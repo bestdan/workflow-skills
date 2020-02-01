@@ -8,7 +8,7 @@ description: Use when choosing which coder agent and model should execute a codi
 Given a task (or a set of orchestrate-coders packets), recommend which coder
 backend and model should execute it. The output is one or more ranked coder
 specs in orchestrate-coders syntax — `opus:claude-sonnet-5`,
-`codex:gpt-5.6-luna`, `agy:Gemini 3.5 Flash (High)` — with a one-line
+`codex:gpt-5.6-luna`, `agy:Gemini 3.6 Flash (High)` — with a one-line
 rationale each, directly usable as `--coder` arguments.
 
 Two inputs drive the choice:
@@ -42,17 +42,18 @@ config orchestrate-coders uses) under an `availability:` block:
 
 ```yaml
 availability:
-  probed_at: 2026-07-03
+  probed_at: 2026-07-28
   opus: # always available (Agent tool) — models per session availableModels
     models: [
-      claude-opus-4-8,
+      claude-opus-5,
+      claude-fable-5,
       claude-sonnet-5,
-      claude-sonnet-4-6,
+      claude-opus-4-8,
       claude-haiku-4-5,
     ]
   codex:
     installed: true
-    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
+    default_model: gpt-5.6-sol # from `~/.codex/config.toml`; `gpt-5.6` is an alias for the terra tier
     auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); ranks codex within the secret-exposure gate
   agy:
     installed: true
@@ -60,8 +61,14 @@ availability:
   devin:
     installed: true
     logged_in: true # script-probed via `devin auth status`; false when creds are dead
-    tier: pro # free tier pins swe-1.6-slow; pro unlocks swe-1.6/-fast + passthroughs
+    tier: pro # free tier is limited; pro unlocks the full marketplace (37 model families)
 ```
+
+**`devin` is a model marketplace, not a model vendor.** `devin models list`
+enumerates dozens of families across nine-plus labs, so `devin:<model>` picks a
+*vendor and jurisdiction*, not just a capability tier — always name the model
+explicitly. See `matrix.md` → devin for which ones are worth reaching for and
+which the secret-exposure gate removes.
 
 **When to (re)probe:** block absent, `--refresh` passed, `probed_at` older
 than 30 days, or a recommendation just failed because a model turned out to
