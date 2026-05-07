@@ -10,11 +10,11 @@ Switching from the most expensive option saves up to $429.60 annually under curr
 
 ## Cost Comparison
 
-| Vendor | Monthly Cost | Annual Cost | Annual Savings vs. Most Expensive |
-|---|---|---|---|
-| Nimbus Cloud | $209.20 | $2,510.40 | $116.40 |
-| Stratus Hosting | $218.90 | $2,626.80 | $0.00 |
-| CumuloStack | $183.10 | $2,197.20 | $429.60 |
+| Vendor          | Monthly Cost | Annual Cost | Annual Savings vs. Most Expensive |
+| --------------- | ------------ | ----------- | --------------------------------- |
+| Nimbus Cloud    | $209.20      | $2,510.40   | $116.40                           |
+| Stratus Hosting | $218.90      | $2,626.80   | $0.00                             |
+| CumuloStack     | $183.10      | $2,197.20   | $429.60                           |
 
 Costs computed from `model.py` using usage assumptions below. Re-run the model if usage estimates change.
 

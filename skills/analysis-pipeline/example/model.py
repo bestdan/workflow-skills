@@ -31,15 +31,19 @@ cumulostack_api_cost_per_1k_requests = 0.005
 # Source: assumed based on current workload estimates — revisit with infra team
 # ---------------------------------------------------------------------------
 
-assumed_storage_gb = 2_400          # assumption: projected peak storage usage
-assumed_monthly_api_requests = 8_500_000  # assumption: ~8.5M requests/month at current growth
+assumed_storage_gb = 2_400  # assumption: projected peak storage usage
+assumed_monthly_api_requests = (
+    8_500_000  # assumption: ~8.5M requests/month at current growth
+)
 
 # ---------------------------------------------------------------------------
 # Derived values
 # ---------------------------------------------------------------------------
 
+
 def monthly_cost(base, storage_per_gb, api_per_1k, storage_gb, api_requests):
     return base + (storage_per_gb * storage_gb) + (api_per_1k * (api_requests / 1_000))
+
 
 nimbus_monthly = monthly_cost(
     nimbus_monthly_base_usd,
@@ -87,8 +91,10 @@ recommended_annual = recommended_monthly * 12
 # Output
 # ---------------------------------------------------------------------------
 
+
 def fmt_usd(value):
     return f"${value:,.2f}"
+
 
 output = {
     "inputs": {
@@ -122,17 +128,23 @@ output = {
         "Nimbus Cloud": {
             "monthly_cost": fmt_usd(nimbus_monthly),
             "annual_cost": fmt_usd(nimbus_annual),
-            "annual_savings_vs_most_expensive": fmt_usd(nimbus_savings_vs_most_expensive),
+            "annual_savings_vs_most_expensive": fmt_usd(
+                nimbus_savings_vs_most_expensive
+            ),
         },
         "Stratus Hosting": {
             "monthly_cost": fmt_usd(stratus_monthly),
             "annual_cost": fmt_usd(stratus_annual),
-            "annual_savings_vs_most_expensive": fmt_usd(stratus_savings_vs_most_expensive),
+            "annual_savings_vs_most_expensive": fmt_usd(
+                stratus_savings_vs_most_expensive
+            ),
         },
         "CumuloStack": {
             "monthly_cost": fmt_usd(cumulostack_monthly),
             "annual_cost": fmt_usd(cumulostack_annual),
-            "annual_savings_vs_most_expensive": fmt_usd(cumulostack_savings_vs_most_expensive),
+            "annual_savings_vs_most_expensive": fmt_usd(
+                cumulostack_savings_vs_most_expensive
+            ),
         },
     },
     "recommendation": {

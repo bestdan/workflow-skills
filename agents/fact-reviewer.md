@@ -82,18 +82,23 @@ Write `fact_review.md` in the analysis directory:
 
 ```markdown
 # Fact Review — <analysis name>
+
 Reviewer: independent agent, <YYYY-MM-DD>
 
 ## Summary
+
 - Checks passed: N / M
 - Critical issues: <count>
 - Recommendation: ship / fix-then-ship / do-not-ship
 
 ## Findings
+
 ### [FAIL] Check 2 — Cited values match sources
+
 - `model.py:42` cites Vendor A price as $99/mo from <url>; source shows $109/mo as of <date>.
 
 ### [PASS] Check 1 — Links resolve
+
 - 14/14 URLs returned 200.
 ```
 
