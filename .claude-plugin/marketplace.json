@@ -10,14 +10,17 @@
         "source": "url",
         "url": "https://github.com/bestdan/workflow-skills.git"
       },
-      "description": "General-purpose Claude Code workflow skills: collaborative PR review (co-review) and durable multi-step planning (plan-with-docs).",
-      "version": "0.1.0",
+      "description": "Claude Code skills for general engineering workflows: collaborative PR review, durable multi-step planning, and auditable quantitative analysis pipelines with independent fact-checking.",
+      "version": "0.2.0",
       "keywords": [
         "workflow",
         "review",
         "planning",
         "pr",
-        "code-review"
+        "code-review",
+        "analysis",
+        "pipeline",
+        "auditable"
       ],
       "license": "MIT"
     }
