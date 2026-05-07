@@ -8,7 +8,7 @@ user-invocable: false
 
 **Note**: Project-level preferences (CLAUDE.md, AGENTS.md) override these.
 
-## When to Use Plain Scripts vs Marimo 
+## When to Use Plain Scripts vs Marimo
 
 - **Plain `.py` script**: deterministic pipeline steps, one-shot computations, CI/automation contexts where a notebook adds unnecessary complexity.
 - **Marimo notebook**: exploratory analysis, interactive parameter tweaking, work that benefits from visible intermediate outputs and tables. Good default for analysis work.
@@ -27,7 +27,7 @@ Use `uv run` for executing plain scripts. Use `uvx` for running CLI tools (like 
 
 When testing setup calls or ephemerally computing numbers during a conversation, MUST write a `temp/_.py` file and re-use it. Don't inline multi-line Python in bash commands that need to be re-approved each time.
 
-Once the numbers are incorporated into a notebook or model, delete the scratchpad — its purpose is to make a single approval all that's required, keep intermediate work visible, not to be a permanent artifact. If there's no model to fold it into, the scratchpad *is* the artifact and should be kept. The agent should clean up `temp/` files before ending the conversation unless they are the final output.
+Once the numbers are incorporated into a notebook or model, delete the scratchpad — its purpose is to make a single approval all that's required, keep intermediate work visible, not to be a permanent artifact. If there's no model to fold it into, the scratchpad _is_ the artifact and should be kept. The agent should clean up `temp/` files before ending the conversation unless they are the final output.
 
 MUST NOT embed raw calculated numbers in markdown without a visible formula or a reference to the model that produced them.
 

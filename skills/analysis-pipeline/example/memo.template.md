@@ -10,11 +10,11 @@ Switching from the most expensive option saves up to {{recommendation.max_annual
 
 ## Cost Comparison
 
-| Vendor | Monthly Cost | Annual Cost | Annual Savings vs. Most Expensive |
-|---|---|---|---|
-| Nimbus Cloud | {{derived.Nimbus Cloud.monthly_cost}} | {{derived.Nimbus Cloud.annual_cost}} | {{derived.Nimbus Cloud.annual_savings_vs_most_expensive}} |
+| Vendor          | Monthly Cost                             | Annual Cost                             | Annual Savings vs. Most Expensive                            |
+| --------------- | ---------------------------------------- | --------------------------------------- | ------------------------------------------------------------ |
+| Nimbus Cloud    | {{derived.Nimbus Cloud.monthly_cost}}    | {{derived.Nimbus Cloud.annual_cost}}    | {{derived.Nimbus Cloud.annual_savings_vs_most_expensive}}    |
 | Stratus Hosting | {{derived.Stratus Hosting.monthly_cost}} | {{derived.Stratus Hosting.annual_cost}} | {{derived.Stratus Hosting.annual_savings_vs_most_expensive}} |
-| CumuloStack | {{derived.CumuloStack.monthly_cost}} | {{derived.CumuloStack.annual_cost}} | {{derived.CumuloStack.annual_savings_vs_most_expensive}} |
+| CumuloStack     | {{derived.CumuloStack.monthly_cost}}     | {{derived.CumuloStack.annual_cost}}     | {{derived.CumuloStack.annual_savings_vs_most_expensive}}     |
 
 Costs computed from `model.py` using usage assumptions below. Re-run the model if usage estimates change.
 

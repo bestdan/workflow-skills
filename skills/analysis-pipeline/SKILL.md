@@ -115,16 +115,20 @@ When an analysis produces a narrative document (memo, recommendation, report):
 - **Sources** as footnoted references in an appendix.
 
 Bad (numbers derived in markdown):
+
 > The system produces 817 kWh/month, saving $142/month.
 
 Good (reference to model):
+
 > See [model.py] for production estimates. Summary: 750-820 kWh/month,
 > $128-$145/month savings (sensitivity table in model).
 
 Bad (structure buries the conclusion):
+
 > We analyzed three vendors across 12 dimensions... [3 pages] ...Vendor B is recommended.
 
 Good (lead with the decision):
+
 > **Recommendation: Vendor B.** Best cost/reliability tradeoff at $X/mo.
 > See comparison model for full breakdown across 12 dimensions.
 

@@ -45,7 +45,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
 
 4. **Write `<name>_plan.md`** — the overview. Keep it tight:
    - **Goal:** one or two sentences. What we're building and why.
-   - **Scope / non-goals:** explicit list of what's *not* in this plan.
+   - **Scope / non-goals:** explicit list of what's _not_ in this plan.
    - **Approach:** the architectural choice and the main tradeoff considered.
    - **Steps:** numbered list, each linking to its `step_N.md` (or `phase_N/step_N.md`). One line per step describing the deliverable.
    - **Open questions:** anything the user still needs to decide. If empty, omit the section — but if you found nothing, double-check; most non-trivial plans have at least one real unknown.
@@ -58,7 +58,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
      - **Code-enforced:** automated tests to add or update, lint/type-check commands, CI checks expected to pass. Name the test files and the assertion in plain English.
      - **User-run:** manual checks that aren't automated — e.g. "open `localhost:3000/foo`, click Save, confirm toast appears", "run migration on staging snapshot, verify row count matches". Be explicit so the user knows what they have to do themselves.
    - **Dependencies:** which earlier steps must land first, if any.
-   Skip sections that don't apply. Don't pad.
+     Skip sections that don't apply. Don't pad.
 
 6. **Cross-link.** Each `step_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each step.
 

@@ -9,7 +9,7 @@ Combines a fresh review of the PR with whatever comments are already on GitHub, 
 
 ## Independence note
 
-The main agent writes the review *and* applies fixes, but does **not** judge whether its own findings are correct. That job is delegated to a sub-agent (the reconciler) which sees the main agent's review and the GitHub comments side-by-side without knowing which came from "you."
+The main agent writes the review _and_ applies fixes, but does **not** judge whether its own findings are correct. That job is delegated to a sub-agent (the reconciler) which sees the main agent's review and the GitHub comments side-by-side without knowing which came from "you."
 
 This is not perfectly independent: the main agent still chooses what to flag in the first place, and writes the prose the reconciler reads. A reviewer with a strong prior can still bias the pool. The split exists to prevent the most obvious failure mode (the same agent grading its own homework) — not to guarantee neutrality.
 
@@ -30,7 +30,7 @@ This is not perfectly independent: the main agent still chooses what to flag in 
    - Project conventions (CLAUDE.md / AGENTS.md already in context)
    - Security and perf where relevant
    - Test coverage gaps that matter
-   Skip nitpicks, formatting, and pre-existing issues. Produce a list of findings with `file:line`, the issue, and your suggested fix.
+     Skip nitpicks, formatting, and pre-existing issues. Produce a list of findings with `file:line`, the issue, and your suggested fix.
 
 4. **Spawn the reconciler sub-agent** (`general-purpose`). Give it:
    - The full diff
