@@ -1,0 +1,18 @@
+{
+  "name": "workflow-skills",
+  "version": "0.1.0",
+  "description": "General-purpose Claude Code workflow skills: collaborative PR review (co-review) and durable multi-step planning (plan-with-docs).",
+  "author": {
+    "name": "Daniel Egan"
+  },
+  "homepage": "https://github.com/bestdan/workflow-skills",
+  "repository": "https://github.com/bestdan/workflow-skills",
+  "keywords": [
+    "workflow",
+    "review",
+    "planning",
+    "pr",
+    "code-review"
+  ],
+  "license": "MIT"
+}
