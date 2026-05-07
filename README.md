@@ -17,7 +17,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 | Skill         | Trigger            | What it does                                                                                                                                                                                   |
 | ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **co-review** | `/co-review [PR#]` | Produce your own review of a PR, reconcile it against existing GitHub bot/human comments via an independent sub-agent, auto-fix high-confidence items, and surface judgment calls back to you. |
+| **co-review** | `/co-review [PR#]` | Produce your own review of a PR, reconcile it against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, and surface judgment calls back to you. |
 
 ### Planning
 
@@ -59,7 +59,7 @@ uv run fill_templates.py     # fill template placeholders -> memo.filled.md
 Then audit it:
 
 ```
-/review-facts skills/analysis-pipeline/example
+/review-facts .
 ```
 
 ## Staying up to date
