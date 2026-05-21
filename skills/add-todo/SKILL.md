@@ -25,17 +25,12 @@ When invoked as `/add-todo <description>`, `$ARGUMENTS` holds that description â
 
 ### 2. Determine the todo folder
 
-Check whether the project already has a folder for todo work, in priority order, relative to the repo root (`$(git rev-parse --show-toplevel)`):
+Check whether the project already has a folder for todo work. Resolve the repo root with `git rev-parse --show-toplevel`, then use Glob to look for these folders, in priority order, and pick the first that exists:
 
-```bash
-root="$(git rev-parse --show-toplevel)"
-for d in dev_docs/todos dev_docs/todo todos todo .todos docs/todos; do
-  [ -d "$root/$d" ] && echo "$d" && break
-done
-```
+`dev_docs/todos`, `dev_docs/todo`, `todos`, `todo`, `.todos`, `docs/todos`
 
 - If one is found, use it.
-- If none exist, default to `dev_docs/todos/` (create it when writing the file).
+- If none exist, default to `dev_docs/todos/` (Write creates it in step 7).
 
 Use the resolved folder as `<todo_dir>` for the rest of the steps.
 
@@ -48,17 +43,13 @@ From the title, create a kebab-case slug:
 
 ### 4. Check for slug collisions
 
-Check if a todo with this slug already exists:
-
-```bash
-find "$(git rev-parse --show-toplevel)/<todo_dir>" -name '<slug>.md' -type f 2>/dev/null
-```
-
-If a collision is found, append `-2`, `-3`, etc. until unique.
+Use Glob (pattern `<todo_dir>/<slug>.md`) to check whether a todo with this slug already exists. If a collision is found, append `-2`, `-3`, etc. until unique.
 
 ### 5. Draft the todo
 
-Auto-populate these fields:
+Write the todo as a YAML frontmatter block followed by markdown sections.
+
+Auto-populate these frontmatter fields:
 - `created`: today's date (ISO format)
 - `source_branch`: current branch
 - `status`: `unclaimed`
@@ -74,19 +65,45 @@ From conversation context and diff, draft:
 - **Task** section: concrete steps to complete it
 - **Acceptance Criteria**: definition of done
 
+The resulting file looks like:
+
+```markdown
+---
+title: Remove stale zsh alias for foobar
+created: 2026-05-21
+source_branch: danielegan/add-todo
+status: unclaimed
+expires: 2026-06-20
+priority: low
+size: s
+related_files:
+  - dotfiles/zsh/aliases.zsh
+tags: [cleanup]
+---
+
+## Context
+
+Noticed while editing aliases that `foobar` points at a binary that no longer exists.
+
+## Task
+
+- Remove the `foobar` alias from `aliases.zsh`.
+
+## Acceptance Criteria
+
+- `alias foobar` is gone and shell startup emits no errors.
+```
+
 ### 6. Present for review
 
 Show the user the full draft and ask for confirmation. They can adjust priority, add/remove files, or edit the task steps.
 
 ### 7. Write the file
 
-After confirmation, write the todo into the local project:
-
-1. Create the directory if needed: `mkdir -p "$(git rev-parse --show-toplevel)/<todo_dir>"`
-2. Write the drafted content to `<todo_dir>/<slug>.md`
+After confirmation, write the drafted content to `<todo_dir>/<slug>.md`. Write creates the directory if it doesn't exist.
 
 ### 8. Confirm
 
 Tell the user:
 - The path of the file written (`<todo_dir>/<slug>.md`)
-- That it's a local, uncommitted file available for `/process-todo`
+- That it's a local, uncommitted file available for later processing
