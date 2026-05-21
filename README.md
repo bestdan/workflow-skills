@@ -11,12 +11,12 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-5 skills and 1 subagent, organized into three workflows:
+6 skills and 1 subagent, organized into four workflows:
 
 ### PR review
 
-| Skill         | Trigger            | What it does                                                                                                                                                                                   |
-| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skill         | Trigger            | What it does                                                                                                                                                                                  |
+| ------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **co-review** | `/co-review [PR#]` | Produce your own review of a PR, reconcile it against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, and surface judgment calls back to you. |
 
 ### Planning
@@ -24,6 +24,12 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 | Skill              | Trigger                                                   | What it does                                                                                                                                                                                                                                                    |
 | ------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **plan-with-docs** | `/plan-with-docs`, or after approving a plan in plan mode | Write a multi-step implementation plan as markdown files under `dev_docs/todo/<name>_plan/` (one file per PR-sized step) instead of printing it inline, then refine the plan through clarifying questions. Default for plans >3 steps or spanning multiple PRs. |
+
+### Task capture
+
+| Skill        | Trigger                   | What it does                                                                                                                                                                                                                                                                  |
+| ------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **add-todo** | `/add-todo [description]` | Capture follow-up work as a structured todo file in the project's existing todo folder (auto-detected, defaulting to `dev_docs/todos/`). Gathers branch/diff context, drafts task and acceptance criteria, and writes a local uncommitted markdown file for later processing. |
 
 ### Auditable analysis
 

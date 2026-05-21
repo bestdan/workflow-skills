@@ -1,6 +1,6 @@
 {
   "name": "workflow-skills",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude Code skills for general engineering workflows: collaborative PR review, durable multi-step planning, and auditable quantitative analysis pipelines with independent fact-checking.",
   "author": {
     "name": "Daniel Egan"
