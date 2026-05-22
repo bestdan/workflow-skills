@@ -1,6 +1,6 @@
 # workflow-skills
 
-A Claude Code plugin bundling Daniel's general engineering workflow skills: collaborative PR review, durable multi-step planning, and auditable quantitative analysis pipelines with independent fact-checking.
+A Claude Code plugin bundling Daniel's general engineering workflow skills: collaborative PR review, durable multi-step planning, auditable quantitative analysis pipelines with independent fact-checking, and a repo-native todo loop for capturing and processing follow-up work.
 
 ## Install
 
@@ -11,7 +11,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-6 skills and 1 subagent, organized into four workflows:
+6 skills, 4 commands, and 1 subagent, organized into four workflows:
 
 ### PR review
 
@@ -25,11 +25,17 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 | ------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **plan-with-docs** | `/plan-with-docs`, or after approving a plan in plan mode | Write a multi-step implementation plan as markdown files under `dev_docs/todo/<name>_plan/` (one file per PR-sized step) instead of printing it inline, then refine the plan through clarifying questions. Default for plans >3 steps or spanning multiple PRs. |
 
-### Task capture
+### Todo loop
 
-| Skill        | Trigger                   | What it does                                                                                                                                                                                                                                                                  |
-| ------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **add-todo** | `/add-todo [description]` | Capture follow-up work as a structured todo file in the project's existing todo folder (auto-detected, defaulting to `dev_docs/todos/`). Gathers branch/diff context, drafts task and acceptance criteria, and writes a local uncommitted markdown file for later processing. |
+Capture follow-up work with full context during development, then process it automatically. The `todo` skill auto-triggers when you mention deferred work; the commands handle capture, listing, processing, and destination configuration.
+
+| Command / Skill   | Trigger                       | What it does                                                                                                                                                                                                                                          |
+| ----------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`/add-todo`**   | `/add-todo [description]`     | Capture follow-up work and deliver it via the configured handler. Defaults to the `repo-pr` handler: dispatches a remote agent to commit the todo as a markdown file on a branch from main and open a PR, with zero local impact.                     |
+| **`/process-todo`** | `/process-todo [slug \| --all \| --local]` | Claim and execute unclaimed `repo-pr` todos. Default dispatches the highest-priority todo to a remote Claude session; `--all` dispatches every unclaimed todo in parallel; `--local` processes in the current session.                  |
+| **`/list-todos`** | `/list-todos [status]`        | Show a table of all todos in `dev_docs/todos/` with status, priority, tags, and expiry. Filter by status (`unclaimed`, `claimed`, `blocked`, `expired`, `all`).                                                                                       |
+| **`/todo-config`** | `/todo-config [handler]`     | Configure where `/add-todo` delivers (writes `dev_docs/todos/.todo-config.yml`). Handlers: `repo-pr` (default, markdown PR), `gh-issue` (GitHub Issue), `jira` (Jira work item via Atlassian MCP). Verifies prerequisites before writing the config.   |
+| **`todo` skill**  | mentions of "todo", "follow-up", "we should come back to this", or any of the `/add-todo` / `/process-todo` commands | Auto-trigger skill: provides the todo file format, capture workflow, handler abstraction, and processing logic. Loaded in-context whenever Claude sees deferred-work language. |
 
 ### Auditable analysis
 
