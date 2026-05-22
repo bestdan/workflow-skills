@@ -96,13 +96,12 @@ Delegate to the Agent tool with this prompt:
 > Steps:
 > 1. Get main's latest SHA: `gh api repos/<owner>/<repo>/git/refs/heads/main --jq '.object.sha'`
 > 2. Create branch: `gh api repos/<owner>/<repo>/git/refs --method POST --field ref="refs/heads/todo/add/<slug>" --field sha="$main_sha"`
-> 3. Create the file on the branch using the Contents API. Base64-encode the todo content inline:
+> 3. Create the file on the branch using the Contents API. **Base64-encode the todo content yourself** (do not try to inline it through the shell — apostrophes in prose will break single-quoted strings). Compute the base64 of the exact file content above, then pass it as a literal field value:
 >    ```
->    echo '<todo file content>' | base64 | tr -d '\n' > /dev/null  # just to show the encoding
 >    gh api repos/<owner>/<repo>/contents/dev_docs/todos/<slug>.md \
 >      --method PUT \
 >      --field message="add todo: <slug>" \
->      --field content="$(printf '%s' '<todo file content>' | base64 | tr -d '\n')" \
+>      --field content="<BASE64_OF_TODO_CONTENT>" \
 >      --field branch="todo/add/<slug>"
 >    ```
 > 4. Ensure label exists and open PR:

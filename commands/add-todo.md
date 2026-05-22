@@ -1,6 +1,6 @@
 ---
 description: Capture follow-up work as a structured todo, then deliver it to the configured destination (repo PR, GitHub issue, or Jira)
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue
 argument-hint: [description of the follow-up work]
 ---
 
@@ -14,13 +14,15 @@ Capture follow-up work with full context, then deliver it to the destination con
 
 Collect automatically (run these in parallel):
 - Current branch: `git rev-parse --abbrev-ref HEAD`
-- Repo name: `gh repo view --json nameWithOwner --jq .nameWithOwner`
+- Repo name: `gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null` (best-effort — omit if gh fails)
 - Open PR for this branch (if any): `gh pr view --json number --jq .number 2>/dev/null`
 - Current diff summary: `git diff --stat HEAD`
 - Today's date: `date +%Y-%m-%d`
 - Expiry date (30 days): `date -v+30d +%Y-%m-%d` (macOS) or `date -d '+30 days' +%Y-%m-%d` (Linux)
 
 If `$ARGUMENTS` is provided, use it as the title seed. Otherwise, ask the user what follow-up work they want to capture.
+
+Treat the `gh`-derived fields (`repo`, `source_pr`) as best-effort: if `gh` is unavailable or unauthenticated, omit them and continue. Handlers that need `gh` will re-check in their own preflight.
 
 ### 2. Generate the slug
 
@@ -86,7 +88,7 @@ Once the user confirms, you hold a normalized **drafted todo** that every handle
 | `source_pr`     | PR number for that branch, if any                                  |
 | `related_files` | Paths relevant to the work                                          |
 
-Every handler **must report back the URL of the artifact it created** (PR, issue, or work item) so step 8 can show it.
+Every handler **must report back an artifact identifier** so step 8 can show it. Normally this is the URL of the created PR, issue, or work item. The one exception is `repo-pr` Mode 3 (local staging), which has no remote artifact yet — it returns the staged file path and branch name instead, and step 8 reports that the file is staged locally and will land via the user's own PR.
 
 ### 6. Resolve the handler
 
@@ -111,5 +113,5 @@ Do not embed handler logic here; do not read handler files for handlers other th
 
 ### 8. Report
 
-Tell the user which handler ran and the artifact URL it returned (PR / issue / work item). For `repo-pr`, also include what was dispatched (file only, or file + processing) and the dispatch mode used, and that they can monitor with `/tasks`.
+Tell the user which handler ran and the artifact it returned. For PR / issue / work item handlers, that's the URL. For `repo-pr` Mode 3 (local staging), there is no URL yet — report the staged file path and branch, and tell the user the todo will land via whatever PR they open from that branch. For `repo-pr`, also include what was dispatched (file only, or file + processing) and the dispatch mode used, and that they can monitor with `/tasks`.
 

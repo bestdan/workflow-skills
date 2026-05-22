@@ -43,10 +43,7 @@ Before dispatching, verify GitHub access:
 gh auth status 2>&1
 ```
 
-If this fails (token invalid, TLS errors, network issues):
-1. Check if the error mentions TLS/x509/certificate — this usually means Claude Code's sandbox is blocking keychain access.
-2. If it looks like a sandbox issue, tell the user: "gh is failing due to sandbox TLS restrictions. You can re-run this command outside sandbox mode, or I'll fall back to local processing."
-3. Fall back to `--local` mode automatically unless the user opts to exit sandbox.
+If this fails (token invalid, TLS errors, network issues), **stop** and tell the user — both remote and local modes call `gh pr create`, so a broken `gh` blocks both. If the error mentions TLS/x509/certificate, note it's likely Claude Code's sandbox blocking keychain access and suggest re-running outside sandbox mode.
 
 ### 4. Dispatch remote agents
 
@@ -141,7 +138,7 @@ Monitor with /tasks. Each will open a PR when complete.
 
 ## Local mode (`--local`)
 
-When `--local` is specified, `gh auth status` fails, or `claude --remote` is unavailable, process the todo directly in the current session:
+When `--local` is specified or `claude --remote` is unavailable, process the todo directly in the current session (`gh` is still required for `gh pr create`):
 
 1. Create branch `todo/<slug>` from current HEAD
 2. Claim, execute, validate, delete, commit, push, and open PR as described above

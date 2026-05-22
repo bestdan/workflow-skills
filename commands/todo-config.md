@@ -59,7 +59,7 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
    Never prompt the user to type a site that doesn't appear in the accessible-resources list.
 3. Resolve `project` against visible projects. Call `mcp__claude_ai_Atlassian__getVisibleJiraProjects` with `cloudId: <site>`.
    - Exactly one project → use it; tell the user which one you picked.
-   - Multiple projects → ask via `AskUserQuestion` (one option per project, labeled `<KEY> — <name>`; cap at 4, "Other" lets the user type a key, which you then re-validate against the visible-projects list).
+   - Multiple projects → ask via `AskUserQuestion` (one option per project, labeled `<KEY> — <name>`; cap at 3 so 3 projects + "Other" fits the 4-option max. "Other" lets the user type a key, which you then re-validate against the visible-projects list).
    - Never prompt the user to type a project key blind.
 4. Ask for `issue_type` via `AskUserQuestion` (header: "Issue type") with options `Task` (recommended, first), `Story`, `Bug`. Use "Other" for anything else. Default is `Task` if the user skips.
 5. **Resolve `default_epic` against real epics — do not accept free-text.** This field is optional but, when set, must be a valid epic key in the chosen project (otherwise it silently breaks `/add-todo`, which uses it to skip the per-todo epic prompt).
@@ -71,7 +71,7 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
    - `maxResults`: 50
 
    Present the result via `AskUserQuestion` (header: "Default epic"):
-   - One option per epic, labeled `<KEY> — <summary>` (cap at 3 epic options so "None" and "Other" fit within the 4-option limit; show the 3 most recently updated).
+   - One option per epic, labeled `<KEY> — <summary>` (cap at 2 epic options so 2 epics + "None" + "Other" fits the 4-option max; show the 2 most recently updated).
    - A `"None — prompt me per-todo"` option (this is the recommended default if the user is unsure).
    - "Other" lets the user type a specific key; if they pick "Other", validate the typed value by calling `searchJiraIssuesUsingJql` again with `jql: project = "<project>" AND key = "<TYPED>" AND issuetype = Epic`. If the result is empty, push back ("`<TYPED>` is not an epic key in `<project>`") and re-ask. Do not write the config with an unvalidated key.
 

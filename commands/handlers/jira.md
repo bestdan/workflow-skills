@@ -38,7 +38,7 @@ jira:
 
    The response wraps issues as `issues.nodes[]`; each node has `key`, `fields.summary`, `fields.status.name`, and a ready-made `webUrl`.
 
-   Present the epics to the user via `AskUserQuestion` (header: "Jira epic"). Each epic is an option labeled `<KEY> — <summary>`. Include a final "No epic (top-level ticket)" option so the user can opt out explicitly. If there are more than 4 epics, show the 4 most recently updated as options — the user can pick "Other" to type a specific key. Capture the chosen `<EPIC-KEY>` (or `none`).
+   Present the epics to the user via `AskUserQuestion` (header: "Jira epic"). Each epic is an option labeled `<KEY> — <summary>`. Include a final "No epic (top-level ticket)" option so the user can opt out explicitly. `AskUserQuestion` enforces a 4-option max — show at most 2 epic options (the 2 most recently updated) so 2 epics + "No epic" + "Other" fits. The user can pick "Other" to type a specific key. Capture the chosen `<EPIC-KEY>` (or `none`).
 
 3. **Compose the description.** Use the drafted todo's `body` plus a source footer (omit empty lines):
 
