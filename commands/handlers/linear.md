@@ -58,10 +58,21 @@ Linear concepts → todo concepts:
    - `title`: the drafted `title`
    - `description`: the composed description from step 3
    - `projectId`: the chosen project id (omit entirely if the user picked "No project")
-   - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
+   - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`urgent` → 1, `high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
+   - `state`: `New` (corresponds to the `new` kanban column — the promoter will move it to `Ready` or `Needs Refinement` later).
 
    Labels are intentionally not passed in v1 — see the config block note.
 
 5. **Return the URL.** The response includes the created issue with a `url` field (and an `identifier` like `ENG-123`). Return `issue.url` directly as this handler's artifact URL for `/add-todo` step 8. (Fallback: if `url` is missing, report the `identifier` and tell the user to open it in Linear.)
 
 This handler does **not** create any `dev_docs/todos/*.md` file, branch, or PR.
+
+## Kanban mapping
+
+The seven-column kanban model from `skills/todo/SKILL.md` maps to Linear workflow states. Two options:
+
+**Option A (recommended) — extend Linear workflow states.** One-time admin change in the Linear team: add states so the team has all seven: `New → Needs Refinement → Ready → In Progress → Blocked → Needs Review → Done`. Then the column == the Linear state, with no labels needed. The handler sets `state: New` on creation; `/promote-todos` (Linear flavor) flips to `Ready` or `Needs Refinement`; `/process-todo` (or the nightly job) picks from `Ready` and flips to `In Progress`; Linear's GitHub integration handles `Needs Review` (PR open) and `Done` (PR merged via `Closes <KEY>`).
+
+**Option B — label-only.** Keep Linear's default `Backlog | In Progress | Done` states and use labels `col:new`, `col:needs-refinement`, `col:ready`, `col:blocked`, `col:needs-review` to refine. Avoids Linear admin work but every query needs a label filter. Use only when you can't modify the team's workflow states.
+
+The bot uses `auto-claimed` as a concurrency guard regardless of option (added when claiming, removed if the bot bails).
