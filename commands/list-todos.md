@@ -10,7 +10,32 @@ Render todos in `dev_docs/todos/` as a vertical kanban view — one section per 
 
 ## Steps
 
-### 1. Find todo files
+### 1. Resolve the handler
+
+Read `dev_docs/todos/.todo-config.yml`:
+
+```bash
+cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/null
+```
+
+- File absent, or no `handler:` key → `repo-pr` (default). Continue to step 2.
+- `handler: repo-pr` → continue to step 2.
+- `handler: gh-issue | jira | linear` → **stop** and tell the user where their kanban actually lives. Do not scan local files. Example output:
+
+  ```
+  This repo uses the `linear` handler. Todos for this repo live in Linear, not in
+  dev_docs/todos/, so /list-todos can't render them yet (read-back from external
+  trackers is out of scope for the current todo plugin — see skills/todo/SKILL.md).
+
+  View your kanban at:
+    https://linear.app/<workspace>/team/<team>/active
+  ```
+
+  For `gh-issue`, point to `gh issue list --label <label>` and the repo's Issues tab. For `jira`, point to the project's board URL. Resolve workspace/team/repo from the handler config block where possible.
+
+- Any other (unknown) value → stop with: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Run /todo-config to fix it."
+
+### 2. Find todo files
 
 ```bash
 find "$(git rev-parse --show-toplevel)/dev_docs/todos" -name '*.md' -type f 2>/dev/null
@@ -18,7 +43,7 @@ find "$(git rev-parse --show-toplevel)/dev_docs/todos" -name '*.md' -type f 2>/d
 
 If the directory doesn't exist or is empty, report "No todos found in this repo."
 
-### 2. Parse and filter
+### 3. Parse and filter
 
 For each file, parse the YAML frontmatter to extract: `title`, `priority`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `human_approval_requested`.
 
@@ -28,7 +53,7 @@ Also compute whether the todo is currently dependency-blocked: if `is_blocked_by
 
 If `$ARGUMENTS` is provided, filter to that status (or `expired`). Default: show every section that has cards.
 
-### 3. Display as stacked sections
+### 4. Display as stacked sections
 
 Print one section per status in this fixed order, top to bottom, omitting empty sections:
 
