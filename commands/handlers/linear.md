@@ -59,7 +59,7 @@ Linear concepts → todo concepts:
    - `description`: the composed description from step 3
    - `projectId`: the chosen project id (omit entirely if the user picked "No project")
    - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`urgent` → 1, `high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
-   - `state`: `New` (corresponds to the `new` kanban column — the promoter will move it to `Ready` or `Needs Refinement` later).
+   - `state`: `New` (corresponds to the `new` kanban column — see the Kanban mapping section below). Resolve the state id by listing the team's workflow states and matching by name; if `New` is not present, fall back to `Backlog`.
 
    Labels are intentionally not passed in v1 — see the config block note.
 
@@ -69,10 +69,23 @@ This handler does **not** create any `dev_docs/todos/*.md` file, branch, or PR.
 
 ## Kanban mapping
 
-The seven-column kanban model from `skills/todo/SKILL.md` maps to Linear workflow states. Two options:
+Linear's workflow states are fixed: `Backlog`, `New`, `Planned`, `In Progress`, `Completed`, `Canceled`. The seven-column kanban model from `skills/todo/SKILL.md` maps onto those existing states plus a small set of labels — **no custom workflow states are added**.
 
-**Option A (recommended) — extend Linear workflow states.** One-time admin change in the Linear team: add states so the team has all seven: `New → Needs Refinement → Ready → In Progress → Blocked → Needs Review → Done`. Then the column == the Linear state, with no labels needed. The handler sets `state: New` on creation; `/promote-todos` (Linear flavor) flips to `Ready` or `Needs Refinement`; `/process-todo` (or the nightly job) picks from `Ready` and flips to `In Progress`; Linear's GitHub integration handles `Needs Review` (PR open) and `Done` (PR merged via `Closes <KEY>`).
+| Kanban column      | Linear state    | Linear label(s)                                  |
+|--------------------|-----------------|--------------------------------------------------|
+| `new`              | `New`           | —                                                |
+| `needs_refinement` | `New`           | `human-approval-requested`                       |
+| `ready`            | `Planned`       | `auto-eligible` (set by promoter)                |
+| `in_progress`      | `In Progress`   | `auto-claimed` (concurrency guard)               |
+| `blocked`          | `In Progress`   | `blocked`                                        |
+| `needs_review`     | `In Progress`   | — (the open PR is the review signal via Linear's GitHub integration) |
+| `done`             | `Completed`     | —                                                |
 
-**Option B — label-only.** Keep Linear's default `Backlog | In Progress | Done` states and use labels `col:new`, `col:needs-refinement`, `col:ready`, `col:blocked`, `col:needs-review` to refine. Avoids Linear admin work but every query needs a label filter. Use only when you can't modify the team's workflow states.
+Transitions:
+- `/add-todo` (this handler) creates the issue in `New`.
+- `/promote-todos` (Linear flavor) scores cards in `New`: HIGH → move to `Planned` and add `auto-eligible`; LOW → leave in `New` and add `human-approval-requested`.
+- `/process-todo` (or the nightly job) picks issues in `Planned` with `auto-eligible` and without `auto-claimed`. On claim it moves the issue to `In Progress` and adds `auto-claimed`.
+- Linear's GitHub integration moves the issue to `Completed` on PR merge via `Closes <KEY>`. `needs_review` is implicit while the linked PR is open.
+- Bail path: revert to `New`, add `human-approval-requested`, remove `auto-claimed`, and leave a comment.
 
-The bot uses `auto-claimed` as a concurrency guard regardless of option (added when claiming, removed if the bot bails).
+If the team's workflow does not have `New` or `Planned` (Linear teams can customize), the handler should fall back: `New` → `Backlog`, `Planned` → `Todo`. Resolve state ids by listing the team's workflow states (`mcp__claude_ai_Linear__list_*`) and matching by name at runtime.
