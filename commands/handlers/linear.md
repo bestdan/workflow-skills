@@ -10,9 +10,10 @@ Config block in `dev_docs/todos/.todo-config.yml`:
 handler: linear
 linear:
   team: ENG                       # required — team key (e.g. ENG) or team id
-  default_project: null           # optional; skips the project prompt. Project id or name.
-  labels: []                      # optional — label names applied to every created issue
+  default_project: null           # optional; skips the project prompt (explicit project id/UUID, not a name)
   default_priority: 3             # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3)
+# labels support is deferred — the Linear MCP create_issue tool takes label UUIDs, not names,
+# and resolving names → ids requires an extra tool call. Add a tag in the body for now.
 ```
 
 Linear concepts → todo concepts:
@@ -36,17 +37,19 @@ Linear concepts → todo concepts:
    - `teamId`: `<resolved team id from step 1>`
    - `includeArchived`: `false`
 
-   Present the projects to the user via `AskUserQuestion` (header: "Linear project"). Each project is an option labeled `<name>` (with state if useful, e.g. `<name> — <state>`). Include a final "No project (team backlog)" option so the user can opt out explicitly. `AskUserQuestion` enforces a 4-option max — show at most 2 project options (the 2 most recently updated) so 2 projects + "No project" + "Other" fits. The user can pick "Other" to type a specific project name or id. Capture the chosen project id (or `none`).
+   Present the projects to the user via `AskUserQuestion` (header: "Linear project"). Each project is an option labeled `<name>` (with state if useful, e.g. `<name> — <state>`). Include a final "No project (team backlog)" option so the user can opt out explicitly. `AskUserQuestion` enforces a 4-option max — show at most 2 project options (the 2 most recently updated) so 2 projects + "No project" + "Other" fits. The user can pick "Other" to type a specific project name or id. If they type a name, match it case-insensitively against the projects returned by `list_projects` and use the matching project id; if no match, push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. If they type a UUID, use it directly. Capture the chosen project id (or `none`).
 
-3. **Compose the description.** Use the drafted todo's `body` plus a source footer (omit empty lines). Linear natively renders markdown, so pass it through unchanged:
+3. **Compose the description.** Use the drafted todo's `body` plus a source footer. Linear natively renders markdown, so pass it through unchanged. Omit each footer line if its value is empty/null — do not render `Source PR: #` or `Source PR: #null`:
 
    ```
    <body>
 
    ---
-   Source branch: <source_branch>
-   Source PR: #<source_pr>
+   Source branch: <source_branch>       # omit this line entirely if source_branch is empty
+   Source PR: #<source_pr>               # omit this line entirely if source_pr is empty
    ```
+
+   If both footer lines are omitted, omit the `---` separator too.
 
 4. **Create the issue.** Call `mcp__claude_ai_Linear__create_issue` with:
    - `teamId`: `<resolved team id from step 1>`
@@ -54,7 +57,8 @@ Linear concepts → todo concepts:
    - `description`: the composed description from step 3
    - `projectId`: the chosen project id (omit entirely if the user picked "No project")
    - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
-   - `labels`: `<linear.labels list>` (omit if no labels configured)
+
+   Labels are intentionally not passed in v1 — see the config block note.
 
 5. **Return the URL.** The response includes the created issue with a `url` field (and an `identifier` like `ENG-123`). Return `issue.url` directly as this handler's artifact URL for `/add-todo` step 8. (Fallback: if `url` is missing, report the `identifier` and tell the user to open it in Linear.)
 

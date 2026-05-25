@@ -104,8 +104,9 @@ The `linear` handler delivers via the official Linear MCP server (`mcp__claude_a
    - "Other" lets the user type a project name; if they pick "Other", look it up by calling `list_projects` again and matching the typed name (case-insensitive). If no match, push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. Do not write the config with an unvalidated value.
 
    If the user picks "None — prompt me per-todo", omit `default_project` from the written config. Otherwise write the project's id as-is.
-4. Optional `labels` — ask the user as plain text (comma-separated list of label names); skip if blank. Do not use `AskUserQuestion` here.
-5. Optional `default_priority` — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
+4. Optional `default_priority` — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
+
+> Labels are not supported in the v1 `linear` handler. The Linear MCP's `create_issue` takes label UUIDs, not names, and resolving names → ids requires an extra tool call (and an `allowed-tools` update). Skip the prompt; if a user asks for labels, the handler can be extended later.
 
 #### MCP setup offer (shared subroutine)
 
@@ -166,7 +167,6 @@ handler: linear
 linear:
   team: ENG
   default_project: null
-  labels: []
   default_priority: 3
 ```
 

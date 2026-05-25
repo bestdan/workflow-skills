@@ -84,8 +84,7 @@ Creates a Linear issue via the official Linear MCP server (`mcp__claude_ai_Linea
 handler: linear
 linear:
   team: ENG                # required — team key or id
-  default_project: null    # optional; skips the project prompt
-  labels: []
+  default_project: null    # optional; skips the project prompt (project UUID, not name)
   default_priority: 3      # 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low
 ```
 
