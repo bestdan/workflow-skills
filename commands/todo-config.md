@@ -53,7 +53,7 @@ No prerequisites. Mention the optional auto-merge workflow (see `README.md`) for
 The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`) — no CLI to install.
 
 1. Call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) to discover accessible sites.
-   - If the tool isn't available at all (the `mcp__claude_ai_Atlassian__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. Go to the **MCP setup offer** below with `server=atlassian`, `add-command=! claude mcp add --transport sse atlassian https://mcp.atlassian.com/v1/sse`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
+   - If the tool isn't available at all (the `mcp__claude_ai_Atlassian__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. Go to the **MCP setup offer** below with `server=atlassian`, `add-command=! claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
    - If the tool is available but returns no resources, **stop** with: "Atlassian MCP is connected but no sites are accessible. Authenticate via `/mcp` (pick `atlassian`), then re-run `/todo-config jira`." Do not write the config.
 2. Resolve `site` from the response (extract hostname from each resource's `url`):
    - Exactly one resource → use that site directly; tell the user which one you picked.
@@ -83,10 +83,10 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
 
 #### linear
 
-The `linear` handler delivers via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/sse`). Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
+The `linear` handler delivers via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/mcp`). Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
 1. Call `mcp__claude_ai_Linear__list_teams` (no args) to discover accessible teams.
-   - If the tool isn't available at all (the `mcp__claude_ai_Linear__*` namespace isn't loaded), the Linear MCP isn't connected yet. Go to the **MCP setup offer** below with `server=linear`, `add-command=! claude mcp add --transport sse linear https://mcp.linear.app/sse`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
+   - If the tool isn't available at all (the `mcp__claude_ai_Linear__*` namespace isn't loaded), the Linear MCP isn't connected yet. Go to the **MCP setup offer** below with `server=linear`, `add-command=! claude mcp add --transport http linear https://mcp.linear.app/mcp`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
    - If the tool is available but returns no teams, **stop** with: "Linear MCP is connected but no teams are accessible. Authenticate via `/mcp` (pick `linear`), then re-run `/todo-config linear`." Do not write the config.
 2. Resolve `team`:
    - Exactly one team → use its `key` directly; tell the user which one you picked.

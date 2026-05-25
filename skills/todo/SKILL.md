@@ -89,7 +89,7 @@ linear:
   default_priority: 3      # 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low
 ```
 
-Requires the Linear MCP to be connected in Claude Code (`https://mcp.linear.app/sse`) and the configured `team` to be in the user's accessible teams; stops with guidance otherwise. Lists the team's active projects for the user to pick a parent (unless `default_project` is set), maps the drafted todo to title + markdown description (with source footer), and returns the issue's `url`.
+Requires the Linear MCP to be connected in Claude Code (`https://mcp.linear.app/mcp`) and the configured `team` to be in the user's accessible teams; stops with guidance otherwise. Lists the team's active projects for the user to pick a parent (unless `default_project` is set), maps the drafted todo to title + markdown description (with source footer), and returns the issue's `url`.
 
 #### Setup: `/todo-config`
 

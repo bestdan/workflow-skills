@@ -1,6 +1,6 @@
 # Handler: linear
 
-Creates a Linear issue via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/sse`). Foreground call, no git plumbing, no CLI install. The new issue is filed under a configured team and optionally attached to a project.
+Creates a Linear issue via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/mcp`). Foreground call, no git plumbing, no CLI install. The new issue is filed under a configured team and optionally attached to a project.
 
 > **Required interaction:** step 2 (project selection) MUST prompt the user via `AskUserQuestion` unless `linear.default_project` is set in config. This applies in auto mode too. Treat a missing or empty `linear.default_project` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `create_issue` without having asked AND without a non-empty `linear.default_project`, stop and go back to step 2.
 
@@ -24,7 +24,7 @@ Linear concepts → todo concepts:
 1. **Preflight.** Confirm the Linear MCP is reachable and the configured team exists:
 
    Call `mcp__claude_ai_Linear__list_teams` (no args).
-   - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/sse`), then re-run." Do not fall back to another handler.
+   - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/mcp`), then re-run." Do not fall back to another handler.
    - If no team in the response has `key` or `id` matching `<linear.team>`, **stop** with: "Configured Linear team `<team>` is not in your accessible teams." (List the team keys that were returned.)
    - Capture the resolved team `id` for step 4.
 
