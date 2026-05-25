@@ -29,8 +29,8 @@ Capture is destination-agnostic; only the handler decides where the todo lands.
 The delivery destination is a **handler** named in a repo-committed config file, `dev_docs/todos/.todo-config.yml`:
 
 ```yaml
-handler: repo-pr   # repo-pr (default) | gh-issue | jira
-# handler-specific blocks (gh-issue / jira) live under their own keys
+handler: repo-pr   # repo-pr (default) | gh-issue | jira | linear
+# handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-todo` stops and points to `/todo-config`. Every handler receives the same drafted todo (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, …) and returns the URL of what it created.
@@ -76,11 +76,26 @@ jira:
 
 Requires the Atlassian MCP to be connected in Claude Code and the configured `site` to be in the user's accessible resources; stops with guidance otherwise. Lists the project's open epics via JQL for the user to pick a parent, maps the drafted todo to summary + description (with source footer), and returns the `https://<site>/browse/<KEY>` URL.
 
+#### Handler: `linear`
+
+Creates a Linear issue via the official Linear MCP server (`mcp__claude_ai_Linear__create_issue`), filed under a configured team and optionally attached to a project. Config:
+
+```yaml
+handler: linear
+linear:
+  team: ENG                # required — team key or id
+  default_project: null    # optional; skips the project prompt
+  labels: []
+  default_priority: 3      # 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low
+```
+
+Requires the Linear MCP to be connected in Claude Code (`https://mcp.linear.app/sse`) and the configured `team` to be in the user's accessible teams; stops with guidance otherwise. Lists the team's active projects for the user to pick a parent (unless `default_project` is set), maps the drafted todo to title + markdown description (with source footer), and returns the issue's `url`.
+
 #### Setup: `/todo-config`
 
-Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the current config, prompts for the destination, verifies prerequisites (`gh` auth for `gh-issue`; Atlassian MCP connectivity for `jira`), and delegates interactive logins to the user. Run it before using a non-default handler.
+Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the current config, prompts for the destination, verifies prerequisites (`gh` auth for `gh-issue`; Atlassian MCP connectivity for `jira`; Linear MCP connectivity for `linear`), and delegates interactive logins to the user. Run it before using a non-default handler.
 
-> **`/process-todo` and `/list-todos` only operate on `repo-pr` (file-based) todos.** For the `gh-issue` and `jira` handlers, lifecycle and tracking live in the external tool — read-back/sync is out of scope.
+> **`/process-todo` and `/list-todos` only operate on `repo-pr` (file-based) todos.** For the `gh-issue`, `jira`, and `linear` handlers, lifecycle and tracking live in the external tool — read-back/sync is out of scope.
 
 ### Process (`/process-todo`)
 

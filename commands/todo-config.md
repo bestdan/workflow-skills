@@ -1,7 +1,7 @@
 ---
 description: Configure where /add-todo delivers todos (repo PR, GitHub issue, or Jira)
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
-argument-hint: [repo-pr | gh-issue | jira]
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects
+argument-hint: [repo-pr | gh-issue | jira | linear]
 ---
 
 # Todo Config
@@ -22,11 +22,12 @@ If it exists, show the user what's currently configured so they see what they're
 
 ### 2. Choose the handler
 
-If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, or `jira`), use it. Otherwise ask which destination they want:
+If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, `jira`, or `linear`), use it. Otherwise ask which destination they want:
 
 - **`repo-pr`** — commit the todo as a markdown file via PR (the default; works with `/process-todo`)
 - **`gh-issue`** — create a GitHub Issue
 - **`jira`** — create a Jira work item under an epic
+- **`linear`** — create a Linear issue under a team (optionally attached to a project)
 
 ### 3. Collect settings + verify prerequisites
 
@@ -79,6 +80,31 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
 
 6. Optional `labels` — ask the user as plain text (comma-separated list); skip if blank. Do not use `AskUserQuestion` here.
 
+#### linear
+
+The `linear` handler delivers via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/sse`). Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
+
+1. Call `mcp__claude_ai_Linear__list_teams` (no args) to discover accessible teams.
+   - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/sse`), then re-run `/todo-config linear`." Do not write the config.
+2. Resolve `team`:
+   - Exactly one team → use its `key` directly; tell the user which one you picked.
+   - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<KEY> — <name>`; cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team key, which you then re-validate against the list. Never prompt the user to type blind.
+   Write the team's `key` (not its id) into the config — it's more human-readable and the handler accepts either.
+3. **Resolve `default_project` against real projects — do not accept free-text.** This field is optional but, when set, must be a valid project in the chosen team (otherwise it silently breaks `/add-todo`, which uses it to skip the per-todo project prompt).
+
+   Call `mcp__claude_ai_Linear__list_projects` with:
+   - `teamId`: id of the resolved team from step 2
+   - `includeArchived`: `false`
+
+   Present the result via `AskUserQuestion` (header: "Default project"):
+   - One option per project, labeled `<name>` (cap at 2 project options so 2 projects + "None" + "Other" fits the 4-option max; show the 2 most recently updated).
+   - A `"None — prompt me per-todo"` option (this is the recommended default if the user is unsure).
+   - "Other" lets the user type a project name; if they pick "Other", look it up by calling `list_projects` again and matching the typed name (case-insensitive). If no match, push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. Do not write the config with an unvalidated value.
+
+   If the user picks "None — prompt me per-todo", omit `default_project` from the written config. Otherwise write the project's id as-is.
+4. Optional `labels` — ask the user as plain text (comma-separated list of label names); skip if blank. Do not use `AskUserQuestion` here.
+5. Optional `default_priority` — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
+
 > **AskUserQuestion rule:** every call needs ≥2 options. If a step would only have one (e.g. a single visible project or site), use it directly and tell the user — don't try to ask.
 
 > **Interactive auth caveat:** `gh auth login` is interactive — never run it headless from inside this command. Always have the user run it with the `!` session prefix, then continue once they report success.
@@ -116,6 +142,16 @@ jira:
   issue_type: Task
   default_epic: PLAT-100
   labels: []
+```
+
+```yaml
+# linear
+handler: linear
+linear:
+  team: ENG
+  default_project: null
+  labels: []
+  default_priority: 3
 ```
 
 Omit optional keys the user didn't set.

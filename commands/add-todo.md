@@ -1,6 +1,6 @@
 ---
 description: Capture follow-up work as a structured todo, then deliver it to the configured destination (repo PR, GitHub issue, or Jira)
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__create_issue
 argument-hint: [description of the follow-up work]
 ---
 
@@ -100,8 +100,8 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/nu
 
 Resolve the handler name:
 - File absent, or no `handler:` key → **`repo-pr`** (the default — preserves the original behavior).
-- `handler: repo-pr | gh-issue | jira` → use that handler.
-- Any other (unknown) value → **stop** and tell the user: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Valid values: repo-pr, gh-issue, jira. Run /todo-config to set it." Do not silently fall back.
+- `handler: repo-pr | gh-issue | jira | linear` → use that handler.
+- Any other (unknown) value → **stop** and tell the user: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Valid values: repo-pr, gh-issue, jira, linear. Run /todo-config to set it." Do not silently fall back.
 
 ### 7. Deliver via the handler
 
