@@ -9,7 +9,7 @@ Config block in `dev_docs/todos/.todo-config.yml`:
 ```yaml
 handler: linear
 linear:
-  team: ENG                       # required — team key (e.g. ENG) or team id
+  team: PreThink                  # required — team name (as shown in Linear) or team id/UUID. The team key (e.g. PRE) is not accepted because `list_teams` does not return it.
   default_project: null           # optional; skips the project prompt (explicit project id/UUID, not a name)
   default_priority: 3             # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3)
 # labels support is deferred — the Linear MCP create_issue tool takes label UUIDs, not names,
@@ -26,7 +26,8 @@ Linear concepts → todo concepts:
 
    Call `mcp__claude_ai_Linear__list_teams` (no args).
    - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/mcp`), then re-run." Do not fall back to another handler.
-   - If no team in the response has `key` or `id` matching `<linear.team>`, **stop** with: "Configured Linear team `<team>` is not in your accessible teams." (List the team keys that were returned.)
+   - Match `<linear.team>` against each returned team's `name` (case-insensitive) or `id`. `list_teams` does not return the team key (e.g. `PRE`), so a key value will not match — surface that in the error if a likely-key string (short, all-caps) is configured.
+   - If no team matches, **stop** with: "Configured Linear team `<team>` is not in your accessible teams." (List the team names that were returned.)
    - Capture the resolved team `id` for step 4.
 
 2. **Select the project. HARD STOP — DO NOT SKIP.** You MUST ask the user which project to attach the issue to before creating it, using `AskUserQuestion`. Do not infer the project from the title, the team, or recent activity. Do not proceed to step 3 until the user has answered. The ONLY way to skip this prompt is if `linear.default_project` is set in the config file (then use that value as-is and proceed).
@@ -47,9 +48,10 @@ Linear concepts → todo concepts:
    ---
    Source branch: <source_branch>       # omit this line entirely if source_branch is empty
    Source PR: #<source_pr>               # omit this line entirely if source_pr is empty
+   Blocked by todo: <is_blocked_by>     # omit this line entirely if is_blocked_by is empty
    ```
 
-   If both footer lines are omitted, omit the `---` separator too.
+   If all footer lines are omitted, omit the `---` separator too.
 
 4. **Create the issue.** Call `mcp__claude_ai_Linear__create_issue` with:
    - `teamId`: `<resolved team id from step 1>`

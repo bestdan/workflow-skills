@@ -33,7 +33,7 @@ handler: repo-pr   # repo-pr (default) | gh-issue | jira | linear
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
-Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-todo` stops and points to `/todo-config`. Every handler receives the same drafted todo (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, …) and returns the URL of what it created.
+Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-todo` stops and points to `/todo-config`. Every handler receives the same drafted todo (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
 #### Handler: `repo-pr` (default)
 
@@ -98,17 +98,18 @@ Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the c
 
 ### Process (`/process-todo`)
 
-1. Scans `dev_docs/todos/**/*.md` for unclaimed todos
+1. Scans `dev_docs/todos/**/*.md` for unclaimed todos and filters out ones still waiting on `is_blocked_by`
 2. For each selected todo, dispatches a remote Claude session that:
    - Claims the todo (branch `todo/<slug>`, sets `status: claimed`)
    - Does the work described in the Task section
    - Deletes the todo file
    - Opens a PR labeled `todo-loop`
-3. Multiple todos can be dispatched in parallel — each gets its own cloud VM
+3. Todos with `is_blocked_by` set wait until the referenced slug no longer exists as a todo file
+4. Multiple dependency-ready todos can be dispatched in parallel — each gets its own cloud VM
 
 ### List (`/list-todos`)
 
-Quick status check. Shows all todos with priority, status, tags, and expiry.
+Quick status check. Shows all todos with priority, dependency blockers, status, tags, and expiry.
 
 ## Todo file format
 
@@ -125,6 +126,7 @@ source_pr: 42
 related_files:
   - path/to/relevant/file.ts
   - path/to/another/file.ts
+is_blocked_by: fix-broken-import
 expires: 2026-04-22
 tags:
   - cleanup
@@ -157,6 +159,7 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 | `source_branch` | yes      | Branch where todo was identified                        |
 | `source_pr`     | no       | PR number if already open                               |
 | `related_files` | yes      | Paths the consumer should read for context              |
+| `is_blocked_by` | no       | Slug/id of another todo that must be completed first    |
 | `expires`       | yes      | ISO date. Default: 30 days from creation.               |
 | `tags`          | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)  |
 
@@ -172,6 +175,8 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 unclaimed --> claimed --> PR opened --> merged (todo file deleted)
     |             |
     |             +--> blocked (needs manual intervention)
+    |
+    +--> waiting on is_blocked_by
     |
     +--> expired (auto-pruned after 30 days)
 ```
