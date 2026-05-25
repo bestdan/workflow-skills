@@ -53,7 +53,8 @@ No prerequisites. Mention the optional auto-merge workflow (see `README.md`) for
 The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`) — no CLI to install.
 
 1. Call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) to discover accessible sites.
-   - If the tool errors or returns no resources, **stop** with: "Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run `/todo-config jira`." Do not write the config.
+   - If the tool isn't available at all (the `mcp__claude_ai_Atlassian__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. Go to the **MCP setup offer** below with `server=atlassian`, `add-command=! claude mcp add --transport sse atlassian https://mcp.atlassian.com/v1/sse`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
+   - If the tool is available but returns no resources, **stop** with: "Atlassian MCP is connected but no sites are accessible. Authenticate via `/mcp` (pick `atlassian`), then re-run `/todo-config jira`." Do not write the config.
 2. Resolve `site` from the response (extract hostname from each resource's `url`):
    - Exactly one resource → use that site directly; tell the user which one you picked.
    - Multiple resources → ask the user which site to use via `AskUserQuestion` (one option per resource).
@@ -85,7 +86,8 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
 The `linear` handler delivers via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/sse`). Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
 1. Call `mcp__claude_ai_Linear__list_teams` (no args) to discover accessible teams.
-   - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/sse`), then re-run `/todo-config linear`." Do not write the config.
+   - If the tool isn't available at all (the `mcp__claude_ai_Linear__*` namespace isn't loaded), the Linear MCP isn't connected yet. Go to the **MCP setup offer** below with `server=linear`, `add-command=! claude mcp add --transport sse linear https://mcp.linear.app/sse`. After the user confirms setup is done, re-call this tool. If it still isn't available, **stop** — don't write the config.
+   - If the tool is available but returns no teams, **stop** with: "Linear MCP is connected but no teams are accessible. Authenticate via `/mcp` (pick `linear`), then re-run `/todo-config linear`." Do not write the config.
 2. Resolve `team`:
    - Exactly one team → use its `key` directly; tell the user which one you picked.
    - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<KEY> — <name>`; cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team key, which you then re-validate against the list. Never prompt the user to type blind.
@@ -104,6 +106,20 @@ The `linear` handler delivers via the official Linear MCP server (`mcp__claude_a
    If the user picks "None — prompt me per-todo", omit `default_project` from the written config. Otherwise write the project's id as-is.
 4. Optional `labels` — ask the user as plain text (comma-separated list of label names); skip if blank. Do not use `AskUserQuestion` here.
 5. Optional `default_priority` — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
+
+#### MCP setup offer (shared subroutine)
+
+Called from the `jira` and `linear` preflights when the required MCP namespace isn't loaded. Inputs: `server` (display name) and `add-command` (the exact `claude mcp add …` line to install it).
+
+1. Ask via `AskUserQuestion` (header: "Set up MCP"): "The `<server>` MCP isn't connected yet. Set it up now?"
+   - **Yes, set it up** (recommended, first) — proceed to step 2.
+   - **Cancel** — stop the config flow. Tell the user: "OK — re-run `/todo-config <handler>` once you've connected the `<server>` MCP."
+2. Tell the user exactly what to do, in this order — do NOT try to run the install command yourself (it modifies their Claude Code config; they should run it):
+   - "Run this in the prompt to install the server: `<add-command>`"
+   - "Then run `/mcp` and authenticate `<server>` via OAuth."
+   - "Reply `done` when both steps complete (or `cancel` to abort)."
+3. After they reply `done`, return to the caller's preflight and re-call the discovery tool. The newly-loaded MCP tools should now be available in this same session via the deferred-tool mechanism.
+4. If the tool still isn't available after the user reports `done`, surface the failure plainly ("Still can't see `<server>` MCP tools — check `/mcp` status") and stop. Don't loop.
 
 > **AskUserQuestion rule:** every call needs ≥2 options. If a step would only have one (e.g. a single visible project or site), use it directly and tell the user — don't try to ask.
 
