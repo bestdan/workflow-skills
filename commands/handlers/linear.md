@@ -59,7 +59,7 @@ Linear concepts → todo concepts:
    - `description`: the composed description from step 3
    - `projectId`: the chosen project id (omit entirely if the user picked "No project")
    - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`urgent` → 1, `high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
-   - `state`: `New` (corresponds to the `new` kanban column — see the Kanban mapping section below). Resolve the state id by listing the team's workflow states and matching by name; if `New` is not present, fall back to `Backlog`.
+   - `state`: the team's default `Backlog` workflow state (corresponds to the `new` kanban column — see the Kanban mapping section below). Resolve the state id by listing the team's workflow states and matching `type: "backlog"`; if multiple, prefer the team's default.
 
    Labels are intentionally not passed in v1 — see the config block note.
 
@@ -69,23 +69,31 @@ This handler does **not** create any `dev_docs/todos/*.md` file, branch, or PR.
 
 ## Kanban mapping
 
-Linear's workflow states are fixed: `Backlog`, `New`, `Planned`, `In Progress`, `Completed`, `Canceled`. The seven-column kanban model from `skills/todo/SKILL.md` maps onto those existing states plus a small set of labels — **no custom workflow states are added**.
+Linear todos are **issues** (not projects). The kanban columns from `skills/todo/SKILL.md` map onto Linear's team-level issue workflow states plus a few labels. **No custom workflow states are required** — the team's default Linear setup (`Backlog → Todo → In Progress → Done → Canceled`) is enough, since `needs_refinement` and `needs_review` ride on labels and on the linked GitHub PR.
 
-| Kanban column      | Linear state    | Linear label(s)                                  |
-|--------------------|-----------------|--------------------------------------------------|
-| `new`              | `New`           | —                                                |
-| `needs_refinement` | `New`           | `human-approval-requested`                       |
-| `ready`            | `Planned`       | `auto-eligible` (set by promoter)                |
-| `in_progress`      | `In Progress`   | `auto-claimed` (concurrency guard)               |
-| `blocked`          | `In Progress`   | `blocked`                                        |
-| `needs_review`     | `In Progress`   | — (the open PR is the review signal via Linear's GitHub integration) |
-| `done`             | `Completed`     | —                                                |
+Resolve state ids at runtime by Linear's state **type** (not display name — display names are user-configurable):
+
+| Kanban column      | Linear state type | Default name  | Linear label(s)                                  |
+|--------------------|-------------------|---------------|--------------------------------------------------|
+| `new`              | `backlog`         | `Backlog`     | —                                                |
+| `needs_refinement` | `backlog`         | `Backlog`     | `human-approval-requested`                       |
+| `ready`            | `unstarted`       | `Todo`        | `auto-eligible` (set by promoter)                |
+| `in_progress`      | `started`         | `In Progress` | `auto-claimed` (concurrency guard)               |
+| `blocked`          | `started`         | `In Progress` | `blocked`                                        |
+| `needs_review`     | `started`         | `In Progress` (or `In Review` if the team has one) | — (the open PR is the review signal via Linear's GitHub integration) |
+| `done`             | `completed`       | `Done`        | —                                                |
 
 Transitions:
-- `/add-todo` (this handler) creates the issue in `New`.
-- `/promote-todos` (Linear flavor) scores cards in `New`: HIGH → move to `Planned` and add `auto-eligible`; LOW → leave in `New` and add `human-approval-requested`.
-- `/process-todo` (or the nightly job) picks issues in `Planned` with `auto-eligible` and without `auto-claimed`. On claim it moves the issue to `In Progress` and adds `auto-claimed`.
-- Linear's GitHub integration moves the issue to `Completed` on PR merge via `Closes <KEY>`. `needs_review` is implicit while the linked PR is open.
-- Bail path: revert to `New`, add `human-approval-requested`, remove `auto-claimed`, and leave a comment.
+- `/add-todo` (this handler) creates the issue in the team's default `backlog`-type state.
+- `/promote-todos` (Linear flavor) scores cards in that backlog state: HIGH → move to the `unstarted`-type state (`Todo`) and add `auto-eligible`; LOW → leave it where it is and add `human-approval-requested`.
+- `/process-todo` (or the nightly job) picks issues with `auto-eligible` (and without `auto-claimed`) from the `unstarted` state. On claim it moves the issue to the `started` state and adds `auto-claimed`.
+- Linear's GitHub integration moves the issue to the `completed` state on PR merge via `Closes <KEY>`. `needs_review` is implicit while the linked PR is open.
+- Bail path: revert to the backlog state, add `human-approval-requested`, remove `auto-claimed`, and leave a comment.
 
-If the team's workflow does not have `New` or `Planned` (Linear teams can customize), the handler should fall back: `New` → `Backlog`, `Planned` → `Todo`. Resolve state ids by listing the team's workflow states (`mcp__claude_ai_Linear__list_*`) and matching by name at runtime.
+### Do I need to change anything in Linear?
+
+**No.** Linear teams ship with the right state types by default. The four labels (`auto-eligible`, `auto-claimed`, `human-approval-requested`, `blocked`) are auto-created the first time the bot needs them.
+
+Optional polish: if you want a visually distinct `needs_review` column in Linear's board view, add an `In Review` state to the team's `started` category (Settings → Teams → [team] → Issue statuses & automations → +). The handler will pick it up automatically by name. No migration needed.
+
+> **Note on Linear's *project* statuses.** Linear also has project-level statuses (`Backlog | Planned | In Progress | Completed | Canceled`) configured at Settings → Projects → Statuses. Those apply to whole projects (groupings of issues), are updated manually only (Linear never auto-transitions them), and are **not** what this handler touches.
