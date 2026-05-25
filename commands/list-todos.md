@@ -1,6 +1,6 @@
 ---
 description: Render todos as a kanban board grouped into vertical sections by status — dispatches to the configured handler (repo-pr files, or external trackers like Linear)
-allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
+allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
 argument-hint: [filter: new|needs_refinement|ready|in_progress|blocked|needs_review|expired|all]
 ---
 
@@ -20,7 +20,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/nu
 
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 2 below (file-based path).
 - `handler: repo-pr` → continue to step 2 below (file-based path).
-- `handler: gh-issue | jira | linear` → **dispatch to the handler.** Read `commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file. If the handler file has no `## List` section yet, stop with: "The `<handler>` handler does not yet support /list-todos. Track progress in <tracker URL from config>."
+- `handler: gh-issue | jira | linear` → **dispatch to the handler.** Read `commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file. If the handler file has no `## List` section yet, stop with: "The `<handler>` handler does not yet support /list-todos. View your kanban directly in `<handler>` (e.g. linear.app, your Jira board, or `gh issue list`)."
 
   If the relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md`) and Read the result. Do not read handler files for handlers other than the resolved one.
 
