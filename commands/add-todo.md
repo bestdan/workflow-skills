@@ -47,7 +47,7 @@ Auto-populate these fields:
 - `created`: today's date (ISO format)
 - `source_branch`: current branch
 - `source_pr`: PR number if one exists for this branch
-- `status`: `new` (the promoter will score it and flip to `ready` or `needs_refinement`)
+- `status`: `new` by default (the promoter will score it and flip to `ready` or `needs_refinement`). If the user picks "Fix now" in step 5, write `status: ready` instead — the user's manual confirmation IS the human gate, so skip the promoter.
 - `expires`: 30 days from today
 - `priority`: `low` (default, ask user if they want different)
 - `size`: estimated task size — `small` / `medium` / `large` (infer from scope, ask user to confirm)
