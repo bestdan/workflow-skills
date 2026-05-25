@@ -1,7 +1,7 @@
 ---
-description: Configure where /add-todo delivers todos (repo PR, GitHub issue, or Jira)
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
-argument-hint: [repo-pr | gh-issue | jira]
+description: Configure where /add-todo delivers todos (repo PR, GitHub issue, Jira, or Linear)
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects
+argument-hint: [repo-pr | gh-issue | jira | linear]
 ---
 
 # Todo Config
@@ -22,11 +22,12 @@ If it exists, show the user what's currently configured so they see what they're
 
 ### 2. Choose the handler
 
-If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, or `jira`), use it. Otherwise ask which destination they want:
+If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, `jira`, or `linear`), use it. Otherwise ask which destination they want:
 
 - **`repo-pr`** — commit the todo as a markdown file via PR (the default; works with `/process-todo`)
 - **`gh-issue`** — create a GitHub Issue
 - **`jira`** — create a Jira work item under an epic
+- **`linear`** — create a Linear issue under a team (optionally attached to a project)
 
 ### 3. Collect settings + verify prerequisites
 
@@ -52,7 +53,8 @@ No prerequisites. Mention the optional auto-merge workflow (see `README.md`) for
 The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`) — no CLI to install.
 
 1. Call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) to discover accessible sites.
-   - If the tool errors or returns no resources, **stop** with: "Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run `/todo-config jira`." Do not write the config.
+   - If the tool isn't available at all (the `mcp__claude_ai_Atlassian__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. Go to the **MCP setup offer** below with `server=atlassian`, `add-command=! claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`. The setup offer stops the run; the user restarts Claude Code and re-invokes `/todo-config jira` from a fresh session.
+   - If the tool is available but returns no resources, **stop** with: "Atlassian MCP is connected but no sites are accessible. Authenticate via `/mcp` (pick `atlassian`), then re-run `/todo-config jira`." Do not write the config.
 2. Resolve `site` from the response (extract hostname from each resource's `url`):
    - Exactly one resource → use that site directly; tell the user which one you picked.
    - Multiple resources → ask the user which site to use via `AskUserQuestion` (one option per resource).
@@ -78,6 +80,47 @@ The `jira` handler delivers via the Atlassian MCP server (`mcp__claude_ai_Atlass
    If the user picks "None — prompt me per-todo", omit `default_epic` from the written config. Otherwise write the validated key as-is.
 
 6. Optional `labels` — ask the user as plain text (comma-separated list); skip if blank. Do not use `AskUserQuestion` here.
+
+#### linear
+
+The `linear` handler delivers via the official Linear MCP server (`mcp__claude_ai_Linear__*`, connected from `https://mcp.linear.app/mcp`). Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
+
+1. Call `mcp__claude_ai_Linear__list_teams` (no args) to discover accessible teams.
+   - If the tool isn't available at all (the `mcp__claude_ai_Linear__*` namespace isn't loaded), the Linear MCP isn't connected yet. Go to the **MCP setup offer** below with `server=linear`, `add-command=! claude mcp add --transport http linear https://mcp.linear.app/mcp`. The setup offer stops the run; the user restarts Claude Code and re-invokes `/todo-config linear` from a fresh session.
+   - If the tool is available but returns no teams, **stop** with: "Linear MCP is connected but no teams are accessible. Authenticate via `/mcp` (pick `linear`), then re-run `/todo-config linear`." Do not write the config.
+2. Resolve `team`:
+   - Exactly one team → use its `key` directly; tell the user which one you picked.
+   - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<KEY> — <name>`; cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team key, which you then re-validate against the list. Never prompt the user to type blind.
+   Write the team's `key` (not its id) into the config — it's more human-readable and the handler accepts either.
+3. **Resolve `default_project` against real projects — do not accept free-text.** This field is optional but, when set, must be a valid project in the chosen team (otherwise it silently breaks `/add-todo`, which uses it to skip the per-todo project prompt).
+
+   Call `mcp__claude_ai_Linear__list_projects` with:
+   - `teamId`: id of the resolved team from step 2
+   - `includeArchived`: `false`
+
+   Present the result via `AskUserQuestion` (header: "Default project"):
+   - One option per project, labeled `<name>` (cap at 2 project options so 2 projects + "None" + "Other" fits the 4-option max; show the 2 most recently updated).
+   - A `"None — prompt me per-todo"` option (this is the recommended default if the user is unsure).
+   - "Other" lets the user type a project name; if they pick "Other", look it up by calling `list_projects` again and matching the typed name (case-insensitive). If no match, push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. Do not write the config with an unvalidated value.
+
+   If the user picks "None — prompt me per-todo", omit `default_project` from the written config. Otherwise write the project's id as-is.
+4. Optional `default_priority` — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
+
+> Labels are not supported in the v1 `linear` handler. The Linear MCP's `create_issue` takes label UUIDs, not names, and resolving names → ids requires an extra tool call (and an `allowed-tools` update). Skip the prompt; if a user asks for labels, the handler can be extended later.
+
+#### MCP setup offer (shared subroutine)
+
+Called from the `jira` and `linear` preflights when the required MCP namespace isn't loaded. Inputs: `server` (display name) and `add-command` (the exact `claude mcp add …` line to install it).
+
+1. Ask via `AskUserQuestion` (header: "Set up MCP"): "The `<server>` MCP isn't connected yet. Set it up now?"
+   - **Yes, set it up** (recommended, first) — proceed to step 2.
+   - **Cancel** — stop the config flow. Tell the user: "OK — re-run `/todo-config <handler>` once you've connected the `<server>` MCP."
+2. Tell the user exactly what to do, in this order — do NOT try to run the install command yourself (it modifies their Claude Code config; they should run it):
+   - "Run this in the prompt to install the server: `<add-command>`"
+   - "Then restart Claude Code so the new MCP's tools register in this session — `claude mcp add` doesn't hot-reload tools into an existing session."
+   - "After restart, run `/mcp` and authenticate `<server>` via OAuth."
+   - "Then re-run `/todo-config <handler>` from a fresh session."
+3. **Stop** the current run after the install instructions. The new tools won't appear in this session, so there's nothing to retry here — let the user restart and re-invoke.
 
 > **AskUserQuestion rule:** every call needs ≥2 options. If a step would only have one (e.g. a single visible project or site), use it directly and tell the user — don't try to ask.
 
@@ -116,6 +159,15 @@ jira:
   issue_type: Task
   default_epic: PLAT-100
   labels: []
+```
+
+```yaml
+# linear
+handler: linear
+linear:
+  team: ENG
+  default_project: null
+  default_priority: 3
 ```
 
 Omit optional keys the user didn't set.
