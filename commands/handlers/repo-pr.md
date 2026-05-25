@@ -60,12 +60,13 @@ Do the following steps exactly:
    git commit -m 'add todo: <slug>'
    git push -u origin todo/add/<slug>
 
-5. Ensure the label exists, then create a PR:
+5. Ensure the label exists, then create a PR (omit the `Blocked by:` line when `is_blocked_by` is empty):
    gh label create todo-add --description 'Auto-generated todo file' --color '1D76DB' 2>/dev/null
    gh pr create --base main --title 'todo: <title>' --label todo-add --body 'Adds a follow-up todo for processing by the todo plugin.
 
 Source branch: <source_branch>
 Priority: <priority>
+Blocked by: <is_blocked_by>
 Expires: <expires>'
 
 6. Report the PR URL.
@@ -86,6 +87,7 @@ Delegate to the Agent tool with this prompt:
 > Title: `<title>`
 > Source branch: `<source_branch>`
 > Priority: `<priority>`
+> Blocked by: `<is_blocked_by>`
 > Expires: `<expires>`
 >
 > Todo file content (write this exactly):
@@ -104,13 +106,14 @@ Delegate to the Agent tool with this prompt:
 >      --field content="<BASE64_OF_TODO_CONTENT>" \
 >      --field branch="todo/add/<slug>"
 >    ```
-> 4. Ensure label exists and open PR:
+> 4. Ensure label exists and open PR (omit the `Blocked by:` line when `is_blocked_by` is empty):
 >    ```
 >    gh label create todo-add --description 'Auto-generated todo file' --color '1D76DB' 2>/dev/null
 >    gh pr create --base main --head "todo/add/<slug>" --title "todo: <title>" --label todo-add --body "Adds a follow-up todo.
 >
 >    Source branch: <source_branch>
 >    Priority: <priority>
+>    Blocked by: <is_blocked_by>
 >    Expires: <expires>"
 >    ```
 > 5. Report the PR URL.

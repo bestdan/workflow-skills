@@ -48,6 +48,7 @@ jira:
    ---
    Source branch: <source_branch>
    Source PR: #<source_pr>
+   Blocked by todo: <is_blocked_by>
    ```
 
 4. **Create the work item.** Call `mcp__claude_ai_Atlassian__createJiraIssue` with:

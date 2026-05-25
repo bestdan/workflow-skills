@@ -25,6 +25,7 @@ gh-issue:
    ---
    Source branch: <source_branch>
    Source PR: #<source_pr>
+   Blocked by todo: <is_blocked_by>
    ```
 
    Write it to a temp file to avoid shell-quoting problems with multi-line markdown.

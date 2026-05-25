@@ -1,18 +1,18 @@
 ---
-description: Process unclaimed todos — dispatches remote agents to claim, execute, and open PRs
+description: Process dependency-ready todos — dispatches remote agents to claim, execute, and open PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Glob, Grep, Read, Write, Edit
 argument-hint: [slug | --all | --local] or empty for highest priority
 ---
 
 # Process Todo
 
-Scan for unclaimed todos and dispatch remote Claude sessions to process them. Each todo gets its own isolated cloud VM.
+Scan for dependency-ready todos and dispatch remote Claude sessions to process them. Each todo gets its own isolated cloud VM.
 
 ## Modes
 
-- `/process-todo` — dispatch the highest priority unclaimed todo to a remote agent
+- `/process-todo` — dispatch the highest priority dependency-ready todo to a remote agent
 - `/process-todo <slug>` — dispatch a specific todo
-- `/process-todo --all` — dispatch all unclaimed todos in parallel (one remote session each)
+- `/process-todo --all` — dispatch all dependency-ready todos and skip ones still blocked by another todo
 - `/process-todo --local` — process locally instead of dispatching (original behavior, useful for testing)
 
 ## Steps
@@ -24,16 +24,19 @@ find "$(git rev-parse --show-toplevel)/dev_docs/todos" -name '*.md' -type f 2>/d
 ```
 
 Parse YAML frontmatter from each file. Filter to `status: unclaimed`. Sort by:
-1. Priority: `high` > `medium` > `low`
-2. Age: oldest `created` date first
+1. Dependency readiness: todos whose `is_blocked_by` target is absent are eligible; todos whose blocker file still exists are not
+2. Priority: `high` > `medium` > `low`
+3. Age: oldest `created` date first
 
-If no unclaimed todos exist, report that and stop.
+Treat `is_blocked_by` as a reference to another todo's slug. The slug is satisfied when no todo file with that slug exists under `dev_docs/todos/**/*.md`. If a referenced blocker file still exists, the dependent todo must not be dispatched yet, even if the blocker is already `claimed`.
+
+If no unclaimed, dependency-ready todos exist, report that and stop. If the only remaining unclaimed todos are waiting on dependencies, say which blocker each one is waiting for.
 
 ### 2. Select todos to process
 
-- Default: pick the single highest priority todo
-- With `<slug>`: find that specific todo
-- With `--all`: select all unclaimed todos
+- Default: pick the single highest priority dependency-ready todo
+- With `<slug>`: find that specific todo; if it is waiting on `is_blocked_by`, stop and report the blocker instead of dispatching it
+- With `--all`: select all dependency-ready todos and skip any that are still waiting on another todo
 
 ### 3. Check dispatch prerequisites
 
@@ -74,7 +77,7 @@ The file is at dev_docs/todos/<slug>.md with this content:
 
    If push fails because the branch exists, STOP — another agent claimed it.
 
-2. EXECUTE: Read the Context and Task sections. Read all files listed in related_files. Do the work described in the Task section.
+2. EXECUTE: Read the Context and Task sections. Read all files listed in related_files. If `is_blocked_by` is present, treat it as already satisfied before proceeding; if the blocking todo file still exists in the checkout for any reason, STOP rather than doing work out of order. Do the work described in the Task section.
 
 3. VALIDATE: Look for test infrastructure (Makefile, justfile, package.json). Run tests if available. Check acceptance criteria.
 
@@ -135,6 +138,8 @@ Dispatched 3 todos to remote agents:
 
 Monitor with /tasks. Each will open a PR when complete.
 ```
+
+If any todos were skipped because they are waiting on another todo, list them separately with their blocker slug.
 
 ## Local mode (`--local`)
 

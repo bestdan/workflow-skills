@@ -51,6 +51,7 @@ Auto-populate these fields:
 - `expires`: 30 days from today
 - `priority`: `low` (default, ask user if they want different)
 - `size`: estimated task size — `small` / `medium` / `large` (infer from scope, ask user to confirm)
+- `is_blocked_by`: omitted by default; set to another todo's slug/id when this work must wait on that todo
 
 From conversation context and diff, draft:
 - `title`: from user description or `$ARGUMENTS`
@@ -59,6 +60,8 @@ From conversation context and diff, draft:
 - **Context** section: why this work was noticed
 - **Task** section: concrete steps to complete it
 - **Acceptance Criteria**: definition of done
+
+If the user indicates this todo depends on another todo, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that todo's slug. In the file-based todo system, the slug is the todo's ID for cross-references. Validate that the referenced slug already exists somewhere under `dev_docs/todos/**/*.md`. If it does not exist, stop and ask the user to correct the slug or remove the dependency rather than silently writing a dangling reference.
 
 ### 5. Present for review
 
@@ -87,6 +90,7 @@ Once the user confirms, you hold a normalized **drafted todo** that every handle
 | `source_branch` | Branch where the todo was identified                               |
 | `source_pr`     | PR number for that branch, if any                                  |
 | `related_files` | Paths relevant to the work                                          |
+| `is_blocked_by` | Optional slug/id of another todo that must be completed first       |
 
 Every handler **must report back an artifact identifier** so step 8 can show it. Normally this is the URL of the created PR, issue, or work item. The one exception is `repo-pr` Mode 3 (local staging), which has no remote artifact yet — it returns the staged file path and branch name instead, and step 8 reports that the file is staged locally and will land via the user's own PR.
 
@@ -114,4 +118,3 @@ Do not embed handler logic here; do not read handler files for handlers other th
 ### 8. Report
 
 Tell the user which handler ran and the artifact it returned. For PR / issue / work item handlers, that's the URL. For `repo-pr` Mode 3 (local staging), there is no URL yet — report the staged file path and branch, and tell the user the todo will land via whatever PR they open from that branch. For `repo-pr`, also include what was dispatched (file only, or file + processing) and the dispatch mode used, and that they can monitor with `/tasks`.
-

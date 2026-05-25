@@ -47,9 +47,10 @@ Linear concepts → todo concepts:
    ---
    Source branch: <source_branch>       # omit this line entirely if source_branch is empty
    Source PR: #<source_pr>               # omit this line entirely if source_pr is empty
+   Blocked by todo: <is_blocked_by>     # omit this line entirely if is_blocked_by is empty
    ```
 
-   If both footer lines are omitted, omit the `---` separator too.
+   If all footer lines are omitted, omit the `---` separator too.
 
 4. **Create the issue.** Call `mcp__claude_ai_Linear__create_issue` with:
    - `teamId`: `<resolved team id from step 1>`
