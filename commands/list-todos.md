@@ -1,12 +1,12 @@
 ---
-description: Render todo files as a kanban board grouped by status column
+description: Render todo files as a kanban board grouped into vertical sections by status
 allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Glob, Grep, Read
 argument-hint: [filter: new|needs_refinement|ready|in_progress|blocked|needs_review|expired|all]
 ---
 
 # List Todos
 
-Render todos in `dev_docs/todos/` as a kanban board, one section per column.
+Render todos in `dev_docs/todos/` as a vertical kanban view — one section per status, stacked top to bottom. Text UIs don't render side-by-side columns reliably, so the kanban "columns" are presented as sequential sections instead.
 
 ## Steps
 
@@ -26,24 +26,24 @@ Check for expired todos: if `expires` < today and `status` is not `done`, mark a
 
 Also compute whether the todo is currently dependency-blocked: if `is_blocked_by` is set and a todo file with that slug still exists anywhere under `dev_docs/todos/**/*.md` with a status other than `done`, treat this todo as waiting on that dependency. This is distinct from `status: blocked`, which means someone tried to process the todo and hit a problem.
 
-If `$ARGUMENTS` is provided, filter to that status (or `expired`). Default: show all columns.
+If `$ARGUMENTS` is provided, filter to that status (or `expired`). Default: show every section that has cards.
 
-### 3. Display as kanban board
+### 3. Display as stacked sections
 
-Print one section per column in this fixed order, omitting empty columns:
+Print one section per status in this fixed order, top to bottom, omitting empty sections:
 
 `new` → `needs_refinement` → `ready` → `in_progress` → `blocked` → `needs_review` → `done`
 
-The first five columns come from todo files (status field). `needs_review` and `done` are **PR-derived** — the file is deleted when `/process-todo` opens the PR, so there is no file to source those statuses from. Populate them by running, in parallel with the file scan:
+The first five sections come from todo files (status field). `needs_review` and `done` are **PR-derived** — the file is deleted when `/process-todo` opens the PR, so there is no file to source those statuses from. Populate them by running, in parallel with the file scan:
 
 ```bash
 gh pr list --label todo-loop --state open  --json number,title,headRefName,updatedAt   # → needs_review
 gh pr list --label todo-loop --state merged --limit 10 --json number,title,mergedAt    # → done (recent)
 ```
 
-Skip those two `gh` calls (and the two columns) if `gh` is unavailable or unauthenticated.
+Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated.
 
-Within each section, sort by priority (urgent > high > medium > low), then age (oldest first). Render each card as a single line:
+Within each section, sort by priority (urgent > high > medium > low), then age (oldest first). Render each card as a single line. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
 
 ```
 ## ready (2)
@@ -51,9 +51,13 @@ Within each section, sort by priority (urgent > high > medium > low), then age (
 - [high] Fix broken import in utils.ts — created 2026-03-20, expires 2026-04-19  [cleanup]
 - [low]  Remove stale foobar alias — waiting on fix-broken-import  [cleanup, zsh]
 
+---
+
 ## needs_refinement (1)
 
 - [medium] Add missing test for parser — human-approval-requested  [tests]
+
+---
 
 ## in_progress (1)
 
