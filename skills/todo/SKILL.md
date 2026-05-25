@@ -96,20 +96,26 @@ Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the c
 
 > **`/process-todo` and `/list-todos` only operate on `repo-pr` (file-based) todos.** For the `gh-issue`, `jira`, and `linear` handlers, lifecycle and tracking live in the external tool — read-back/sync is out of scope.
 
+### Promote (`/promote-todos`)
+
+1. Scans `dev_docs/todos/**/*.md` for todos in `status: new`
+2. Scores each against the confidence check (see Kanban columns below)
+3. HIGH confidence → flips `status: ready`. LOW confidence → flips `status: needs_refinement` and sets `human_approval_requested: true`
+4. Never touches todos already past `new` — humans own demotions from `ready`
+
 ### Process (`/process-todo`)
 
-1. Scans `dev_docs/todos/**/*.md` for unclaimed todos and filters out ones still waiting on `is_blocked_by`
+1. Scans `dev_docs/todos/**/*.md` for todos in `status: ready` and filters out ones still waiting on `is_blocked_by`
 2. For each selected todo, dispatches a remote Claude session that:
-   - Claims the todo (branch `todo/<slug>`, sets `status: claimed`)
+   - Claims the todo (branch `todo/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
-   - Deletes the todo file
-   - Opens a PR labeled `todo-loop`
+   - Deletes the todo file and opens a PR labeled `todo-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
 3. Todos with `is_blocked_by` set wait until the referenced slug no longer exists as a todo file
 4. Multiple dependency-ready todos can be dispatched in parallel — each gets its own cloud VM
 
 ### List (`/list-todos`)
 
-Quick status check. Shows all todos with priority, dependency blockers, status, tags, and expiry.
+Renders a kanban view grouped by `status` column with priority, dependency blockers, tags, and expiry.
 
 ## Todo file format
 
@@ -119,7 +125,7 @@ Files live in `dev_docs/todos/` (supports subdirectories). Markdown with YAML fr
 ---
 title: Imperative description under 80 chars
 priority: low
-status: unclaimed
+status: new
 created: 2026-03-23
 source_branch: bestdan/feat/example
 source_pr: 42
@@ -130,6 +136,7 @@ is_blocked_by: fix-broken-import
 expires: 2026-04-22
 tags:
   - cleanup
+human_approval_requested: false
 ---
 
 ## Context
@@ -153,32 +160,55 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 | Field           | Required | Description                                             |
 | --------------- | -------- | ------------------------------------------------------- |
 | `title`         | yes      | Imperative description, < 80 chars                      |
-| `priority`      | yes      | `low` / `medium` / `high`                               |
-| `status`        | yes      | `unclaimed` / `claimed` / `blocked`                     |
+| `priority`      | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only) |
+| `status`        | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done` |
 | `created`       | yes      | ISO date                                                |
 | `source_branch` | yes      | Branch where todo was identified                        |
 | `source_pr`     | no       | PR number if already open                               |
-| `related_files` | yes      | Paths the consumer should read for context              |
+| `related_files` | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research` |
 | `is_blocked_by` | no       | Slug/id of another todo that must be completed first    |
 | `expires`       | yes      | ISO date. Default: 30 days from creation.               |
 | `tags`          | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)  |
+| `human_approval_requested` | no | Forces card into `needs_refinement` until a human flips it back |
 
 ### Body sections
 
 - **Context** (required) — Why this exists. What you saw.
 - **Task** (required) — Concrete steps. Specific enough for an agent to execute.
-- **Acceptance Criteria** (optional) — Definition of done.
+- **Acceptance Criteria** (required, ≥ 1 bullet) — Definition of done. Missing or empty section blocks promotion to `ready`.
+- **Open Questions** / **TBD** (optional) — Presence of either with non-empty content blocks promotion to `ready`.
+
+## Kanban columns
+
+The seven `status` values form a kanban flow. Cards move between columns via specific actions:
+
+| Column | Card enters when… | Card leaves when… |
+|---|---|---|
+| `new` | `/add-todo` writes the card | `/promote-todos` scores it |
+| `needs_refinement` | Promoter scored LOW, or human demoted from `ready` | Human edits the card, clears `human_approval_requested`, AND sets `status: ready` (the promoter does not re-scan past `new`) |
+| `ready` | Promoter scored HIGH | `/process-todo` claims it |
+| `in_progress` | Claim (branch + status flip) | PR opened (file is deleted in that PR) |
+| `blocked` | Agent or human sets it with a `Consumer Notes` reason | Blocker resolved → returns to `in_progress` |
+| `needs_review` | PR opened from `todo/<slug>` branch | PR merged or closed |
+| `done` | PR merged | terminal |
+
+> **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The todo file is deleted as part of opening the PR, so it cannot carry these statuses in the file system. `/list-todos` populates these two columns by querying `gh pr list --label todo-loop --state open` (needs_review) and `--state merged` (recent done). For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
+
+### Confidence check (used by `/promote-todos`)
+
+- **HIGH** (→ `ready`): all required fields present; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; no scope-keyword red flags (`refactor`, `migrate`, `redesign`, `rewrite`, `overhaul`) suggesting > 5 files.
+- **LOW** (→ `needs_refinement`, set `human_approval_requested: true`): any of the above fails, or `human_approval_requested` is already true.
+
+Note: `is_blocked_by` is intentionally **not** checked here. `/process-todo`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
 
 ## Lifecycle
 
 ```
-unclaimed --> claimed --> PR opened --> merged (todo file deleted)
-    |             |
-    |             +--> blocked (needs manual intervention)
-    |
-    +--> waiting on is_blocked_by
-    |
-    +--> expired (auto-pruned after 30 days)
+new --> needs_refinement <--> ready --> in_progress --> needs_review --> done
+                                           |                                
+                                           +--> blocked --> in_progress     
+                                                                            
+expired (auto-pruned once the `expires` date passes while status is non-terminal; default expires = 30 days from creation, see Field reference)
 ```
 
 ## Branch naming
