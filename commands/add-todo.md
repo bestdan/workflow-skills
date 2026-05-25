@@ -47,7 +47,7 @@ Auto-populate these fields:
 - `created`: today's date (ISO format)
 - `source_branch`: current branch
 - `source_pr`: PR number if one exists for this branch
-- `status`: `unclaimed`
+- `status`: `new` (the promoter will score it and flip to `ready` or `needs_refinement`)
 - `expires`: 30 days from today
 - `priority`: `low` (default, ask user if they want different)
 - `size`: estimated task size — `small` / `medium` / `large` (infer from scope, ask user to confirm)
@@ -81,7 +81,7 @@ Once the user confirms, you hold a normalized **drafted todo** that every handle
 | --------------- | ------------------------------------------------------------------- |
 | `title`         | Imperative, < 80 chars                                              |
 | `body`          | The Context / Task / Acceptance Criteria markdown                   |
-| `priority`      | `low` / `medium` / `high`                                           |
+| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)          |
 | `size`          | `small` / `medium` / `large` — estimated task size                  |
 | `tags`          | List of freeform tags                                               |
 | `slug`          | Kebab-case slug from step 2                                         |
