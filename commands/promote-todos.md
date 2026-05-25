@@ -27,12 +27,13 @@ For each candidate, run the **confidence check** from `skills/todo/SKILL.md`:
 - `related_files` has ≥ 1 entry, OR `tags` includes `scope: research`
 - Body has a `## Acceptance Criteria` section with ≥ 1 bullet
 - Body has no `## Open Questions` or `## TBD` section with non-empty content (an empty heading is fine)
-- If `is_blocked_by` is set, the referenced slug either does not exist as a todo file OR exists with `status: done`
 - `priority` ≠ `urgent`
 - `human_approval_requested` is unset or false
 - Title and body together do not contain any scope red-flag keyword: `refactor`, `migrate`, `redesign`, `rewrite`, `overhaul` (case-insensitive, whole word)
 
 **LOW (→ `needs_refinement`, set `human_approval_requested: true`)** if any HIGH condition fails.
+
+Note: `is_blocked_by` is intentionally not part of the promotion check — `/process-todo` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
 
 ### 3. Apply
 

@@ -109,8 +109,7 @@ Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the c
 2. For each selected todo, dispatches a remote Claude session that:
    - Claims the todo (branch `todo/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
-   - On PR open, sets `status: needs_review`
-   - On PR merge, deletes the todo file (implicit `done`)
+   - Deletes the todo file and opens a PR labeled `todo-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
 3. Todos with `is_blocked_by` set wait until the referenced slug no longer exists as a todo file
 4. Multiple dependency-ready todos can be dispatched in parallel — each gets its own cloud VM
 
@@ -186,17 +185,21 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 | Column | Card enters when… | Card leaves when… |
 |---|---|---|
 | `new` | `/add-todo` writes the card | `/promote-todos` scores it |
-| `needs_refinement` | Promoter scored LOW, or human demoted from `ready` | Human edits + clears `human_approval_requested` |
+| `needs_refinement` | Promoter scored LOW, or human demoted from `ready` | Human edits the card, clears `human_approval_requested`, AND sets `status: ready` (the promoter does not re-scan past `new`) |
 | `ready` | Promoter scored HIGH | `/process-todo` claims it |
-| `in_progress` | Claim (branch + status flip) | PR opened |
+| `in_progress` | Claim (branch + status flip) | PR opened (file is deleted in that PR) |
 | `blocked` | Agent or human sets it with a `Consumer Notes` reason | Blocker resolved → returns to `in_progress` |
 | `needs_review` | PR opened from `todo/<slug>` branch | PR merged or closed |
-| `done` | PR merged (handler deletes the file) | terminal |
+| `done` | PR merged | terminal |
+
+> **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The todo file is deleted as part of opening the PR, so it cannot carry these statuses in the file system. `/list-todos` populates these two columns by querying `gh pr list --label todo-loop --state open` (needs_review) and `--state merged` (recent done). For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
 
 ### Confidence check (used by `/promote-todos`)
 
-- **HIGH** (→ `ready`): all required fields present; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `is_blocked_by` (if set) resolves to a completed/missing slug; `priority` ≠ `urgent`; no scope-keyword red flags (`refactor`, `migrate`, `redesign`) suggesting > 5 files.
+- **HIGH** (→ `ready`): all required fields present; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; no scope-keyword red flags (`refactor`, `migrate`, `redesign`, `rewrite`, `overhaul`) suggesting > 5 files.
 - **LOW** (→ `needs_refinement`, set `human_approval_requested: true`): any of the above fails, or `human_approval_requested` is already true.
+
+Note: `is_blocked_by` is intentionally **not** checked here. `/process-todo`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
 
 ## Lifecycle
 
@@ -205,7 +208,7 @@ new --> needs_refinement <--> ready --> in_progress --> needs_review --> done
                                            |                                
                                            +--> blocked --> in_progress     
                                                                             
-expired (auto-pruned after 30 days from any non-terminal status)
+expired (auto-pruned once the `expires` date passes while status is non-terminal; default expires = 30 days from creation, see Field reference)
 ```
 
 ## Branch naming
