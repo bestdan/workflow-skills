@@ -35,66 +35,18 @@ handler: repo-pr   # repo-pr (default) | gh-issue | jira | linear
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-todo` stops and points to `/todo-config`. Every handler receives the same drafted todo (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-#### Handler: `repo-pr` (default)
+Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
-Reproduces the original behavior. Dispatches an agent to:
-- Create a branch from main (`todo/add/<slug>`)
-- Write the todo file to `dev_docs/todos/<slug>.md`
-- Open a PR labeled `todo-add` (an auto-merge workflow lands it on main, decoupled from the feature branch)
+| Handler   | Lands the todo as…           | Reference file                  |
+|-----------|------------------------------|---------------------------------|
+| `repo-pr` | a committed markdown file in `dev_docs/todos/` via PR (default) | `commands/handlers/repo-pr.md` |
+| `gh-issue`| a GitHub Issue               | `commands/handlers/gh-issue.md` |
+| `jira`    | a Jira work item under an epic | `commands/handlers/jira.md`   |
+| `linear`  | a Linear issue under a team   | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` |
 
-**Zero local impact.** No files written, no branches created, no staging.
+Set the handler with `/todo-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-**Fallback modes** (automatic cascade, `repo-pr` only): `--remote` (cloud VM) → `--subagent` (GitHub API via sub-agent, zero local git impact) → `--local` (stage into current branch). If `gh auth status` fails, skip straight to `--local`. Do NOT pass `--print` to `claude --remote`. This cascade applies only to `repo-pr`; other handlers are single foreground calls (`gh-issue` via the `gh` CLI, `jira` via the Atlassian MCP).
-
-#### Handler: `gh-issue`
-
-Creates a GitHub Issue via `gh issue create` (foreground, no git plumbing). Config:
-
-```yaml
-handler: gh-issue
-gh-issue:
-  repo: owner/name      # optional; defaults to current repo
-  labels: [follow-up]   # optional
-  assignees: []         # optional
-```
-
-Requires working `gh` auth; on auth failure it stops with guidance rather than falling back. The drafted todo's body plus a source-branch/PR footer becomes the issue body; the handler returns the new issue URL.
-
-#### Handler: `jira`
-
-Creates a Jira work item via the Atlassian MCP server (`mcp__claude_ai_Atlassian__createJiraIssue`), placed under a selected epic. Config:
-
-```yaml
-handler: jira
-jira:
-  site: mycompany.atlassian.net
-  project: PLAT            # required
-  issue_type: Task         # default Task
-  default_epic: PLAT-100   # optional; skips the epic prompt
-  labels: []
-```
-
-Requires the Atlassian MCP to be connected in Claude Code and the configured `site` to be in the user's accessible resources; stops with guidance otherwise. Lists the project's open epics via JQL for the user to pick a parent, maps the drafted todo to summary + description (with source footer), and returns the `https://<site>/browse/<KEY>` URL.
-
-#### Handler: `linear`
-
-Creates a Linear issue via the official Linear MCP server (`mcp__claude_ai_Linear__create_issue`), filed under a configured team and optionally attached to a project. Config:
-
-```yaml
-handler: linear
-linear:
-  team: ENG                # required — team key or id
-  default_project: null    # optional; skips the project prompt (project UUID, not name)
-  default_priority: 3      # 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low
-```
-
-Requires the Linear MCP to be connected in Claude Code (`https://mcp.linear.app/mcp`) and the configured `team` to be in the user's accessible teams; stops with guidance otherwise. Lists the team's active projects for the user to pick a parent (unless `default_project` is set), maps the drafted todo to title + markdown description (with source footer), and returns the issue's `url`.
-
-#### Setup: `/todo-config`
-
-Configures the handler and writes `dev_docs/todos/.todo-config.yml`. Shows the current config, prompts for the destination, verifies prerequisites (`gh` auth for `gh-issue`; Atlassian MCP connectivity for `jira`; Linear MCP connectivity for `linear`), and delegates interactive logins to the user. Run it before using a non-default handler.
-
-> **`/process-todo` and `/list-todos` only operate on `repo-pr` (file-based) todos.** For the `gh-issue`, `jira`, and `linear` handlers, lifecycle and tracking live in the external tool — read-back/sync is out of scope.
+> Different handlers support different downstream commands. `/process-todo` is file-only (`repo-pr`). `/list-todos` dispatches to whichever handler is configured. The handler files document what they do and don't support.
 
 ### Promote (`/promote-todos`)
 

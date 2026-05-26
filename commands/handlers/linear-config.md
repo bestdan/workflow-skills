@@ -5,7 +5,7 @@ Configures the `linear` handler, which creates Linear issues via the official Li
 Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
 > **Linear MCP tool namespace.** The same Linear MCP can be installed two ways, which produces two different tool prefixes:
-> - Installed via `claude.ai` settings → tools are `<linear-mcp>__list_teams`, etc.
+> - Installed via `claude.ai` settings → tools are `mcp__claude_ai_Linear__list_teams`, etc.
 > - Installed via `claude mcp add --transport http linear https://mcp.linear.app/mcp` (what `mcp-setup-offer.md` instructs) → tools are `mcp__linear__list_teams`, etc. (the prefix is `mcp__<server-name>__`, and the server is registered as `linear`).
 >
 > Use whichever prefix is loaded in the current session. The tool names after the prefix (`list_teams`, `list_projects`, `list_workflow_states`, `create_issue`, `save_issue`, `get_issue`, `save_comment`, `list_issue_labels`, `create_issue_label`, `get_user`, `list_issues`) are identical across both installs. The rest of this file omits the prefix and writes tool names as `<linear-mcp>__list_teams`, etc.
@@ -25,7 +25,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    - Exactly one team → use it; tell the user which one you picked.
    - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<name>` — do NOT label as `<KEY> — <name>` because `list_teams` does not return the team key, so you literally cannot render `<KEY>`. If two teams collide on name, disambiguate with `<name> (<short-id>)`. Cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team name (not key), which you then re-validate against the list. Never prompt the user to type blind.
 
-   **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PRE`), so a key value will not match downstream and `/add-todo`/`/list-todos`/`/claim-todo` will all stop at preflight with "Configured Linear team `PRE` is not in your accessible teams." The `name` (e.g. `PreThink`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
+   **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PRE`), so a key value will not match downstream and `/add-todo`/`/list-todos` will stop at preflight with "Configured Linear team `PRE` is not in your accessible teams." The `name` (e.g. `PreThink`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
 
 3. **Resolve `default_project` against real projects — do not accept free-text.** This field is optional but, when set, must be a valid project in the chosen team (otherwise it silently breaks `/add-todo`, which uses it to skip the per-todo project prompt).
 
