@@ -1,6 +1,6 @@
 ---
 description: Capture follow-up work as a structured todo, then deliver it to the configured destination (repo PR, GitHub issue, Jira, or Linear)
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__create_issue
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, AskUserQuestion, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__save_issue
 argument-hint: [description of the follow-up work]
 ---
 
@@ -109,9 +109,14 @@ Resolve the handler name:
 
 ### 7. Deliver via the handler
 
-Each handler's full instructions live in a sibling file: `commands/handlers/<handler>.md`. Use the **Read** tool to load only the resolved handler's file, then follow it, passing the drafted todo from step 5. The handler file owns everything about how the todo lands — preflight checks, dispatch, parsing, and the artifact URL it returns.
+Each handler's full instructions live in sibling file(s) under `commands/handlers/`:
 
-If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md`) and Read the result.
+- `handler: repo-pr | gh-issue | jira` → Read `commands/handlers/<handler>.md` and follow it.
+- `handler: linear` → Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-add.md` (the create flow), and follow them.
+
+Use the **Read** tool, then follow it, passing the drafted todo from step 5. The handler file(s) own everything about how the todo lands — preflight checks, dispatch, parsing, and the artifact URL returned.
+
+If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result.
 
 Do not embed handler logic here; do not read handler files for handlers other than the resolved one.
 
