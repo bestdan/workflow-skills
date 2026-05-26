@@ -31,8 +31,8 @@ linear:
 
 ## Linear concepts → todo concepts
 
-- **Team** is required for every issue (like Jira's `project`).
-- **Project** is an optional grouping that can span teams (like Jira's `epic`).
+- **Team** is required for every issue.
+- **Project** is an optional grouping that can span teams.
 
 ## Preflight pattern
 
@@ -48,7 +48,7 @@ Every Linear-handled command starts the same way. Failure messages are identical
 
 ## Kanban mapping
 
-Linear todos are **issues** (not projects). The seven kanban columns from `skills/todo/SKILL.md` map onto Linear's team-level issue workflow states plus four labels. **No custom workflow states are required** — the team's default Linear setup (`Backlog → Todo → In Progress → Done → Canceled`) is enough, since `needs_refinement` and `needs_review` ride on labels and on the linked GitHub PR.
+Linear todos are **issues**. The seven kanban columns from `skills/todo/SKILL.md` map onto Linear's team-level issue workflow states plus four labels. **No custom workflow states are required** — the team's default Linear setup (`Backlog → Todo → In Progress → Done → Canceled`) is enough, since `needs_refinement` and `needs_review` ride on labels and on the linked GitHub PR.
 
 Resolve state ids at runtime by Linear's state **type** (not display name — display names are user-configurable):
 
