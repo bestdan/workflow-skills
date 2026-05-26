@@ -10,6 +10,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
    - If the tool isn't available at all (the `<atlassian-mcp>__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. **Dispatch to `mcp-setup-offer.md`** with:
      - `server`: `atlassian`
      - `add-command`: `! claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`
+     - `handler`: `jira`
 
      The setup offer stops the run; the user restarts Claude Code and re-invokes `/todo-config jira` from a fresh session.
    - If the tool is available but returns no resources, **stop** with: "Atlassian MCP is connected but no sites are accessible. Authenticate via `/mcp` (pick `atlassian`), then re-run `/todo-config jira`." Do not write the config.

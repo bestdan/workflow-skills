@@ -16,13 +16,14 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    - If the tool isn't available at all (the `<linear-mcp>__*` namespace isn't loaded), the Linear MCP isn't connected yet. **Dispatch to `mcp-setup-offer.md`** with:
      - `server`: `linear`
      - `add-command`: `! claude mcp add --transport http linear https://mcp.linear.app/mcp`
+     - `handler`: `linear`
 
      The setup offer stops the run; the user restarts Claude Code and re-invokes `/todo-config linear` from a fresh session.
    - If the tool is available but returns no teams, **stop** with: "Linear MCP is connected but no teams are accessible. Authenticate via `/mcp` (pick `linear`), then re-run `/todo-config linear`." Do not write the config.
 
 2. **Resolve `team`:**
    - Exactly one team → use it; tell the user which one you picked.
-   - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<KEY> — <name>` for readability; cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team name (not key), which you then re-validate against the list. Never prompt the user to type blind.
+   - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<name>` — do NOT label as `<KEY> — <name>` because `list_teams` does not return the team key, so you literally cannot render `<KEY>`. If two teams collide on name, disambiguate with `<name> (<short-id>)`. Cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team name (not key), which you then re-validate against the list. Never prompt the user to type blind.
 
    **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PRE`), so a key value will not match downstream and `/add-todo`/`/list-todos`/`/claim-todo` will all stop at preflight with "Configured Linear team `PRE` is not in your accessible teams." The `name` (e.g. `PreThink`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
 

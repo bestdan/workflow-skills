@@ -2,8 +2,9 @@
 
 Called from `jira-config.md` and `linear-config.md` when the required MCP namespace isn't loaded in the current session. Inputs:
 
-- `server` — display name shown to the user (e.g. `linear`, `atlassian`)
+- `server` — display name shown to the user, also the name used by `claude mcp add` (e.g. `linear`, `atlassian`)
 - `add-command` — the exact `claude mcp add …` line the user should run to install the server
+- `handler` — the `/todo-config` subcommand to re-run after the MCP is connected (e.g. `linear`, `jira`). May differ from `server` (jira-config.md passes `server=atlassian, handler=jira`).
 
 ## Steps
 
