@@ -8,12 +8,7 @@ argument-hint: [issue identifier (e.g. ENG-123)] or empty to auto-pick
 
 Pick one unclaimed, small-enough todo issue, decide whether this session can finish it without a human in the loop, claim it in the tracker, open a branch, do the work, and open a PR.
 
-**How this differs from `/process-todo`:**
-
-- `/process-todo` runs known-ready, file-based todos and dispatches **remote** cloud agents (one per todo). It is best for fire-and-forget batches.
-- `/claim-todo` works against the configured tracker (Linear first; file-based defers to `/process-todo --local`), applies a model-judged feasibility filter, and runs the work **in the current session** so you can watch and intervene. It claims **at most one** todo per invocation.
-
-If you want to drain the backlog headlessly, prefer `/process-todo --all`. If you want to pull one card and pair on it, use `/claim-todo`.
+> Choosing between `/claim-todo` and `/process-todo`? See `skills/todo/SKILL.md` — both commands are listed there with the when-to-use-which guidance. This file assumes the choice is already made.
 
 ## Steps
 

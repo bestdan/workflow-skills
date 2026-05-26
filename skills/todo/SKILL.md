@@ -55,7 +55,19 @@ Set the handler with `/todo-config` (which dispatches to `commands/handlers/<han
 3. HIGH confidence → flips `status: ready`. LOW confidence → flips `status: needs_refinement` and sets `human_approval_requested: true`
 4. Never touches todos already past `new` — humans own demotions from `ready`
 
-### Process (`/process-todo`)
+### Execute: `/process-todo` vs `/claim-todo` — which to use?
+
+Two commands turn captured todos into PRs. Pick before you invoke; they have different shapes:
+
+|                    | `/process-todo`                                                       | `/claim-todo`                                                                |
+|--------------------|-----------------------------------------------------------------------|------------------------------------------------------------------------------|
+| Where it runs      | **Remote** cloud agents, one per todo                                 | **Foreground** in the current session                                        |
+| How many per call  | Batch — one, several, or all dependency-ready                         | At most one                                                                  |
+| Where todos live   | File-based (`repo-pr`) only                                           | Tracker-side (Linear today; file-based defers to `/process-todo --local`)    |
+| Selection          | Anything in `status: ready` whose dependencies are clear              | Model-judged feasibility — "can I finish this in-session?"                   |
+| Best for           | Draining a known-ready backlog headlessly (`--all`)                   | Pulling one card to pair on with the agent watching                          |
+
+#### Process (`/process-todo`)
 
 1. Scans `dev_docs/todos/**/*.md` for todos in `status: ready` and filters out ones still waiting on `is_blocked_by`
 2. For each selected todo, dispatches a remote Claude session that:
@@ -65,7 +77,7 @@ Set the handler with `/todo-config` (which dispatches to `commands/handlers/<han
 3. Todos with `is_blocked_by` set wait until the referenced slug no longer exists as a todo file
 4. Multiple dependency-ready todos can be dispatched in parallel — each gets its own cloud VM
 
-### Claim (`/claim-todo`)
+#### Claim (`/claim-todo`)
 
 Pulls one tracker-side todo the current session can plausibly finish, claims it, branches, executes, and opens a PR — all in the foreground.
 
@@ -76,7 +88,7 @@ Pulls one tracker-side todo the current session can plausibly finish, claims it,
 5. Branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the merge automatically marks the work done.
 6. Bail path (mid-execution infeasibility): handler unclaims and flags for human review; `/claim-todo` stops without silently rolling to the next candidate.
 
-Distinct from `/process-todo`: `/claim-todo` is **one foreground claim with a feasibility filter**. Handler-specific details (which states/labels are used, how the PR is linked back) live in `commands/handlers/<handler>-claim.md`.
+Handler-specific details (which states/labels are used, how the PR is linked back) live in `commands/handlers/<handler>-claim.md`.
 
 ### List (`/list-todos`)
 
