@@ -1,11 +1,13 @@
 # jira handler — /todo-config setup
 
-Configures the `jira` handler, which creates Jira work items via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`) at `/add-todo` time. This file owns the Atlassian MCP preflight and the site/project/issue_type/default_epic/labels prompts; the actual create flow lives in `jira.md`.
+Configures the `jira` handler, which creates Jira work items via the Atlassian MCP server at `/add-todo` time. This file owns the Atlassian MCP preflight and the site/project/issue_type/default_epic/labels prompts; the actual create flow lives in `jira.md`.
+
+> **Atlassian MCP tool namespace.** Like Linear, the Atlassian MCP can be installed via `claude.ai` settings (tools prefixed `<atlassian-mcp>__`) or via `claude mcp add` (tools prefixed `mcp__<server-name>__`, where `<server-name>` is the name passed at install — `mcp-setup-offer.md` uses `atlassian`, so `mcp__atlassian__`). Use whichever prefix is loaded. Tool names after the prefix (`getAccessibleAtlassianResources`, `getVisibleJiraProjects`, `searchJiraIssuesUsingJql`, `createJiraIssue`) are identical. This file writes tool names as `<atlassian-mcp>__getAccessibleAtlassianResources`, etc.
 
 ## Steps
 
-1. **Atlassian MCP preflight.** Call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) to discover accessible sites.
-   - If the tool isn't available at all (the `mcp__claude_ai_Atlassian__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. **Dispatch to `mcp-setup-offer.md`** with:
+1. **Atlassian MCP preflight.** Call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) to discover accessible sites.
+   - If the tool isn't available at all (the `<atlassian-mcp>__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. **Dispatch to `mcp-setup-offer.md`** with:
      - `server`: `atlassian`
      - `add-command`: `! claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`
 
@@ -18,7 +20,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 
    Never prompt the user to type a site that doesn't appear in the accessible-resources list.
 
-3. **Resolve `project`** against visible projects. Call `mcp__claude_ai_Atlassian__getVisibleJiraProjects` with `cloudId: <site>`.
+3. **Resolve `project`** against visible projects. Call `<atlassian-mcp>__getVisibleJiraProjects` with `cloudId: <site>`.
    - Exactly one project → use it; tell the user which one you picked.
    - Multiple projects → ask via `AskUserQuestion` (one option per project, labeled `<KEY> — <name>`; cap at 3 so 3 projects + "Other" fits the 4-option max. "Other" lets the user type a key, which you then re-validate against the visible-projects list).
 
@@ -28,7 +30,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 
 5. **Resolve `default_epic` against real epics — do not accept free-text.** This field is optional but, when set, must be a valid epic key in the chosen project (otherwise it silently breaks `/add-todo`, which uses it to skip the per-todo epic prompt).
 
-   Call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql` with:
+   Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<site>`
    - `jql`: `project = "<project>" AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC`
    - `fields`: `["summary"]`
