@@ -42,11 +42,11 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 | `repo-pr` | a committed markdown file in `dev_docs/todos/` via PR (default) | `commands/handlers/repo-pr.md` |
 | `gh-issue`| a GitHub Issue               | `commands/handlers/gh-issue.md` |
 | `jira`    | a Jira work item under an epic | `commands/handlers/jira.md`   |
-| `linear`  | a Linear issue under a team   | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` |
+| `linear`  | a Linear issue under a team   | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` |
 
 Set the handler with `/todo-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/process-todo` is file-only (`repo-pr`). `/list-todos` dispatches to whichever handler is configured. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/process-todo` is file-only (`repo-pr`). `/list-todos` and `/claim-todo` dispatch to whichever handler is configured, but a handler may legitimately decline a verb (e.g. defer the user back to `/process-todo --local` for file-based todos). The handler files document what they do and don't support.
 
 ### Promote (`/promote-todos`)
 
@@ -64,6 +64,19 @@ Set the handler with `/todo-config` (which dispatches to `commands/handlers/<han
    - Deletes the todo file and opens a PR labeled `todo-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
 3. Todos with `is_blocked_by` set wait until the referenced slug no longer exists as a todo file
 4. Multiple dependency-ready todos can be dispatched in parallel — each gets its own cloud VM
+
+### Claim (`/claim-todo`)
+
+Pulls one tracker-side todo the current session can plausibly finish, claims it, branches, executes, and opens a PR — all in the foreground.
+
+1. Resolves the handler from `.todo-config.yml` and dispatches to it. Handlers that don't support `/claim-todo` stop with guidance (e.g. file-based defers to `/process-todo --local <slug>`).
+2. Asks the handler for unclaimed, small-enough candidates.
+3. Walks candidates in priority order and asks the model "can I finish this in this session without a human?" — first feasible candidate wins. Rejected candidates get a one-line skip comment in the tracker.
+4. Handler claims the chosen candidate atomically (concurrency guard against parallel claims).
+5. Branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the merge automatically marks the work done.
+6. Bail path (mid-execution infeasibility): handler unclaims and flags for human review; `/claim-todo` stops without silently rolling to the next candidate.
+
+Distinct from `/process-todo`: `/claim-todo` is **one foreground claim with a feasibility filter**. Handler-specific details (which states/labels are used, how the PR is linked back) live in `commands/handlers/<handler>-claim.md`.
 
 ### List (`/list-todos`)
 
