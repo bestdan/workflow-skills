@@ -31,7 +31,7 @@ Invoked from `/list-todos` when `handler: linear` is configured. Read-only — n
    | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                  |
    | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                 |
    | `blocked`          | state type `started`, has `blocked` label                                                   |
-   | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration) |
+   | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment from `/claim-todo`) |
    | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                       |
 
    If an issue could match both `blocked` and `needs_review`, prefer `blocked` (the more actionable signal).
