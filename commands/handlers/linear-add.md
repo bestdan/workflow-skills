@@ -1,10 +1,10 @@
 # Linear handler — /add-todo flow
 
-Creates a Linear issue via `<linear-mcp>__create_issue`. The new issue is filed under the configured team and optionally attached to a project.
+Creates a Linear issue via `<linear-mcp>__save_issue` (called without `id` — that's the create primitive; there is no separate `create_issue` tool). The new issue is filed under the configured team and attached to a project.
 
 **Shared reference:** see `linear-common.md` for the connection details, full config schema, preflight pattern, and kanban mapping. This file only documents what `/add-todo` does on top of that.
 
-> **Required interaction:** step 2 (project selection) MUST prompt the user via `AskUserQuestion` unless `linear.default_project` is set in config. This applies in auto mode too. Treat a missing or empty `linear.default_project` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `create_issue` without having asked AND without a non-empty `linear.default_project`, stop and go back to step 2.
+> **Required interaction:** step 2 (project selection) MUST prompt the user via `AskUserQuestion` unless `linear.default_project` is set in config. This applies in auto mode too. Treat a missing or empty `linear.default_project` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `save_issue` without having asked AND with an empty `linear.default_project`, stop and go back to step 2.
 
 ## Steps
 
@@ -28,18 +28,23 @@ Creates a Linear issue via `<linear-mcp>__create_issue`. The new issue is filed 
    ---
    Source branch: <source_branch>       # omit this line entirely if source_branch is empty
    Source PR: #<source_pr>               # omit this line entirely if source_pr is empty
-   Blocked by todo: <is_blocked_by>     # omit this line entirely if is_blocked_by is empty
+   Blocked by todo: <is_blocked_by>     # ONLY include if is_blocked_by is a non-Linear value
+                                         # (e.g. a file-based todo slug like `fix-broken-import`).
+                                         # If is_blocked_by is a Linear identifier (matches
+                                         # /^[A-Z]+-\d+$/), do NOT add this line — use the native
+                                         # blockedBy relationship in step 4 instead.
    ```
 
    If all footer lines are omitted, omit the `---` separator too.
 
-4. **Create the issue.** Call `<linear-mcp>__create_issue` with:
-   - `teamId`: `<resolved team id from step 1>`
+4. **Create the issue.** Call `<linear-mcp>__save_issue` (no `id` — that's how this MCP creates) with:
+   - `team`: `<resolved team id from step 1>` (the `save_issue` field is named `team`, not `teamId`)
    - `title`: the drafted `title`
    - `description`: the composed description from step 3
-   - `projectId`: the chosen project id (omit entirely if the user picked "No project")
+   - `project`: the chosen project id (omit entirely if the user picked "No project") — field is `project`, not `projectId`
    - `priority`: map the drafted todo's `priority` to Linear's 0–4 scale (`urgent` → 1, `high` → 2, `medium` → 3, `low` → 4). If the drafted todo has no priority, use `<linear.default_priority>` (default `3`).
    - `state`: the team's default `Backlog` workflow state (corresponds to the `new` kanban column — see the kanban mapping in `linear-common.md`). Resolve the state id by listing the team's workflow states and matching `type: "backlog"`; if multiple, prefer the team's default.
+   - `blockedBy`: **if `is_blocked_by` matches `/^[A-Z]+-\d+$/` (a Linear identifier like `PRE-12`)**, pass `[<is_blocked_by>]` so Linear renders a native blocker relationship (clickable, shows up in the blocked issue's "Blocking" list, surfaces in the project view, drives downstream automation). `save_issue` accepts identifier strings here — no UUID lookup needed. Omit this field entirely if `is_blocked_by` is empty, or if it's a non-Linear value like a file-based todo slug (in that case the markdown footer line from step 3 carries the reference instead).
 
    Labels are intentionally not passed in v1 — see the config block note in `linear-common.md`.
 
