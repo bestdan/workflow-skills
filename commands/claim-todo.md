@@ -1,6 +1,6 @@
 ---
 description: Find a todo small enough to finish in this session, claim it, branch, code, and open a PR — dispatches to the configured handler (Linear today; file-based defers to /process-todo --local)
-allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, Write, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__create_issue_label, mcp__linear__save_comment
+allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, Write, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__get_user, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__create_issue_label, mcp__linear__save_comment, mcp__linear__get_user
 argument-hint: [issue identifier (e.g. ENG-123)] or empty to auto-pick
 ---
 
@@ -127,8 +127,8 @@ Post one final Linear comment on the issue with the PR URL.
 
 If during step 6 the work turns out to need a human (scope creep, missing context, broken-in-an-unrelated-way, etc.):
 
-- `git checkout <base>` and delete the local branch (`git branch -D <branch>`). Do not push.
-- In Linear: remove the `auto-claimed` label, add `human-approval-requested`, move the issue back to the `backlog`-type state, and post a comment explaining what you found. Do not leave the issue in `started`.
+- **Stash, don't discard, the work-in-progress.** Step 6 will typically leave uncommitted modified or untracked files — exactly the artifacts the human needs to look at to understand what tripped the bail. Run `git stash push -u -m "claim-todo bail: <identifier>"` first, then `git checkout <base>` (which now works on a clean tree) and `git branch -D <branch>`. Do not push. Do NOT use `git reset --hard` — that throws away the evidence.
+- In Linear: remove the `auto-claimed` label, add `human-approval-requested`, move the issue back to the `backlog`-type state, and post a comment explaining what you found. Mention the stash entry by its `<identifier>`-tagged message so the human can `git stash list | grep <identifier>` and `git stash pop` to recover the WIP. Do not leave the issue in `started`.
 - Report the outcome and stop. Do not silently pick a different candidate after a bail — the human should look at what tripped the bail before more work is auto-claimed.
 
 ### 9. Report
