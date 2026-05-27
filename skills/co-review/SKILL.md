@@ -30,7 +30,7 @@ This is not perfectly independent: the main agent still chooses what to flag in 
    - Distinct logical units that could land independently without breaking each other.
    - A reviewer realistically cannot hold the whole change in their head.
 
-   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one PR. If you do call a split, name the proposed PRs concretely (files/hunks + one-line description each), present the recommendation to the user **immediately**, and ask whether to pause and split or proceed with per-line review anyway. If the user chooses to pause, **stop here** — do not run the per-line review or reconciler. If the PR is appropriately sized, say nothing about splitting and move on.
+   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one PR. If you do call a split, name the proposed PRs concretely (files/hunks + one-line description each), and present the recommendation to the user as part of the review. If the PR is appropriately sized, say so in your review.
 
 4. **Review the PR yourself.** Form an independent review focused on:
    - Correctness and obvious bugs
