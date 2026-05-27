@@ -25,19 +25,19 @@ This is not perfectly independent: the main agent still chooses what to flag in 
    - `gh pr diff <n>`
    - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
 
-3. **Review the PR yourself.** Form an independent review focused on:
+3. **Assess PR scope first.** Before any per-line review, judge whether the PR is too big and should be split. Only raise this if you have **high confidence** — don't flag every multi-file PR. Signals that justify a split call:
+   - Multiple unrelated concerns in one diff (e.g., a refactor + a feature + a config change).
+   - Distinct logical units that could land independently without breaking each other.
+   - A reviewer realistically cannot hold the whole change in their head.
+
+   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one PR. If you do call a split, name the proposed PRs concretely (files/hunks + one-line description each), present the recommendation to the user **immediately**, and ask whether to pause and split or proceed with per-line review anyway. If the user chooses to pause, **stop here** — do not run the per-line review or reconciler. If the PR is appropriately sized, say nothing about splitting and move on.
+
+4. **Review the PR yourself.** Form an independent review focused on:
    - Correctness and obvious bugs
    - Project conventions (CLAUDE.md / AGENTS.md already in context)
    - Security and perf where relevant
    - Test coverage gaps that matter
      Skip nitpicks, formatting, and pre-existing issues. Produce a list of findings with `file:line`, the issue, and your suggested fix.
-
-4. **Assess PR scope.** Before per-line review, judge whether the PR is too big and should be split. Only raise this if you have **high confidence** — don't flag every multi-file PR. Signals that justify a split call:
-   - Multiple unrelated concerns in one diff (e.g., a refactor + a feature + a config change).
-   - Distinct logical units that could land independently without breaking each other.
-   - A reviewer realistically cannot hold the whole change in their head.
-
-   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one PR. If you do call a split, name the proposed PRs concretely: for each, list which files/hunks belong to it and a one-line description. If the PR is appropriately sized, say nothing about splitting and move on.
 
 5. **Spawn the reconciler sub-agent** (`general-purpose`). Give it:
    - The full diff
@@ -51,7 +51,6 @@ This is not perfectly independent: the main agent still chooses what to flag in 
    - Treat suggestions that are over-engineered for this codebase (e.g., enterprise hardening for a personal repo) or that don't apply to its actual setup (e.g., worktree handling on a directly-cloned repo) as **low** confidence and say why — the sub-agent won't see this skill's Rules section unless you pass it along.
 
 6. **Reconcile and present** to the user:
-   - **Split recommendation** (only if step 4 produced one) — lead with this, with the proposed PR breakdown. Ask the user whether to proceed with per-line review anyway or pause to split first.
    - Auto-fix list (high confidence) — state what you will change.
    - Ask list (medium) — one yes/no question per item.
    - Skip list (low) — name them so the user can override if they disagree.
