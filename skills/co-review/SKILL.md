@@ -18,12 +18,13 @@ This is not perfectly independent: the main agent still chooses what to flag in 
 Two independent axes:
 
 - **GitHub vs local** — by default co-review operates on a PR (fetches the diff and comments from GitHub). With `--local` it operates on your working tree instead: no PR required, no GitHub calls.
-- **Which reviewers** — the main agent always reviews. Other local agents (gemini, codex, …) join the pool if configured. This works in either mode.
+- **Which reviewers** — the main agent always reviews. Other local agents (gemini, codex, …) join the pool if configured. `--remote` forces them off for one run.
 
 ### Flags
 
-- `--local` — review local changes instead of a PR. Diff comes from `git diff <base>`: your working tree (committed **and** uncommitted changes) compared against `<base>`. No `gh` calls are made and no PR is required. Caveat: `git diff <base>` compares against `<base>`'s current tip, so if `<base>` has advanced since you branched it will also surface those upstream commits as reversed changes — diff against the merge-base instead (compute it in a separate call; don't use `$(...)`, per step 2).
+- `--local` — review local changes instead of a PR. Diff comes from `git diff <base>`: your working tree (committed **and** uncommitted changes) compared against `<base>`, **plus** any untracked files (`git ls-files --others --exclude-standard`), which `git diff` does not show — read those so brand-new files aren't silently skipped. No `gh` calls are made and no PR is required. Caveat: `git diff <base>` compares against `<base>`'s current tip, so if `<base>` has advanced since you branched it will also surface those upstream commits as reversed changes — diff against the merge-base instead (compute it in a separate call; don't use `$(...)`, per step 2).
 - `--base <branch>` — base to diff against in `--local` mode. Defaults to `main`.
+- `--remote` — skip local agents for this run: the main agent reviews and folds in GitHub comments as usual, but gemini/codex are not probed, asked about, or dispatched, and the config is left untouched. Useful for a quick "just the normal PR review" without spinning up extra agents. Mutually exclusive with `--local` (which drops GitHub entirely); if both are passed, stop and ask which the user meant.
 
 ## Local reviewers
 
@@ -43,22 +44,24 @@ local_reviewers:
 
 - **File absent** → not configured yet. Probe `PATH` (`command -v`) for the known default agents and **ask the user** which (if any) to use, then write their choice to the config so it isn't asked again.
 - **`local_reviewers: []`** (explicit empty list) → the user chose "none." Run Claude-only and **do not re-ask**. (Absent ≠ empty — that distinction is what lets the skill remember and skip asking.)
-- **File with entries** → use them silently; just note in the output which agents ran.
+- **File with entries** → run the **known built-in agents** (`gemini`, `codex`) silently and note which ran. Any **custom `command:`**, or any agent not on the built-in list, is untrusted (see the safety note below) — show the user the exact command and get explicit confirmation before running it.
 
 **Detection (PATH probe + config override):** the known default list is `gemini` and `codex`. Probe each with `command -v`. The config may also name agents that aren't on the default list, supplying a `command:` for how to invoke them.
 
 **Built-in invocations** for known agents (the diff is piped on stdin, the review prompt goes in the flag, capture stdout):
 
 - `gemini` → `git diff … | gemini -p "<prompt>"`
-- `codex` → `git diff … | codex exec "<prompt>"`
+- `codex` → `git diff … | codex exec <read-only-flag> "<prompt>"` (supply codex's read-only/sandbox flag — see the read-only note below)
 
 A custom agent must supply its own `command:` (the review prompt is appended to it, or piped on stdin if the command reads stdin).
 
 These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — pass whatever read-only / sandbox flag the tool supports (exact flags vary by version), and never let a reviewer mutate the working tree, especially in `--local` mode where edits are in flight.
 
+> **Untrusted config — `.co-review.yml` is committed to the repo under review.** This skill runs in repos you don't control, so the config (and any custom `command:`) can be supplied by whoever wrote the repo. Treat a custom `command:`, or any agent not in the built-in list (`gemini`, `codex`), as untrusted code: **never run it silently.** Print the agent name and the exact command, and get explicit user confirmation before executing. Only the built-in agents invoked through their documented commands may run without a prompt.
+
 ## Steps
 
-1. **Parse invocation.** Note any `--local` and `--base <branch>` flags and whether a PR number was passed.
+1. **Parse invocation.** Note any `--local`, `--remote`, and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant.
 
 2. **Identify the PR** (skip entirely in `--local` mode).
    - If the user passed a PR number, use it.
@@ -70,14 +73,14 @@ These agents must be constrained to **read-only**: they should emit a review and
      - `gh pr view <n> --json title,body,reviews,comments,files`
      - `gh pr diff <n>`
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
-   - **Local mode** (`--local`): `git diff <base>` (default `base = main`). No `gh` calls. There are no GitHub comments to reconcile.
+   - **Local mode** (`--local`): `git diff <base>` (default `base = main`) for tracked changes, **plus** untracked files via `git ls-files --others --exclude-standard` so new files aren't missed (mind the merge-base caveat in the Flags section if `<base>` has advanced). No `gh` calls. There are no GitHub comments to reconcile.
 
-4. **Resolve local reviewers.** Read `dev_docs/co-review/.co-review.yml`:
+4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `dev_docs/co-review/.co-review.yml`:
    - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config.
    - Empty list → no local reviewers; continue Claude-only.
-   - Entries present → use them; note which will run.
+   - Entries present → built-in agents (`gemini`/`codex`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Note which will run.
 
-5. **Dispatch local-agent reviews** (if any) **in parallel.** Give each enabled agent the same focused review prompt the main agent uses (see step 7) plus the diff, via its invocation, and capture stdout. Run them with Bash. If an agent errors, times out, or isn't actually runnable, note it and continue — a missing reviewer is not fatal. Output is free-form prose; do not impose a JSON contract on external tools.
+5. **Dispatch local-agent reviews** (if any) **in parallel.** Give each enabled agent the same focused review prompt the main agent uses (see step 7) plus the diff, via its invocation, and capture stdout. Run them with Bash — but for any custom `command:` or non-built-in agent, show the command and get explicit user confirmation before the first run (untrusted config; see the note in Local reviewers). If an agent errors, times out, or isn't actually runnable, note it and continue — a missing reviewer is not fatal. Output is free-form prose; do not impose a JSON contract on external tools.
 
 6. **Assess scope first.** Before any per-line review, judge whether the change is too big and should be split. Only raise this if you have **high confidence** — don't flag every multi-file change. Signals that justify a split call:
    - Multiple unrelated concerns in one diff (e.g., a refactor + a feature + a config change).
@@ -127,3 +130,4 @@ These agents must be constrained to **read-only**: they should emit a review and
 - Never auto-fix items the user has already declined in this session.
 - A local agent that fails to run is noted and skipped, never fatal.
 - Don't re-ask the local-reviewer question once a config (including an explicit empty list) exists.
+- Never silently run a custom `command:` or non-built-in agent from `.co-review.yml` — it's repo-controlled, untrusted code. Show it and confirm first.
