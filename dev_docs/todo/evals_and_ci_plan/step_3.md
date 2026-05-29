@@ -17,12 +17,15 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
     via its install script if we'd rather run it inside `check.sh`.
   - `lycheeverse/lychee-action` for link integrity (relative links between
     SKILL.md and bundled reference files; the analysis-pipeline `example/`).
-- `claude` CLI install: `npm install -g @anthropic-ai/claude-code`. **Verify on
-  the first CI run** whether `claude plugin validate` runs without auth in a
-  headless runner (acceptable risk — confirm during step 3, don't pre-solve). If
-  the first run shows it needs auth, the fallback is to move manifest-schema
-  validation into `scripts/validate.py` and drop the CLI step from CI. Add a
-  one-line note in `ci.yml` near the validate step flagging this so it's checked.
+- `claude` CLI install: `npm install -g @anthropic-ai/claude-code`. **RESOLVED on
+  first CI run:** `claude plugin validate . --strict` runs headless with no auth
+  on `ubuntu-latest` (gate job passed in 15s). The fallback (fold manifest checks
+  into `validate.py`) was not needed; the inline note in `ci.yml` documents the
+  finding.
+- **Link-integrity job dropped:** the shipped docs contain zero relative markdown
+  links, so an offline lychee run scanned 0 links and tripped its `failIfEmpty`
+  default. Removed rather than left vacuous; `ci.yml` carries a note to reinstate
+  it if inter-doc markdown links are introduced.
 
 ## Changes
 
@@ -36,10 +39,8 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
        one path so dprint isn't run twice)
      - run `scripts/check.sh` (the deterministic gate: dprint + plugin validate
        - `validate.py`)
-   - Separate `links` job (or step) using `lycheeverse/lychee-action` with
-     `args: --no-progress --offline './**/*.md'` for internal links; if external
-     link checking is wanted, run it non-`--offline` but `continue-on-error` so
-     flaky external hosts don't block PRs.
+   - ~~Separate `links` job using `lycheeverse/lychee-action`~~ — **dropped**, see
+     Context: no relative markdown links exist in the shipped docs to check.
 2. **Decide dprint ownership:** either `check.sh` runs `dprint check` (then CI
    just needs dprint installed) **or** the `dprint/check` action runs it (then
    `check.sh`'s dprint step is skipped in CI via an env guard). Document the

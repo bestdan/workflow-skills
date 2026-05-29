@@ -24,6 +24,9 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.11.16"
+          # Nothing cacheable here (the only lockfile is a uv *script* lock);
+          # disabling avoids a spurious "no cache dependency matched" warning.
+          enable-cache: false
 
       - name: Install dprint + claude CLI
         # dprint is pinned to match the local toolchain; claude provides
@@ -38,17 +41,7 @@ jobs:
       - name: Deterministic quality gate
         run: bash scripts/check.sh
 
-  links:
-    name: Internal link integrity
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check relative links in shipped docs
-        # --offline checks only local file existence (relative links between a
-        # SKILL.md and its bundled reference files), so no flaky network calls.
-        # Scoped to the published surface; dev_docs/ planning notes are excluded.
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --offline --no-progress README.md skills agents commands
-          fail: true
+  # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
+  # dropped — the shipped docs (README, skills, commands, agents) contain no
+  # relative markdown links to check, so it scanned 0 links and only produced a
+  # vacuous/failing result. Reinstate it if inter-doc markdown links are added.
