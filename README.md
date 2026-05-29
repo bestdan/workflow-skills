@@ -1,5 +1,7 @@
 # workflow-skills
 
+[![CI](https://github.com/bestdan/workflow-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/bestdan/workflow-skills/actions/workflows/ci.yml)
+
 A Claude Code plugin bundling Daniel's general engineering workflow skills: collaborative PR review, durable multi-step planning, auditable quantitative analysis pipelines with independent fact-checking, and a repo-native todo loop for capturing and processing follow-up work.
 
 ## Install
@@ -84,6 +86,12 @@ Third-party marketplaces have auto-update disabled by default. Enable auto-updat
 /plugin marketplace update bestdan/workflow-skills
 /reload-plugins
 ```
+
+## Development
+
+Run the full quality gate locally with `just check` (formatting, manifest
+validation, and repo-native structural checks). See [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for the dev loop, the "adding a skill" checklist, and the opt-in behavioral evals.
 
 ## License
 

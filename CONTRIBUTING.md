@@ -1,0 +1,57 @@
+# Contributing
+
+## Local dev loop
+
+Everything CI runs is also runnable locally through one entrypoint, so you never
+discover a failure only after pushing.
+
+```sh
+just check     # the full deterministic gate (what CI runs on every PR)
+just fmt       # auto-format everything with dprint
+just validate  # only the repo-native structural/consistency validator
+just eval      # gate + behavioral skill-triggering evals (opt-in, needs auth)
+```
+
+`just check` is just a thin wrapper around `scripts/check.sh` — the script is the
+source of truth, and CI calls it directly.
+
+## The gate (`just check`)
+
+Three deterministic, blocking checks:
+
+1. **`dprint check`** — formatting (config in `dprint.json`).
+2. **`claude plugin validate . --strict`** — official manifest/frontmatter
+   validation.
+3. **`uv run scripts/validate.py`** — repo-specific rules the above don't cover:
+   - skill/command/agent frontmatter shape; skill `name` (if set) matches its
+     directory and the `^[a-z0-9-]+$` slug rules; `description` non-empty and
+     ≤1024 chars; SKILL.md body ≤500 lines;
+   - `plugin.json` and `marketplace.json` versions are present and **equal**;
+   - the README "N skills, M commands, K subagent" sentence matches reality.
+
+`scripts/validate.py` is dev/CI-only tooling (never shipped to plugin
+consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
+
+## Adding a skill
+
+1. Create `skills/<name>/SKILL.md` with valid frontmatter (`description`
+   required; `name`, if set, must equal `<name>`). Keep the body ≤500 lines —
+   move detail into sibling reference files.
+2. Update the component count in `README.md` ("What's in the box").
+3. Add a trigger eval: `evals/prompts/<name>.txt` (a realistic prompt that
+   **doesn't name the skill**) plus a row in `evals/manifest.tsv`. Skip this only
+   for `user-invocable: false` skills.
+4. Run `just check` (must pass) and, if you can, `just eval` to confirm the new
+   skill auto-triggers.
+
+## Versioning
+
+Bump `plugin.json` `version` **and** the matching `marketplace.json` plugin-entry
+`version` together — `validate.py` fails if they drift.
+
+## Behavioral evals
+
+`just eval` (and the manual **Evals** GitHub workflow) check that Claude
+auto-invokes each skill from its naive prompt. They cost API tokens and are
+nondeterministic, so they are **opt-in and never block a PR**. See
+[`evals/README.md`](evals/README.md).
