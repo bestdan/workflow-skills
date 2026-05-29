@@ -22,7 +22,7 @@ Two independent axes:
 
 ### Flags
 
-- `--local` — review local changes instead of a PR. Diff comes from `git diff <base>` (committed branch changes **plus** uncommitted working-tree changes vs. the base). No `gh` calls are made and no PR is required.
+- `--local` — review local changes instead of a PR. Diff comes from `git diff <base>`: your working tree (committed **and** uncommitted changes) compared against `<base>`. No `gh` calls are made and no PR is required. Caveat: `git diff <base>` compares against `<base>`'s current tip, so if `<base>` has advanced since you branched it will also surface those upstream commits as reversed changes — diff against the merge-base instead (compute it in a separate call; don't use `$(...)`, per step 2).
 - `--base <branch>` — base to diff against in `--local` mode. Defaults to `main`.
 
 ## Local reviewers
@@ -47,12 +47,14 @@ local_reviewers:
 
 **Detection (PATH probe + config override):** the known default list is `gemini` and `codex`. Probe each with `command -v`. The config may also name agents that aren't on the default list, supplying a `command:` for how to invoke them.
 
-**Built-in invocations** for known agents (pass the prompt headlessly, capture stdout):
+**Built-in invocations** for known agents (the diff is piped on stdin, the review prompt goes in the flag, capture stdout):
 
-- `gemini` → `gemini -p "<prompt>"`
-- `codex` → `codex exec "<prompt>"`
+- `gemini` → `git diff … | gemini -p "<prompt>"`
+- `codex` → `git diff … | codex exec "<prompt>"`
 
 A custom agent must supply its own `command:` (the review prompt is appended to it, or piped on stdin if the command reads stdin).
+
+These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — pass whatever read-only / sandbox flag the tool supports (exact flags vary by version), and never let a reviewer mutate the working tree, especially in `--local` mode where edits are in flight.
 
 ## Steps
 

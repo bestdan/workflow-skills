@@ -17,7 +17,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 | Skill         | Trigger            | What it does                                                                                                                                                                                  |
 | ------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **co-review** | `/co-review [PR# \| --local] [--base <branch>]` | Produce your own review of a PR, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, and surface judgment calls back to you. `--local` reviews uncommitted changes with no PR. |
+| **co-review** | `/co-review [PR# \| --local] [--base <branch>]` | Produce your own review of a PR, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, and surface judgment calls back to you. `--local` reviews local changes (committed + uncommitted) with no PR. |
 
 ### Planning
 
