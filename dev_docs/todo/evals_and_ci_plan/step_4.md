@@ -20,8 +20,10 @@ a manual `workflow_dispatch` job in CI.
   from a prompt. `analysis-conventions` is `user-invocable: false` (context-load
   only) — exclude it or test it differently. Decide per skill which trigger
   prompt is fair.
-- Needs `ANTHROPIC_API_KEY` (CI secret). The harness must hard-fail with a clear
-  message if the key is absent, not silently pass.
+- Auth: CI uses the `ANTHROPIC_API_KEY` secret. **Deviation from the original
+  plan:** the harness does _not_ hard-fail when the env var is unset, because a
+  locally logged-in CLI (OAuth/subscription) is also valid auth — it prints a
+  note and proceeds, letting `claude` surface a real auth error if there's none.
 
 ## Changes
 
@@ -56,22 +58,22 @@ a manual `workflow_dispatch` job in CI.
 
 **Code-enforced:**
 
-- `scripts/eval.sh` with `ANTHROPIC_API_KEY` set runs every manifest case and
-  reports a PASS/FAIL tally with a correct exit code.
-- Running with the key unset exits non-zero with an explanatory message (no false
-  pass).
-- The `evals.yml` workflow does **not** appear as a required check (verify it
-  can't block a merge).
+- Detection logic verified against synthetic `stream-json` fixtures (no API
+  spend): correct skill (incl. `workflow-skills:` prefix) → PASS; different
+  skill → no match; no `Skill` invocation → no match.
+- `evals.yml` is `workflow_dispatch`-only — not a required check, can't block a
+  merge.
+- `scripts/check.sh --with-evals` routes to the (executable) `scripts/eval.sh`;
+  plain `scripts/check.sh` (what the blocking CI runs) does not.
 
-**User-run:**
+**User-run (opt-in — costs API credits, intentionally not run during build):**
 
-- Run `just eval` locally with your key and review the tally; for any skill that
-  fails to trigger, decide whether the prompt is unfair or the skill description
-  needs tightening (feeds back into skill authoring).
-- Add `ANTHROPIC_API_KEY` to repo Actions secrets, then trigger `evals.yml`
-  manually and confirm it runs green.
-- Confirm `analysis-conventions` (non-user-invocable) is handled sensibly
-  (excluded or context-load asserted).
+- Run `just eval` locally and review the tally; for any skill that fails to
+  trigger, decide whether the prompt is unfair or the skill `description` needs
+  tightening (feeds back into skill authoring).
+- Add `ANTHROPIC_API_KEY` to repo Actions secrets, then trigger the **Evals**
+  workflow manually and confirm it runs.
+- `analysis-conventions` is excluded from the manifest (non-user-invocable).
 
 ## Dependencies
 

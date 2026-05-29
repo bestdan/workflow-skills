@@ -1,0 +1,1 @@
+Can you take a look at pull request #42 on this repo? I'd like your own read on it, then have you reconcile that against the comments the bots and reviewers already left, fix the easy high-confidence stuff yourself, and flag anything that actually needs my judgment.

@@ -1,0 +1,1 @@
+That stale config in the auth module is bugging me, and there's some dead code in the billing helper too. We shouldn't deal with it right now — we're mid-feature — but I really don't want to lose track of it. Can you make sure these don't fall through the cracks?

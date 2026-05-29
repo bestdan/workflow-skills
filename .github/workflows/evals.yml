@@ -1,0 +1,28 @@
+name: Evals
+
+# Behavioral skill-triggering evals. Opt-in and NON-BLOCKING: this is a manual
+# workflow_dispatch only, never a required check, because it costs API tokens and
+# is nondeterministic. The deterministic gate lives in ci.yml.
+#
+# Requires an ANTHROPIC_API_KEY repository secret.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    name: Skill-triggering evals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run skill-triggering evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash scripts/eval.sh
