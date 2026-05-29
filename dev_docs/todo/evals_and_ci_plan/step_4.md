@@ -39,7 +39,7 @@ a manual `workflow_dispatch` job in CI.
      --output-format stream-json > log`.
    - Pass iff the log contains `"name":"Skill"` and a skill field matching the
      expected name (regex tolerant of the `plugin:` prefix). Print which skills
-     *were* triggered on failure, for debugging.
+     _were_ triggered on failure, for debugging.
    - Tally PASS/FAIL; `exit 1` if any failed. Fail fast with a clear message if
      `ANTHROPIC_API_KEY` is unset.
 3. **Wire the flag:** `scripts/check.sh --with-evals` calls `scripts/eval.sh`

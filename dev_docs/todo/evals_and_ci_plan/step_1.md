@@ -2,7 +2,7 @@
 
 # Step 1 — Make the repo green
 
-Fix the failures that exist *today* so later steps can enforce them without the
+Fix the failures that exist _today_ so later steps can enforce them without the
 first CI run being red. No new infrastructure in this PR — just corrections.
 
 ## Context

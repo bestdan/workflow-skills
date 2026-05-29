@@ -35,7 +35,7 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
      - `dprint/check@v2` (or install dprint, then let `check.sh` run it — pick
        one path so dprint isn't run twice)
      - run `scripts/check.sh` (the deterministic gate: dprint + plugin validate
-       + `validate.py`)
+       - `validate.py`)
    - Separate `links` job (or step) using `lycheeverse/lychee-action` with
      `args: --no-progress --offline './**/*.md'` for internal links; if external
      link checking is wanted, run it non-`--offline` but `continue-on-error` so

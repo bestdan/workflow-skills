@@ -10,7 +10,7 @@ verifiable purely by running the entrypoint.
 
 - The repo already configures `dprint` (`dprint.json`) and the `claude` CLI
   ships `plugin validate --strict`. Those two are off-the-shelf; everything
-  *repo-specific* needs a custom validator.
+  _repo-specific_ needs a custom validator.
 - Component layout the validator must understand:
   - `skills/<name>/SKILL.md` — frontmatter: `name?`, `description`,
     `user-invocable?`. Directory name is the canonical invocation name.
@@ -77,7 +77,7 @@ verifiable purely by running the entrypoint.
    - `fmt` → `dprint fmt`
    - `validate` → `uv run scripts/validate.py`
    - `eval` → `scripts/check.sh --with-evals` (functional after step 4)
-   Note: these wrap the scripts; the scripts remain the source of truth.
+     Note: these wrap the scripts; the scripts remain the source of truth.
 
 ## Acceptance
 

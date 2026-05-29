@@ -18,7 +18,7 @@ checks Claude actually invokes each skill from a naive trigger prompt.
   entrypoint, a skill-triggering eval harness runnable via flag (local + manual
   CI), and the docs to operate it.
 - **Non-goals:**
-  - LLM-as-judge *quality* scoring of skill output (promptfoo / `claude-eval`
+  - LLM-as-judge _quality_ scoring of skill output (promptfoo / `claude-eval`
     style rubrics). The harness here only asserts skill **invocation**, not
     output quality. Noted as a documented extension point, not built.
   - Nightly/scheduled eval runs. Evals are opt-in via flag, per decision.

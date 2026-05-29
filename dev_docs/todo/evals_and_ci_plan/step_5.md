@@ -31,7 +31,7 @@ gate, run evals, and what's required when adding a skill.
 3. **`.github/PULL_REQUEST_TEMPLATE.md`** (new): a short checklist —
    ran `just check`; updated README counts if components changed; added/updated
    an eval prompt if a skill changed.
-4. *(Optional)* **`.github/ISSUE_TEMPLATE/`** for skill bug reports — only if you
+4. _(Optional)_ **`.github/ISSUE_TEMPLATE/`** for skill bug reports — only if you
    want it; not required by the gate.
 
 ## Acceptance
