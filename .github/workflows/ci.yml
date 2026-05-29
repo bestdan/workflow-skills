@@ -1,0 +1,54 @@
+name: CI
+
+# Deterministic, blocking quality gate. Runs the exact same entrypoint
+# (scripts/check.sh) that contributors run locally via `just check`, so CI and
+# local can never drift. Behavioral evals are NOT here — they are opt-in and
+# live in evals.yml (manual workflow_dispatch).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Deterministic gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.16"
+
+      - name: Install dprint + claude CLI
+        # dprint is pinned to match the local toolchain; claude provides
+        # `plugin validate`. Node/npm are preinstalled on ubuntu-latest.
+        run: npm install -g dprint@0.54.0 @anthropic-ai/claude-code
+
+      # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
+      # `claude plugin validate` works headless (no auth) on a GitHub runner. If
+      # it requires auth, fold manifest-schema validation into scripts/validate.py
+      # and drop the CLI from this gate — validate.py already covers version-sync
+      # and manifest cross-consistency.
+      - name: Deterministic quality gate
+        run: bash scripts/check.sh
+
+  links:
+    name: Internal link integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check relative links in shipped docs
+        # --offline checks only local file existence (relative links between a
+        # SKILL.md and its bundled reference files), so no flaky network calls.
+        # Scoped to the published surface; dev_docs/ planning notes are excluded.
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress README.md skills agents commands
+          fail: true
