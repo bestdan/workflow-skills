@@ -1,7 +1,7 @@
 ---
 description: Process dependency-ready todos — dispatches remote agents to claim, execute, and open PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Glob, Grep, Read, Write, Edit
-argument-hint: [slug | --all | --local] or empty for highest priority
+argument-hint: "[slug | --all | --local] or empty for highest priority"
 ---
 
 # Process Todo

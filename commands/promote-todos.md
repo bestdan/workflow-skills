@@ -1,7 +1,7 @@
 ---
 description: Score new todos against the confidence check and promote them to ready or needs_refinement
 allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Glob, Grep, Read, Edit
-argument-hint: [filter: dry-run|apply] (default apply)
+argument-hint: "[filter: dry-run|apply] (default apply)"
 ---
 
 # Promote Todos

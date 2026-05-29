@@ -14,8 +14,11 @@ verifiable purely by running the entrypoint.
 - Component layout the validator must understand:
   - `skills/<name>/SKILL.md` — frontmatter: `name?`, `description`,
     `user-invocable?`. Directory name is the canonical invocation name.
-  - `commands/*.md` and `commands/handlers/*.md` — frontmatter: `description`,
-    `allowed-tools?`, `argument-hint?`.
+  - `commands/*.md` — frontmatter: `description`, `allowed-tools?`,
+    `argument-hint?`.
+  - `commands/handlers/*.md` — **reference procedures bundled into the `todo`
+    skill, NOT slash commands; they have no frontmatter** and are excluded from
+    validation. (The original plan wrongly assumed they carried frontmatter.)
   - `agents/*.md` — frontmatter: `name`, `description`, `tools`, `model`,
     `color?`.
   - `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`.
@@ -52,8 +55,11 @@ verifiable purely by running the entrypoint.
      pick error at >1536 to match Claude Code, warn at >1024 — decide one and
      document it in the script header).
    - SKILL.md body (after frontmatter) ≤500 lines.
-   - Every `commands/*.md` and `commands/handlers/*.md` has a non-empty
-     `description`; if `allowed-tools` present, it parses as a comma/space list.
+   - Every top-level `commands/*.md` has a non-empty `description`; if
+     `allowed-tools` present, it's a string or list. (`commands/handlers/*.md`
+     excluded — no frontmatter.) Note: three `argument-hint` values
+     (`claim-todo`, `process-todo`, `promote-todos`) were invalid YAML
+     (trailing text after `]`); they were quoted so the block parses strictly.
    - Every `agents/*.md` has `name`, `description`, `tools`.
    - **Version sync:** assert `plugin.json.version` is present and semver-shaped
      and **equals** the `marketplace.json` plugin entry `version` (step 1 synced
