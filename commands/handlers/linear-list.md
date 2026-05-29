@@ -18,21 +18,21 @@ Invoked from `/list-todos` when `handler: linear` is configured. Read-only — n
    - `teamId`: resolved team id from step 1
    - `projectId`: from step 2 (omit entirely when listing all team issues)
    - `includeArchived`: `false`
-   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow with linear.default_project in dev_docs/todos/.todo-config.yml, or pass a section filter like `/list-todos ready`)` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
+   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow with linear.default_project in dev_docs/todos/.todo-config.yml, or pass a section filter like`/list-todos ready`)` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
 
    The goal is "everything still active in the team's kanban." Pull all non-archived issues in the `backlog`, `unstarted`, `started`, and recently-`completed` state types. To avoid over-fetching when `list_issues` doesn't accept a state-type filter directly, first resolve the team's workflow states by calling `<linear-mcp>__list_workflow_states` (with `teamId`), then pass the matching state ids into `list_issues` for each relevant type. Cache the state-id → type map for step 4's grouping.
 
 4. **Group into kanban sections.** Reverse the kanban mapping in `linear-common.md`. For each issue, classify by **state type** (not display name) and label presence:
 
-   | Section            | Match rule                                                                                  |
-   |--------------------|---------------------------------------------------------------------------------------------|
-   | `new`              | state type `backlog`, no `human-approval-requested` label                                   |
-   | `needs_refinement` | state type `backlog`, has `human-approval-requested` label                                  |
-   | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                  |
-   | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                 |
-   | `blocked`          | state type `started`, has `blocked` label                                                   |
+   | Section            | Match rule                                                                                                                                 |
+   | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+   | `new`              | state type `backlog`, no `human-approval-requested` label                                                                                  |
+   | `needs_refinement` | state type `backlog`, has `human-approval-requested` label                                                                                 |
+   | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                                                                 |
+   | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                                                                |
+   | `blocked`          | state type `started`, has `blocked` label                                                                                                  |
    | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment from `/claim-todo`) |
-   | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                       |
+   | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                                                                      |
 
    If an issue could match both `blocked` and `needs_review`, prefer `blocked` (the more actionable signal).
 
@@ -52,13 +52,13 @@ Invoked from `/list-todos` when `handler: linear` is configured. Read-only — n
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                  |
-   |-------------|-------------------------------------------------------------------------|
-   | Priority    | Linear `priority` mapped back to `urgent|high|medium|low|none`         |
-   | Identifier  | Linear `identifier` (e.g. `PRE-12`)                                     |
-   | Title       | Linear issue `title`                                                    |
-   | Assignee    | Linear `assignee.displayName` (omit `— assignee …` if unassigned)       |
-   | Annotations | See below                                                               |
+   | Field       | Source                                                            |
+   | ----------- | ----------------------------------------------------------------- |
+   | Priority    | Linear `priority` mapped back to `urgent                          |
+   | Identifier  | Linear `identifier` (e.g. `PRE-12`)                               |
+   | Title       | Linear issue `title`                                              |
+   | Assignee    | Linear `assignee.displayName` (omit `— assignee …` if unassigned) |
+   | Annotations | See below                                                         |
 
    Inline annotations to surface when present (comma-separated, after the assignee):
    - `human-approval-requested` (label present)

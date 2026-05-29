@@ -29,7 +29,7 @@ Capture is destination-agnostic; only the handler decides where the todo lands.
 The delivery destination is a **handler** named in a repo-committed config file, `dev_docs/todos/.todo-config.yml`:
 
 ```yaml
-handler: repo-pr   # repo-pr (default) | gh-issue | jira | linear
+handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
@@ -37,12 +37,12 @@ Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
-| Handler   | Lands the todo as…           | Reference file                  |
-|-----------|------------------------------|---------------------------------|
-| `repo-pr` | a committed markdown file in `dev_docs/todos/` via PR (default) | `commands/handlers/repo-pr.md` |
-| `gh-issue`| a GitHub Issue               | `commands/handlers/gh-issue.md` |
-| `jira`    | a Jira work item under an epic | `commands/handlers/jira.md`   |
-| `linear`  | a Linear issue under a team   | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` |
+| Handler    | Lands the todo as…                                              | Reference file                                                                                         |
+| ---------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `repo-pr`  | a committed markdown file in `dev_docs/todos/` via PR (default) | `commands/handlers/repo-pr.md`                                                                         |
+| `gh-issue` | a GitHub Issue                                                  | `commands/handlers/gh-issue.md`                                                                        |
+| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md`                                                                            |
+| `linear`   | a Linear issue under a team                                     | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` |
 
 Set the handler with `/todo-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
@@ -59,13 +59,13 @@ Set the handler with `/todo-config` (which dispatches to `commands/handlers/<han
 
 Two commands turn captured todos into PRs. Pick before you invoke; they have different shapes:
 
-|                    | `/process-todo`                                                       | `/claim-todo`                                                                |
-|--------------------|-----------------------------------------------------------------------|------------------------------------------------------------------------------|
-| Where it runs      | **Remote** cloud agents, one per todo                                 | **Foreground** in the current session                                        |
-| How many per call  | Batch — one, several, or all dependency-ready                         | At most one                                                                  |
-| Where todos live   | File-based (`repo-pr`) only                                           | Tracker-side (Linear today; file-based defers to `/process-todo --local`)    |
-| Selection          | Anything in `status: ready` whose dependencies are clear              | Model-judged feasibility — "can I finish this in-session?"                   |
-| Best for           | Draining a known-ready backlog headlessly (`--all`)                   | Pulling one card to pair on with the agent watching                          |
+|                   | `/process-todo`                                          | `/claim-todo`                                                             |
+| ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Where it runs     | **Remote** cloud agents, one per todo                    | **Foreground** in the current session                                     |
+| How many per call | Batch — one, several, or all dependency-ready            | At most one                                                               |
+| Where todos live  | File-based (`repo-pr`) only                              | Tracker-side (Linear today; file-based defers to `/process-todo --local`) |
+| Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?"                |
+| Best for          | Draining a known-ready backlog headlessly (`--all`)      | Pulling one card to pair on with the agent watching                       |
 
 #### Process (`/process-todo`)
 
@@ -134,19 +134,19 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 ### Field reference
 
-| Field           | Required | Description                                             |
-| --------------- | -------- | ------------------------------------------------------- |
-| `title`         | yes      | Imperative description, < 80 chars                      |
-| `priority`      | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only) |
-| `status`        | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done` |
-| `created`       | yes      | ISO date                                                |
-| `source_branch` | yes      | Branch where todo was identified                        |
-| `source_pr`     | no       | PR number if already open                               |
-| `related_files` | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research` |
-| `is_blocked_by` | no       | Slug/id of another todo that must be completed first    |
-| `expires`       | yes      | ISO date. Default: 30 days from creation.               |
-| `tags`          | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)  |
-| `human_approval_requested` | no | Forces card into `needs_refinement` until a human flips it back |
+| Field                      | Required | Description                                                                                   |
+| -------------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `title`                    | yes      | Imperative description, < 80 chars                                                            |
+| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                    |
+| `status`                   | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done`    |
+| `created`                  | yes      | ISO date                                                                                      |
+| `source_branch`            | yes      | Branch where todo was identified                                                              |
+| `source_pr`                | no       | PR number if already open                                                                     |
+| `related_files`            | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research` |
+| `is_blocked_by`            | no       | Slug/id of another todo that must be completed first                                          |
+| `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                     |
+| `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                        |
+| `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                               |
 
 ### Body sections
 
@@ -159,15 +159,15 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 The seven `status` values form a kanban flow. Cards move between columns via specific actions:
 
-| Column | Card enters when… | Card leaves when… |
-|---|---|---|
-| `new` | `/add-todo` writes the card | `/promote-todos` scores it |
-| `needs_refinement` | Promoter scored LOW, or human demoted from `ready` | Human edits the card, clears `human_approval_requested`, AND sets `status: ready` (the promoter does not re-scan past `new`) |
-| `ready` | Promoter scored HIGH | `/process-todo` claims it |
-| `in_progress` | Claim (branch + status flip) | PR opened (file is deleted in that PR) |
-| `blocked` | Agent or human sets it with a `Consumer Notes` reason | Blocker resolved → returns to `in_progress` |
-| `needs_review` | PR opened from `todo/<slug>` branch | PR merged or closed |
-| `done` | PR merged | terminal |
+| Column             | Card enters when…                                     | Card leaves when…                                                                                                            |
+| ------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `new`              | `/add-todo` writes the card                           | `/promote-todos` scores it                                                                                                   |
+| `needs_refinement` | Promoter scored LOW, or human demoted from `ready`    | Human edits the card, clears `human_approval_requested`, AND sets `status: ready` (the promoter does not re-scan past `new`) |
+| `ready`            | Promoter scored HIGH                                  | `/process-todo` claims it                                                                                                    |
+| `in_progress`      | Claim (branch + status flip)                          | PR opened (file is deleted in that PR)                                                                                       |
+| `blocked`          | Agent or human sets it with a `Consumer Notes` reason | Blocker resolved → returns to `in_progress`                                                                                  |
+| `needs_review`     | PR opened from `todo/<slug>` branch                   | PR merged or closed                                                                                                          |
+| `done`             | PR merged                                             | terminal                                                                                                                     |
 
 > **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The todo file is deleted as part of opening the PR, so it cannot carry these statuses in the file system. `/list-todos` populates these two columns by querying `gh pr list --label todo-loop --state open` (needs_review) and `--state merged` (recent done). For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
 

@@ -13,6 +13,7 @@ Capture follow-up work with full context, then deliver it to the destination con
 ### 1. Gather context
 
 Collect automatically (run these in parallel):
+
 - Current branch: `git rev-parse --abbrev-ref HEAD`
 - Repo name: `gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null` (best-effort — omit if gh fails)
 - Open PR for this branch (if any): `gh pr view --json number --jq .number 2>/dev/null`
@@ -27,6 +28,7 @@ Treat the `gh`-derived fields (`repo`, `source_pr`) as best-effort: if `gh` is u
 ### 2. Generate the slug
 
 From the title, create a kebab-case slug:
+
 - Lowercase, strip filler words (the, a, an, for, in, on, at, to, of)
 - Max 50 chars
 - Example: "Remove stale zsh alias for foobar" -> `remove-stale-zsh-alias-foobar`
@@ -44,6 +46,7 @@ If a collision is found, append `-2`, `-3`, etc. until unique.
 ### 4. Draft the todo
 
 Auto-populate these fields:
+
 - `created`: today's date (ISO format)
 - `source_branch`: current branch
 - `source_pr`: PR number if one exists for this branch
@@ -54,6 +57,7 @@ Auto-populate these fields:
 - `is_blocked_by`: omitted by default; set to another todo's slug/id when this work must wait on that todo
 
 From conversation context and diff, draft:
+
 - `title`: from user description or `$ARGUMENTS`
 - `related_files`: files from current diff or conversation that are relevant
 - `tags`: infer from context (e.g., `cleanup`, `tests`, `docs`)
@@ -68,6 +72,7 @@ If the user indicates this todo depends on another todo, or the dependency is ob
 Show the user the full draft and ask for confirmation. They can adjust priority, size, add/remove files, or edit the task steps.
 
 If the resolved handler (step 6) is `repo-pr`, also ask: **"File for later, or fix now?"**
+
 - **File for later** (default): creates the todo file on main for `/process-todo` to pick up
 - **Fix now**: creates the todo file AND immediately dispatches a processing agent to do the work
 
@@ -77,20 +82,20 @@ If the resolved handler (step 6) is `repo-pr`, also ask: **"File for later, or f
 
 Once the user confirms, you hold a normalized **drafted todo** that every handler consumes. This is the stable contract between capture and delivery:
 
-| Field           | Description                                                         |
-| --------------- | ------------------------------------------------------------------- |
-| `title`         | Imperative, < 80 chars                                              |
-| `body`          | The Context / Task / Acceptance Criteria markdown                   |
-| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)          |
-| `size`          | `small` / `medium` / `large` — estimated task size                  |
-| `tags`          | List of freeform tags                                               |
-| `slug`          | Kebab-case slug from step 2                                         |
-| `created`       | ISO date                                                            |
-| `expires`       | ISO date                                                            |
-| `source_branch` | Branch where the todo was identified                               |
-| `source_pr`     | PR number for that branch, if any                                  |
-| `related_files` | Paths relevant to the work                                          |
-| `is_blocked_by` | Optional slug/id of another todo that must be completed first       |
+| Field           | Description                                                   |
+| --------------- | ------------------------------------------------------------- |
+| `title`         | Imperative, < 80 chars                                        |
+| `body`          | The Context / Task / Acceptance Criteria markdown             |
+| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)    |
+| `size`          | `small` / `medium` / `large` — estimated task size            |
+| `tags`          | List of freeform tags                                         |
+| `slug`          | Kebab-case slug from step 2                                   |
+| `created`       | ISO date                                                      |
+| `expires`       | ISO date                                                      |
+| `source_branch` | Branch where the todo was identified                          |
+| `source_pr`     | PR number for that branch, if any                             |
+| `related_files` | Paths relevant to the work                                    |
+| `is_blocked_by` | Optional slug/id of another todo that must be completed first |
 
 Every handler **must report back an artifact identifier** so step 8 can show it. Normally this is the URL of the created PR, issue, or work item. The one exception is `repo-pr` Mode 3 (local staging), which has no remote artifact yet — it returns the staged file path and branch name instead, and step 8 reports that the file is staged locally and will land via the user's own PR.
 
@@ -103,6 +108,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/nu
 ```
 
 Resolve the handler name:
+
 - File absent, or no `handler:` key → **`repo-pr`** (the default — preserves the original behavior).
 - `handler: repo-pr | gh-issue | jira | linear` → use that handler.
 - Any other (unknown) value → **stop** and tell the user: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Valid values: repo-pr, gh-issue, jira, linear. Run /todo-config to set it." Do not silently fall back.

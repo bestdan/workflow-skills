@@ -24,6 +24,7 @@ find "$(git rev-parse --show-toplevel)/dev_docs/todos" -name '*.md' -type f 2>/d
 ```
 
 Parse YAML frontmatter from each file. Filter to `status: ready`. Sort by:
+
 1. Dependency readiness: todos whose `is_blocked_by` target is absent (or `done`) are eligible; todos whose blocker is still active are not
 2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
 3. Age: oldest `created` date first
@@ -129,11 +130,13 @@ When dispatching multiple todos (`--all`), run the `claude --remote` commands in
 ### 5. Report
 
 For each dispatched todo, tell the user:
+
 - The slug and title
 - That a remote session has been started
 - They can monitor all sessions with `/tasks`
 
 Example output:
+
 ```
 Dispatched 3 todos to remote agents:
   - remove-stale-alias (low) — remote session started

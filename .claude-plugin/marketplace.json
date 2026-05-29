@@ -1,5 +1,6 @@
 {
   "name": "workflow-skills",
+  "description": "Daniel's general engineering workflow skills for Claude Code: collaborative PR review, durable multi-step planning, auditable analysis pipelines with independent fact-checking, and a repo-native todo loop.",
   "owner": {
     "name": "Daniel Egan"
   },
@@ -11,7 +12,7 @@
         "url": "https://github.com/bestdan/workflow-skills.git"
       },
       "description": "Claude Code skills for general engineering workflows: collaborative PR review, durable multi-step planning, auditable quantitative analysis pipelines with independent fact-checking, and a repo-native todo loop for capturing and processing follow-up work.",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "keywords": [
         "workflow",
         "review",
