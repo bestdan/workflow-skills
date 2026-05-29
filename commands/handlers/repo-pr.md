@@ -14,6 +14,7 @@ gh auth status 2>&1
 ```
 
 If `gh auth status` fails (token invalid, TLS errors, network issues):
+
 1. Check if the error mentions TLS/x509/certificate — this usually means Claude Code's sandbox is blocking keychain access.
 2. If it looks like a sandbox issue, tell the user: "gh is failing due to sandbox TLS restrictions. You can re-run this command outside sandbox mode, or I'll fall back to local staging."
 3. Skip straight to Mode 3 (local) unless the user opts to exit sandbox.
@@ -40,7 +41,7 @@ Dispatch a remote Claude session. The remote agent runs in an isolated cloud VM 
 
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported and will error.
 
-**Framing matters.** The todo body contains a Task section written in imperative voice ("Add X", "Re-run Y"). Those lines are *file content destined for a future worker* — NOT instructions for the remote agent to execute. Without explicit framing, a permission classifier reading the whole dispatch string can mistake the imperative Task steps for a sub-agent being told to autonomously edit code and push, and deny the command. State the data-vs-instructions boundary up front and confine the agent's actual operations to creating one file, exactly as Mode 2 does.
+**Framing matters.** The todo body contains a Task section written in imperative voice ("Add X", "Re-run Y"). Those lines are _file content destined for a future worker_ — NOT instructions for the remote agent to execute. Without explicit framing, a permission classifier reading the whole dispatch string can mistake the imperative Task steps for a sub-agent being told to autonomously edit code and push, and deny the command. State the data-vs-instructions boundary up front and confine the agent's actual operations to creating one file, exactly as Mode 2 does.
 
 ```bash
 claude --remote "You are creating a todo FILE for the todo plugin system. Your ONLY job is to write a markdown file verbatim and open a PR for it.
@@ -91,11 +92,13 @@ Delegate to the Agent tool with this prompt:
 > Expires: `<expires>`
 >
 > Todo file content (write this exactly):
+>
 > ```
 > <paste full todo file content>
 > ```
 >
 > Steps:
+>
 > 1. Get main's latest SHA: `gh api repos/<owner>/<repo>/git/refs/heads/main --jq '.object.sha'`
 > 2. Create branch: `gh api repos/<owner>/<repo>/git/refs --method POST --field ref="refs/heads/todo/add/<slug>" --field sha="$main_sha"`
 > 3. Create the file on the branch using the Contents API. **Base64-encode the todo content yourself** (do not try to inline it through the shell — apostrophes in prose will break single-quoted strings). Compute the base64 of the exact file content above, then pass it as a literal field value:

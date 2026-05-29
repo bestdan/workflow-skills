@@ -1,0 +1,1 @@
+I want to add OAuth login, a Stripe billing system, and an admin dashboard to my app. These are big and will land across several pull requests. Can you work out the implementation strategy for all of it and write the plan down somewhere I can edit and work through later, rather than just telling me in chat?

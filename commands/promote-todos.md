@@ -1,7 +1,7 @@
 ---
 description: Score new todos against the confidence check and promote them to ready or needs_refinement
 allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Glob, Grep, Read, Edit
-argument-hint: [filter: dry-run|apply] (default apply)
+argument-hint: "[filter: dry-run|apply] (default apply)"
 ---
 
 # Promote Todos
@@ -23,6 +23,7 @@ Filter to files with `status: new` in their YAML frontmatter. Report and exit if
 For each candidate, run the **confidence check** from `skills/todo/SKILL.md`:
 
 **HIGH (→ `ready`)** requires ALL of:
+
 - `title`, `priority`, `created`, `source_branch`, `expires` present
 - `related_files` has ≥ 1 entry, OR `tags` includes `scope: research`
 - Body has a `## Acceptance Criteria` section with ≥ 1 bullet
@@ -40,6 +41,7 @@ Note: `is_blocked_by` is intentionally not part of the promotion check — `/pro
 If `$ARGUMENTS` is `dry-run`, print the proposed transitions and exit without writing.
 
 Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter in place:
+
 - HIGH: set `status: ready`
 - LOW: set `status: needs_refinement`, set `human_approval_requested: true` (add the field if missing). Append a one-line `# promoter:` comment to the frontmatter naming which check failed (e.g., `# promoter: missing acceptance_criteria`) so the human can fix quickly.
 

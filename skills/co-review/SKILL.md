@@ -34,9 +34,9 @@ Other local agents can act as extra reviewers. Resolution mirrors the todo syste
 
 ```yaml
 local_reviewers:
-  - gemini          # known agent → built-in default invocation
+  - gemini # known agent → built-in default invocation
   - codex
-  - name: my-agent  # custom agent → explicit invocation
+  - name: my-agent # custom agent → explicit invocation
     command: "my-agent review --stdin"
 ```
 

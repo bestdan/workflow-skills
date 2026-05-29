@@ -1,0 +1,1 @@
+I need to compare three cloud vendors on their total annual cost and produce a short memo recommending one of them. This is going in front of finance, so every number has to be reproducible and traceable back to where it came from — not just numbers I typed into a paragraph. How should I build this?

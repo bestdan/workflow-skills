@@ -1,0 +1,1 @@
+I just finished a vendor cost analysis — there's a model that computes the numbers and a memo with the recommendation filled in. Before I send it to my boss, can you independently double-check that every number in the memo actually traces back to the model, the cited sources say what I claim, and the recommendation matches the data?

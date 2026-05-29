@@ -1,7 +1,7 @@
 ---
 description: Find a todo small enough to finish in this session, claim it, branch, code, and open a PR — dispatches to the configured handler (Linear today; file-based defers to /process-todo --local)
 allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, Write, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__get_user, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__create_issue_label, mcp__linear__save_comment, mcp__linear__get_user
-argument-hint: [issue identifier (e.g. ENG-123)] or empty to auto-pick
+argument-hint: "[issue identifier (e.g. ENG-123)] or empty to auto-pick"
 ---
 
 # Claim Todo

@@ -9,11 +9,11 @@ Config block in `dev_docs/todos/.todo-config.yml`:
 ```yaml
 handler: jira
 jira:
-  site: mycompany.atlassian.net   # used as cloudId and to build the browse URL
-  project: PLAT                   # required — project key
-  issue_type: Task                # default Task
-  default_epic: PLAT-100          # optional; skips the epic prompt (explicit key, not a name)
-  labels: []                      # optional — passed via additional_fields.labels
+  site: mycompany.atlassian.net # used as cloudId and to build the browse URL
+  project: PLAT # required — project key
+  issue_type: Task # default Task
+  default_epic: PLAT-100 # optional; skips the epic prompt (explicit key, not a name)
+  labels: [] # optional — passed via additional_fields.labels
 ```
 
 `site` is passed directly as `cloudId` to the MCP tools (they accept either a UUID or a site URL/hostname).

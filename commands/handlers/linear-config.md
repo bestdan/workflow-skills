@@ -5,6 +5,7 @@ Configures the `linear` handler, which creates Linear issues via the official Li
 Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
 > **Linear MCP tool namespace.** The same Linear MCP can be installed two ways, which produces two different tool prefixes:
+>
 > - Installed via `claude.ai` settings → tools are `mcp__claude_ai_Linear__list_teams`, etc.
 > - Installed via `claude mcp add --transport http linear https://mcp.linear.app/mcp` (what `mcp-setup-offer.md` instructs) → tools are `mcp__linear__list_teams`, etc. (the prefix is `mcp__<server-name>__`, and the server is registered as `linear`).
 >
@@ -47,7 +48,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    ```yaml
    handler: linear
    linear:
-     team: PreThink           # team NAME (or UUID id) — never the team key like "PRE"
+     team: PreThink # team NAME (or UUID id) — never the team key like "PRE"
      default_project: null
      default_priority: 3
    ```

@@ -1,0 +1,9 @@
+# skill<TAB>prompt_file<TAB>max_turns   (lines starting with # are ignored)
+# Behavioral skill-triggering cases. Each naive prompt must NOT name the skill;
+# the eval asserts Claude auto-invokes the expected skill. analysis-conventions
+# is omitted (user-invocable: false — context-load only, not auto-routable).
+plan-with-docs	prompts/plan-with-docs.txt	6
+co-review	prompts/co-review.txt	6
+review-facts	prompts/review-facts.txt	6
+todo	prompts/todo.txt	6
+analysis-pipeline	prompts/analysis-pipeline.txt	6

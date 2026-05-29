@@ -80,7 +80,7 @@ jira:
 # linear
 handler: linear
 linear:
-  team: PreThink           # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
+  team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
   default_project: null
   default_priority: 3
 ```
@@ -90,6 +90,7 @@ Omit optional keys the user didn't set (the per-handler file already handles thi
 ### 5. Confirm
 
 Tell the user:
+
 - Which handler is now configured and where the file lives.
 - That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.
 - They can now run `/add-todo`, or re-run `/todo-config` to switch handlers.

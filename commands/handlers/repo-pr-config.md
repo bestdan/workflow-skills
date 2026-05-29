@@ -20,7 +20,10 @@ The `repo-pr` handler is the default. It captures todos as markdown files via PR
        permissions: { pull-requests: write, contents: write }
        steps:
          - run: gh pr merge --auto --squash "$PR"
-           env: { PR: "${{ github.event.pull_request.html_url }}", GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+           env: {
+             PR: "${{ github.event.pull_request.html_url }}",
+             GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+           }
    ```
 
    The user can paste this into their repo if they want it; do not write it for them from `/todo-config`.

@@ -7,9 +7,9 @@ Config block in `dev_docs/todos/.todo-config.yml`:
 ```yaml
 handler: gh-issue
 gh-issue:
-  repo: owner/name        # optional; defaults to the current repo
-  labels: [follow-up]     # optional; each is created if missing
-  assignees: []           # optional GitHub usernames
+  repo: owner/name # optional; defaults to the current repo
+  labels: [follow-up] # optional; each is created if missing
+  assignees: [] # optional GitHub usernames
 ```
 
 ## Steps
