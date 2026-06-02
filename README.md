@@ -21,6 +21,16 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 | ------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **co-review** | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Produce your own review of a PR, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, and surface judgment calls back to you. `--local` reviews local changes (committed + uncommitted) with no PR; `--remote` skips local agents for a plain PR review; `--post` reviews someone else's PR and, after you vet the findings, posts them back as a batched GitHub review instead of editing local files. |
 
+**Approve the reviewer commands once.** Local-agent reviews tailor the prompt per diff, so per-command "always allow" never sticks. Add a one-time prefix rule for the reviewers you use to `~/.claude/settings.json` (or the repo's `.claude/settings.json`):
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(gh pr diff:*)", "Bash(gemini -p:*)", "Bash(codex exec:*)"]
+  }
+}
+```
+
 ### Planning
 
 | Skill              | Trigger                                                   | What it does                                                                                                                                                                                                                                                                                   |
