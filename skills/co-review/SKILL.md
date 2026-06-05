@@ -1,6 +1,6 @@
 ---
 name: co-review
-description: Collaborative PR review — produce your own review, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against GitHub bot/human comments via an independent sub-agent, auto-fix high-confidence items, and ask the user about judgment calls. Supports a --local flag to review uncommitted changes with no PR. Use when the user runs /co-review or asks for a "co-review" of a PR.
+description: Collaborative PR review — produce your own review, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against GitHub bot/human comments via an independent sub-agent, auto-fix high-confidence items, and ask the user about judgment calls. Supports a --local flag to review uncommitted changes with no PR, and a --post flag to review someone else's PR and post vetted findings back to GitHub. Use when the user runs /co-review or asks for a "co-review" of a PR.
 ---
 
 # co-review — collaborative PR review
@@ -15,16 +15,18 @@ This is not perfectly independent: the main agent still chooses what to flag in 
 
 ## Modes
 
-Two independent axes:
+Three mode choices:
 
 - **GitHub vs local** — by default co-review operates on a PR (fetches the diff and comments from GitHub). With `--local` it operates on your working tree instead: no PR required, no GitHub calls.
 - **Which reviewers** — the main agent always reviews. Other local agents (gemini, codex, …) join the pool if configured. `--remote` forces them off for one run.
+- **What happens to the findings** — by default co-review assumes the PR is **yours**: it auto-fixes high-confidence items in your working tree. With `--post` it assumes you're reviewing **someone else's** PR: it never touches the code and instead posts the vetted findings back to GitHub as a PR review.
 
 ### Flags
 
 - `--local` — review local changes instead of a PR. Diff comes from `git diff <base>`: your working tree (committed **and** uncommitted changes) compared against `<base>`, **plus** any untracked files (`git ls-files --others --exclude-standard`), which `git diff` does not show — read those so brand-new files aren't silently skipped. No `gh` calls are made and no PR is required. Caveat: `git diff <base>` compares against `<base>`'s current tip, so if `<base>` has advanced since you branched it will also surface those upstream commits as reversed changes — diff against the merge-base instead (compute it in a separate call; don't use `$(...)`, per step 2).
 - `--base <branch>` — base to diff against in `--local` mode. Defaults to `main`.
 - `--remote` — skip local agents for this run: the main agent reviews and folds in GitHub comments as usual, but gemini/codex are not probed, asked about, or dispatched, and the config is left untouched. Useful for a quick "just the normal PR review" without spinning up extra agents. Mutually exclusive with `--local` (which drops GitHub entirely); if both are passed, stop and ask which the user meant.
+- `--post` — review someone else's PR and post the vetted findings **back to the PR** instead of editing local files. The review and reconciliation are identical to the default flow, but the auto-fix step is replaced: nothing in the working tree is ever changed, and high/medium findings (after you vet them) are submitted as a single GitHub PR review with inline comments. Requires a PR — mutually exclusive with `--local`; if both are passed, stop and ask which the user meant. Composes with `--remote` (post a Claude-only review) and with local reviewers (post a reconciled multi-agent review).
 
 ## Local reviewers
 
@@ -61,7 +63,7 @@ These agents must be constrained to **read-only**: they should emit a review and
 
 ## Steps
 
-1. **Parse invocation.** Note any `--local`, `--remote`, and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant.
+1. **Parse invocation.** Note any `--local`, `--remote`, `--post`, and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant. `--post` requires a PR and is **mutually exclusive with `--local`** — if both are present, stop and ask which was meant.
 
 2. **Identify the PR** (skip entirely in `--local` mode).
    - If the user passed a PR number, use it.
@@ -106,12 +108,20 @@ These agents must be constrained to **read-only**: they should emit a review and
    - Assign a confidence: **high** (clearly correct, low-risk fix), **medium** (probably correct but a judgment call), **low** (wrong, not applicable to this codebase, or over-engineering for a personal repo).
    - Return a JSON array, one object per finding: `{file, line, issue, source, confidence, recommended_fix, rationale}`.
    - Treat suggestions that are over-engineered for this codebase (e.g., enterprise hardening for a personal repo) or that don't apply to its actual setup (e.g., worktree handling on a directly-cloned repo) as **low** confidence and say why — the sub-agent won't see this skill's Rules section unless you pass it along.
+   - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
-9. **Reconcile and present** to the user:
-   - Note which reviewers contributed (Claude + which local agents ran, or which were skipped and why).
-   - Auto-fix list (high confidence) — state what you will change.
-   - Ask list (medium) — one yes/no question per item.
-   - Skip list (low) — name them so the user can override if they disagree.
+9. **Reconcile and present** to the user. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Then branch on disposition:
+   - **Default (your PR):**
+     - Auto-fix list (high confidence) — state what you will change.
+     - Ask list (medium) — one yes/no question per item.
+     - Skip list (low) — name them so the user can override if they disagree.
+   - **`--post` mode (someone else's PR):**
+     - Post-candidate list — **high + medium** findings, as a single numbered list. For each: `file:line`, the issue, the suggested fix, and its tier. These are what _may_ be posted, pending your vetting (step 10).
+     - Skip list (low) — name them so the user can pull one back in if they disagree.
+
+The remaining steps depend on disposition.
+
+**Default disposition (your PR):**
 
 10. **Apply high-confidence fixes** with Edit. Verify each:
     - Shell scripts: `bash -n`
@@ -122,6 +132,19 @@ These agents must be constrained to **read-only**: they should emit a review and
 
 12. **Stop short of commit/push.** Summarize what changed; let the user trigger the next step.
 
+**`--post` disposition (someone else's PR):**
+
+10. **Vet before posting.** Never touch the working tree — you don't own this code. Present the numbered post-candidate list and let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing.
+
+11. **Choose the verdict.** Ask the user which review event to submit: `COMMENT` (neutral), `REQUEST_CHANGES`, or `APPROVE`. Ask this every run; don't assume.
+
+12. **Post one batched PR review.** Submit a single review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
+    - `event` = the chosen verdict.
+    - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns).
+    - `comments` = an array of `{path, line, body}`, one per anchored candidate. `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
+
+13. **Report the result.** Print the review URL (`gh pr view <n> --json url` plus the review, or the API response's `html_url`). Don't commit or push anything — you changed no files.
+
 ## Rules
 
 - Respect AGENTS.md / CLAUDE.md instructions already loaded.
@@ -131,3 +154,5 @@ These agents must be constrained to **read-only**: they should emit a review and
 - A local agent that fails to run is noted and skipped, never fatal.
 - Don't re-ask the local-reviewer question once a config (including an explicit empty list) exists.
 - Never silently run a custom `command:` or non-built-in agent from `.co-review.yml` — it's repo-controlled, untrusted code. Show it and confirm first.
+- In `--post` mode, never edit the reviewed code — it isn't yours. The only output is the GitHub review.
+- In `--post` mode, nothing is posted to GitHub until the user has vetted and explicitly approved the final comment set and chosen the verdict.
