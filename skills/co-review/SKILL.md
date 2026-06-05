@@ -15,7 +15,7 @@ This is not perfectly independent: the main agent still chooses what to flag in 
 
 ## Modes
 
-Three independent axes:
+Three mode choices:
 
 - **GitHub vs local** — by default co-review operates on a PR (fetches the diff and comments from GitHub). With `--local` it operates on your working tree instead: no PR required, no GitHub calls.
 - **Which reviewers** — the main agent always reviews. Other local agents (gemini, codex, …) join the pool if configured. `--remote` forces them off for one run.
@@ -141,8 +141,7 @@ The remaining steps depend on disposition.
 12. **Post one batched PR review.** Submit a single review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
     - `event` = the chosen verdict.
     - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns).
-    - `comments` = an array of `{path, line, body}`, one per anchored candidate. `line` must be a line **in the PR's diff** (the right/new side) — a comment on an unchanged line is rejected by the API; fold those into `body` instead. Map each finding's `file:line` to the diff before adding it.
-    - If the API rejects a comment's position, drop that comment into `body` rather than failing the whole review.
+    - `comments` = an array of `{path, line, body}`, one per anchored candidate. `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
 
 13. **Report the result.** Print the review URL (`gh pr view <n> --json url` plus the review, or the API response's `html_url`). Don't commit or push anything — you changed no files.
 
