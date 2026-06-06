@@ -1,12 +1,14 @@
 ---
-description: Capture follow-up work as a structured todo, then deliver it to the configured destination (repo PR, GitHub issue, Jira, or Linear)
+description: Capture follow-up work as a structured task, then deliver it to the configured destination (repo PR, GitHub issue, Jira, or Linear)
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(date *), Bash(cat *), Bash(find *), Bash(mkdir *), Glob, Grep, Read, Write, AskUserQuestion, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__save_issue
 argument-hint: [description of the follow-up work]
 ---
 
-# Add Todo
+# Add Task
 
-Capture follow-up work with full context, then deliver it to the destination configured for this repo. Capture is destination-agnostic; the **handler** resolved from `dev_docs/todos/.todo-config.yml` decides where the todo lands. With no config, the default `repo-pr` handler reproduces the original behavior: dispatch an agent to commit the todo file on a branch from main and open a PR, without touching local state.
+Capture follow-up work with full context, then deliver it to the destination configured for this repo. Capture is destination-agnostic; the **handler** resolved from `dev_docs/tasks/.task-config.yml` decides where the task lands. With no config, the default `repo-pr` handler reproduces the original behavior: dispatch an agent to commit the task file on a branch from main and open a PR, without touching local state.
+
+> **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists (older versions stored tasks there), run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
 
 ## Steps
 
@@ -35,15 +37,15 @@ From the title, create a kebab-case slug:
 
 ### 3. Check for slug collisions
 
-Check if a todo with this slug already exists:
+Check if a task with this slug already exists:
 
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/todos" -name '<slug>.md' -type f 2>/dev/null
+find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '<slug>.md' -type f 2>/dev/null
 ```
 
 If a collision is found, append `-2`, `-3`, etc. until unique.
 
-### 4. Draft the todo
+### 4. Draft the task
 
 Auto-populate these fields:
 
@@ -53,8 +55,8 @@ Auto-populate these fields:
 - `status`: `new` by default (the promoter will score it and flip to `ready` or `needs_refinement`). If the user picks "Fix now" in step 5, write `status: ready` instead — the user's manual confirmation IS the human gate, so skip the promoter.
 - `expires`: 30 days from today
 - `priority`: `low` (default, ask user if they want different)
-- `size`: estimated task size — `small` / `medium` / `large` (infer from scope, ask user to confirm)
-- `is_blocked_by`: omitted by default; set to another todo's slug/id when this work must wait on that todo
+- `size`: Fibonacci story-point estimate of scope — `1` / `2` / `3` / `5` (infer from scope, ask the user to confirm). See **Task size** in `skills/task/SKILL.md`. If the work estimates larger than `5`, it is too big for one card — propose breaking it into sub-tasks chained with `is_blocked_by` rather than capturing it as one.
+- `is_blocked_by`: omitted by default; set to another task's slug/id when this work must wait on that task
 
 From conversation context and diff, draft:
 
@@ -65,7 +67,7 @@ From conversation context and diff, draft:
 - **Task** section: concrete steps to complete it
 - **Acceptance Criteria**: definition of done
 
-If the user indicates this todo depends on another todo, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that todo's slug. In the file-based todo system, the slug is the todo's ID for cross-references. Validate that the referenced slug already exists somewhere under `dev_docs/todos/**/*.md`. If it does not exist, stop and ask the user to correct the slug or remove the dependency rather than silently writing a dangling reference.
+If the user indicates this task depends on another task, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that task's slug. In the file-based task system, the slug is the task's ID for cross-references. Validate that the referenced slug already exists somewhere under `dev_docs/tasks/**/*.md`. If it does not exist, stop and ask the user to correct the slug or remove the dependency rather than silently writing a dangling reference.
 
 ### 5. Present for review
 
@@ -73,29 +75,29 @@ Show the user the full draft and ask for confirmation. They can adjust priority,
 
 If the resolved handler (step 6) is `repo-pr`, also ask: **"File for later, or fix now?"**
 
-- **File for later** (default): creates the todo file on main for `/process-todo` to pick up
-- **Fix now**: creates the todo file AND immediately dispatches a processing agent to do the work
+- **File for later** (default): creates the task file on main for `/process-tasks` to pick up
+- **Fix now**: creates the task file AND immediately dispatches a processing agent to do the work
 
 (Other handlers deliver to an external tracker and have no fix-now option.)
 
-### The drafted todo (handler input)
+### The drafted task (handler input)
 
-Once the user confirms, you hold a normalized **drafted todo** that every handler consumes. This is the stable contract between capture and delivery:
+Once the user confirms, you hold a normalized **drafted task** that every handler consumes. This is the stable contract between capture and delivery:
 
-| Field           | Description                                                   |
-| --------------- | ------------------------------------------------------------- |
-| `title`         | Imperative, < 80 chars                                        |
-| `body`          | The Context / Task / Acceptance Criteria markdown             |
-| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)    |
-| `size`          | `small` / `medium` / `large` — estimated task size            |
-| `tags`          | List of freeform tags                                         |
-| `slug`          | Kebab-case slug from step 2                                   |
-| `created`       | ISO date                                                      |
-| `expires`       | ISO date                                                      |
-| `source_branch` | Branch where the todo was identified                          |
-| `source_pr`     | PR number for that branch, if any                             |
-| `related_files` | Paths relevant to the work                                    |
-| `is_blocked_by` | Optional slug/id of another todo that must be completed first |
+| Field           | Description                                                    |
+| --------------- | -------------------------------------------------------------- |
+| `title`         | Imperative, < 80 chars                                         |
+| `body`          | The Context / Task / Acceptance Criteria markdown              |
+| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)     |
+| `size`          | Fibonacci story points — `1` / `2` / `3` / `5` (`> 5` ⇒ split) |
+| `tags`          | List of freeform tags                                          |
+| `slug`          | Kebab-case slug from step 2                                    |
+| `created`       | ISO date                                                       |
+| `expires`       | ISO date                                                       |
+| `source_branch` | Branch where the task was identified                           |
+| `source_pr`     | PR number for that branch, if any                              |
+| `related_files` | Paths relevant to the work                                     |
+| `is_blocked_by` | Optional slug/id of another task that must be completed first  |
 
 Every handler **must report back an artifact identifier** so step 8 can show it. Normally this is the URL of the created PR, issue, or work item. The one exception is `repo-pr` Mode 3 (local staging), which has no remote artifact yet — it returns the staged file path and branch name instead, and step 8 reports that the file is staged locally and will land via the user's own PR.
 
@@ -104,14 +106,14 @@ Every handler **must report back an artifact identifier** so step 8 can show it.
 The destination is configurable. Read the repo config:
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/null
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
 ```
 
 Resolve the handler name:
 
 - File absent, or no `handler:` key → **`repo-pr`** (the default — preserves the original behavior).
 - `handler: repo-pr | gh-issue | jira | linear` → use that handler.
-- Any other (unknown) value → **stop** and tell the user: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Valid values: repo-pr, gh-issue, jira, linear. Run /todo-config to set it." Do not silently fall back.
+- Any other (unknown) value → **stop** and tell the user: "Unknown task handler `<value>` in dev_docs/tasks/.task-config.yml. Valid values: repo-pr, gh-issue, jira, linear. Run /task-config to set it." Do not silently fall back.
 
 ### 7. Deliver via the handler
 
@@ -120,7 +122,7 @@ Each handler's full instructions live in sibling file(s) under `commands/handler
 - `handler: repo-pr | gh-issue | jira` → Read `commands/handlers/<handler>.md` and follow it.
 - `handler: linear` → Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-add.md` (the create flow), and follow them.
 
-Use the **Read** tool, then follow it, passing the drafted todo from step 5. The handler file(s) own everything about how the todo lands — preflight checks, dispatch, parsing, and the artifact URL returned.
+Use the **Read** tool, then follow it, passing the drafted task from step 5. The handler file(s) own everything about how the task lands — preflight checks, dispatch, parsing, and the artifact URL returned.
 
 If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result.
 
@@ -128,4 +130,4 @@ Do not embed handler logic here; do not read handler files for handlers other th
 
 ### 8. Report
 
-Tell the user which handler ran and the artifact it returned. For PR / issue / work item handlers, that's the URL. For `repo-pr` Mode 3 (local staging), there is no URL yet — report the staged file path and branch, and tell the user the todo will land via whatever PR they open from that branch. For `repo-pr`, also include what was dispatched (file only, or file + processing) and the dispatch mode used, and that they can monitor with `/tasks`.
+Tell the user which handler ran and the artifact it returned. For PR / issue / work item handlers, that's the URL. For `repo-pr` Mode 3 (local staging), there is no URL yet — report the staged file path and branch, and tell the user the task will land via whatever PR they open from that branch. For `repo-pr`, also include what was dispatched (file only, or file + processing) and the dispatch mode used, and that they can monitor with `/tasks`.

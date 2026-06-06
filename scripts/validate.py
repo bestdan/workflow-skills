@@ -100,7 +100,7 @@ for d in skill_dirs:
         err(rel(sk), f"body is {n_lines} lines (max {BODY_MAX_LINES})")
 
 # --- commands (top-level only) ---
-# commands/handlers/*.md are reference procedures bundled into the todo skill,
+# commands/handlers/*.md are reference procedures bundled into the task skill,
 # not slash commands — they have no frontmatter and are intentionally skipped.
 command_files = sorted((ROOT / "commands").glob("*.md"))
 for c in command_files:

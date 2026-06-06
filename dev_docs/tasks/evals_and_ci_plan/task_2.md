@@ -1,6 +1,25 @@
+---
+title: Add repo-native validator and local check entrypoint
+priority: medium
+size: 5
+status: done
+created: 2026-05-29
+source_branch: bestdan/skills-evals-ci
+source_pr: 15
+related_files:
+  - scripts/validate.py
+  - scripts/check.sh
+  - justfile
+is_blocked_by: task_1
+expires: 2026-06-28
+tags:
+  - tooling
+  - tests
+---
+
 ← [[evals_and_ci_plan|Overview]]
 
-# Step 2 — Repo-native validation + local entrypoint
+# Task 2 — Repo-native validation + local entrypoint
 
 Add the deterministic checks as self-contained scripts plus a `justfile`, so the
 full gate runs locally with one command. No GitHub Actions yet — this PR is
@@ -43,7 +62,7 @@ verifiable purely by running the entrypoint.
   hash-verified, reproducible dependency. Declare the dep in PEP 723 inline
   metadata at the top of the script.
 
-## Changes
+## Task
 
 1. **`scripts/validate.py`** (run via `uv run`; PEP 723 inline metadata with a
    pinned, hash-locked `pyyaml`) — repo-specific structural & consistency checks. Each failure prints `path: message` and the script exits
@@ -85,7 +104,7 @@ verifiable purely by running the entrypoint.
    - `eval` → `scripts/check.sh --with-evals` (functional after step 4)
      Note: these wrap the scripts; the scripts remain the source of truth.
 
-## Acceptance
+## Acceptance Criteria
 
 **Code-enforced:**
 
@@ -101,7 +120,3 @@ verifiable purely by running the entrypoint.
 - `just check` runs the gate locally and is green.
 - Confirm `uv run scripts/validate.py` resolves the hash-locked `pyyaml` from the
   committed `*.lock` (reproducible install, no version surprise).
-
-## Dependencies
-
-[[step_1]] must land first so the deterministic checks pass on a green repo.

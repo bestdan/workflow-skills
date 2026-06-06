@@ -1,6 +1,6 @@
-# gh-issue handler — /todo-config setup
+# gh-issue handler — /task-config setup
 
-Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue create` at `/add-todo` time. This file owns the prerequisite check (`gh auth status`) and the optional-fields prompt; the actual create flow lives in `gh-issue.md`.
+Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue create` at `/add-task` time. This file owns the prerequisite check (`gh auth status`) and the optional-fields prompt; the actual create flow lives in `gh-issue.md`.
 
 ## Steps
 
@@ -14,7 +14,7 @@ Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue cre
    - `labels` — list, e.g. `[follow-up]`. Plain text prompt (comma-separated); skip if blank.
    - `assignees` — list of GitHub usernames. Plain text prompt (comma-separated); skip if blank.
 
-3. **Return the config block** to `/todo-config`:
+3. **Return the config block** to `/task-config`:
 
    ```yaml
    handler: gh-issue

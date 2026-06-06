@@ -1,6 +1,24 @@
+---
+title: "Make the repo green: formatting, manifest description, version sync"
+priority: medium
+size: 2
+status: done
+created: 2026-05-29
+source_branch: bestdan/skills-evals-ci
+source_pr: 15
+related_files:
+  - .claude-plugin/plugin.json
+  - .claude-plugin/marketplace.json
+  - README.md
+expires: 2026-06-28
+tags:
+  - chore
+  - tooling
+---
+
 ← [[evals_and_ci_plan|Overview]]
 
-# Step 1 — Make the repo green
+# Task 1 — Make the repo green
 
 Fix the failures that exist _today_ so later steps can enforce them without the
 first CI run being red. No new infrastructure in this PR — just corrections.
@@ -25,7 +43,7 @@ Relevant files:
 - `README.md:14`
 - 15 unformatted files (let `dprint` enumerate them; do not hand-edit).
 
-## Changes
+## Task
 
 1. **Format everything:** run `dprint fmt` from repo root. Review the diff — it
    should be whitespace/wrapping/table-alignment only (the failing files are
@@ -42,7 +60,7 @@ Relevant files:
    `commands/handlers/`). Keep the count consistent with what step 2's validator
    will assert.
 
-## Acceptance
+## Acceptance Criteria
 
 **Code-enforced:**
 
@@ -54,7 +72,3 @@ Relevant files:
 - Eyeball the `dprint fmt` diff to confirm it's formatting-only, no content
   regressions in skill text.
 - Confirm the README command count matches the actual `commands/*.md` files.
-
-## Dependencies
-
-None. This is the first PR and unblocks the enforcement added in later steps.

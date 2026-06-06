@@ -2,7 +2,7 @@
 
 Creates a GitHub Issue via the `gh` CLI. Runs in the **foreground in the current session** — one API call, no git plumbing, no remote/subagent/local cascade.
 
-Config block in `dev_docs/todos/.todo-config.yml`:
+Config block in `dev_docs/tasks/.task-config.yml`:
 
 ```yaml
 handler: gh-issue
@@ -19,13 +19,13 @@ gh-issue:
    - Otherwise report the auth failure.
    - Either way, **stop**. Do not silently fall back to `repo-pr` — the destination was chosen deliberately.
 
-2. **Build the issue body.** Take the drafted todo's `body` and append a source footer (omit lines whose value is empty):
+2. **Build the issue body.** Take the drafted task's `body` and append a source footer (omit lines whose value is empty):
 
    ```
    ---
    Source branch: <source_branch>
    Source PR: #<source_pr>
-   Blocked by todo: <is_blocked_by>
+   Blocked by task: <is_blocked_by>
    ```
 
    Write it to a temp file to avoid shell-quoting problems with multi-line markdown.
@@ -38,7 +38,7 @@ gh-issue:
 
    (Omit `--repo` when no `gh-issue.repo` is configured, matching step 4 — labels must be created in the same repo the issue lands in.)
 
-4. **Create the issue.** Map the drafted todo: `--title` ← `title`, body ← step 2, `--label`/`--assignee` ← config, `--repo` ← `gh-issue.repo` if set.
+4. **Create the issue.** Map the drafted task: `--title` ← `title`, body ← step 2, `--label`/`--assignee` ← config, `--repo` ← `gh-issue.repo` if set.
 
    ```bash
    gh issue create \
@@ -51,6 +51,6 @@ gh-issue:
 
    (Omit `--repo` to use the current repo; omit `--label`/`--assignee` flags that have no configured values.)
 
-5. **Return the URL.** `gh issue create` prints the new issue URL to stdout — capture it and return it as this handler's artifact URL for `/add-todo` step 8.
+5. **Return the URL.** `gh issue create` prints the new issue URL to stdout — capture it and return it as this handler's artifact URL for `/add-task` step 8.
 
-This handler does **not** create any `dev_docs/todos/*.md` file, branch, or PR.
+This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.

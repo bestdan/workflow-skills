@@ -1,6 +1,24 @@
+---
+title: "Document contributor workflow: CONTRIBUTING, README badge, PR template"
+priority: medium
+size: 3
+status: done
+created: 2026-05-29
+source_branch: bestdan/skills-evals-ci
+source_pr: 15
+related_files:
+  - CONTRIBUTING.md
+  - README.md
+  - .github/PULL_REQUEST_TEMPLATE.md
+is_blocked_by: task_4
+expires: 2026-06-28
+tags:
+  - docs
+---
+
 ← [[evals_and_ci_plan|Overview]]
 
-# Step 5 — Docs & contributor workflow
+# Task 5 — Docs & contributor workflow
 
 Tie the pieces together so a contributor (or future you) knows how to run the
 gate, run evals, and what's required when adding a skill.
@@ -12,7 +30,7 @@ gate, run evals, and what's required when adding a skill.
 - `README.md` is the front door; it already documents the skills but says nothing
   about development, testing, or contributing.
 
-## Changes
+## Task
 
 1. **`CONTRIBUTING.md`** (new):
    - Local dev loop: `just check` (deterministic gate), `just fmt`, `just eval`
@@ -34,7 +52,7 @@ gate, run evals, and what's required when adding a skill.
 4. _(Optional)_ **`.github/ISSUE_TEMPLATE/`** for skill bug reports — only if you
    want it; not required by the gate.
 
-## Acceptance
+## Acceptance Criteria
 
 **Code-enforced:**
 
@@ -48,8 +66,3 @@ gate, run evals, and what's required when adding a skill.
 - Read `CONTRIBUTING.md` end-to-end and confirm the "adding a skill" checklist
   actually reproduces a green `just check` + `just eval`.
 - Open a test PR and confirm the PR template renders.
-
-## Dependencies
-
-[[step_2]], [[step_3]], [[step_4]] — docs describe the entrypoints, CI, and evals
-those steps create.

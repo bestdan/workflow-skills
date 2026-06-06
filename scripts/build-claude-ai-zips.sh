@@ -9,7 +9,7 @@
 #
 # Special bundling:
 #   review-facts -> includes agents/fact-reviewer.md (the subagent it spawns)
-#   todo         -> includes commands/*.md + commands/handlers/*.md and a
+#   task         -> includes commands/*.md + commands/handlers/*.md and a
 #                   CLAUDE-AI-NOTE.md explaining that slash commands map to
 #                   reference procedures on claude.ai
 #
@@ -54,9 +54,9 @@ bundle_review_facts() {
   zip_skill review-facts
 }
 
-bundle_todo() {
+bundle_task() {
   local dest
-  dest="$(stage_skill todo)"
+  dest="$(stage_skill task)"
   mkdir -p "$dest/commands/handlers"
   cp commands/*.md "$dest/commands/"
   cp commands/handlers/*.md "$dest/commands/handlers/"
@@ -64,20 +64,20 @@ bundle_todo() {
 # Using this skill on claude.ai
 
 This skill was authored as a Claude Code plugin. The slash commands it
-documents (`/add-todo`, `/claim-todo`, `/list-todos`, `/process-todo`,
-`/promote-todos`, `/todo-config`) do not exist as dispatchers on claude.ai.
+documents (`/add-task`, `/claim-task`, `/list-tasks`, `/process-tasks`,
+`/promote-tasks`, `/task-config`) do not exist as dispatchers on claude.ai.
 
 Treat the files under `commands/` (and `commands/handlers/`) as reference
 procedures. Invoke them by asking naturally, e.g.:
 
-  - "Add a todo for X" -> follow commands/add-todo.md
-  - "List my todos"    -> follow commands/list-todos.md
-  - "Claim a todo"     -> follow commands/claim-todo.md
+  - "Add a task for X" -> follow commands/add-task.md
+  - "List my tasks"    -> follow commands/list-tasks.md
+  - "Claim a task"     -> follow commands/claim-task.md
 
 The Linear handler procedures require the Linear MCP connector to be
 enabled in the claude.ai workspace.
 EOF
-  zip_skill todo
+  zip_skill task
 }
 
 bundle_default() {
@@ -96,7 +96,7 @@ for skill_dir in skills/*/; do
   fi
   case "$name" in
     review-facts) bundle_review_facts ;;
-    todo)         bundle_todo ;;
+    task)         bundle_task ;;
     *)            bundle_default "$name" ;;
   esac
 done
