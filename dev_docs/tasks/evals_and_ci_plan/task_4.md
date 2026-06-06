@@ -1,6 +1,26 @@
+---
+title: Add flag-gated behavioral eval harness
+priority: medium
+size: 5
+status: done
+created: 2026-05-29
+source_branch: bestdan/skills-evals-ci
+source_pr: 15
+related_files:
+  - evals/manifest.tsv
+  - scripts/eval.sh
+  - .github/workflows/evals.yml
+  - evals/README.md
+is_blocked_by: task_3
+expires: 2026-06-28
+tags:
+  - ci
+  - tests
+---
+
 ← [[evals_and_ci_plan|Overview]]
 
-# Step 4 — Behavioral eval harness (flag-gated)
+# Task 4 — Behavioral eval harness (flag-gated)
 
 Add an opt-in harness that verifies Claude actually **invokes** the right skill
 when given a naive trigger prompt that never names it. Non-blocking: it costs API
@@ -25,7 +45,7 @@ a manual `workflow_dispatch` job in CI.
   locally logged-in CLI (OAuth/subscription) is also valid auth — it prints a
   note and proceeds, letting `claude` surface a real auth error if there's none.
 
-## Changes
+## Task
 
 1. **`evals/` directory:**
    - `evals/prompts/<skill>.txt` — one naive trigger prompt per testable skill
@@ -54,7 +74,7 @@ a manual `workflow_dispatch` job in CI.
      `scripts/eval.sh`.
    - **Non-blocking:** not a required check; never gates merges.
 
-## Acceptance
+## Acceptance Criteria
 
 **Code-enforced:**
 
@@ -74,8 +94,3 @@ a manual `workflow_dispatch` job in CI.
 - Add `ANTHROPIC_API_KEY` to repo Actions secrets, then trigger the **Evals**
   workflow manually and confirm it runs.
 - `analysis-conventions` is excluded from the manifest (non-user-invocable).
-
-## Dependencies
-
-[[step_2]] (the `--with-evals` flag + `just eval` wiring) and [[step_3]]
-(CI/toolchain-install pattern to copy for `evals.yml`).

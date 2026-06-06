@@ -1,34 +1,38 @@
 ---
 name: plan-with-docs
-description: Write a multi-step implementation plan as markdown files under dev_docs/todo/<name>_plan/ instead of printing it inline, then refine the plan through clarifying questions. Use when the user runs /plan-with-docs, asks to "plan X to files", or has just approved a plan in plan mode and wants it persisted. Default for any plan that is more than ~3 steps or spans multiple PRs.
+description: Write a multi-step implementation plan as markdown files under dev_docs/tasks/<name>_plan/ instead of printing it inline, then refine the plan through clarifying questions. Use when the user runs /plan-with-docs, asks to "plan X to files", or has just approved a plan in plan mode and wants it persisted. Default for any plan that is more than ~3 tasks or spans multiple PRs.
 ---
 
 # plan-with-docs — persist plans as markdown, then refine
 
 Plan mode renders the plan inline via `ExitPlanMode` and that's fine for small plans. For larger projects this skill writes a structured set of markdown files instead, so the plan can be edited, committed, and worked through PR by PR. It also preserves the best part of plan mode — clarifying back-and-forth — by surfacing open questions after the files exist, so the user can refine the plan in place instead of restarting.
 
+A plan is a set of **tasks** in the same format the task loop uses (`skills/task/SKILL.md`). Each `task_N.md` is born `status: new`, so once the plan exists the user can run `/promote-tasks` and `/process-tasks` over it like any other backlog — plan output feeds the same pipeline.
+
+> **Legacy migration preflight.** Older versions wrote plans under `dev_docs/todo/`. Before writing, if a legacy `dev_docs/todo/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
+
 ## Output layout
 
 For a plan named `<name>` (snake_case, derived from the project/feature):
 
 ```
-dev_docs/todo/<name>_plan/
-  <name>_plan.md          # top-level overview + index of steps
-  step_1.md               # one PR-sized task per file
-  step_2.md
+dev_docs/tasks/<name>_plan/
+  <name>_plan.md          # top-level overview + index of tasks (NOT a task itself)
+  task_1.md               # one PR-sized task per file, canonical task format
+  task_2.md
   ...
 ```
 
-If steps naturally cluster into phases, nest them:
+If tasks naturally cluster into phases, nest them:
 
 ```
-dev_docs/todo/<name>_plan/
+dev_docs/tasks/<name>_plan/
   <name>_plan.md
   phase_1/
-    step_1.md
-    step_2.md
+    task_1.md
+    task_2.md
   phase_2/
-    step_1.md
+    task_1.md
 ```
 
 Use phases only when there are clear groupings (e.g. "backend → frontend → migration"). Don't invent phases to look organized.
@@ -39,37 +43,37 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
    - If the user passed an argument, slugify it (lowercase, snake_case, no trailing `_plan` — the directory adds that).
    - Otherwise pick a short slug from the topic under discussion and confirm in one line.
 
-2. **Confirm the working directory.** Files go under `<repo_root>/dev_docs/todo/<name>_plan/`. Find repo root with `git rev-parse --show-toplevel`. If not in a git repo, use the current working directory and say so. Create `dev_docs/todo/<name>_plan/` (and any missing parents) if it doesn't exist — `Write` handles parents, but `mkdir -p` first if you're shelling out.
+2. **Confirm the working directory.** Files go under `<repo_root>/dev_docs/tasks/<name>_plan/`. Find repo root with `git rev-parse --show-toplevel`. If not in a git repo, use the current working directory and say so. Create `dev_docs/tasks/<name>_plan/` (and any missing parents) if it doesn't exist — `Write` handles parents, but `mkdir -p` first if you're shelling out.
 
-3. **Check for collisions.** If `dev_docs/todo/<name>_plan/` already exists, list its contents and ask whether to **overwrite** (replace existing files), **append** (add new `step_N.md` files with the next available numbers, leaving existing files untouched and updating only the overview's index), or **pick a new name**. Don't silently clobber. When the existing plan uses `phase_N/` nesting, append defaults to the **last existing phase** unless the user says otherwise; numbering is per-folder (`phase_2/step_3.md` is independent of `phase_1/step_3.md`), so pick the next free integer within the chosen phase.
+3. **Check for collisions.** If `dev_docs/tasks/<name>_plan/` already exists, list its contents and ask whether to **overwrite** (replace existing files), **append** (add new `task_N.md` files with the next available numbers, leaving existing files untouched and updating only the overview's index), or **pick a new name**. Don't silently clobber. When the existing plan uses `phase_N/` nesting, append defaults to the **last existing phase** unless the user says otherwise; numbering is per-folder (`phase_2/task_3.md` is independent of `phase_1/task_3.md`), so pick the next free integer within the chosen phase.
 
-4. **Write `<name>_plan.md`** — the overview. Keep it tight:
+4. **Write `<name>_plan.md`** — the overview. It carries **no task frontmatter**, so `/promote-tasks` (which only scores files with `status: new`) skips it. Keep it tight:
    - **Goal:** one or two sentences. What we're building and why.
    - **Scope / non-goals:** explicit list of what's _not_ in this plan.
    - **Approach:** the architectural choice and the main tradeoff considered.
-   - **Steps:** numbered list, each linking to its `step_N.md` (or `phase_N/step_N.md`). One line per step describing the deliverable.
+   - **Tasks:** numbered list, each linking to its `task_N.md` (or `phase_N/task_N.md`). One line per task describing the deliverable.
    - **Open questions:** anything the user still needs to decide. If empty, omit the section — but if you found nothing, double-check; most non-trivial plans have at least one real unknown.
 
-5. **Write each `step_N.md`** as a single-PR-sized task:
-   - **Title:** what the PR will do.
-   - **Context:** the bare minimum a developer needs to start — relevant files (`path:line`), prior decisions, gotchas.
-   - **Changes:** concrete edits / new files / commands. Concrete enough that someone (or another agent) can pick it up cold.
-   - **Acceptance:** how we know it's done. Split into:
+5. **Write each `task_N.md`** in the **canonical task format** (see `skills/task/SKILL.md` for the full field reference) — a single-PR-sized task:
+   - **Frontmatter:** `title`, `priority`, `size` (Fibonacci `1`/`2`/`3`/`5` — see **Task size**; if a task estimates `> 5`, split it), `status: new`, `created`, `source_branch` (the current branch), `related_files` (the files the task touches, `path:line` where useful), `is_blocked_by` (the slug of the earlier task this one depends on — this is how the plan's ordering is encoded), `expires`, `tags`.
+   - **`## Context`:** the bare minimum a developer needs to start — relevant files, prior decisions, gotchas. Written for someone who has never seen this code.
+   - **`## Task`:** concrete edits / new files / commands. Concrete enough that someone (or another agent) can pick it up cold.
+   - **`## Acceptance Criteria`:** how we know it's done (≥ 1 bullet, required for promotion). Where useful, split into:
      - **Code-enforced:** automated tests to add or update, lint/type-check commands, CI checks expected to pass. Name the test files and the assertion in plain English.
-     - **User-run:** manual checks that aren't automated — e.g. "open `localhost:3000/foo`, click Save, confirm toast appears", "run migration on staging snapshot, verify row count matches". Be explicit so the user knows what they have to do themselves.
-   - **Dependencies:** which earlier steps must land first, if any.
-     Skip sections that don't apply. Don't pad.
+     - **User-run:** manual checks that aren't automated — e.g. "open `localhost:3000/foo`, click Save, confirm toast appears", "run migration on staging snapshot, verify row count matches".
 
-6. **Cross-link.** Each `step_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each step.
+   Skip optional frontmatter that doesn't apply. Don't pad.
 
-7. **Report.** Print the directory tree of what was written and the absolute path to the overview. Don't re-print the plan body — the user can open the files.
+6. **Cross-link.** Each `task_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each task. Encode hard ordering with `is_blocked_by` (slug of the prerequisite task), not just prose.
+
+7. **Report.** Print the directory tree of what was written and the absolute path to the overview. Don't re-print the plan body — the user can open the files. Mention they can run `/promote-tasks` to score the new tasks and `/list-tasks` to see the board.
 
 8. **Review with the user.** Surface every open question and judgment call you noted while drafting — assumptions you made, alternatives you considered and rejected, gaps in your understanding of the codebase. Ask them one by one (or grouped if tightly related). Update the affected files in place as the user answers; don't make the user restart the planning round-trip. Stop when the user says the plan is good.
 
 ## Rules
 
-- Obsidian-flavored markdown. Wikilinks (`[[step_1]]`) are fine when files are in the same folder; use relative paths (`phase_1/step_1.md`) across folders so they render in plain GitHub too.
-- One step = one PR. If a step would be > ~300 lines of diff or touch > ~5 unrelated files, split it.
+- Obsidian-flavored markdown. Wikilinks (`[[task_1]]`) are fine when files are in the same folder; use relative paths (`phase_1/task_1.md`) across folders so they render in plain GitHub too.
+- One task = one PR. Honor the **Task size** budget in `skills/task/SKILL.md`: if a task would exceed size `5` (~300 lines of diff or > ~5 unrelated files), split it into multiple tasks and chain them with `is_blocked_by`.
 - No `dprint` post-processing inside this skill — the user runs that themselves.
 - Don't commit. Don't open PRs. Just write the files.
 - If invoked right after plan mode, treat the just-approved plan as the source material — but still run step 8. Plan-mode approval doesn't mean the plan has no open questions, just that the user wanted to exit plan mode.

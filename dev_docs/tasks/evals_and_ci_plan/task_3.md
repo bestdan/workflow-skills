@@ -1,6 +1,22 @@
+---
+title: Add blocking CI workflow reusing the local gate
+priority: medium
+size: 3
+status: done
+created: 2026-05-29
+source_branch: bestdan/skills-evals-ci
+source_pr: 15
+related_files:
+  - .github/workflows/ci.yml
+is_blocked_by: task_2
+expires: 2026-06-28
+tags:
+  - ci
+---
+
 ← [[evals_and_ci_plan|Overview]]
 
-# Step 3 — Blocking CI workflow
+# Task 3 — Blocking CI workflow
 
 Add the GitHub Actions workflow that runs the deterministic gate on every PR and
 push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
@@ -27,7 +43,7 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
   default. Removed rather than left vacuous; `ci.yml` carries a note to reinstate
   it if inter-doc markdown links are introduced.
 
-## Changes
+## Task
 
 1. **`.github/workflows/ci.yml`**:
    - Triggers: `pull_request` and `push` to `main`.
@@ -48,7 +64,7 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
    via the official install script — keeps one code path.
 3. **Pin versions** of every action (`@vX.Y.Z` or SHA) for reproducibility.
 
-## Acceptance
+## Acceptance Criteria
 
 **Code-enforced:**
 
@@ -67,7 +83,3 @@ push to `main`. It reuses `scripts/check.sh` so CI and local can't diverge.
   `validate.py`, drop the CLI step).
 - Set the check as a **required status check** in branch protection for `main`
   (GitHub repo setting — must be done in the UI/API after first green run).
-
-## Dependencies
-
-[[step_2]] — CI invokes `scripts/check.sh`, which must exist and be green first.

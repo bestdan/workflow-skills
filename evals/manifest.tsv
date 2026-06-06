@@ -5,5 +5,5 @@
 plan-with-docs	prompts/plan-with-docs.txt	6
 co-review	prompts/co-review.txt	6
 review-facts	prompts/review-facts.txt	6
-todo	prompts/todo.txt	6
+task	prompts/task.txt	6
 analysis-pipeline	prompts/analysis-pipeline.txt	6

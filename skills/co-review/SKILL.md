@@ -30,7 +30,7 @@ Three mode choices:
 
 ## Local reviewers
 
-Other local agents can act as extra reviewers. Resolution mirrors the todo system's config pattern.
+Other local agents can act as extra reviewers. Resolution mirrors the task system's config pattern.
 
 **Config file (repo-committed):** `dev_docs/co-review/.co-review.yml`
 

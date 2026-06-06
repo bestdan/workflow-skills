@@ -1,29 +1,29 @@
 ---
-description: Find a todo small enough to finish in this session, claim it, branch, code, and open a PR — dispatches to the configured handler (Linear today; file-based defers to /process-todo --local)
+description: Find a task small enough to finish in this session, claim it, branch, code, and open a PR — dispatches to the configured handler (Linear today; file-based defers to /process-tasks --local)
 allowed-tools: Bash(git *), Bash(gh *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, Write, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__get_user, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__create_issue_label, mcp__linear__save_comment, mcp__linear__get_user
 argument-hint: "[issue identifier (e.g. ENG-123)] or empty to auto-pick"
 ---
 
-# Claim Todo
+# Claim Task
 
-Pick one unclaimed, small-enough todo issue, decide whether this session can finish it without a human in the loop, claim it in the tracker, open a branch, do the work, and open a PR.
+Pick one unclaimed, small-enough task issue, decide whether this session can finish it without a human in the loop, claim it in the tracker, open a branch, do the work, and open a PR.
 
-> Choosing between `/claim-todo` and `/process-todo`? See `skills/todo/SKILL.md` — both commands are listed there with the when-to-use-which guidance. This file assumes the choice is already made.
+> Choosing between `/claim-task` and `/process-tasks`? See `skills/task/SKILL.md` — both commands are listed there with the when-to-use-which guidance. This file assumes the choice is already made.
 
 ## Steps
 
 ### 1. Resolve the handler
 
-Read `dev_docs/todos/.todo-config.yml`:
+Read `dev_docs/tasks/.task-config.yml`:
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/null
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
 ```
 
-- File absent, or `handler: repo-pr` → **stop** with: "For the file-based (`repo-pr`) handler, use `/process-todo <slug> --local` instead. `/claim-todo`'s feasibility filter is tracker-aware (size, labels) and doesn't add value over file-based todos that are already promoted to `ready`."
-- `handler: linear` → continue with the Linear path below (steps 2–8). Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-claim.md` (the `/claim-todo`-specific MCP calls) — follow them in parallel with these steps.
-- `handler: gh-issue | jira` → **stop** with: "The `<handler>` handler does not yet support /claim-todo. Pull an issue manually, branch, and open a PR; or switch the handler to `linear` in `dev_docs/todos/.todo-config.yml`."
-- Any other (unknown) value → **stop** with: "Unknown todo handler `<value>` in dev_docs/todos/.todo-config.yml. Run /todo-config to fix it."
+- File absent, or `handler: repo-pr` → **stop** with: "For the file-based (`repo-pr`) handler, use `/process-tasks <slug> --local` instead. `/claim-task`'s feasibility filter is tracker-aware (size, labels) and doesn't add value over file-based tasks that are already promoted to `ready`."
+- `handler: linear` → continue with the Linear path below (steps 2–8). Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-claim.md` (the `/claim-task`-specific MCP calls) — follow them in parallel with these steps.
+- `handler: gh-issue | jira` → **stop** with: "The `<handler>` handler does not yet support /claim-task. Pull an issue manually, branch, and open a PR; or switch the handler to `linear` in `dev_docs/tasks/.task-config.yml`."
+- Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative paths don't resolve, find the handler files with **Glob** (`**/commands/handlers/linear-common.md` and `**/commands/handlers/linear-claim.md`) and Read the results.
 
@@ -31,15 +31,15 @@ If the relative paths don't resolve, find the handler files with **Glob** (`**/c
 
 Run in parallel:
 
-- `gh auth status 2>&1` — PR creation requires it. If it fails, stop with the same guidance as `/process-todo` step 3 (likely sandbox/keychain blocking).
-- Verify the working tree is clean: `git status --porcelain`. If non-empty, **stop** and ask the user to commit/stash first — claiming a todo branches off `main`/the configured base, and dirty state would be lost.
+- `gh auth status 2>&1` — PR creation requires it. If it fails, stop with the same guidance as `/process-tasks` step 3 (likely sandbox/keychain blocking).
+- Verify the working tree is clean: `git status --porcelain`. If non-empty, **stop** and ask the user to commit/stash first — claiming a task branches off `main`/the configured base, and dirty state would be lost.
 - Resolve the base branch (default `main` unless `linear.base_branch` is set in config — see handler doc) and fetch it: `git fetch origin <base>`.
 
 ### 3. Find candidates (handler-specific)
 
-Follow `commands/handlers/linear-claim.md` → "Find candidates". It returns a ranked list of unclaimed issues whose `estimate` is set and `< 3`, in priority order. If `$ARGUMENTS` is a specific issue identifier (e.g. `ENG-123`), skip discovery and fetch just that issue; if it does not satisfy the unclaimed/size gates, **report the reason and stop** rather than overriding the gates silently.
+Follow `commands/handlers/linear-claim.md` → "Find candidates". It returns a ranked list of unclaimed issues whose `estimate` is set and `< 3`, in priority order. Linear's `estimate` is the same Fibonacci scale as the task **size** field (see **Task size** in `skills/task/SKILL.md`), so `estimate < 3` selects size `1`–`2` work — small enough to land in one session. If `$ARGUMENTS` is a specific issue identifier (e.g. `ENG-123`), skip discovery and fetch just that issue; if it does not satisfy the unclaimed/size gates, **report the reason and stop** rather than overriding the gates silently.
 
-If no candidates remain, report "No claimable Linear issues (need `estimate` set and `< 3`, unclaimed, not `human-approval-requested`). Run `/list-todos ready` to see what is sitting in the backlog." and stop.
+If no candidates remain, report "No claimable Linear issues (need `estimate` set and `< 3`, unclaimed, not `human-approval-requested`). Run `/list-tasks ready` to see what is sitting in the backlog." and stop.
 
 ### 4. Judge feasibility
 
@@ -52,7 +52,7 @@ Apply judgment, not a checklist. Ask:
 - Would a reasonable engineer expect to land a PR in under ~1 hour of focused work, given the codebase?
 - Is there anything that screams "needs a product/design call" or "depends on infra I don't have access to"?
 
-If feasible: continue with this candidate. If not: leave a one-line Linear comment on the candidate (`Skipped by /claim-todo: <reason>`) and move to the next candidate. **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar.
+If feasible: continue with this candidate. If not: leave a one-line Linear comment on the candidate (`Skipped by /claim-task: <reason>`) and move to the next candidate. **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar.
 
 Print the chosen issue's identifier, title, and a one-sentence rationale for why this one is feasible, then proceed.
 
@@ -62,7 +62,7 @@ Follow `commands/handlers/linear-claim.md` → "Claim the issue". This:
 
 - Adds the `auto-claimed` label (creating it if absent — concurrency guard)
 - Moves the issue to the team's `started`-type workflow state
-- Posts a Linear comment recording the branch name and that `/claim-todo` is processing it
+- Posts a Linear comment recording the branch name and that `/claim-task` is processing it
 
 If the issue already has `auto-claimed` by the time you try to set it (race with another claim), **stop and pick a different candidate** by re-entering step 4 with the next candidate.
 
@@ -127,7 +127,7 @@ Post one final Linear comment on the issue with the PR URL.
 
 If during step 6 the work turns out to need a human (scope creep, missing context, broken-in-an-unrelated-way, etc.):
 
-- **Stash, don't discard, the work-in-progress.** Step 6 will typically leave uncommitted modified or untracked files — exactly the artifacts the human needs to look at to understand what tripped the bail. Run `git stash push -u -m "claim-todo bail: <identifier>"` first, then `git checkout <base>` (which now works on a clean tree) and `git branch -D <branch>`. Do not push. Do NOT use `git reset --hard` — that throws away the evidence.
+- **Stash, don't discard, the work-in-progress.** Step 6 will typically leave uncommitted modified or untracked files — exactly the artifacts the human needs to look at to understand what tripped the bail. Run `git stash push -u -m "claim-task bail: <identifier>"` first, then `git checkout <base>` (which now works on a clean tree) and `git branch -D <branch>`. Do not push. Do NOT use `git reset --hard` — that throws away the evidence.
 - In Linear: remove the `auto-claimed` label, add `human-approval-requested`, move the issue back to the `backlog`-type state, and post a comment explaining what you found. Mention the stash entry by its `<identifier>`-tagged message so the human can `git stash list | grep <identifier>` and `git stash pop` to recover the WIP. Do not leave the issue in `started`.
 - Report the outcome and stop. Do not silently pick a different candidate after a bail — the human should look at what tripped the bail before more work is auto-claimed.
 

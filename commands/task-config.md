@@ -1,12 +1,12 @@
 ---
-description: Configure where /add-todo delivers todos (repo PR, GitHub issue, Jira, or Linear)
+description: Configure where /add-task delivers tasks (repo PR, GitHub issue, Jira, or Linear)
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, Glob, AskUserQuestion, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getVisibleJiraProjects, mcp__atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
 argument-hint: [repo-pr | gh-issue | jira | linear]
 ---
 
-# Todo Config
+# Task Config
 
-Set up the destination handler for `/add-todo` in this repo. Writes `dev_docs/todos/.todo-config.yml`, which `/add-todo` reads to decide where a captured todo lands. The file is **repo-committed and shared by the team** — everyone in the repo files to the same destination.
+Set up the destination handler for `/add-task` in this repo. Writes `dev_docs/tasks/.task-config.yml`, which `/add-task` reads to decide where a captured task lands. The file is **repo-committed and shared by the team** — everyone in the repo files to the same destination.
 
 This command is a thin dispatcher. The per-handler setup logic (preflight checks, prompts, config block shape) lives in `commands/handlers/<handler>-config.md`. The runtime delivery logic for each handler lives in `commands/handlers/<handler>.md`.
 
@@ -15,16 +15,16 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 ### 1. Show current config
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/todos/.todo-config.yml" 2>/dev/null
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
 ```
 
-If it exists, show the user what's currently configured so they see what they're changing. If not, say there's no config yet (so `/add-todo` currently defaults to `repo-pr`).
+If it exists, show the user what's currently configured so they see what they're changing. If not, say there's no config yet (so `/add-task` currently defaults to `repo-pr`).
 
 ### 2. Choose the handler
 
 If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, `jira`, or `linear`), use it. Otherwise ask via `AskUserQuestion` (header: "Destination") which one they want:
 
-- **`repo-pr`** (recommended, first) — commit the todo as a markdown file via PR (the default; works with `/process-todo` and `/list-todos`)
+- **`repo-pr`** (recommended, first) — commit the task as a markdown file via PR (the default; works with `/process-tasks` and `/list-tasks`)
 - **`gh-issue`** — create a GitHub Issue
 - **`jira`** — create a Jira work item under an epic
 - **`linear`** — create a Linear issue under a team (optionally attached to a project)
@@ -46,10 +46,10 @@ If the relative path doesn't resolve, find the file with **Glob** (`**/commands/
 Ensure the directory exists and write the file:
 
 ```bash
-mkdir -p "$(git rev-parse --show-toplevel)/dev_docs/todos"
+mkdir -p "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
 
-Write the config block returned by the per-handler file to `dev_docs/todos/.todo-config.yml`. Examples of the shape each handler returns:
+Write the config block returned by the per-handler file to `dev_docs/tasks/.task-config.yml`. Examples of the shape each handler returns:
 
 ```yaml
 # repo-pr
@@ -93,4 +93,4 @@ Tell the user:
 
 - Which handler is now configured and where the file lives.
 - That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.
-- They can now run `/add-todo`, or re-run `/todo-config` to switch handlers.
+- They can now run `/add-task`, or re-run `/task-config` to switch handlers.
