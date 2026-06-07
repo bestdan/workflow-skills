@@ -202,7 +202,7 @@ Dispatched 3 tasks to remote agents:
 Monitor with /tasks. Each will open a PR when complete.
 ```
 
-If any tasks were **reserved for a human** by the size gate (step 4), list them as their own group — e.g. `reserved for human (size 5 > auto_execute_max_size 2): <slug>` — so the user knows they were claimed but not executed and can resume them with `/do-tasks <slug> --no-claim`.
+If any tasks were **reserved for a human** by the size gate (the Size-gate auto-routing block above), list them as their own group — e.g. `reserved for human (size 5 > auto_execute_max_size 2): <slug>` — so the user knows they were claimed but not executed and can resume them with `/do-tasks <slug> --no-claim`.
 
 If any tasks were skipped because they are waiting on another task, list them separately with every unresolved blocker slug. If any dependency-ready tasks were **held by the WIP limit** or the `-n N` ceiling (step 4), list those too — e.g. `held (WIP limit 3 reached): <slug> (high)` — so the user knows they are eligible and will dispatch on the next `--all` once in-flight work clears.
 
@@ -213,7 +213,7 @@ When `--local` is specified or `claude --remote` is unavailable, process the tas
 The size gate still applies to the batch path: `/do-tasks --all --local` with a highest-ranked task whose `size > auto_execute_max_size` **reserves** it (`--claim-only` semantics — claim and push, no execution) and reports it as reserved rather than executing it. A named `/do-tasks <slug> --local` is single-task mode and is never size-gated.
 
 1. Create branch `task/<slug>` from current HEAD
-2. Claim, execute, validate, delete, commit, push, and open PR as described above
+2. Route by the size gate (batch path only): if `size <= auto_execute_max_size`, claim, execute, validate, delete, commit, push, and open PR as described above; if `size > auto_execute_max_size`, **reserve** it (claim + push only — no execute, delete, or PR). A named `/do-tasks <slug> --local` is single-task mode and always executes in full.
 3. Return to the original branch with `git checkout -`
 
 There is no remote session in this mode — report the PR opened in-session instead.
