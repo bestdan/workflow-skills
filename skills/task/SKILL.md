@@ -175,23 +175,25 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 ### Field reference
 
-| Field                      | Required | Description                                                                                                                |
-| -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `title`                    | yes      | Imperative description, < 80 chars                                                                                         |
-| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                                                 |
-| `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                               |
-| `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                            |
-| `impact`                   | no       | Fibonacci value estimate: `1` / `2` / `3` / `5`, mirroring `size`. Used for value/effort ranking. See **Task size**        |
-| `status`                   | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done`                                 |
-| `created`                  | yes      | ISO date                                                                                                                   |
-| `source_branch`            | yes      | Branch where task was identified                                                                                           |
-| `source_pr`                | no       | PR number if already open                                                                                                  |
-| `related_files`            | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research`                              |
-| `is_blocked_by`            | no       | Slug/id of a blocker, or a list of slugs (`[a, b]`). A single string stays valid. Ready only when **all** blockers resolve |
-| `parent`                   | no       | Slug of an epic this task belongs to (grouping, distinct from `is_blocked_by` ordering)                                    |
-| `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                                                  |
-| `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                                                     |
-| `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                                                            |
+| Field                      | Required | Description                                                                                                                                                                                                                                |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `title`                    | yes      | Imperative description, < 80 chars                                                                                                                                                                                                         |
+| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                                                                                                                                                                 |
+| `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                                                                                                                                               |
+| `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                                                                                                                                            |
+| `impact`                   | no       | Fibonacci value estimate: `1` / `2` / `3` / `5`, mirroring `size`. Used for value/effort ranking. See **Task size**                                                                                                                        |
+| `status`                   | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done`                                                                                                                                                 |
+| `created`                  | yes      | ISO date                                                                                                                                                                                                                                   |
+| `source_branch`            | yes      | Branch where task was identified                                                                                                                                                                                                           |
+| `source_pr`                | no       | PR number if already open                                                                                                                                                                                                                  |
+| `related_files`            | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research`                                                                                                                                              |
+| `is_blocked_by`            | no       | Slug/id of a blocker, or a list of slugs (`[a, b]`). A single string stays valid. Ready only when **all** blockers resolve                                                                                                                 |
+| `parent`                   | no       | Slug of an epic this task belongs to (grouping, distinct from `is_blocked_by` ordering)                                                                                                                                                    |
+| `tracker_id`               | no       | Tracker issue id recorded when a vetted plan is pushed to a tracker (Linear `PRE-12`, Jira `PLAT-123`, gh-issue `owner/repo#45`). Its presence makes re-push skip the task (create-missing-only). Written by the planned `/push-plan` flow |
+| `tracker_url`              | no       | Web URL of the pushed tracker issue, recorded alongside `tracker_id`                                                                                                                                                                       |
+| `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                                                                                                                                                                  |
+| `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                                                                                                                                                                     |
+| `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                                                                                                                                                                            |
 
 ### Body sections
 
@@ -215,6 +217,8 @@ created: 2026-06-07
 ```
 
 A `plan-with-docs` overview (`<name>_plan.md`) is written as this epic file — see `skills/plan-with-docs/SKILL.md`.
+
+When a plan is pushed to a tracker, the epic file records the grouping container's id (Linear project, Jira epic, gh-issue milestone) in the same optional `tracker_id` / `tracker_url` fields a task uses for its issue id — written by the planned `/push-plan` flow.
 
 **Epic slug.** An epic's slug is its filename stem with a trailing `_plan` removed (so `task_loop_improvements_plan` → `task_loop_improvements`); a standalone epic file not named `*_plan.md` uses its bare stem.
 

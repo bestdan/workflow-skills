@@ -178,6 +178,12 @@ if task_dir.is_dir():
             owner = data.get("owner")
             if owner is not None and (not isinstance(owner, str) or not owner.strip()):
                 err(rel(t), "epic owner must be a non-empty string")
+            # An epic pushed to a tracker (see "plan→tracker sync") records the
+            # grouping container's id the same way a task records its issue id.
+            for field in ("tracker_id", "tracker_url"):
+                v = data.get(field)
+                if v is not None and not isinstance(v, str):
+                    err(rel(t), f"{field} must be a string")
             continue
         for field in ("size", "impact"):
             v = data.get(field)
@@ -199,9 +205,10 @@ if task_dir.is_dir():
             or (isinstance(blk, list) and all(isinstance(x, str) for x in blk))
         ):
             err(rel(t), "is_blocked_by must be a string or a list of strings")
-        # Type-only guard: the content is freeform (a handle, an id, a slug),
-        # but a list/dict here is a YAML authoring slip, like is_blocked_by above.
-        for field in ("assignee", "parent"):
+        # Type-only guard: the content is freeform (a handle, an id, a slug, a
+        # tracker identifier/URL recorded by plan→tracker sync), but a list/dict
+        # here is a YAML authoring slip, like is_blocked_by above.
+        for field in ("assignee", "parent", "tracker_id", "tracker_url"):
             v = data.get(field)
             if v is not None and not isinstance(v, str):
                 err(rel(t), f"{field} must be a string")
