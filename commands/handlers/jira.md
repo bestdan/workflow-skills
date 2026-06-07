@@ -64,3 +64,61 @@ jira:
 5. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.)
 
 This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
+
+## List
+
+Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one `searchJiraIssuesUsingJql` query, no edits, no claims. Renders the configured project's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
+
+> **Coverage note.** `jira` is a capture-only handler in this loop — there is no jira promote/claim/execute flow that sets status labels — so in practice most issues land in `new` (status category To Do) or `done` (status category Done). The status-label mapping below is honored when those labels happen to be present (e.g. set by hand or a board automation), but a plain jira setup renders a two-section `new`/`done` board, which is the expected v1 behavior — exactly like the gh-issue `## List` path.
+
+1. **Preflight.** Reuse the create flow's step 1 preflight: call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP…" / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
+
+2. **Query issues.** Call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql` with:
+   - `cloudId`: `<jira.site>`
+   - `jql`: `project = "<project>"`, plus one `AND labels = "<label>"` clause per entry in `jira.labels` when it is non-empty (AND-joined, so the board shows only issues carrying **all** configured labels — matching the gh-issue handler's per-`--label` AND filter; `labels in (...)` would be OR), then `ORDER BY created DESC`
+   - `fields`: `["summary", "status", "assignee", "priority", "labels", "created"]`
+   - `maxResults`: 50
+
+   The response is an `issues[]` array — each element has `key`, `fields.summary`, `fields.status.statusCategory.key` (`new` / `indeterminate` / `done`), `fields.assignee.displayName` (or `null` when unassigned), `fields.priority.name`, `fields.labels[]` (plain strings), and `fields.created`. Some Atlassian MCP servers wrap the array as `issues.nodes[]` instead (the create flow above reads `issues.nodes[0]`); read whichever key the server returns.
+
+3. **Group into kanban sections.** Classify each issue by its `statusCategory.key` (the coarse split, like gh-issue's open/closed `state`) plus label presence. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
+
+   | Section            | Match rule                                                                                     |
+   | ------------------ | ---------------------------------------------------------------------------------------------- |
+   | `new`              | statusCategory `new`, none of the status labels below present                                  |
+   | `needs_refinement` | statusCategory `new`, has `human-approval-requested`                                           |
+   | `ready`            | statusCategory `new`, has `auto-eligible`                                                      |
+   | `in_progress`      | statusCategory `indeterminate`, no `blocked` or `needs-review` (the default for indeterminate) |
+   | `blocked`          | statusCategory `indeterminate`, has `blocked`                                                  |
+   | `needs_review`     | statusCategory `indeterminate`, has `needs-review`                                             |
+   | `done`             | statusCategory `done` — select the 10 most recent by `created`, then sort per step 4           |
+
+`in_progress` is the default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`. If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+
+4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
+
+   ```
+   - [high] PLAT-142 Fix broken import — assignee dan
+   ```
+
+   Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
+
+   | Field       | Source                                                                                                                                                                                                                                                                                                                 |
+   | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Priority    | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low`. Default scheme: Highest→urgent, High→high, Medium→medium, Low/Lowest→low. `P`-scheme (custom, common): P1→urgent, P2→high, P3→medium, P4→low (match the leading `P<n>`, e.g. `P4-Trivial`). Any other custom name, or no priority, → `[—]`, sort last |
+   | Identifier  | issue `key`                                                                                                                                                                                                                                                                                                            |
+   | Title       | `fields.summary`                                                                                                                                                                                                                                                                                                       |
+   | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                                                                                                                                    |
+   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                                                                                                                                         |
+
+   Sort within each section by priority (`urgent > high > medium > low`, none last), then `created` (oldest first).
+
+5. **Summary line.** Same shape as the file-based path:
+
+   ```
+   8 issues (1 new, 1 needs_refinement, 2 ready, 1 in_progress, 0 blocked, 2 needs_review, 1 done)
+   ```
+
+6. **Filter argument.** If `$ARGUMENTS` is a section name (`new|needs_refinement|ready|in_progress|blocked|needs_review|done|all`), render only that section. Default: every non-empty section.
+
+7. **Empty board.** If the query returns no issues, report `No tasks found in <project>.` rather than erroring.
