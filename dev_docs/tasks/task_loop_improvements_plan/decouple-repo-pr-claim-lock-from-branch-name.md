@@ -8,7 +8,7 @@ source_branch: claude/modest-brown-Q0BH4
 source_pr: 28
 related_files:
   - commands/process-tasks.md
-  - commands/claim-task.md
+  - commands/do-tasks.md
   - skills/task/SKILL.md
 tags:
   - task-loop
@@ -48,15 +48,21 @@ whose linking depends on a specific branch name, but this task is scoped to the
    the branch name. Candidate approaches to evaluate (pick one, document why):
    - **First-writer-wins on `main`:** commit the `ready → in_progress` flip
      directly to `main` and push; the non-fast-forward rejection on the losing
-     push becomes the lock. Visible to every later scanner immediately.
+     push becomes the lock. Visible to every later scanner immediately. **Risk to
+     evaluate:** repos commonly protect `main` (no direct pushes / required PRs),
+     which would block this approach — confirm it degrades or is ruled out where
+     `main` is protected.
    - **Labeled draft PR as the claim marker:** opening a `task-loop` draft PR that
      references the slug is the claim; a pre-claim check queries open `task-loop`
      PRs for that slug and bails if one exists.
    - Any equivalent atomic, branch-name-independent primitive.
 2. Update `commands/process-tasks.md` (CLAIM step + `--local` mode) and
-   `commands/claim-task.md` to use the chosen signal, keeping the existing
-   `task/<slug>` branch convention for environments that _can_ set it (it still
-   aids the merge/done flow) but no longer relying on it for the lock.
+   `commands/do-tasks.md` (which subsumes `/process-tasks` for the `repo-pr`
+   handler) to use the chosen signal, keeping the existing `task/<slug>` branch
+   convention for environments that _can_ set it (it still aids the merge/done
+   flow) but no longer relying on it for the lock. (`commands/claim-task.md` is
+   the tracker path — its claim lock is the `auto-claimed` label, not a branch
+   name — so it is out of scope here.)
 3. Update `skills/task/SKILL.md` (the `/process-tasks` claim description and the
    kanban/coordination notes) to document the new claim semantics and explicitly
    note that the loop is now safe to run from branch-pinned environments.
