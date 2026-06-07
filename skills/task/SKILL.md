@@ -11,7 +11,7 @@ Repo-native system for capturing follow-up work with full context and processing
 
 - User notices incidental work during a feature branch (stale flags, dead code, missing tests)
 - User says "task", "todo", "follow-up", "we should come back to this", "add a task for this"
-- User runs `/add-task` or `/process-tasks`
+- User runs `/add-task`, `/do-tasks`, or `/process-tasks`
 
 ## How it works
 
@@ -58,7 +58,25 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 3. HIGH confidence → flips `status: ready`. LOW confidence → flips `status: needs_refinement` and sets `human_approval_requested: true`
 4. Never touches tasks already past `new` — humans own demotions from `ready`
 
-### Execute: `/process-tasks` vs `/claim-task` — which to use?
+### Execute (`/do-tasks`)
+
+`/do-tasks` is the primary verb for turning ready tasks into PRs. It resolves the
+handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`:
+
+- `/do-tasks` — single highest-ranked dependency-ready task
+- `/do-tasks --all` / `/do-tasks -n N` — batch (remote by default; `--local` caps at 1), bounded by `wip_limit`
+- `/do-tasks --remote` (default) / `/do-tasks --local` — where execution runs
+
+For the `repo-pr` handler it fully subsumes `/process-tasks` (same scan, ranking,
+multi-blocker readiness, WIP cap, and remote/`--local` mechanics). The tracker
+path is being folded in; until then, the `linear` handler defers to `/claim-task`
+(jira/gh-issue have no execute path yet). See `commands/do-tasks.md`.
+
+> `/process-tasks` and `/claim-task` still work and remain the authoritative
+> reference for the file and tracker mechanics respectively (they are removed in a
+> later task). The comparison below documents that underlying split.
+
+#### `/process-tasks` vs `/claim-task` — the underlying split
 
 Two commands turn captured tasks into PRs. Pick before you invoke; they have different shapes:
 
