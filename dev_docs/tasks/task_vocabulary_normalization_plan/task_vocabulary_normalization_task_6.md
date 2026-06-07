@@ -1,8 +1,30 @@
+---
+title: "Consistency sweep: docs, manifests, evals, validator comment"
+priority: medium
+size: 2
+status: done
+created: 2026-06-06
+source_branch: bestdan/refactor/task-vocabulary
+source_pr: 18
+related_files:
+  - README.md
+  - CONTRIBUTING.md
+  - .claude-plugin/plugin.json
+  - .claude-plugin/marketplace.json
+  - scripts/validate.py
+  - evals/manifest.tsv
+  - evals/prompts/task.txt
+  - evals/README.md
+is_blocked_by: task_vocabulary_normalization_task_5
+expires: 2026-07-06
+tags:
+  - refactor
+  - docs
+---
+
 ← [[task_vocabulary_normalization_plan]]
 
-# Step 6 — Consistency sweep (docs, manifests, evals, validator)
-
-## Title
+# Task 6 — Consistency sweep (docs, manifests, evals, validator)
 
 Finish the rename across README, CONTRIBUTING, manifests (with version bump), evals, and the validator comment; assert no stray "todo" remains.
 
@@ -13,7 +35,7 @@ Finish the rename across README, CONTRIBUTING, manifests (with version bump), ev
 - `evals/manifest.tsv:8` has a `todo` row pointing at `prompts/todo.txt`; the eval asserts auto-invocation of the skill by name, so the row must point at `task` / `prompts/task.txt`.
 - `scripts/validate.py:103` has a comment "bundled into the todo skill".
 
-## Changes
+## Task
 
 - `README.md`: `todo`/`todos` → `task`/`tasks`; "repo-native todo loop" → "repo-native task loop"; all command names, `dev_docs/tasks/`, `.task-config.yml`, branch/label references. Preserve the component-count sentence.
 - `CONTRIBUTING.md`: any todo references → task.
@@ -22,7 +44,7 @@ Finish the rename across README, CONTRIBUTING, manifests (with version bump), ev
 - `git mv evals/prompts/todo.txt evals/prompts/task.txt`; `evals/manifest.tsv`: row `todo\tprompts/todo.txt\t6` → `task\tprompts/task.txt\t6`; update the prompt body if it names the old dir/commands (keep it a naive prompt that does not name the skill).
 - `evals/README.md`: any `todo` references → task.
 
-## Acceptance
+## Acceptance Criteria
 
 ### Code-enforced
 
@@ -34,7 +56,3 @@ Finish the rename across README, CONTRIBUTING, manifests (with version bump), ev
 ### User-run
 
 - Trigger the `task` eval locally (`bash scripts/eval.sh task` or per `evals/README.md`) and confirm the naive prompt auto-invokes the renamed `task` skill.
-
-## Dependencies
-
-Steps 1–5 (everything must be renamed before the stray-`todo` assertion can pass).

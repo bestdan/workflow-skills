@@ -10,7 +10,7 @@ related_files:
   - CONTRIBUTING.md
   - README.md
   - .github/PULL_REQUEST_TEMPLATE.md
-is_blocked_by: task_4
+is_blocked_by: evals_and_ci_task_4
 expires: 2026-06-28
 tags:
   - docs

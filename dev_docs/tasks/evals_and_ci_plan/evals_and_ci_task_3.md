@@ -8,7 +8,7 @@ source_branch: bestdan/skills-evals-ci
 source_pr: 15
 related_files:
   - .github/workflows/ci.yml
-is_blocked_by: task_2
+is_blocked_by: evals_and_ci_task_2
 expires: 2026-06-28
 tags:
   - ci

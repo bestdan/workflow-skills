@@ -223,7 +223,7 @@ If a command finds a legacy `dev_docs/todos/` (task store) or `dev_docs/todo/` (
 
 > Found legacy `dev_docs/todos/`. Migrate to `dev_docs/tasks/`? [migrate / skip once]
 
-- **migrate**: `git mv` the directory to `dev_docs/tasks/`, rename `.todo-config.yml` → `.task-config.yml` if present, and report what moved. Leave in-flight branches (`todo/<slug>`) and the `todo-loop` PR label untouched — they are historical and harmless.
+- **migrate**: `dev_docs/tasks/` may already exist (e.g. it holds `plan-with-docs` output), so do **not** `git mv` the legacy directory onto it — that nests the source inside the target (`dev_docs/tasks/todos/`) instead of merging. Instead: `mkdir -p dev_docs/tasks`, then `git mv` each **child** of the legacy directory into `dev_docs/tasks/` (resolving any name collision by keeping both, e.g. suffixing the incoming file), rename `.todo-config.yml` → `.task-config.yml` if present, and remove the now-empty legacy directory. Migrate `dev_docs/todos/` (task store) and `dev_docs/todo/` (plans) the same way, reporting each separately. Leave in-flight branches (`todo/<slug>`) and the `todo-loop` PR label untouched — they are historical and harmless.
 - **skip once**: proceed without migrating and do not re-prompt during this invocation.
 
 ## Race conditions
