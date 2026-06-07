@@ -60,12 +60,19 @@ rest). Each produces one status line plus, on `WARN`/`FAIL`, a remediation hint.
 its `handler:` is a known value (`repo-pr` / `gh-issue` / `jira` / `linear`).
 
 - Absent file, or `handler:` is a known value → `PASS`.
-- Unparseable YAML, or an unknown `handler:` value → `WARN` (judgment call —
-  never auto-rewritten): "Unknown handler `<value>` — run `/task-config` to fix it."
+- Unparseable YAML → `WARN` (judgment call — never auto-rewritten): "`.task-config.yml`
+  is not valid YAML — fix the syntax, or re-run `/task-config` to regenerate it."
+- A parsed but unknown `handler:` value → `WARN`: "Unknown handler `<value>` — run
+  `/task-config` to fix it."
 
-**Check 2 — Handler prerequisites.** For the configured handler, verify the
-prerequisites that handler's own doc requires (reference, don't restate the auth
-flows):
+Either WARN means Check 1 did **not** resolve a known handler — Check 2 keys off that.
+
+**Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
+(invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler
+unresolved — fix Check 1 first") rather than defaulting to `repo-pr` prerequisites,
+which would produce a misleading PASS/WARN. Otherwise, for the resolved handler,
+verify the prerequisites that handler's own doc requires (reference, don't restate
+the auth flows):
 
 - `repo-pr` / `gh-issue` → `gh auth status 2>&1` must succeed (PR/issue creation
   needs it). On a TLS/x509/certificate error, note it's likely the sandbox blocking
@@ -125,14 +132,27 @@ rules from `scripts/validate.py` and applying them yourself.
 - **Expired tasks** — files with `expires` < today while `status` is non-terminal
   (not `done`). These are pruning candidates (see the lifecycle note in
   `skills/task/SKILL.md`). `FAIL`, prunable under `--fix`.
-- **Orphan branches / PRs** — open `task-loop` / `task-claim` branches or PRs with
-  no matching task file, or local `task/<slug>` branches whose work has merged. Query
-  **both** labels (`task-loop` is the review queue; `task-claim` is an in-flight
-  claim that an aborted/crashed session may have orphaned): `gh pr list --label
-  task-loop --state open` **and** `gh pr list --label task-claim --state open`, plus
-  `git branch --list 'task/*'`. `WARN` (deleting someone's in-flight branch is a
-  judgment call) — list them, suggest manual cleanup. Skip this bullet if `gh` is
-  unavailable.
+- **Orphan branches / PRs** — cruft from aborted/crashed sessions. **Do not** use
+  "open PR with no matching task file" as the signal: by design the task file is
+  deleted when the claim PR is converted to the `task-loop` review PR, so an open
+  `task-loop` PR _normally_ has no file (that's the `needs_review` queue — see
+  `commands/list-tasks.md` step 4 and the PR-derived `needs_review` note in
+  `skills/task/SKILL.md`). Flagging those would mark every legitimate in-review PR as
+  an orphan. Instead surface:
+  - **Stale `task-claim` PRs** — an open `task-claim` PR that never advanced to
+    `task-loop` (work finished) or `task-blocked` (parked for a human) is a likely
+    abandoned claim. Query it the same way the Claim protocol does and parse the slug
+    from the **whole-line** `Claims-task: <slug>` marker (or `headRefName == task/<slug>`),
+    not a substring — see the Claim protocol in `commands/handlers/repo-pr-execute.md`:
+    `gh pr list --state open --label task-claim --limit 100 --json number,headRefName,body,updatedAt`.
+    Surface ones untouched for a while (stale `updatedAt`).
+  - **Merged-work local branches** — local `task/<slug>` branches whose PR has already
+    merged or closed (`git branch --list 'task/*'` cross-checked against
+    `gh pr list --state merged|closed`), safe to delete.
+
+  `WARN` only (deleting an in-flight branch/claim is a judgment call) — list them and
+  suggest manual cleanup; never auto-delete, even under `--fix`. Skip this bullet if
+  `gh` is unavailable.
 
 Nothing found → `PASS`.
 
