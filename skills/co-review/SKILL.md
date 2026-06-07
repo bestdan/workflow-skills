@@ -94,7 +94,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 Why this is narrow:
 
 - The `gemini` / `codex` rules are **exact** — they authorize only this one read-only review command with that exact prompt. They do **not** grant arbitrary `gemini -p` or `codex exec` runs, and the `codex` rule pins `--sandbox read-only` into the approved string. Edit the pointer and Claude Code re-prompts, so the approval can't silently come to mean something else.
-- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — all read-only. Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
+- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `/tmp/coreview-input.md` temp file (redirection targets aren't constrained by the rule). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` version uses a different read-only flag, update both.
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
