@@ -88,11 +88,12 @@ legitimately ship with tasks that still need their own sub-plan.
 
    > **`--ready-only` caveat — a held blocker's native link is lost.** If a
    > pushed `ready` task is blocked by a task held back this run, that blocker's
-   > slug isn't in the map yet, so it falls through to the markdown footer (no
-   > native `blockedBy`). Because v1 never updates an existing issue (§6), the
-   > native relationship stays missing even after the held task is pushed later.
-   > **Warn** when this happens so the user can push the whole plan instead if
-   > the native links matter.
+   > slug isn't in the map yet, so it falls through to the markdown footer rather
+   > than the handler's resolved form — no native `blockedBy` on Linear, a slug
+   > instead of `Blocked by: #<number>` on gh-issue. Because v1 never updates an
+   > existing issue (§6), that resolved link stays missing even after the held
+   > task is pushed later. **Warn** when this happens so the user can push the
+   > whole plan instead if the resolved links matter.
 
 Already-pushed tasks (those with a `tracker_id`) are skipped regardless — they
 still appear in the summary as `already pushed (<tracker_id>)`.
@@ -237,7 +238,7 @@ Use the same ordering algorithm as **§4.3** (a task comes after every task it i
 blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
 slug — **warn**). The only difference is the "already an id" shape: for gh-issue
 an `is_blocked_by` entry that is already an issue reference matches
-`/^(\S+#)?\d+$/` (`#142`, `142`, or `owner/repo#142`) and is **not** an ordering
+`/^(\S*#)?\d+$/` (`#142`, `142`, or `owner/repo#142`) and is **not** an ordering
 edge.
 
 ### 5.4 Create issues (reuse `gh-issue.md` create-flow, create-missing-only)
