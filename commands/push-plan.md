@@ -205,11 +205,19 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
 1. If the **epic file** already records a `tracker_id`, reuse that milestone
    (`<number>` for a milestone, or the `plan:<name>` label sentinel from the
    fallback below — honor whichever is recorded).
-2. Else **create** a milestone named after the epic `title`:
+2. Else **look up, then create.** First check whether a milestone with the epic
+   `title` already exists (a manual creation, or a prior run that didn't record
+   the id), and **reuse it** if so — creating it again would 422, which would
+   wrongly trip the label fallback in step 3:
 
    ```bash
+   # Reuse an existing milestone with this title, if any (empty output ⇒ none).
+   gh api "repos/<repo>/milestones?state=all" \
+     --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url}'
+
+   # Only if the lookup returned nothing, create it:
    gh api "repos/<repo>/milestones" -f title="<epic title>" \
-     --jq '{number: .number, url: .html_url}'
+     --jq '{number, url: .html_url}'
    ```
 
    (Use the resolved `<repo>`, or the current repo's `OWNER/NAME` from
@@ -256,9 +264,10 @@ Walk the tasks in topological order. For each:
    matching the Linear `--ready-only` caveat in §3.
 4. **Create the issue** by following `gh-issue.md` steps 2–5 (build body + footer,
    ensure labels, `gh issue create`, return the URL), adding the container from
-   §5.2: `--milestone "<epic title>"` (milestone path) or
-   `--label "plan:<name>"` (fallback path), alongside any configured
-   `gh-issue.labels`.
+   §5.2: `--milestone "<milestone number>"` (milestone path — pass the resolved
+   **number**, not the title, so a title with shell-unsafe characters or a later
+   rename can't break it) or `--label "plan:<name>"` (fallback path), alongside
+   any configured `gh-issue.labels`.
 5. **Record the id back** into the task file's frontmatter: `tracker_id`
    (`owner/repo#<number>`, or `#<number>` when `gh-issue.repo` is unset) and
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map
