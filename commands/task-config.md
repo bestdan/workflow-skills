@@ -10,6 +10,20 @@ Set up the destination handler for `/add-task` in this repo. Writes `dev_docs/ta
 
 This command is a thin dispatcher. The per-handler setup logic (preflight checks, prompts, config block shape) lives in `commands/handlers/<handler>-config.md`. The runtime delivery logic for each handler lives in `commands/handlers/<handler>.md`.
 
+## Handler capability matrix
+
+Handler feature parity is jagged — only `repo-pr` runs the full loop. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
+
+| Verb (command)                                        | `repo-pr` | `gh-issue` | `jira` | `linear` |
+| ----------------------------------------------------- | --------- | ---------- | ------ | -------- |
+| capture (`/add-task`)                                 | yes       | yes        | yes    | yes      |
+| list (`/list-tasks`)                                  | yes       | no         | no     | yes      |
+| promote (`/promote-tasks`)                            | yes       | no         | no     | no       |
+| do — single (`/do-tasks`, `/claim-task`)              | yes       | no         | no     | yes      |
+| process — batch (`/do-tasks --all`, `/process-tasks`) | yes       | no         | no     | no       |
+
+`repo-pr` is the only full-loop handler. `gh-issue` and `jira` are capture-only today; `linear` adds list and single `do` but not promote or batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+
 ## Steps
 
 ### 1. Show current config
@@ -92,5 +106,10 @@ Omit optional keys the user didn't set (the per-handler file already handles thi
 Tell the user:
 
 - Which handler is now configured and where the file lives.
+- **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
+  - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks (and /process-tasks)."
+  - `jira`: "`jira` supports: /add-task. Not supported: /list-tasks, /promote-tasks, /do-tasks. You can still manage these in Jira directly."
+  - `gh-issue`: "`gh-issue` supports: /add-task. Not supported: /list-tasks, /promote-tasks, /do-tasks. You can still manage these in GitHub directly."
+  - `linear`: "`linear` supports: /add-task, /list-tasks, /do-tasks (single). Not supported: /promote-tasks, batch /do-tasks --all. You can still manage these in Linear directly."
 - That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.
 - They can now run `/add-task`, or re-run `/task-config` to switch handlers.
