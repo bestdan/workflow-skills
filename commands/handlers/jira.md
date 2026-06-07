@@ -75,7 +75,7 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
 2. **Query issues.** Call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<jira.site>`
-   - `jql`: `project = "<project>"`, plus `AND labels in (<jira.labels>)` when `jira.labels` is non-empty (comma-joined, each quoted), then `ORDER BY created DESC`
+   - `jql`: `project = "<project>"`, plus one `AND labels = "<label>"` clause per entry in `jira.labels` when it is non-empty (AND-joined, so the board shows only issues carrying **all** configured labels — matching the gh-issue handler's per-`--label` AND filter; `labels in (...)` would be OR), then `ORDER BY created DESC`
    - `fields`: `["summary", "status", "assignee", "priority", "labels", "created"]`
    - `maxResults`: 50
 
@@ -83,17 +83,17 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
 3. **Group into kanban sections.** Classify each issue by its `statusCategory.key` (the coarse split, like gh-issue's open/closed `state`) plus label presence. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
-   | Section            | Match rule                                                                           |
-   | ------------------ | ------------------------------------------------------------------------------------ |
-   | `new`              | statusCategory `new`, none of the status labels below present                        |
-   | `needs_refinement` | statusCategory `new`, has `human-approval-requested`                                 |
-   | `ready`            | statusCategory `new`, has `auto-eligible`                                            |
-   | `in_progress`      | statusCategory `indeterminate`, has `auto-claimed` (or `in-progress`), no `blocked`  |
-   | `blocked`          | statusCategory `indeterminate`, has `blocked`                                        |
-   | `needs_review`     | statusCategory `indeterminate`, has `needs-review`                                   |
-   | `done`             | statusCategory `done` — select the 10 most recent by `created`, then sort per step 4 |
+   | Section            | Match rule                                                                                     |
+   | ------------------ | ---------------------------------------------------------------------------------------------- |
+   | `new`              | statusCategory `new`, none of the status labels below present                                  |
+   | `needs_refinement` | statusCategory `new`, has `human-approval-requested`                                           |
+   | `ready`            | statusCategory `new`, has `auto-eligible`                                                      |
+   | `in_progress`      | statusCategory `indeterminate`, no `blocked` or `needs-review` (the default for indeterminate) |
+   | `blocked`          | statusCategory `indeterminate`, has `blocked`                                                  |
+   | `needs_review`     | statusCategory `indeterminate`, has `needs-review`                                             |
+   | `done`             | statusCategory `done` — select the 10 most recent by `created`, then sort per step 4           |
 
-   An `indeterminate` issue with none of the `in_progress` labels still belongs in `in_progress` (work is underway by definition). If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+`in_progress` is the default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`. If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
 
 4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
