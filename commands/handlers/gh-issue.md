@@ -88,7 +88,7 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
    | `in_progress`      | `open`, has `auto-claimed` (or `in-progress`), no `blocked`                                                                      |
    | `blocked`          | `open`, has `blocked`                                                                                                            |
    | `needs_review`     | `open`, has `needs-review` (best-effort — `gh issue list` does not return linked PRs, so do not call extra tools to detect them) |
-   | `done`             | `closed` — limit to the 10 most recent by `createdAt`                                                                            |
+   | `done`             | `closed` — select the 10 most recent by `createdAt`, then sort per step 4                                                        |
 
    If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
 
@@ -100,13 +100,13 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                         |
-   | ----------- | -------------------------------------------------------------------------------------------------------------- |
-   | Priority    | A `priority:<urgent\|high\|medium\|low>` label if present; otherwise render `[—]` and sort it last in the tier |
-   | Identifier  | `#<number>`                                                                                                    |
-   | Title       | issue `title`                                                                                                  |
-   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                |
-   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when the matching label is present     |
+   | Field       | Source                                                                                                                                         |
+   | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Priority    | A `priority:<urgent\|high\|medium\|low>` label if present; otherwise render `[—]` and sort it last in the tier                                 |
+   | Identifier  | `#<number>`                                                                                                                                    |
+   | Title       | issue `title`                                                                                                                                  |
+   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                |
+   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—` |
 
    Sort within each section by priority (`urgent > high > medium > low`, none last), then `createdAt` (oldest first).
 
