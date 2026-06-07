@@ -82,6 +82,10 @@ def commits_since(ref: str | None) -> list[tuple[str, str, str]]:
         if not record.strip():
             continue
         fields = record.split("\x1f")
+        if len(fields) < 2:
+            # Defensive: our own --format always emits both separators, but skip
+            # anything malformed (e.g. a stray git warning) rather than crash.
+            continue
         short, subject = fields[0], fields[1]
         body = fields[2] if len(fields) > 2 else ""
         commits.append((short.strip(), subject.strip(), body))
@@ -137,13 +141,33 @@ def grouped_notes(commits: list[tuple[str, str, str]]) -> str:
     return "\n\n".join(sections)
 
 
-def set_version(path: Path, old: str, new: str) -> None:
-    """Swap the single `"version": "X.Y.Z"` field, preserving all other bytes."""
-    text = path.read_text()
-    needle = f'"version": "{old}"'
-    if text.count(needle) != 1:
-        sys.exit(f"{path}: expected exactly one {needle!r}, found {text.count(needle)}")
-    path.write_text(text.replace(needle, f'"version": "{new}"'))
+def _write_json(path: Path, data: object) -> None:
+    # 2-space indent matches the repo style; the release workflow runs `dprint
+    # fmt` on these files afterward, so exact byte-formatting need not be perfect.
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def set_versions(name: str, old: str, new: str) -> None:
+    """Update the version in plugin.json (top-level) and the matching
+    marketplace.json plugin entry, parsing JSON rather than string-replacing so
+    an unrelated version string elsewhere can never be touched."""
+    plugin = json.loads(PLUGIN.read_text())
+    if plugin.get("version") != old:
+        sys.exit(f"{PLUGIN}: expected version {old!r}, found {plugin.get('version')!r}")
+    plugin["version"] = new
+    _write_json(PLUGIN, plugin)
+
+    market = json.loads(MARKET.read_text())
+    entry = next((p for p in market.get("plugins", []) if p.get("name") == name), None)
+    if entry is None:
+        sys.exit(f"{MARKET}: no plugin entry named {name!r}")
+    if entry.get("version") != old:
+        sys.exit(
+            f"{MARKET}: entry {name!r} expected version {old!r}, "
+            f"found {entry.get('version')!r}"
+        )
+    entry["version"] = new
+    _write_json(MARKET, market)
 
 
 def update_changelog(version: str, notes: str) -> None:
@@ -172,7 +196,9 @@ def emit_output(bumped: bool, old: str, new: str) -> None:
 
 def main(argv: list[str]) -> int:
     apply = "--apply" in argv
-    current = json.loads(PLUGIN.read_text())["version"]
+    plugin = json.loads(PLUGIN.read_text())
+    name = plugin["name"]
+    current = plugin["version"]
     if not SEMVER_RE.match(current):
         sys.exit(f"{PLUGIN}: version {current!r} is not plain X.Y.Z")
 
@@ -202,8 +228,7 @@ def main(argv: list[str]) -> int:
     print(notes)
 
     if apply:
-        set_version(PLUGIN, current, new)
-        set_version(MARKET, current, new)
+        set_versions(name, current, new)
         update_changelog(new, notes)
         notes_file = os.environ.get("RELEASE_NOTES_FILE")
         if notes_file:
