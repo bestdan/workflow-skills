@@ -37,7 +37,7 @@ Main tradeoff considered: bundling all format fields into one task (chosen — t
 1. [[task_1]] — Extend the canonical task frontmatter schema (`assignee`, `impact`, `parent`, list-valued `is_blocked_by`) + update validator.
 2. [[task_2]] — Value/effort ranking in `/process-tasks` & `/list-tasks`; surface `assignee`. (after 1)
 3. [[task_3]] — Multi-blocker dependency semantics across scan/list/process. (after 1)
-4. [[task_4]] — Epic hierarchy: `parent` field + `_plan/` as epic + rollup in `/list-tasks`. (after 1)
+4. [[task_4]] — Epic hierarchy: first-class `type: epic` file + `parent` field + rollup in `/list-tasks`. (after 1)
 5. [[task_5]] — WIP limit on batch dispatch in `/process-tasks --all`.
 6. [[task_6]] — Handler capability warnings at `/task-config`.
 7. [[task_7]] — Model-judgment scope check in `/promote-tasks`.

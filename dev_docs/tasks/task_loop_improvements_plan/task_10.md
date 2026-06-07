@@ -11,8 +11,8 @@ related_files:
   - skills/task/SKILL.md
   - commands/handlers/repo-pr.md
 is_blocked_by:
-  - wip-limit-batch
-  - multi-blocker-deps
+  - task_5
+  - task_3
 tags:
   - task-loop
   - do-tasks

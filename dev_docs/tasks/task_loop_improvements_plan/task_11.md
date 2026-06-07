@@ -10,7 +10,7 @@ related_files:
   - commands/claim-task.md
   - commands/handlers/linear-claim.md
   - commands/handlers/linear-common.md
-is_blocked_by: do-tasks-file-path
+is_blocked_by: task_10
 tags:
   - task-loop
   - do-tasks

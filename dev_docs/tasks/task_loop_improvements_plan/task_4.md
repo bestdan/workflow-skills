@@ -9,7 +9,7 @@ related_files:
   - skills/task/SKILL.md
   - commands/list-tasks.md
   - skills/plan-with-docs/SKILL.md
-is_blocked_by: task-format-schema
+is_blocked_by: task_1
 tags:
   - task-loop
   - epics

@@ -12,8 +12,8 @@ related_files:
   - skills/task/SKILL.md
   - README.md
 is_blocked_by:
-  - do-tasks-file-path
-  - do-tasks-tracker-path
+  - task_10
+  - task_11
 tags:
   - task-loop
   - do-tasks

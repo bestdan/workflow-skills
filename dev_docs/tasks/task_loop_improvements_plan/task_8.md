@@ -10,7 +10,7 @@ related_files:
   - commands/handlers/linear-common.md
   - commands/handlers/linear-add.md
   - commands/handlers/linear-list.md
-is_blocked_by: promote-scope-judgment
+is_blocked_by: task_7
 tags:
   - task-loop
   - handlers

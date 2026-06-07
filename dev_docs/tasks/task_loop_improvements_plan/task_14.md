@@ -11,7 +11,7 @@ related_files:
   - commands/handlers/linear-add.md
   - commands/handlers/jira.md
   - commands/handlers/gh-issue.md
-is_blocked_by: plan-tracker-sync-design
+is_blocked_by: task_13
 tags:
   - task-loop
   - planning
