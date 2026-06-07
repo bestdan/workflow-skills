@@ -167,7 +167,13 @@ The remaining steps depend on disposition.
 
 11. **Wait for the user's answers** on the medium items. Apply the ones they say yes to.
 
-12. **Stop short of commit/push.** Summarize what changed; let the user trigger the next step.
+12. **Commit and push the changes.** Once the fixes are applied and verified, commit them and push to the current branch's upstream:
+    - **Never commit/push to the default branch.** If the current branch is the repo's default branch (`main`/`master`), stop and tell the user to move the fixes onto a feature branch first — don't auto-commit or push review fixes straight to the default branch.
+    - Stage only the files you changed as part of the review fixes — don't sweep in unrelated work that was already in the working tree.
+    - Write a concise commit message describing the review fixes (e.g., `Apply co-review fixes`), summarizing the items addressed.
+    - Push the current branch. If it already has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` succeeds), a plain `git push` is enough. Otherwise set one explicitly against the branch's intended remote — `git push -u <remote> HEAD`, where `<remote>` is the configured remote (default `origin`, but don't assume it: fall back to whatever `git remote` reports if `origin` isn't present).
+    - If there are no committable changes (nothing was auto-fixed and the user approved nothing), skip this step.
+    - Then summarize what changed and confirm the commit/push.
 
 **`--post` disposition (someone else's PR):**
 
