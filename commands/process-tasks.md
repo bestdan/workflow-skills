@@ -33,7 +33,7 @@ Parse YAML frontmatter from each file. Filter to `status: ready`. Sort by:
 
 Treat `is_blocked_by` as a reference to another task's slug, **or a list of slugs** (`[a, b]`). A single string behaves exactly as a one-element list. Each slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. A task is dependency-ready only when **all** of its blockers are satisfied; if any referenced blocker file still exists in another state, the dependent task must not be dispatched yet. When reporting a blocked task, list **every** unresolved blocker (e.g. `waiting on b, c`).
 
-If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blocker each one is waiting for.
+If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blockers each one is waiting for.
 
 ### 2. Select tasks to process
 

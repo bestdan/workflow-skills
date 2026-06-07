@@ -72,7 +72,7 @@ Two commands turn captured tasks into PRs. Pick before you invoke; they have dif
 
 #### Process (`/process-tasks`)
 
-1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is ready only when **every** blocker is resolved)
+1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is dependency-ready only when **every** blocker is resolved)
 2. For each selected task, dispatches a remote Claude session that:
    - Claims the task (branch `task/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
