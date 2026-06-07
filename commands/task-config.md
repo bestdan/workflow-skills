@@ -14,15 +14,17 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 Handler feature parity is jagged — only `repo-pr` runs the full loop. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
-| Verb (command)                                        | `repo-pr` | `gh-issue` | `jira` | `linear` |
-| ----------------------------------------------------- | --------- | ---------- | ------ | -------- |
-| capture (`/add-task`)                                 | yes       | yes        | yes    | yes      |
-| list (`/list-tasks`)                                  | yes       | no         | no     | yes      |
-| promote (`/promote-tasks`)                            | yes       | no         | no     | no       |
-| do — single (`/do-tasks`, `/claim-task`)              | yes       | no         | no     | yes      |
-| process — batch (`/do-tasks --all`, `/process-tasks`) | yes       | no         | no     | no       |
+| Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
+| ----------------------------------- | --------- | ---------- | ------ | -------- |
+| capture (`/add-task`)               | yes       | yes        | yes    | yes      |
+| list (`/list-tasks`)                | yes       | no         | no     | yes      |
+| promote (`/promote-tasks`)          | yes       | no         | no     | no       |
+| do — single (`/do-tasks`)           | yes       | no         | no     | yes      |
+| process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
 
 `repo-pr` is the only full-loop handler. `gh-issue` and `jira` are capture-only today; `linear` adds list and single `do` but not promote or batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+
+`/claim-task` and `/process-tasks` are the legacy execute commands being folded into `/do-tasks` (see [[task_12]]): `/claim-task` is the Linear-only spelling of single `do` (it **stops** on `repo-pr`/`gh-issue`/`jira` — use `/do-tasks` there), and `/process-tasks` is the file/`repo-pr` batch spelling (same support as `/do-tasks --all`). Both are slated for removal in favor of `/do-tasks`.
 
 ## Steps
 

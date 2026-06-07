@@ -46,7 +46,7 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 
 ## Adding a handler
 
-When you add a task handler or teach an existing one a new verb (list, promote, do, process), update the **handler capability matrix** in `commands/task-config.md` in the same PR — it's the single source of truth that `/task-config` reads to warn users about capability gaps, and it drifts silently if you don't.
+When you add a task handler or teach an existing one a new verb (capture, list, promote, do, process), update the **handler capability matrix** in `commands/task-config.md` in the same PR — it's the single source of truth that `/task-config` reads to warn users about capability gaps, and it drifts silently if you don't.
 
 ## Versioning
 
