@@ -2,7 +2,7 @@
 title: Replace keyword scope-check in /promote-tasks with model judgment
 priority: medium
 size: 2
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:
