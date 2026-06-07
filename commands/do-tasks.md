@@ -1,5 +1,5 @@
 ---
-description: Execute dependency-ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs (file/repo-pr today; tracker path arriving)
+description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit
 argument-hint: "[slug | --all | -n N] [--remote|--local]"
 ---
