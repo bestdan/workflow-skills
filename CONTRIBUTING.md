@@ -50,8 +50,70 @@ When you add a task handler or teach an existing one a new verb (capture, list, 
 
 ## Versioning
 
-Bump `plugin.json` `version` **and** the matching `marketplace.json` plugin-entry
-`version` together — `validate.py` fails if they drift.
+Versions are **bumped automatically on merge to `main`** by the **Release**
+workflow (`.github/workflows/release.yml`), driven by
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+| Commit type on a merged commit         | Bump    |
+| -------------------------------------- | ------- |
+| `feat:`                                | `minor` |
+| `fix:` / `perf:`                       | `patch` |
+| `BREAKING CHANGE` in body, or `type!:` | `major` |
+| `chore:`, `docs:`, `ci:`, `test:`, …   | none    |
+
+A merge that contains only no-bump types ships **no release** — that's the
+"meaningful changes only" filter. When a bump is due, the workflow updates
+`plugin.json` **and** the matching `marketplace.json` entry together (kept in
+sync as plain `X.Y.Z` — `validate.py` rejects a `v` prefix), prepends a grouped
+`CHANGELOG.md` section, pushes a `chore: release vX.Y.Z [skip ci]` commit, tags
+`vX.Y.Z`, and publishes a GitHub Release.
+
+Preview what the next merge would do, locally and without writing anything:
+
+```sh
+just bump-preview   # python3 scripts/bump-version.py
+```
+
+The version/changelog math lives in `scripts/bump-version.py`; the workflow only
+commits, tags, and publishes. To force a specific version, you can still bump
+both manifest fields by hand in a normal PR — just keep them equal.
+
+### One-time setup: release token (required — `main` is protected)
+
+`main` is a protected branch, and the built-in `GITHUB_TOKEN` **cannot** be added
+to a branch bypass list. So the workflow pushes the release commit with a
+fine-grained PAT exposed as the `RELEASE_TOKEN` secret. Without it the release
+push is rejected and the workflow fails. Set it up once:
+
+1. **Create the PAT** — GitHub → **Settings → Developer settings → Personal
+   access tokens → Fine-grained tokens → Generate new token**:
+   - **Resource owner** `bestdan`; **Repository access → Only select
+     repositories → `workflow-skills`**.
+   - **Permissions → Repository permissions → Contents: Read and write** (add
+     **Workflows: Read and write** only if a release ever needs to modify files
+     under `.github/workflows/`). Nothing else.
+   - Pick an expiry, **Generate**, and copy the value.
+2. **Store it as a secret** — repo **Settings → Secrets and variables → Actions
+   → New repository secret**: name `RELEASE_TOKEN`, paste the value.
+3. **Put the token's owner on the bypass list** so its pushes skip the PR/status
+   requirements on `main`:
+   - **Rulesets:** Settings → **Rules → Rulesets** → open the `main` ruleset →
+     **Bypass list → Add bypass → Repository admin** (or add your user) → Save.
+   - **Classic branch protection:** edit the `main` rule → under _Require a pull
+     request before merging_ enable **Allow specified actors to bypass required
+     pull requests** and add yourself; leave **Allow administrators to bypass**
+     on so required status checks don't block the push.
+
+The token acts as you (an admin), so admin bypass covers it. Renew the secret
+before the PAT expires, or releases start failing. Note PAT pushes **do**
+re-trigger workflows — that's why the release commit carries `[skip ci]` and the
+job's `if:` guard exists; both are load-bearing here.
+
+### One-time: the first run seeds a baseline
+
+With no `v*` tag yet, the first qualifying merge only creates a
+`v<current-version>` tag (no bump); every merge after that has a boundary to diff
+against and bumps normally.
 
 ## Behavioral evals
 
