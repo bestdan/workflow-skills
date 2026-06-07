@@ -1,7 +1,7 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear
-argument-hint: "[slug | --all | -n N] [--remote|--local]"
+argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim]"
 ---
 
 # Do Tasks
@@ -26,16 +26,60 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --all` — execute dependency-ready tasks up to the WIP limit, holding the overflow
 - `/do-tasks -n N` — dispatch up to `N` tasks, **each to its own session (one task per session)**, bounded by the WIP limit
 - `/do-tasks --remote` / `/do-tasks --local` — choose where execution runs (default: remote dispatch)
+- `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
+- `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 
-**Scope of `--all` / `-n N`.** Batch is meaningful only for **remote** dispatch
-(each task gets its own cloud VM). Foreground pairing is inherently single, so
-`--local` caps the **batch** (`--all` / `-n N`) at **1** — it processes the single
-highest-ranked task and reports the rest as held. `/do-tasks <slug> --local` still
-runs the named slug.
+**Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
+dispatch (each task gets its own cloud VM). Foreground pairing is inherently
+single, so `--local` caps the **batch** (`--all` / `-n N`) at **1** — it processes
+the single highest-ranked task and reports the rest as held. `/do-tasks <slug>
+--local` still runs the named slug. (Batch _claiming_ is the one exception —
+`--claim-only` reserves without executing, so it batches regardless; see the
+Claim / execute split below.)
 
 For the **tracker** (`linear`) handler, execution is single and foreground
 (it runs in the current session): `--remote`/`--local` do not apply, and `--all` /
-`-n N` degrades to a single claim with a one-line note. See section 3.
+`-n N` degrades to a single claim with a one-line note (except with `--claim-only`,
+which is batchable — see below). See section 3.
+
+### Claim / execute split (`--claim-only`, `--no-claim`)
+
+`/do-tasks` is atomic by default — it **claims** a task (reserve it, move it to
+in-progress) and then **executes** it (do the work, open a PR) in one step. These
+two flags expose the claim and execute halves as composable steps, so a claim now
+plus a `--no-claim` execute later (by a different actor, or after a resume) add up
+to one normal run. The flags are **mutually exclusive** — passing both is an
+error: stop and ask which one was meant.
+
+- **default** (neither flag) — atomic claim + execute, unchanged.
+- **`--claim-only`** — run the claim step and **stop**: no execution, no PR.
+  - `repo-pr`: branch `task/<slug>`, flip the file `status: ready → in_progress`,
+    commit, and push (the claim half of `commands/handlers/repo-pr-execute.md`).
+    Do **not** delete the file or open a PR.
+  - `linear`: run only "Claim the issue" in `commands/handlers/linear-claim.md`
+    (the atomic `auto-claimed` guard, move to the `started`-type state, record the
+    branch name), then stop before "Branch + execute".
+- **`--no-claim`** — skip the claim step and execute a task this caller has
+  **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
+  no default selection, since the target is a specific already-claimed task, not
+  the highest-ranked ready one. Guard: proceed only when that task is already
+  claimed by this caller — `status: in_progress` (`repo-pr`) or assigned to the
+  caller in a `started`-type state (`linear`). Otherwise **stop and explain** —
+  executing an unclaimed task reopens the race the claim step closes. When the
+  guard passes, **first check out the existing claim branch** (the claim step
+  already created and pushed it; `git fetch` it if it is not present locally) — do
+  **not** branch fresh from the current `HEAD`, which is usually the base branch:
+  - `repo-pr`: `git checkout task/<slug>`, then do the work, validate, delete the
+    file, commit, push, and open the PR (per `repo-pr-execute.md`).
+  - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
+    PR, and "Move to review on PR open" (per `linear-claim.md`) — without
+    re-claiming.
+
+**Batching.** `--claim-only` is the one execute-family action safe to batch — it
+runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
+dependency-ready tasks at once, bounded by the WIP gate (the file path's WIP cap or
+the tracker pre-claim gate). `--no-claim` is always **single**: it resumes one
+already-claimed task, so `--all` / `-n N` do not apply to it.
 
 ## 1. Resolve the handler
 
@@ -123,10 +167,13 @@ phases in the **current session**. If the relative paths don't resolve, find the
 with **Glob** (`**/commands/handlers/linear-claim.md`,
 `**/commands/handlers/linear-common.md`).
 
-**Single by nature.** Tracker execution is foreground, so `--remote`/`--local` do
-not apply and `--all` / `-n N` is **not supported** — a batch flag degrades to a
-single claim with a one-line note ("batch isn't supported for tracker handlers;
-claiming one issue"). `/do-tasks <identifier>` (a specific Linear id, e.g.
+**Single by nature.** Tracker _execution_ is foreground, so `--remote`/`--local`
+do not apply and `--all` / `-n N` is **not supported for execution** — a batch flag
+on a normal (claim+execute) or `--no-claim` run degrades to a single claim/resume
+with a one-line note ("batch isn't supported for tracker handlers; claiming one
+issue"). The exception is `--claim-only`: reserving an issue runs no foreground
+work, so `--all` / `-n N --claim-only` may claim several issues at once, bounded by
+the pre-claim WIP gate below. `/do-tasks <identifier>` (a specific Linear id, e.g.
 `PRE-12`) claims that one issue.
 
 ### Pre-claim WIP gate

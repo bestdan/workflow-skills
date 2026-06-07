@@ -72,15 +72,19 @@ Flag matrix:
 | `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)     |
 | `--remote` (default) | dispatch each task to its own cloud VM (file path)                            |
 | `--local`            | run in the current session; caps the batch at 1 (file path)                   |
+| `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable    |
+| `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only  |
+
+**Claim / execute split (`--claim-only`, `--no-claim`).** `/do-tasks` claims and executes atomically by default. These two **mutually exclusive** flags split that into composable steps so a claim now plus a `--no-claim` execute later add up to one normal run. `--claim-only` runs the claim half and stops (`repo-pr`: branch `task/<slug>`, flip `status: ready → in_progress`, commit, push — no file delete, no PR; `linear`: run only "Claim the issue" — the atomic `auto-claimed` guard, move to the `started`-type state, record the branch name — then stop). `--no-claim` skips claiming and executes a task the caller already claimed, guarding that it is already `in_progress` (`repo-pr`) or assigned to the caller in a `started` state (`linear`) — otherwise it stops, since executing an unclaimed task reopens the claim race. `--claim-only` is the one execute-family action safe to batch (`--all` / `-n N`, bounded by the WIP gate); `--no-claim` is always single. See `commands/do-tasks.md`.
 
 Per-handler support:
 
-|                   | `repo-pr` (file path)                                    | `linear` (tracker path)                                    |
-| ----------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
-| Where it runs     | **Remote** cloud agents (one per task), or `--local`     | **Foreground** in the current session                      |
-| How many per call | Batch — one, several, or all dependency-ready (`--all`)  | At most one (`--all` / `-n N` degrade to a single claim)   |
-| Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?" |
-| WIP cap           | Batch dispatch bounded by `wip_limit`                    | Pre-claim gate: declines if in-flight work ≥ `wip_limit`   |
+|                   | `repo-pr` (file path)                                    | `linear` (tracker path)                                                                           |
+| ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Where it runs     | **Remote** cloud agents (one per task), or `--local`     | **Foreground** in the current session                                                             |
+| How many per call | Batch — one, several, or all dependency-ready (`--all`)  | At most one for execution; `--all` / `-n N --claim-only` may reserve several (pre-claim WIP gate) |
+| Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?"                                        |
+| WIP cap           | Batch dispatch bounded by `wip_limit`                    | Pre-claim gate: declines if in-flight work ≥ `wip_limit`                                          |
 
 **File path (`repo-pr`).** See `commands/handlers/repo-pr-execute.md`.
 
