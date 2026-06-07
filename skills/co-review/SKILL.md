@@ -69,7 +69,7 @@ These agents must be constrained to **read-only**: they should emit a review and
 
 ## Permissions (approve once)
 
-The reviewer prompt changes every run (it's tailored per diff), so "always allow" on the **exact command** never sticks — the literal string never recurs. The fix is a one-time **prefix rule** per reviewer, since Claude Code matches each pipe segment independently and `:*` matches any trailing prompt. Add these to `~/.claude/settings.json` (user-wide) or the repo's `.claude/settings.json` once:
+The reviewer prompt changes every run (it's tailored per diff), so "always allow" on the **exact command** never sticks — the literal string never recurs. The fix is a one-time **prefix rule** per reviewer, since Claude Code matches each pipe segment independently and `:*` matches any trailing prompt. Merge these into the `permissions.allow` array in `~/.claude/settings.json` (user-wide) or the repo's `.claude/settings.json` once — don't overwrite an existing settings file:
 
 ```json
 {
@@ -83,7 +83,7 @@ The reviewer prompt changes every run (it's tailored per diff), so "always allow
 }
 ```
 
-Only add the rules for the reviewers you actually use. These cover the built-in invocations regardless of PR number or prompt text. They do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
+Only add the rules for the reviewers you actually use. These cover the built-in invocations regardless of PR number or prompt text. Note that `Bash(codex exec:*)` auto-approves **any** `codex exec` run, not only the read-only one above — if your `codex` version exposes a stable sandbox flag, scope the rule to it (e.g. `Bash(codex exec --sandbox read-only:*)`) rather than the bare prefix. They do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
 ## Steps
 
