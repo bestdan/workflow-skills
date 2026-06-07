@@ -32,13 +32,23 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
 
    ```yaml
    handler: repo-pr
-   # wip_limit: 3   # optional — caps how many tasks /do-tasks --all dispatches at once
+   # wip_limit: 3            # optional — caps how many tasks /do-tasks --all dispatches at once
+   # auto_execute_max_size: 2 # optional — batch auto-routing: auto-execute size <= this, reserve bigger for a human
    ```
 
-   The only configurable setting is `wip_limit` (default `3`). It bounds batch
-   dispatch: `/do-tasks --all` counts work already in flight — tasks with
-   `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) —
-   and dispatches only up to `wip_limit - current_wip` tasks, holding the rest.
-   This keeps the human PR-review bottleneck from being flooded. Omit the key to
-   accept the default of `3`; single-task dispatch (`/do-tasks` or
-   `/do-tasks <slug>`) ignores it.
+   Two optional settings:
+
+   - **`wip_limit`** (default `3`) bounds batch dispatch: `/do-tasks --all` counts
+     work already in flight — tasks with `status: in_progress` plus open
+     `task-loop` PRs (the `needs_review` queue) — and dispatches only up to
+     `wip_limit - current_wip` tasks, holding the rest. This keeps the human
+     PR-review bottleneck from being flooded.
+   - **`auto_execute_max_size`** (default `2`) size-gates batch auto-routing in
+     `/do-tasks --all` / `-n N`: after ranking and the WIP gate, tasks with
+     `size <= auto_execute_max_size` are claimed and executed, while bigger ones
+     (`size > auto_execute_max_size`) are **reserved** (`--claim-only` semantics —
+     claimed but not executed) for a human to pick up. The default of `2`
+     auto-does size `1`–`2` and reserves size `3`+. Omit the key to accept it.
+
+   Omit either key to accept its default. Single-task dispatch (`/do-tasks` or
+   `/do-tasks <slug>`) ignores both — an explicit pick is always executed in full.

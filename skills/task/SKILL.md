@@ -31,12 +31,15 @@ The delivery destination is a **handler** named in a repo-committed config file,
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
 wip_limit: 3 # optional — bounds /do-tasks in-flight work (repo-pr batch dispatch + linear pre-claim gate); default 3
+auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute size <= this, reserve bigger for a human; default 2
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
 `wip_limit` (default `3`) bounds in-flight work for `/do-tasks` on both execute paths. On the `repo-pr` file path it caps **batch** dispatch: `/do-tasks --all` counts current work-in-flight — tasks with `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded (single-task dispatch is ungated). On the `linear` tracker path it is a **pre-claim gate** that declines a claim — including a single claim — when in-flight work already meets the limit. See `commands/handlers/repo-pr-config.md`.
+
+`auto_execute_max_size` (default `2`, `repo-pr` only) size-gates the **batch** auto-routing for `/do-tasks --all` / `-n N`: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless), while bigger ones are **reserved** (`--claim-only` semantics — claimed but not executed) for a human to resume with `/do-tasks <slug> --no-claim`. This turns the small-vs-big triage into a policy instead of a manual sort. Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — an explicit pick is always executed in full — and explicit `--claim-only` / `--no-claim` override the gate. See `commands/handlers/repo-pr-config.md`.
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
@@ -93,7 +96,7 @@ Per-handler support:
    - Claims the task (branch `task/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
    - Deletes the task file and opens a PR labeled `task-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
-3. `--all` / `-n N` dispatch multiple dependency-ready tasks, each to its own cloud VM, bounded by `wip_limit`.
+3. `--all` / `-n N` dispatch multiple dependency-ready tasks, each to its own cloud VM, bounded by `wip_limit` and then size-routed: tasks with `size <= auto_execute_max_size` (default `2`) execute, bigger ones are reserved (claimed, not executed) for a human. The executed and reserved groups are reported separately.
 
 **Tracker path (`linear`).** See `commands/handlers/linear-claim.md`. Pulls one tracker-side issue the current session can plausibly finish, claims it, branches, executes, and opens a PR — all in the foreground.
 
