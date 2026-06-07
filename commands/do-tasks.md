@@ -1,6 +1,6 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__get_user, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__create_issue_label, mcp__linear__save_comment, mcp__linear__get_user
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear
 argument-hint: "[slug | --all | -n N] [--remote|--local]"
 ---
 
