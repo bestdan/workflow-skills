@@ -31,7 +31,7 @@ Flag equivalences to fold into `/do-tasks` so no capability is lost: `/process-t
 
 ## Task
 
-1. **Relocate before deleting — these files hold content nothing else does.** `/do-tasks` currently *references* `commands/process-tasks.md` and `commands/claim-task.md` for orchestration that does **not** live in the surviving handler docs (`commands/handlers/*`). Before `git rm`, move that content into a survivor so nothing is lost:
+1. **Relocate before deleting — these files hold content nothing else does.** `/do-tasks` currently _references_ `commands/process-tasks.md` and `commands/claim-task.md` for orchestration that does **not** live in the surviving handler docs (`commands/handlers/*`). Before `git rm`, move that content into a survivor so nothing is lost:
    - **File path:** `do-tasks.md` §2 defers to `process-tasks.md` for the scan/rank/multi-blocker/WIP/remote-dispatch-prompt/`--local` mechanics. Inline those into `do-tasks.md` §2 (or a new `commands/handlers/repo-pr-execute.md`) so §2 stands alone.
    - **Tracker path:** `do-tasks.md` §3 cites "`/claim-task` step 4" (the feasibility-judgment criteria — concrete-outcome / files-identifiable / <1hr / needs-a-product-call questions) and "`/claim-task` step 9" (the success/bail report format). `commands/handlers/linear-claim.md` does **not** contain these — it stops at find-candidates/claim/move-to-review/bail mechanics. Move the feasibility criteria and report format into `do-tasks.md` §3 (or into `linear-claim.md`) so the step pointers can be dropped, not just renamed.
 2. Delete `commands/process-tasks.md` and `commands/claim-task.md` (`git rm`). Confirm `/do-tasks` covers every flag they had (`--all`, `--local`, `<slug>`/`<id>`); add any missing flag to `/do-tasks` first.
