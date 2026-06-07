@@ -34,10 +34,11 @@ record the created ids back into the files (idempotency).
 cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
 ```
 
-- File absent, or `handler: repo-pr` → **no-op**. Print exactly: `repo-pr
-  handler: plans already live as task files — no external tracker to push to`
-  and **stop**. For this handler the task files _are_ the destination (they land
-  via the user's normal commit/PR), so there is nothing to sync.
+- File absent, no `handler:` key, or `handler: repo-pr` → **no-op** (same default
+  resolution as `/add-task`). Print exactly this one line and **stop**:
+  `repo-pr handler: plans already live as task files — no external tracker to push to`.
+  For this handler the task files _are_ the destination (they land via the user's
+  normal commit/PR), so there is nothing to sync.
 - `handler: linear` → run the Linear push flow (sections 2–5 below).
 - `handler: jira | gh-issue` → **stop**: "`/push-plan` does not yet support the
   `<handler>` handler — only `linear` and the `repo-pr` no-op are implemented.
@@ -50,13 +51,19 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 
 1. Resolve the plan directory from `<name>`: `dev_docs/tasks/<name>_plan/` under
    the repo root. If `<name>` already ends in `_plan`, don't double it. If the
-   directory doesn't exist, **stop** and list the plan directories that do
-   (`find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -maxdepth 1 -type d
-   -name '*_plan'`).
+   directory doesn't exist, **stop** and list the plan directories that do:
+
+   ```bash
+   find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -maxdepth 1 -type d -name '*_plan'
+   ```
 2. Find every `*.md` under the plan directory (recurse into `phase_N/` folders).
    Split each into (frontmatter, body).
    - The **epic file** is the one with `type: epic` (normally `<name>_plan.md`).
-     It is the container, **not** a task — never create an issue for it.
+     It is the container, **not** a task — never create an issue for it. If **no**
+     file has `type: epic`, **stop** and report it (a plan needs an overview epic
+     to map to the tracker container). If **multiple** do, prefer the one named
+     `<name>_plan.md`; if none matches that name, **stop** and report the
+     ambiguity rather than guessing.
    - **Task files** are the rest with parseable frontmatter. Files with no
      frontmatter are not task cards — skip them.
 
@@ -77,6 +84,14 @@ legitimately ship with tasks that still need their own sub-plan.
    further breakdown as long as its gap is recorded — and they're echoed back as
    the follow-up set in the report. With `--ready-only`, push just the `ready`
    subset; the held tasks land on a later re-push (safe, create-missing-only).
+
+   > **`--ready-only` caveat — a held blocker's native link is lost.** If a
+   > pushed `ready` task is blocked by a task held back this run, that blocker's
+   > slug isn't in the map yet, so it falls through to the markdown footer (no
+   > native `blockedBy`). Because v1 never updates an existing issue (§5), the
+   > native relationship stays missing even after the held task is pushed later.
+   > **Warn** when this happens so the user can push the whole plan instead if
+   > the native links matter.
 
 Already-pushed tasks (those with a `tracker_id`) are skipped regardless — they
 still appear in the summary as `already pushed (<tracker_id>)`.
@@ -113,10 +128,14 @@ file's frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`). Cases
 Push in dependency order so every blocker is created before its dependents (spike
 §3.3). Build the order from `is_blocked_by` (a string or a list — honor both):
 a task comes after every task it is blocked by. Restrict edges to **slugs that
-name another task file in this plan** — entries that are already tracker ids or
-point outside the plan are not ordering edges here. If the dependencies contain a
-**cycle**, that's a plan bug — **stop** and report the cycle (the slugs
-involved); do not push a partial order.
+name another task file in this plan** — entries that are already tracker ids
+(`/^[A-Z]+-\d+$/`) or point outside the plan are not ordering edges here. A bare
+slug (not a tracker id) that matches **no** task file in the plan is almost always
+a typo of an in-plan slug, not a real external reference — **warn** (name the
+offending slug and the task that references it) so a misspelled blocker isn't
+silently dropped to a footer in §4.4. If the dependencies contain a **cycle**,
+that's a plan bug — **stop** and report the cycle (the slugs involved); do not
+push a partial order.
 
 ### 4.4 Create issues (reuse `linear-add.md`, create-missing-only)
 
@@ -136,17 +155,20 @@ Walk the tasks in topological order. For each:
    step 5 (`title`, `body` = the Context/Task/Acceptance markdown, `priority`,
    `size`, `tags`, `source_branch`, `source_pr`, `related_files`,
    `is_blocked_by`). **Translate `is_blocked_by` through the map before handing it
-   off:** rewrite each entry that names a plan task to that task's tracker id;
-   **pass through unchanged** any entry that already matches `/^[A-Z]+-\d+$/` or
-   isn't in the map (an external/manual reference) — never fail on those.
+   off, preserving its shape:** rewrite each entry that names a plan task to that
+   task's tracker id; **pass through unchanged** any entry that already matches
+   `/^[A-Z]+-\d+$/` or isn't in the map (an external/manual reference) — never
+   fail on those. A single-value `is_blocked_by` stays a single value; a list
+   stays a list (each entry translated independently), so a task with **multiple**
+   blockers hands off a list of resolved ids.
 4. **Create the issue** by following `commands/handlers/linear-add.md` steps 3–5
    (compose description, `save_issue`, return the url) with the resolved team and
    the **container project id from §4.2**. Because the container is already
    resolved here, **skip `linear-add.md` step 2's project prompt** — pass the
-   project id directly. `linear-add` already renders a native `blockedBy`
-   relationship when an `is_blocked_by` value matches `/^[A-Z]+-\d+$/`, which is
-   exactly what the map translation produces — so no change to `linear-add.md`
-   is needed.
+   project id directly. `linear-add` step 4 collects every `is_blocked_by` entry
+   matching `/^[A-Z]+-\d+$/` and renders them as native `blockedBy` relationships
+   — for both a single id and a **list** of them, which is exactly what the map
+   translation produces, so every resolved blocker links natively.
 5. **Record the id back** into the task file's frontmatter: `tracker_id:
    <identifier>` (e.g. `PRE-12`) and optional `tracker_url`, and add
    `<slug> → <identifier>` to the map so later dependents resolve.
