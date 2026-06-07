@@ -49,6 +49,8 @@ Main tradeoff considered: bundling all format fields into one task (chosen — t
 13. [[task_13]] — Design spike: local-first plan→tracker sync.
 14. [[task_14]] — Implement vetted-plan push to the configured handler. (after 13)
 
+> **Dependency-slug caveat.** Ordering is encoded with `is_blocked_by` pointing at task **filename stems** (`task_1`, `task_5`, …), because `commands/process-tasks.md` resolves blockers by bare slug **globally** across `dev_docs/tasks/**/*.md`. Those stems are not unique across coexisting plans (e.g. `evals_and_ci_plan/` also has `task_1`…`task_5`), so process this plan in isolation, or keep task slugs unique across in-flight plans, until [[task_3]] (multi-blocker semantics) or a future change makes resolution path-aware.
+
 ## Resolved decisions
 
 - **`impact` scale (Rec 1):** Fibonacci `1`/`2`/`3`/`5`, mirroring `size` and Linear's Fibonacci `estimate`; rank by `impact/size`. Linear has no native value/impact field, so value/effort ranking is file-handler-only — the Linear handler keeps ranking by `priority` + `estimate`. (See [[task_2]].)
