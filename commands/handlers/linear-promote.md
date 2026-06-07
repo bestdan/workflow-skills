@@ -37,7 +37,7 @@ Call `<linear-mcp>__list_issues` with:
 - `includeArchived`: `false`
 - Limit: 50. If more exist, note the truncation in the report; do not paginate.
 
-Drop any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Report and exit if no candidates remain.
+Set aside (do **not** score) any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Keep these in a separate `skipped` list so step 8 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `save_issue` call. Report and exit if no un-scored candidates remain.
 
 ### 6. Score each candidate
 
@@ -63,7 +63,7 @@ If `$ARGUMENTS` is `dry-run`, print the proposed transitions (per the report sha
 Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`:
 
 - **HIGH:** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering).
-- **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`. Optionally call `<linear-mcp>__save_comment` with a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment.
+- **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`. Optionally call `<linear-mcp>__save_comment` with `issueId` = candidate `id` (the `save_comment` field is named `issueId`, not `id` — same as `linear-claim.md`) and `body` = a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment.
 
 Never move an issue to a `completed`- or `canceled`-type state, and never touch a non-`backlog` issue.
 
