@@ -9,9 +9,16 @@ name: Release
 # scripts/bump-version.py owns the version + changelog math (run it locally with
 # `just bump-preview`); this workflow only commits, tags, and publishes.
 #
-# Loop safety: the release commit is authored by GITHUB_TOKEN -- pushes made with
-# that token never trigger another workflow run -- AND carries `[skip ci]`. The
-# `if:` guard below is a third backstop.
+# Loop safety: the release commit carries `[skip ci]` (honored regardless of which
+# token pushes it) and is authored by GITHUB_TOKEN, whose pushes don't trigger
+# workflows. The `if:` guard below is a third backstop, matched tightly to the
+# exact commit this workflow generates so it never skips a human commit that
+# merely starts with "chore: release".
+#
+# Concurrency: runs are serialized (never cancelled) so a release is never
+# interrupted between `git push` and `gh release create`. Each run checks out the
+# tip of main and rebases just before pushing, so a queued run releases whatever
+# is newest and the next run cleanly no-ops -- no non-fast-forward.
 
 on:
   push:
@@ -28,10 +35,11 @@ jobs:
   release:
     name: Version bump + release
     runs-on: ubuntu-latest
-    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
+    if: "${{ !(startsWith(github.event.head_commit.message, 'chore: release v') && contains(github.event.head_commit.message, '[skip ci]')) }}"
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main # release against the tip of main, not just the pushed SHA
           fetch-depth: 0 # full history + tags: the bump diffs against the last v* tag
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -62,6 +70,12 @@ jobs:
             TAG="v${{ steps.bump.outputs.new_version }}"
             git add CHANGELOG.md .claude-plugin/plugin.json .claude-plugin/marketplace.json
             git commit -m "chore: release ${TAG} [skip ci]"
+            # Land on top of whatever is newest on main (a non-release push could
+            # have arrived mid-run); the release commit only touches generated
+            # files, so this rebase is conflict-free in practice. Tag after the
+            # rebase so the tag points at the final commit, then push both.
+            git fetch origin main
+            git rebase origin/main
             git tag -a "${TAG}" -m "${TAG}"
             git push origin HEAD:main
             git push origin "${TAG}"
