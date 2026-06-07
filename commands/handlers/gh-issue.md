@@ -30,6 +30,12 @@ gh-issue:
 
    Write it to a temp file to avoid shell-quoting problems with multi-line markdown.
 
+   > When the caller supplies `is_blocked_by` as **issue references** rather than
+   > task slugs — e.g. `/push-plan` translates blockers to `#142`, `#143` after
+   > creating them in dependency order — render this line as
+   > `Blocked by: #142, #143` instead of `Blocked by task: …`, so the footer is a
+   > real cross-issue link.
+
 3. **Ensure labels exist.** For each label in `gh-issue.labels`:
 
    ```bash
