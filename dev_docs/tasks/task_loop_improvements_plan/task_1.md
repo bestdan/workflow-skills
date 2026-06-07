@@ -2,7 +2,7 @@
 title: Extend task frontmatter schema (assignee, impact, parent, list is_blocked_by)
 priority: high
 size: 3
-status: new
+status: ready
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:

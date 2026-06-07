@@ -2,7 +2,7 @@
 title: Design spike — local-first plan→tracker sync
 priority: medium
 size: 3
-status: new
+status: ready
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:

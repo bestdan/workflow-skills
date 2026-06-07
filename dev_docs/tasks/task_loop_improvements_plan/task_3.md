@@ -2,7 +2,7 @@
 title: Support multiple blockers in is_blocked_by across scan/list/process
 priority: medium
 size: 2
-status: new
+status: ready
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:

@@ -2,7 +2,7 @@
 title: Add WIP limit to batch dispatch in /process-tasks --all
 priority: high
 size: 2
-status: new
+status: ready
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:
