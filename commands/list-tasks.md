@@ -42,7 +42,7 @@ If the directory doesn't exist or is empty, report "No tasks found in this repo.
 
 ### 3. Parse and filter
 
-For each file, parse the YAML frontmatter to extract: `title`, `priority`, `size`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `human_approval_requested`.
+For each file, parse the YAML frontmatter to extract: `title`, `priority`, `size`, `impact`, `assignee`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `human_approval_requested`.
 
 Check for expired tasks: if `expires` < today and `status` is not `done`, mark as expired.
 
@@ -65,12 +65,12 @@ gh pr list --label task-loop --state merged --limit 10 --json number,title,merge
 
 Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated.
 
-Within each section, sort by priority (urgent > high > medium > low), then age (oldest first). Render each card as a single line, including its `size` (Fibonacci points). Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
+Within each section, sort by priority (urgent > high > medium > low), then by **value/effort score** `impact / size` descending (a card with no `impact` set has no score and sorts last within its priority tier), then age (oldest first). This matches the **Ranking** in `skills/task/SKILL.md` and `/process-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
 
 ```
 ## ready (2)
 
-- [high] (size 3) Fix broken import in utils.ts — created 2026-03-20, expires 2026-04-19  [cleanup]
+- [high] (size 3) Fix broken import in utils.ts — @dan — created 2026-03-20, expires 2026-04-19  [cleanup]
 - [low]  (size 1) Remove stale foobar alias — waiting on fix-broken-import  [cleanup, zsh]
 
 ---
@@ -83,10 +83,10 @@ Within each section, sort by priority (urgent > high > medium > low), then age (
 
 ## in_progress (1)
 
-- [high] (size 2) Migrate config loader — claimed on bestdan/migrate-config
+- [high] (size 2) Migrate config loader — @dan — claimed on bestdan/migrate-config
 ```
 
-Annotations to surface inline when present: `human-approval-requested`, `waiting on <slug>`, `expired`, `claimed on <branch>`.
+Annotations to surface inline when present: `@<assignee>`, `human-approval-requested`, `waiting on <slug>`, `expired`, `claimed on <branch>`.
 
 Finish with a summary line:
 
