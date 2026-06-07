@@ -78,7 +78,36 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority, then value/effort score, then age — as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
-For each selected task that fits under the limit, read its full content (frontmatter + body), then dispatch a remote session.
+**Size-gate auto-routing (batch only — `--all` / `-n N`).** The intended operating
+model is **both**: drain small tasks autonomously and reserve bigger ones for a
+human. After the WIP cap fixes the dispatch set above, split it by `size` so the
+batch self-routes instead of being hand-sorted. Single-task mode (`/do-tasks` /
+`/do-tasks <slug>`) is **not** size-gated — an explicit pick is an explicit
+instruction to do it in full.
+
+1. Resolve `auto_execute_max_size` from `dev_docs/tasks/.task-config.yml` (the
+   repo-pr handler config). Default to `2` if the key is absent (auto-do size
+   `1`–`2`; reserve `3`+).
+2. For each task in the WIP-bounded dispatch set, route by its `size`:
+   - `size <= auto_execute_max_size` → **execute**: dispatch normally (the claim +
+     execute remote session below, or the in-session run under `--local`).
+   - `size > auto_execute_max_size` → **reserve** (`--claim-only` semantics from
+     `/do-tasks`): claim it — branch `task/<slug>`, flip the file
+     `status: ready → in_progress`, commit, and push — but do **not** execute,
+     delete the file, or open a PR. Leave it `in_progress` for a human to resume
+     (e.g. with `/do-tasks <slug> --no-claim`).
+3. A reserved task still consumed a WIP slot when it was selected, so it counts
+   against the cap exactly as an executed one does — the gate routes the batch, it
+   does not enlarge it.
+4. **Explicit flags override the gate.** A `--claim-only` run reserves every
+   selected task regardless of size; a `--no-claim` run executes the named
+   already-claimed task regardless of size. The size split applies only to the
+   default (atomic claim + execute) batch path.
+
+Report the two groups distinctly in step 5: executed/dispatched vs.
+`reserved for human (size N > auto_execute_max_size)`.
+
+For each selected task routed to **execute**, read its full content (frontmatter + body), then dispatch a remote session.
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
@@ -173,11 +202,15 @@ Dispatched 3 tasks to remote agents:
 Monitor with /tasks. Each will open a PR when complete.
 ```
 
+If any tasks were **reserved for a human** by the size gate (step 4), list them as their own group — e.g. `reserved for human (size 5 > auto_execute_max_size 2): <slug>` — so the user knows they were claimed but not executed and can resume them with `/do-tasks <slug> --no-claim`.
+
 If any tasks were skipped because they are waiting on another task, list them separately with every unresolved blocker slug. If any dependency-ready tasks were **held by the WIP limit** or the `-n N` ceiling (step 4), list those too — e.g. `held (WIP limit 3 reached): <slug> (high)` — so the user knows they are eligible and will dispatch on the next `--all` once in-flight work clears.
 
 ## Local mode (`--local`)
 
 When `--local` is specified or `claude --remote` is unavailable, process the task directly in the current session (`gh` is still required for `gh pr create`). `--local` caps the batch at **1** — it processes the single highest-ranked task and reports the rest as held; `/do-tasks <slug> --local` still runs the named slug.
+
+The size gate still applies to the batch path: `/do-tasks --all --local` with a highest-ranked task whose `size > auto_execute_max_size` **reserves** it (`--claim-only` semantics — claim and push, no execution) and reports it as reserved rather than executing it. A named `/do-tasks <slug> --local` is single-task mode and is never size-gated.
 
 1. Create branch `task/<slug>` from current HEAD
 2. Claim, execute, validate, delete, commit, push, and open PR as described above

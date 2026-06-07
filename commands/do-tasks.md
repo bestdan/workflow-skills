@@ -155,6 +155,13 @@ Both are defined in `repo-pr-execute.md`:
 - **Multi-blocker readiness** — a task is dependency-ready only when **every**
   `is_blocked_by` entry is satisfied (target absent or `done`); `is_blocked_by`
   may be a single slug or a list (`[a, b]`).
+- **Size-gate auto-routing** — after ranking and the WIP gate, the batch
+  (`--all` / `-n N`) self-routes by `size`: tasks with
+  `size <= auto_execute_max_size` (repo-pr config key, default `2`) are claimed and
+  executed, while bigger ones are **reserved** (`--claim-only` semantics — claimed
+  but not executed) for a human to resume. The two groups are reported separately.
+  Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated, and
+  explicit `--claim-only` / `--no-claim` override the gate.
 
 ## 3. Tracker path (`linear` handler)
 
