@@ -55,8 +55,11 @@ Main tradeoff considered: bundling all format fields into one task (chosen — t
 10. [[task_10]] — Introduce `/do-tasks` (file/repo-pr path; subsumes `/process-tasks`, WIP-bounded). (after 3, 5)
 11. [[task_11]] — Add tracker dispatch to `/do-tasks` (subsumes `/claim-task`). (after 10)
 12. [[task_12]] — Remove `/process-tasks` & `/claim-task` in favor of `/do-tasks` + docs/README. (after 10, 11)
-13. [[task_13]] — Design spike: local-first plan→tracker sync.
-14. [[task_14]] — Implement vetted-plan push to the configured handler. (after 13)
+13. [[task_13]] — Design spike: local-first plan→tracker sync. **(done — see `plan_tracker_sync_design.md`)**
+14. ~~[[task_14]] — Implement vetted-plan push to the configured handler.~~ **Re-split by the spike** ([[plan_tracker_sync_design]] "Implementation breakdown") into:
+    - [[task_14a]] — Schema: `tracker_id` / `tracker_url` frontmatter fields + validator type-guard + docs. **(done)**
+    - [[task_14b]] — `/push-plan` command: repo-pr no-op + Linear path. (after 14a)
+    - [[task_14c]] — `/push-plan` gh-issue and jira push paths. (after 14b)
 15. [[task_15]] — Add `--claim-only` / `--no-claim` flags to `/do-tasks` (claim and do as composable steps). (after 11)
 16. [[task_16]] — Size-gate `/do-tasks --all` auto-routing: headless-execute small tasks, reserve big ones for a human. (after 15)
 17. [[task_17]] — `/doctor` config + schema health command (validate handler/prereqs, detect schema drift, delegate legacy migration, hygiene). (after 1)
