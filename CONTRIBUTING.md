@@ -78,15 +78,42 @@ The version/changelog math lives in `scripts/bump-version.py`; the workflow only
 commits, tags, and publishes. To force a specific version, you can still bump
 both manifest fields by hand in a normal PR — just keep them equal.
 
-**Two setup caveats** (one-time):
+### One-time setup: release token (required — `main` is protected)
 
-- **Branch protection.** The workflow pushes the release commit straight to
-  `main` using the built-in `GITHUB_TOKEN`. If `main` requires PRs or status
-  checks, allow the `github-actions` bot to bypass them (or swap in a PAT /
-  GitHub App token with bypass rights), otherwise the push is rejected.
-- **First run seeds a baseline.** With no `v*` tag yet, the first qualifying
-  merge only creates a `v<current-version>` tag (no bump); every merge after
-  that has a boundary to diff against and bumps normally.
+`main` is a protected branch, and the built-in `GITHUB_TOKEN` **cannot** be added
+to a branch bypass list. So the workflow pushes the release commit with a
+fine-grained PAT exposed as the `RELEASE_TOKEN` secret. Without it the release
+push is rejected and the workflow fails. Set it up once:
+
+1. **Create the PAT** — GitHub → **Settings → Developer settings → Personal
+   access tokens → Fine-grained tokens → Generate new token**:
+   - **Resource owner** `bestdan`; **Repository access → Only select
+     repositories → `workflow-skills`**.
+   - **Permissions → Repository permissions → Contents: Read and write** (add
+     **Workflows: Read and write** only if a release ever needs to modify files
+     under `.github/workflows/`). Nothing else.
+   - Pick an expiry, **Generate**, and copy the value.
+2. **Store it as a secret** — repo **Settings → Secrets and variables → Actions
+   → New repository secret**: name `RELEASE_TOKEN`, paste the value.
+3. **Put the token's owner on the bypass list** so its pushes skip the PR/status
+   requirements on `main`:
+   - **Rulesets:** Settings → **Rules → Rulesets** → open the `main` ruleset →
+     **Bypass list → Add bypass → Repository admin** (or add your user) → Save.
+   - **Classic branch protection:** edit the `main` rule → under _Require a pull
+     request before merging_ enable **Allow specified actors to bypass required
+     pull requests** and add yourself; leave **Allow administrators to bypass**
+     on so required status checks don't block the push.
+
+The token acts as you (an admin), so admin bypass covers it. Renew the secret
+before the PAT expires, or releases start failing. Note PAT pushes **do**
+re-trigger workflows — that's why the release commit carries `[skip ci]` and the
+job's `if:` guard exists; both are load-bearing here.
+
+### One-time: the first run seeds a baseline
+
+With no `v*` tag yet, the first qualifying merge only creates a
+`v<current-version>` tag (no bump); every merge after that has a boundary to diff
+against and bumps normally.
 
 ## Behavioral evals
 

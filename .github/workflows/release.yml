@@ -9,11 +9,12 @@ name: Release
 # scripts/bump-version.py owns the version + changelog math (run it locally with
 # `just bump-preview`); this workflow only commits, tags, and publishes.
 #
-# Loop safety: the release commit carries `[skip ci]` (honored regardless of which
-# token pushes it) and is authored by GITHUB_TOKEN, whose pushes don't trigger
-# workflows. The `if:` guard below is a third backstop, matched tightly to the
-# exact commit this workflow generates so it never skips a human commit that
-# merely starts with "chore: release".
+# Loop safety: the release commit is pushed with a fine-grained PAT (RELEASE_TOKEN)
+# because main is protected, and PAT pushes DO re-trigger workflows -- so the loop
+# is broken by the `[skip ci]` in the release commit (honored regardless of token),
+# backstopped by the `if:` guard below, which is matched tightly to the exact
+# commit this workflow generates so it never skips a human commit that merely
+# starts with "chore: release".
 #
 # Concurrency: runs are serialized (never cancelled) so a release is never
 # interrupted between `git push` and `gh release create`. Each run checks out the
@@ -42,7 +43,11 @@ jobs:
           ref: main # release against the tip of main, not just the pushed SHA
           fetch-depth: 0 # full history + tags: the bump diffs against the last v* tag
           fetch-tags: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # main is protected, and the built-in GITHUB_TOKEN can't be on a bypass
+          # list -- so the release commit is pushed with a fine-grained PAT whose
+          # owner is on the branch bypass list. See CONTRIBUTING.md "Versioning".
+          # Its pushes re-trigger workflows, hence the [skip ci] + `if:` guards.
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Compute + apply version bump
         id: bump
