@@ -46,7 +46,11 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 
 # Conventional-Commit header: `type(scope)!: description`. scope and `!` optional.
 HEADER_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?:\s*(?P<desc>.+)$")
-BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE", re.MULTILINE)
+# A breaking change is the footer `BREAKING CHANGE:` / `BREAKING-CHANGE:` (the
+# colon is required by the Conventional Commits spec) or a `!` before the colon
+# in the header. Requiring the colon avoids matching prose like "BREAKING CHANGES
+# are listed below".
+BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 VTAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
