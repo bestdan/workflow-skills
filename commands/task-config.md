@@ -24,7 +24,7 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 
 `repo-pr` is the only full-loop handler. `gh-issue` and `jira` are capture-only today; `linear` adds list and single `do` but not promote or batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
-`/claim-task` and `/process-tasks` are the legacy execute commands being folded into `/do-tasks` (see [[task_12]]): `/claim-task` is the Linear-only spelling of single `do` (it **stops** on `repo-pr`/`gh-issue`/`jira` — use `/do-tasks` there), and `/process-tasks` is the file/`repo-pr` batch spelling (same support as `/do-tasks --all`). Both are slated for removal in favor of `/do-tasks`.
+`/do-tasks` is the single execute verb across handlers: single `do` by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear` it claims and executes one issue in the current session; on `gh-issue`/`jira` it stops and points you at the tracker.
 
 ## Steps
 
@@ -109,7 +109,7 @@ Tell the user:
 
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
-  - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks (and /process-tasks)."
+  - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks."
   - `jira`: "`jira` supports: /add-task. Not supported: /list-tasks, /promote-tasks, /do-tasks. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task. Not supported: /list-tasks, /promote-tasks, /do-tasks. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /do-tasks (single). Not supported: /promote-tasks, batch /do-tasks --all. You can still manage these in Linear directly."
