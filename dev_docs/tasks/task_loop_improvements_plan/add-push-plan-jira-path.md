@@ -2,7 +2,7 @@
 title: Add /push-plan jira push path
 priority: low
 size: 2
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: claude/vigilant-ritchie-g3Z4W
 related_files:
