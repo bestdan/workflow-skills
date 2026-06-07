@@ -1,6 +1,6 @@
 ---
 description: Diagnose and optionally fix the task-loop setup — config validity, handler prerequisites, legacy dirs, schema drift, and hygiene
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(mkdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
 
@@ -89,26 +89,36 @@ the handler doc's own remediation.
   it; do not restate the `git mv` steps). This is one check among many — not the
   command's reason to exist.
 
-**Check 4 — Schema drift.** Task files whose frontmatter violates the rules in
-`scripts/validate.py` — reuse that script's rules rather than re-specifying them.
-The mechanical way to run this check:
+**Check 4 — Schema drift.** Task files whose frontmatter is invalid. This is **two
+sub-checks** because they have different sources of truth:
 
-```bash
-uv run "$(git rev-parse --show-toplevel)/scripts/validate.py" 2>&1
-```
+1. **Present-but-invalid fields** — reuse `scripts/validate.py`'s rules (out-of-range
+   `size`/`impact`, bad `status`/`priority`, malformed `is_blocked_by`, mistyped
+   `assignee`/`parent`, epic-shape violations). Run it and surface its
+   `dev_docs/tasks/**` failures:
 
-Surface any reported `dev_docs/tasks/**` failures (out-of-range `size`/`impact`,
-bad `status`/`priority`, malformed `is_blocked_by`, mistyped `assignee`/`parent`,
-epic-shape violations). Distinguish two kinds:
+   ```bash
+   uv run "$(git rev-parse --show-toplevel)/scripts/validate.py" 2>&1
+   ```
 
-- **Defaultable / mechanical** (e.g. a missing `expires` — default 30 days from
-  `created`; a missing `status` on an otherwise-complete card) → `FAIL`, fixable
-  under `--fix`.
-- **Needs judgment** (an out-of-range `size`, an unknown `status` value) → `WARN`;
-  point at the file and the rule.
+2. **Missing required fields** — `validate.py` is deliberately **lenient**: it only
+   validates a field's shape _when present_ and never checks `expires` at all, so it
+   does **not** report a card missing a required field. So `/doctor` must check this
+   itself, against the **Field reference** in `skills/task/SKILL.md` (required:
+   `title`, `priority`, `size`, `status`, `created`, `source_branch`, `related_files`,
+   `expires`). Read each non-epic card's frontmatter and flag any required field that
+   is absent.
 
-No drift → `PASS`. If `uv` is unavailable, fall back to reading the frontmatter
-shape rules from `scripts/validate.py` and applying them yourself.
+Classify the combined findings:
+
+- **Defaultable / mechanical** (a missing `expires` — default 30 days from `created`)
+  → `FAIL`, fixable under `--fix`.
+- **Needs judgment** (an out-of-range `size`, an unknown `status` value, a missing
+  field with no safe default like `title` or `source_branch`) → `WARN`; point at the
+  file and the rule.
+
+No drift → `PASS`. If `uv` is unavailable, fall back to reading the frontmatter shape
+rules from `scripts/validate.py` and applying them yourself.
 
 **Check 5 — Hygiene.** Lower-stakes cruft:
 
@@ -116,8 +126,10 @@ shape rules from `scripts/validate.py` and applying them yourself.
   (not `done`). These are pruning candidates (see the lifecycle note in
   `skills/task/SKILL.md`). `FAIL`, prunable under `--fix`.
 - **Orphan branches / PRs** — open `task-loop` / `task-claim` branches or PRs with
-  no matching task file, or local `task/<slug>` branches whose work has merged.
-  Query with `gh pr list --label task-loop --state open` and
+  no matching task file, or local `task/<slug>` branches whose work has merged. Query
+  **both** labels (`task-loop` is the review queue; `task-claim` is an in-flight
+  claim that an aborted/crashed session may have orphaned): `gh pr list --label
+  task-loop --state open` **and** `gh pr list --label task-claim --state open`, plus
   `git branch --list 'task/*'`. `WARN` (deleting someone's in-flight branch is a
   judgment call) — list them, suggest manual cleanup. Skip this bullet if `gh` is
   unavailable.
