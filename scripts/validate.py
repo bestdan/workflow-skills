@@ -181,6 +181,12 @@ if task_dir.is_dir():
             or (isinstance(blk, list) and all(isinstance(x, str) for x in blk))
         ):
             err(rel(t), "is_blocked_by must be a string or a list of strings")
+        # Type-only guard: the content is freeform (a handle, an id, a slug),
+        # but a list/dict here is a YAML authoring slip, like is_blocked_by above.
+        for field in ("assignee", "parent"):
+            v = data.get(field)
+            if v is not None and not isinstance(v, str):
+                err(rel(t), f"{field} must be a string")
 
 # --- manifests: version sync + cross-consistency ---
 plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
