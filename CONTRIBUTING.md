@@ -50,8 +50,43 @@ When you add a task handler or teach an existing one a new verb (capture, list, 
 
 ## Versioning
 
-Bump `plugin.json` `version` **and** the matching `marketplace.json` plugin-entry
-`version` together — `validate.py` fails if they drift.
+Versions are **bumped automatically on merge to `main`** by the **Release**
+workflow (`.github/workflows/release.yml`), driven by
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+| Commit type on a merged commit         | Bump    |
+| -------------------------------------- | ------- |
+| `feat:`                                | `minor` |
+| `fix:` / `perf:`                       | `patch` |
+| `BREAKING CHANGE` in body, or `type!:` | `major` |
+| `chore:`, `docs:`, `ci:`, `test:`, …   | none    |
+
+A merge that contains only no-bump types ships **no release** — that's the
+"meaningful changes only" filter. When a bump is due, the workflow updates
+`plugin.json` **and** the matching `marketplace.json` entry together (kept in
+sync as plain `X.Y.Z` — `validate.py` rejects a `v` prefix), prepends a grouped
+`CHANGELOG.md` section, pushes a `chore: release vX.Y.Z [skip ci]` commit, tags
+`vX.Y.Z`, and publishes a GitHub Release.
+
+Preview what the next merge would do, locally and without writing anything:
+
+```sh
+just bump-preview   # python3 scripts/bump-version.py
+```
+
+The version/changelog math lives in `scripts/bump-version.py`; the workflow only
+commits, tags, and publishes. To force a specific version, you can still bump
+both manifest fields by hand in a normal PR — just keep them equal.
+
+**Two setup caveats** (one-time):
+
+- **Branch protection.** The workflow pushes the release commit straight to
+  `main` using the built-in `GITHUB_TOKEN`. If `main` requires PRs or status
+  checks, allow the `github-actions` bot to bypass them (or swap in a PAT /
+  GitHub App token with bypass rights), otherwise the push is rejected.
+- **First run seeds a baseline.** With no `v*` tag yet, the first qualifying
+  merge only creates a `v<current-version>` tag (no bump); every merge after
+  that has a boundary to diff against and bumps normally.
 
 ## Behavioral evals
 

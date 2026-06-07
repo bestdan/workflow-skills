@@ -21,3 +21,7 @@ validate:
 # Run the gate plus behavioral skill-triggering evals (needs ANTHROPIC_API_KEY).
 eval:
     scripts/check.sh --with-evals
+
+# Preview the next Conventional-Commits version bump (no writes, no tags).
+bump-preview:
+    python3 scripts/bump-version.py
