@@ -86,7 +86,7 @@ uses these exact steps:
    PRs:
 
    ```bash
-   gh label create task-claim --description 'task-loop claim marker (in progress)' --color 'FBCA04' 2>/dev/null
+   gh label create task-claim --description 'task-loop claim marker (in progress)' --color 'FBCA04' 2>/dev/null || true
    gh pr create --draft --label task-claim --title 'chore(task): <title> [claim]' --body 'Claiming task <slug> for execution. Will be filled in and marked ready for review when the work is done.
 
    Claims-task: <slug>'
@@ -229,7 +229,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
       If pushing task/<slug> is rejected because the ref exists, STOP — another agent acquired it.
 
    c. OPEN THE CLAIM MARKER — a draft PR labeled task-claim carrying the slug marker (task-claim, not task-loop, so the in-flight claim is not counted as needs_review):
-      gh label create task-claim --description 'task-loop claim marker (in progress)' --color 'FBCA04' 2>/dev/null
+      gh label create task-claim --description 'task-loop claim marker (in progress)' --color 'FBCA04' 2>/dev/null || true
       gh pr create --draft --label task-claim --title 'chore(task): <title> [claim]' --body 'Claiming task <slug> for execution. Filled in and marked ready when the work is done.
 
       Claims-task: <slug>'
@@ -252,7 +252,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
    git push
 
 6. FINISH THE PR: Convert the draft claim PR opened in step 1 into the review PR — do NOT open a second PR. Relabel it from task-claim to task-loop (so /list-tasks shows it under needs_review), replace the placeholder body with the real summary, and mark it ready for review. <pr> is the claim PR number from step 1c:
-   gh label create task-loop --description 'Auto-generated from task-loop' --color '0E8A16' 2>/dev/null
+   gh label create task-loop --description 'Auto-generated from task-loop' --color '0E8A16' 2>/dev/null || true
    gh pr edit <pr> --add-label task-loop --remove-label task-claim --title 'chore(task): <title>' --body '## Summary
 
    Automated follow-up from task <slug>.md, created during branch <source_branch>.
@@ -278,7 +278,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 1. Edit the task: change status to 'blocked'
 2. Add a '## Consumer Notes' section explaining what you tried and what went wrong
 3. Commit and push
-4. RELABEL the draft claim PR opened in step 1 from task-claim to task-blocked ('gh label create task-blocked --description "task-loop blocked, needs a human" --color "B60205" 2>/dev/null; gh pr edit <pr> --add-label task-blocked --remove-label task-claim') and leave it OPEN. Do NOT close it and do NOT convert it to a task-loop review PR.
+4. RELABEL the draft claim PR opened in step 1 from task-claim to task-blocked ('gh label create task-blocked --description "task-loop blocked, needs a human" --color "B60205" 2>/dev/null || true; gh pr edit <pr> --add-label task-blocked --remove-label task-claim') and leave it OPEN. Do NOT close it and do NOT convert it to a task-loop review PR.
    Why not close it: the 'status: blocked' flip lives only on this unmerged branch — main still shows the task as 'ready'. If you closed the PR, the next scanner would see 'ready' with no open claim and re-claim the same failing task in a loop. Keeping the PR open under task-blocked makes the block visible on GitHub, preserves the Consumer Notes, and the pre-claim check skips task-blocked PRs so nothing re-claims it. A human resolves the block (push a fix, or close the task-blocked PR to release it) before it runs again.
 
 ## After opening the PR
