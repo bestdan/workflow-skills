@@ -6,7 +6,7 @@ Close the gap between the current task loop (a strong capture-and-execute kanban
 
 ## Scope / non-goals
 
-**In scope** (9 of the 10 reviewed recommendations):
+**In scope** (the reviewed recommendations, plus follow-ups added during planning):
 
 - Task-format additions: `assignee`, `impact`, multi-value `is_blocked_by`, `parent`/`epic`.
 - Value/effort ranking in selection and listing.

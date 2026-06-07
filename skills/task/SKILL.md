@@ -11,7 +11,7 @@ Repo-native system for capturing follow-up work with full context and processing
 
 - User notices incidental work during a feature branch (stale flags, dead code, missing tests)
 - User says "task", "todo", "follow-up", "we should come back to this", "add a task for this"
-- User runs `/add-task` or `/process-tasks`
+- User runs `/add-task`, `/do-tasks`, or `/process-tasks`
 
 ## How it works
 
@@ -64,7 +64,7 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`:
 
 - `/do-tasks` — single highest-ranked dependency-ready task
-- `/do-tasks --all` / `/do-tasks -n N` — batch (remote only), bounded by `wip_limit`
+- `/do-tasks --all` / `/do-tasks -n N` — batch (remote by default; `--local` caps at 1), bounded by `wip_limit`
 - `/do-tasks --remote` (default) / `/do-tasks --local` — where execution runs
 
 For the `repo-pr` handler it fully subsumes `/process-tasks` (same scan, ranking,
