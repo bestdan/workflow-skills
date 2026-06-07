@@ -24,7 +24,7 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 
 `repo-pr` is the only full-loop handler. `gh-issue` and `jira` are capture-only today; `linear` adds list and single `do` but not promote or batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
-`/do-tasks` is the single execute verb across handlers: single `do` by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear` it claims and executes one issue in the current session; on `gh-issue`/`jira` it stops and points you at the tracker.
+`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear` it claims and executes one issue in the current session; on `gh-issue`/`jira` it stops and points you at the tracker.
 
 ## Steps
 
