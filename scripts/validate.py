@@ -175,8 +175,8 @@ if task_dir.is_dir():
                     f"epic status '{est}' must be one of {sorted(EPIC_STATUSES)}",
                 )
             owner = data.get("owner")
-            if owner is not None and not isinstance(owner, str):
-                err(rel(t), "epic owner must be a string")
+            if owner is not None and (not isinstance(owner, str) or not owner.strip()):
+                err(rel(t), "epic owner must be a non-empty string")
             continue
         for field in ("size", "impact"):
             v = data.get(field)
