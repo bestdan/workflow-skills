@@ -98,6 +98,15 @@ Both are carried through **unchanged** from `/process-tasks`:
   `.task-config.yml` (default `3`), count current WIP (`in_progress` files + open
   `task-loop` PRs), and dispatch at most `wip_limit - current_wip`. Single-task
   mode (`/do-tasks` / `/do-tasks <slug>`) is not gated.
+
+  **Check the WIP slack first (batch only).** Before scanning/ranking, confirm
+  `gh` auth (the WIP count itself calls `gh`), then compute
+  `wip_limit - current_wip` (per `/process-tasks` step 4). If it is `≤ 0`, report
+  `WIP limit <n> reached (<current_wip> in flight) — nothing dispatched` and stop,
+  skipping ranking and dispatch entirely (a light frontmatter scan is still needed
+  to count `in_progress`; you need not enumerate held tasks — point the user at
+  `/list-tasks`). Only with positive slack do you rank and dispatch the top
+  `min(N, slack)`. Single-task mode is not gated and skips this guard.
 - **Multi-blocker readiness** — a task is dependency-ready only when **every**
   `is_blocked_by` entry is satisfied (target absent or `done`); `is_blocked_by`
   may be a single slug or a list (`[a, b]`). See `/process-tasks` step 1.
