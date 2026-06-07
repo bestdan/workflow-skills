@@ -42,17 +42,34 @@ If the directory doesn't exist or is empty, report "No tasks found in this repo.
 
 ### 3. Parse and filter
 
-For each file, parse the YAML frontmatter to extract: `title`, `priority`, `size`, `impact`, `assignee`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `human_approval_requested`.
+For each file, parse the YAML frontmatter. Split files into two kinds:
+
+- **Epic files** — `type: epic`. Set these aside for the Epics rollup (step 4); they are **not** task cards and never appear in a status section.
+- **Task cards** — everything else with frontmatter. Extract: `title`, `priority`, `size`, `impact`, `assignee`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `parent`, `human_approval_requested`.
+
+Files with no frontmatter (e.g. a legacy plan overview) are neither — skip them.
 
 Check for expired tasks: if `expires` < today and `status` is not `done`, mark as expired.
 
 Also compute whether the task is currently dependency-blocked. `is_blocked_by` may be a single slug or a list of slugs (`[a, b]`); treat a string as a one-element list. For each entry, the blocker is unresolved if a task file with that slug still exists anywhere under `dev_docs/tasks/**/*.md` with a status other than `done`. The task is waiting if **any** blocker is unresolved; surface **all** unresolved blockers in the annotation (e.g. `waiting on a, b`). This is distinct from `status: blocked`, which means someone tried to process the task and hit a problem.
 
+**Epic rollups.** For each epic file, derive its slug (filename stem with a trailing `_plan` removed; a non-`*_plan.md` epic file uses its bare stem) and collect its member task cards — those whose `parent` equals the epic slug, **or** that live in the same plan directory (`<name>_plan/`) as the epic file. Tally the members by `status`: `total` (member files present), `done`, `in_progress`, `blocked`. Because the `repo-pr` handler deletes a member's file when its PR opens, fully-merged members no longer appear — the rollup reflects member files currently present (see **Epics** in `skills/task/SKILL.md`).
+
 If `$ARGUMENTS` is provided, filter to that status (or `expired`). Default: show every section that has cards.
 
 ### 4. Display as stacked sections
 
-Print one section per status in this fixed order, top to bottom, omitting empty sections:
+**Epics rollup (top of board).** When epic files are present and the view is unfiltered — the default view or `$ARGUMENTS` = `all` (omit it when filtering to a single status) — print an `## Epics` section **above** the `new` section, one line per epic:
+
+```
+## Epics
+
+- Task Loop Improvements (task_loop_improvements): 0/14 done (2 in progress, 1 blocked) — owner @dan, active
+```
+
+Format each line as `<title> (<slug>): <done>/<total> done (<in_progress> in progress, <blocked> blocked) — owner @<owner>, <status>`. Omit the `(… in progress, … blocked)` parenthetical when both are zero. Separate the Epics section from the status sections with a horizontal rule (`---`). Omit the whole section when there are no epic files.
+
+Then print one section per status in this fixed order, top to bottom, omitting empty sections:
 
 `new` → `needs_refinement` → `ready` → `in_progress` → `blocked` → `needs_review` → `done`
 

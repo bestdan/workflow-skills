@@ -193,6 +193,35 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 - **Acceptance Criteria** (required, ≥ 1 bullet) — Definition of done. Missing or empty section blocks promotion to `ready`.
 - **Open Questions** / **TBD** (optional) — Presence of either with non-empty content blocks promotion to `ready`.
 
+## Epics
+
+An **epic** groups related tasks so the board can show a rollup. Tasks are otherwise flat — `is_blocked_by` gives ordering but no grouping. An epic is a first-class file, distinguished from a task card by `type: epic` in its frontmatter:
+
+```yaml
+---
+type: epic
+title: Task Loop Improvements
+status: active # active | done | abandoned
+owner: dan
+created: 2026-06-07
+---
+```
+
+A `plan-with-docs` overview (`<name>_plan.md`) is written as this epic file — see `skills/plan-with-docs/SKILL.md`.
+
+**Epic slug.** An epic's slug is its filename stem with a trailing `_plan` removed (so `task_loop_improvements_plan` → `task_loop_improvements`); a standalone epic file not named `*_plan.md` uses its bare stem.
+
+**Membership.** A task belongs to an epic when **either**:
+
+- its `parent` field equals the epic slug, **or**
+- it lives in the same plan directory as the epic file (`<name>_plan/`).
+
+`parent` is grouping; it is distinct from `is_blocked_by` (ordering). A task may have a `parent` and no blockers, or vice versa.
+
+**Rollup.** `/list-tasks` renders one line per epic: counts of member task **files** by status — `<done>/<total> done`, plus in-progress and blocked — with the epic's owner and status. Because the `repo-pr` handler deletes a task file when its PR opens, a member that has fully merged no longer appears as a file; the rollup counts therefore reflect the member files currently present (the same file-deletion tradeoff that makes `needs_review`/`done` PR-derived for the main board).
+
+**Scans skip epics.** `/promote-tasks` and `/do-tasks` (and the `repo-pr` execute scan) ignore any file with `type: epic` — an epic is never scored, ranked, or executed as a task. `scripts/validate.py` checks epic files against the epic shape (`title` / `status` / `owner`), not the task shape.
+
 ## Kanban columns
 
 The seven `status` values form a kanban flow. Cards move between columns via specific actions:

@@ -18,7 +18,7 @@ Scan `dev_docs/tasks/**/*.md` for tasks in `status: new`, score each against the
 find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
 ```
 
-Filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
+Skip any file with `type: epic` in its frontmatter — epic rollup files are never scored (see **Epics** in `skills/task/SKILL.md`). Then filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
 
 ### 2. Score each candidate
 

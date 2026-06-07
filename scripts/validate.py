@@ -33,6 +33,7 @@ DESC_MAX = 1024
 BODY_MAX_LINES = 500
 FIBONACCI = {1, 2, 3, 5}
 TASK_PRIORITIES = {"low", "medium", "high", "urgent"}
+EPIC_STATUSES = {"active", "done", "abandoned"}
 TASK_STATUSES = {
     "new",
     "needs_refinement",
@@ -143,7 +144,8 @@ for a in agent_files:
 # The repo-native task store (see skills/task/SKILL.md). Lenient like the rest
 # of this script: validate the shape of fields that are present, don't hard-
 # reject unknown keys, and skip non-task files. Files with no frontmatter
-# (e.g. a plan overview) and epics (`type: epic`) are not task cards — skip them.
+# (e.g. a legacy plan overview) are not task cards — skip them. Epic files
+# (`type: epic`) are validated against the epic shape, not the task shape.
 task_dir = ROOT / "dev_docs" / "tasks"
 if task_dir.is_dir():
     for t in sorted(task_dir.rglob("*.md")):
@@ -160,6 +162,21 @@ if task_dir.is_dir():
             err(rel(t), f"unparseable frontmatter: {data}")
             continue
         if data.get("type") == "epic":
+            # Epic rollup files (see "Epics" in skills/task/SKILL.md), not task
+            # cards. Validate the epic shape (title / status / owner) instead of
+            # the task shape, then skip the task-specific checks below.
+            title = data.get("title")
+            if not isinstance(title, str) or not title.strip():
+                err(rel(t), "epic title must be a non-empty string")
+            est = data.get("status")
+            if est is None or est not in EPIC_STATUSES:
+                err(
+                    rel(t),
+                    f"epic status '{est}' must be one of {sorted(EPIC_STATUSES)}",
+                )
+            owner = data.get("owner")
+            if owner is not None and not isinstance(owner, str):
+                err(rel(t), "epic owner must be a string")
             continue
         for field in ("size", "impact"):
             v = data.get(field)
