@@ -149,7 +149,13 @@ if task_dir.is_dir():
     for t in sorted(task_dir.rglob("*.md")):
         data, _ = split_frontmatter(t)
         if data is None:
-            continue  # no frontmatter — not a task card
+            # split_frontmatter returns None both for a file with no
+            # frontmatter and for one that opens with `---` but never closes
+            # it. The former (e.g. a plan overview) is a legit non-task file;
+            # the latter is a malformed card we should flag.
+            if t.read_text().startswith("---"):
+                err(rel(t), "malformed frontmatter: missing closing '---'")
+            continue  # genuinely no frontmatter — not a task card
         if not isinstance(data, dict):
             err(rel(t), f"unparseable frontmatter: {data}")
             continue
@@ -157,7 +163,11 @@ if task_dir.is_dir():
             continue
         for field in ("size", "impact"):
             v = data.get(field)
-            if v is not None and v not in FIBONACCI:
+            # bool is an int subclass (True == 1) and 3.0 == 3, so a bare
+            # `in FIBONACCI` test would let `size: true`/`impact: 3.0` pass.
+            if v is not None and (
+                not isinstance(v, int) or isinstance(v, bool) or v not in FIBONACCI
+            ):
                 err(rel(t), f"{field} '{v}' must be one of 1/2/3/5")
         pr = data.get("priority")
         if pr is not None and pr not in TASK_PRIORITIES:
