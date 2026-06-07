@@ -7,3 +7,4 @@ co-review	prompts/co-review.txt	6
 review-facts	prompts/review-facts.txt	6
 task	prompts/task.txt	6
 analysis-pipeline	prompts/analysis-pipeline.txt	6
+break-down-task	prompts/break-down-task.txt	6

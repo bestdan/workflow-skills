@@ -1,0 +1,1 @@
+I've got a task card sitting in my backlog that I clearly underestimated — it's supposed to add an audit log, but it touches the database schema, the write path in the service layer, and a new admin viewer page all in one. There's no way that's a single pull request. Can you take that existing card and carve it up into smaller pieces I can ship one at a time, in the right order?

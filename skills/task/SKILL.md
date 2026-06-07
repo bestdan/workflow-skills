@@ -111,7 +111,7 @@ Renders a kanban view grouped by `status` column with priority, dependency block
 
 ## Task size
 
-Every task carries a **size** — a Fibonacci story-point estimate of its scope: `1`, `2`, `3`, or `5`. `5` is the ceiling: **one task = one PR**, roughly ≤ ~300 lines of diff across ≤ ~5 files. If a task estimates larger than `5`, it is too big to capture as one card — break it into sub-tasks and chain them with `is_blocked_by`.
+Every task carries a **size** — a Fibonacci story-point estimate of its scope: `1`, `2`, `3`, or `5`. `5` is the ceiling: **one task = one PR**, roughly ≤ ~300 lines of diff across ≤ ~5 files. If a task estimates larger than `5`, it is too big to capture as one card — break it into sub-tasks and chain them with `is_blocked_by`. When an _existing_ card turns out too big (or `/promote-tasks` flags it `scope exceeds size 5`), the `break-down-task` skill (`skills/break-down-task/SKILL.md`) finds the shear points and replaces it with the sub-tasks.
 
 | size  | meaning                                                        |
 | ----- | -------------------------------------------------------------- |
