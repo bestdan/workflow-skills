@@ -21,13 +21,13 @@ re-split) without guessing.
 
 ## Recommendation at a glance
 
-| Question          | Recommendation                                                                                                                                                                                                                                                      |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Trigger**       | A new `/push-plan <name>` command that resolves the handler like `/add-task`/`/do-tasks`. `repo-pr` ⇒ no-op.                                                                                                                                                        |
-| **Vetting gate**  | Every non-epic task file in the plan is `status: ready` **and** an explicit confirmation prompt listing what will be created. No new `vetted:` field.                                                                                                               |
-| **Mapping**       | Overview epic → Linear **project** / Jira **epic** / gh-issue **milestone**. Each `task_N.md` → one issue via the existing handler add-flow. `is_blocked_by` translated by pushing in **topological order** and resolving slugs through a live slug→tracker-id map. |
-| **Idempotency**   | Record the created id back into each file's frontmatter (`tracker_id`, optional `tracker_url`); the epic file records the project/epic/milestone id. Re-push is **create-missing-only** — a file with `tracker_id` is skipped. No separate manifest.                |
-| **Reverse drift** | Out of scope to solve. Local files are **not** deleted; they keep their `tracker_id` as a traceable link. Tracker becomes the source of truth for status/execution.                                                                                                 |
+| Question          | Recommendation                                                                                                                                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**       | A new `/push-plan <name>` command that resolves the handler like `/add-task`/`/do-tasks`. `repo-pr` ⇒ no-op.                                                                                                                                                                       |
+| **Readiness**     | **Push by default** — readiness is a reported _check_, not a hard gate. Classify tasks `ready` vs not-ready, confirm with the user (showing each not-ready task's "what's needed"), then push the whole plan; `--ready-only` pushes just the ready subset. No new `vetted:` field. |
+| **Mapping**       | Overview epic → Linear **project** / Jira **epic** / gh-issue **milestone**. Each `task_N.md` → one issue via the existing handler add-flow. `is_blocked_by` translated by pushing in **topological order** and resolving slugs through a live slug→tracker-id map.                |
+| **Idempotency**   | Record the created id back into each file's frontmatter (`tracker_id`, optional `tracker_url`); the epic file records the project/epic/milestone id. Re-push is **create-missing-only** — a file with `tracker_id` is skipped. No separate manifest.                               |
+| **Reverse drift** | Out of scope to solve. Local files are **not** deleted; they keep their `tracker_id` as a traceable link. Tracker becomes the source of truth for status/execution.                                                                                                                |
 
 ---
 
@@ -36,9 +36,11 @@ re-split) without guessing.
 A new top-level command, dispatched off `.task-config.yml` exactly like
 `/add-task`, `/list-tasks`, and `/do-tasks`:
 
-- Resolve handler. `repo-pr` (or absent) ⇒ **no-op**: plans already live as files;
-  print "plans already live as files for the repo-pr handler — nothing to push"
-  and stop. This matches [[task_14]]'s acceptance criterion.
+- Resolve handler. `repo-pr` (or absent) ⇒ **no-op**: for this handler the task
+  files _are_ the destination (they land via the user's normal commit/PR), so
+  there is **no separate tracker to sync to**. Print "repo-pr handler: plans
+  already live as task files — no external tracker to push to" and stop. This
+  matches [[task_14]]'s acceptance criterion.
 - `linear | jira | gh-issue` ⇒ run the push flow (section 3).
 
 **Why a standalone command, not a flag or a prompt:**
@@ -55,25 +57,44 @@ A new top-level command, dispatched off `.task-config.yml` exactly like
   **discoverable** alongside the other task-loop verbs, and reuses the existing
   handler-dispatch pattern verbatim.
 
-`plan-with-docs` step 7/8 gains a one-line pointer ("once vetted, run
-`/push-plan <name>` to sync to the configured tracker"), nothing more.
+`plan-with-docs` step 7/8 gains a one-line pointer ("once you're happy with the
+plan, run `/push-plan <name>` to sync it to the configured tracker"), nothing
+more.
 
-## 2. Vetting gate — `status: ready` + explicit confirm
+## 2. Readiness check — push by default, surface a not-ready follow-up set
 
-A plan is pushable when **every non-epic task file** in
-`dev_docs/tasks/<name>_plan/**` is `status: ready`, and the user confirms a
-summary of what will be created.
+Readiness is a **reported check, not a hard gate.** Requiring every task be
+`status: ready` is too strict: a plan legitimately ships with some tasks that
+still need their own sub-plan (this very spike is one — [[task_14]] needed
+breaking down before it could be `ready`). So `/push-plan` **pushes by default**
+and uses readiness only to _classify and report_, not to block.
 
-- `ready` is the existing "this card passed the human/promoter gate" signal
-  (tasks are born `new`; `/promote-tasks` flips them to `ready`). Reusing it means
-  "vetted" = "promoted + confirmed" — no new state to maintain.
-- If any task is still `new`/`needs_refinement`, **stop** and point the user at
-  `/promote-tasks` (or let them pass `--force` to push the ready subset — see
-  open question O1).
-- The epic file (`type: epic`) is exempt from the `ready` check (it is not a task).
+The flow:
 
-**Rejected:** a dedicated `vetted: true` frontmatter field — it duplicates the
-information already in `status`, and adds a field to keep in sync.
+1. **Classify** the plan's non-epic task files into `ready` vs **not-ready**
+   (`new` / `needs_refinement` / `blocked`). The epic file (`type: epic`) is
+   exempt — it's the container, not a task.
+2. **Confirm as a check.** Show the user the summary of what will be created
+   _and_ the not-ready set, each not-ready task line carrying **what's needed to
+   resolve it** — the promoter's `needs_refinement` reason where one exists, else
+   "unscored (`status: new`) — run `/promote-tasks`". This keeps the
+   "encouragement toward completion" without enforcing it: the gaps are explicit
+   and trackable.
+3. **Push by default.** On confirm, push the whole plan (create-missing-only, §4).
+   Not-ready tasks are still created — it's fine for a tracker issue to need
+   further breakdown, as long as its gap is recorded — and they're echoed back as
+   the **follow-up set** the user can resolve now or later. A user who wants to
+   hold them passes `--ready-only` to push just the `ready` subset; re-push is
+   safe (create-missing-only), so the held ones land on the next run once
+   resolved.
+
+- `ready` reuses the existing promoter signal (tasks are born `new`;
+  `/promote-tasks` flips them to `ready` / `needs_refinement`), so "readiness"
+  needs **no new state** — it reads `status`.
+
+**Rejected:** (a) a hard `status: ready` gate that **stops** the push — too rigid,
+fights real plans that carry sub-plan tasks; (b) a dedicated `vetted: true`
+frontmatter field — duplicates `status` and adds a field to keep in sync.
 
 ## 3. Mapping
 
@@ -211,7 +232,8 @@ The per-handler differences (and the schema prerequisite) make the single
   string fields + validator type-guard; document them in the field reference and
   **Epics** section of `skills/task/SKILL.md`. _Prereq for the rest._ (size 2)
 - **task_14b — `/push-plan` + repo-pr no-op + Linear path.** The command skeleton:
-  handler resolve, vetting gate (§2), topological order + slug→id map (§3.3),
+  handler resolve, readiness check + push-by-default (§2), topological order +
+  slug→id map (§3.3),
   create-missing-only idempotency (§4) writing ids back. Wire to `linear-add.md`
   (project-as-epic + resolved native `blockedBy`). `repo-pr` ⇒ no-op. Update
   `skills/plan-with-docs/SKILL.md` to document local-first → vet → push.
@@ -226,14 +248,14 @@ Recommended order: **14a → 14b → 14c.** Each is ≤ size 3 and one PR.
 
 ---
 
-## Open questions for the user (O1–O2)
+## Open questions
 
-- **O1 — `--force` partial push?** Should `/push-plan` allow pushing only the
-  `ready` subset of a partially-vetted plan (via `--force`), or hard-require the
-  _whole_ plan be `ready`? Recommendation: hard-require by default, allow
-  `--force` for the ready subset (still create-missing-only, so the rest can be
-  pushed later once promoted).
+- **O1 — partial push? RESOLVED (review, 2026-06-07).** Push **by default**;
+  readiness is a reported check, not a hard gate (§2). Not-ready tasks are pushed
+  too and echoed back as a follow-up set with "what's needed"; `--ready-only`
+  pushes just the `ready` subset for users who'd rather hold the rest. (Reverses
+  the spike's original "hard-require by default" lean, per owner direction.)
 - **O2 — gh-issue grouping grain.** Milestone (native, but the add-flow must learn
   to create/assign milestones) vs. a `plan:<name>` label (zero new capability, but
   weaker grouping). Recommendation: milestone in 14c; label as the documented
-  fallback if milestone creation slips.
+  fallback if milestone creation slips. _Still open._
