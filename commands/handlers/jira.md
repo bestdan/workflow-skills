@@ -79,7 +79,7 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
    - `fields`: `["summary", "status", "assignee", "priority", "labels", "created"]`
    - `maxResults`: 50
 
-   The response wraps issues as `issues.nodes[]`; each node has `key`, `fields.summary`, `fields.status.statusCategory.key` (`new` / `indeterminate` / `done`), `fields.assignee.displayName`, `fields.priority.name`, `fields.labels[]`, `fields.created`, and a ready-made `webUrl`.
+   The response is an `issues[]` array — each element has `key`, `fields.summary`, `fields.status.statusCategory.key` (`new` / `indeterminate` / `done`), `fields.assignee.displayName` (or `null` when unassigned), `fields.priority.name`, `fields.labels[]` (plain strings), and `fields.created`. Some Atlassian MCP servers wrap the array as `issues.nodes[]` instead (the create flow above reads `issues.nodes[0]`); read whichever key the server returns.
 
 3. **Group into kanban sections.** Classify each issue by its `statusCategory.key` (the coarse split, like gh-issue's open/closed `state`) plus label presence. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
@@ -103,13 +103,13 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                                                              |
-   | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Priority    | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low` (Highest→urgent, High→high, Medium→medium, Low/Lowest→low); none → `[—]`, sort last |
-   | Identifier  | issue `key`                                                                                                                                         |
-   | Title       | `fields.summary`                                                                                                                                    |
-   | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                 |
-   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`      |
+   | Field       | Source                                                                                                                                                                                                                                                                                                                 |
+   | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Priority    | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low`. Default scheme: Highest→urgent, High→high, Medium→medium, Low/Lowest→low. `P`-scheme (custom, common): P1→urgent, P2→high, P3→medium, P4→low (match the leading `P<n>`, e.g. `P4-Trivial`). Any other custom name, or no priority, → `[—]`, sort last |
+   | Identifier  | issue `key`                                                                                                                                                                                                                                                                                                            |
+   | Title       | `fields.summary`                                                                                                                                                                                                                                                                                                       |
+   | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                                                                                                                                    |
+   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                                                                                                                                         |
 
    Sort within each section by priority (`urgent > high > medium > low`, none last), then `created` (oldest first).
 
