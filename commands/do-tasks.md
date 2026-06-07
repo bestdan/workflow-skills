@@ -144,11 +144,12 @@ feasibility or claiming:
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr
    handler uses).
-2. Count current in-flight work = Linear issues in a `started`-type state
-   (`In Progress`, `In Review`) for the configured team, plus open PRs linked to
-   those issues. Counting the `started`/`In Review` issues via
-   `<linear-mcp>__list_issues` is sufficient — an open linked PR keeps its issue
-   in `In Review`, so it is already reflected in that count.
+2. Count current in-flight work = Linear issues in any `started`-type state
+   (e.g. `In Progress`, `In Review`) for the configured team, via
+   `<linear-mcp>__list_issues` (resolve by state **type**, not display name —
+   names are team-configurable). The started-type issue is the canonical
+   in-flight unit: an open PR is already reflected by its issue sitting in a
+   started state, so do **not** add open PRs separately — that double-counts.
 3. If that count is **≥ `wip_limit`**, decline: report
    `WIP limit <n> reached (<count> in flight) — no issue claimed` and stop. Do not
    claim another card.
