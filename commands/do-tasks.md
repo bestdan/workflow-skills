@@ -147,7 +147,8 @@ protects, regardless of how the batch is split.
 Both are defined in `repo-pr-execute.md`:
 
 - **WIP cap** — resolve `wip_limit` from `.task-config.yml` (default `3`), count
-  current WIP (`in_progress` files + open `task-loop` PRs), and dispatch at most
+  current WIP (distinct in-flight tasks, deduped by slug across open `task-claim` PRs,
+  open `task-loop` PRs, and `in_progress` files), and dispatch at most
   `wip_limit - current_wip`. Single-task mode (`/do-tasks` / `/do-tasks <slug>`)
   is not gated.
 

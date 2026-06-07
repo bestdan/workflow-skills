@@ -57,11 +57,14 @@ uses these exact steps:
    gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
    ```
 
-   A PR claims `<slug>` when its body contains the marker line `Claims-task: <slug>`
-   **or** its `headRefName` is `task/<slug>`. If any open PR (any of the three labels)
-   claims it, **STOP** — report `already claimed by PR #<n>` (or `blocked — see PR #<n>`
-   for a `task-blocked` match) and move to the next candidate. A `task-blocked` match
-   needs a human to resolve the block, so never auto-re-claim it.
+   A PR claims `<slug>` when one of its body lines is **exactly** `Claims-task: <slug>`
+   **or** its `headRefName` is `task/<slug>`. Match the **whole line**, not a substring
+   (`grep -Fxq` on trimmed body lines, or `^Claims-task: <slug>$`) — a substring test
+   would let slug `task_1` falsely match a `Claims-task: task_13` line and skip a claim
+   it shouldn't. If any open PR (any of the three labels) claims it, **STOP** — report
+   `already claimed by PR #<n>` (or `blocked — see PR #<n>` for a `task-blocked` match)
+   and move to the next candidate. A `task-blocked` match needs a human to resolve the
+   block, so never auto-re-claim it.
 
 2. **Acquire.** Switch to a work branch — prefer `git checkout -b task/<slug>`; in a
    branch-pinned environment where you cannot push a new branch, **stay on the current
@@ -96,16 +99,23 @@ uses these exact steps:
    can both pass step 1 concurrently and both open a draft PR. Re-run the step-1 query
    and, if more than one open PR claims this slug, the **lowest PR number wins**
    deterministically. If yours is not the lowest, `gh pr close <your-pr>`, undo the
-   status flip, and **STOP**. (When both sessions share one fixed branch, the second
+   status flip (change `status: in_progress` back to `ready`, commit, and push so no
+   stale `in_progress` file is left on your branch), and **STOP**. (When both sessions
+   share one fixed branch, the second
    `gh pr create` is rejected outright — GitHub allows one open PR per head→base pair —
    so the second bails here without a tie to break.)
 
 A claim that succeeds leaves the task file at `status: in_progress` and one open draft
 `task-claim` PR. **Finishing** the work (see the dispatch/local steps) converts that
 same PR into the review PR: delete the task file, push, then relabel it
-`task-loop`, replace the placeholder body with the real summary, and `gh pr ready` it.
-Until then a `--no-claim` resume finds the claim by its open `task-claim` PR and checks
-out that PR's `headRefName`.
+`task-loop`, replace the placeholder body with the real summary — **keeping the
+`Claims-task: <slug>` marker line in the new body** — and `gh pr ready` it. Retaining
+the marker matters because the task file still shows `status: ready` on `main` until
+the PR merges; in a branch-pinned env the review PR's head branch is not `task/<slug>`,
+so the marker is the only thing that lets the pre-claim check recognize the in-review
+task and stops a second session from re-claiming and redoing it. Until merge, a
+`--no-claim` resume finds the claim by its open `task-claim` PR and checks out that
+PR's `headRefName`.
 
 ## 1. Scan for tasks
 
@@ -148,19 +158,25 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 **WIP limit (batch only — `--all` / `-n N`).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — skip this paragraph there.
 
 1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
-2. Count current WIP = (task files with `status: in_progress`) + (open `task-loop` PRs):
+2. Count current WIP = the number of **distinct in-flight tasks**, deduped by slug
+   across three sources: open `task-claim` PRs (claimed, work underway), open
+   `task-loop` PRs (finished, in review), and task files with `status: in_progress` in
+   the current checkout:
 
    ```bash
-   gh pr list --label task-loop --state open --json number --jq 'length'
+   gh pr list --label task-claim --state open --limit 100 --json number,headRefName,body
+   gh pr list --label task-loop  --state open --limit 100 --json number,headRefName,body
    ```
 
-   A claimed-but-unfinished task is counted **once** via its `in_progress` file — its
-   open claim PR carries the `task-claim` label (not `task-loop`), so it is not in this
-   count and does not double-count. The PR only flips to `task-loop` at finish, when the
-   task file is deleted, so the two terms stay disjoint. If the `gh pr list` query fails
-   (API error or rate limit — step 3 has already confirmed `gh` is installed and
-   authenticated), count only the `in_progress` files and note in the report that the
-   count may undercount open PRs (so the effective cap is looser than intended).
+   **Dedupe by slug** — a task mid-finish can momentarily appear as both an
+   `in_progress` file and a `task-claim`/`task-loop` PR; count each slug once.
+   Counting open `task-claim` PRs matters because a claim's `in_progress` flip lives on
+   an unmerged branch and is **invisible to a fresh-clone batch scan**, so the open
+   `task-claim` PR — not the `in_progress` file — is the reliable in-flight signal for
+   work claimed by other sessions. If the `gh pr list` queries fail (API error or rate
+   limit — step 3 has already confirmed `gh` is installed and authenticated), count only
+   the `in_progress` files and note in the report that the count may undercount open PRs
+   (so the effective cap is looser than intended).
 3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority, then value/effort score, then age — as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
@@ -218,7 +234,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
       gh pr list --state open --label task-claim   --limit 100 --json number,headRefName,body
       gh pr list --state open --label task-loop     --limit 100 --json number,headRefName,body
       gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
-      A PR claims this slug if its body contains the line 'Claims-task: <slug>' OR its headRefName is 'task/<slug>'. If any open PR (any of the three labels) claims it, STOP — another agent has it, or it is blocked awaiting a human (never auto-re-claim a task-blocked match).
+      A PR claims this slug if one of its body lines is EXACTLY 'Claims-task: <slug>' (match the whole line, e.g. grep -Fxq on trimmed lines or '^Claims-task: <slug>$' — NOT a substring, so task_1 does not match a 'Claims-task: task_13' line) OR its headRefName is 'task/<slug>'. If any open PR (any of the three labels) claims it, STOP — another agent has it, or it is blocked awaiting a human (never auto-re-claim a task-blocked match).
 
    b. ACQUIRE — switch to a work branch and flip the status. Prefer a dedicated branch; if this environment pins you to a fixed branch and forbids pushing a new one, stay on the current branch (the branch name does NOT carry the lock):
       git checkout -b task/<slug>   # or stay on the pinned branch
@@ -251,7 +267,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
    Source branch: <source_branch>'
    git push
 
-6. FINISH THE PR: Convert the draft claim PR opened in step 1 into the review PR — do NOT open a second PR. Relabel it from task-claim to task-loop (so /list-tasks shows it under needs_review), replace the placeholder body with the real summary, and mark it ready for review. <pr> is the claim PR number from step 1c:
+6. FINISH THE PR: Convert the draft claim PR opened in step 1 into the review PR — do NOT open a second PR. Relabel it from task-claim to task-loop (so /list-tasks shows it under needs_review), replace the placeholder body with the real summary (KEEP the 'Claims-task: <slug>' marker line in the new body — the task file still shows status: ready on main until this PR merges, and in a branch-pinned env the head branch is not task/<slug>, so this marker is the only thing that lets another session's pre-claim check see the task is already in review and not redo it), and mark it ready for review. <pr> is the claim PR number from step 1c:
    gh label create task-loop --description 'Auto-generated from task-loop' --color '0E8A16' 2>/dev/null || true
    gh pr edit <pr> --add-label task-loop --remove-label task-claim --title 'chore(task): <title>' --body '## Summary
 
@@ -270,7 +286,9 @@ The file is at dev_docs/tasks/<slug>.md with this content:
    - [ ] Acceptance criteria met
 
    ---
-   Source task: dev_docs/tasks/<slug>.md (deleted in this PR)'
+   Source task: dev_docs/tasks/<slug>.md (deleted in this PR)
+
+   Claims-task: <slug>'
    gh pr ready <pr>
 
 ## If you cannot complete the task
@@ -324,7 +342,7 @@ not the branch: it works whether or not you can create `task/<slug>`.
 The size gate still applies to the batch path: `/do-tasks --all --local` with a highest-ranked task whose `size > auto_execute_max_size` **reserves** it (`--claim-only` semantics — claim only, no execution) and reports it as reserved rather than executing it. A named `/do-tasks <slug> --local` is single-task mode and is never size-gated.
 
 1. **Claim** via the Claim protocol (pre-claim check → acquire → draft `task-claim` PR → reconcile). For acquire, prefer `git checkout -b task/<slug>` from the current HEAD; in a branch-pinned session that cannot push a new branch, stay on the pinned branch — the draft PR still carries the lock. If the pre-claim check or reconcile shows the slug already claimed, STOP and report it.
-2. Route by the size gate (batch path only): if `size <= auto_execute_max_size`, execute, validate, delete the file, commit, push, and **finish the PR** (relabel `task-claim`→`task-loop`, fill the body, `gh pr ready`); if `size > auto_execute_max_size`, **reserve** it (stop after the claim — leave the draft `task-claim` PR open). A named `/do-tasks <slug> --local` is single-task mode and always executes in full.
+2. Route by the size gate (batch path only): if `size <= auto_execute_max_size`, execute, validate, delete the file, commit, push, and **finish the PR** (relabel `task-claim`→`task-loop`, fill the body **keeping the `Claims-task: <slug>` marker line**, `gh pr ready`); if `size > auto_execute_max_size`, **reserve** it (stop after the claim — leave the draft `task-claim` PR open). A named `/do-tasks <slug> --local` is single-task mode and always executes in full.
 3. Return to the original branch with `git checkout -` (only if you created `task/<slug>`; in a branch-pinned session you stayed put).
 
 There is no remote session in this mode — report the PR opened in-session instead.
