@@ -14,7 +14,7 @@ Close the gap between the current task loop (a strong capture-and-execute kanban
 - Handler capability warnings at config time.
 - Model-judgment scope check in promotion.
 - Epic hierarchy with rollup.
-- Unified `/do-tasks` verb (single by default, `--all` batch, WIP-bounded); `/process-tasks` and `/claim-task` are **removed** in favor of it.
+- Unified `/do-tasks` verb (single by default, `--all` batch, WIP-bounded); `/process-tasks` and `/claim-task` are **removed** in favor of it. Claim and execute are exposed as composable steps (`--claim-only` / `--no-claim`), and the batch path size-gates auto-execution so the headless runner drains small tasks while big ones are reserved for a human.
 - Handler parity: Linear promote path + `/list-tasks` for gh-issue and jira.
 - Plan→tracker sync, **local-first** (draft → vet → explicit push), scoped via a design spike first.
 
@@ -48,6 +48,8 @@ Main tradeoff considered: bundling all format fields into one task (chosen — t
 12. [[task_12]] — Remove `/process-tasks` & `/claim-task` in favor of `/do-tasks` + docs/README. (after 10, 11)
 13. [[task_13]] — Design spike: local-first plan→tracker sync.
 14. [[task_14]] — Implement vetted-plan push to the configured handler. (after 13)
+15. [[task_15]] — Add `--claim-only` / `--no-claim` flags to `/do-tasks` (claim and do as composable steps). (after 11)
+16. [[task_16]] — Size-gate `/do-tasks --all` auto-routing: headless-execute small tasks, reserve big ones for a human. (after 15)
 
 > **Dependency-slug caveat.** Ordering is encoded with `is_blocked_by` pointing at task **filename stems** (`task_1`, `task_5`, …), because `commands/process-tasks.md` resolves blockers by bare slug **globally** across `dev_docs/tasks/**/*.md`. Those stems are not unique across coexisting plans (e.g. `evals_and_ci_plan/` also has `task_1`…`task_5`), so process this plan in isolation, or keep task slugs unique across in-flight plans, until [[task_3]] (multi-blocker semantics) or a future change makes resolution path-aware.
 
@@ -57,3 +59,4 @@ Main tradeoff considered: bundling all format fields into one task (chosen — t
 - **WIP default (Rec 2):** cap concurrent in-flight work at **3**, configurable in `.task-config.yml`. (See [[task_5]].)
 - **Old execute commands (Rec 9):** `/process-tasks` and `/claim-task` are **removed immediately** in favor of `/do-tasks` — no alias/deprecation period. (See [[task_12]].)
 - **Epic identity (Rec 7):** a **first-class epic file** with its own frontmatter (`type: epic`, title, status, owner), not just a directory name. Promote/execute scans must skip `type: epic` files. (See [[task_4]].)
+- **Claim/do separation (added 2026-06-07):** keep claim and execute as **composable steps**, not separate commands — `/do-tasks` stays the single verb, with `--claim-only` (reserve, don't execute) and `--no-claim` (execute an already-claimed task) flags. Default remains atomic claim+do. The standalone-claim primitive is gated behind an actual human-in-the-loop need rather than built speculatively. (See [[task_15]], [[task_16]].)
