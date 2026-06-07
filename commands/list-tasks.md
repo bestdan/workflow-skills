@@ -65,7 +65,7 @@ gh pr list --label task-loop --state merged --limit 10 --json number,title,merge
 
 Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated.
 
-Within each section, sort by priority (urgent > high > medium > low), then by **value/effort score** `impact / size` descending (a card with no `impact` set has no score and sorts last within its priority tier), then age (oldest first). This matches the **Ranking** in `skills/task/SKILL.md` and `/process-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
+Within each section, sort by priority (urgent > high > medium > low), then by **value/effort score** `impact / size` descending (a card with no `impact` set, or a missing/invalid `size`, has no score and sorts last within its priority tier), then age (oldest first). This matches the **Ranking** in `skills/task/SKILL.md` and `/do-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
 
 ```
 ## ready (2)
@@ -86,7 +86,7 @@ Within each section, sort by priority (urgent > high > medium > low), then by **
 - [high] (size 2) Migrate config loader — @dan — claimed on bestdan/migrate-config
 ```
 
-Annotations to surface inline when present: `@<assignee>`, `human-approval-requested`, `waiting on <slug>`, `expired`, `claimed on <branch>`.
+Annotations to surface inline when present: `@<name>` (assignee), `human-approval-requested`, `waiting on <slug>`, `expired`, `claimed on <branch>`.
 
 Finish with a summary line:
 

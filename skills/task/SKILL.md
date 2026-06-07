@@ -118,13 +118,13 @@ This single scale governs the promotion confidence check (below), the `/do-tasks
 
 ## Ranking
 
-When a command picks the "next" task or orders a list, it ranks dependency-ready tasks by, in order:
+When a command picks the "next" task or orders a list, it ranks tasks by, in order:
 
 1. **`priority`** — `urgent` > `high` > `medium` > `low` (urgent is human-only, so the auto-execute path never selects it, but it still sorts first in `/list-tasks`).
-2. **Value/effort score** — `impact / size`, **descending** (`size` is effort, `impact` is value; both Fibonacci `1`/`2`/`3`/`5`). A task with no `impact` set has no score and ranks **last within its priority tier** — never dropped.
+2. **Value/effort score** — `impact / size`, **descending** (`size` is effort, `impact` is value; both Fibonacci `1`/`2`/`3`/`5`). A task with no `impact` set, or a missing/invalid `size` (e.g. an unpromoted card that hasn't passed validation), has no score and ranks **last within its priority tier** — never dropped.
 3. **Age** — oldest `created` first.
 
-This is the **file-handler (`repo-pr`) ranking** and is consumed by `/process-tasks` (selection) and `/list-tasks` (sort). Linear has no native value/impact field, so the `linear` handler ranks by `priority` + `estimate` instead and does not compute a value/effort score.
+This ordering applies within each status section in `/list-tasks` (all tasks, including ones waiting on a blocker), while `/do-tasks` first filters to dependency-ready tasks and then applies the same order for selection. This is the **file-handler (`repo-pr`) ranking**. Linear has no native value/impact field, so the `linear` handler ranks by `priority` + `estimate` instead and does not compute a value/effort score.
 
 ## Task file format
 
