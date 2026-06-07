@@ -103,7 +103,7 @@ Both are defined in `repo-pr-execute.md`:
   **Check the WIP slack first (batch only).** Before scanning/ranking, confirm
   `gh` auth (the WIP count itself calls `gh`), then compute
   `wip_limit - current_wip`. If it is `≤ 0`, report
-  `WIP limit <n> reached (<current_wip> in flight) — nothing dispatched` and stop,
+  `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched` and stop,
   skipping ranking and dispatch entirely (a light frontmatter scan is still needed
   to count `in_progress`; you need not enumerate held tasks — point the user at
   `/list-tasks`). Only with positive slack do you rank and dispatch the top
@@ -145,7 +145,7 @@ resolves the team and workflow states, **before** judging feasibility or claimin
    in-flight unit: an open PR is already reflected by its issue sitting in a
    started state, so do **not** add open PRs separately — that double-counts.
 3. If that count is **≥ `wip_limit`**, decline: report
-   `WIP limit <n> reached (<count> in flight) — no issue claimed` and stop. Do not
+   `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do not
    claim another card.
 
 Single-issue mode (`/do-tasks <identifier>`) is gated too — the limit protects

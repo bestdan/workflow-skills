@@ -35,7 +35,7 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
    If the MCP response does not include `branchName` on `list_issues` results, fetch it lazily via `<linear-mcp>__get_issue` for whichever candidate the Judge feasibility phase selects. **Do not synthesize a branch name when the field is reachable** — using Linear's exact published string maximizes the chance of GitHub-integration auto-detection, even though the tracker path also adds an explicit `links` attachment as a fallback.
 
-   If the `/do-tasks` argument was a specific identifier (e.g. `PRE-12`), skip steps 2–6 and call `<linear-mcp>__get_issue` with that identifier. Apply the filters from step 5 to that one issue; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct identifier — `/do-tasks` will surface the reason and stop.
+   If the `/do-tasks` argument was a specific identifier (e.g. `PRE-12`), skip steps 3–6 (keep step 2 — the cached state map is still needed by "Claim the issue" and "Move to review") and call `<linear-mcp>__get_issue` with that identifier. Apply the filters from step 5 to that one issue; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct identifier — `/do-tasks` will surface the reason and stop.
 
 ## Judge feasibility
 

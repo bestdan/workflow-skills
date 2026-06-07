@@ -74,7 +74,7 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
    ```
 
    If the `gh pr list` query fails (API error or rate limit — step 3 has already confirmed `gh` is installed and authenticated), count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
-3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <n> reached (<current_wip> in flight) — nothing dispatched`.
+3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
 For each selected task that fits under the limit, read its full content (frontmatter + body), then dispatch a remote session.
