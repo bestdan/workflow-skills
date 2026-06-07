@@ -2,7 +2,7 @@
 title: Add /list-tasks support for gh-issue and jira handlers
 priority: low
 size: 3
-status: new
+status: ready
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:
