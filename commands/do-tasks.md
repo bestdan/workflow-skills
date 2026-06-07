@@ -29,11 +29,13 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 
-**Scope of `--all` / `-n N`.** Batch is meaningful only for **remote** dispatch
-(each task gets its own cloud VM). Foreground pairing is inherently single, so
-`--local` caps the **batch** (`--all` / `-n N`) at **1** — it processes the single
-highest-ranked task and reports the rest as held. `/do-tasks <slug> --local` still
-runs the named slug.
+**Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
+dispatch (each task gets its own cloud VM). Foreground pairing is inherently
+single, so `--local` caps the **batch** (`--all` / `-n N`) at **1** — it processes
+the single highest-ranked task and reports the rest as held. `/do-tasks <slug>
+--local` still runs the named slug. (Batch _claiming_ is the one exception —
+`--claim-only` reserves without executing, so it batches regardless; see the
+Claim / execute split below.)
 
 For the **tracker** (`linear`) handler, execution is single and foreground
 (it runs in the current session): `--remote`/`--local` do not apply, and `--all` /
@@ -58,14 +60,20 @@ error: stop and ask which one was meant.
     (the atomic `auto-claimed` guard, move to the `started`-type state, record the
     branch name), then stop before "Branch + execute".
 - **`--no-claim`** — skip the claim step and execute a task this caller has
-  **already** claimed. Guard: proceed only when the task is already claimed by this
-  caller — `status: in_progress` (`repo-pr`) or assigned to the caller in a
-  `started`-type state (`linear`). Otherwise **stop and explain** — executing an
-  unclaimed task reopens the race the claim step closes. When the guard passes, run
-  the execute half only: for `repo-pr` do the work, validate, delete the file,
-  commit, push, and open the PR (per `repo-pr-execute.md`); for `linear` do the
-  work, open the PR, and "Move to review on PR open" (per `linear-claim.md`) —
-  without re-claiming.
+  **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
+  no default selection, since the target is a specific already-claimed task, not
+  the highest-ranked ready one. Guard: proceed only when that task is already
+  claimed by this caller — `status: in_progress` (`repo-pr`) or assigned to the
+  caller in a `started`-type state (`linear`). Otherwise **stop and explain** —
+  executing an unclaimed task reopens the race the claim step closes. When the
+  guard passes, **first check out the existing claim branch** (the claim step
+  already created and pushed it; `git fetch` it if it is not present locally) — do
+  **not** branch fresh from the current `HEAD`, which is usually the base branch:
+  - `repo-pr`: `git checkout task/<slug>`, then do the work, validate, delete the
+    file, commit, push, and open the PR (per `repo-pr-execute.md`).
+  - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
+    PR, and "Move to review on PR open" (per `linear-claim.md`) — without
+    re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
