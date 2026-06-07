@@ -117,6 +117,7 @@ Files live in `dev_docs/tasks/` (supports subdirectories). Markdown with YAML fr
 title: Imperative description under 80 chars
 priority: low
 size: 2
+impact: 3
 status: new
 created: 2026-03-23
 source_branch: bestdan/feat/example
@@ -124,7 +125,7 @@ source_pr: 42
 related_files:
   - path/to/relevant/file.ts
   - path/to/another/file.ts
-is_blocked_by: fix-broken-import
+is_blocked_by: [fix-broken-import, other-task]
 expires: 2026-04-22
 tags:
   - cleanup
@@ -149,20 +150,23 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 ### Field reference
 
-| Field                      | Required | Description                                                                                     |
-| -------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `title`                    | yes      | Imperative description, < 80 chars                                                              |
-| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                      |
-| `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size** |
-| `status`                   | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done`      |
-| `created`                  | yes      | ISO date                                                                                        |
-| `source_branch`            | yes      | Branch where task was identified                                                                |
-| `source_pr`                | no       | PR number if already open                                                                       |
-| `related_files`            | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research`   |
-| `is_blocked_by`            | no       | Slug/id of another task that must be completed first                                            |
-| `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                       |
-| `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                          |
-| `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                                 |
+| Field                      | Required | Description                                                                                                                |
+| -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `title`                    | yes      | Imperative description, < 80 chars                                                                                         |
+| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                                                 |
+| `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                               |
+| `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                            |
+| `impact`                   | no       | Fibonacci value estimate: `1` / `2` / `3` / `5`, mirroring `size`. Used for value/effort ranking. See **Task size**        |
+| `status`                   | yes      | `new` / `needs_refinement` / `ready` / `in_progress` / `blocked` / `needs_review` / `done`                                 |
+| `created`                  | yes      | ISO date                                                                                                                   |
+| `source_branch`            | yes      | Branch where task was identified                                                                                           |
+| `source_pr`                | no       | PR number if already open                                                                                                  |
+| `related_files`            | yes      | Paths the consumer should read for context. May be empty if `tags` includes `scope: research`                              |
+| `is_blocked_by`            | no       | Slug/id of a blocker, or a list of slugs (`[a, b]`). A single string stays valid. Ready only when **all** blockers resolve |
+| `parent`                   | no       | Slug of an epic this task belongs to (grouping, distinct from `is_blocked_by` ordering)                                    |
+| `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                                                  |
+| `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                                                     |
+| `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                                                            |
 
 ### Body sections
 

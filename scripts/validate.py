@@ -7,8 +7,8 @@
 Dev/CI-only tooling — this script is never loaded by Claude Code as a plugin
 component and never reaches plugin consumers at runtime. It enforces the
 repo-specific rules that `claude plugin validate` and `dprint` don't cover:
-frontmatter shape, name == directory, manifest version sync, and the README
-component-count sentence.
+frontmatter shape, name == directory, manifest version sync, task-file
+frontmatter under dev_docs/tasks/, and the README component-count sentence.
 
 Run via: `uv run scripts/validate.py` (deps are hash-locked in validate.py.lock).
 Exits 0 when clean, 1 with a list of `path: message` failures otherwise.
@@ -31,6 +31,17 @@ NAME_RE = re.compile(r"^[a-z0-9-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
+FIBONACCI = {1, 2, 3, 5}
+TASK_PRIORITIES = {"low", "medium", "high", "urgent"}
+TASK_STATUSES = {
+    "new",
+    "needs_refinement",
+    "ready",
+    "in_progress",
+    "blocked",
+    "needs_review",
+    "done",
+}
 
 errors: list[str] = []
 
@@ -127,6 +138,39 @@ for a in agent_files:
     check_description(rel(a), data.get("description"))
     if not data.get("tools"):
         err(rel(a), "missing tools")
+
+# --- task files (dev_docs/tasks/**/*.md) ---
+# The repo-native task store (see skills/task/SKILL.md). Lenient like the rest
+# of this script: validate the shape of fields that are present, don't hard-
+# reject unknown keys, and skip non-task files. Files with no frontmatter
+# (e.g. a plan overview) and epics (`type: epic`) are not task cards — skip them.
+task_dir = ROOT / "dev_docs" / "tasks"
+if task_dir.is_dir():
+    for t in sorted(task_dir.rglob("*.md")):
+        data, _ = split_frontmatter(t)
+        if data is None:
+            continue  # no frontmatter — not a task card
+        if not isinstance(data, dict):
+            err(rel(t), f"unparseable frontmatter: {data}")
+            continue
+        if data.get("type") == "epic":
+            continue
+        for field in ("size", "impact"):
+            v = data.get(field)
+            if v is not None and v not in FIBONACCI:
+                err(rel(t), f"{field} '{v}' must be one of 1/2/3/5")
+        pr = data.get("priority")
+        if pr is not None and pr not in TASK_PRIORITIES:
+            err(rel(t), f"priority '{pr}' must be one of {sorted(TASK_PRIORITIES)}")
+        st = data.get("status")
+        if st is not None and st not in TASK_STATUSES:
+            err(rel(t), f"status '{st}' must be one of {sorted(TASK_STATUSES)}")
+        blk = data.get("is_blocked_by")
+        if blk is not None and not (
+            isinstance(blk, str)
+            or (isinstance(blk, list) and all(isinstance(x, str) for x in blk))
+        ):
+            err(rel(t), "is_blocked_by must be a string or a list of strings")
 
 # --- manifests: version sync + cross-consistency ---
 plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())

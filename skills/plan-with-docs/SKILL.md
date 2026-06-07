@@ -64,7 +64,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
      - **Code-enforced:** automated tests to add or update, lint/type-check commands, CI checks expected to pass. Name the test files and the assertion in plain English.
      - **User-run:** manual checks that aren't automated — e.g. "open `localhost:3000/foo`, click Save, confirm toast appears", "run migration on staging snapshot, verify row count matches".
 
-   Skip optional frontmatter that doesn't apply. Don't pad.
+   Optional fields are available when they help: `assignee` (who's accountable), `impact` (Fibonacci value estimate `1`/`2`/`3`/`5`, mirroring `size`), and `parent` (slug of an epic this task groups under). Skip optional frontmatter that doesn't apply. Don't pad.
 
 6. **Cross-link.** Each `<name>_task_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each task. Encode hard ordering with `is_blocked_by` (slug of the prerequisite task), not just prose.
 
