@@ -78,7 +78,7 @@ the scan, ranking, multi-blocker readiness, WIP cap, remote dispatch prompt,
 ### `-n N`
 
 `-n N` is `--all` with an explicit ceiling. After ranking the dependency-ready
-tasks (priority → age), keep the top `N`, then apply the WIP limit
+tasks (priority → value/effort score → age), keep the top `N`, then apply the WIP limit
 (`wip_limit - current_wip`). The effective batch is `min(N, wip_limit - current_wip)`.
 Report any selected task you did not dispatch — distinguishing `held (-n N ceiling)`
 from `held (WIP limit reached)` — so the user knows why each was left behind.

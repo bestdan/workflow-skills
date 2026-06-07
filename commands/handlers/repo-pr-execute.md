@@ -39,7 +39,8 @@ Filter to `status: ready`. Sort by:
 
 1. Dependency readiness: a task is eligible only when **every** `is_blocked_by` entry is satisfied (target absent or `done`); a task with any still-active blocker is not
 2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
-3. Age: oldest `created` date first
+3. Value/effort score: `impact / size` descending (`impact` and `size` are both Fibonacci `1`/`2`/`3`/`5`); a task with no `impact` set has no score and ranks **last within its priority tier** (never dropped). See **Ranking** in `skills/task/SKILL.md`.
+4. Age: oldest `created` date first
 
 Treat `is_blocked_by` as a reference to another task's slug, **or a list of slugs** (`[a, b]`). A single string behaves exactly as a one-element list. Each slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. A task is dependency-ready only when **all** of its blockers are satisfied; if any referenced blocker file still exists in another state, the dependent task must not be dispatched yet. When reporting a blocked task, list **every** unresolved blocker (e.g. `waiting on b, c`).
 
@@ -74,7 +75,7 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
    ```
 
    If the `gh pr list` query fails (API error or rate limit — step 3 has already confirmed `gh` is installed and authenticated), count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
-3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
+3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority, then value/effort score, then age — as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
 For each selected task that fits under the limit, read its full content (frontmatter + body), then dispatch a remote session.
