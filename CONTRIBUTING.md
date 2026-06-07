@@ -44,6 +44,10 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 4. Run `just check` (must pass) and, if you can, `just eval` to confirm the new
    skill auto-triggers.
 
+## Adding a handler
+
+When you add a task handler or teach an existing one a new verb (capture, list, promote, do, process), update the **handler capability matrix** in `commands/task-config.md` in the same PR — it's the single source of truth that `/task-config` reads to warn users about capability gaps, and it drifts silently if you don't.
+
 ## Versioning
 
 Bump `plugin.json` `version` **and** the matching `marketplace.json` plugin-entry
