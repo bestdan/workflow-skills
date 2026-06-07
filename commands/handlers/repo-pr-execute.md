@@ -46,17 +46,22 @@ not depend on the claimer controlling the branch name.
 Every claim path below (remote dispatch, `--local`, and the size-gate **reserve**)
 uses these exact steps:
 
-1. **Pre-claim check.** Query open claim/loop PRs and bail if this slug is already
-   claimed:
+1. **Pre-claim check.** Query open claim/loop/blocked PRs and bail if this slug is
+   already claimed or parked as blocked. Pass `--limit 100` so an active repo's open
+   PRs aren't truncated past the default 30 (a missed marker would let a second agent
+   double-claim):
 
    ```bash
-   gh pr list --state open --label task-claim --json number,headRefName,body
-   gh pr list --state open --label task-loop  --json number,headRefName,body
+   gh pr list --state open --label task-claim   --limit 100 --json number,headRefName,body
+   gh pr list --state open --label task-loop     --limit 100 --json number,headRefName,body
+   gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
    ```
 
    A PR claims `<slug>` when its body contains the marker line `Claims-task: <slug>`
-   **or** its `headRefName` is `task/<slug>`. If any open PR (either label) claims it,
-   **STOP** — report `already claimed by PR #<n>` and move to the next candidate.
+   **or** its `headRefName` is `task/<slug>`. If any open PR (any of the three labels)
+   claims it, **STOP** — report `already claimed by PR #<n>` (or `blocked — see PR #<n>`
+   for a `task-blocked` match) and move to the next candidate. A `task-blocked` match
+   needs a human to resolve the block, so never auto-re-claim it.
 
 2. **Acquire.** Switch to a work branch — prefer `git checkout -b task/<slug>`; in a
    branch-pinned environment where you cannot push a new branch, **stay on the current
@@ -209,10 +214,11 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 
 1. CLAIM: The claim lock is an open draft PR labeled 'task-claim' that names the slug — NOT the branch push. Do all four sub-steps:
 
-   a. PRE-CLAIM CHECK — bail if the slug is already claimed:
-      gh pr list --state open --label task-claim --json number,headRefName,body
-      gh pr list --state open --label task-loop  --json number,headRefName,body
-      A PR claims this slug if its body contains the line 'Claims-task: <slug>' OR its headRefName is 'task/<slug>'. If any open PR (either label) claims it, STOP — another agent has it.
+   a. PRE-CLAIM CHECK — bail if the slug is already claimed or parked as blocked. Pass --limit 100 so open PRs are not truncated past the default 30:
+      gh pr list --state open --label task-claim   --limit 100 --json number,headRefName,body
+      gh pr list --state open --label task-loop     --limit 100 --json number,headRefName,body
+      gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
+      A PR claims this slug if its body contains the line 'Claims-task: <slug>' OR its headRefName is 'task/<slug>'. If any open PR (any of the three labels) claims it, STOP — another agent has it, or it is blocked awaiting a human (never auto-re-claim a task-blocked match).
 
    b. ACQUIRE — switch to a work branch and flip the status. Prefer a dedicated branch; if this environment pins you to a fixed branch and forbids pushing a new one, stay on the current branch (the branch name does NOT carry the lock):
       git checkout -b task/<slug>   # or stay on the pinned branch
@@ -228,7 +234,7 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 
       Claims-task: <slug>'
 
-   d. RECONCILE — re-run the step-(a) query. If more than one open PR claims this slug, the LOWEST PR number wins. If yours is not the lowest, run 'gh pr close <your-pr>' and STOP. (If two agents shared one fixed branch, the second gh pr create was already rejected — one open PR per head/base pair.)
+   d. RECONCILE — re-run the step-(a) query. If more than one open PR claims this slug, the LOWEST PR number wins. If yours is not the lowest, run 'gh pr close <your-pr>', undo the status flip in the task file (change status: in_progress back to ready, commit, and push so no stale in_progress file is left on your branch), and STOP. (If two agents shared one fixed branch, the second gh pr create was already rejected — one open PR per head/base pair.)
 
 2. EXECUTE: Read the Context and Task sections. Read all files listed in related_files. If `is_blocked_by` is present, treat it as already satisfied before proceeding; if the blocking task file still exists in the checkout (and is not in status: done) for any reason, STOP rather than doing work out of order. Do the work described in the Task section.
 
@@ -272,7 +278,8 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 1. Edit the task: change status to 'blocked'
 2. Add a '## Consumer Notes' section explaining what you tried and what went wrong
 3. Commit and push
-4. CLOSE the draft claim PR opened in step 1 ('gh pr close <pr>') so it no longer holds the claim — the 'status: blocked' file (kept, not deleted) is the signal, and closing the claim lets the task be re-claimed once unblocked. Do NOT convert it to a task-loop review PR.
+4. RELABEL the draft claim PR opened in step 1 from task-claim to task-blocked ('gh label create task-blocked --description "task-loop blocked, needs a human" --color "B60205" 2>/dev/null; gh pr edit <pr> --add-label task-blocked --remove-label task-claim') and leave it OPEN. Do NOT close it and do NOT convert it to a task-loop review PR.
+   Why not close it: the 'status: blocked' flip lives only on this unmerged branch — main still shows the task as 'ready'. If you closed the PR, the next scanner would see 'ready' with no open claim and re-claim the same failing task in a loop. Keeping the PR open under task-blocked makes the block visible on GitHub, preserves the Consumer Notes, and the pre-claim check skips task-blocked PRs so nothing re-claims it. A human resolves the block (push a fix, or close the task-blocked PR to release it) before it runs again.
 
 ## After opening the PR
 
