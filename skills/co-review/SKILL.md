@@ -170,7 +170,7 @@ The remaining steps depend on disposition.
 12. **Commit and push the changes.** Once the fixes are applied and verified, commit them and push to the current branch's upstream:
     - Stage only the files you changed as part of the review fixes — don't sweep in unrelated work that was already in the working tree.
     - Write a concise commit message describing the review fixes (e.g., `Apply co-review fixes`), summarizing the items addressed.
-    - Push to the current branch (`git push`; use `git push -u origin <branch>` if it has no upstream yet).
+    - Push the current branch. If it already has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` succeeds), a plain `git push` is enough. Otherwise set one explicitly against the branch's intended remote — `git push -u <remote> HEAD`, where `<remote>` is the configured remote (default `origin`, but don't assume it: fall back to whatever `git remote` reports if `origin` isn't present).
     - If there are no committable changes (nothing was auto-fixed and the user approved nothing), skip this step.
     - Then summarize what changed and confirm the commit/push.
 
