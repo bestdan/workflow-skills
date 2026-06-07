@@ -33,9 +33,11 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md`:
 - Body has no `## Open Questions` or `## TBD` section with non-empty content (an empty heading is fine)
 - `priority` ≠ `urgent`
 - `human_approval_requested` is unset or false
-- Title and body together do not contain any scope red-flag keyword: `refactor`, `migrate`, `redesign`, `rewrite`, `overhaul` (case-insensitive, whole word) suggesting the task exceeds size `5`
+- **Scope fits size 5 (judgment, not keywords).** Assess whether the task's described scope plausibly fits within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the breadth of the `## Task` steps, and the `related_files` count together. A title containing a word like "migrate" or "refactor" is not itself disqualifying ("Migrate one constant to the new config key" is size `1`); a title like "Restructure the auth module" that implies multi-file rework is. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-tasks`.
 
 **LOW (→ `needs_refinement`, set `human_approval_requested: true`)** if any HIGH condition fails.
+
+This scope gate is **model judgment, not a deterministic rule** — acceptable here because `/promote-tasks` is not a blocking CI gate; a misjudged card lands in `needs_refinement` for a human to confirm, never silently lost. Every other HIGH check above stays deterministic.
 
 Note: `is_blocked_by` is intentionally not part of the promotion check — `/process-tasks` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
 
@@ -61,7 +63,7 @@ Promoted 4 of 6 candidates:
     - fix-broken-import
     - bump-eslint-config
   needs_refinement (1):
-    - migrate-auth-service  (red-flag keyword: migrate)
+    - restructure-auth-module  (scope exceeds size 5 — split into sub-tasks)
   skipped (2, already past new):
     - <slug>
     - <slug>
