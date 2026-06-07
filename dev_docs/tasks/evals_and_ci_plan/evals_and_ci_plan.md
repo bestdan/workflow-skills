@@ -54,19 +54,19 @@ painful to reimplement well (`dprint/check`, `lychee` link-check).
 
 ## Tasks
 
-1. [[task_1]] — **Make the repo green.** Fix the three current failures
+1. [[evals_and_ci_task_1]] — **Make the repo green.** Fix the three current failures
    (dprint formatting, missing marketplace description, version drift) and the
    stale README command count, before adding any gate that would enforce them.
-2. [[task_2]] — **Repo-native validation + local entrypoint.** Add
+2. [[evals_and_ci_task_2]] — **Repo-native validation + local entrypoint.** Add
    `scripts/validate.py`, `scripts/check.sh`, and a `justfile` so contributors
    run the full deterministic gate locally with one command.
-3. [[task_3]] — **Blocking CI workflow.** Add `.github/workflows/ci.yml` that
+3. [[evals_and_ci_task_3]] — **Blocking CI workflow.** Add `.github/workflows/ci.yml` that
    installs the toolchain and runs the same `scripts/check.sh` on every PR/push,
    plus link integrity.
-4. [[task_4]] — **Behavioral eval harness (flag-gated).** Add `evals/` prompts,
+4. [[evals_and_ci_task_4]] — **Behavioral eval harness (flag-gated).** Add `evals/` prompts,
    `scripts/eval.sh` (skill-triggering via `claude -p` stream-json), wire it
    behind a flag locally and a manual `workflow_dispatch` CI job.
-5. [[task_5]] — **Docs & contributor workflow.** `CONTRIBUTING.md`, README CI
+5. [[evals_and_ci_task_5]] — **Docs & contributor workflow.** `CONTRIBUTING.md`, README CI
    badge, PR template, and a "what to do when you add a skill" checklist that
    ties the pieces together.
 
@@ -74,17 +74,17 @@ painful to reimplement well (`dprint/check`, `lychee` link-check).
 
 - **Version drift → keep both & sync.** `plugin.json` and the `marketplace.json`
   plugin entry both carry the version, synced to `0.6.0`; `scripts/validate.py`
-  asserts they stay **equal** to prevent re-drift. ([[task_1]], [[task_2]])
+  asserts they stay **equal** to prevent re-drift. ([[evals_and_ci_task_1]], [[evals_and_ci_task_2]])
 - **`claude plugin validate` auth in CI → verify on first run.** Accepted as a
   known unknown: CI includes the step with a flag-note, and the first CI run
   confirms it runs headless; documented fallback is to fold manifest-schema
-  checks into `validate.py`. ([[task_3]])
+  checks into `validate.py`. ([[evals_and_ci_task_3]])
 - **Validator dependency → real YAML parser, dev-only, hash-pinned.**
   `scripts/validate.py` is dev/CI-only tooling (never shipped to plugin
   consumers), so a `pyyaml` (`safe_load`) dependency is approved; pin an exact
-  security-checked version and hash-lock it via `uv lock --script`. ([[task_2]])
+  security-checked version and hash-lock it via `uv lock --script`. ([[evals_and_ci_task_2]])
 - **`just` in CI → no.** Canonical entrypoint is `scripts/check.sh` (pure bash);
-  the `justfile` is a local convenience wrapper. ([[task_2]], [[task_3]])
+  the `justfile` is a local convenience wrapper. ([[evals_and_ci_task_2]], [[evals_and_ci_task_3]])
 
 ## Open questions
 

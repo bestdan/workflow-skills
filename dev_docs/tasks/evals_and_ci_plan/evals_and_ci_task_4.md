@@ -11,7 +11,7 @@ related_files:
   - scripts/eval.sh
   - .github/workflows/evals.yml
   - evals/README.md
-is_blocked_by: task_3
+is_blocked_by: evals_and_ci_task_3
 expires: 2026-06-28
 tags:
   - ci

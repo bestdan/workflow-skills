@@ -10,7 +10,7 @@ related_files:
   - scripts/validate.py
   - scripts/check.sh
   - justfile
-is_blocked_by: task_1
+is_blocked_by: evals_and_ci_task_1
 expires: 2026-06-28
 tags:
   - tooling

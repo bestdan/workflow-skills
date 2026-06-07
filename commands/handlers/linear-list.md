@@ -18,7 +18,7 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
    - `teamId`: resolved team id from step 1
    - `projectId`: from step 2 (omit entirely when listing all team issues)
    - `includeArchived`: `false`
-   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow with linear.default_project in dev_docs/tasks/.task-config.yml, or pass a section filter like`/list-tasks ready`)` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
+   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow with linear.default_project in dev_docs/tasks/.task-config.yml, or pass a section filter like "/list-tasks ready")` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
 
    The goal is "everything still active in the team's kanban." Pull all non-archived issues in the `backlog`, `unstarted`, `started`, and recently-`completed` state types. To avoid over-fetching when `list_issues` doesn't accept a state-type filter directly, first resolve the team's workflow states by calling `<linear-mcp>__list_workflow_states` (with `teamId`), then pass the matching state ids into `list_issues` for each relevant type. Cache the state-id → type map for step 4's grouping.
 
