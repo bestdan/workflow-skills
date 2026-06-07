@@ -4,6 +4,8 @@ priority: low
 size: 3
 status: new
 created: 2026-06-07
+tracker_id: PRE-117
+tracker_url: https://linear.app/prethinkio/issue/PRE-117/build-gh-issue-batch-do-tasks-all-on-the-tracker-batch-subroutine
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/do-tasks.md

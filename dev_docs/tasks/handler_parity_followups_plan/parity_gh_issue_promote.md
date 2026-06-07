@@ -4,6 +4,8 @@ priority: medium
 size: 3
 status: new
 created: 2026-06-07
+tracker_id: PRE-111
+tracker_url: https://linear.app/prethinkio/issue/PRE-111/build-the-gh-issue-promote-handler-gh-issue-promotemd
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/promote-tasks.md

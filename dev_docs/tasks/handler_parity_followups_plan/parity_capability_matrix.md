@@ -4,6 +4,8 @@ priority: low
 size: 1
 status: new
 created: 2026-06-07
+tracker_id: PRE-114
+tracker_url: https://linear.app/prethinkio/issue/PRE-114/fix-the-stale-promotelinear-matrix-cell-and-keep-the-capability-matrix
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/task-config.md

@@ -4,6 +4,8 @@ priority: medium
 size: 5
 status: new
 created: 2026-06-07
+tracker_id: PRE-116
+tracker_url: https://linear.app/prethinkio/issue/PRE-116/build-the-jira-single-execute-path-jira-claimmd
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/do-tasks.md

@@ -4,6 +4,8 @@ priority: low
 size: 5
 status: new
 created: 2026-06-07
+tracker_id: PRE-113
+tracker_url: https://linear.app/prethinkio/issue/PRE-113/lift-linear-do-tasks-all-to-true-batch-execution-establish-the-tracker
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/do-tasks.md

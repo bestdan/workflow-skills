@@ -4,6 +4,8 @@ priority: medium
 size: 5
 status: new
 created: 2026-06-07
+tracker_id: PRE-112
+tracker_url: https://linear.app/prethinkio/issue/PRE-112/build-the-jira-promote-handler-dynamic-workflow-status-transitions
 source_branch: bestdan/handler-parity-followups
 related_files:
   - commands/promote-tasks.md

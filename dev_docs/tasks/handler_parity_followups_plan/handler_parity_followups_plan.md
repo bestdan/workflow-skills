@@ -1,3 +1,17 @@
+---
+title: Handler parity follow-ups
+type: epic
+status: new
+created: 2026-06-07
+tracker_id: ebbc284b-a1c1-4cb3-96e0-914e210a79a2
+tracker_url: https://linear.app/prethinkio/project/workflow-skills-handler-parity-follow-ups-f09d72e59cbb
+source_branch: bestdan/handler-parity-followups
+tags:
+  - task-loop
+  - handlers
+  - parity
+---
+
 # Handler parity follow-ups
 
 Bring every task-loop verb (`/promote-tasks`, `/do-tasks` single, `/do-tasks` batch) to **parity across all handlers** (`repo-pr`, `linear`, `gh-issue`, `jira`). The matrix is jagged: `repo-pr` runs the full loop, `linear` now has promote + single-execute, and `gh-issue`/`jira` are capture/list destinations with no promotion or execution. None of these gaps are *fundamental* — they are implementation gaps. This plan closes them.
