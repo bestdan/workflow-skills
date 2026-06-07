@@ -22,7 +22,7 @@ expires: 2026-07-07
 
 ## Context
 
-`commands/handlers/linear-common.md` ("Kanban mapping" → Transitions) *describes* a Linear promote behavior — "HIGH → move to `unstarted`/Todo + add `auto-eligible`; LOW → leave in backlog + add `human-approval-requested`" — but no code implements it: `/promote-tasks` (`commands/promote-tasks.md`) is file-only. This is doc↔impl drift. This task builds the missing path and makes `/promote-tasks` handler-aware, matching how `/add-task` and `/list-tasks` dispatch.
+`commands/handlers/linear-common.md` ("Kanban mapping" → Transitions) _describes_ a Linear promote behavior — "HIGH → move to `unstarted`/Todo + add `auto-eligible`; LOW → leave in backlog + add `human-approval-requested`" — but no code implements it: `/promote-tasks` (`commands/promote-tasks.md`) is file-only. This is doc↔impl drift. This task builds the missing path and makes `/promote-tasks` handler-aware, matching how `/add-task` and `/list-tasks` dispatch.
 
 Depends on the promote-judgment task so the new scope gate is the one wired into both the file and Linear paths (avoids editing the scoring logic twice).
 

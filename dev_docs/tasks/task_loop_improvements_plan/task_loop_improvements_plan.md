@@ -25,7 +25,7 @@ Close the gap between the current task loop (a strong capture-and-execute kanban
 
 ## Approach
 
-- **Schema first.** One foundational task adds all new frontmatter fields and updates `scripts/validate.py` so every later behavior task builds on a stable format and the gate stays green. Behavior that *consumes* each field lands as its own task.
+- **Schema first.** One foundational task adds all new frontmatter fields and updates `scripts/validate.py` so every later behavior task builds on a stable format and the gate stays green. Behavior that _consumes_ each field lands as its own task.
 - **Behavior changes land before the structural merge.** WIP cap (Rec 2) and multi-blocker semantics (Rec 3) ship against today's `/process-tasks`, then the `/do-tasks` merge inherits them — keeping the big refactor PR smaller.
 - **`/do-tasks` is split into three** (file path → tracker path → removal of old commands + docs) so no single PR exceeds the size-5 budget.
 - **Plan→tracker is a spike, not a guess.** The local-first-then-push round-trip has real design questions (when to push, how to reconcile edits made in the tracker, idempotency); a research task settles them before implementation.

@@ -23,7 +23,7 @@ expires: 2026-07-07
 
 ## Context
 
-`plan-with-docs` always writes file-based tasks regardless of the configured handler, so teams on Linear/Jira get a split: `/add-task` files to the tracker but plans land as repo files. The desired flow (from planning) is **local-first**: draft and vet the plan locally, *then* explicitly push the vetted plan to the configured tracker — not auto-sync on write. This task is a design spike to settle the real questions before building (no production behavior change).
+`plan-with-docs` always writes file-based tasks regardless of the configured handler, so teams on Linear/Jira get a split: `/add-task` files to the tracker but plans land as repo files. The desired flow (from planning) is **local-first**: draft and vet the plan locally, _then_ explicitly push the vetted plan to the configured tracker — not auto-sync on write. This task is a design spike to settle the real questions before building (no production behavior change).
 
 Questions to answer:
 

@@ -24,7 +24,7 @@ expires: 2026-07-07
 
 Handler feature parity is jagged: configuring `jira` gives `/add-task` only (no list/promote/claim/process); `gh-issue` is capture + (after task 9) list; `linear` lacks process(batch) but gains promote after task 8; `repo-pr` is the only full-loop handler. Today `/task-config` (`commands/task-config.md`) writes the config silently, so a user adopts a handler without knowing they've opted out of most of the loop.
 
-This task surfaces a capability matrix at config time. It should reflect reality *after* the parity tasks land, so keep the matrix in one place that's easy to update.
+This task surfaces a capability matrix at config time. It should reflect reality _after_ the parity tasks land, so keep the matrix in one place that's easy to update.
 
 ## Task
 

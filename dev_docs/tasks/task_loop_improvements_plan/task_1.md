@@ -20,7 +20,7 @@ expires: 2026-07-07
 
 ## Context
 
-The canonical task format is defined in `skills/task/SKILL.md` ("Task file format" + "Field reference" table, ~lines 111–166). Several downstream improvements need new fields. This task adds the *schema and validation* only — no behavior consumes the fields yet (later tasks do). Doing all field additions in one PR avoids repeated merge conflicts on the same field-reference table.
+The canonical task format is defined in `skills/task/SKILL.md` ("Task file format" + "Field reference" table, ~lines 111–166). Several downstream improvements need new fields. This task adds the _schema and validation_ only — no behavior consumes the fields yet (later tasks do). Doing all field additions in one PR avoids repeated merge conflicts on the same field-reference table.
 
 New/changed fields:
 

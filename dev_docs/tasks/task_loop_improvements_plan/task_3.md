@@ -20,7 +20,7 @@ expires: 2026-07-07
 
 ## Context
 
-`is_blocked_by` is single-valued today; real dependency graphs need "blocked by A **and** B." The schema task makes the field accept a list. This task implements the *semantics*: a task is dependency-ready only when **every** referenced blocker is resolved (slug absent under `dev_docs/tasks/**/*.md`, or present with `status: done`).
+`is_blocked_by` is single-valued today; real dependency graphs need "blocked by A **and** B." The schema task makes the field accept a list. This task implements the _semantics_: a task is dependency-ready only when **every** referenced blocker is resolved (slug absent under `dev_docs/tasks/**/*.md`, or present with `status: done`).
 
 Relevant logic lives in: `commands/process-tasks.md` step 1 (dependency readiness) and step 2; `commands/list-tasks.md` step 3 ("compute whether the task is currently dependency-blocked"); and the dependency description in `skills/task/SKILL.md`.
 
