@@ -42,7 +42,7 @@ The `plan-with-docs` overview file (`<name>_plan.md`) becomes this epic file (ga
 2. **Skip guard:** update `commands/promote-tasks.md` (and the `repo-pr` scan in `/do-tasks`/`/process-tasks`) to ignore any file with `type: epic` — never score or execute it.
 3. `commands/list-tasks.md`: add an "Epics" rollup section at the top of the board (before `new`), one line per epic file: `<title> (<slug>): <done>/<total> done (<in_progress> in progress, <blocked> blocked) — owner @<owner>, <status>`. Omit when no epic files present.
 4. `skills/plan-with-docs/SKILL.md` step 4/5: write the overview as the epic file (add `type: epic` frontmatter) and set `parent: <name>` on each generated `task_N.md`.
-5. `scripts/validate.py`: accept the epic file frontmatter shape.
+5. `scripts/validate.py`: in the `dev_docs/tasks/**/*.md` scan added in task 1, recognize `type: epic` files and validate them against the epic frontmatter shape (title / status / owner) rather than the task shape — and keep them excluded from task-specific checks (no `size`/`status: new` requirement).
 6. Honor the existing `$ARGUMENTS` filter — epics section shows under `all` and the default view, not when filtering to a single status.
 
 ## Acceptance Criteria

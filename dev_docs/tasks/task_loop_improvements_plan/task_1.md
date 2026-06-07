@@ -37,12 +37,12 @@ New/changed fields:
    - Add `assignee`, `impact`, `parent` rows to the Field reference table (mark optional; document the Fibonacci scale for `impact`, pointing at the existing **Task size** section).
    - Update the `is_blocked_by` row to document scalar-or-list and note "ready only when ALL blockers resolve" (semantics implemented in the multi-blocker task).
    - Update the example frontmatter block to show `impact` and a list `is_blocked_by`.
-2. In `scripts/validate.py`: allow the three new optional keys; accept `is_blocked_by` as string OR list of strings; keep rejecting unknown keys if it currently does.
+2. In `scripts/validate.py`: note it currently scans only `skills/`, top-level `commands/*.md`, and `agents/` — it does **not** validate task files at all today. Add a scan of `dev_docs/tasks/**/*.md` that validates task frontmatter (skip files with no frontmatter, e.g. the plan overview, and skip `type: epic` files — introduced in task 4). In that scan: allow the three new optional keys; accept `is_blocked_by` as string OR list of strings; validate field types (e.g. `impact`/`size` ∈ {1,2,3,5}). Match the script's existing lenient style on unknown keys (it does not hard-reject them today).
 3. In `skills/plan-with-docs/SKILL.md` step 5 frontmatter bullet: mention the new optional fields are available (don't require them).
 4. Run `just check` — must stay green.
 
 ## Acceptance Criteria
 
-- **Code-enforced:** `just check` passes. `scripts/validate.py` accepts a task file with `assignee`, `impact: 3`, `parent: some-epic`, and `is_blocked_by: [a, b]`; still rejects a malformed file (e.g. `impact: 7`).
+- **Code-enforced:** `just check` passes. `scripts/validate.py` now scans `dev_docs/tasks/**/*.md`, accepts a task file with `assignee`, `impact: 3`, `parent: some-epic`, and `is_blocked_by: [a, b]`, and flags a malformed file (e.g. `impact: 7`). The existing plan task files in this repo pass the new scan.
 - **User-run:** Field reference table in `skills/task/SKILL.md` renders with the three new rows and the updated `is_blocked_by` description.
 - No behavior change in any command yet — only schema + validation.
