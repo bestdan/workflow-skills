@@ -69,8 +69,8 @@ handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`:
 
 For the `repo-pr` handler it fully subsumes `/process-tasks` (same scan, ranking,
 multi-blocker readiness, WIP cap, and remote/`--local` mechanics). The tracker
-path is being folded in; until then, tracker handlers defer to `/claim-task`. See
-`commands/do-tasks.md`.
+path is being folded in; until then, the `linear` handler defers to `/claim-task`
+(jira/gh-issue have no execute path yet). See `commands/do-tasks.md`.
 
 > `/process-tasks` and `/claim-task` still work and remain the authoritative
 > reference for the file and tracker mechanics respectively (they are removed in a

@@ -30,8 +30,9 @@ cannot drift.
 
 **Scope of `--all` / `-n N`.** Batch is meaningful only for **remote** dispatch
 (each task gets its own cloud VM). Foreground pairing is inherently single, so
-`--local` caps the batch at **1** regardless of `--all` / `-n N` — it processes
-the single highest-ranked task and reports the rest as held.
+`--local` caps the **batch** (`--all` / `-n N`) at **1** — it processes the single
+highest-ranked task and reports the rest as held. `/do-tasks <slug> --local` still
+runs the named slug.
 
 ## 1. Resolve the handler
 
@@ -42,10 +43,13 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 ```
 
 - File absent, or `handler: repo-pr` → **file path** (section 2 below).
-- `handler: linear | jira | gh-issue` → **tracker path**. The tracker dispatch
-  is added to this command in a later task. **For now, defer:** stop and tell the
-  user to use `/claim-task` (which already dispatches to the configured tracker
-  handler) for tracker-side execution.
+- `handler: linear` → **tracker path**. The tracker dispatch is added to this
+  command in a later task. **For now, defer:** stop and tell the user to use
+  `/claim-task`, which dispatches to the Linear handler.
+- `handler: jira | gh-issue` → **tracker path**, not yet supported by any execute
+  verb (`/claim-task` stops on these too). Stop and tell the user to pull the
+  issue and execute it manually, or switch the handler to `linear` in
+  `dev_docs/tasks/.task-config.yml` — the same guidance `/claim-task` gives.
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
@@ -75,7 +79,7 @@ tasks and ranking them (priority → age, exactly as `/process-tasks` step 1), k
 the top `N`, then apply the WIP limit from step 4 (`wip_limit - current_wip`). The
 effective batch is `min(N, wip_limit - current_wip)`. Report any selected task you
 did not dispatch — distinguishing `held (-n N ceiling)` from
-`held (WIP limit N reached)` — so the user knows why each was left behind.
+`held (WIP limit reached)` — so the user knows why each was left behind.
 
 ### WIP cap and multi-blocker semantics
 
@@ -91,7 +95,9 @@ Both are carried through **unchanged** from `/process-tasks`:
 
 ## 3. Report
 
-Report exactly as `/process-tasks` step 5: list each dispatched task (slug, title,
-that a remote session started), point the user at `/tasks` to monitor, and list
-separately any tasks skipped because they are waiting on another task (with every
-unresolved blocker) or **held** by the `-n N` ceiling or the WIP limit.
+For **remote** dispatch, report as `/process-tasks` step 5: list each dispatched
+task (slug, title, that a remote session started) and point the user at `/tasks`
+to monitor. For **`--local`**, there is no remote session — report the PR opened
+in-session instead. In both cases, list separately any tasks skipped because they
+are waiting on another task (with every unresolved blocker) or **held** by the
+`-n N` ceiling or the WIP limit.
