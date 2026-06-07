@@ -1,6 +1,6 @@
 # Handler: repo-pr
 
-The default. Creates the task file on a branch from main and opens a PR — without touching local state. Lands on main (via auto-merge) decoupled from the feature branch, where `/process-tasks` can later pick it up.
+The default. Creates the task file on a branch from main and opens a PR — without touching local state. Lands on main (via auto-merge) decoupled from the feature branch, where `/do-tasks` can later pick it up.
 
 This is the only handler that uses an agent + the remote/subagent/local cascade, because it is the only one that does git plumbing. The CLI/MCP handlers (`gh-issue`, `jira`) are single foreground calls.
 
@@ -136,12 +136,12 @@ Last resort. Write the file directly into the current branch:
 
 After the task file PR is dispatched, also dispatch a processing agent for this task. Use the same mode detection logic:
 
-- **Remote**: `claude --remote` with the full processing prompt from `/process-tasks`
+- **Remote**: `claude --remote` with the full processing prompt from `/do-tasks` (the file-path flow in `commands/handlers/repo-pr-execute.md`)
 - **Sub-agent**: Agent tool with processing instructions
 
 **Sequencing:** Do NOT dispatch both in parallel. The processing agent needs the task file to exist. Dispatch the task-add agent first. Once it completes (or if using remote, once the `claude --remote` command returns), dispatch the processing agent with `--head task/add/<slug>` as its base branch instead of main. The processing agent should branch `task/<slug>` from `task/add/<slug>` so it has the task file available even before the add-PR merges.
 
-When reporting back to `/add-task` step 8, also note: if "file for later", the task lands on main once the PR merges and is then available for `/process-tasks`.
+When reporting back to `/add-task` step 8, also note: if "file for later", the task lands on main once the PR merges and is then available for `/do-tasks`.
 
 ### Mode selection summary
 

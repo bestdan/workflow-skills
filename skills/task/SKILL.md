@@ -11,7 +11,7 @@ Repo-native system for capturing follow-up work with full context and processing
 
 - User notices incidental work during a feature branch (stale flags, dead code, missing tests)
 - User says "task", "todo", "follow-up", "we should come back to this", "add a task for this"
-- User runs `/add-task`, `/do-tasks`, or `/process-tasks`
+- User runs `/add-task` or `/do-tasks`
 
 ## How it works
 
@@ -30,13 +30,13 @@ The delivery destination is a **handler** named in a repo-committed config file,
 
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
-wip_limit: 3 # optional (repo-pr) — caps /process-tasks --all batch dispatch; default 3
+wip_limit: 3 # optional (repo-pr) — caps /do-tasks --all batch dispatch; default 3
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (repo-pr, default `3`) bounds **batch** dispatch only. `/process-tasks --all` counts current work-in-flight — tasks with `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded. Single-task dispatch ignores it. See `commands/handlers/repo-pr-config.md`.
+`wip_limit` (repo-pr, default `3`) bounds **batch** dispatch only. `/do-tasks --all` counts current work-in-flight — tasks with `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded. Single-task dispatch ignores it. See `commands/handlers/repo-pr-config.md`.
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
@@ -49,7 +49,7 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/process-tasks` is file-only (`repo-pr`). `/list-tasks` and `/claim-task` dispatch to whichever handler is configured, but a handler may legitimately decline a verb (e.g. defer the user back to `/process-tasks --local` for file-based tasks). The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr` and the tracker path for `linear`; `jira`/`gh-issue` have no execute path yet. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -60,56 +60,43 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 
 ### Execute (`/do-tasks`)
 
-`/do-tasks` is the primary verb for turning ready tasks into PRs. It resolves the
-handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`:
+`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`) or the tracker path (`linear`). `jira`/`gh-issue` have no execute path yet. See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path) and `commands/handlers/linear-claim.md` (tracker path).
 
-- `/do-tasks` — single highest-ranked dependency-ready task
-- `/do-tasks --all` / `/do-tasks -n N` — batch (remote by default; `--local` caps at 1), bounded by `wip_limit`
-- `/do-tasks --remote` (default) / `/do-tasks --local` — where execution runs
+Flag matrix:
 
-For the `repo-pr` handler it fully subsumes `/process-tasks` (same scan, ranking,
-multi-blocker readiness, WIP cap, and remote/`--local` mechanics). The tracker
-path is being folded in; until then, the `linear` handler defers to `/claim-task`
-(jira/gh-issue have no execute path yet). See `commands/do-tasks.md`.
+|                      | What it does                                                                  |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `/do-tasks`          | execute the single highest-ranked dependency-ready task                       |
+| `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`) |
+| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)    |
+| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)     |
+| `--remote` (default) | dispatch each task to its own cloud VM (file path)                            |
+| `--local`            | run in the current session; caps the batch at 1 (file path)                   |
 
-> `/process-tasks` and `/claim-task` still work and remain the authoritative
-> reference for the file and tracker mechanics respectively (they are removed in a
-> later task). The comparison below documents that underlying split.
+Per-handler support:
 
-#### `/process-tasks` vs `/claim-task` — the underlying split
+|                   | `repo-pr` (file path)                                    | `linear` (tracker path)                                    |
+| ----------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
+| Where it runs     | **Remote** cloud agents (one per task), or `--local`     | **Foreground** in the current session                      |
+| How many per call | Batch — one, several, or all dependency-ready (`--all`)  | At most one (`--all` / `-n N` degrade to a single claim)   |
+| Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?" |
+| WIP cap           | Batch dispatch bounded by `wip_limit`                    | Pre-claim gate: declines if in-flight work ≥ `wip_limit`   |
 
-Two commands turn captured tasks into PRs. Pick before you invoke; they have different shapes:
+**File path (`repo-pr`).** See `commands/handlers/repo-pr-execute.md`.
 
-|                   | `/process-tasks`                                         | `/claim-task`                                                              |
-| ----------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Where it runs     | **Remote** cloud agents, one per task                    | **Foreground** in the current session                                      |
-| How many per call | Batch — one, several, or all dependency-ready            | At most one                                                                |
-| Where tasks live  | File-based (`repo-pr`) only                              | Tracker-side (Linear today; file-based defers to `/process-tasks --local`) |
-| Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?"                 |
-| Best for          | Draining a known-ready backlog headlessly (`--all`)      | Pulling one card to pair on with the agent watching                        |
-
-#### Process (`/process-tasks`)
-
-1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is dependency-ready only when **every** blocker is resolved)
-2. For each selected task, dispatches a remote Claude session that:
+1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is dependency-ready only when **every** blocker is resolved); `is_blocked_by` may be a single slug or a list (`[a, b]`).
+2. For each selected task, dispatches a remote Claude session (or runs in-session with `--local`) that:
    - Claims the task (branch `task/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
    - Deletes the task file and opens a PR labeled `task-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
-3. Tasks with `is_blocked_by` set wait until **all** referenced slugs are resolved (each no longer exists as a task file, or exists with `status: done`); `is_blocked_by` may be a single slug or a list (`[a, b]`)
-4. Multiple dependency-ready tasks can be dispatched in parallel — each gets its own cloud VM
+3. `--all` / `-n N` dispatch multiple dependency-ready tasks, each to its own cloud VM, bounded by `wip_limit`.
 
-#### Claim (`/claim-task`)
+**Tracker path (`linear`).** See `commands/handlers/linear-claim.md`. Pulls one tracker-side issue the current session can plausibly finish, claims it, branches, executes, and opens a PR — all in the foreground.
 
-Pulls one tracker-side task the current session can plausibly finish, claims it, branches, executes, and opens a PR — all in the foreground.
-
-1. Resolves the handler from `.task-config.yml` and dispatches to it. Handlers that don't support `/claim-task` stop with guidance (e.g. file-based defers to `/process-tasks --local <slug>`).
-2. Asks the handler for unclaimed, small-enough candidates.
-3. Walks candidates in priority order and asks the model "can I finish this in this session without a human?" — first feasible candidate wins. Rejected candidates get a one-line skip comment in the tracker.
-4. Handler claims the chosen candidate atomically (concurrency guard against parallel claims).
-5. Branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the merge automatically marks the work done.
-6. Bail path (mid-execution infeasibility): handler unclaims and flags for human review; `/claim-task` stops without silently rolling to the next candidate.
-
-Handler-specific details (which states/labels are used, how the PR is linked back) live in `commands/handlers/<handler>-claim.md`.
+1. Asks the handler for unclaimed, small-enough candidates.
+2. Walks candidates in priority order and asks the model "can I finish this in this session without a human?" — first feasible candidate wins. Rejected candidates get a one-line skip comment in the tracker.
+3. Handler claims the chosen candidate atomically (concurrency guard against parallel claims), branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the merge automatically marks the work done.
+4. Bail path (mid-execution infeasibility): handler unclaims and flags for human review; `/do-tasks` stops without silently rolling to the next candidate.
 
 ### List (`/list-tasks`)
 
@@ -127,7 +114,7 @@ Every task carries a **size** — a Fibonacci story-point estimate of its scope:
 | `5`   | large — the upper bound of a single PR (~300 lines / ~5 files) |
 | `> 5` | too big — do **not** capture as one task; split into sub-tasks |
 
-This single scale governs the promotion confidence check (below), the `/claim-task` feasibility gate (which maps to a tracker's native estimate — Linear's `estimate` is the same Fibonacci scale), and the granularity rule in `plan-with-docs`. They point here rather than restating a threshold.
+This single scale governs the promotion confidence check (below), the `/do-tasks` tracker-path feasibility gate (which maps to a tracker's native estimate — Linear's `estimate` is the same Fibonacci scale), and the granularity rule in `plan-with-docs`. They point here rather than restating a threshold.
 
 ## Task file format
 
@@ -204,7 +191,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 | ------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `new`              | `/add-task` writes the card                           | `/promote-tasks` scores it                                                                                                   |
 | `needs_refinement` | Promoter scored LOW, or human demoted from `ready`    | Human edits the card, clears `human_approval_requested`, AND sets `status: ready` (the promoter does not re-scan past `new`) |
-| `ready`            | Promoter scored HIGH                                  | `/process-tasks` claims it                                                                                                   |
+| `ready`            | Promoter scored HIGH                                  | `/do-tasks` claims it                                                                                                        |
 | `in_progress`      | Claim (branch + status flip)                          | PR opened (file is deleted in that PR)                                                                                       |
 | `blocked`          | Agent or human sets it with a `Consumer Notes` reason | Blocker resolved → returns to `in_progress`                                                                                  |
 | `needs_review`     | PR opened from `task/<slug>` branch                   | PR merged or closed                                                                                                          |
@@ -219,7 +206,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
 
-Note: `is_blocked_by` is intentionally **not** checked here. `/process-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
+Note: `is_blocked_by` is intentionally **not** checked here. `/do-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
 
 ## Lifecycle
 
@@ -263,4 +250,4 @@ Each remote session gets its own isolated VM with a fresh clone. Filesystem race
 
 ## Remote session notes
 
-Remote sessions (`claude --remote`) run in cloud VMs and don't have access to locally-installed plugins. The `/add-task` and `/process-tasks` commands handle this by embedding all necessary instructions directly in the remote prompt. The remote agent doesn't need to know about this plugin — it just follows the instructions in its prompt.
+Remote sessions (`claude --remote`) run in cloud VMs and don't have access to locally-installed plugins. The `/add-task` and `/do-tasks` commands handle this by embedding all necessary instructions directly in the remote prompt. The remote agent doesn't need to know about this plugin — it just follows the instructions in its prompt.

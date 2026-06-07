@@ -1,6 +1,6 @@
 # repo-pr handler — /task-config setup
 
-The `repo-pr` handler is the default. It captures tasks as markdown files via PR (works with `/process-tasks` and `/list-tasks`). There are no prerequisites to verify here — `gh` auth and git plumbing are exercised at the time of `/add-task`, not at config time.
+The `repo-pr` handler is the default. It captures tasks as markdown files via PR (works with `/do-tasks` and `/list-tasks`). There are no prerequisites to verify here — `gh` auth and git plumbing are exercised at the time of `/add-task`, not at config time.
 
 ## Steps
 
@@ -32,13 +32,13 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
 
    ```yaml
    handler: repo-pr
-   # wip_limit: 3   # optional — caps how many tasks /process-tasks --all dispatches at once
+   # wip_limit: 3   # optional — caps how many tasks /do-tasks --all dispatches at once
    ```
 
    The only configurable setting is `wip_limit` (default `3`). It bounds batch
-   dispatch: `/process-tasks --all` counts work already in flight — tasks with
+   dispatch: `/do-tasks --all` counts work already in flight — tasks with
    `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) —
    and dispatches only up to `wip_limit - current_wip` tasks, holding the rest.
    This keeps the human PR-review bottleneck from being flooded. Omit the key to
-   accept the default of `3`; single-task dispatch (`/process-tasks` or
-   `/process-tasks <slug>`) ignores it.
+   accept the default of `3`; single-task dispatch (`/do-tasks` or
+   `/do-tasks <slug>`) ignores it.

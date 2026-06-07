@@ -26,10 +26,10 @@ linear:
   default_project: null # optional; skips the project prompt in /add-task
   # (explicit project id/UUID, not a name).
   default_priority: 3 # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3).
-  max_estimate: 3 # optional, used by /claim-task — exclusive upper bound on
+  max_estimate: 3 # optional, used by /do-tasks (tracker path) — exclusive upper bound on
   # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task
   # `size` — see "Task size" in skills/task/SKILL.md). Default 3 (i.e. claim issues with estimate 1 or 2).
-  base_branch: main # optional, used by /claim-task — branch /claim-task branches
+  base_branch: main # optional, used by /do-tasks (tracker path) — branch /do-tasks branches
 # from. Default main.
 # labels support is deferred — the Linear MCP create_issue tool takes label UUIDs, not names,
 # and resolving names → ids requires an extra tool call. Add a tag in the body for now.
@@ -42,7 +42,7 @@ linear:
 
 ## Preflight pattern
 
-Every Linear-handled command starts the same way. Failure messages are identical across `/add-task`, `/list-tasks`, and `/claim-task` so the user sees the same guidance regardless of which command surfaced the error.
+Every Linear-handled command starts the same way. Failure messages are identical across `/add-task`, `/list-tasks`, and `/do-tasks` so the user sees the same guidance regardless of which command surfaced the error.
 
 1. Call `<linear-mcp>__list_teams` (no args).
    - If the tool errors or returns no teams, **stop** with: "Linear handler needs the Linear MCP. Connect it in Claude Code settings (`https://mcp.linear.app/mcp`), then re-run." Do not fall back to another handler.
@@ -50,7 +50,7 @@ Every Linear-handled command starts the same way. Failure messages are identical
    - If no team matches, **stop** with: "Configured Linear team `<team>` is not in your accessible teams." (List the team names that were returned.)
    - Capture the resolved team `id` and pass it to the rest of the flow.
 
-2. (Per-verb files do additional setup — e.g. `list_workflow_states` for `/list-tasks` and `/claim-task`.) The shared part is just the team check.
+2. (Per-verb files do additional setup — e.g. `list_workflow_states` for `/list-tasks` and `/do-tasks`.) The shared part is just the team check.
 
 ## Kanban mapping
 
@@ -58,22 +58,22 @@ Linear tasks are **issues**. The seven kanban columns from `skills/task/SKILL.md
 
 Resolve state ids at runtime by Linear's state **type** (not display name — display names are user-configurable):
 
-| Kanban column      | Linear state type | Default name                                       | Linear label(s)                                                                                                            |
-| ------------------ | ----------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `new`              | `backlog`         | `Backlog`                                          | —                                                                                                                          |
-| `needs_refinement` | `backlog`         | `Backlog`                                          | `human-approval-requested`                                                                                                 |
-| `ready`            | `unstarted`       | `Todo`                                             | `auto-eligible` (set by promoter)                                                                                          |
-| `in_progress`      | `started`         | `In Progress`                                      | `auto-claimed` (concurrency guard)                                                                                         |
-| `blocked`          | `started`         | `In Progress`                                      | `blocked`                                                                                                                  |
-| `needs_review`     | `started`         | `In Progress` (or `In Review` if the team has one) | — (the open PR is the review signal via Linear's GitHub integration or the explicit `links` attachment from `/claim-task`) |
-| `done`             | `completed`       | `Done`                                             | —                                                                                                                          |
+| Kanban column      | Linear state type | Default name                                       | Linear label(s)                                                                                                                       |
+| ------------------ | ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `new`              | `backlog`         | `Backlog`                                          | —                                                                                                                                     |
+| `needs_refinement` | `backlog`         | `Backlog`                                          | `human-approval-requested`                                                                                                            |
+| `ready`            | `unstarted`       | `Todo`                                             | `auto-eligible` (set by promoter)                                                                                                     |
+| `in_progress`      | `started`         | `In Progress`                                      | `auto-claimed` (concurrency guard)                                                                                                    |
+| `blocked`          | `started`         | `In Progress`                                      | `blocked`                                                                                                                             |
+| `needs_review`     | `started`         | `In Progress` (or `In Review` if the team has one) | — (the open PR is the review signal via Linear's GitHub integration or the explicit `links` attachment from the tracker execute path) |
+| `done`             | `completed`       | `Done`                                             | —                                                                                                                                     |
 
 Transitions:
 
 - `/add-task` (`linear-add.md`) creates the issue in the team's default `backlog`-type state.
 - `/promote-tasks` (Linear flavor) scores cards in that backlog state: HIGH → move to the `unstarted`-type state (`Todo`) and add `auto-eligible`; LOW → leave it where it is and add `human-approval-requested`.
-- `/claim-task` (`linear-claim.md`) picks issues from the `unstarted` state. On claim it moves the issue to the `started` state, adds `auto-claimed`, and (on PR open) optionally moves to an `In Review` state if one exists.
-- Linear's GitHub integration moves the issue to the `completed` state on PR merge via `Closes <KEY>`. `/claim-task` also adds an explicit `links` attachment to the issue so the PR↔issue link does not depend on branch-name matching.
+- `/do-tasks` (tracker path, `linear-claim.md`) picks issues from the `unstarted` state. On claim it moves the issue to the `started` state, adds `auto-claimed`, and (on PR open) optionally moves to an `In Review` state if one exists.
+- Linear's GitHub integration moves the issue to the `completed` state on PR merge via `Closes <KEY>`. `/do-tasks` also adds an explicit `links` attachment to the issue so the PR↔issue link does not depend on branch-name matching.
 - Bail path: revert to the backlog state, add `human-approval-requested`, remove `auto-claimed`, and leave a comment.
 
-> **Hard rule for `/claim-task`: it never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Merge is the only completion signal, handled by Linear's GitHub integration. If you are about to call `save_issue` with a `completed`-type `state` from `linear-claim.md`, you have a bug — stop.
+> **Hard rule for the tracker execute path: it never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Merge is the only completion signal, handled by Linear's GitHub integration. If you are about to call `save_issue` with a `completed`-type `state` from `linear-claim.md`, you have a bug — stop.
