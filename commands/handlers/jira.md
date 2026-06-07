@@ -122,3 +122,19 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 6. **Filter argument.** If `$ARGUMENTS` is a section name (`new|needs_refinement|ready|in_progress|blocked|needs_review|done|all`), render only that section. Default: every non-empty section.
 
 7. **Empty board.** If the query returns no issues, report `No tasks found in <project>.` rather than erroring.
+
+## Link
+
+Invoked from `/push-plan` (§5b) to translate a task's `is_blocked_by` into a native Jira **issue link** — the capability the create flow above lacks (`createJiraIssue` has no link parameter). Each call adds one "blocks / is blocked by" edge between two existing issues, so it runs in a **second pass** after every issue in the batch exists and its key is known.
+
+1. **Resolve the link type.** The blocker relationship is Jira's built-in `Blocks` type (`inward: "is blocked by"`, `outward: "blocks"`). Use the name `Blocks` directly. If a site has renamed or removed it, call `mcp__claude_ai_Atlassian__getIssueLinkTypes` (`cloudId: <jira.site>`) and pick the type whose `inward` is `is blocked by`; if none exists, **skip linking** and note it in the report (the board still has the parent/child epic structure, just no blocker edges).
+
+2. **Create the link.** For "**A is blocked by B**" (A's `is_blocked_by` names B), call `mcp__claude_ai_Atlassian__createIssueLink` with:
+   - `cloudId`: `<jira.site>`
+   - `type`: `Blocks`
+   - `inwardIssue`: `<B>` — the **blocker** (the issue that blocks)
+   - `outwardIssue`: `<A>` — the **blocked** issue
+
+   Direction matters: `inwardIssue` is the blocker, `outwardIssue` is the dependent. Reversing them records the relationship backwards. A task with multiple blockers gets one `createIssueLink` call per blocker.
+
+3. **Idempotency (create-missing-only).** Before linking, read A's existing links — `mcp__claude_ai_Atlassian__getJiraIssue` (`cloudId`, `issueIdOrKey: <A>`, `fields: ["issuelinks"]`) — and **skip** if an `issuelinks[]` entry already has `type.name == "Blocks"` with `inwardIssue.key == <B>`. This keeps a re-pushed plan from stacking duplicate "is blocked by" edges, matching the create-missing-only contract in `/push-plan` §6.

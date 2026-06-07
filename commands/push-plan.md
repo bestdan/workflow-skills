@@ -1,6 +1,6 @@
 ---
-description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project and gh-issue under a milestone, in dependency order
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
+description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic (with native blocker links), in dependency order
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue
 argument-hint: "<plan-name> [--ready-only]"
 ---
 
@@ -41,10 +41,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
   normal commit/PR), so there is nothing to sync.
 - `handler: linear` → run the Linear push flow (§4).
 - `handler: gh-issue` → run the gh-issue push flow (§5).
-- `handler: jira` → **stop**: "`/push-plan` does not yet support the `jira`
-  handler — only `linear`, `gh-issue`, and the `repo-pr` no-op are implemented.
-  See `add-push-plan-jira-path` in the task-loop-improvements plan." (The jira
-  path needs a host with a working jira CLI; do not partially improvise it here.)
+- `handler: jira` → run the jira push flow (§5b).
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
@@ -274,6 +271,99 @@ Walk the tasks in topological order. For each:
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map
    so later dependents resolve.
 
+## 5b. jira path
+
+The jira path mirrors the Linear path (§4) — same topological order, same live
+slug→id map, same create-missing-only idempotency (§6). It uses the Atlassian MCP
+(`mcp__claude_ai_Atlassian__*`, **not** a CLI), so it needs that MCP connected
+rather than any local tooling. Two things differ from Linear: the container is a
+Jira **Epic** (children set their `parent` to its key), and blockers become native
+issue links created in a **second pass** — because `createJiraIssue` has no link
+parameter, every issue must exist before its `is_blocked_by` edges can be drawn.
+
+> **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so — like
+> the gh-issue push — a jira push produces a board you then work **manually**. The
+> epic grouping + native blocker links are still worth pushing for visibility.
+
+### 5b.1 Preflight
+
+Run the `jira` create-flow preflight (`commands/handlers/jira.md` step 1): call
+`mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` and confirm a resource
+whose `url` matches `https://<jira.site>`. On failure, reuse the create-flow's
+messages and **stop** — do not fall back to another handler. Read
+`commands/handlers/jira.md` for the config block (`jira.site`, `jira.project`,
+`jira.issue_type`, `jira.labels`) and the create/link steps reused below; if the
+relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/jira.md`).
+Confirm the project has an `Epic` issue type (and the configured `jira.issue_type`)
+via `mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata`
+(`projectIdOrKey: <jira.project>`); if `Epic` is absent, **stop** and report it (no
+container type to map the overview epic to).
+
+### 5b.2 Resolve the container (epic → Jira Epic)
+
+The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
+**reuse-before-create** so re-push never duplicates the container:
+
+1. If the **epic file** already records a `tracker_id`, reuse that Epic key.
+2. Else **look up, then create.** First check whether an Epic with the epic
+   `title` already exists (a manual creation, or a prior run that didn't record the
+   key), and reuse it if so — call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql`
+   with `jql: project = "<project>" AND issuetype = Epic AND summary ~ "<epic title>"`
+   and `fields: ["summary"]`. If a result's `summary` matches the epic title
+   exactly, reuse its `key`. Otherwise create the Epic via
+   `mcp__claude_ai_Atlassian__createJiraIssue` (`projectKey: <project>`,
+   `issueTypeName: "Epic"`, `summary: <epic title>`, `description:` the epic body,
+   `contentFormat: "markdown"`). Capture the new Epic `key` and `webUrl`.
+
+Whenever an Epic is newly created, **write its key back** onto the epic file's
+frontmatter: `tracker_id: <epic key>` (+ optional `tracker_url`). Case 1 writes
+nothing new.
+
+### 5b.3 Order the tasks (topological)
+
+Use the same ordering algorithm as **§4.3** (a task comes after every task it is
+blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
+slug — **warn**). The only difference is the "already an id" shape: for jira an
+`is_blocked_by` entry that is already an issue key matches `/^[A-Z][A-Z0-9]+-\d+$/`
+(e.g. `PLAT-142`) and is **not** an ordering edge.
+
+### 5b.4 Create issues (reuse `jira.md` create-flow, create-missing-only)
+
+Maintain a live **slug → issue-key map**, seeded first from every task file that
+already has a `tracker_id` (including skipped, already-pushed ones), so a freshly
+added task can resolve a blocker pushed on an earlier run.
+
+Walk the tasks in topological order. For each:
+
+1. **Skip if already pushed.** A task with a non-empty `tracker_id` is **not**
+   recreated; report it as `already pushed (<tracker_id>)`. Its key is already in
+   the map from the seed step.
+2. **Skip if held.** With `--ready-only`, skip non-`ready` tasks.
+3. **Build the drafted task** — the normalized contract from `commands/add-task.md`
+   step 5. The blocker translation is **deferred to §5b.5** (links are a second
+   pass), so nothing about `is_blocked_by` is passed at create time.
+4. **Create the issue** by following `jira.md` steps 3–5 (compose description,
+   `createJiraIssue`, return the url) with `issueTypeName: <jira.issue_type>`
+   (default `Task`) and **`parent: <epic key from §5b.2>`**. Because the container
+   is already resolved here, **skip `jira.md` step 2's epic-selection prompt** —
+   pass the epic key directly as `parent`. Apply `jira.labels` via
+   `additional_fields` exactly as the create flow does.
+5. **Record the key back** into the task file's frontmatter: `tracker_id: <key>`
+   (e.g. `PLAT-142`) and optional `tracker_url`, and add `<slug> → <key>` to the
+   map so later dependents resolve.
+
+### 5b.5 Second pass — native blocker links
+
+After **every** issue in the batch exists (so all blocker keys are in the map),
+walk the tasks again and translate each `is_blocked_by` through the map: for a task
+A blocked by B, follow `jira.md`'s **`## Link`** section to create the native
+`Blocks` link (`inwardIssue: <B>` the blocker, `outwardIssue: <A>` the blocked). A
+task with a **list** of blockers gets one link per resolved blocker. Entries that
+stay bare slugs (a blocker held back by `--ready-only`, or an out-of-plan
+reference) have no key to link to — **warn** and skip them, matching the Linear
+`--ready-only` caveat in §3. The `## Link` step is itself create-missing-only, so a
+re-push adds no duplicate edges.
+
 ## 6. Idempotency
 
 The behavior above is **create-missing-only** and safe to re-run (spike §4):
@@ -282,6 +372,9 @@ The behavior above is **create-missing-only** and safe to re-run (spike §4):
 - A recorded container id is reused, never duplicated.
 - Skipped files still feed the slug→id map, so newly added tasks resolve their
   blockers on a later push.
+- For jira, the §5b.5 link pass is create-missing-only too: it checks the
+  dependent's existing `Blocks` links before adding one, so a re-push draws no
+  duplicate "is blocked by" edges.
 - v1 **never updates or deletes** remote issues, and **never deletes** the local
   plan files — they keep their `tracker_id` as a traceable back-link (spike §5).
   Local `status:` goes stale after push; the tracker becomes the source of truth.
@@ -290,8 +383,10 @@ The behavior above is **create-missing-only** and safe to re-run (spike §4):
 
 Print:
 
-- The container: created (`<title>` → `<project / milestone id>`) or reused
-  (`<id>`); for gh-issue, note when the `plan:<name>` label fallback was used.
+- The container: created (`<title>` → `<project / milestone / Epic id>`) or reused
+  (`<id>`); for gh-issue, note when the `plan:<name>` label fallback was used; for
+  jira, note any blocker links skipped because the `Blocks` link type was absent
+  (§5b.5).
 - **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
   resolved blockers if any.
 - **Already pushed:** skipped files with their `tracker_id`.
