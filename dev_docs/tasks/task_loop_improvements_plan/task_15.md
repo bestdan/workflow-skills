@@ -2,7 +2,7 @@
 title: Add --claim-only and --no-claim flags to /do-tasks
 priority: medium
 size: 3
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: task/task_10
 related_files:
