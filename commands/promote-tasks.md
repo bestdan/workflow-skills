@@ -1,6 +1,6 @@
 ---
 description: Score new tasks against the confidence check and promote them to ready or needs_refinement
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Glob, Grep, Read, Edit
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment
 argument-hint: "[filter: dry-run|apply] (default apply)"
 ---
 
@@ -8,9 +8,28 @@ argument-hint: "[filter: dry-run|apply] (default apply)"
 
 Scan `dev_docs/tasks/**/*.md` for tasks in `status: new`, score each against the confidence check, and flip status accordingly. This is the auto-promotion stage of the kanban flow — it never touches tasks past `new`. Humans own demotions from `ready`.
 
+When the configured handler is an external tracker, the same scoring runs against the tracker's backlog instead of files (see step 0).
+
 > **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
 
 ## Steps
+
+### 0. Resolve the handler
+
+Read `dev_docs/tasks/.task-config.yml`:
+
+```bash
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+```
+
+- File absent, or no `handler:` key → `repo-pr` (default). Continue to step 1 below (file-based path).
+- `handler: repo-pr` → continue to step 1 below (file-based path).
+- `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-promote.md` (the promote flow), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the tracker-specific scoring and transitions. Skip steps 1–4 of this file.
+
+  If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/linear-*.md`) and Read the result.
+
+- `handler: gh-issue | jira` → **stop** with: "promotion not supported for `<handler>`; promote in the tracker directly." (gh-issue and jira have no promote path — refine and label issues in the tracker's own UI.)
+- Any other (unknown) value → stop with: "Unknown task handler `<value>` in dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 ### 1. Find candidates
 
