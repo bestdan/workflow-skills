@@ -275,11 +275,16 @@ Walk the tasks in topological order. For each:
 
 The jira path mirrors the Linear path (§4) — same topological order, same live
 slug→id map, same create-missing-only idempotency (§6). It uses the Atlassian MCP
-(`mcp__claude_ai_Atlassian__*`, **not** a CLI), so it needs that MCP connected
-rather than any local tooling. Two things differ from Linear: the container is a
-Jira **Epic** (children set their `parent` to its key), and blockers become native
-issue links created in a **second pass** — because `createJiraIssue` has no link
-parameter, every issue must exist before its `is_blocked_by` edges can be drawn.
+(`<atlassian-mcp>__*`, **not** a CLI), so it needs that MCP connected rather than
+any local tooling. Two things differ from Linear: the container is a Jira **Epic**
+(children set their `parent` to its key), and blockers become native issue links
+created in a **second pass** — because `createJiraIssue` has no link parameter,
+every issue must exist before its `is_blocked_by` edges can be drawn.
+
+> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
+> `mcp__atlassian__` depending on the install (see `commands/handlers/jira-config.md`),
+> parallel to `<linear-mcp>__` in §4 — substitute the prefix loaded in your session.
+> The `allowed-tools` front-matter names both concrete prefixes.
 
 > **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so — like
 > the gh-issue push — a jira push produces a board you then work **manually**. The
@@ -288,15 +293,15 @@ parameter, every issue must exist before its `is_blocked_by` edges can be drawn.
 ### 5b.1 Preflight
 
 Run the `jira` create-flow preflight (`commands/handlers/jira.md` step 1): call
-`mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` and confirm a resource
+`<atlassian-mcp>__getAccessibleAtlassianResources` and confirm a resource
 whose `url` matches `https://<jira.site>`. On failure, reuse the create-flow's
 messages and **stop** — do not fall back to another handler. Read
 `commands/handlers/jira.md` for the config block (`jira.site`, `jira.project`,
 `jira.issue_type`, `jira.labels`) and the create/link steps reused below; if the
 relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/jira.md`).
 Confirm the project has an `Epic` issue type (and the configured `jira.issue_type`)
-via `mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata`
-(`projectIdOrKey: <jira.project>`); if `Epic` is absent, **stop** and report it (no
+via `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
+(`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`); if `Epic` is absent, **stop** and report it (no
 container type to map the overview epic to).
 
 ### 5b.2 Resolve the container (epic → Jira Epic)
@@ -307,16 +312,18 @@ The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
 1. If the **epic file** already records a `tracker_id`, reuse that Epic key.
 2. Else **look up, then create.** First check whether an Epic with the epic
    `title` already exists (a manual creation, or a prior run that didn't record the
-   key), and reuse it if so — call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql`
-   with `jql: project = "<project>" AND issuetype = Epic AND summary ~ "<epic title>"`
+   key), and reuse it if so — call `<atlassian-mcp>__searchJiraIssuesUsingJql`
+   with `cloudId: <jira.site>`, `jql: project = "<project>" AND issuetype = Epic AND summary ~ "<epic title>"`,
    and `fields: ["summary"]`. If a result's `summary` matches the epic title
    exactly, reuse its `key`. Otherwise create the Epic via
-   `mcp__claude_ai_Atlassian__createJiraIssue` (`projectKey: <project>`,
+   `<atlassian-mcp>__createJiraIssue` (`cloudId: <jira.site>`, `projectKey: <project>`,
    `issueTypeName: "Epic"`, `summary: <epic title>`, `description:` the epic body,
    `contentFormat: "markdown"`). Capture the new Epic `key` and `webUrl`.
 
-Whenever an Epic is newly created, **write its key back** onto the epic file's
-frontmatter: `tracker_id: <epic key>` (+ optional `tracker_url`). Case 1 writes
+Whenever an Epic is resolved by **lookup or create** (case 2 — i.e. any time case 1
+didn't already supply it), **write its key back** onto the epic file's frontmatter:
+`tracker_id: <epic key>` (+ optional `tracker_url`), so a later run skips the lookup
+(matching gh-issue §5.2, which writes back on both reuse and create). Case 1 writes
 nothing new.
 
 ### 5b.3 Order the tasks (topological)
@@ -324,8 +331,8 @@ nothing new.
 Use the same ordering algorithm as **§4.3** (a task comes after every task it is
 blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
 slug — **warn**). The only difference is the "already an id" shape: for jira an
-`is_blocked_by` entry that is already an issue key matches `/^[A-Z][A-Z0-9]+-\d+$/`
-(e.g. `PLAT-142`) and is **not** an ordering edge.
+`is_blocked_by` entry that is already an issue key matches `/^[A-Z][A-Z0-9]*-\d+$/`
+(e.g. `PLAT-142`, or a single-letter project key like `X-1`) and is **not** an ordering edge.
 
 ### 5b.4 Create issues (reuse `jira.md` create-flow, create-missing-only)
 
