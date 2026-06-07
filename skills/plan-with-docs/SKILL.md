@@ -80,7 +80,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
 
 6. **Cross-link.** Each `<name>_task_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each task. Encode hard ordering with `is_blocked_by` (slug of the prerequisite task), not just prose.
 
-7. **Report.** Print the directory tree of what was written and the absolute path to the overview. Don't re-print the plan body — the user can open the files. Mention they can run `/promote-tasks` to score the new tasks and `/list-tasks` to see the board.
+7. **Report.** Print the directory tree of what was written and the absolute path to the overview. Don't re-print the plan body — the user can open the files. Mention they can run `/promote-tasks` to score the new tasks and `/list-tasks` to see the board. On a tracker handler (Linear/Jira/gh-issue), add a one-line pointer: once they're happy with the plan, `/push-plan <name>` syncs it to the configured tracker (local-first — the files are always written here first; pushing is a separate, explicit step).
 
 8. **Review with the user.** Surface every open question and judgment call you noted while drafting — assumptions you made, alternatives you considered and rejected, gaps in your understanding of the codebase. Ask them one by one (or grouped if tightly related). Update the affected files in place as the user answers; don't make the user restart the planning round-trip. Stop when the user says the plan is good.
 
@@ -89,7 +89,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
 - Obsidian-flavored markdown. Wikilinks (`[[<name>_task_1]]`) are fine when files are in the same folder; use relative paths (`phase_1/<name>_task_1.md`) across folders so they render in plain GitHub too.
 - One task = one PR. Honor the **Task size** budget in `skills/task/SKILL.md`: if a task would exceed size `5` (~300 lines of diff or > ~5 unrelated files), split it into multiple tasks and chain them with `is_blocked_by`. (This skill slices a _fresh_ plan; when an _existing_ task card outgrows size `5`, the `break-down-task` skill — `skills/break-down-task/SKILL.md` — performs the same split on it.)
 - No `dprint` post-processing inside this skill — the user runs that themselves.
-- Don't commit. Don't open PRs. Just write the files.
+- Don't commit. Don't open PRs. Just write the files. Plans are **local-first**: they always draft to files under `dev_docs/tasks/<name>_plan/`, regardless of the configured task handler. Syncing a vetted plan to an external tracker (Linear/Jira/gh-issue) is a separate, explicit act — `/push-plan <name>` — never an auto-sync on write.
 - If invoked right after plan mode, treat the just-approved plan as the source material — but still run step 8. Plan-mode approval doesn't mean the plan has no open questions, just that the user wanted to exit plan mode.
 - Asking clarifying questions is not optional. If you genuinely have none, say so explicitly in step 8 instead of skipping it.
 - When in doubt about granularity, err toward more, smaller files. Easier to merge two than to split one.

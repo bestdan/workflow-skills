@@ -1,0 +1,178 @@
+---
+description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, in dependency order
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
+argument-hint: "<plan-name> [--ready-only]"
+---
+
+# Push Plan
+
+Take a plan drafted locally by `/plan-with-docs` (`dev_docs/tasks/<name>_plan/`)
+and push it to the tracker configured for this repo. This is the **local-first**
+flow: plans are always drafted and vetted as files first; pushing is a separate,
+deliberate, re-runnable act — never an auto-sync on write.
+
+The design that this command implements (trigger, readiness, mapping,
+idempotency, reverse drift) is the spike
+`dev_docs/tasks/task_loop_improvements_plan/plan_tracker_sync_design.md` — read
+it for the full rationale and rejected alternatives.
+
+This command **reuses each handler's existing add-flow** to create issues rather
+than re-implementing create logic. Its own job is only: resolve the container,
+order the tasks topologically, resolve `is_blocked_by` slugs to tracker ids, and
+record the created ids back into the files (idempotency).
+
+## Modes
+
+- `/push-plan <name>` — push the whole plan (every non-epic task), creating only
+  the issues that don't already exist (create-missing-only).
+- `/push-plan <name> --ready-only` — push just the `status: ready` subset; hold
+  the not-ready tasks for a later run.
+
+## 1. Resolve the handler
+
+```bash
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+```
+
+- File absent, or `handler: repo-pr` → **no-op**. Print exactly: `repo-pr
+  handler: plans already live as task files — no external tracker to push to`
+  and **stop**. For this handler the task files _are_ the destination (they land
+  via the user's normal commit/PR), so there is nothing to sync.
+- `handler: linear` → run the Linear push flow (sections 2–5 below).
+- `handler: jira | gh-issue` → **stop**: "`/push-plan` does not yet support the
+  `<handler>` handler — only `linear` and the `repo-pr` no-op are implemented.
+  See `task_14c` in the task-loop-improvements plan." (These paths land in
+  task_14c; do not partially improvise them here.)
+- Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
+  dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
+
+## 2. Resolve and read the plan
+
+1. Resolve the plan directory from `<name>`: `dev_docs/tasks/<name>_plan/` under
+   the repo root. If `<name>` already ends in `_plan`, don't double it. If the
+   directory doesn't exist, **stop** and list the plan directories that do
+   (`find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -maxdepth 1 -type d
+   -name '*_plan'`).
+2. Find every `*.md` under the plan directory (recurse into `phase_N/` folders).
+   Split each into (frontmatter, body).
+   - The **epic file** is the one with `type: epic` (normally `<name>_plan.md`).
+     It is the container, **not** a task — never create an issue for it.
+   - **Task files** are the rest with parseable frontmatter. Files with no
+     frontmatter are not task cards — skip them.
+
+## 3. Readiness check — push by default
+
+Readiness is a **reported check, not a hard gate** (spike §2): a plan can
+legitimately ship with tasks that still need their own sub-plan.
+
+1. **Classify** the task files: `ready` (`status: ready`) vs **not-ready**
+   (`new` / `needs_refinement` / `blocked` / anything else).
+2. **Confirm.** Show the user the summary of what will be created — the container
+   and the ordered list of issues to create — and, separately, the **not-ready
+   set**, each line carrying _what's needed to resolve it_: the task's
+   `needs_refinement` reason if one is recorded, else `unscored (status: new) —
+   run /promote-tasks`. Ask for confirmation via `AskUserQuestion`.
+3. **Push by default.** On confirm, push the whole plan (create-missing-only,
+   §5). Not-ready tasks are still created — it's fine for a tracker issue to need
+   further breakdown as long as its gap is recorded — and they're echoed back as
+   the follow-up set in the report. With `--ready-only`, push just the `ready`
+   subset; the held tasks land on a later re-push (safe, create-missing-only).
+
+Already-pushed tasks (those with a `tracker_id`) are skipped regardless — they
+still appear in the summary as `already pushed (<tracker_id>)`.
+
+## 4. Linear path
+
+### 4.1 Preflight
+
+Run the `linear-common.md` preflight (call `<linear-mcp>__list_teams`, match
+`<linear.team>`, capture the team `id`; reuse its failure messages). Read
+`commands/handlers/linear-common.md` for the MCP namespace note (`<linear-mcp>__`
+is `mcp__linear__` or `mcp__claude_ai_Linear__` depending on the install) and the
+config schema. If the relative path doesn't resolve, find it with **Glob**
+(`**/commands/handlers/linear-common.md`).
+
+### 4.2 Resolve the container (epic → Linear project)
+
+The overview epic maps to a Linear **project** (spike §3.1). Resolve it in this
+order, and **reuse before create** so re-push never duplicates the container:
+
+1. If the **epic file** already records a `tracker_id`, reuse that project id.
+2. Else if `linear.default_project` is set in config, use it.
+3. Else **create** a project named after the epic `title` via
+   `<linear-mcp>__save_project` (no `id` — that's the create primitive) with
+   `teamIds: [<team id>]` and `name: <epic title>`. Capture the returned project
+   `id` (and `url` if present).
+
+Whenever a project is newly created (case 3), **write its id back** onto the epic
+file's frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`). Cases
+1–2 write nothing new.
+
+### 4.3 Order the tasks (topological)
+
+Push in dependency order so every blocker is created before its dependents (spike
+§3.3). Build the order from `is_blocked_by` (a string or a list — honor both):
+a task comes after every task it is blocked by. Restrict edges to **slugs that
+name another task file in this plan** — entries that are already tracker ids or
+point outside the plan are not ordering edges here. If the dependencies contain a
+**cycle**, that's a plan bug — **stop** and report the cycle (the slugs
+involved); do not push a partial order.
+
+### 4.4 Create issues (reuse `linear-add.md`, create-missing-only)
+
+Maintain a live **slug → tracker-id map**. **Seed it first** from every task
+file that already has a `tracker_id` (including the skipped, already-pushed ones)
+— otherwise a freshly added task that depends on an already-pushed one can't
+resolve its blocker (spike §3.3).
+
+Walk the tasks in topological order. For each:
+
+1. **Skip if already pushed.** A task with a non-empty `tracker_id` is **not**
+   recreated (create-missing-only). Its id is already in the map from the seed
+   step. Report it as `already pushed`.
+2. **Skip if held.** With `--ready-only`, skip non-`ready` tasks (don't create,
+   don't record — they're the held follow-up set).
+3. **Build the drafted task** — the normalized contract from `commands/add-task.md`
+   step 5 (`title`, `body` = the Context/Task/Acceptance markdown, `priority`,
+   `size`, `tags`, `source_branch`, `source_pr`, `related_files`,
+   `is_blocked_by`). **Translate `is_blocked_by` through the map before handing it
+   off:** rewrite each entry that names a plan task to that task's tracker id;
+   **pass through unchanged** any entry that already matches `/^[A-Z]+-\d+$/` or
+   isn't in the map (an external/manual reference) — never fail on those.
+4. **Create the issue** by following `commands/handlers/linear-add.md` steps 3–5
+   (compose description, `save_issue`, return the url) with the resolved team and
+   the **container project id from §4.2**. Because the container is already
+   resolved here, **skip `linear-add.md` step 2's project prompt** — pass the
+   project id directly. `linear-add` already renders a native `blockedBy`
+   relationship when an `is_blocked_by` value matches `/^[A-Z]+-\d+$/`, which is
+   exactly what the map translation produces — so no change to `linear-add.md`
+   is needed.
+5. **Record the id back** into the task file's frontmatter: `tracker_id:
+   <identifier>` (e.g. `PRE-12`) and optional `tracker_url`, and add
+   `<slug> → <identifier>` to the map so later dependents resolve.
+
+## 5. Idempotency
+
+The behavior above is **create-missing-only** and safe to re-run (spike §4):
+
+- A file with a non-empty `tracker_id` is skipped, never duplicated.
+- A recorded container id is reused, never duplicated.
+- Skipped files still feed the slug→id map, so newly added tasks resolve their
+  blockers on a later push.
+- v1 **never updates or deletes** remote issues, and **never deletes** the local
+  plan files — they keep their `tracker_id` as a traceable back-link (spike §5).
+  Local `status:` goes stale after push; the tracker becomes the source of truth.
+
+## 6. Report
+
+Print:
+
+- The container: created (`<title>` → `<project id>`) or reused (`<project id>`).
+- **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
+  resolved blockers if any.
+- **Already pushed:** skipped files with their `tracker_id`.
+- **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
+  or held (`--ready-only`), each with what's needed to resolve it.
+
+A re-run with no changes should report only "already pushed" lines and "container
+reused" — the signal that idempotency held.
