@@ -2,7 +2,7 @@
 title: Warn about handler capability gaps at /task-config
 priority: medium
 size: 2
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:
