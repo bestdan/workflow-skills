@@ -92,7 +92,7 @@ gh pr list --label task-loop --state open  --json number,title,headRefName,updat
 gh pr list --label task-loop --state merged --limit 30 --json number,title,headRefName,mergedAt  # → done (recent) + epic rollup
 ```
 
-Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated.
+Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated. When they're skipped, the **Epics rollup degrades to file-only counts**: `done` reflects only member files explicitly `status: done`, and `in_progress`/`blocked`/`total` come from present member files (the PR-derived done/in-flight contributions are simply absent).
 
 Within each section, sort by priority (urgent > high > medium > low), then by **value/effort score** `impact / size` descending (a card with no `impact` set, or a missing/invalid `size`, has no score and sorts last within its priority tier), then age (oldest first). This matches the **Ranking** in `skills/task/SKILL.md` and `/do-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
 
