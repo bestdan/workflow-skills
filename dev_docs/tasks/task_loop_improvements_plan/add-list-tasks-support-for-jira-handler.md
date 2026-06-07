@@ -2,7 +2,7 @@
 title: Add /list-tasks support for the jira handler
 priority: low
 size: 2
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: claude/wonderful-bardeen-SW7wW
 related_files:
