@@ -214,8 +214,10 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 ### Confidence check (used by `/promote-tasks`)
 
-- **HIGH** (→ `ready`): all required fields present; `size` is one of `1` / `2` / `3` / `5`; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; no scope-keyword red flags (`refactor`, `migrate`, `redesign`, `rewrite`, `overhaul`) suggesting the task exceeds size `5` and should be split (see **Task size**).
+- **HIGH** (→ `ready`): all required fields present; `size` is one of `1` / `2` / `3` / `5`; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; and the promoter **judges** the described scope to plausibly fit within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the `## Task` steps, and `related_files` breadth. This last gate is model judgment, not a keyword scan: a title merely containing "migrate"/"refactor" does not fail it, while one implying multi-file rework that exceeds size `5` does (reason: `scope exceeds size 5 — split into sub-tasks`).
 - **LOW** (→ `needs_refinement`, set `human_approval_requested: true`): any of the above fails, or `human_approval_requested` is already true.
+
+The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
 
 Note: `is_blocked_by` is intentionally **not** checked here. `/process-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
 
