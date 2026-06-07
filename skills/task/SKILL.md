@@ -72,12 +72,12 @@ Two commands turn captured tasks into PRs. Pick before you invoke; they have dif
 
 #### Process (`/process-tasks`)
 
-1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by`
+1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is dependency-ready only when **every** blocker is resolved)
 2. For each selected task, dispatches a remote Claude session that:
    - Claims the task (branch `task/<slug>`, sets `status: in_progress`)
    - Does the work described in the Task section
    - Deletes the task file and opens a PR labeled `task-loop` (the open PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
-3. Tasks with `is_blocked_by` set wait until the referenced slug no longer exists as a task file
+3. Tasks with `is_blocked_by` set wait until **all** referenced slugs are resolved (each no longer exists as a task file, or exists with `status: done`); `is_blocked_by` may be a single slug or a list (`[a, b]`)
 4. Multiple dependency-ready tasks can be dispatched in parallel — each gets its own cloud VM
 
 #### Claim (`/claim-task`)

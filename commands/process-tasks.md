@@ -27,18 +27,18 @@ find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/d
 
 Parse YAML frontmatter from each file. Filter to `status: ready`. Sort by:
 
-1. Dependency readiness: tasks whose `is_blocked_by` target is absent (or `done`) are eligible; tasks whose blocker is still active are not
+1. Dependency readiness: a task is eligible only when **every** `is_blocked_by` entry is satisfied (target absent or `done`); a task with any still-active blocker is not
 2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
 3. Age: oldest `created` date first
 
-Treat `is_blocked_by` as a reference to another task's slug. The slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. If a referenced blocker file still exists in any other state, the dependent task must not be dispatched yet.
+Treat `is_blocked_by` as a reference to another task's slug, **or a list of slugs** (`[a, b]`). A single string behaves exactly as a one-element list. Each slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. A task is dependency-ready only when **all** of its blockers are satisfied; if any referenced blocker file still exists in another state, the dependent task must not be dispatched yet. When reporting a blocked task, list **every** unresolved blocker (e.g. `waiting on b, c`).
 
-If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blocker each one is waiting for.
+If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blockers each one is waiting for.
 
 ### 2. Select tasks to process
 
 - Default: pick the single highest priority dependency-ready task
-- With `<slug>`: find that specific task; if it is waiting on `is_blocked_by`, stop and report the blocker instead of dispatching it
+- With `<slug>`: find that specific task; if it is waiting on `is_blocked_by`, stop and report every unresolved blocker instead of dispatching it
 - With `--all`: select all dependency-ready tasks and skip any that are still waiting on another task. The WIP limit in step 4 then caps how many of these are actually dispatched.
 
 ### 3. Check dispatch prerequisites

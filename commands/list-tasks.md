@@ -46,7 +46,7 @@ For each file, parse the YAML frontmatter to extract: `title`, `priority`, `size
 
 Check for expired tasks: if `expires` < today and `status` is not `done`, mark as expired.
 
-Also compute whether the task is currently dependency-blocked: if `is_blocked_by` is set and a task file with that slug still exists anywhere under `dev_docs/tasks/**/*.md` with a status other than `done`, treat this task as waiting on that dependency. This is distinct from `status: blocked`, which means someone tried to process the task and hit a problem.
+Also compute whether the task is currently dependency-blocked. `is_blocked_by` may be a single slug or a list of slugs (`[a, b]`); treat a string as a one-element list. For each entry, the blocker is unresolved if a task file with that slug still exists anywhere under `dev_docs/tasks/**/*.md` with a status other than `done`. The task is waiting if **any** blocker is unresolved; surface **all** unresolved blockers in the annotation (e.g. `waiting on a, b`). This is distinct from `status: blocked`, which means someone tried to process the task and hit a problem.
 
 If `$ARGUMENTS` is provided, filter to that status (or `expired`). Default: show every section that has cards.
 
