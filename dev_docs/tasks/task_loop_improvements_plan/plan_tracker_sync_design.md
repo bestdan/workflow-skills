@@ -108,9 +108,16 @@ The plan encodes ordering as `is_blocked_by` pointing at task **filename stems**
    before its dependents. (`is_blocked_by` may be a string or a list — honor
    both, per the schema.) A cycle is a plan bug — stop and report it.
 2. **Maintain a live slug→tracker-id map.** As each issue is created, record
-   `<slug> → <tracker identifier>`. When creating a dependent, **translate its
-   `is_blocked_by` slugs through the map** _before_ handing the drafted task to
-   the add-flow, so the handler receives real tracker ids.
+   `<slug> → <tracker identifier>`. **On re-push, seed the map from every task
+   that already has a `tracker_id`** (the skipped, already-pushed ones from §4) —
+   otherwise a freshly added task that depends on an already-pushed one can't
+   resolve its blocker. When creating a dependent, **translate its `is_blocked_by`
+   entries through the map** _before_ handing the drafted task to the add-flow, so
+   the handler receives real tracker ids. **Pass-through, don't fail:** an entry
+   that already looks like a tracker id (e.g. matches `/^[A-Z]+-\d+$/`) or that
+   isn't in the map (an external/manual reference) is handed through unchanged
+   rather than treated as an unresolved error — only local plan slugs are
+   rewritten.
 
 Per-handler translation (this is where the handlers differ, and why the
 implementation splits):
@@ -131,10 +138,16 @@ each handler learning about plan slugs.
   frontmatter: `tracker_id: <identifier>` (Linear `PRE-12`, Jira `PLAT-123`,
   gh-issue `owner/repo#45`) and optionally `tracker_url`. The epic file records
   the project/epic/milestone id the same way.
+- **Reuse an existing container.** If the epic file already has a recorded
+  project/epic/milestone id, `/push-plan` **reuses** it (attaches new issues to
+  it) instead of creating a duplicate container — the container is created only on
+  the first push, when the epic has no recorded id.
 - **Re-push is create-missing-only:** a task with a non-empty `tracker_id` is
-  **skipped** (no duplicate). Only files without one are created. This makes
-  `/push-plan` safe to re-run after adding tasks to a plan, or after a partial
-  failure mid-push.
+  **skipped** (no duplicate). Only files without one are created — but every
+  skipped task's `tracker_id` is still loaded into the slug→tracker-id map (§3.3)
+  so newly created dependents can resolve their blockers. This makes `/push-plan`
+  safe to re-run after adding tasks to a plan, or after a partial failure
+  mid-push.
 - v1 **never updates or deletes** remote issues. A future `--update` could sync
   title/description/blocker edits; out of scope here.
 
