@@ -1,6 +1,6 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear
 argument-hint: "[slug | --all | -n N] [--remote|--local]"
 ---
 
@@ -34,6 +34,11 @@ cannot drift.
 highest-ranked task and reports the rest as held. `/do-tasks <slug> --local` still
 runs the named slug.
 
+For the **tracker** (`linear`) handler, execution is single and foreground
+(it runs in the current session, like `/claim-task`): `--remote`/`--local` do not
+apply, and `--all` / `-n N` degrades to a single claim with a one-line note. See
+section 3.
+
 ## 1. Resolve the handler
 
 Read `dev_docs/tasks/.task-config.yml`:
@@ -43,13 +48,13 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 ```
 
 - File absent, or `handler: repo-pr` → **file path** (section 2 below).
-- `handler: linear` → **tracker path**. The tracker dispatch is added to this
-  command in a later task. **For now, defer:** stop and tell the user to use
-  `/claim-task`, which dispatches to the Linear handler.
-- `handler: jira | gh-issue` → **tracker path**, not yet supported by any execute
-  verb (`/claim-task` stops on these too). Stop and tell the user to pull the
-  issue and execute it manually, or switch the handler to `linear` in
-  `dev_docs/tasks/.task-config.yml` — the same guidance `/claim-task` gives.
+- `handler: linear` → **tracker path** (section 3 below). Follow
+  `commands/handlers/linear-claim.md` (with `commands/handlers/linear-common.md`
+  for config/preflight/kanban mapping) for the full claim flow.
+- `handler: jira | gh-issue` → **stop**: "execution not supported for
+  `<handler>`; pull an issue manually and open a PR, or switch the handler to
+  `linear` in `dev_docs/tasks/.task-config.yml`." (`/claim-task` stops on these
+  too, with the same guidance.)
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
@@ -111,11 +116,94 @@ Both are carried through **unchanged** from `/process-tasks`:
   `is_blocked_by` entry is satisfied (target absent or `done`); `is_blocked_by`
   may be a single slug or a list (`[a, b]`). See `/process-tasks` step 1.
 
-## 3. Report
+## 3. Tracker path (`linear` handler)
 
-For **remote** dispatch, report as `/process-tasks` step 5: list each dispatched
-task (slug, title, that a remote session started) and point the user at `/tasks`
-to monitor. For **`--local`**, there is no remote session — report the PR opened
-in-session instead. In both cases, list separately any tasks skipped because they
-are waiting on another task (with every unresolved blocker) or **held** by the
-`-n N` ceiling or the WIP limit.
+This path fully subsumes `/claim-task`. Rather than restate the feasibility
+judgment, atomic claim (concurrency guard), branch-name-verbatim rule, PR↔issue
+linking, move-to-review, and bail mechanics, **follow
+`commands/handlers/linear-claim.md`** (with `commands/handlers/linear-common.md`
+for config/preflight/kanban mapping) — every phase there applies verbatim. The
+sub-steps below are exactly `/claim-task` steps 2–9; `/do-tasks` runs them in the
+**current session**. Read both handler files; if the relative paths don't resolve,
+find them with **Glob** (`**/commands/handlers/linear-claim.md`,
+`**/commands/handlers/linear-common.md`).
+
+**Single by nature.** Tracker execution is foreground, so `--remote`/`--local` do
+not apply and `--all` / `-n N` is **not supported** — a batch flag degrades to a
+single claim with a one-line note ("batch isn't supported for tracker handlers;
+claiming one issue"). `/do-tasks <identifier>` (a specific Linear id, e.g.
+`PRE-12`) claims that one issue.
+
+### Pre-claim WIP gate
+
+The WIP limit carries over from the file path (`/process-tasks` step 4), but since
+tracker execution is single/foreground it is a **pre-claim gate**, not a batch
+cap. After the preflight resolves the team and workflow states, **before** judging
+feasibility or claiming:
+
+1. Resolve `wip_limit` from the top-level `wip_limit` key in
+   `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr
+   handler uses).
+2. Count current in-flight work = Linear issues in any `started`-type state
+   (e.g. `In Progress`, `In Review`) for the configured team, via
+   `<linear-mcp>__list_issues` (resolve by state **type**, not display name —
+   names are team-configurable). The started-type issue is the canonical
+   in-flight unit: an open PR is already reflected by its issue sitting in a
+   started state, so do **not** add open PRs separately — that double-counts.
+3. If that count is **≥ `wip_limit`**, decline: report
+   `WIP limit <n> reached (<count> in flight) — no issue claimed` and stop. Do not
+   claim another card.
+
+Single-issue mode (`/do-tasks <identifier>`) is gated too — the limit protects
+total in-flight work regardless of how the claim was initiated.
+
+### Claim and execute
+
+With positive WIP slack, run `commands/handlers/linear-claim.md` end to end,
+exactly as `/claim-task` does:
+
+1. **Preflight** — `linear-common.md` preflight (resolve team) + `linear-claim.md`
+   "Find candidates" (resolve workflow states, query unstarted issues, filter by
+   `estimate`/labels/assignee, rank). Also confirm `gh auth status`, a clean
+   working tree, and fetch the base branch (`linear.base_branch`, default `main`).
+2. **Judge feasibility** — `/claim-task` step 4: take candidates in ranked order,
+   one at a time, and stop at the first this session can finish without a human;
+   comment `Skipped by /do-tasks: <reason>` on each one rejected.
+3. **Claim** — `linear-claim.md` "Claim the issue": add `auto-claimed` (creating
+   the label if absent — the concurrency guard), move to the `started`-type state,
+   comment the branch name. On an `auto-claimed` race, fall back to the next
+   candidate.
+4. **Branch + execute** — branch with Linear's **verbatim** `branchName` (never
+   reconstruct it when the field is present), do the work, run the project's
+   tests/lints (`just check` here).
+5. **PR** — `gh pr create` with the Linear identifier in brackets in the title
+   (`[PRE-12] …`) and `Closes <identifier>` on its own line in the body; post the
+   PR URL as a Linear comment.
+6. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
+   PR via `links` and move to `In Review` if the team has one. **Never move the
+   issue to a `completed`/`canceled` state** — merge is the only completion signal,
+   handled by Linear's GitHub integration. This hard rule from `linear-claim.md`
+   carries over unchanged.
+7. **Bail** — if the work proves infeasible mid-execution, `linear-claim.md`
+   "Bail": `git stash push -u` the WIP, remove `auto-claimed`, add
+   `human-approval-requested`, revert the issue to the `backlog`-type state, and
+   comment what tripped the bail. Stop — do not auto-pick another candidate.
+
+## 4. Report
+
+For the **file path**, report by dispatch mode:
+
+- **remote** dispatch — as `/process-tasks` step 5: list each dispatched task
+  (slug, title, that a remote session started) and point the user at `/tasks` to
+  monitor.
+- **`--local`** — there is no remote session; report the PR opened in-session
+  instead.
+
+In both file-path modes, list separately any tasks skipped because they are
+waiting on another task (with every unresolved blocker) or **held** by the `-n N`
+ceiling or the WIP limit.
+
+For the **tracker path**, report as `/claim-task` step 9: on success print the
+issue identifier, the PR URL, and a one-line summary; on bail print the identifier,
+why it bailed, and the Linear comment URL; on the WIP gate declining, print the
+limit and the in-flight count.
