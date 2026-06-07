@@ -1,14 +1,17 @@
 ---
-title: Decide jira promote support or record it as a non-goal
-priority: low
-size: 3
+title: Build the jira promote handler (dynamic workflow-status transitions)
+priority: medium
+size: 5
 status: new
 created: 2026-06-07
 source_branch: bestdan/handler-parity-followups
 related_files:
-  - commands/task-config.md
-  - commands/handlers/jira.md
   - commands/promote-tasks.md
+  - commands/handlers/jira-promote.md
+  - commands/handlers/jira.md
+  - commands/handlers/jira-config.md
+  - commands/handlers/linear-promote.md
+  - commands/task-config.md
 expires: 2026-09-07
 tags:
   - task-loop
@@ -16,23 +19,36 @@ tags:
   - parity
 ---
 
-> Part of [[handler_parity_followups_plan]].
+> Part of [[handler_parity_followups_plan]]. The promote dispatch spine already exists upstream.
 
 ## Context
 
-Matrix cell: **jira × promote** (`/promote-tasks`).
+`/promote-tasks` step 0 already resolves the handler; the `jira` branch currently **stops** ("promotion not supported"). This task flips it to dispatch, modeled on the shipped `commands/handlers/linear-promote.md`.
 
-`/promote-tasks` scores `status: new` task files and flips them to `ready` / `needs_refinement`. It is file-only; the planned parity work only adds a Linear promote path. After it lands, the jira handler still has no promote verb. Jira items are created already-actionable, and Jira's own workflow/status scheme is the natural place for a triage gate.
-
-This may be a **deliberate non-goal**: Jira manages issue states through its configured workflow, and a repo-side promotion scorer may duplicate or conflict with that.
+Jira differs from gh-issue/linear: there is no Jira `## List` flow or label vocabulary established yet, and **Jira workflow statuses are project-configurable** — there is no fixed "Ready" status to assume. So jira promote drives a **workflow-status transition** (not a label), and the handler must resolve the available transitions dynamically. This is why this task is size 5 while gh-issue promote is size 3.
 
 ## Task
 
-1. Decide whether `/promote-tasks` should support the jira handler at all.
-2. If **build**: define what "promote" means for a Jira item (e.g. a workflow transition driven by the same confidence check) and what would be involved in `commands/promote-tasks.md` + `commands/handlers/jira.md`.
-3. If **non-goal**: mark the cell in the `commands/task-config.md` capability matrix as a deliberate non-goal (not merely "unsupported") and note the rationale in `commands/handlers/jira.md`.
+1. **Flip the dispatch** in `commands/promote-tasks.md` step 0: `jira` → dispatch to `commands/handlers/jira-promote.md` (mirror the `linear` branch). Add the Atlassian MCP tool names to `allowed-tools`.
+2. **Config.** Extend the `jira:` block (and `commands/handlers/jira-config.md`) with optional `ready_status` / `refinement_status` keys (e.g. `Selected for Development` / `Needs Refinement`). If unset, the handler resolves the available transitions and prompts via `AskUserQuestion`, then notes the chosen statuses for the user to persist.
+3. **Write `commands/handlers/jira-promote.md`**, modeled on `linear-promote.md`:
+   - Preflight reachability exactly as `jira.md` step 1 (`getAccessibleAtlassianResources`, site match).
+   - Query candidates in the project's initial/new status via `searchJiraIssuesUsingJql` (e.g. `project = "<project>" AND statusCategory = "To Do" ORDER BY updated DESC`), pulling `summary`, `description`, `status`, `priority`.
+   - Score each against the shared confidence check (the field-mapped gate from `linear-promote.md` step 6), reading the description.
+   - **Resolve transitions dynamically** — confirm the exact Atlassian MCP tool names at implementation (expected `getJiraIssueTransitions` read + `transitionJiraIssue` write under the `mcp__claude_ai_Atlassian__*` / `mcp__atlassian__*` prefixes used elsewhere). Map `ready_status`/`refinement_status` to their transition ids per item (ids vary per workflow).
+   - Apply: HIGH → transition to `ready_status`; LOW → transition to `refinement_status` + a comment naming the failed check. Honor `dry-run`.
+   - Report in the `linear-promote.md` step 8 shape, keyed by Jira key.
+4. **Flip the matrix cell** `promote × jira` to `yes` in `commands/task-config.md`.
 
 ## Acceptance Criteria
 
-- The decision is recorded: either a jira promote path is implemented (matrix updated to supported), or the capability matrix in `commands/task-config.md` and `commands/handlers/jira.md` explicitly mark jira promote as a deliberate non-goal with rationale.
+**Code-enforced**
+- `commands/promote-tasks.md` dispatches `jira` to `jira-promote.md`.
+- `jira-promote.md` resolves transitions dynamically (no hard-coded status ids), scores via the shared confidence check, and honors `dry-run`.
+- `ready_status`/`refinement_status` config keys are documented; absence triggers the prompt path.
+- The `promote × jira` matrix cell reads `yes`.
 - `just check` passes.
+
+**User-run**
+- `/promote-tasks` with `handler: jira` transitions a well-formed item to the ready status and an underspecified one to the refinement status (+ comment).
+- `/promote-tasks dry-run` mutates nothing.

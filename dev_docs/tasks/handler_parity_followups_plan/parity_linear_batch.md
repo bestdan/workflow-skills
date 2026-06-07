@@ -1,14 +1,15 @@
 ---
-title: Decide linear batch-process support or record it as a non-goal
+title: Lift Linear /do-tasks --all to true batch execution; establish the tracker-batch subroutine
 priority: low
-size: 3
+size: 5
 status: new
 created: 2026-06-07
 source_branch: bestdan/handler-parity-followups
 related_files:
-  - commands/task-config.md
-  - commands/handlers/linear-claim.md
   - commands/do-tasks.md
+  - commands/handlers/linear-claim.md
+  - commands/handlers/repo-pr-execute.md
+  - commands/task-config.md
 expires: 2026-09-07
 tags:
   - task-loop
@@ -16,23 +17,32 @@ tags:
   - parity
 ---
 
-> Part of [[handler_parity_followups_plan]].
+> Part of [[handler_parity_followups_plan]]. Foundation for the Phase 3 batch cells.
 
 ## Context
 
-Matrix cell: **linear × process / batch** (`/do-tasks --all`).
+`/do-tasks --all` / `-n N` is true batch only for the file store (`repo-pr`), whose remote fan-out now lives in `commands/handlers/repo-pr-execute.md` (the old `commands/process-tasks.md` was removed). For Linear, `commands/do-tasks.md` section 3 says batch *execution* degrades to a single foreground claim — **but `--claim-only` already batches** (`do-tasks.md` line ~189: "`--all` / `-n N --claim-only` may claim several issues at once, bounded by the pre-claim WIP gate"). So the missing piece is **batch execution**, not batch claiming.
 
-Linear is the one tracker with a `/do-tasks` execution path, but that path is single-claim only: `/do-tasks --all` against the Linear handler explicitly degrades to a single foreground claim. Batch fan-out across remote VMs is `repo-pr`-only. So even Linear, the most-supported tracker, has no batch cell after the planned parity work.
-
-This may be a **deliberate non-goal**: the foreground claim model is intentionally one-card-at-a-time (pair on a card with the agent watching), and bulk parallel execution is the file-store's job. Lifting it to Linear means reconciling the foreground claim model with remote fan-out and a non-file push-race guard.
+This task closes that gap and, in doing so, defines the **reusable tracker-batch subroutine** that gh-issue (task 6) and jira (task 7) reuse. The push-race guard is the atomic `auto-claimed` claim already in `linear-claim.md`, not file-store branch determinism.
 
 ## Task
 
-1. Decide whether `/do-tasks --all` should support the linear handler (true batch) rather than degrading to a single claim.
-2. If **build**: define what's involved — selecting multiple dependency-ready unclaimed Linear issues, applying `wip_limit`, dispatching remote agents that each claim atomically, and reconciling with the existing single-claim foreground path in `commands/handlers/linear-claim.md`. Scope honestly; likely larger than a single card.
-3. If **non-goal**: confirm and document the current degrade-to-single behavior as intentional — mark the cell in the `commands/task-config.md` matrix as a deliberate non-goal and note the rationale in `commands/handlers/linear-claim.md` (or wherever the `/do-tasks` Linear path is documented).
+1. **Add true batch execution for Linear** in `commands/do-tasks.md` section 3. When `--all`/`-n N` (without `--claim-only`) and `handler: linear`:
+   - Select dependency-ready unclaimed issues from the `unstarted`/`Todo` state (the `linear-claim.md` "Find candidates" filters + rank). "Dependency-ready" for Linear = all native `blockedBy` relationships resolved (blockers in a `completed`-type state).
+   - Apply the WIP slack check (`wip_limit - current_wip`) from the section-3 pre-claim gate. Select the top `min(N, slack)`.
+   - Dispatch **one remote session per issue** (one issue per session, like `repo-pr-execute.md`'s fan-out), each running `linear-claim.md` end-to-end and claiming atomically. Bare `/do-tasks` stays a single foreground claim; `--claim-only` keeps its existing batch-claim behavior.
+   - Report dispatched vs held (WIP / `-n N` ceiling), matching the file-path report.
+2. **Document the tracker-batch subroutine** — factor selection + WIP-slack + per-issue-remote-dispatch + atomic-claim into a clearly delimited section tasks 6–7 can reference ("follow the tracker-batch subroutine, substituting the gh-issue/jira candidate query and claim").
+3. **Flip the matrix cell** `process — batch × linear` to `yes` in `commands/task-config.md`.
 
 ## Acceptance Criteria
 
-- The decision is recorded: either a linear batch path is implemented (matrix updated to supported), or the capability matrix in `commands/task-config.md` and the Linear handler docs explicitly mark linear batch as a deliberate non-goal (degrade-to-single is intentional) with rationale.
+**Code-enforced**
+- `commands/do-tasks.md` no longer degrades Linear `--all`/`-n N` execution to a single claim; it dispatches up to `min(N, wip_slack)` remote single-claim sessions, while preserving the existing `--claim-only` batch-claim and single-foreground default.
+- The Linear dependency-ready definition (native `blockedBy` resolved) is stated, and a reusable tracker-batch subroutine is documented.
+- The `process — batch × linear` matrix cell reads `yes`.
 - `just check` passes.
+
+**User-run**
+- `/do-tasks --all` with `handler: linear` and several ready unblocked issues dispatches multiple remote sessions bounded by `wip_limit`, each claiming a distinct issue atomically; held issues are reported with the reason.
+- Bare `/do-tasks` still does a single foreground claim; `/do-tasks --all --claim-only` still batch-reserves.
