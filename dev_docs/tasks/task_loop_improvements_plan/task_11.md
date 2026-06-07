@@ -34,7 +34,7 @@ Map the unified flags onto tracker behavior: tracker execution is foreground/sin
 3. Preserve every safety property from `linear-claim.md`: atomic `auto-claimed` guard, verbatim `branchName`, `Closes <id>` + identifier-in-title linking, bail = stash + unclaim + human-approval, and the never-set-completed rule.
 4. Reference `linear-claim.md` rather than duplicating its MCP-call detail.
 5. Leave `commands/claim-task.md` working for now — it is removed in the next task (task 12), not here.
-6. **Carry over the WIP limit** added for repo-pr in task_5. Tracker execution is single/foreground, so it's not a batch cap but a **pre-claim gate**: before claiming, count in-flight work as Linear issues in `started`/`In Review` workflow states plus open linked PRs; if that already meets `wip_limit` (read from the `linear` config block, default 3), decline the claim and report the limit instead of pulling another card.
+6. **Carry over the WIP limit** added for repo-pr in task_5. Tracker execution is single/foreground, so it's not a batch cap but a **pre-claim gate**: before claiming, count in-flight work as Linear issues in `started`/`In Review` workflow states plus open linked PRs; if that already meets the top-level `wip_limit` key in `.task-config.yml` (default 3, the same key repo-pr uses), decline the claim and report the limit instead of pulling another card.
 
 ## Acceptance Criteria
 

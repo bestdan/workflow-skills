@@ -59,10 +59,10 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 2. Count current WIP = (task files with `status: in_progress`) + (open `task-loop` PRs):
 
    ```bash
-   gh pr list --label task-loop --state open --json number | grep -c '"number"'
+   gh pr list --label task-loop --state open --json number --jq 'length'
    ```
 
-   If `gh` is unavailable or errors, count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
+   If the `gh pr list` query fails (API error or rate limit — step 3 has already confirmed `gh` is installed and authenticated), count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
 3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). If that slack is `0` or negative, dispatch nothing.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)`, listed under the dispatched ones in step 5.
 
