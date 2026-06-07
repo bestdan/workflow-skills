@@ -109,6 +109,12 @@ Per-handler support:
 
 Renders a kanban view grouped by `status` column with priority, dependency blockers, tags, and expiry.
 
+### Diagnostics (`/doctor`)
+
+`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), and hygiene (expired tasks, orphan branches) — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth) as reported warnings.
+
+It **complements, not replaces, migrate-on-contact** (below): that implicit preflight keeps stale setups working without anyone invoking `/doctor`, while `/doctor` surfaces the same drift — and more — in one place on demand. Both reference the single migration procedure in this file.
+
 ## Task size
 
 Every task carries a **size** — a Fibonacci story-point estimate of its scope: `1`, `2`, `3`, or `5`. `5` is the ceiling: **one task = one PR**, roughly ≤ ~300 lines of diff across ≤ ~5 files. If a task estimates larger than `5`, it is too big to capture as one card — break it into sub-tasks and chain them with `is_blocked_by`. When an _existing_ card turns out too big (or `/promote-tasks` flags it `scope exceeds size 5`), the `break-down-task` skill (`skills/break-down-task/SKILL.md`) finds the shear points and replaces it with the sub-tasks.
@@ -281,7 +287,7 @@ Always scan recursively: `dev_docs/tasks/**/*.md`. Subdirectories are optional o
 
 ## Legacy migration
 
-Earlier versions of this system stored tasks under `dev_docs/todos/` (and `plan-with-docs` wrote plans under `dev_docs/todo/`). There is no dual-path support — instead, migrate once on contact.
+Earlier versions of this system stored tasks under `dev_docs/todos/` (and `plan-with-docs` wrote plans under `dev_docs/todo/`). There is no dual-path support — instead, migrate once on contact. (`/doctor` exposes the same procedure as an explicit **Legacy dirs** check — reported by default, run under `--fix` — but the on-contact preflight below stays the implicit path so a stale setup heals without invoking `/doctor`.)
 
 If a command finds a legacy `dev_docs/todos/` (task store) or `dev_docs/todo/` (plans) directory, pause before proceeding and prompt once:
 
