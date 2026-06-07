@@ -30,13 +30,13 @@ The delivery destination is a **handler** named in a repo-committed config file,
 
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
-wip_limit: 3 # optional (repo-pr) — caps /do-tasks --all batch dispatch; default 3
+wip_limit: 3 # optional — bounds /do-tasks in-flight work (repo-pr batch dispatch + linear pre-claim gate); default 3
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (repo-pr, default `3`) bounds **batch** dispatch only. `/do-tasks --all` counts current work-in-flight — tasks with `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded. Single-task dispatch ignores it. See `commands/handlers/repo-pr-config.md`.
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks` on both execute paths. On the `repo-pr` file path it caps **batch** dispatch: `/do-tasks --all` counts current work-in-flight — tasks with `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded (single-task dispatch is ungated). On the `linear` tracker path it is a **pre-claim gate** that declines a claim — including a single claim — when in-flight work already meets the limit. See `commands/handlers/repo-pr-config.md`.
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 

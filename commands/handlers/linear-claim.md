@@ -86,7 +86,7 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
 2. **Compose the link.** The PR URL from `gh pr create`, with a human title like `PR #<n>: <PR title>` (the `<n>` comes from `gh pr view --json number`, or parse it from the URL's trailing `/pull/<n>` segment).
 
 3. **Mutate.** Call `<linear-mcp>__save_issue` with:
-   - `id`: the issue identifier (e.g. `ENG-123`) or UUID
+   - `id`: the candidate's UUID (`candidate.id`, the same value the claim step's `get_issue`/`save_issue` calls use — the human identifier like `ENG-123` is display-only)
    - `links`: `[{ "url": "<PR URL>", "title": "PR #<n>: <PR title>" }]` — this is the explicit PR↔issue attachment. **This is append-only**, so the call is safe even if other PRs are already attached.
    - `state`: the resolved `In Review` state id from step 1. **Omit this field entirely** if no `In Review` state exists — do not pass an empty string or null.
    - Do not touch `labels` here — `auto-claimed` stays on through review.
