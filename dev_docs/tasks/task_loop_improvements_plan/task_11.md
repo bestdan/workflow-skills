@@ -2,7 +2,7 @@
 title: Add tracker dispatch to /do-tasks (subsume /claim-task)
 priority: high
 size: 5
-status: ready
+status: in_progress
 created: 2026-06-07
 source_branch: claude/keen-tesla-pgLI4
 related_files:
