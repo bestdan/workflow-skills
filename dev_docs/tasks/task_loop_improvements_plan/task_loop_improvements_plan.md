@@ -1,3 +1,11 @@
+---
+type: epic
+title: Task Loop Improvements
+status: active
+owner: dan
+created: 2026-06-07
+---
+
 # Task Loop Improvements — Plan
 
 ## Goal

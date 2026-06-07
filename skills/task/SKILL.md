@@ -193,6 +193,35 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 - **Acceptance Criteria** (required, ≥ 1 bullet) — Definition of done. Missing or empty section blocks promotion to `ready`.
 - **Open Questions** / **TBD** (optional) — Presence of either with non-empty content blocks promotion to `ready`.
 
+## Epics
+
+An **epic** groups related tasks so the board can show a rollup. Tasks are otherwise flat — `is_blocked_by` gives ordering but no grouping. An epic is a first-class file, distinguished from a task card by `type: epic` in its frontmatter:
+
+```yaml
+---
+type: epic
+title: Task Loop Improvements
+status: active # active | done | abandoned
+owner: dan # optional — omit when unknown
+created: 2026-06-07
+---
+```
+
+A `plan-with-docs` overview (`<name>_plan.md`) is written as this epic file — see `skills/plan-with-docs/SKILL.md`.
+
+**Epic slug.** An epic's slug is its filename stem with a trailing `_plan` removed (so `task_loop_improvements_plan` → `task_loop_improvements`); a standalone epic file not named `*_plan.md` uses its bare stem.
+
+**Membership.** A task belongs to an epic when **either**:
+
+- its `parent` field equals the epic slug, **or**
+- it lives anywhere in the epic's plan directory tree (`<name>_plan/`) — membership is **recursive**, so tasks nested in `phase_N/` subdirectories count too, not just direct siblings of the overview file.
+
+`parent` is grouping; it is distinct from `is_blocked_by` (ordering). A task may have a `parent` and no blockers, or vice versa.
+
+**Rollup.** `/list-tasks` renders one line per epic — `<done>/<total> done`, plus in-progress and blocked, with the epic's owner and status. Members are drawn from **two** sources, keyed by task slug: present task **files** (by `parent` or plan directory), and `task-loop` **PRs** whose work branch matches `task/<epic-slug>_` (the `<name>_task_N` plan naming). A merged matched PR counts as `done`, an open one as in-flight; the two sources are de-duplicated by slug so a member is counted once with its most-advanced signal. This recovers true `done` progress even though the `repo-pr` handler deletes a task file when its PR opens. Two limits: the merged-PR query is a recent window (so `done` is best-effort for very old epics), and branch matching only catches the plan naming — a standalone task added via `parent:` drops from the rollup once its file is merged-and-deleted.
+
+**Scans skip epics.** `/promote-tasks` and `/do-tasks` (and the `repo-pr` execute scan) ignore any file with `type: epic` — an epic is never scored, ranked, or executed as a task. `scripts/validate.py` checks epic files against the epic shape (`title` and `status` required; `owner` optional but, when present, a non-empty string), not the task shape.
+
 ## Kanban columns
 
 The seven `status` values form a kanban flow. Cards move between columns via specific actions:

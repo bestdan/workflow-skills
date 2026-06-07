@@ -19,7 +19,7 @@ For a plan named `<name>` (snake_case, derived from the project/feature):
 
 ```
 dev_docs/tasks/<name>_plan/
-  <name>_plan.md          # top-level overview + index of tasks (NOT a task itself)
+  <name>_plan.md          # top-level overview + index of tasks (the epic file, NOT a task itself)
   <name>_task_1.md        # one PR-sized task per file, canonical task format
   <name>_task_2.md
   ...
@@ -49,7 +49,19 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
 
 3. **Check for collisions.** If `dev_docs/tasks/<name>_plan/` already exists, list its contents and ask whether to **overwrite** (replace existing files), **append** (add new `<name>_task_N.md` files with the next available numbers, leaving existing files untouched and updating only the overview's index), or **pick a new name**. Don't silently clobber. When the existing plan uses `phase_N/` nesting, append defaults to the **last existing phase** unless the user says otherwise; numbering is **unique across the whole plan** (not per-folder — `phase_2/<name>_task_3.md` continues from `phase_1/<name>_task_2.md`), so pick the next free integer across all phases.
 
-4. **Write `<name>_plan.md`** — the overview. It carries **no task frontmatter**, so `/promote-tasks` (which only scores files with `status: new`) skips it. Keep it tight:
+4. **Write `<name>_plan.md`** — the overview, written as the plan's **epic file** (see **Epics** in `skills/task/SKILL.md`). Give it epic frontmatter so `/list-tasks` can roll the plan's tasks up under it:
+
+   ```yaml
+   ---
+   type: epic
+   title: <human-readable plan title>
+   status: active # active | done | abandoned
+   owner: <the user, if known — else omit>
+   created: <today, ISO date>
+   ---
+   ```
+
+   The `type: epic` marker is what keeps `/promote-tasks` and `/do-tasks` from ever scoring or executing the overview as a task (it is the epic, not a task card). Below the frontmatter, keep the body tight:
    - **Goal:** one or two sentences. What we're building and why.
    - **Scope / non-goals:** explicit list of what's _not_ in this plan.
    - **Approach:** the architectural choice and the main tradeoff considered.
@@ -57,14 +69,14 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
    - **Open questions:** anything the user still needs to decide. If empty, omit the section — but if you found nothing, double-check; most non-trivial plans have at least one real unknown.
 
 5. **Write each `<name>_task_N.md`** in the **canonical task format** (see `skills/task/SKILL.md` for the full field reference) — a single-PR-sized task:
-   - **Frontmatter:** `title`, `priority`, `size` (Fibonacci `1`/`2`/`3`/`5` — see **Task size**; if a task estimates `> 5`, split it), `status: new`, `created`, `source_branch` (the current branch), `related_files` (the files the task touches, `path:line` where useful), `is_blocked_by` (the slug of the earlier task this one depends on — the slug is the prerequisite's filename stem, e.g. `<name>_task_1`; this is how the plan's ordering is encoded), `expires`, `tags`.
+   - **Frontmatter:** `title`, `priority`, `size` (Fibonacci `1`/`2`/`3`/`5` — see **Task size**; if a task estimates `> 5`, split it), `status: new`, `created`, `source_branch` (the current branch), `related_files` (the files the task touches, `path:line` where useful), `is_blocked_by` (the slug of the earlier task this one depends on — the slug is the prerequisite's filename stem, e.g. `<name>_task_1`; this is how the plan's ordering is encoded), `parent: <name>` (the plan's epic slug, so the task rolls up under the overview — `<name>` is the plan name, the overview stem with `_plan` stripped), `expires`, `tags`.
    - **`## Context`:** the bare minimum a developer needs to start — relevant files, prior decisions, gotchas. Written for someone who has never seen this code.
    - **`## Task`:** concrete edits / new files / commands. Concrete enough that someone (or another agent) can pick it up cold.
    - **`## Acceptance Criteria`:** how we know it's done (≥ 1 bullet, required for promotion). Where useful, split into:
      - **Code-enforced:** automated tests to add or update, lint/type-check commands, CI checks expected to pass. Name the test files and the assertion in plain English.
      - **User-run:** manual checks that aren't automated — e.g. "open `localhost:3000/foo`, click Save, confirm toast appears", "run migration on staging snapshot, verify row count matches".
 
-   Optional fields are available when they help: `assignee` (who's accountable), `impact` (Fibonacci value estimate `1`/`2`/`3`/`5`, mirroring `size`), and `parent` (slug of an epic this task groups under). Skip optional frontmatter that doesn't apply. Don't pad.
+   Other optional fields are available when they help: `assignee` (who's accountable) and `impact` (Fibonacci value estimate `1`/`2`/`3`/`5`, mirroring `size`). Skip optional frontmatter that doesn't apply. Don't pad. (`parent` is set above to the plan epic; only override it if a task belongs to a different epic.)
 
 6. **Cross-link.** Each `<name>_task_N.md` links back to `<name>_plan.md` at the top. The overview links forward to each task. Encode hard ordering with `is_blocked_by` (slug of the prerequisite task), not just prose.
 
