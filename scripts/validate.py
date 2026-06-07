@@ -163,8 +163,9 @@ if task_dir.is_dir():
             continue
         if data.get("type") == "epic":
             # Epic rollup files (see "Epics" in skills/task/SKILL.md), not task
-            # cards. Validate the epic shape (title / status / owner) instead of
-            # the task shape, then skip the task-specific checks below.
+            # cards. Validate the epic shape — title and status required, owner
+            # optional (typed when present) — instead of the task shape, then
+            # skip the task-specific checks below.
             title = data.get("title")
             if not isinstance(title, str) or not title.strip():
                 err(rel(t), "epic title must be a non-empty string")

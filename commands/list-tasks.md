@@ -55,7 +55,7 @@ Also compute whether the task is currently dependency-blocked. `is_blocked_by` m
 
 **Epic rollups.** For each epic file, derive its slug (filename stem with a trailing `_plan` removed; a non-`*_plan.md` epic file uses its bare stem). Members come from two sources, keyed by **task slug** (a member's slug is its task-file stem, and its work-PR branch is `task/<slug>`):
 
-- **Task files** — cards whose `parent` equals the epic slug, **or** that live in the same plan directory (`<name>_plan/`) as the epic file.
+- **Task files** — cards whose `parent` equals the epic slug, **or** that live anywhere in the epic's plan directory tree (`<name>_plan/`). Directory membership is **recursive**: tasks under nested `phase_N/` subdirectories count too, not only direct siblings of the overview file.
 - **Epic PRs** — `task-loop` PRs whose head branch matches the prefix `task/<epic_slug>_` (the `plan-with-docs` `<name>_task_N` naming). Reuse the same `gh pr list --label task-loop` results step 4 already fetches (both include `headRefName`). A **merged** matched PR means that member is `done`; an **open** matched PR means it is in flight (in review).
 
 Combine the two sources by slug so each member is counted once, preferring the most-advanced signal (merged PR `done` > open PR in-flight > file status). Then tally:
