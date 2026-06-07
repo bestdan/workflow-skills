@@ -32,6 +32,13 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
 
    ```yaml
    handler: repo-pr
+   # wip_limit: 3   # optional — caps how many tasks /process-tasks --all dispatches at once
    ```
 
-   No nested block is needed — `repo-pr` has no configurable settings.
+   The only configurable setting is `wip_limit` (default `3`). It bounds batch
+   dispatch: `/process-tasks --all` counts work already in flight — tasks with
+   `status: in_progress` plus open `task-loop` PRs (the `needs_review` queue) —
+   and dispatches only up to `wip_limit - current_wip` tasks, holding the rest.
+   This keeps the human PR-review bottleneck from being flooded. Omit the key to
+   accept the default of `3`; single-task dispatch (`/process-tasks` or
+   `/process-tasks <slug>`) ignores it.
