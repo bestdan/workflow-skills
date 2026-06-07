@@ -25,7 +25,7 @@ cannot drift.
 - `/do-tasks` — execute the single highest-ranked dependency-ready task
 - `/do-tasks <slug>` — execute a specific task
 - `/do-tasks --all` — execute dependency-ready tasks up to the WIP limit, holding the overflow
-- `/do-tasks -n N` — execute up to `N` dependency-ready tasks, still bounded by the WIP limit
+- `/do-tasks -n N` — dispatch up to `N` tasks, **each to its own session (one task per session)**, bounded by the WIP limit
 - `/do-tasks --remote` / `/do-tasks --local` — choose where execution runs (default: remote dispatch)
 
 **Scope of `--all` / `-n N`.** Batch is meaningful only for **remote** dispatch
@@ -80,6 +80,15 @@ the top `N`, then apply the WIP limit from step 4 (`wip_limit - current_wip`). T
 effective batch is `min(N, wip_limit - current_wip)`. Report any selected task you
 did not dispatch — distinguishing `held (-n N ceiling)` from
 `held (WIP limit reached)` — so the user knows why each was left behind.
+
+**One task per session.** `N` bounds the number of **separate** single-task
+sessions launched, **not** how many tasks any one session takes. Each selected
+task is dispatched to its own remote session that claims and executes exactly that
+one task (its own branch and VM, per `/process-tasks` step 4) — never instruct a
+single agent to claim or work multiple tasks. So `-n 3` means up to three
+independent agents each doing one task, capped further by the WIP ceiling; it is
+the **total in-flight** that the limit protects, regardless of how the batch is
+split.
 
 ### WIP cap and multi-blocker semantics
 
