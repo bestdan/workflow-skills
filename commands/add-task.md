@@ -75,7 +75,7 @@ Show the user the full draft and ask for confirmation. They can adjust priority,
 
 If the resolved handler (step 6) is `repo-pr`, also ask: **"File for later, or fix now?"**
 
-- **File for later** (default): creates the task file on main for `/process-tasks` to pick up
+- **File for later** (default): creates the task file on main for `/do-tasks` to pick up
 - **Fix now**: creates the task file AND immediately dispatches a processing agent to do the work
 
 (Other handlers deliver to an external tracker and have no fix-now option.)

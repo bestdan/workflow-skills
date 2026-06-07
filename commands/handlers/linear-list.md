@@ -24,15 +24,15 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
 4. **Group into kanban sections.** Reverse the kanban mapping in `linear-common.md`. For each issue, classify by **state type** (not display name) and label presence:
 
-   | Section            | Match rule                                                                                                                                 |
-   | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-   | `new`              | state type `backlog`, no `human-approval-requested` label                                                                                  |
-   | `needs_refinement` | state type `backlog`, has `human-approval-requested` label                                                                                 |
-   | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                                                                 |
-   | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                                                                |
-   | `blocked`          | state type `started`, has `blocked` label                                                                                                  |
-   | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment from `/claim-task`) |
-   | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                                                                      |
+   | Section            | Match rule                                                                                                                                            |
+   | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `new`              | state type `backlog`, no `human-approval-requested` label                                                                                             |
+   | `needs_refinement` | state type `backlog`, has `human-approval-requested` label                                                                                            |
+   | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                                                                            |
+   | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                                                                           |
+   | `blocked`          | state type `started`, has `blocked` label                                                                                                             |
+   | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment from the tracker execute path) |
+   | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                                                                                 |
 
    If an issue could match both `blocked` and `needs_review`, prefer `blocked` (the more actionable signal).
 

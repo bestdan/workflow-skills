@@ -56,7 +56,7 @@ Print one section per status in this fixed order, top to bottom, omitting empty 
 
 `new` → `needs_refinement` → `ready` → `in_progress` → `blocked` → `needs_review` → `done`
 
-The first five sections come from task files (status field). `needs_review` and `done` are **PR-derived** — the file is deleted when `/process-tasks` opens the PR, so there is no file to source those statuses from. Populate them by running, in parallel with the file scan:
+The first five sections come from task files (status field). `needs_review` and `done` are **PR-derived** — the file is deleted when `/do-tasks` opens the PR, so there is no file to source those statuses from. Populate them by running, in parallel with the file scan:
 
 ```bash
 gh pr list --label task-loop --state open  --json number,title,headRefName,updatedAt   # → needs_review

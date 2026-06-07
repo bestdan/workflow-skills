@@ -1,31 +1,41 @@
----
-description: Process dependency-ready tasks — dispatches remote agents to claim, execute, and open PRs
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Glob, Grep, Read, Write, Edit
-argument-hint: "[slug | --all | --local] or empty for highest priority"
----
+# repo-pr handler — /do-tasks file-path execute flow
 
-# Process Tasks
+Invoked from `/do-tasks` when the handler is `repo-pr` (or absent). Scan for
+dependency-ready task files and turn them into PRs — by default dispatching a
+remote Claude session per task (each in its own isolated cloud VM), or in the
+current session with `--local`.
 
-Scan for dependency-ready tasks and dispatch remote Claude sessions to process them. Each task gets its own isolated cloud VM.
+This file holds the file-path mechanics (scan, ranking, multi-blocker readiness,
+WIP cap, the remote dispatch prompt, local mode, and the report format) so
+`/do-tasks` can reference it rather than restate it — symmetric with
+`linear-claim.md` for the tracker path.
 
-> **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
+> **Legacy migration preflight.** `/do-tasks` runs this before invoking this file
+> (if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration**
+> prompt from `skills/task/SKILL.md`), so assume it is already handled here.
 
-## Modes
+## Argument mapping
 
-- `/process-tasks` — dispatch the highest priority dependency-ready task to a remote agent
-- `/process-tasks <slug>` — dispatch a specific task
-- `/process-tasks --all` — dispatch dependency-ready tasks up to the WIP limit (see step 4), skipping ones still blocked by another task and holding the overflow
-- `/process-tasks --local` — process locally instead of dispatching (original behavior, useful for testing)
+`/do-tasks` passes its arguments straight through:
 
-## Steps
+| `/do-tasks` invocation | Behavior here                                                                     |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `/do-tasks`            | default: select and process the single highest-ranked dependency-ready task       |
+| `/do-tasks <slug>`     | process that specific task; if it is still blocked, stop and report every blocker |
+| `/do-tasks --all`      | select all dependency-ready tasks, dispatch up to the WIP limit, hold the rest    |
+| `/do-tasks -n N`       | like `--all`, but cap the **selected** batch at `N` before applying the WIP limit |
+| `--remote` (default)   | remote dispatch (the "Dispatch remote agents" section)                            |
+| `--local`              | the "Local mode" section (caps the batch at 1)                                    |
 
-### 1. Scan for tasks
+## 1. Scan for tasks
 
 ```bash
 find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
 ```
 
-Parse YAML frontmatter from each file. Filter to `status: ready`. Sort by:
+Parse YAML frontmatter from each file. Skip any file with `type: epic` (those are
+epic rollups, not task cards) and any with no frontmatter (e.g. a plan overview).
+Filter to `status: ready`. Sort by:
 
 1. Dependency readiness: a task is eligible only when **every** `is_blocked_by` entry is satisfied (target absent or `done`); a task with any still-active blocker is not
 2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
@@ -35,13 +45,14 @@ Treat `is_blocked_by` as a reference to another task's slug, **or a list of slug
 
 If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blockers each one is waiting for.
 
-### 2. Select tasks to process
+## 2. Select tasks to process
 
-- Default: pick the single highest priority dependency-ready task
+- Default: pick the single highest-ranked dependency-ready task
 - With `<slug>`: find that specific task; if it is waiting on `is_blocked_by`, stop and report every unresolved blocker instead of dispatching it
 - With `--all`: select all dependency-ready tasks and skip any that are still waiting on another task. The WIP limit in step 4 then caps how many of these are actually dispatched.
+- With `-n N`: like `--all`, but after ranking keep only the top `N` before the WIP limit applies. The effective batch is `min(N, wip_limit - current_wip)`. Report any selected task you did not dispatch, distinguishing `held (-n N ceiling)` from `held (WIP limit reached)`.
 
-### 3. Check dispatch prerequisites
+## 3. Check dispatch prerequisites
 
 Before dispatching, verify GitHub access:
 
@@ -51,9 +62,9 @@ gh auth status 2>&1
 
 If this fails (token invalid, TLS errors, network issues), **stop** and tell the user — both remote and local modes call `gh pr create`, so a broken `gh` blocks both. If the error mentions TLS/x509/certificate, note it's likely Claude Code's sandbox blocking keychain access and suggest re-running outside sandbox mode.
 
-### 4. Dispatch remote agents
+## 4. Dispatch remote agents
 
-**WIP limit (`--all` only).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/process-tasks` / `/process-tasks <slug>`) is **not** gated — skip this paragraph there.
+**WIP limit (batch only — `--all` / `-n N`).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — skip this paragraph there.
 
 1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
 2. Count current WIP = (task files with `status: in_progress`) + (open `task-loop` PRs):
@@ -63,8 +74,8 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
    ```
 
    If the `gh pr list` query fails (API error or rate limit — step 3 has already confirmed `gh` is installed and authenticated), count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
-3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). If that slack is `0` or negative, dispatch nothing.
-4. Report every task you did **not** dispatch as `held (WIP limit N reached)`, listed under the dispatched ones in step 5.
+3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
+4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
 For each selected task that fits under the limit, read its full content (frontmatter + body), then dispatch a remote session.
 
@@ -140,9 +151,9 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 The PR is the 'needs_review' signal. The task file has been deleted in this PR, so it no longer appears in /list-tasks under in_progress. The merged PR is the implicit 'done' transition."
 ```
 
-When dispatching multiple tasks (`--all`), run the `claude --remote` commands in sequence (not background) so the user can see each session ID. Each remote session runs independently in its own cloud VM.
+When dispatching multiple tasks (`--all` / `-n N`), run the `claude --remote` commands in sequence (not background) so the user can see each session ID. Each remote session runs independently in its own cloud VM, and claims and executes **exactly one** task — never instruct a single agent to claim or work multiple tasks.
 
-### 5. Report
+## 5. Report
 
 For each dispatched task, tell the user:
 
@@ -161,14 +172,16 @@ Dispatched 3 tasks to remote agents:
 Monitor with /tasks. Each will open a PR when complete.
 ```
 
-If any tasks were skipped because they are waiting on another task, list them separately with their blocker slug. If any dependency-ready tasks were **held by the WIP limit** (step 4), list those too — e.g. `held (WIP limit 3 reached): <slug> (high)` — so the user knows they are eligible and will dispatch on the next `--all` once in-flight work clears.
+If any tasks were skipped because they are waiting on another task, list them separately with every unresolved blocker slug. If any dependency-ready tasks were **held by the WIP limit** or the `-n N` ceiling (step 4), list those too — e.g. `held (WIP limit 3 reached): <slug> (high)` — so the user knows they are eligible and will dispatch on the next `--all` once in-flight work clears.
 
 ## Local mode (`--local`)
 
-When `--local` is specified or `claude --remote` is unavailable, process the task directly in the current session (`gh` is still required for `gh pr create`):
+When `--local` is specified or `claude --remote` is unavailable, process the task directly in the current session (`gh` is still required for `gh pr create`). `--local` caps the batch at **1** — it processes the single highest-ranked task and reports the rest as held; `/do-tasks <slug> --local` still runs the named slug.
 
 1. Create branch `task/<slug>` from current HEAD
 2. Claim, execute, validate, delete, commit, push, and open PR as described above
 3. Return to the original branch with `git checkout -`
+
+There is no remote session in this mode — report the PR opened in-session instead.
 
 This is useful for testing or when cloud sessions aren't available.

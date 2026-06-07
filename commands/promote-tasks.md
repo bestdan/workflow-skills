@@ -39,7 +39,7 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md`:
 
 This scope gate is **model judgment, not a deterministic rule** — acceptable here because `/promote-tasks` is not a blocking CI gate; a misjudged card lands in `needs_refinement` for a human to confirm, never silently lost. Every other HIGH check above stays deterministic.
 
-Note: `is_blocked_by` is intentionally not part of the promotion check — `/process-tasks` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
+Note: `is_blocked_by` is intentionally not part of the promotion check — `/do-tasks` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
 
 ### 3. Apply
 
@@ -50,7 +50,7 @@ Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter 
 - HIGH: set `status: ready`
 - LOW: set `status: needs_refinement`, set `human_approval_requested: true` (add the field if missing). Append a one-line `# promoter:` comment to the frontmatter naming which check failed (e.g., `# promoter: missing acceptance_criteria`) so the human can fix quickly.
 
-Do not touch any other fields. Do not move the file. Do not stage or commit — the next git operation (manual or `/process-tasks`) will pick up the changes.
+Do not touch any other fields. Do not move the file. Do not stage or commit — the next git operation (manual or `/do-tasks`) will pick up the changes.
 
 ### 4. Report
 

@@ -40,7 +40,7 @@ If it exists, show the user what's currently configured so they see what they're
 
 If `$ARGUMENTS` names a handler (`repo-pr`, `gh-issue`, `jira`, or `linear`), use it. Otherwise ask via `AskUserQuestion` (header: "Destination") which one they want:
 
-- **`repo-pr`** (recommended, first) — commit the task as a markdown file via PR (the default; works with `/process-tasks` and `/list-tasks`)
+- **`repo-pr`** (recommended, first) — commit the task as a markdown file via PR (the default; works with `/do-tasks` and `/list-tasks`)
 - **`gh-issue`** — create a GitHub Issue
 - **`jira`** — create a Jira work item under an epic
 - **`linear`** — create a Linear issue under a team (optionally attached to a project)

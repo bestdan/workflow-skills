@@ -64,15 +64,15 @@ bundle_task() {
 # Using this skill on claude.ai
 
 This skill was authored as a Claude Code plugin. The slash commands it
-documents (`/add-task`, `/claim-task`, `/list-tasks`, `/process-tasks`,
-`/promote-tasks`, `/task-config`) do not exist as dispatchers on claude.ai.
+documents (`/add-task`, `/do-tasks`, `/list-tasks`, `/promote-tasks`,
+`/task-config`) do not exist as dispatchers on claude.ai.
 
 Treat the files under `commands/` (and `commands/handlers/`) as reference
 procedures. Invoke them by asking naturally, e.g.:
 
   - "Add a task for X" -> follow commands/add-task.md
   - "List my tasks"    -> follow commands/list-tasks.md
-  - "Claim a task"     -> follow commands/claim-task.md
+  - "Do the next task" -> follow commands/do-tasks.md
 
 The Linear handler procedures require the Linear MCP connector to be
 enabled in the claude.ai workspace.
