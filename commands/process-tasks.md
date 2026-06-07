@@ -14,7 +14,7 @@ Scan for dependency-ready tasks and dispatch remote Claude sessions to process t
 
 - `/process-tasks` — dispatch the highest priority dependency-ready task to a remote agent
 - `/process-tasks <slug>` — dispatch a specific task
-- `/process-tasks --all` — dispatch all dependency-ready tasks and skip ones still blocked by another task
+- `/process-tasks --all` — dispatch dependency-ready tasks up to the WIP limit (see step 4), skipping ones still blocked by another task and holding the overflow
 - `/process-tasks --local` — process locally instead of dispatching (original behavior, useful for testing)
 
 ## Steps
@@ -39,7 +39,7 @@ If no ready, dependency-ready tasks exist, report that and stop. Hint the user t
 
 - Default: pick the single highest priority dependency-ready task
 - With `<slug>`: find that specific task; if it is waiting on `is_blocked_by`, stop and report the blocker instead of dispatching it
-- With `--all`: select all dependency-ready tasks and skip any that are still waiting on another task
+- With `--all`: select all dependency-ready tasks and skip any that are still waiting on another task. The WIP limit in step 4 then caps how many of these are actually dispatched.
 
 ### 3. Check dispatch prerequisites
 
@@ -53,7 +53,20 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 
 ### 4. Dispatch remote agents
 
-For each selected task, read its full content (frontmatter + body), then dispatch a remote session.
+**WIP limit (`--all` only).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/process-tasks` / `/process-tasks <slug>`) is **not** gated — skip this paragraph there.
+
+1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
+2. Count current WIP = (task files with `status: in_progress`) + (open `task-loop` PRs):
+
+   ```bash
+   gh pr list --label task-loop --state open --json number --jq 'length'
+   ```
+
+   If the `gh pr list` query fails (API error or rate limit — step 3 has already confirmed `gh` is installed and authenticated), count only the `in_progress` files and note in the report that the count may undercount open PRs (so the effective cap is looser than intended).
+3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority then age, as sorted in step 1). If that slack is `0` or negative, dispatch nothing.
+4. Report every task you did **not** dispatch as `held (WIP limit N reached)`, listed under the dispatched ones in step 5.
+
+For each selected task that fits under the limit, read its full content (frontmatter + body), then dispatch a remote session.
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
@@ -148,7 +161,7 @@ Dispatched 3 tasks to remote agents:
 Monitor with /tasks. Each will open a PR when complete.
 ```
 
-If any tasks were skipped because they are waiting on another task, list them separately with their blocker slug.
+If any tasks were skipped because they are waiting on another task, list them separately with their blocker slug. If any dependency-ready tasks were **held by the WIP limit** (step 4), list those too — e.g. `held (WIP limit 3 reached): <slug> (high)` — so the user knows they are eligible and will dispatch on the next `--all` once in-flight work clears.
 
 ## Local mode (`--local`)
 
