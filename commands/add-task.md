@@ -55,7 +55,7 @@ Auto-populate these fields:
 - `status`: `new` by default (the promoter will score it and flip to `ready` or `needs_refinement`). If the user picks "Fix now" in step 5, write `status: ready` instead — the user's manual confirmation IS the human gate, so skip the promoter.
 - `expires`: 30 days from today
 - `priority`: `low` (default, ask user if they want different)
-- `size`: Fibonacci story-point estimate of scope — `1` / `2` / `3` / `5` (infer from scope, ask the user to confirm). See **Task size** in `skills/task/SKILL.md`. If the work estimates larger than `5`, it is too big for one card — propose breaking it into sub-tasks chained with `is_blocked_by` rather than capturing it as one.
+- `size`: Fibonacci story-point estimate of scope — `1` / `2` / `3` / `5` (infer from scope, ask the user to confirm). See **Task size** in `skills/task/SKILL.md`. If the work estimates larger than `5`, it is too big for one card — propose breaking it into sub-tasks chained with `is_blocked_by` rather than capturing it as one (the `break-down-task` skill, `skills/break-down-task/SKILL.md`, does this).
 - `is_blocked_by`: omitted by default; set to another task's slug/id when this work must wait on that task
 
 From conversation context and diff, draft:
