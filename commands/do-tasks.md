@@ -52,10 +52,14 @@ to one normal run. The flags are **mutually exclusive** — passing both is an
 error: stop and ask which one was meant.
 
 - **default** (neither flag) — atomic claim + execute, unchanged.
-- **`--claim-only`** — run the claim step and **stop**: no execution, no PR.
-  - `repo-pr`: branch `task/<slug>`, flip the file `status: ready → in_progress`,
-    commit, and push (the claim half of `commands/handlers/repo-pr-execute.md`).
-    Do **not** delete the file or open a PR.
+- **`--claim-only`** — run the claim step and **stop**: no execution, no review PR.
+  - `repo-pr`: run the **Claim protocol** in
+    `commands/handlers/repo-pr-execute.md` (pre-claim check → acquire the work branch
+    and flip `status: ready → in_progress` → open the draft `task-claim` PR that names
+    the slug → reconcile). The open draft `task-claim` PR is the reservation marker.
+    Do **not** delete the file or convert it to a `task-loop` review PR. The claim lock
+    is that PR, not the branch name, so this works in branch-pinned environments that
+    cannot create `task/<slug>`.
   - `linear`: run only "Claim the issue" in `commands/handlers/linear-claim.md`
     (the atomic `auto-claimed` guard, move to the `started`-type state, record the
     branch name), then stop before "Branch + execute".
@@ -66,11 +70,14 @@ error: stop and ask which one was meant.
   claimed by this caller — `status: in_progress` (`repo-pr`) or assigned to the
   caller in a `started`-type state (`linear`). Otherwise **stop and explain** —
   executing an unclaimed task reopens the race the claim step closes. When the
-  guard passes, **first check out the existing claim branch** (the claim step
-  already created and pushed it; `git fetch` it if it is not present locally) — do
-  **not** branch fresh from the current `HEAD`, which is usually the base branch:
-  - `repo-pr`: `git checkout task/<slug>`, then do the work, validate, delete the
-    file, commit, push, and open the PR (per `repo-pr-execute.md`).
+  guard passes, **first check out the existing claim branch** — do **not** branch
+  fresh from the current `HEAD`, which is usually the base branch:
+  - `repo-pr`: find the open draft `task-claim` PR that names this slug and check out
+    its `headRefName` (`gh pr list`/`gh pr view` → headRefName; `git fetch` it if not
+    present locally — the claim may have been pushed to `task/<slug>` or, in a
+    branch-pinned session, to that session's branch). Then do the work, validate,
+    delete the file, commit, push, and **finish the PR** (relabel `task-claim` →
+    `task-loop`, fill the body, `gh pr ready`) per `repo-pr-execute.md`.
   - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
     PR, and "Move to review on PR open" (per `linear-claim.md`) — without
     re-claiming.
@@ -140,7 +147,8 @@ protects, regardless of how the batch is split.
 Both are defined in `repo-pr-execute.md`:
 
 - **WIP cap** — resolve `wip_limit` from `.task-config.yml` (default `3`), count
-  current WIP (`in_progress` files + open `task-loop` PRs), and dispatch at most
+  current WIP (distinct in-flight tasks, deduped by slug across open `task-claim` PRs,
+  open `task-loop` PRs, and `in_progress` files), and dispatch at most
   `wip_limit - current_wip`. Single-task mode (`/do-tasks` / `/do-tasks <slug>`)
   is not gated.
 
