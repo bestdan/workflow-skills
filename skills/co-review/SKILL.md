@@ -52,29 +52,25 @@ local_reviewers:
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one stdin stream**; the prompt argument is a short **fixed pointer**. Because nothing variable ends up in the command string, the command is invariant and can be approved once with an exact-match rule (see Permissions).
 
-Assemble the input **and** pipe it to the agent in a **single shell invocation** — group the rubric, the reviewer-specific requests, and the diff inside one `{ …; }` pipeline so the bytes the agent reads are produced by the same shell that runs it. Do **not** write the assembled input to a temp file in one Bash call and read it back in another (see the sandbox note below for why that desyncs). The rubric is copied verbatim with `cat` (no LLM transcription); the requests ride on a here-doc so there is no intermediate file; the diff comes from `gh pr diff` / `git diff`. Keep the pointer **byte-for-byte** identical to the Permissions rules:
+Assemble the input **and** pipe it to the agent in a **single shell invocation** (one Bash call), so the bytes the agent reads are written and read in the same shell — and therefore the same sandbox context (see the note below for why splitting this across two calls desyncs). Build the stream with `cat` + redirection only — **no `{ }` group, no here-doc** — so every part stays within the permission matcher's documented contract: only `|`, `&&`, `;`, `&`, and newlines split a command into separately-matched segments, and redirection (`>`, `>>`) is transparent to matching. `<INPUT>` is a fixed absolute path (**not** a `$TMPDIR`-relative one); opening it with `>` truncates any leftover file before the diff is read, so a prior run's bytes can never be consumed.
 
-- `gemini`, GitHub mode →
+1. Reviewer-specific requests (if any) go in a **file** — write `<REQUESTS>` (a fixed absolute path) with the requests, or skip it entirely when there are none. Keeping the requests in a file (not inline in the command) is what keeps the command text invariant, so the exact-match approval below still holds whatever the requests say.
+2. In **one** shell invocation, assemble then dispatch (keep the pointer **byte-for-byte** identical to the Permissions rules):
 
-  ```
-  { cat "<this skill dir>/review_prompt.md"; cat <<'REQUESTS'
-  <reviewer-specific requests, or omit this here-doc entirely if none>
-  REQUESTS
-  gh pr diff <n>; } | gemini -p "<POINTER>"
-  ```
+- `gemini`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | gemini -p "<POINTER>"`
+- `gemini`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | gemini -p "<POINTER>"`
+- `codex`, GitHub mode → identical, piped to `codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
+- `--local` mode → swap `gh pr diff <n>` for `git diff <base>`, and append any untracked files you read **in the same invocation**: `… ; git diff <base> >> "<INPUT>"; cat <untracked-file> … >> "<INPUT>"; cat "<INPUT>" | <agent> …`.
 
-- `codex`, GitHub mode → same `{ …; }` group, piped to `codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
-- `--local` mode → swap `gh pr diff <n>` for `git diff <base>` inside the group (also append the contents of any untracked files you read).
-
-Each `;`/`|`-separated segment is permission-matched on its own (`cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, the `gemini`/`codex` tail → its exact rule), so the grouped pipeline is covered by the same rules as before — only the diff and requests change, and both ride on stdin.
+Each `;`/`|`-separated segment is permission-matched on its own — `cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, `git diff …` → `Bash(git diff:*)`, and the `gemini`/`codex` tail → its exact rule — and redirection (`>`, `>>`) is transparent to matching, so this assemble-then-dispatch line is fully covered by the rules below. The only things that change between runs are the contents of `<REQUESTS>`, `<INPUT>`, and the diff — all files, never the command text.
 
 where `<POINTER>` is exactly:
 
 > Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.
 
-The diff and the requestor's asks ride on **stdin**, which the permission matcher never sees — so `review_prompt.md` and the per-PR requests can change freely without ever changing the approved command. A custom agent must supply its own `command:` (input is piped on stdin).
+Everything that varies per PR — `review_prompt.md`, the per-PR requests, and the diff — lives in **files** that are concatenated into `<INPUT>` and piped to the agent on **stdin**; the command string itself holds only fixed path arguments and the fixed pointer. So the diff and requests can change freely without ever changing the approved command. A custom agent must supply its own `command:` (input is piped on stdin).
 
-> **Why one shell, never a temp file.** An earlier version assembled the input into a temp file (`$TMPDIR/coreview-input.md`) in one Bash call and `cat`-ed it into the agent in another. That silently fed reviewers a **stale** diff from a prior session: input assembly runs in a **sandboxed** shell while the network-bound reviewer runs **unsandboxed**, and `$TMPDIR` (and even a sandbox-blocked `/tmp` write) resolves differently across that boundary — so the write landed in one place and the read came from a leftover file somewhere else. Building and consuming the bytes in a single `{ …; } | <agent>` pipeline removes the file entirely, so there is no path that can read a previous run's input. Do not reintroduce an intermediate input file (and never key one off `$TMPDIR`).
+> **Why a single shell call.** An earlier version assembled the input into a temp file (`$TMPDIR/coreview-input.md`) in one Bash call and `cat`-ed it into the agent in **another** call. That silently fed reviewers a **stale** diff from a prior session: input assembly ran in a **sandboxed** shell while the network-bound reviewer ran **unsandboxed**, and `$TMPDIR` (and even a sandbox-blocked `/tmp` write) resolves differently across that boundary — so the write landed in one place and the read came from a leftover file somewhere else. The fix is to write **and** read `<INPUT>` in the **same** Bash invocation (one shell, one sandbox context), open it with `>` so any leftover is truncated before the diff is appended, and key it off a fixed absolute path — never `$TMPDIR`. Do **not** re-split assembly and dispatch across two Bash calls, and do **not** reach for a `{ }` group or a here-doc to avoid the file: those constructs aren't in the matcher's documented splitter set (`|`, `&&`, `;`, `&`, newlines), so they'd put the approve-once exact-match rules on unverified ground.
 
 These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — the pointer says read-only and the `codex` invocation pins a sandbox flag, but never rely on the prompt alone: keep the sandbox flag in both the command and its allow-rule, especially in `--local` mode where edits are in flight.
 
@@ -101,7 +97,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 Why this is narrow:
 
 - The `gemini` / `codex` rules are **exact** — they authorize only this one read-only review command with that exact prompt. They do **not** grant arbitrary `gemini -p` or `codex exec` runs, and the `codex` rule pins `--sandbox read-only` into the approved string. Edit the pointer and Claude Code re-prompts, so the approval can't silently come to mean something else.
-- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data and emit it on stdout, which the `{ …; }` group pipes straight into the agent (no temp file is written, so there is nothing to allow-list for a write). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
+- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` version uses a different read-only flag, update both.
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
