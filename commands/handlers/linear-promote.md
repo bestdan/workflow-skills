@@ -39,6 +39,10 @@ Call `<linear-mcp>__list_issues` with:
 
 Set aside (do **not** score) any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Keep these in a separate `skipped` list so step 8 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `save_issue` call. Report and exit if no un-scored candidates remain.
 
+Also set aside (do **not** score) any candidate that is a **parent rollup** — a backlog issue that has been decomposed by `/break-down-task` into child issues. Promoting a parent rollup would move an empty shell to `Todo` where `/do-tasks` would try to claim it. This is the tracker-path analogue of the file path's `type: epic` skip (see `commands/promote-tasks.md` step 1).
+
+**Detecting parent rollups:** after the backlog query, call `<linear-mcp>__list_issues` with the same `teamId` (and `projectId` if set), `includeArchived: false`, and `limit: 50` — **without** a `stateId` filter — to collect `parentId` values across all states. Build a `parentIds` set from every non-null `parentId` field in that response. Any backlog candidate whose `id` appears in `parentIds` has at least one child — skip it as a `parent rollup`. For projects where the cross-state query truncates at 50, fall back to calling `<linear-mcp>__list_issues` with `parentId` = candidate `id` and `limit: 1` for any candidate not yet confirmed safe. Keep all identified parent rollups in the `skipped` list with reason `parent rollup`; they receive no `save_issue` call.
+
 ### 6. Score each candidate
 
 For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter:
@@ -79,9 +83,9 @@ Promoted 4 of 6 candidates:
     - PRE-18  Remove stale alias
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
-  skipped (2, already scored):
-    - PRE-09
-    - PRE-10
+  skipped (2):
+    - PRE-09  (already scored)
+    - PRE-10  (parent rollup)
 ```
 
-Append the truncation note from step 5 if it applied.
+Skipped issues are reported with their reason — `already scored` or `parent rollup`. Append the truncation note from step 5 if it applied.
