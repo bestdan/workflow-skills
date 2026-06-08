@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.6.2] - 2026-06-08
+
+### Fixes
+
+- keep reviewer dispatch within documented matcher contract (ba0f27c)
+- assemble reviewer input in one shell to avoid stale cross-sandbox temp reads (a6ab6e2)
+
 ## [1.6.1] - 2026-06-08
 
 ### Fixes
