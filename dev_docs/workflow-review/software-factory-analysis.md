@@ -172,11 +172,9 @@ concept to the Linear path so Linear issues can fan out across VMs like files do
 
 `/co-review`, `review-facts`, and `verify` exist but are **manual, out-of-band**
 skills. In a factory, review is a _station the work flows through_, not a tool a
-human remembers to pick up.
+human remembers to pick up. This station — auto-review feeding auto-merge — is
+where the highest-leverage improvement sits, so it gets its own deep dive below.
 
-- **Auto-review on task-PR open.** When a `task-loop` PR opens, automatically run
-  `/co-review --post` so every agent-authored PR arrives pre-reviewed. The plugin
-  already has `subscribe_pr_activity` to hang this off.
 - **Acceptance-criteria-driven verification.** Each card _has_ explicit
   Acceptance Criteria (often split into "code-enforced" vs "user-run"). Have the
   builder agent turn the code-enforced ones into actual test assertions and gate
@@ -184,14 +182,108 @@ human remembers to pick up.
   said so."
 - **Risk-tiered autonomy.** `auto_execute_max_size` gates on _size_. Add a gate on
   _risk_ (touches auth / migrations / payments / public API → always human) so
-  autonomy scales with blast radius, not just diff size.
+  autonomy scales with blast radius, not just diff size. This same tier is the
+  hard gate on auto-merge below.
+
+#### Deep dive: auto-review → auto-merge for agent-authored PRs
+
+The goal: **the moment a `task-loop` PR opens, three reviewers (Claude + Codex +
+Gemini) review it; if nothing needs a human and CI is green, it merges itself.**
+The good news is that `/co-review` already has almost every primitive — the work
+is mostly _wiring it to run headless and giving it a merge decision_.
+
+**The key insight — co-review already classifies "needs a human."** The skill's
+reconciler sub-agent (a separate agent, so the author isn't grading its own
+homework) sorts every finding — from all reviewers and any existing GitHub
+comments — into three confidence tiers:
+
+| Tier       | co-review's default action | Maps to                       |
+| ---------- | -------------------------- | ----------------------------- |
+| **high**   | auto-fix, verify, push     | machine-resolvable            |
+| **medium** | _ask the user_ (judgment)  | **exactly "human-requiring"** |
+| **low**    | skip (wrong / over-eng.)   | noise                         |
+
+So "the review shows no human-requiring comments" has a precise definition
+already: **the reconciler returned zero `medium` findings.** That is the
+auto-merge trigger — no new heuristic needed.
+
+And the three-reviewer pool the user wants is co-review's existing model: the
+**Claude** main agent always reviews; **Gemini** and **Codex** are built-in local
+reviewers that join the pool when configured (`dev_docs/co-review/.co-review.yml:
+local_reviewers: [gemini, codex]`). Widening the pool is the whole reason to run
+all three before trusting an auto-merge — Codex and Gemini catch what Claude alone
+misses, and vice versa.
+
+**What to build (the gaps):**
+
+1. **A trigger.** A GitHub Action `on: pull_request: [opened, synchronize]`,
+   filtered to the `task-loop` label (agent-authored PRs), that runs the Claude
+   CLI headless (`claude -p "/co-review --auto"`). (The plugin's
+   `subscribe_pr_activity` can drive this from a live session too, but a CI
+   workflow is the durable, always-on factory trigger.)
+
+2. **A third co-review disposition: `--auto` (headless, your PR, may merge).**
+   Today co-review has two dispositions — interactive "your PR" (asks about every
+   medium item) and `--post` (someone else's PR). Neither is autonomous: the
+   default _stops to ask_ about medium findings. `--auto` replaces those prompts
+   with a policy:
+   - **high** → auto-fix, verify (lint/test), commit + push — co-review _already_
+     does this.
+   - **medium ≥ 1** → this _is_ the human hand-off: post the medium items as a
+     `REQUEST_CHANGES` review, label `needs-human`, assign a human, and **stop
+     without merging**.
+   - **low** → skip, noted in the review body.
+   - **zero medium** → proceed to the merge gate.
+   - Pre-seed `.co-review.yml` with `[gemini, codex]` so the first-run
+     reviewer prompt never fires.
+
+3. **The merge gate.** Enable auto-merge (`enable_pr_auto_merge` /
+   `gh pr merge --auto --squash`) only when **all** hold:
+   1. reconciler returned **zero medium** findings;
+   2. all high-confidence fixes applied and **re-verified green**;
+   3. **CI passing** on the final commit;
+   4. **risk tier = low** (not auth / migrations / payments / public API / infra —
+      the same gate as the bullet above) — high-risk PRs always wait for a human
+      regardless of how clean the review is;
+   5. no human has already left `REQUEST_CHANGES`.
+
+   Anything short of all five routes to a human instead of merging.
+
+**Honest caveats — what makes this safe (or not):**
+
+- **"Zero medium" is a model judgment, not a proof.** Three reviewers plus a
+  reconciler can still _miss_ a real issue (a false "all clear"). The backstops
+  are CI, the risk-tier gate, and — critically — the **measurement loop (⑩)**:
+  track the revert / hotfix rate of auto-merged PRs and feed it back to tighten
+  the gate (lower the size ceiling, widen the risk list) if reverts climb. This is
+  the dependency worth naming out loud: **trustworthy auto-merge _depends on_
+  closing Gap C.** Turn it on conservatively (size-1, lowest-risk tiers only) and
+  loosen as the revert data earns it.
+- **Reconciler bias remains.** One model grades all three pooled reviews, so a
+  strong shared prior can still slip through. Widening the pool helps but doesn't
+  eliminate it.
+- **Running Codex + Gemini in CI is real setup.** Install the CLIs, supply
+  `GEMINI_API_KEY` and the Codex/OpenAI key as Actions secrets, and make
+  co-review's exact-match permission allow-rules available headless (commit
+  `.claude/settings.json` or pass `--allowedTools`). One-time, but not free.
+- **Bounded rounds.** Auto-fixing high-confidence items mutates the diff, and the
+  `synchronize` trigger re-runs the action on the fix commit. Cap the
+  review→fix→re-review cycle (e.g. 2 rounds) and have the action skip its own
+  bot-authored commits, or it can loop on itself.
+
+**Net:** this single loop closes both station ⑦ (review becomes a station work
+flows _through_) and station ⑧ (merge automates itself), leaving humans only the
+`medium`-judgment and high-risk PRs — exactly the bounded review bottleneck the
+WIP cap and capacity-aware scheduling (⑤) are there to protect.
 
 ### ⑧ Merge — _let green merge itself_
 
-"Done" is a human merge. The safe, high-value automation: **auto-merge on green +
-approval** for low-risk tiers (`enable_pr_auto_merge` already exists in the
-toolset). Small, well-tested, size-1 cleanup PRs shouldn't need a human to click
-merge — they need a human only when CI or review flags something.
+"Done" is a human merge. The high-value automation is the **auto-merge gate**
+detailed in ⑦'s deep dive: a clean three-reviewer co-review (zero `medium`
+findings) + green CI + low risk tier → `enable_pr_auto_merge`, no human click
+required. Humans are pulled in only when a reviewer flags a judgment call, CI
+fails, or the change touches a high-risk surface. Start with size-1, lowest-risk
+PRs and widen as the revert data (⑩) earns trust.
 
 ### ⑨ Deploy/Release — _the missing back half_
 
@@ -245,29 +337,33 @@ Gaps A, B, and C at once.
 
 1. **A scheduler that chains `promote → do --all`** on a cron. The fastest path
    from "toolbox" to "line." (Gap A)
-2. **Auto-review agent-authored PRs** via `subscribe_pr_activity` + `/co-review
-   --post`. (Station ⑦)
-3. **Auto-merge low-risk green PRs** with `enable_pr_auto_merge`. (Station ⑧)
-4. **Recurring/scheduled task injection** (deps, audits) — a cron that templates a
+2. **Auto-review → auto-merge loop** (the highest-leverage item — see ⑦'s deep
+   dive): a `pull_request`-triggered Action runs `/co-review` headless with the
+   Claude + Codex + Gemini pool; a new `--auto` disposition auto-fixes
+   high-confidence items and, on **zero `medium` (human-requiring) findings** +
+   green CI + low risk tier, calls `enable_pr_auto_merge`. Medium findings route
+   to a human instead. (Stations ⑦ + ⑧)
+3. **Recurring/scheduled task injection** (deps, audits) — a cron that templates a
    card. (Station ①)
 
 ### Strategic (weeks, structural)
 
-5. **Linear-webhook-driven headless dispatch** — closes the Linear autonomy gap
+4. **Linear-webhook-driven headless dispatch** — closes the Linear autonomy gap
    _and_ adds the event clock in one move. (Gaps A + B)
-6. **A measurement/ledger station** — stop deleting cards on PR-open; emit flow +
-   revert metrics; surface them in `/list-tasks` or a Linear dashboard. (Gap C)
-7. **Risk-tiered autonomy** alongside the existing size gate. (Station ⑦) The
+5. **A measurement/ledger station** — stop deleting cards on PR-open; emit flow +
+   revert metrics; surface them in `/list-tasks` or a Linear dashboard. (Gap C).
+   Also the trust signal that lets the auto-merge gate (#2) safely widen.
+6. **Risk-tiered autonomy** alongside the existing size gate. (Station ⑦) The
    prerequisite for trusting more auto-merge.
-8. **Objective prioritization (RICE/WSJF) in a Linear custom field**, replacing
+7. **Objective prioritization (RICE/WSJF) in a Linear custom field**, replacing
    hand-set `impact`. (Station ③)
 
 ### Foundational (the enabling theme)
 
-9. **Capacity-aware WIP** so autonomous fan-out can't outrun human review — the
+8. **Capacity-aware WIP** so autonomous fan-out can't outrun human review — the
    guardrail that makes all the above _safe_ to switch on.
-10. **Multi-channel Triage intake** (Sentry/Slack) — let production and users file
-    the factory's work, closing the outer feedback loop.
+9. **Multi-channel Triage intake** (Sentry/Slack) — let production and users file
+   the factory's work, closing the outer feedback loop.
 
 ---
 
