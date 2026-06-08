@@ -4,6 +4,17 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.6.0] - 2026-06-08
+
+### Features
+
+- add /promote-tasks support against configured statuses (a02a4c5)
+
+### Fixes
+
+- resolve promote target status to a transition id (57847d3)
+- correct self-defeating promote example and tighten docs (cf14483)
+
 ## [1.5.0] - 2026-06-08
 
 ### Features
