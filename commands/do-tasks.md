@@ -101,15 +101,19 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 - `handler: linear` → **tracker path** (section 3 below). Follow
   `commands/handlers/linear-claim.md` (with `commands/handlers/linear-common.md`
   for config/preflight/kanban mapping) for the full claim flow.
-- `handler: jira | gh-issue` → **stop**: "execution not supported for
-  `<handler>`; pull an issue manually and open a PR, or switch the handler to
-  `linear` in `dev_docs/tasks/.task-config.yml`."
+- `handler: gh-issue` → **gh-issue path** (section 4 below). Follow
+  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow
+  (foreground single, current session).
+- `handler: jira` → **stop**: "execution not supported for `jira`; pull an issue
+  manually and open a PR, or switch the handler to `linear` in
+  `dev_docs/tasks/.task-config.yml`."
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative paths don't resolve, find the handler files with **Glob**
 (`**/commands/handlers/repo-pr-execute.md`, `**/commands/handlers/linear-claim.md`,
-`**/commands/handlers/linear-common.md`) and Read the results.
+`**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`)
+and Read the results.
 
 ## 2. File path (`repo-pr` / absent handler)
 
@@ -244,7 +248,24 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    `human-approval-requested`, revert the issue to the `backlog`-type state, and
    comment what tripped the bail. Stop — do not auto-pick another candidate.
 
-## 4. Report
+## 4. gh-issue path (`gh-issue` handler)
+
+Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
+the find-candidates query, the feasibility judgment, the read-then-write claim
+guard, the `gh issue develop` branch, `gh pr create` with `Closes #<n>`, the
+move-to-review label swap, bail mechanics, and the report format. `/do-tasks`
+runs these phases in the **current session** over the `gh` CLI. If the relative
+path doesn't resolve, find it with **Glob**
+(`**/commands/handlers/gh-issue-claim.md`).
+
+**Single by nature.** Like the tracker path, gh-issue execution is foreground:
+`--remote`/`--local` do not apply, and `--all` / `-n N` is not supported for
+execution (it degrades to a single claim with a one-line note). `/do-tasks <#n>`
+(a specific issue number) claims that one issue. The claim/execute split
+(`--claim-only` / `--no-claim`) and a pre-claim WIP gate are not wired for
+gh-issue yet — `/do-tasks` runs the atomic claim+execute in `gh-issue-claim.md`.
+
+## 5. Report
 
 For the **file path**, report per `repo-pr-execute.md` "Report":
 
@@ -261,3 +282,7 @@ For the **tracker path**, report per `linear-claim.md` "Report": on success prin
 the issue identifier, the PR URL, and a one-line summary; on bail print the
 identifier, why it bailed, and the Linear comment URL; on the WIP gate declining,
 print the limit and the in-flight count.
+
+For the **gh-issue path**, report per `gh-issue-claim.md` "Report": on success
+print the issue number, the PR URL, and a one-line summary; on bail print the
+issue number, why it bailed, and the issue-comment URL.
