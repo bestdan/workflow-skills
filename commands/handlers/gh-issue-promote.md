@@ -19,13 +19,14 @@ If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass it as `--re
 ### 3. Query candidates
 
 ```bash
-gh issue list --state open --limit 50 --json number,title,body,labels [--repo <repo>]
+gh issue list --state open --search "-label:auto-eligible -label:human-approval-requested" --limit 50 --json number,title,body,labels [--repo <repo>]
 ```
 
 - `--state open` only — closed issues are `done` and are never scored.
-- Limit 50. If `gh issue list` reports more (the page is full), note the truncation in the report; do not paginate.
+- The `--search` filter excludes issues that already carry `auto-eligible` or `human-approval-requested` **at query time** — mirroring how `linear-promote.md` reads candidates only from the `backlog` state — so the 50-item window isn't consumed by already-scored issues. (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
+- Limit 50. If exactly 50 issues are returned the page may be truncated — note possible truncation in the report; do not paginate.
 
-Set aside (do **not** score) any issue that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
+Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
 
 ### 4. Score each candidate
 
