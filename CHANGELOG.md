@@ -4,6 +4,16 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.5.0] - 2026-06-08
+
+### Features
+
+- add claim/execute split + pre-claim WIP gate (b269cd4)
+
+### Fixes
+
+- resolve co-review findings on claim/execute split (cdde3e7)
+
 ## [1.4.0] - 2026-06-08
 
 ### Features
