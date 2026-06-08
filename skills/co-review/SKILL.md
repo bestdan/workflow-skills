@@ -52,22 +52,29 @@ local_reviewers:
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one stdin stream**; the prompt argument is a short **fixed pointer**. Because nothing variable ends up in the command string, the command is invariant and can be approved once with an exact-match rule (see Permissions).
 
-Assemble the shared input once, then pipe it to each agent:
+Assemble the input **and** pipe it to the agent in a **single shell invocation** — group the rubric, the reviewer-specific requests, and the diff inside one `{ …; }` pipeline so the bytes the agent reads are produced by the same shell that runs it. Do **not** write the assembled input to a temp file in one Bash call and read it back in another (see the sandbox note below for why that desyncs). The rubric is copied verbatim with `cat` (no LLM transcription); the requests ride on a here-doc so there is no intermediate file; the diff comes from `gh pr diff` / `git diff`. Keep the pointer **byte-for-byte** identical to the Permissions rules:
 
-1. Write the user's reviewer-specific requests (if any) to `/tmp/coreview-requestor.md` — an empty file if there are none.
-2. `cat "<this skill dir>/review_prompt.md" /tmp/coreview-requestor.md > /tmp/coreview-input.md` — rubric + requests, copied verbatim (no LLM transcription).
-3. Append the diff verbatim: GitHub mode `gh pr diff <n> >> /tmp/coreview-input.md`; `--local` mode `git diff <base> >> /tmp/coreview-input.md` (also append the contents of any untracked files you read). Redirection (`>`, `>>`) does not break permission matching — only `|`, `&&`, `;`, `&`, and newlines split a command into separately-matched segments.
+- `gemini`, GitHub mode →
 
-Then dispatch (keep the pointer **byte-for-byte** identical to the Permissions rules):
+  ```
+  { cat "<this skill dir>/review_prompt.md"; cat <<'REQUESTS'
+  <reviewer-specific requests, or omit this here-doc entirely if none>
+  REQUESTS
+  gh pr diff <n>; } | gemini -p "<POINTER>"
+  ```
 
-- `gemini` → `cat /tmp/coreview-input.md | gemini -p "<POINTER>"`
-- `codex` → `cat /tmp/coreview-input.md | codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports)
+- `codex`, GitHub mode → same `{ …; }` group, piped to `codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
+- `--local` mode → swap `gh pr diff <n>` for `git diff <base>` inside the group (also append the contents of any untracked files you read).
+
+Each `;`/`|`-separated segment is permission-matched on its own (`cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, the `gemini`/`codex` tail → its exact rule), so the grouped pipeline is covered by the same rules as before — only the diff and requests change, and both ride on stdin.
 
 where `<POINTER>` is exactly:
 
 > Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.
 
 The diff and the requestor's asks ride on **stdin**, which the permission matcher never sees — so `review_prompt.md` and the per-PR requests can change freely without ever changing the approved command. A custom agent must supply its own `command:` (input is piped on stdin).
+
+> **Why one shell, never a temp file.** An earlier version assembled the input into a temp file (`$TMPDIR/coreview-input.md`) in one Bash call and `cat`-ed it into the agent in another. That silently fed reviewers a **stale** diff from a prior session: input assembly runs in a **sandboxed** shell while the network-bound reviewer runs **unsandboxed**, and `$TMPDIR` (and even a sandbox-blocked `/tmp` write) resolves differently across that boundary — so the write landed in one place and the read came from a leftover file somewhere else. Building and consuming the bytes in a single `{ …; } | <agent>` pipeline removes the file entirely, so there is no path that can read a previous run's input. Do not reintroduce an intermediate input file (and never key one off `$TMPDIR`).
 
 These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — the pointer says read-only and the `codex` invocation pins a sandbox flag, but never rely on the prompt alone: keep the sandbox flag in both the command and its allow-rule, especially in `--local` mode where edits are in flight.
 
@@ -94,7 +101,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 Why this is narrow:
 
 - The `gemini` / `codex` rules are **exact** — they authorize only this one read-only review command with that exact prompt. They do **not** grant arbitrary `gemini -p` or `codex exec` runs, and the `codex` rule pins `--sandbox read-only` into the approved string. Edit the pointer and Claude Code re-prompts, so the approval can't silently come to mean something else.
-- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `/tmp/coreview-input.md` temp file (redirection targets aren't constrained by the rule). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
+- `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data and emit it on stdout, which the `{ …; }` group pipes straight into the agent (no temp file is written, so there is nothing to allow-list for a write). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` version uses a different read-only flag, update both.
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
