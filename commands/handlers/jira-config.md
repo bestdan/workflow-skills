@@ -56,7 +56,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      issue_type: Task
      default_epic: PLAT-100
      labels: []
-     ready_status: To Do
+     ready_status: Selected for Development
      refinement_status: Needs Refinement
    ```
 
@@ -69,4 +69,4 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 - **`ready_status`** — the target status a HIGH-confidence issue is transitioned to (the jira analogue of Linear's `Todo`/`auto-eligible`).
 - **`refinement_status`** — the target status a LOW-confidence (underspecified) issue is transitioned to (the jira analogue of `needs_refinement`/`human-approval-requested`).
 
-Both are **transition targets passed verbatim** to `transitionJiraIssue` — set each to the name of an available workflow transition (or its target status) in your project. This slice **requires** both keys when `/promote-tasks` runs under the `jira` handler; if either is unset, the promote flow stops with a clear message. Auto-resolving a status name to its transition (no configured value needed) and the prompt-when-unset path are deferred to a sibling slice. The keys are optional in `/add-task`-only setups — they only matter for promote.
+Both are **transition targets passed verbatim** to `transitionJiraIssue` — set each to the name of an available workflow transition (or its target status) in your project. Each **must differ from the project's initial/new status** (the status new issues enter): the candidate query excludes issues already in `ready_status`/`refinement_status`, so pointing either at the initial status would filter out every new issue and promote nothing. This slice **requires** both keys when `/promote-tasks` runs under the `jira` handler; if either is unset, the promote flow stops with a clear message. Auto-resolving a status name to its transition (no configured value needed) and the prompt-when-unset path are deferred to a sibling slice. The keys are optional in `/add-task`-only setups — they only matter for promote.
