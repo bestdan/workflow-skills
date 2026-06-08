@@ -52,7 +52,7 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr` and the tracker path for `linear`; `jira`/`gh-issue` have no execute path yet. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -63,7 +63,7 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 
 ### Execute (`/do-tasks`)
 
-`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`) or the tracker path (`linear`). `jira`/`gh-issue` have no execute path yet. See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path) and `commands/handlers/linear-claim.md` (tracker path).
+`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`), the tracker path (`linear`), or the gh-issue path (`gh-issue`). `jira` has no execute path yet. See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path), `commands/handlers/linear-claim.md` (tracker path), and `commands/handlers/gh-issue-claim.md` (gh-issue path).
 
 Flag matrix:
 
