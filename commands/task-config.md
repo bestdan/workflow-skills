@@ -18,11 +18,11 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | ----------------------------------- | --------- | ---------- | ------ | -------- |
 | capture (`/add-task`)               | yes       | yes        | yes    | yes      |
 | list (`/list-tasks`)                | yes       | yes        | no     | yes      |
-| promote (`/promote-tasks`)          | yes       | yes        | no     | yes      |
+| promote (`/promote-tasks`)          | yes       | yes        | yes    | yes      |
 | do — single (`/do-tasks`)           | yes       | yes        | no     | yes      |
 | process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
 
-`repo-pr` is the only full-loop handler. `jira` is capture-only today; `gh-issue` adds list, promote, and single `do`; `linear` adds list, promote, and single `do` but not batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`repo-pr` is the only full-loop handler. `jira` adds promote (but not list or `do`); `gh-issue` adds list, promote, and single `do`; `linear` adds list, promote, and single `do` but not batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 `/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear` and `gh-issue` it claims and executes one issue in the current session; on `jira` it stops and points you at the tracker.
 
@@ -110,7 +110,7 @@ Tell the user:
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks."
-  - `jira`: "`jira` supports: /add-task. Not supported: /list-tasks, /promote-tasks, /do-tasks. You can still manage these in Jira directly."
+  - `jira`: "`jira` supports: /add-task, /promote-tasks (needs `ready_status`/`refinement_status` configured). Not supported: /list-tasks, /do-tasks. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
 - That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.
