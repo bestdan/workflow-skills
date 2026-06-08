@@ -41,7 +41,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
 ```
 
-Skip any file with `type: epic` in its frontmatter — epic rollup files are never scored (see **Epics** in `skills/task/SKILL.md`). Then filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
+Skip any file with `type: epic` in its frontmatter — epic rollup files are never scored (see **Epics** in `skills/task/SKILL.md`). The tracker path applies the analogous skip: backlog issues with sub-issues (children) are treated as **parent rollups** and are never scored — see `commands/handlers/linear-promote.md` step 5. Then filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
 
 ### 2. Score each candidate
 

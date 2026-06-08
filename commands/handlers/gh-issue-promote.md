@@ -28,6 +28,8 @@ gh issue list --state open --search "-label:auto-eligible -label:human-approval-
 
 Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
 
+> **Parent rollup guard:** GitHub's sub-issue relationship is not exposed as a bulk-filterable field on `gh issue list`, so there is no efficient equivalent to the cross-state `parentId` sweep `linear-promote.md` applies (issues with sub-issues are skipped there — see step 5). If the repo uses GitHub's task-list sub-issues feature, the promote handler cannot detect parent shells — the user should manually exclude them by closing them or removing the `auto-eligible` label.
+
 ### 4. Score each candidate
 
 For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the GitHub issue per the field mapping `linear-promote.md` step 6 defines. GitHub issues carry no native `priority` or `estimate`/`size` field, so those map to optional labels or fold into the scope judgment, as noted below.
