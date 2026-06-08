@@ -1,17 +1,19 @@
 # The Task Workflow, End to End
 
-_A plain-language tour of how `workflow-skills` turns "we should come back to
-this" into a merged PR — written for someone meeting the system for the first
-time._
+_A plain-language tour of how `workflow-skills` turns feature design and slicing
+— via `plan-with-docs` — into a stream of merged PRs. Capturing incidental
+follow-up work (`/add-task`) is a good secondary use case, but not the main one.
+Written for someone meeting the system for the first time._
 
 ---
 
 ## The one-sentence version
 
-You capture follow-up work as you notice it, the system scores and prioritizes
-it, and an autonomous agent picks up the ready work, does it on its own branch,
-and opens a PR for review — all without losing the context of _why_ the task
-existed in the first place.
+You capture structured plans and tasks — designing a feature and slicing it into
+PR-sized pieces with `plan-with-docs`, or filing incidental follow-up work with
+`/add-task` — the system scores and prioritizes them, and an autonomous agent
+picks up the ready work, does it on its own branch, and opens a PR for review —
+all without losing the context of _why_ each piece exists.
 
 It is a **repo-native kanban** that an AI agent can both **fill** and **drain**.
 
@@ -31,15 +33,15 @@ new ──▶ needs_refinement ◀──▶ ready ──▶ in_progress ──�
 (expired: auto-pruned if the card's `expires` date passes before it ships)
 ```
 
-| Column             | A card lands here when…                           | …and leaves when                       |
-| ------------------ | ------------------------------------------------- | -------------------------------------- |
-| `new`              | you capture it with `/add-task`                   | `/promote-tasks` scores it             |
-| `needs_refinement` | the scorer wasn't confident, or a human paused it | a human edits it and marks it `ready`  |
-| `ready`            | the scorer was confident                          | `/do-tasks` claims it                  |
-| `in_progress`      | an agent claims it                                | the work is done and a review PR opens |
-| `blocked`          | an agent/human hits a wall                        | the blocker clears                     |
-| `needs_review`     | the agent opens its PR                            | the PR merges (or closes)              |
-| `done`             | the PR merges                                     | — (terminal)                           |
+| Column             | A card lands here when…                                  | …and leaves when                       |
+| ------------------ | -------------------------------------------------------- | -------------------------------------- |
+| `new`              | `plan-with-docs`, `/push-plan`, or `/add-task` writes it | `/promote-tasks` scores it             |
+| `needs_refinement` | the scorer wasn't confident, or a human paused it        | a human edits it and marks it `ready`  |
+| `ready`            | the scorer was confident                                 | `/do-tasks` claims it                  |
+| `in_progress`      | an agent claims it                                       | the work is done and a review PR opens |
+| `blocked`          | an agent/human hits a wall                               | the blocker clears                     |
+| `needs_review`     | the agent opens its PR                                   | the PR merges (or closes)              |
+| `done`             | the PR merges                                            | — (terminal)                           |
 
 The key idea: **a card is just a markdown file with YAML frontmatter** (or, if
 you choose, a Linear issue). One card = one PR-sized chunk of work (≤ ~300 lines
@@ -64,10 +66,18 @@ your tracker) and **`/doctor`** (diagnose and repair the setup).
 
 ## Walking through the lifecycle
 
-### 1. Capture — `/add-task`
+### 1. Get work onto the board — `plan-with-docs` (primary) or `/add-task`
 
-While you're deep in a feature branch, you spot a stale flag or a missing test.
-Instead of context-switching, you say `/add-task`. The system:
+**The main entry point is `plan-with-docs`.** When you're designing a feature or
+a piece of architecture, you describe it and the system slices it into PR-sized
+task cards under `dev_docs/tasks/<name>_plan/` — an epic file on top, dependencies
+wired via `is_blocked_by` — refined through clarifying questions. `/push-plan`
+then syncs that plan to your tracker. Every card is born `status: new` and feeds
+the same pipeline below. (See **Planning bigger work**.)
+
+**Capturing incidental follow-up work — `/add-task` — is the secondary entry.**
+You don't have to be planning a feature; when you spot a stale flag or a missing
+test mid-branch, instead of context-switching you say `/add-task`. The system:
 
 - Auto-grabs the branch, the open PR, and the current diff,
 - Drafts a structured card — title, priority, a **size estimate** (Fibonacci
@@ -75,8 +85,8 @@ Instead of context-switching, you say `/add-task`. The system:
   has never seen this code"), concrete _Task_ steps, and _Acceptance Criteria_,
 - Shows it to you for a quick edit, then files it.
 
-The card is born `status: new`. Crucially, capture preserves the _why_ — the
-single most valuable thing usually lost when you defer work.
+Either way the card is born `status: new`. Crucially, both entry points preserve
+the _why_ — the single most valuable thing usually lost when you defer work.
 
 ### 2. Refine — `/promote-tasks`
 
@@ -142,7 +152,9 @@ chosen once per repo with `/task-config` (stored in
 | `gh-issue` | a GitHub Issue                               | lightweight, GitHub-native          |
 | `jira`     | a Jira work item                             | enterprise tracker shops            |
 
-**Capability is jagged** — only `repo-pr` runs the _full_ loop today:
+**Capability is currently uneven** — `repo-pr` runs the _full_ loop today while
+the tracker handlers are still catching up. **Parity is the target state**: the
+matrix below is a snapshot of today's coverage, not a designed limitation.
 
 | Verb                       | repo-pr | gh-issue | jira | linear |
 | -------------------------- | :-----: | :------: | :--: | :----: |
@@ -173,9 +185,11 @@ guard), branches using Linear's verbatim branch name, opens a PR with
 
 ---
 
-## Planning bigger work
+## Planning bigger work — the primary entry point
 
-Two skills feed _into_ the same pipeline by emitting ordinary `new` cards:
+**`plan-with-docs` should be thought of as the primary way of interacting with
+the workflow.** Most work enters here — as a designed-and-sliced feature, not a
+one-off card. Two skills feed structured cards into the same pipeline:
 
 - **`plan-with-docs`** — turns a fresh, multi-PR idea into a directory of
   PR-sized task files under `dev_docs/tasks/<name>_plan/`, with an **epic** file
@@ -221,8 +235,9 @@ locking service.
 
 1. Run `/task-config` once to pick where tasks live (or skip it — files are the
    default).
-2. Say `/add-task` whenever you notice deferred work; it captures the context for
-   you.
+2. Design a feature with **`plan-with-docs`** — the main entry point — to slice it
+   into PR-sized cards (and `/push-plan` to sync it to your tracker). Reach for
+   **`/add-task`** for incidental follow-up work you notice along the way.
 3. Run `/promote-tasks` to vet the backlog.
 4. Run `/do-tasks` and let an agent turn ready work into reviewable PRs.
 5. Review, merge — done.

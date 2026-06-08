@@ -23,18 +23,18 @@ Here is the canonical line, with where today's workflow sits:
                                              └──────── feedback ──┘
 ```
 
-| # | Station               | Today's coverage                                                          |  Maturity  |
-| - | --------------------- | ------------------------------------------------------------------------- | :--------: |
-| ① | **Intake**            | `/add-task` — but _only from inside a Claude session_                     | 🟡 Partial |
-| ② | **Triage/Refine**     | `/promote-tasks` confidence check; `break-down-task` for oversized        | 🟢 Strong  |
-| ③ | **Prioritize**        | `priority` + value/effort (`impact ÷ size`) ranking                       | 🟡 Partial |
-| ④ | **Decompose**         | `plan-with-docs`, `break-down-task` → PR-sized cards, `is_blocked_by` DAG | 🟢 Strong  |
-| ⑤ | **Schedule/Dispatch** | `/do-tasks` with WIP cap + size-gated auto-routing                        | 🟡 Partial |
-| ⑥ | **Build**             | Remote VMs (repo-pr) / foreground (linear); claim-lock concurrency        | 🟢 Strong  |
-| ⑦ | **Review/QA**         | `/co-review`, `review-facts`, `verify` — but _not wired into the loop_    | 🟡 Partial |
-| ⑧ | **Merge**             | Human merges; "done" = merge                                              | 🔴 Manual  |
-| ⑨ | **Deploy/Release**    | —                                                                         | 🔴 Absent  |
-| ⑩ | **Measure/Learn**     | — (explicitly a non-goal; file-deletion-on-PR even _destroys_ history)    | 🔴 Absent  |
+| # | Station               | Today's coverage                                                                   |  Maturity  |
+| - | --------------------- | ---------------------------------------------------------------------------------- | :--------: |
+| ① | **Intake**            | `plan-with-docs` (primary) + `/add-task` — but _only from inside a Claude session_ | 🟡 Partial |
+| ② | **Triage/Refine**     | `/promote-tasks` confidence check; `break-down-task` for oversized                 | 🟢 Strong  |
+| ③ | **Prioritize**        | `priority` + value/effort (`impact ÷ size`) ranking                                | 🟡 Partial |
+| ④ | **Decompose**         | `plan-with-docs`, `break-down-task` → PR-sized cards, `is_blocked_by` DAG          | 🟢 Strong  |
+| ⑤ | **Schedule/Dispatch** | `/do-tasks` with WIP cap + size-gated auto-routing                                 | 🟡 Partial |
+| ⑥ | **Build**             | Remote VMs (repo-pr) / foreground (linear); claim-lock concurrency                 | 🟢 Strong  |
+| ⑦ | **Review/QA**         | `/co-review`, `review-facts`, `verify` — but _not wired into the loop_             | 🟡 Partial |
+| ⑧ | **Merge**             | Human merges; "done" = merge                                                       | 🔴 Manual  |
+| ⑨ | **Deploy/Release**    | —                                                                                  | 🔴 Absent  |
+| ⑩ | **Measure/Learn**     | — (explicitly a non-goal; file-deletion-on-PR even _destroys_ history)             | 🔴 Absent  |
 
 **The headline:** the _middle_ of the line (refine → decompose → build) is
 genuinely strong and already semi-autonomous. The **two ends are open** — intake
@@ -89,8 +89,9 @@ can't get better at estimating, prioritizing, or deciding what to auto-execute.
 
 ### ① Intake — _open up the front door_
 
-Today the only way a task enters is a human typing `/add-task` inside a Claude
-session. A factory pulls raw intent from everywhere:
+Today work enters only from inside a Claude session — primarily `plan-with-docs`
+(designing and slicing a feature), with `/add-task` for incidental follow-ups. A
+factory pulls raw intent from everywhere:
 
 - **Linear Triage** as the universal inbox. Linear already ingests from Slack,
   email, Zendesk/Intercom, and Sentry into a Triage queue. Wire `/promote-tasks`
