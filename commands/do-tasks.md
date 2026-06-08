@@ -217,10 +217,11 @@ resolves the team and workflow states, **before** judging feasibility or claimin
 2. Count current in-flight work = Linear issues in any `started`-type state
    (e.g. `In Progress`, `In Review`), via `<linear-mcp>__list_issues` (resolve by
    state **type**, not display name — names are team-configurable). **Scope the
-   count the same way "Find candidates" scopes its search:** if
-   `linear.default_project` is set (non-empty), pass it as `projectId` so only
-   that project's in-flight issues count; otherwise omit `projectId` and count
-   across the whole team. The WIP limit then bounds the work you are actually
+   count the same way "Find candidates" scopes its search:** always pass the
+   resolved `teamId`, and if `linear.default_project` is set (non-empty), also
+   pass it as `projectId` so only that project's in-flight issues count;
+   otherwise omit `projectId` and count across the whole team (still scoped by
+   `teamId`). The WIP limit then bounds the work you are actually
    pulling from — counting team-wide while claiming from one project would let
    unrelated projects (or epics) eat this project's slots. The started-type issue
    is the canonical in-flight unit: an open PR is already reflected by its issue
