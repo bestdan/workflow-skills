@@ -4,9 +4,9 @@ Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the pro
 
 **Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status`/`refinement_status` config keys are defined in `commands/handlers/jira-config.md`; the field-mapped confidence gate is `commands/handlers/linear-promote.md` step 6, read here against the Jira issue rather than Linear fields.
 
-> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
+> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
 
-> **Scope: static (configured) statuses only.** This slice **requires** `ready_status` and `refinement_status` to be set in config and passes each **verbatim** to `transitionJiraIssue` as the transition target. The same value is also used as a **status name** in the step-3 candidate query (`status != "<ready_status>"`); the static slice assumes the configured value matches **both** the workflow transition and its target status name (true for the common Jira setup where the transition is named after its target). When a site's transition name differs from its target status name, the step-3 dedup backstop can miss an already-scored issue — that, along with auto-resolving a status name to its transition with no configured value (and the prompt-when-unset path), is deferred to a sibling slice. Do not attempt dynamic transition discovery here.
+> **Scope: static (configured) statuses only.** This slice **requires** `ready_status` and `refinement_status` to be set in config; both are **target status names**. They are used two ways: as a **status name** in the step-3 candidate query (`status != "<ready_status>"`), and — because `transitionJiraIssue` takes a transition **id**, not a status name — resolved to a transition id at apply time (step 5) by matching the configured name against the issue's available transitions. What is deferred to a sibling slice is **auto-resolving a status with no configured value** (and the prompt-when-unset path): here the target statuses must come from config, not be discovered. The step-3 `status !=` filter matches on status name; if a site's transition name differs from its target status name the step-5 lookup still resolves correctly (it matches the transition's target status `to.name`), but the step-3 dedup backstop in step 3 covers the query-filter edge regardless.
 
 > **Hard rule: this path only ever touches new, un-scored issues** — issues in the project's initial (`statusCategory = "To Do"`) status that are not already sitting in `ready_status` or `refinement_status`. An issue already in either configured status has been scored and is out of the promoter's lane, exactly as the file path never touches tasks past `status: new` and `linear-promote.md` never touches a non-`backlog` issue. If you are about to `transitionJiraIssue` an already-scored or non-`To Do` issue, you have a bug — stop.
 
@@ -44,10 +44,10 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 
 **HIGH (→ promote)** requires ALL of:
 
-- `summary` present and non-empty.
+- `fields.summary` present and non-empty.
 - `fields.priority.name` is **not** the project's top/urgent level (`Highest`, or `P1` under the `P`-scheme — the same mapping `jira.md`'s List section documents). A non-urgent or unset priority passes — Jira priority is coarse metadata here, like gh-issue's optional priority label.
-- `description` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare summary or an "investigate X" description fails with `description missing acceptance criteria`.
-- `description` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
+- `fields.description` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare summary or an "investigate X" description fails with `description missing acceptance criteria`.
+- `fields.description` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
 - **Scope fits one PR (~size 5), judgment not keywords.** Weigh the description's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`); a story-points custom field, if the project exposes one, is a hint. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
 
 **LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `priority is urgent`, `unresolved open questions`).
@@ -58,7 +58,17 @@ As on the file path, the scope gate is **model judgment, not a deterministic rul
 
 If `$ARGUMENTS` is `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `transitionJiraIssue`/`addCommentToJiraIssue` call.
 
-Otherwise, for each scored candidate:
+Otherwise, for each scored candidate, first **resolve the target status name to a transition id** — `transitionJiraIssue` accepts a transition **id** (`transition: { id: "<id>" }`), not a status name:
+
+```
+<atlassian-mcp>__getTransitionsForJiraIssue
+  cloudId: <jira.site>
+  issueIdOrKey: <KEY>
+```
+
+From the returned `transitions[]`, pick the entry whose **target status** matches the configured name — `to.name == <status>` (fall back to the transition's own `name == <status>` for sites where they coincide). `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. Capture its `id` as `<transition-id>`. If no transition matches, **do not guess** — surface the configured key and the available transition names so the user can fix the config, and skip that issue.
+
+Then transition:
 
 - **HIGH:**
 
@@ -66,7 +76,7 @@ Otherwise, for each scored candidate:
   <atlassian-mcp>__transitionJiraIssue
     cloudId: <jira.site>
     issueIdOrKey: <KEY>
-    transition: <ready_status>          # passed verbatim from config
+    transition: { id: "<transition-id>" }   # id resolved from ready_status
   ```
 
 - **LOW:**
@@ -75,7 +85,7 @@ Otherwise, for each scored candidate:
   <atlassian-mcp>__transitionJiraIssue
     cloudId: <jira.site>
     issueIdOrKey: <KEY>
-    transition: <refinement_status>     # passed verbatim from config
+    transition: { id: "<transition-id>" }   # id resolved from refinement_status
 
   <atlassian-mcp>__addCommentToJiraIssue
     cloudId: <jira.site>
@@ -85,7 +95,7 @@ Otherwise, for each scored candidate:
 
   The comment names the failed check so the human can fix it quickly — the jira analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment.
 
-Pass the configured value as `transition` **verbatim** — do not look it up, remap it, or hard-code a transition id (that resolution is the sibling slice's job). If `transitionJiraIssue` errors because the value is not a valid transition for the issue, surface the error and the configured key so the user can fix the config; do not retry with a guessed transition. Never transition an issue to a `Done`/`completed`-category status here — promotion only moves an issue to `ready_status` or `refinement_status`.
+The configured value names the **target status**; the transition id is resolved per-issue from `getTransitionsForJiraIssue` (transitions are issue- and workflow-specific, so resolve for each candidate rather than caching one id across the batch). Never transition an issue to a `Done`/`completed`-category status here — promotion only moves an issue to `ready_status` or `refinement_status`.
 
 ### 6. Report
 
