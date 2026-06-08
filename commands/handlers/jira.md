@@ -14,7 +14,11 @@ jira:
   issue_type: Task # default Task
   default_epic: PLAT-100 # optional; skips the epic prompt (explicit key, not a name)
   labels: [] # optional — passed via additional_fields.labels
+  ready_status: Selected for Development # used by /promote-tasks — target status for HIGH-confidence promotions (must differ from the initial/new status)
+  refinement_status: Needs Refinement # used by /promote-tasks — target status for LOW-confidence (underspecified) issues
 ```
+
+The `ready_status` / `refinement_status` keys are consumed only by the promote flow (`jira-promote.md`); `/add-task` ignores them.
 
 `site` is passed directly as `cloudId` to the MCP tools (they accept either a UUID or a site URL/hostname).
 
