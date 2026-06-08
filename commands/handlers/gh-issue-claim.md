@@ -29,11 +29,13 @@ normal run — passing both is an error: stop and ask which was meant.
   (`me=$(gh api user --jq .login)`; the issue's `assignees[].login` is exactly that
   one login) **and** it carries `auto-claimed`. Otherwise **stop and explain** —
   executing an unclaimed issue reopens the race the claim step closes. When the guard
-  passes, **check out the existing claim branch** rather than branching fresh from
-  `HEAD`: `gh issue develop <n> --list [--repo <repo>]` prints the issue's linked
-  branch — `git fetch` and `git checkout` it (do not re-run `gh issue develop
-  --checkout`, which may create a second branch). Then run "Branch + execute"
-  (skipping branch creation), "PR", and "Move to review" — without re-claiming.
+  passes, **check out the claim branch** rather than branching fresh from `HEAD`:
+  `gh issue develop <n> --list [--repo <repo>]` lists the issue's linked branch(es).
+  If one exists (resuming after a crash mid-execution), `git fetch` and `git checkout`
+  it — do **not** re-run `gh issue develop --checkout`, which would create a second
+  branch. If none exists (the issue was reserved via `--claim-only`, which creates no
+  branch), create it now with `gh issue develop <n> --checkout`. Then run "Branch +
+  execute" (skipping branch creation), "PR", and "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
 
 ## Pre-claim WIP gate
@@ -45,21 +47,27 @@ claims nothing, skips it.
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr and
    linear handlers use).
-2. Count current in-flight work = open issues labeled `auto-claimed`:
+2. Count current in-flight work = open issues labeled `auto-claimed` (claimed, PR
+   not yet open) **or** `needs-review` (PR open, in review). An in-flight issue holds
+   exactly one of the two, so sum two counts:
 
    ```bash
-   gh issue list --state open --search "label:auto-claimed" --limit 100 --json number [--repo <repo>] --jq length
+   c1=$(gh issue list --state open --search "label:auto-claimed" --limit 100 --json number [--repo <repo>] --jq length)
+   c2=$(gh issue list --state open --search "label:needs-review" --limit 100 --json number [--repo <repo>] --jq length)
+   count=$((c1 + c2))
    ```
 
-   The open `auto-claimed` issue is the canonical in-flight unit — its open PR is
-   already reflected by the label, so do **not** count open PRs separately (that
-   double-counts).
+   Both labels count because the WIP limit exists to bound the human PR-review queue:
+   "Move to review on PR open" swaps `auto-claimed → needs-review`, so a `needs-review`
+   issue is an open PR still awaiting review — in-flight, not done. (This mirrors the
+   linear gate, which counts both `In Progress` and `In Review`.)
 3. If that count is **≥ `wip_limit`**, decline: report
    `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
    not claim another issue.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
-outright: reserve at most `wip_limit - <count>` issues.
+outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve
+nothing and report the WIP-limit decline).
 
 ## Find candidates
 

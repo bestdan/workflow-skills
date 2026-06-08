@@ -86,10 +86,11 @@ error: stop and ask which one was meant.
   - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
     PR, and "Move to review on PR open" (per `linear-claim.md`) — without
     re-claiming.
-  - `gh-issue`: check out the issue's linked branch (`gh issue develop <n> --list`
-    → the branch; `git fetch` it if not present locally), then do the work, open the
-    PR, and "Move to review on PR open" (per `gh-issue-claim.md`) — without
-    re-claiming.
+  - `gh-issue`: check out the claim branch — `gh issue develop <n> --list` lists it;
+    `git fetch` + check out an existing one, or `gh issue develop <n> --checkout` to
+    create it when the claim was `--claim-only` (which leaves no branch). Then do the
+    work, open the PR, and "Move to review on PR open" (per `gh-issue-claim.md`) —
+    without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
