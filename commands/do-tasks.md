@@ -63,12 +63,17 @@ error: stop and ask which one was meant.
   - `linear`: run only "Claim the issue" in `commands/handlers/linear-claim.md`
     (the atomic `auto-claimed` guard, move to the `started`-type state, record the
     branch name), then stop before "Branch + execute".
+  - `gh-issue`: run only the pre-claim WIP gate and "Claim the issue" in
+    `commands/handlers/gh-issue-claim.md` (the read-then-write guard: assign `@me`,
+    add `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute".
+    The assigned `auto-claimed` issue is the reservation marker — no branch, no PR.
 - **`--no-claim`** — skip the claim step and execute a task this caller has
   **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
   no default selection, since the target is a specific already-claimed task, not
   the highest-ranked ready one. Guard: proceed only when that task is already
-  claimed by this caller — `status: in_progress` (`repo-pr`) or assigned to the
-  caller in a `started`-type state (`linear`). Otherwise **stop and explain** —
+  claimed by this caller — `status: in_progress` (`repo-pr`), assigned to the
+  caller in a `started`-type state (`linear`), or assigned to the caller with
+  `auto-claimed` (`gh-issue`). Otherwise **stop and explain** —
   executing an unclaimed task reopens the race the claim step closes. When the
   guard passes, **first check out the existing claim branch** — do **not** branch
   fresh from the current `HEAD`, which is usually the base branch:
@@ -81,6 +86,11 @@ error: stop and ask which one was meant.
   - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
     PR, and "Move to review on PR open" (per `linear-claim.md`) — without
     re-claiming.
+  - `gh-issue`: check out the claim branch — `gh issue develop <n> --list` lists it;
+    `git fetch` + check out an existing one, or `gh issue develop <n> --checkout` to
+    create it when the claim was `--claim-only` (which leaves no branch). Then do the
+    work, open the PR, and "Move to review on PR open" (per `gh-issue-claim.md`) —
+    without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
@@ -259,11 +269,15 @@ path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
 
 **Single by nature.** Like the tracker path, gh-issue execution is foreground:
-`--remote`/`--local` do not apply, and `--all` / `-n N` is not supported for
-execution (it degrades to a single claim with a one-line note). `/do-tasks <#n>`
+`--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a single claim
+with a one-line note ("batch isn't supported for gh-issue execution; claiming one
+issue") until the gh-issue batch task lands. The exception is `--claim-only`:
+reserving an issue runs no foreground work, so `--all` / `-n N --claim-only` may
+reserve several issues at once, bounded by the pre-claim WIP gate. `/do-tasks <#n>`
 (a specific issue number) claims that one issue. The claim/execute split
-(`--claim-only` / `--no-claim`) and a pre-claim WIP gate are not wired for
-gh-issue yet — `/do-tasks` runs the atomic claim+execute in `gh-issue-claim.md`.
+(`--claim-only` / `--no-claim`) and the pre-claim WIP gate are now wired for
+gh-issue — both are documented in `gh-issue-claim.md` ("Modes: atomic vs.
+claim/execute split" and "Pre-claim WIP gate").
 
 ## 5. Report
 
