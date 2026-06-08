@@ -110,7 +110,7 @@ Tell the user:
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks."
-  - `jira`: "`jira` supports: /add-task, /promote-tasks (needs `ready_status`/`refinement_status` configured). Not supported: /list-tasks, /do-tasks. You can still manage these in Jira directly."
+  - `jira`: "`jira` supports: /add-task, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts). Not supported: /list-tasks, /do-tasks. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
 - That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.

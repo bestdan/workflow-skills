@@ -32,7 +32,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/gh-issue-promote.md`) and Read the result.
 
-- `handler: jira` → **dispatch to the jira handler.** Read `commands/handlers/jira-promote.md` (the promote flow; it cites `commands/handlers/jira.md` step 1 for the shared Atlassian MCP preflight and `commands/handlers/jira-config.md` for the `ready_status`/`refinement_status` config keys it requires), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the jira scoring and status transitions. Skip steps 1–4 of this file.
+- `handler: jira` → **dispatch to the jira handler.** Read `commands/handlers/jira-promote.md` (the promote flow; it cites `commands/handlers/jira.md` step 1 for the shared Atlassian MCP preflight and `commands/handlers/jira-config.md` for the optional `ready_status`/`refinement_status` config keys it uses — prompting for them when unset), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the jira scoring and status transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/jira-promote.md`) and Read the result.
 

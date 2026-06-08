@@ -1,12 +1,12 @@
 # jira handler — /promote-tasks flow
 
-Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the project's **new, un-scored** issues against the same confidence check the file path uses, then applies the kanban transitions by **status**: HIGH → transition to the configured `ready_status` (the jira analogue of moving to `Todo`/`auto-eligible`); LOW → transition to `refinement_status` and leave a comment naming the failed check.
+Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the project's **new, un-scored** issues against the same confidence check the file path uses, then applies the kanban transitions by **status**: HIGH → transition to `ready_status` (the jira analogue of moving to `Todo`/`auto-eligible`); LOW → transition to `refinement_status` and leave a comment naming the failed check. Both target statuses are taken from config when set, or resolved dynamically and prompted for when unset (step 3a).
 
 **Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status`/`refinement_status` config keys are defined in `commands/handlers/jira-config.md`; the field-mapped confidence gate is `commands/handlers/linear-promote.md` step 6, read here against the Jira issue rather than Linear fields.
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
 
-> **Scope: static (configured) statuses only.** This slice **requires** `ready_status` and `refinement_status` to be set in config; both are **target status names**. They are used two ways: as a **status name** in the step-3 candidate query (`status != "<ready_status>"`), and — because `transitionJiraIssue` takes a transition **id**, not a status name — resolved to a transition id at apply time (step 5) by matching the configured name against the issue's available transitions. What is deferred to a sibling slice is **auto-resolving a status with no configured value** (and the prompt-when-unset path): here the target statuses must come from config, not be discovered. The step-3 `status !=` filter matches on status name; if a site's transition name differs from its target status name the step-5 lookup still resolves correctly (it matches the transition's target status `to.name`), but the step-3 dedup backstop in step 3 covers the query-filter edge regardless.
+> **Target statuses: configured or resolved-and-prompted.** `ready_status` and `refinement_status` are both **target status names**, and both are **optional**. When set in config they are used two ways: as a **status name** in the step-3 candidate query (`status != "<ready_status>"`), and — because `transitionJiraIssue` takes a transition **id**, not a status name — resolved to a transition id at apply time (step 5) by matching the configured name against the issue's available transitions. When **unset**, step 3a resolves the project's reachable statuses **dynamically** (from a candidate's available transitions) and prompts the user to pick via `AskUserQuestion`, so no status id or name is ever hard-coded on either path. The step-3 `status !=` filter matches on status name; if a site's transition name differs from its target status name the step-5 lookup still resolves correctly (it matches the transition's target status `to.name`), and the step-3 dedup backstop covers the query-filter edge regardless.
 
 > **Hard rule: this path only ever touches new, un-scored issues** — issues in the project's initial (`statusCategory = "To Do"`) status that are not already sitting in `ready_status` or `refinement_status`. An issue already in either configured status has been scored and is out of the promoter's lane, exactly as the file path never touches tasks past `status: new` and `linear-promote.md` never touches a non-`backlog` issue. If you are about to `transitionJiraIssue` an already-scored or non-`To Do` issue, you have a bug — stop.
 
@@ -16,27 +16,52 @@ Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the pro
 
 Run the Atlassian MCP preflight exactly as `commands/handlers/jira.md` step 1: call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run." / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
 
-### 2. Resolve config (required keys)
+### 2. Resolve config (optional keys)
 
 Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (as the create flow does), plus the two promote keys:
 
 - `jira.ready_status` — the HIGH transition target.
 - `jira.refinement_status` — the LOW transition target.
 
-If either `ready_status` or `refinement_status` is unset/empty, **stop** with: "jira promote needs `ready_status` and `refinement_status` set in `dev_docs/tasks/.task-config.yml` (run /task-config jira). Dynamic status resolution is not available yet." Do not guess transition names.
+Both keys are **optional**. Classify the run:
+
+- **Configured path** — both `ready_status` and `refinement_status` are set/non-empty. Use them as the target status names; step 3 includes both `status !=` filters and step 3a is skipped.
+- **Prompt-when-unset path** — either key is unset/empty. Do **not** stop and do **not** guess a status name. Defer resolution to **step 3a**, which resolves the project's reachable statuses dynamically and prompts the user. For the step-3 query, omit the `status !=` clause for whichever key is still unset (you cannot filter on a value you do not yet have); the unset key(s) are filled in by step 3a before any transition is applied.
 
 ### 3. Query candidates
 
 Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
 
 - `cloudId`: `<jira.site>`
-- `jql`: `project = "<project>" AND statusCategory = "To Do" AND status != "<ready_status>" AND status != "<refinement_status>" ORDER BY created ASC`
+- `jql`: `project = "<project>" AND statusCategory = "To Do"`, plus an `AND status != "<status>"` clause for **each promote key that is set** (both clauses on the configured path; only the set key — or neither — on the prompt-when-unset path), then `ORDER BY created ASC`
 - `fields`: `["summary", "status", "priority", "labels", "description"]`
 - `maxResults`: 50
 
-The `status !=` clauses exclude issues already transitioned into either configured status **at query time** — mirroring how `linear-promote.md` reads candidates only from `backlog` and `gh-issue-promote.md` excludes already-labeled issues — so the 50-item window isn't consumed by already-scored issues. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`).
+The `status !=` clauses exclude issues already transitioned into a configured status **at query time** — mirroring how `linear-promote.md` reads candidates only from `backlog` and `gh-issue-promote.md` excludes already-labeled issues — so the 50-item window isn't consumed by already-scored issues. On the prompt-when-unset path the clause for an unset key is omitted (its value isn't known yet); step 3a's backstop sets those aside once the status is chosen. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`).
 
 As a backstop to the JQL filter, set aside (do **not** score) any returned issue whose current `fields.status.name` already equals `ready_status` or `refinement_status` (e.g. if those values are status names the `status !=` filter didn't catch as transitions). Keep these in a separate `skipped` list so step 6 can report them; they receive no transition. Limit 50 — if exactly 50 are returned the page may be truncated; note possible truncation in the report and do not paginate. Report and exit if no un-scored candidates remain.
+
+### 3a. Resolve statuses & prompt (prompt-when-unset path only)
+
+Runs only when step 2 classified the run as **prompt-when-unset** and step 3 returned at least one candidate. (If step 3 returned no candidates there is nothing to promote — report and exit; no prompt is needed.) On the configured path, skip this step.
+
+1. **Enumerate reachable statuses dynamically.** Pick the first candidate from step 3 as a representative and call:
+
+   ```
+   <atlassian-mcp>__getTransitionsForJiraIssue
+     cloudId: <jira.site>
+     issueIdOrKey: <KEY>
+   ```
+
+   Collect the distinct **target status names** (`transitions[].to.name`) — the statuses reachable from the project's new/initial status, resolved at runtime with **no hard-coded ids or names**. Drop the distinct current statuses (`fields.status.name`) of **all** step-3 candidates from the options — not just the representative's — so the user can't pick an initial status as a target (that would filter out every new issue sitting in it — see `jira-config.md`). Because the candidate query spans `statusCategory = "To Do"`, which can hold more than one status, excluding only the representative's status would leave another candidate's initial status offerable; the full candidate set is already in hand from step 3, so exclude every one of them.
+
+2. **Prompt.** For **each unset key**, ask the user via `AskUserQuestion` (one question per unset key — header `Ready status` for `ready_status`, `Refinement status` for `refinement_status`) which target status a HIGH (ready) / LOW (refinement) issue should move to. Offer the distinct target status names from step 1 as options, surfacing the most plausible first: if **4 or fewer** were enumerated, offer all of them (the list is exhaustive — no "Other" needed); if **more than 4**, offer the 3 most plausible plus "Other" so the total fits the 4-option `AskUserQuestion` max. When offered, "Other" lets the user type a status name, which you **re-validate** against the enumerated target statuses — reject a value no transition leads to rather than guessing. The two targets must differ from each other and from the initial status. When **both** keys are unset, prompt `ready_status` first; for the `refinement_status` prompt, exclude the just-chosen `ready_status` from the offered options and reject it if entered via "Other", so the two resolved targets are guaranteed distinct.
+
+3. **Persist (optional).** Offer to write the chosen value(s) back to the `jira:` block in `dev_docs/tasks/.task-config.yml` (`ready_status` / `refinement_status`) so the prompt does not recur. If the user declines, use the choice for this run only.
+
+4. **Re-apply the dedup backstop.** Now that both targets are known, set aside (do **not** score) any step-3 candidate whose current `fields.status.name` already equals the chosen `ready_status` or `refinement_status` — the prompt-when-unset query could not exclude them up front. Keep them in the `skipped` list for step 6.
+
+After step 3a, `ready_status` and `refinement_status` are both resolved for the rest of the run; steps 4–6 proceed identically to the configured path.
 
 ### 4. Score each candidate
 
@@ -66,7 +91,7 @@ Otherwise, for each scored candidate, first **resolve the target status name to 
   issueIdOrKey: <KEY>
 ```
 
-From the returned `transitions[]`, pick the entry whose **target status** matches the configured name — `to.name == <status>` (fall back to the transition's own `name == <status>` for sites where they coincide). `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. Capture its `id` as `<transition-id>`. If no transition matches, **do not guess** — surface the configured key and the available transition names so the user can fix the config, and skip that issue.
+From the returned `transitions[]`, pick the entry whose **target status** matches the resolved target status name (`ready_status`/`refinement_status`, whether set in config or chosen in step 3a) — `to.name == <status>` (fall back to the transition's own `name == <status>` for sites where they coincide). `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. Capture its `id` as `<transition-id>`. If no transition matches, **do not guess** — surface the configured key and the available transition names so the user can fix the config, and skip that issue.
 
 Then transition:
 
