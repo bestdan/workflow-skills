@@ -13,7 +13,7 @@ Invoked from `/do-tasks` (section 1, "gh-issue path") when `handler: gh-issue` i
 ## Find candidates
 
 ```bash
-gh issue list --state open --search "label:auto-eligible no:assignee" --limit 50 --json number,title,body,labels,assignees [--repo <repo>]
+gh issue list --state open --search "label:auto-eligible no:assignee" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
 ```
 
 - `label:auto-eligible` selects promoted, ready issues; `no:assignee` skips anything already claimed. (Both ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.)
@@ -46,13 +46,13 @@ GitHub has no transactional claim, so use a **read-then-write guard** (the analo
    gh issue edit <n> --add-assignee @me --add-label auto-claimed --remove-label auto-eligible [--repo <repo>]
    ```
 
-3. **Confirm** — re-read once more. If `assignees` is anyone other than you alone, a concurrent claimer raced in; unassign yourself (`gh issue edit <n> --remove-assignee @me --remove-label auto-claimed --add-label auto-eligible`) and fall back to the next candidate. Otherwise the claim holds.
+3. **Confirm** — resolve your own login once (`me=$(gh api user --jq .login)`; `@me` is only valid as a `--add-assignee`/`--remove-assignee` argument, never a value you can match in the JSON), then re-read the issue's `assignees`. The claim holds **iff** `assignees[].login` is exactly that one login. If anyone else appears, a concurrent claimer raced in — unassign yourself (`gh issue edit <n> --remove-assignee @me --remove-label auto-claimed --add-label auto-eligible [--repo <repo>]`) and fall back to the next candidate.
 
 (`gh issue edit` errors if a label doesn't exist; create it first with `gh label create "<label>" [--repo <repo>] 2>/dev/null`, mirroring the create flow.)
 
 ## Branch + execute
 
-1. **Branch** — `gh issue develop <n> --base <base> [--repo <repo>]` creates a branch linked to the issue (base defaults to the repository's default branch; pass `--base` to override). **Check it out verbatim** (`gh issue develop` prints the branch name, or `--checkout` it) — do not invent a branch name.
+1. **Branch** — `gh issue develop <n> --checkout [--base <branch>] [--repo <repo>]` creates a branch linked to the issue and checks it out (base defaults to the repository's default branch; pass `--base` to override). Use the name `gh issue develop` prints — do not invent a branch name.
 2. **Execute** — do the work, then run the project's quality gate (`just check` here). Keep the diff scoped to this one issue.
 
 ## PR
