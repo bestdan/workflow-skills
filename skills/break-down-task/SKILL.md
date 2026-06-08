@@ -1,6 +1,6 @@
 ---
 name: break-down-task
-description: Break a task that is too large for a single PR into smaller, PR-sized component tasks. Use when a task estimates larger than size 5, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work. Finds natural shear points (vertical/horizontal slices, preparatory refactors, interface-then-impl), and on a HIGH-confidence breakdown replaces the original task with the component tasks chained by is_blocked_by.
+description: Break a task that is too large for a single PR into smaller, PR-sized component tasks. Use when a task estimates size 3 or above, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work. Finds natural shear points (vertical/horizontal slices, preparatory refactors, interface-then-impl), and on a HIGH-confidence breakdown replaces the original task with the component tasks chained by is_blocked_by.
 ---
 
 # break-down-task — slice a too-large task into PR-sized components
@@ -11,7 +11,7 @@ It is the resolution of the `/promote-tasks` size gate, and the sibling of `plan
 
 ## When to use
 
-- A task estimates larger than size `5` (multi-layer rework, many unrelated files, several behaviors at once).
+- A task estimates size `3` or above (multi-layer rework, many unrelated files, several behaviors at once).
 - `/promote-tasks` scored a card LOW with `scope exceeds size 5 — split into sub-tasks`.
 - The user points at a specific task/card/ticket and says it's too big, won't fit one PR, or asks to split / slice / break down / chunk it.
 - Mid-`/do-tasks`, the executor realizes the claimed task is too large to finish in one PR and bails for breakdown.
@@ -41,7 +41,7 @@ The rest of this skill describes the **`repo-pr` file path**; the analysis (shea
 
 ## Find the shear points
 
-A **shear point** is a seam where the work naturally separates into pieces that can each ship as an independent, reviewable PR. You are looking for the cuts that yield the _fewest, largest_ slices that are each still ≤ size `5`. Prefer cuts that produce slices which are individually mergeable and leave the system working at each step.
+A **shear point** is a seam where the work naturally separates into pieces that can each ship as an independent, reviewable PR. You are looking for the cuts that yield the _fewest, largest_ slices that are each still ≤ size `2`. Prefer cuts that produce slices which are individually mergeable and leave the system working at each step.
 
 Common seams, roughly in order of preference:
 
@@ -58,11 +58,11 @@ Common seams, roughly in order of preference:
 
 Rules for good slices:
 
-- **Each slice is ≤ size `5`.** If a proposed slice still looks like `> 5`, slice _it_ again (recurse) or pick a finer seam.
+- **Each slice is ≤ size `2`.** If a proposed slice still looks like `≥ 3`, slice _it_ again (recurse) or pick a finer seam.
 - **MECE.** Together the slices cover the _entire_ original scope (no dropped work) with minimal overlap. Re-read the original `## Task` and `## Acceptance Criteria` and check every item maps into exactly one slice.
 - **Clean dependency DAG.** Ordering between slices is expressed with `is_blocked_by`; there must be no cycle. A slice that depends on two earlier ones lists both (`is_blocked_by: [a, b]`).
 - **Each slice keeps the build green.** Prefer cuts where every intermediate PR leaves tests passing and the app working. A "preparatory refactor first" cut is usually the way to achieve this.
-- **Prefer few, fat slices.** Two size-`3`s beat five size-`1`s. Don't over-shatter — review overhead is real.
+- **Prefer few, fat slices.** Two size-`2`s beat four size-`1`s. Don't over-shatter — review overhead is real.
 
 ## Confidence gate
 
