@@ -1,8 +1,8 @@
 # The Task Loop as a Software Factory
 
-*Framing the workflow as a production line — Linear as the project-management
+_Framing the workflow as a production line — Linear as the project-management
 substrate — and asking: which stations exist, which are missing, and which could
-run with the lights off?*
+run with the lights off?_
 
 ---
 
@@ -17,31 +17,31 @@ need judgment.
 Here is the canonical line, with where today's workflow sits:
 
 ```
- ① INTAKE → ② TRIAGE/REFINE → ③ PRIORITIZE → ④ DECOMPOSE → ⑤ SCHEDULE/DISPATCH
-    → ⑥ BUILD → ⑦ REVIEW/QA → ⑧ MERGE → ⑨ DEPLOY/RELEASE → ⑩ MEASURE/LEARN
-                                                                   │
-                                              └──────── feedback ──┘
+① INTAKE → ② TRIAGE/REFINE → ③ PRIORITIZE → ④ DECOMPOSE → ⑤ SCHEDULE/DISPATCH
+   → ⑥ BUILD → ⑦ REVIEW/QA → ⑧ MERGE → ⑨ DEPLOY/RELEASE → ⑩ MEASURE/LEARN
+                                                                  │
+                                             └──────── feedback ──┘
 ```
 
-| # | Station         | Today's coverage                                                                 | Maturity |
-| - | --------------- | -------------------------------------------------------------------------------- | :------: |
-| ① | **Intake**      | `/add-task` — but *only from inside a Claude session*                            | 🟡 Partial |
-| ② | **Triage/Refine** | `/promote-tasks` confidence check; `break-down-task` for oversized              | 🟢 Strong  |
-| ③ | **Prioritize**  | `priority` + value/effort (`impact ÷ size`) ranking                              | 🟡 Partial |
-| ④ | **Decompose**   | `plan-with-docs`, `break-down-task` → PR-sized cards, `is_blocked_by` DAG        | 🟢 Strong  |
+| # | Station               | Today's coverage                                                          |  Maturity  |
+| - | --------------------- | ------------------------------------------------------------------------- | :--------: |
+| ① | **Intake**            | `/add-task` — but _only from inside a Claude session_                     | 🟡 Partial |
+| ② | **Triage/Refine**     | `/promote-tasks` confidence check; `break-down-task` for oversized        | 🟢 Strong  |
+| ③ | **Prioritize**        | `priority` + value/effort (`impact ÷ size`) ranking                       | 🟡 Partial |
+| ④ | **Decompose**         | `plan-with-docs`, `break-down-task` → PR-sized cards, `is_blocked_by` DAG | 🟢 Strong  |
 | ⑤ | **Schedule/Dispatch** | `/do-tasks` with WIP cap + size-gated auto-routing                        | 🟡 Partial |
-| ⑥ | **Build**       | Remote VMs (repo-pr) / foreground (linear); claim-lock concurrency               | 🟢 Strong  |
-| ⑦ | **Review/QA**   | `/co-review`, `review-facts`, `verify` — but *not wired into the loop*           | 🟡 Partial |
-| ⑧ | **Merge**       | Human merges; "done" = merge                                                      | 🔴 Manual  |
-| ⑨ | **Deploy/Release** | —                                                                              | 🔴 Absent  |
-| ⑩ | **Measure/Learn** | — (explicitly a non-goal; file-deletion-on-PR even *destroys* history)         | 🔴 Absent  |
+| ⑥ | **Build**             | Remote VMs (repo-pr) / foreground (linear); claim-lock concurrency        | 🟢 Strong  |
+| ⑦ | **Review/QA**         | `/co-review`, `review-facts`, `verify` — but _not wired into the loop_    | 🟡 Partial |
+| ⑧ | **Merge**             | Human merges; "done" = merge                                              | 🔴 Manual  |
+| ⑨ | **Deploy/Release**    | —                                                                         | 🔴 Absent  |
+| ⑩ | **Measure/Learn**     | — (explicitly a non-goal; file-deletion-on-PR even _destroys_ history)    | 🔴 Absent  |
 
-**The headline:** the *middle* of the line (refine → decompose → build) is
+**The headline:** the _middle_ of the line (refine → decompose → build) is
 genuinely strong and already semi-autonomous. The **two ends are open** — intake
 is single-channel and the back end (merge → deploy → measure → learn) barely
 exists — and **nothing schedules the line itself**. A human still types every
-`/promote-tasks` and `/do-tasks`. It's a superb set of *stations*; it is not yet
-a *running line*.
+`/promote-tasks` and `/do-tasks`. It's a superb set of _stations_; it is not yet
+a _running line_.
 
 ---
 
@@ -65,13 +65,13 @@ repo-pr path, which dispatches N parallel cloud VMs. So the moment you adopt
 Linear as your source of truth, you **lose** the headless batch runner that makes
 the file path feel like a factory. The capability matrix says it plainly:
 
-| Verb               | repo-pr | linear |
-| ------------------ | :-----: | :----: |
-| do — single        |   ✅    |   ✅   |
-| **process — batch**|   ✅    |   ❌   |
+| Verb                | repo-pr | linear |
+| ------------------- | :-----: | :----: |
+| do — single         |   ✅    |   ✅   |
+| **process — batch** |   ✅    |   ❌   |
 
 The asymmetry is understandable (the repo-pr claim-lock was built for fan-out;
-Linear execution runs in-session), but it means *Linear + autonomy* is precisely
+Linear execution runs in-session), but it means _Linear + autonomy_ is precisely
 the combination the system is weakest at.
 
 ### Gap C — The loop is open (no feedback, no memory)
@@ -87,18 +87,18 @@ can't get better at estimating, prioritizing, or deciding what to auto-execute.
 
 ## 3. Station-by-station: what's missing and what could be automated
 
-### ① Intake — *open up the front door*
+### ① Intake — _open up the front door_
 
 Today the only way a task enters is a human typing `/add-task` inside a Claude
 session. A factory pulls raw intent from everywhere:
 
 - **Linear Triage** as the universal inbox. Linear already ingests from Slack,
   email, Zendesk/Intercom, and Sentry into a Triage queue. Wire `/promote-tasks`
-  (Linear flavor) to run against Triage so non-engineers — and *machines* — can
+  (Linear flavor) to run against Triage so non-engineers — and _machines_ — can
   file work that the loop then grooms.
 - **Error/observability intake.** A Sentry issue or a failing alert → an
   auto-drafted Linear issue with the stack trace as Context. This is the
-  highest-value autonomous intake: production *tells* the factory what to build.
+  highest-value autonomous intake: production _tells_ the factory what to build.
 - **Recurring/scheduled tasks** (dependency upgrades, cert rotation, "audit dead
   flags monthly") — raised in the original review and deferred. A cron that
   injects a templated card is trivial and high-leverage.
@@ -106,10 +106,10 @@ session. A factory pulls raw intent from everywhere:
   auto-`/add-task` from the thread. Closes the loop the plugin already half-has
   via `subscribe_pr_activity`.
 
-### ② Triage/Refine — *enrich, don't just gate*
+### ② Triage/Refine — _enrich, don't just gate_
 
-`/promote-tasks` is a strong *gate*, but refinement in a real factory also
-*enriches*:
+`/promote-tasks` is a strong _gate_, but refinement in a real factory also
+_enriches_:
 
 - **Auto-dedup.** Before promoting, semantically compare against open cards /
   Linear issues and flag likely duplicates (deferred in the original review;
@@ -121,7 +121,7 @@ session. A factory pulls raw intent from everywhere:
 - **Estimation calibration.** Once metrics exist (⑩), feed historical actuals
   back so the size estimate self-corrects instead of being a one-shot guess.
 
-### ③ Prioritize — *make value objective*
+### ③ Prioritize — _make value objective_
 
 `impact` is a hand-set Fibonacci number, and value/effort ranking is repo-pr-only
 (Linear has no native impact field, so it falls back to `priority + estimate`).
@@ -131,19 +131,19 @@ session. A factory pulls raw intent from everywhere:
   `impact`. Store it in a Linear custom field so ranking is portable.
 - **Aging/SLA escalation.** A `low` card that's sat 60 days, or a `high` past its
   SLA, should auto-escalate. Linear has native SLA + automations for exactly
-  this; the file path has `expires` (prune) but no *escalate*.
+  this; the file path has `expires` (prune) but no _escalate_.
 - **Connect impact to reality.** The strongest version: derive `impact` from
   business signal (how many users hit the error, revenue of the affected flow)
   rather than a guess.
 
-### ④ Decompose — *already strong*
+### ④ Decompose — _already strong_
 
 `plan-with-docs` + `break-down-task` + the `is_blocked_by` DAG are the most mature
 part of the line. The one autonomy opportunity: let `/promote-tasks`, on a
 HIGH-confidence "too big" verdict, **auto-invoke `break-down-task`** instead of
 parking the card for a human to manually trigger the split.
 
-### ⑤ Schedule/Dispatch — *add the clock*
+### ⑤ Schedule/Dispatch — _add the clock_
 
 This is where "a factory" is won or lost.
 
@@ -153,7 +153,7 @@ This is where "a factory" is won or lost.
   addition is what turns the toolbox into a line.
 - **Linear-webhook-driven dispatch.** When an issue moves to `Todo` (`ready`),
   fire a remote agent to claim and execute it — instead of waiting for someone to
-  run `/do-tasks`. This *also closes Gap B*: it gives Linear the headless,
+  run `/do-tasks`. This _also closes Gap B_: it gives Linear the headless,
   event-driven runner the file path has, without making Linear execution
   foreground.
 - **Capacity-aware WIP.** WIP is a flat default of 3. Tie it to actual review
@@ -161,45 +161,45 @@ This is where "a factory" is won or lost.
   doesn't manufacture a 20-PR pile-up no human can review — the classic
   "infinite WIP" failure mode of autonomous coding agents.
 
-### ⑥ Build — *strong; extend to Linear*
+### ⑥ Build — _strong; extend to Linear_
 
 Solid: isolated VMs, deterministic claim-lock, size-gated auto-routing. The gap
 is **parallel/headless build for Linear** (Gap B). Port the draft-PR claim-lock
 concept to the Linear path so Linear issues can fan out across VMs like files do.
 
-### ⑦ Review/QA — *wire it into the loop*
+### ⑦ Review/QA — _wire it into the loop_
 
 `/co-review`, `review-facts`, and `verify` exist but are **manual, out-of-band**
-skills. In a factory, review is a *station the work flows through*, not a tool a
+skills. In a factory, review is a _station the work flows through_, not a tool a
 human remembers to pick up.
 
 - **Auto-review on task-PR open.** When a `task-loop` PR opens, automatically run
   `/co-review --post` so every agent-authored PR arrives pre-reviewed. The plugin
   already has `subscribe_pr_activity` to hang this off.
-- **Acceptance-criteria-driven verification.** Each card *has* explicit
+- **Acceptance-criteria-driven verification.** Each card _has_ explicit
   Acceptance Criteria (often split into "code-enforced" vs "user-run"). Have the
   builder agent turn the code-enforced ones into actual test assertions and gate
   the PR on them — making "done" mean "criteria demonstrably met," not "an agent
   said so."
-- **Risk-tiered autonomy.** `auto_execute_max_size` gates on *size*. Add a gate on
-  *risk* (touches auth / migrations / payments / public API → always human) so
+- **Risk-tiered autonomy.** `auto_execute_max_size` gates on _size_. Add a gate on
+  _risk_ (touches auth / migrations / payments / public API → always human) so
   autonomy scales with blast radius, not just diff size.
 
-### ⑧ Merge — *let green merge itself*
+### ⑧ Merge — _let green merge itself_
 
 "Done" is a human merge. The safe, high-value automation: **auto-merge on green +
 approval** for low-risk tiers (`enable_pr_auto_merge` already exists in the
 toolset). Small, well-tested, size-1 cleanup PRs shouldn't need a human to click
 merge — they need a human only when CI or review flags something.
 
-### ⑨ Deploy/Release — *the missing back half*
+### ⑨ Deploy/Release — _the missing back half_
 
 The line currently ends at `merge`. A factory ships. Even a thin station helps:
 record what merged, group it into a release, and (where infra allows) trigger the
 deploy and watch it. At minimum, **close the card against the deploy, not the
 merge**, so `done` means "in users' hands."
 
-### ⑩ Measure/Learn — *close the loop*
+### ⑩ Measure/Learn — _close the loop_
 
 The deliberate non-goal that most limits the system. Without it the factory is
 blind. Minimum viable telemetry (and Linear computes most of it natively —
@@ -208,11 +208,11 @@ cycle time, throughput, scope-change):
 - **Flow metrics:** lead time (capture→merge), cycle time (claim→merge),
   throughput, WIP aging, `needs_refinement` bounce rate.
 - **Quality metrics:** % of auto-executed PRs reverted or heavily edited in
-  review — the single most important number for *tuning how much to trust the
-  autonomous runner*.
+  review — the single most important number for _tuning how much to trust the
+  autonomous runner_.
 - **Estimation accuracy:** predicted `size` vs actual diff/time, fed back to ③.
 - **An archive ledger.** The repo-pr handler deleting the card on PR-open means
-  history evaporates. A lightweight append-only ledger (or just *keeping* the
+  history evaporates. A lightweight append-only ledger (or just _keeping_ the
   card and flipping it to `done`) restores a learnable record.
 
 ---
@@ -221,16 +221,16 @@ cycle time, throughput, scope-change):
 
 Linear ships a lot of factory machinery the loop currently ignores:
 
-| Linear feature        | Could power…                                                            |
-| --------------------- | ----------------------------------------------------------------------- |
-| **Triage inbox**      | Multi-channel intake (Slack/email/Sentry/Zendesk) → station ①           |
-| **Webhooks**          | Event-driven autonomous dispatch (issue → Todo fires a build) → Gap B/⑤ |
-| **Cycles (sprints)**  | A scheduling horizon: "drain this cycle's committed issues" → ⑤          |
-| **SLA + Automations** | Aging/priority escalation → ③                                           |
-| **Projects/Initiatives** | Already used as epics — extend to roadmap rollup                     |
-| **Custom fields**     | Store RICE/WSJF score, risk tier, revert-flag → ③/⑦/⑩                    |
-| **Native analytics**  | Cycle time / throughput dashboards for free → ⑩                         |
-| **Sub-issues**        | `break-down-task` output as native children (partly done)               |
+| Linear feature           | Could power…                                                            |
+| ------------------------ | ----------------------------------------------------------------------- |
+| **Triage inbox**         | Multi-channel intake (Slack/email/Sentry/Zendesk) → station ①           |
+| **Webhooks**             | Event-driven autonomous dispatch (issue → Todo fires a build) → Gap B/⑤ |
+| **Cycles (sprints)**     | A scheduling horizon: "drain this cycle's committed issues" → ⑤         |
+| **SLA + Automations**    | Aging/priority escalation → ③                                           |
+| **Projects/Initiatives** | Already used as epics — extend to roadmap rollup                        |
+| **Custom fields**        | Store RICE/WSJF score, risk tier, revert-flag → ③/⑦/⑩                   |
+| **Native analytics**     | Cycle time / throughput dashboards for free → ⑩                         |
+| **Sub-issues**           | `break-down-task` output as native children (partly done)               |
 
 The throughline: **Linear can be the clock and the dashboard**, not just the card
 store. Webhooks for dispatch and the analytics API for measurement together close
@@ -253,7 +253,7 @@ Gaps A, B, and C at once.
 ### Strategic (weeks, structural)
 
 5. **Linear-webhook-driven headless dispatch** — closes the Linear autonomy gap
-   *and* adds the event clock in one move. (Gaps A + B)
+   _and_ adds the event clock in one move. (Gaps A + B)
 6. **A measurement/ledger station** — stop deleting cards on PR-open; emit flow +
    revert metrics; surface them in `/list-tasks` or a Linear dashboard. (Gap C)
 7. **Risk-tiered autonomy** alongside the existing size gate. (Station ⑦) The
@@ -264,7 +264,7 @@ Gaps A, B, and C at once.
 ### Foundational (the enabling theme)
 
 9. **Capacity-aware WIP** so autonomous fan-out can't outrun human review — the
-   guardrail that makes all the above *safe* to switch on.
+   guardrail that makes all the above _safe_ to switch on.
 10. **Multi-channel Triage intake** (Sentry/Slack) — let production and users file
     the factory's work, closing the outer feedback loop.
 
