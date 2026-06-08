@@ -1,6 +1,6 @@
 ---
 description: Score new tasks against the confidence check and promote them to ready or needs_refinement
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment
 argument-hint: "[filter: dry-run|apply] (default apply)"
 ---
 
@@ -28,7 +28,11 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/linear-*.md`) and Read the result.
 
-- `handler: gh-issue | jira` → **stop** with: "promotion not supported for `<handler>`; promote in the tracker directly." (gh-issue and jira have no promote path — refine and label issues in the tracker's own UI.)
+- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
+
+  If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/gh-issue-promote.md`) and Read the result.
+
+- `handler: jira` → **stop** with: "promotion not supported for `jira`; promote in the tracker directly." (jira has no promote path — refine and label issues in the tracker's own UI.)
 - Any other (unknown) value → stop with: "Unknown task handler `<value>` in dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 ### 1. Find candidates

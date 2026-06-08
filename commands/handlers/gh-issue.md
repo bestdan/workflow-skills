@@ -65,7 +65,7 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only — one `gh issue list` query, no edits, no claims. Renders the repo's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `gh-issue` is a create-only handler — there is no gh-issue promote/claim/execute flow that sets status labels — so in practice most issues land in `new` (open) or `done` (closed). The status-label mapping below is honored when those labels happen to be present (e.g. set by hand or a board automation), but a plain gh-issue setup renders a two-column `new`/`done` board, which is the expected v1 behavior.
+> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), and **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which adds `auto-eligible` to well-formed open issues and `human-approval-requested` to underspecified ones). There is still no gh-issue claim/execute flow that sets `auto-claimed`/`needs-review`, so issues advance `new → needs_refinement`/`ready` via promotion but reach `in_progress`/`needs_review` only when those labels are set by hand or a board automation; closed issues are `done`. The status-label mapping below is honored whenever the labels are present.
 
 1. **Preflight auth.** Run `gh auth status 2>&1`. If it fails, use the same handling as the create flow's step 1 (TLS/x509 → sandbox keychain hint; otherwise report the auth failure) and **stop** — do not fall back to another handler.
 
