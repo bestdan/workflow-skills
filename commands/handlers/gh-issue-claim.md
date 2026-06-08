@@ -8,7 +8,58 @@ Invoked from `/do-tasks` (section 1, "gh-issue path") when `handler: gh-issue` i
 
 **Repo.** If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass it as `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the current repo, matching the create/list/promote flows.
 
-> **Scope note.** This is the **core** single-execute path. The claim/execute split (`--claim-only` / `--no-claim`) and a pre-claim WIP gate are **not** implemented here yet — `/do-tasks` runs the atomic claim+execute below. Those compose on top in a follow-up.
+## Modes: atomic vs. claim/execute split
+
+`/do-tasks` claims and executes atomically by default. Two **mutually exclusive**
+flags (`--claim-only` / `--no-claim`, passed through from `/do-tasks`) split that
+into composable steps so a claim now plus a `--no-claim` execute later add up to one
+normal run — passing both is an error: stop and ask which was meant.
+
+- **default** (neither flag) — run every phase below: pre-claim WIP gate → claim →
+  branch + execute → PR → move to review.
+- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue" (assign
+  `@me`, add `auto-claimed`, remove `auto-eligible`), then **stop**: no branch, no
+  execution, no PR. The assigned issue carrying `auto-claimed` is the reservation
+  marker — do **not** swap to `needs-review`. `--claim-only` is the one execute-family
+  action safe to batch, so `/do-tasks --all` / `-n N --claim-only` may reserve several
+  issues at once, each bounded by the WIP gate.
+- **`--no-claim <#n>`** — skip the claim and resume an issue this caller has
+  **already** claimed. **Requires an explicit issue number** — there is no default
+  selection. Guard: proceed only when the issue's assignee is this caller
+  (`me=$(gh api user --jq .login)`; the issue's `assignees[].login` is exactly that
+  one login) **and** it carries `auto-claimed`. Otherwise **stop and explain** —
+  executing an unclaimed issue reopens the race the claim step closes. When the guard
+  passes, **check out the existing claim branch** rather than branching fresh from
+  `HEAD`: `gh issue develop <n> --list [--repo <repo>]` prints the issue's linked
+  branch — `git fetch` and `git checkout` it (do not re-run `gh issue develop
+  --checkout`, which may create a second branch). Then run "Branch + execute"
+  (skipping branch creation), "PR", and "Move to review" — without re-claiming.
+  `--no-claim` is always single (`--all` / `-n N` do not apply).
+
+## Pre-claim WIP gate
+
+Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
+claiming, on every claiming run — single mode included; only `--no-claim`, which
+claims nothing, skips it.
+
+1. Resolve `wip_limit` from the top-level `wip_limit` key in
+   `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr and
+   linear handlers use).
+2. Count current in-flight work = open issues labeled `auto-claimed`:
+
+   ```bash
+   gh issue list --state open --search "label:auto-claimed" --limit 100 --json number [--repo <repo>] --jq length
+   ```
+
+   The open `auto-claimed` issue is the canonical in-flight unit — its open PR is
+   already reflected by the label, so do **not** count open PRs separately (that
+   double-counts).
+3. If that count is **≥ `wip_limit`**, decline: report
+   `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
+   not claim another issue.
+
+For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
+outright: reserve at most `wip_limit - <count>` issues.
 
 ## Find candidates
 
