@@ -28,12 +28,12 @@ normal run — passing both is an error: stop and ask which was meant.
 
 - **default** (neither flag) — run every phase below: pre-claim WIP gate → claim →
   branch + execute → PR → move to review.
-- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue" (self-assign
-  + transition to an In-Progress status), then **stop**: no branch, no execution, no
-  PR. The assigned, In-Progress issue is the reservation marker — do **not** transition
-  it to In Review. `--claim-only` is the one execute-family action safe to batch, so
-  `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
-  bounded by the WIP gate.
+- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue"
+  (self-assign, then transition to an In-Progress status), then **stop**: no branch,
+  no execution, no PR. The assigned, In-Progress issue is the reservation marker — do
+  **not** transition it to In Review. `--claim-only` is the one execute-family action
+  safe to batch, so `/do-tasks --all` / `-n N --claim-only` may reserve several issues
+  at once, each bounded by the WIP gate.
 - **`--no-claim <KEY>`** — skip the claim and resume an issue this caller has
   **already** claimed. **Requires an explicit issue key** — there is no default
   selection. Guard: proceed only when the issue's assignee is this caller (its
@@ -65,9 +65,9 @@ claims nothing, skips it.
    and gh-issue handlers use).
 2. Count current in-flight work = issues in the configured project whose status sits in
    the In Progress / In Review category. A single JQL count covers both: Jira's
-   `indeterminate` category (display name `In Progress`) spans every In-Progress *and*
-   In-Review-type status, so `statusCategory = "In Progress"` (equivalently
-   `statusCategory = indeterminate`) catches the lot:
+   `indeterminate` category (display name `In Progress`) spans every In-Progress _and_
+   In-Review-type status, so `statusCategory = "In Progress"` catches the lot (use the
+   category name or its id `4` — JQL does not accept the `indeterminate` key):
 
    ```
    <atlassian-mcp>__searchJiraIssuesUsingJql
