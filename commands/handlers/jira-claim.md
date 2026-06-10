@@ -84,7 +84,7 @@ Jira has no transactional claim, so use a **read-then-write guard** (the analogu
 
    If no `indeterminate` transition is available, **do not guess** — surface the available transition names so the user can fix the workflow, unassign yourself, and stop.
 
-5. **Confirm.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). The claim holds **iff** `assignee.accountId` equals your `account_id` from step 1. If anyone else appears, a concurrent claimer raced in — clear the assignee (`editJiraIssue` with `fields: { "assignee": null }`), revert the status to `ready_status` (resolve its transition id the same way), and fall back to the next candidate.
+5. **Confirm.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). The claim holds **iff** `assignee.accountId` equals your `account_id` from step 1. If a different `accountId` appears, a concurrent claimer raced in **and won** — leave the issue untouched (do **not** clear the assignee or revert the status; both now belong to the winner, and stomping them would disrupt their active claim), return `race`, and fall back to the next candidate.
 
 6. **Comment** the branch name via `addCommentToJiraIssue` (`commentBody: "Claimed by /do-tasks. Working on branch \`task/<KEY>\`; PR link will follow."`).
 
@@ -92,10 +92,10 @@ Return the issue key and url so `/do-tasks` can branch and execute.
 
 ## Branch + execute
 
-1. **Branch** — `task/<KEY>` (Jira has no native branch primitive, so the handler publishes this deterministic name). Branch from `jira.base_branch` (default: the repo's default branch):
+1. **Branch** — `task/<KEY>` (Jira has no native branch primitive, so the handler publishes this deterministic name). Branch from `<base>` — `jira.base_branch` if set, otherwise the repo's default branch (resolve it, e.g. `git symbolic-ref --short refs/remotes/origin/HEAD` → strip the `origin/` prefix; do **not** assume `main`):
 
    ```bash
-   git fetch origin && git switch -c "task/<KEY>" "origin/${BASE:-main}"
+   git fetch origin && git switch -c "task/<KEY>" "origin/<base>"
    ```
 
 2. **Execute** — do the work, then run the project's quality gate (`just check` here). Keep the diff scoped to this one issue.
@@ -143,7 +143,7 @@ git stash push -u
 Then, over the Atlassian MCP:
 
 1. **Unassign** — `editJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: { "assignee": null }`).
-2. **Transition back** to `ready_status` (resolve its transition id via `getTransitionsForJiraIssue`, matching `to.name == <ready_status>`) so the issue returns to the lane it came from. If a `human-approval-requested`-style label is configured on the board, add it via `editJiraIssue` so a human knows to look; otherwise the comment below carries that signal.
+2. **Transition back** to `ready_status` (resolve its transition id via `getTransitionsForJiraIssue`, matching `to.name == <ready_status>`) so the issue returns to the lane it came from. If a `human-approval-requested` label is configured on the board, re-read the issue's current labels (`getJiraIssue`, `fields: ["labels"]`), append `human-approval-requested` to that list, and write the combined list back via `editJiraIssue` (`fields: { "labels": [<existing…>, "human-approval-requested"] }`) so a human knows to look — `editJiraIssue` **replaces** the whole label set, so omitting the existing labels would drop them. Otherwise the comment below carries that signal.
 3. **Comment** the bail reason via `addCommentToJiraIssue` (`commentBody: "Bailed by /do-tasks: <what was tried, what tripped the bail>"`).
 
 Stop — do not auto-pick another candidate after a bail; a human should look before more work is auto-claimed.
