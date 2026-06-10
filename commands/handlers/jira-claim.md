@@ -50,7 +50,9 @@ normal run — passing both is an error: stop and ask which was meant.
 
   If that branch exists neither locally nor on the remote (the issue was reserved via
   `--claim-only`, which creates no branch), create it now —
-  `git switch -c "task/<KEY>" "origin/<base>"`. Then run "Branch + execute" (skipping
+  `git switch -c "task/<KEY>" "origin/<base>"` (`<base>` is `jira.base_branch` if set,
+  else the repo's default branch — resolved as in "Branch + execute" below). Then run
+  "Branch + execute" (skipping
   branch creation), "PR", and "Move to review" — without re-claiming. `--no-claim` is
   always single (`--all` / `-n N` do not apply).
 
@@ -66,8 +68,9 @@ claims nothing, skips it.
 2. Count current in-flight work = issues in the configured project whose status sits in
    the In Progress / In Review category. A single JQL count covers both: Jira's
    `indeterminate` category (display name `In Progress`) spans every In-Progress _and_
-   In-Review-type status, so `statusCategory = "In Progress"` catches the lot (use the
-   category name or its id `4` — JQL does not accept the `indeterminate` key):
+   In-Review-type status, so `statusCategory = "In Progress"` catches the lot (the
+   category name `In Progress`, its key `indeterminate`, and its id `4` are all accepted
+   and equivalent — pick one):
 
    ```
    <atlassian-mcp>__searchJiraIssuesUsingJql
@@ -77,8 +80,10 @@ claims nothing, skips it.
      maxResults: 100
    ```
 
-   Count the returned issues (the response's `total`, or the `issues[]` / `issues.nodes[]`
-   length). The `indeterminate` category is the in-flight unit — an issue stays there
+   Count the returned issues — the length of `issues[]` (or `issues.nodes[]` on installs
+   that nest it). The enhanced-search response carries **no** `total` field, so don't rely
+   on one; the first page (`maxResults` 100) is far more than any `wip_limit`. The
+   `indeterminate` category is the in-flight unit — an issue stays there
    from claim through PR review, so an open PR is already reflected by its issue's
    status; do **not** add open PRs separately, that double-counts. (This mirrors the
    linear gate, which counts both `In Progress` and `In Review`, and the gh-issue gate,
