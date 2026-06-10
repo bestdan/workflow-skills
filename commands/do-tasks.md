@@ -1,6 +1,6 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
 argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim]"
 ---
 
@@ -114,16 +114,16 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 - `handler: gh-issue` → **gh-issue path** (section 4 below). Follow
   `commands/handlers/gh-issue-claim.md` for the full claim/execute flow
   (foreground single, current session).
-- `handler: jira` → **stop**: "execution not supported for `jira`; pull an issue
-  manually and open a PR, or switch the handler to `linear` in
-  `dev_docs/tasks/.task-config.yml`."
+- `handler: jira` → **jira path** (section 5 below). Follow
+  `commands/handlers/jira-claim.md` for the full claim/execute flow
+  (foreground single, current session).
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative paths don't resolve, find the handler files with **Glob**
 (`**/commands/handlers/repo-pr-execute.md`, `**/commands/handlers/linear-claim.md`,
-`**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`)
-and Read the results.
+`**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`,
+`**/commands/handlers/jira-claim.md`) and Read the results.
 
 ## 2. File path (`repo-pr` / absent handler)
 
@@ -286,7 +286,26 @@ reserve several issues at once, bounded by the pre-claim WIP gate. `/do-tasks <#
 gh-issue — both are documented in `gh-issue-claim.md` ("Modes: atomic vs.
 claim/execute split" and "Pre-claim WIP gate").
 
-## 5. Report
+## 5. jira path (`jira` handler)
+
+Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
+config read (`ready_status` is required here), the find-candidates JQL, the
+feasibility judgment, the self-assign + transition read-then-write claim guard,
+the `task/<KEY>` branch, `gh pr create` with the `[<KEY>]` title prefix, the
+move-to-review transition, bail mechanics, and the report format. `/do-tasks`
+runs these phases in the **current session** over the Atlassian MCP. If the
+relative path doesn't resolve, find it with **Glob**
+(`**/commands/handlers/jira-claim.md`).
+
+**Single by nature.** Like the tracker and gh-issue paths, jira execution is
+foreground: `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
+single claim with a one-line note ("batch isn't supported for jira execution;
+claiming one issue"). The claim/execute split (`--claim-only` / `--no-claim`) and
+the pre-claim WIP gate are **not yet wired for jira** — they land in the sibling
+slice; until then `/do-tasks` runs the atomic claim-and-execute path.
+`/do-tasks <KEY>` (a specific issue key, e.g. `PLAT-142`) claims that one issue.
+
+## 6. Report
 
 For the **file path**, report per `repo-pr-execute.md` "Report":
 
@@ -307,3 +326,7 @@ print the limit and the in-flight count.
 For the **gh-issue path**, report per `gh-issue-claim.md` "Report": on success
 print the issue number, the PR URL, and a one-line summary; on bail print the
 issue number, why it bailed, and the issue-comment URL.
+
+For the **jira path**, report per `jira-claim.md` "Report": on success print the
+issue key, the PR URL, and a one-line summary; on bail print the issue key and
+why it bailed (the bail comment is posted on the issue).
