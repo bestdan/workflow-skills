@@ -150,7 +150,7 @@ Jira has no transactional claim, so use a **read-then-write guard** (the analogu
      issueIdOrKey: <KEY>
    ```
 
-   From the returned `transitions[]`, pick the entry whose target status is in the `indeterminate` (In Progress) category — `to.statusCategory.key == "indeterminate"`, preferring one named `In Progress` if several exist. Capture its `id` and transition:
+   From the returned `transitions[]`, consider only entries whose target status is in the `indeterminate` (In Progress) category (`to.statusCategory.key == "indeterminate"`), then resolve the start-work status: if exactly one such transition exists, use it; if several exist, prefer one whose `to.name` is `In Progress` (case-insensitive), and if none is named `In Progress`, drop any whose `to.name` signals a non-start in-flight state (matches `hold`, `block`, `review`, `validation`, or `wait`) and use the single remaining candidate. Real workflows often name their start state `In Execution`, `Doing`, etc. — not literally `In Progress` — so don't assume the name. Capture its `id` and transition:
 
    ```
    <atlassian-mcp>__transitionJiraIssue
@@ -159,7 +159,7 @@ Jira has no transactional claim, so use a **read-then-write guard** (the analogu
      transition: { id: "<transition-id>" }
    ```
 
-   If no `indeterminate` transition is available, **do not guess** — surface the available transition names so the user can fix the workflow, unassign yourself, and stop.
+   If this leaves **no** candidate, or **more than one** after the filter, **do not guess** — surface the available transition names so the user can disambiguate (or fix the workflow / set a claim-target status in config), unassign yourself, and stop. Guessing among several `indeterminate` transitions risks parking a fresh claim in `On Hold/Blocked` or a review status — validated against a real workflow whose In-Progress category spans `In Execution`, `Validation`, and `On Hold/Blocked` with none named `In Progress`.
 
 5. **Confirm.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). The claim holds **iff** `assignee.accountId` equals your `account_id` from step 1. If a different `accountId` appears, a concurrent claimer raced in **and won** — leave the issue untouched (do **not** clear the assignee or revert the status; both now belong to the winner, and stomping them would disrupt their active claim), return `race`, and fall back to the next candidate.
 
