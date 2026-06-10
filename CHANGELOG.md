@@ -4,6 +4,16 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.8.0] - 2026-06-10
+
+### Features
+
+- single /do-tasks execute path (jira-claim.md) (700b3fc)
+
+### Fixes
+
+- harden jira-claim race, base-branch, and bail-label steps (8169d95)
+
 ## [1.7.0] - 2026-06-08
 
 ### Features
