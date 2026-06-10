@@ -4,6 +4,18 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.9.0] - 2026-06-10
+
+### Features
+
+- add jira claim/execute split + pre-claim WIP gate (5352747)
+
+### Fixes
+
+- disambiguate claim transition when multiple In-Progress statuses exist (86bc792)
+- correct WIP-gate JQL facts and gloss <base> in --no-claim (e0602e5)
+- dprint formatting and invalid statusCategory JQL in jira WIP gate (8a55d49)
+
 ## [1.8.0] - 2026-06-10
 
 ### Features
