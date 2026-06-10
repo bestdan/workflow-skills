@@ -6,7 +6,7 @@ Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is config
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getJiraIssue`, `editJiraIssue`, `atlassianUserInfo`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
 
-> **Scope.** This is the **core** claim/execute flow. The `--claim-only`/`--no-claim` split and the pre-claim WIP gate that `linear-claim.md` and `gh-issue-claim.md` carry are **not yet wired for jira** — they land in the sibling slice. Until then `/do-tasks` runs the atomic claim-and-execute path below.
+> **Scope.** This flow now carries the same `--claim-only`/`--no-claim` split and pre-claim WIP gate that `linear-claim.md` and `gh-issue-claim.md` do — see "Modes: atomic vs. claim/execute split" and "Pre-claim WIP gate" below. `/do-tasks` claims and executes atomically by default; the two flags split that into composable steps.
 
 > **Hard rule for every phase below: never transition a jira issue to a `Done`/`completed`-category status, and never close it manually.** Merge is the only completion signal — Jira's GitHub integration (or a smart commit on merge) closes the issue automatically when the PR, whose title carries `[<KEY>]` and whose body names `<KEY>`, merges. If you are about to `transitionJiraIssue` to a `Done`-category status from this file, you have a bug — stop.
 
@@ -18,6 +18,78 @@ Read `dev_docs/tasks/.task-config.yml`. The jira claim flow reads:
 - `jira.project` — project key.
 - `jira.ready_status` — **required here.** The status the ready lane lives in (the jira analogue of Linear's `Todo`). `/do-tasks` pulls candidates from this status. If it is unset/empty, **stop** with: "jira `/do-tasks` needs `jira.ready_status` set in dev_docs/tasks/.task-config.yml (the status promoted issues land in). Set it, or run `/task-config jira`." Do not guess a status name.
 - `jira.base_branch` — optional; the branch `/do-tasks` branches from (default: the repo's default branch).
+
+## Modes: atomic vs. claim/execute split
+
+`/do-tasks` claims and executes atomically by default. Two **mutually exclusive**
+flags (`--claim-only` / `--no-claim`, passed through from `/do-tasks`) split that
+into composable steps so a claim now plus a `--no-claim` execute later add up to one
+normal run — passing both is an error: stop and ask which was meant.
+
+- **default** (neither flag) — run every phase below: pre-claim WIP gate → claim →
+  branch + execute → PR → move to review.
+- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue" (self-assign
+  + transition to an In-Progress status), then **stop**: no branch, no execution, no
+  PR. The assigned, In-Progress issue is the reservation marker — do **not** transition
+  it to In Review. `--claim-only` is the one execute-family action safe to batch, so
+  `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
+  bounded by the WIP gate.
+- **`--no-claim <KEY>`** — skip the claim and resume an issue this caller has
+  **already** claimed. **Requires an explicit issue key** — there is no default
+  selection. Guard: proceed only when the issue's assignee is this caller (its
+  `assignee.accountId` equals your `atlassianUserInfo` `account_id`) **and** its status
+  is in the `indeterminate` (In Progress) category. Otherwise **stop and explain** —
+  executing an unclaimed issue reopens the race the claim step closes. When the guard
+  passes, **check out the existing `task/<KEY>` branch** rather than branching fresh
+  from base — Jira publishes no branch, so the handler's deterministic `task/<KEY>` is
+  the claim branch:
+
+  ```bash
+  git fetch origin && git switch "task/<KEY>"
+  ```
+
+  If that branch exists neither locally nor on the remote (the issue was reserved via
+  `--claim-only`, which creates no branch), create it now —
+  `git switch -c "task/<KEY>" "origin/<base>"`. Then run "Branch + execute" (skipping
+  branch creation), "PR", and "Move to review" — without re-claiming. `--no-claim` is
+  always single (`--all` / `-n N` do not apply).
+
+## Pre-claim WIP gate
+
+Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
+claiming, on every claiming run — single mode included; only `--no-claim`, which
+claims nothing, skips it.
+
+1. Resolve `wip_limit` from the top-level `wip_limit` key in
+   `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr, linear,
+   and gh-issue handlers use).
+2. Count current in-flight work = issues in the configured project whose status sits in
+   the In Progress / In Review category. A single JQL count covers both: Jira's
+   `indeterminate` category (display name `In Progress`) spans every In-Progress *and*
+   In-Review-type status, so `statusCategory = "In Progress"` (equivalently
+   `statusCategory = indeterminate`) catches the lot:
+
+   ```
+   <atlassian-mcp>__searchJiraIssuesUsingJql
+     cloudId: <jira.site>
+     jql: project = "<project>" AND statusCategory = "In Progress" ORDER BY updated ASC
+     fields: ["status"]
+     maxResults: 100
+   ```
+
+   Count the returned issues (the response's `total`, or the `issues[]` / `issues.nodes[]`
+   length). The `indeterminate` category is the in-flight unit — an issue stays there
+   from claim through PR review, so an open PR is already reflected by its issue's
+   status; do **not** add open PRs separately, that double-counts. (This mirrors the
+   linear gate, which counts both `In Progress` and `In Review`, and the gh-issue gate,
+   which counts both `auto-claimed` and `needs-review`.)
+3. If that count is **≥ `wip_limit`**, decline: report
+   `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
+   not claim another issue.
+
+For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
+outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve
+nothing and report the WIP-limit decline).
 
 ## Find candidates
 

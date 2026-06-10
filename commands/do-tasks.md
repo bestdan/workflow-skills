@@ -67,13 +67,18 @@ error: stop and ask which one was meant.
     `commands/handlers/gh-issue-claim.md` (the read-then-write guard: assign `@me`,
     add `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute".
     The assigned `auto-claimed` issue is the reservation marker — no branch, no PR.
+  - `jira`: run only the pre-claim WIP gate and "Claim the issue" in
+    `commands/handlers/jira-claim.md` (the read-then-write guard: self-assign + transition
+    to an In-Progress status), then stop before "Branch + execute". The assigned,
+    In-Progress issue is the reservation marker — no branch, no PR.
 - **`--no-claim`** — skip the claim step and execute a task this caller has
   **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
   no default selection, since the target is a specific already-claimed task, not
   the highest-ranked ready one. Guard: proceed only when that task is already
   claimed by this caller — `status: in_progress` (`repo-pr`), assigned to the
-  caller in a `started`-type state (`linear`), or assigned to the caller with
-  `auto-claimed` (`gh-issue`). Otherwise **stop and explain** —
+  caller in a `started`-type state (`linear`), assigned to the caller with
+  `auto-claimed` (`gh-issue`), or assigned to the caller in an `indeterminate`
+  (In Progress) category status (`jira`). Otherwise **stop and explain** —
   executing an unclaimed task reopens the race the claim step closes. When the
   guard passes, **first check out the existing claim branch** — do **not** branch
   fresh from the current `HEAD`, which is usually the base branch:
@@ -91,6 +96,11 @@ error: stop and ask which one was meant.
     create it when the claim was `--claim-only` (which leaves no branch). Then do the
     work, open the PR, and "Move to review on PR open" (per `gh-issue-claim.md`) —
     without re-claiming.
+  - `jira`: check out the handler's deterministic claim branch `task/<KEY>`
+    (`git fetch origin && git switch task/<KEY>`); create it
+    (`git switch -c task/<KEY> origin/<base>`) when the claim was `--claim-only`, which
+    leaves no branch. Then do the work, open the PR, and "Move to review on PR open"
+    (per `jira-claim.md`) — without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
@@ -300,9 +310,11 @@ relative path doesn't resolve, find it with **Glob**
 **Single by nature.** Like the tracker and gh-issue paths, jira execution is
 foreground: `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
 single claim with a one-line note ("batch isn't supported for jira execution;
-claiming one issue"). The claim/execute split (`--claim-only` / `--no-claim`) and
-the pre-claim WIP gate are **not yet wired for jira** — they land in the sibling
-slice; until then `/do-tasks` runs the atomic claim-and-execute path.
+claiming one issue"). The exception is `--claim-only`: reserving an issue runs no
+foreground work, so `--all` / `-n N --claim-only` may reserve several issues at once,
+bounded by the pre-claim WIP gate. The claim/execute split (`--claim-only` /
+`--no-claim`) and the pre-claim WIP gate are now wired for jira — both are documented
+in `jira-claim.md` ("Modes: atomic vs. claim/execute split" and "Pre-claim WIP gate").
 `/do-tasks <KEY>` (a specific issue key, e.g. `PLAT-142`) claims that one issue.
 
 ## 6. Report
