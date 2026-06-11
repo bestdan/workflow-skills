@@ -102,17 +102,17 @@ nothing and report the WIP-limit decline).
 
 2. **Query.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<jira.site>`
-   - `jql`: `project = "<project>" AND status = "<ready_status>" AND assignee IS EMPTY ORDER BY priority DESC, updated ASC`
+   - `jql`: `project = "<project>" AND status = "<ready_status>" AND assignee IS EMPTY AND Flagged IS EMPTY ORDER BY priority DESC, updated ASC`
    - `fields`: `["summary", "status", "priority", "labels", "description", "assignee"]`
    - `maxResults`: 50
 
-   `assignee IS EMPTY` skips anything already claimed (the jira analogue of Linear's "pull only from `unstarted`" and gh-issue's `no:assignee`). The `ORDER BY` ranks by priority then age up front. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`). Limit 50 — if exactly 50 are returned the page may be truncated; note it in the report and do not paginate.
+   `assignee IS EMPTY` skips anything already claimed (the jira analogue of Linear's "pull only from `unstarted`" and gh-issue's `no:assignee`). `Flagged IS EMPTY` skips issues a human has flagged as an impediment — a native, site-level field, so the clause is safe on any board; it is the same blocked-issue guard `jira-promote.md` step 3 applies to its candidate query (the claim query is already pinned to one `status`, so the promoter's `blocked_statuses` exclusion isn't needed here). The `ORDER BY` ranks by priority then age up front. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`). Limit 50 — if exactly 50 are returned the page may be truncated; note it in the report and do not paginate.
 
 3. **Filter.** From the returned issues, drop any that carry a `human-approval-requested` or `blocked` label (a defensive filter — `assignee IS EMPTY` already excludes claimed work). Jira has no native `estimate`/size field (story points, when present, are a custom field), so there is no estimate gate here — scope is judged in the next phase, exactly as `jira-promote.md` folds size into the scope judgment.
 
 Return the ranked list to **Judge feasibility**. Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
 
-If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` gates to it; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct key — `/do-tasks` surfaces the reason and stops.
+If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields` plus `"Flagged"`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` / `Flagged IS EMPTY` gates to it; if it fails any gate, return the failure reason rather than the issue (a flagged issue reports as blocked). Do not auto-override the gates from a direct key — `/do-tasks` surfaces the reason and stops.
 
 ## Judge feasibility
 

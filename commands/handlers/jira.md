@@ -14,6 +14,7 @@ jira:
   issue_type: Task # default Task
   default_epic: PLAT-100 # optional; skips the epic prompt (explicit key, not a name)
   labels: [] # optional — passed via additional_fields.labels
+  blocked_statuses: [] # optional — status names that mean "blocked"; excluded from /promote-tasks candidates
   ready_status: Selected for Development # optional — used by /promote-tasks; target status for HIGH-confidence promotions (must differ from the initial/new status). Prompted when unset.
   refinement_status: Needs Refinement # optional — used by /promote-tasks; target status for LOW-confidence (underspecified) issues. Prompted when unset.
 ```
