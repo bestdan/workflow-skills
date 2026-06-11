@@ -18,10 +18,11 @@ Run the Atlassian MCP preflight exactly as `commands/handlers/jira.md` step 1: c
 
 ### 2. Resolve config (optional keys)
 
-Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (as the create flow does), plus the two promote keys:
+Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (as the create flow does), plus the two promote keys and the optional blocked-status list:
 
 - `jira.ready_status` — the HIGH transition target.
 - `jira.refinement_status` — the LOW transition target.
+- `jira.blocked_statuses` — optional list of status names that mean "blocked" on this board (e.g. `["Blocked", "On Hold/Blocked"]`); excluded from the step-3 candidate set. Omit or leave empty if the board has none.
 
 Both keys are **optional**. Classify the run:
 
@@ -33,11 +34,13 @@ Both keys are **optional**. Classify the run:
 Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
 
 - `cloudId`: `<jira.site>`
-- `jql`: `project = "<project>" AND statusCategory = "To Do"`, plus an `AND status != "<status>"` clause for **each promote key that is set** (both clauses on the configured path; only the set key — or neither — on the prompt-when-unset path), then `ORDER BY created ASC`
+- `jql`: `project = "<project>" AND statusCategory = "To Do" AND Flagged IS EMPTY`, plus an `AND status != "<status>"` clause for **each promote key that is set** (both clauses on the configured path; only the set key — or neither — on the prompt-when-unset path), plus an `AND status NOT IN ("<blocked-status>", …)` clause when `jira.blocked_statuses` is non-empty, then `ORDER BY created ASC`
 - `fields`: `["summary", "status", "priority", "labels", "description"]`
 - `maxResults`: 50
 
 The `status !=` clauses exclude issues already transitioned into a configured status **at query time** — mirroring how `linear-promote.md` reads candidates only from `backlog` and `gh-issue-promote.md` excludes already-labeled issues — so the 50-item window isn't consumed by already-scored issues. On the prompt-when-unset path the clause for an unset key is omitted (its value isn't known yet); step 3a's backstop sets those aside once the status is chosen. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`).
+
+The `Flagged IS EMPTY` and `status NOT IN (…)` clauses keep **blocked** issues out of the candidate set — without them, an issue someone marked blocked but left in the project's initial (`statusCategory = "To Do"`) category would be scored as fresh backlog and transitioned to `ready_status`. `Flagged` is a native, site-level Jira field, so `Flagged IS EMPTY` is safe to apply on any board unconditionally. A dedicated **blocked status** is the other common encoding, but the same status name can sit in different `statusCategory` values across boards (`Blocked` lands in `To Do` on some, `In Progress` on others), so it can't be hard-coded — list those names in `jira.blocked_statuses` (`jira-config.md`) and the `status NOT IN (…)` clause is added only when that key is non-empty. Both clauses are server-side. (The `blocked` **label** is the least reliable signal and is not used here; an unresolved `is blocked by` link is the most precise but isn't expressible in core JQL.)
 
 As a backstop to the JQL filter, set aside (do **not** score) any returned issue whose current `fields.status.name` already equals `ready_status` or `refinement_status` (e.g. if those values are status names the `status !=` filter didn't catch as transitions). Keep these in a separate `skipped` list so step 6 can report them; they receive no transition. Limit 50 — if exactly 50 are returned the page may be truncated; note possible truncation in the report and do not paginate. Report and exit if no un-scored candidates remain.
 

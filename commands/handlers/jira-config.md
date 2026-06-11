@@ -56,6 +56,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      issue_type: Task
      default_epic: PLAT-100
      labels: []
+     blocked_statuses: []
      ready_status: Selected for Development
      refinement_status: Needs Refinement
    ```
@@ -70,3 +71,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 - **`refinement_status`** — the target status a LOW-confidence (underspecified) issue is transitioned to (the jira analogue of `needs_refinement`/`human-approval-requested`).
 
 Both are **target status names** — set each to the name of the status you want the issue moved to in your project. The promote flow resolves each name to the matching workflow transition id per issue at apply time (`transitionJiraIssue` takes a transition id, not a status name), so the name just has to match a status an available transition leads to. Each **must differ from the project's initial/new status** (the status new issues enter): the candidate query excludes issues already in `ready_status`/`refinement_status`, so pointing either at the initial status would filter out every new issue and promote nothing. Both keys are **optional**. When a key is unset, `/promote-tasks` (the `jira-promote.md` flow) resolves the project's reachable statuses dynamically from a candidate's available transitions and prompts you to pick via `AskUserQuestion`, then offers to persist the choice back here so the prompt does not recur — no status id or name is ever hard-coded. They are likewise unused in `/add-task`-only setups — they only matter for promote.
+
+## Blocked statuses (`blocked_statuses`)
+
+`blocked_statuses` is an **optional** list of status **names** that mean "blocked" on your board (e.g. `["Blocked", "On Hold/Blocked"]`). `/promote-tasks` (the `jira-promote.md` flow) excludes them from its candidate query so a blocked issue isn't scored as fresh backlog and transitioned to `ready_status`. This is needed because a board can place a `Blocked`-type status in the **initial / To-Do** `statusCategory` — there it is indistinguishable from new work to the category filter, and the same status name can sit in a different category on another board, so it can't be hard-coded. Leave it empty or omit it if your board has no such status. (Issues flagged with Jira's native **Flagged**/Impediment field are excluded automatically, with no config — `blocked_statuses` is only for boards that encode blocked-ness as a _status_.)
