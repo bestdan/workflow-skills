@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.9.1] - 2026-06-11
+
+### Fixes
+
+- request Flagged field on direct-key claim lookup (252ff6a)
+- exclude blocked issues from promote/claim candidates (2ceca5a)
+
 ## [1.9.0] - 2026-06-10
 
 ### Features
