@@ -1,6 +1,6 @@
 ---
 name: analysis-pipeline
-description: Reproducible analysis pipelines — separation of narrative and computation, input provenance, document structure, template-driven reports. Use when building analyses where numbers feed into decisions, reports, or documents.
+description: Use when building analyses where numbers feed into decisions, reports, or documents — financial projections, cost comparisons, capacity planning, scenario analysis — with more than a couple of variable inputs.
 user-invocable: true
 ---
 

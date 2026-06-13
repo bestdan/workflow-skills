@@ -1,6 +1,6 @@
 ---
 name: co-review
-description: Collaborative PR review — produce your own review, optionally pull in other local agents (gemini, codex, …) as extra reviewers, reconcile everything against GitHub bot/human comments via an independent sub-agent, auto-fix high-confidence items, and ask the user about judgment calls. Supports a --local flag to review uncommitted changes with no PR, and a --post flag to review someone else's PR and post vetted findings back to GitHub. Use when the user runs /co-review or asks for a "co-review" of a PR.
+description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files.
 ---
 
 # co-review — collaborative PR review
@@ -9,9 +9,7 @@ Combines a fresh review of the PR with whatever comments are already on GitHub �
 
 ## Independence note
 
-The main agent writes the review _and_ applies fixes, but does **not** judge whether its own findings are correct. That job is delegated to a sub-agent (the reconciler) which sees the main agent's review, any local-agent reviews, and the GitHub comments side-by-side without knowing which came from "you."
-
-This is not perfectly independent: the main agent still chooses what to flag in the first place, and writes the prose the reconciler reads. A reviewer with a strong prior can still bias the pool. The split exists to prevent the most obvious failure mode (the same agent grading its own homework) — not to guarantee neutrality. Pulling in other local agents widens the pool, which helps, but they are graded by the same reconciler.
+The main agent writes the review _and_ applies fixes, but does **not** judge whether its own findings are correct. That job is delegated to a sub-agent (the reconciler) which sees the main agent's review, any local-agent reviews, and the GitHub comments side-by-side without knowing which came from "you." This isn't perfect independence — the main agent still chooses what to flag and writes the prose the reconciler reads — but it prevents the obvious failure mode (an agent grading its own homework).
 
 ## Modes
 
@@ -68,9 +66,9 @@ where `<POINTER>` is exactly:
 
 > Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.
 
-Everything that varies per PR — `review_prompt.md`, the per-PR requests, and the diff — lives in **files** that are concatenated into `<INPUT>` and piped to the agent on **stdin**; the command string itself holds only fixed path arguments and the fixed pointer. So the diff and requests can change freely without ever changing the approved command. A custom agent must supply its own `command:` (input is piped on stdin).
+A custom agent must supply its own `command:` (input is piped on stdin).
 
-> **Why a single shell call.** An earlier version assembled the input into a temp file (`$TMPDIR/coreview-input.md`) in one Bash call and `cat`-ed it into the agent in **another** call. That silently fed reviewers a **stale** diff from a prior session: input assembly ran in a **sandboxed** shell while the network-bound reviewer ran **unsandboxed**, and `$TMPDIR` (and even a sandbox-blocked `/tmp` write) resolves differently across that boundary — so the write landed in one place and the read came from a leftover file somewhere else. The fix is to write **and** read `<INPUT>` in the **same** Bash invocation (one shell, one sandbox context), open it with `>` so any leftover is truncated before the diff is appended, and key it off a fixed absolute path — never `$TMPDIR`. Do **not** re-split assembly and dispatch across two Bash calls, and do **not** reach for a `{ }` group or a here-doc to avoid the file: those constructs aren't in the matcher's documented splitter set (`|`, `&&`, `;`, `&`, newlines), so they'd put the approve-once exact-match rules on unverified ground.
+> **Why a single shell call.** Splitting assembly and dispatch across two Bash calls silently feeds reviewers a **stale** diff: assembly runs sandboxed while the network-bound reviewer runs unsandboxed, and `$TMPDIR`/`/tmp` resolve differently across that boundary, so the read comes from a leftover file. Write **and** read `<INPUT>` in the **same** invocation, open it with `>` to truncate leftovers, and key it off a fixed absolute path — never `$TMPDIR`. Don't reach for a `{ }` group or here-doc either: they aren't in the matcher's splitter set (`|`, `&&`, `;`, `&`, newlines), so they'd void the approve-once exact-match rules.
 
 These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — the pointer says read-only and the `codex` invocation pins a sandbox flag, but never rely on the prompt alone: keep the sandbox flag in both the command and its allow-rule, especially in `--local` mode where edits are in flight.
 

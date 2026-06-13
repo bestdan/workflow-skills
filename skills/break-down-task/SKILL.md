@@ -1,6 +1,6 @@
 ---
 name: break-down-task
-description: Break a task that is too large for a single PR into smaller, PR-sized component tasks. Use when a task estimates size 3 or above, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work. Finds natural shear points (vertical/horizontal slices, preparatory refactors, interface-then-impl), and on a HIGH-confidence breakdown replaces the original task with the component tasks chained by is_blocked_by.
+description: Use when a task estimates size 3 or above, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work.
 ---
 
 # break-down-task — slice a too-large task into PR-sized components
