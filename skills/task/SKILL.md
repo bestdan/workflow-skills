@@ -37,7 +37,7 @@ auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `linear` path it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-config.md`.
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `linear` path it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (for `repo-pr`) and `commands/do-tasks.md` (for `linear`).
 
 `auto_execute_max_size` (default `2`, `repo-pr` only) size-gates **batch** auto-routing: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless); bigger ones are **reserved** (claimed but not executed, `--claim-only` semantics) for a human to resume with `/do-tasks <slug> --no-claim`. Single-task mode is never gated, and explicit `--claim-only` / `--no-claim` override it. See `commands/handlers/repo-pr-config.md`.
 
@@ -307,7 +307,7 @@ The claim is acquired in four steps:
 3. **Open the draft `task-claim` PR.**
 4. **Reconcile** — if two PRs named the same slug, the lowest PR number wins; the others `gh pr close` and bail. This deterministically closes the window where two sessions on different branches both pass the pre-claim check.
 
-**Blocked / bail.** A task that cannot be finished goes to `status: blocked` (file kept) and its draft PR is **relabeled `task-claim` → `task-blocked` and left open** — _not_ closed. The `blocked` flip lives only on the unmerged branch (`main` still shows `ready`), so closing the PR would leave no visible marker and the next scanner would re-claim the failing task in a loop. The open `task-blocked` PR keeps the block visible (with its `Consumer Notes`), and the pre-claim check treats it as a stop marker until a human resolves the block (pushes a fix or closes the PR to release it).
+**Blocked / bail.** A task that cannot be finished goes to `status: blocked` (file kept) and its draft PR is **relabeled `task-claim` → `task-blocked` and left open** — _not_ closed. The `blocked` flip lives only on the unmerged branch (`main` still shows `ready`), so closing the PR would leave no visible marker and the next scanner would re-claim the failing task in a loop. The open `task-blocked` PR keeps the block visible (with its `Consumer Notes`), and the pre-claim check treats it as a marker to skip claiming that slug until a human resolves the block (pushes a fix or closes the PR to release it).
 
 ## Remote session notes
 
