@@ -29,6 +29,15 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "note: ANTHROPIC_API_KEY not set — relying on a logged-in claude CLI." >&2
 fi
 
+# `timeout` is GNU coreutils — present on Linux/CI, but not on a stock macOS
+# (where it's `gtimeout` via `brew install coreutils`, if at all). Find whichever
+# exists; if neither does, run without a wall-clock cap rather than failing every
+# row with "command not found".
+TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
+if [[ -z "$TIMEOUT" ]]; then
+  echo "note: no timeout/gtimeout on PATH — running without a per-eval time cap." >&2
+fi
+
 pass=0
 fail=0
 failed=()
@@ -43,7 +52,7 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
   prompt="$(cat "evals/$prompt_file")"
   log="$(mktemp)"
   echo "→ ${skill}  (prompt: ${prompt_file}, max-turns: ${mt})"
-  timeout 300 claude -p "$prompt" \
+  ${TIMEOUT:+"$TIMEOUT" 300} claude -p "$prompt" \
     --plugin-dir "$ROOT" \
     --dangerously-skip-permissions \
     --max-turns "$mt" \
