@@ -1,6 +1,6 @@
 ---
 name: task
-description: Capture and process follow-up work discovered during development. Use when a user notices incidental work (stale config, tech debt, dead code, test gaps) they want to defer without losing context. Provides the task file format, creation workflow, and processing logic via remote Claude sessions.
+description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks.
 ---
 
 # Task Loop — Capture and Process Follow-Up Work
@@ -37,9 +37,9 @@ auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks` on both execute paths. On the `repo-pr` file path it caps **batch** dispatch: `/do-tasks --all` counts current work-in-flight — distinct in-flight tasks deduped by slug across open `task-claim` PRs (claimed), open `task-loop` PRs (the `needs_review` queue), and `status: in_progress` files — and dispatches at most `wip_limit - current_wip` tasks, holding the rest so the human PR-review bottleneck stays bounded (single-task dispatch is ungated). On the `linear` tracker path it is a **pre-claim gate** that declines a claim — including a single claim — when in-flight work already meets the limit. See `commands/handlers/repo-pr-config.md`.
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `linear` path it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (for `repo-pr`) and `commands/do-tasks.md` (for `linear`).
 
-`auto_execute_max_size` (default `2`, `repo-pr` only) size-gates the **batch** auto-routing for `/do-tasks --all` / `-n N`: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless), while bigger ones are **reserved** (`--claim-only` semantics — claimed but not executed) for a human to resume with `/do-tasks <slug> --no-claim`. This turns the small-vs-big triage into a policy instead of a manual sort. Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — an explicit pick is always executed in full — and explicit `--claim-only` / `--no-claim` override the gate. See `commands/handlers/repo-pr-config.md`.
+`auto_execute_max_size` (default `2`, `repo-pr` only) size-gates **batch** auto-routing: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless); bigger ones are **reserved** (claimed but not executed, `--claim-only` semantics) for a human to resume with `/do-tasks <slug> --no-claim`. Single-task mode is never gated, and explicit `--claim-only` / `--no-claim` override it. See `commands/handlers/repo-pr-config.md`.
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
@@ -78,7 +78,7 @@ Flag matrix:
 | `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable    |
 | `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only  |
 
-**Claim / execute split (`--claim-only`, `--no-claim`).** `/do-tasks` claims and executes atomically by default. These two **mutually exclusive** flags split that into composable steps so a claim now plus a `--no-claim` execute later add up to one normal run. `--claim-only` runs the claim half and stops (`repo-pr`: run the claim protocol — flip `status: ready → in_progress` and open the draft `task-claim` PR that names the slug — no file delete, no `task-loop` review PR; `linear`: run only "Claim the issue" — the atomic `auto-claimed` guard, move to the `started`-type state, record the branch name — then stop). `--no-claim` skips claiming and executes a task the caller already claimed, guarding that it is already `in_progress` (`repo-pr`, which then checks out the open `task-claim` PR's head branch to resume) or assigned to the caller in a `started` state (`linear`) — otherwise it stops, since executing an unclaimed task reopens the claim race. `--claim-only` is the one execute-family action safe to batch (`--all` / `-n N`, bounded by the WIP gate); `--no-claim` is always single. See `commands/do-tasks.md`.
+**Claim / execute split (`--claim-only`, `--no-claim`).** `/do-tasks` claims and executes atomically by default. These two **mutually exclusive** flags split that into composable steps: a `--claim-only` now plus a `--no-claim` later add up to one normal run. `--claim-only` runs only the claim half and stops (no file delete, no review PR). `--no-claim` skips claiming and executes a task the caller already claimed, guarding that it's already `in_progress` (`repo-pr`) or assigned in a `started` state (`linear`) — otherwise it stops, since executing an unclaimed task reopens the claim race. `--claim-only` is the one execute-family action safe to batch (bounded by the WIP gate); `--no-claim` is always single. Per-handler steps: `commands/do-tasks.md`.
 
 Per-handler support:
 
@@ -93,7 +93,7 @@ Per-handler support:
 
 1. Scans `dev_docs/tasks/**/*.md` for tasks in `status: ready` and filters out ones still waiting on `is_blocked_by` (a task is dependency-ready only when **every** blocker is resolved); `is_blocked_by` may be a single slug or a list (`[a, b]`).
 2. For each selected task, dispatches a remote Claude session (or runs in-session with `--local`) that:
-   - Claims the task via the **branch-name-independent claim protocol** (sets `status: in_progress`, then opens a **draft PR labeled `task-claim`** that names the slug — that open draft PR is the lock; see **Race conditions**). The claim no longer relies on being the first to push `task/<slug>`, so it works in branch-pinned environments.
+   - Claims the task via the claim protocol — the lock is an open draft PR labeled `task-claim` naming the slug (see **Race conditions** and `commands/handlers/repo-pr-execute.md`).
    - Does the work described in the Task section
    - Deletes the task file and **converts the claim PR into the review PR** — relabels it `task-claim` → `task-loop` and marks it ready (the open `task-loop` PR is the implicit `needs_review` signal; merge is the implicit `done` signal — neither is written back to the file because the file is gone by then)
 3. `--all` / `-n N` dispatch multiple dependency-ready tasks, each to its own cloud VM, bounded by `wip_limit` and then size-routed: tasks with `size <= auto_execute_max_size` (default `2`) execute, bigger ones are reserved (claimed, not executed) for a human. The executed and reserved groups are reported separately.
@@ -298,15 +298,16 @@ If a command finds a legacy `dev_docs/todos/` (task store) or `dev_docs/todo/` (
 
 ## Race conditions
 
-Each remote session gets its own isolated VM with a fresh clone. Filesystem races are impossible. The contention point is **claiming the same `ready` task twice**. The claim lock is an **open draft PR labeled `task-claim` that names the slug** (carried in the body as `Claims-task: <slug>`), queried from the GitHub API — _not_ the first push of `task/<slug>`. Full mechanics: the **Claim protocol** in `commands/handlers/repo-pr-execute.md`.
+Each remote session gets an isolated VM with a fresh clone, so filesystem races are impossible. The only contention is **claiming the same `ready` task twice**. The claim lock is an **open draft PR labeled `task-claim` that names the slug** (body carries `Claims-task: <slug>`), queried via the GitHub API — _not_ the first push of `task/<slug>`. Because the lock is the PR and not the branch name, it works even in branch-pinned environments (e.g. Claude Code on the web, which forbids pushing off its fixed `claude/<session>` branch). Full mechanics: the **Claim protocol** in `commands/handlers/repo-pr-execute.md`.
 
-The claim is acquired in four steps: **pre-claim check** (bail if an open `task-claim`, `task-loop`, **or `task-blocked`** PR already names the slug — a `task-blocked` match means the task is parked for a human, so it is never re-claimed) → **acquire** (flip `status: ready → in_progress`, push to whatever branch the environment allows) → **open the draft `task-claim` PR** → **reconcile** (if two PRs ended up naming the same slug, the lowest PR number wins; the others close and bail).
+The claim is acquired in four steps:
 
-- **Visible from a fresh clone.** The claim lives in the GitHub API (`gh pr list`), so a later scanner sees it immediately — unlike the old `status: in_progress` flip, which sat on the claimer's unmerged branch and was invisible to a fresh clone of `main`.
-- **Branch-name independent → safe in branch-pinned environments.** Claude Code on the web pins each session to a fixed `claude/<session>` branch and forbids pushing elsewhere, so such a session can never create `task/<slug>`. Because the lock is the draft PR (which can be opened from _any_ head branch) and not the branch name, two such sessions can no longer both claim the same task: the second observes the first's `task-claim` PR in the pre-claim check (or, if both share one fixed branch, GitHub rejects the second `gh pr create` — one open PR per head→base pair) and bails.
-- **Race window and its closer.** Two sessions on _different_ branches can both pass the pre-claim check concurrently and both open a draft PR. The **reconcile** step closes this window deterministically: re-query, lowest PR number wins, the rest `gh pr close` and bail. No coordination or locking service is needed.
-- **Belt-and-suspenders.** Where branches _are_ settable, `git push -u origin task/<slug>` still fails fast on a second push, an early-out before the PR steps — but it is no longer the _only_ collision point, so the loser-must-control-the-branch failure mode is gone.
-- **Blocked / bail.** A task that cannot be finished goes to `status: blocked` (file kept) and its draft PR is **relabeled `task-claim` → `task-blocked` and left open** — _not_ closed. The `blocked` flip lives only on the unmerged branch (`main` still shows `ready`), so closing the PR would leave no visible marker and the next scanner would re-claim the same failing task in a loop. The open `task-blocked` PR keeps the block visible with its `Consumer Notes`, and the pre-claim check treats a `task-blocked` PR as a block marker — it **stops and skips claiming that slug** (it does not ignore the PR) — so nothing re-claims the task until a human resolves the block (pushes a fix or closes the PR to release it).
+1. **Pre-claim check** — bail if an open `task-claim`, `task-loop`, **or `task-blocked`** PR already names the slug (a `task-blocked` match means the task is parked for a human — stop and skip, never re-claim).
+2. **Acquire** — flip `status: ready → in_progress`, push to whatever branch the environment allows.
+3. **Open the draft `task-claim` PR.**
+4. **Reconcile** — if two PRs named the same slug, the lowest PR number wins; the others `gh pr close` and bail. This deterministically closes the window where two sessions on different branches both pass the pre-claim check.
+
+**Blocked / bail.** A task that cannot be finished goes to `status: blocked` (file kept) and its draft PR is **relabeled `task-claim` → `task-blocked` and left open** — _not_ closed. The `blocked` flip lives only on the unmerged branch (`main` still shows `ready`), so closing the PR would leave no visible marker and the next scanner would re-claim the failing task in a loop. The open `task-blocked` PR keeps the block visible (with its `Consumer Notes`), and the pre-claim check treats it as a marker to skip claiming that slug until a human resolves the block (pushes a fix or closes the PR to release it).
 
 ## Remote session notes
 
