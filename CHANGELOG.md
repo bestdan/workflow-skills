@@ -4,6 +4,16 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.10.0] - 2026-06-14
+
+### Features
+
+- scope /promote-tasks to one project/epic/milestone by default (19f07c2)
+
+### Fixes
+
+- resolve pinned Linear project name for the scope report (b9f3663)
+
 ## [1.9.1] - 2026-06-11
 
 ### Fixes
