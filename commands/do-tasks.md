@@ -265,7 +265,7 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 5. **PR** — `gh pr create` with the Linear identifier in brackets in the title
    (`[PRE-12] …`) and `Closes <identifier>` on its own line in the body; post the
    PR URL as a Linear comment. **The claimed identifier is the only one that may
-   appear with a closing keyword.** Any *other* Linear id that lands in the title
+   appear with a closing keyword.** Any _other_ Linear id that lands in the title
    or body — a blocker, a sibling phase task, a "follow-up" referenced in the task
    description prose — must be written so Linear will not sweep it to `Done` on
    merge: prefix it with a non-closing magic word (`related to`, `part of`,
