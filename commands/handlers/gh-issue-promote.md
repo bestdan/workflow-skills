@@ -16,14 +16,32 @@ Run `gh auth status 2>&1`. If it fails, use the same handling as the gh-issue cr
 
 If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass it as `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the current repo, matching the create and list flows.
 
+### 2a. Resolve the milestone scope
+
+By default this flow scores a **single** milestone's issues, not the whole repo backlog (the gh analogue of `linear-promote.md` step 4 scoping to one project). The gh-issue handler has no pin key — scope is always detected, or explicitly widened with `all`. Resolve one milestone title (`<scope-milestone>`) or none, in this order:
+
+1. **`all` override.** If `$ARGUMENTS` contains `all`, set **no** `<scope-milestone>` — score the whole repo backlog. Note `scope: whole backlog (all)` in the step-6 report and skip the rest of this step.
+2. **Detect.** Else enumerate open milestones (`<repo>` is `gh-issue.repo` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`):
+
+   ```bash
+   gh api "repos/<repo>/milestones?state=open" --jq '.[] | {number, title, updated_at}'
+   ```
+
+   - **Exactly one** → use its `title` as `<scope-milestone>`. Note `scope: milestone <title>` in the report.
+   - **Multiple** → ask via `AskUserQuestion` (header `Milestone`) which one to score: offer the most recently updated milestones by `title` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `<scope-milestone>` (as in the `all` override). Otherwise use the chosen milestone's `title`.
+   - **Zero** → set **no** `<scope-milestone>`; fall back to the whole repo backlog. Note `scope: whole backlog (no milestones)` in the report.
+
+When `<scope-milestone>` is set, step 3 adds `--milestone "<scope-milestone>"` to the `gh issue list` query; when unset, no milestone filter is added.
+
 ### 3. Query candidates
 
 ```bash
-gh issue list --state open --search "-label:auto-eligible -label:human-approval-requested" --limit 50 --json number,title,body,labels [--repo <repo>]
+gh issue list --state open --search "-label:auto-eligible -label:human-approval-requested" --limit 50 --json number,title,body,labels [--milestone "<scope-milestone>"] [--repo <repo>]
 ```
 
 - `--state open` only — closed issues are `done` and are never scored.
 - The `--search` filter excludes issues that already carry `auto-eligible` or `human-approval-requested` **at query time** — mirroring how `linear-promote.md` reads candidates only from the `backlog` state — so the 50-item window isn't consumed by already-scored issues. (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
+- `--milestone "<scope-milestone>"` only when step 2a resolved a milestone scope; omit it on an `all`/no-milestone run.
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note possible truncation in the report; do not paginate.
 
 Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
@@ -48,7 +66,7 @@ As on the file path, the scope gate is **model judgment, not a deterministic rul
 
 ### 5. Apply
 
-If `$ARGUMENTS` is `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `gh issue edit`/`gh issue comment`.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `gh issue edit`/`gh issue comment`.
 
 Otherwise, for each scored candidate:
 
@@ -71,9 +89,10 @@ Create the label first if `gh issue edit` errors on a missing label (`gh label c
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`) so it's clear what the run covered:
 
 ```
+scope: milestone v2.0
 Promoted 4 of 6 candidates:
   ready (3):
     - #142  Fix broken import

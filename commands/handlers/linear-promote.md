@@ -23,9 +23,18 @@ Call `<linear-mcp>__list_workflow_states` with `teamId`. Cache the state-id → 
 
 Call `<linear-mcp>__list_issue_labels` with `teamId`. Capture the ids for `auto-eligible` and `human-approval-requested`. If either label does not exist, create it via `<linear-mcp>__create_issue_label` (`teamId`, `name`, a recognizable color — e.g. `auto-eligible` → `#26B5CE`, `human-approval-requested` → `#F2994A`) and capture the new id. Mirrors how `linear-claim.md` resolves `auto-claimed` on demand.
 
-### 4. Project filter
+### 4. Resolve the project scope
 
-If `linear.default_project` is set (non-empty), pass it as `projectId`. Otherwise omit — score across all of the team's backlog.
+By default the promoter scores a **single** project, not the whole team backlog. Resolve one `projectId` (or, when explicitly widened, none) in this order:
+
+1. **`all` override.** If `$ARGUMENTS` contains `all`, set **no** `projectId` — score the whole team backlog. Note `scope: whole backlog (all)` in the step-8 report and skip the rest of this step.
+2. **Pinned.** Else if `linear.default_project` is set (non-empty), use it as `projectId`.
+3. **Detect.** Else call `<linear-mcp>__list_projects` with `teamId` and `includeArchived: false`, and consider the **active** projects (state is not `completed`/`canceled`):
+   - **Exactly one** → use its `id` as `projectId`. Note `scope: project <name>` in the report.
+   - **Multiple** → ask via `AskUserQuestion` (header `Project`) which one to score: offer the most recently updated projects (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `projectId` (as in the `all` override). Otherwise use the chosen project's `id`.
+   - **Zero** → set **no** `projectId`; fall back to the whole team backlog. Note `scope: whole backlog (no projects)` in the report.
+
+The resolved `projectId` (or its absence) feeds **both** the candidate query and the parent-rollup cross-state sweep in step 5.
 
 ### 5. Query candidates
 
@@ -62,7 +71,7 @@ As on the file path, this scope gate is **model judgment, not a deterministic ru
 
 ### 7. Apply
 
-If `$ARGUMENTS` is `dry-run`, print the proposed transitions (per the report shape below) and exit **without** calling `save_issue`.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** calling `save_issue`.
 
 Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`:
 
@@ -73,9 +82,10 @@ Never move an issue to a `completed`- or `canceled`-type state, and never touch 
 
 ### 8. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: whole backlog (all)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
 
 ```
+scope: project Payments revamp
 Promoted 4 of 6 candidates:
   ready (3):
     - PRE-12  Fix broken import

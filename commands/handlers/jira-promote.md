@@ -18,23 +18,37 @@ Run the Atlassian MCP preflight exactly as `commands/handlers/jira.md` step 1: c
 
 ### 2. Resolve config (optional keys)
 
-Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (as the create flow does), plus the two promote keys and the optional blocked-status list:
+Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (as the create flow does), plus the two promote keys, the optional blocked-status list, and the optional epic pin:
 
 - `jira.ready_status` — the HIGH transition target.
 - `jira.refinement_status` — the LOW transition target.
 - `jira.blocked_statuses` — optional list of status names that mean "blocked" on this board (e.g. `["Blocked", "On Hold/Blocked"]`); excluded from the step-3 candidate set. Omit or leave empty if the board has none.
+- `jira.default_epic` — optional epic key (`jira-config.md` step 5). When set, it pins the **scope** of this run (step 2a) the way `linear.default_project` does on the Linear path; the create flow uses the same key to skip the per-task epic prompt.
 
 Both keys are **optional**. Classify the run:
 
 - **Configured path** — both `ready_status` and `refinement_status` are set/non-empty. Use them as the target status names; step 3 includes both `status !=` filters and step 3a is skipped.
 - **Prompt-when-unset path** — either key is unset/empty. Do **not** stop and do **not** guess a status name. Defer resolution to **step 3a**, which resolves the project's reachable statuses dynamically and prompts the user. For the step-3 query, omit the `status !=` clause for whichever key is still unset (you cannot filter on a value you do not yet have); the unset key(s) are filled in by step 3a before any transition is applied.
 
+### 2a. Resolve the epic scope
+
+By default this flow scores a **single** epic's children, not the whole project backlog (the Jira analogue of `linear-promote.md` step 4 scoping to one project). Resolve one epic key (`<scope-epic>`) or, when explicitly widened, none — in this order:
+
+1. **`all` override.** If `$ARGUMENTS` contains `all`, set **no** `<scope-epic>` — score the whole project backlog. Note `scope: whole backlog (all)` in the step-6 report and skip the rest of this step.
+2. **Pinned.** Else if `jira.default_epic` is set (non-empty), use it as `<scope-epic>`.
+3. **Detect.** Else enumerate open epics — call `<atlassian-mcp>__searchJiraIssuesUsingJql` with `cloudId: <jira.site>`, `jql: project = "<project>" AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC`, `fields: ["summary"]`, `maxResults: 50` (the same query `jira-config.md` step 5 uses):
+   - **Exactly one** → use its `key` as `<scope-epic>`. Note `scope: epic <KEY>` in the report.
+   - **Multiple** → ask via `AskUserQuestion` (header `Epic`) which epic to score: offer the most recently updated epics labeled `<KEY> — <summary>` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `<scope-epic>` (as in the `all` override). Otherwise use the chosen epic's `key`.
+   - **Zero** → set **no** `<scope-epic>`; fall back to the whole project backlog. Note `scope: whole backlog (no epics)` in the report.
+
+When `<scope-epic>` is set, step 3 adds `AND parent = "<scope-epic>"` to the candidate JQL — on modern Jira Cloud the unified `parent` field links an epic to its children (the same field the PRE-129 parent-rollup note uses). When unset, no `parent` clause is added.
+
 ### 3. Query candidates
 
 Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
 
 - `cloudId`: `<jira.site>`
-- `jql`: `project = "<project>" AND statusCategory = "To Do" AND Flagged IS EMPTY`, plus an `AND status != "<status>"` clause for **each promote key that is set** (both clauses on the configured path; only the set key — or neither — on the prompt-when-unset path), plus an `AND status NOT IN ("<blocked-status>", …)` clause when `jira.blocked_statuses` is non-empty, then `ORDER BY created ASC`
+- `jql`: `project = "<project>" AND statusCategory = "To Do" AND Flagged IS EMPTY`, plus an `AND parent = "<scope-epic>"` clause when step 2a resolved an epic scope (omit it on an `all`/no-epic run), plus an `AND status != "<status>"` clause for **each promote key that is set** (both clauses on the configured path; only the set key — or neither — on the prompt-when-unset path), plus an `AND status NOT IN ("<blocked-status>", …)` clause when `jira.blocked_statuses` is non-empty, then `ORDER BY created ASC`
 - `fields`: `["summary", "status", "priority", "labels", "description"]`
 - `maxResults`: 50
 
@@ -97,7 +111,7 @@ As on the file path, the scope gate is **model judgment, not a deterministic rul
 
 ### 5. Apply
 
-If `$ARGUMENTS` is `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `transitionJiraIssue`/`addCommentToJiraIssue` call.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `transitionJiraIssue`/`addCommentToJiraIssue` call.
 
 Otherwise, for each scored candidate, first **resolve the target status name to a transition id** — `transitionJiraIssue` accepts a transition **id** (`transition: { id: "<id>" }`), not a status name:
 
@@ -140,9 +154,10 @@ The configured value names the **target status**; the transition id is resolved 
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue key:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue key. Lead with the resolved scope from step 2a (`scope: epic <KEY>` / `scope: whole backlog (all)` / `scope: whole backlog (no epics)`) so it's clear what the run covered:
 
 ```
+scope: epic PLAT-100
 Promoted 4 of 6 candidates:
   ready (3):
     - PLAT-142  Fix broken import
