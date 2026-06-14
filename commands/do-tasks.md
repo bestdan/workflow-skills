@@ -264,7 +264,16 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    tests/lints (`just check` here).
 5. **PR** — `gh pr create` with the Linear identifier in brackets in the title
    (`[PRE-12] …`) and `Closes <identifier>` on its own line in the body; post the
-   PR URL as a Linear comment.
+   PR URL as a Linear comment. **Close only issues this PR actually finishes, each
+   as its own `Closes <identifier>` line** (more than one is fine when the PR
+   genuinely completes several — one clearly-marked `Closes` per line). Any _other_
+   Linear id that lands in the title or body — a blocker, a sibling phase task, a
+   "follow-up" referenced in the task description prose — must be written so Linear
+   will not sweep it to `Done` on merge: prefix it with a non-closing magic word
+   (`related to`, `part of`, `towards`). A **bare** identifier — or a bare Linear
+   URL, which embeds one — is treated as a closing link and the sibling issue gets
+   auto-completed even though this PR did not do its work. See `linear-claim.md`
+   "PR body magic words".
 6. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
    PR via `links` and move to `In Review` if the team has one. **Never move the
    issue to a `completed`/`canceled` state** — merge is the only completion signal,

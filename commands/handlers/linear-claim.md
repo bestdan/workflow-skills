@@ -6,6 +6,15 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 > **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Merge is the only completion signal, and Linear's GitHub integration handles that automatically when the PR (with `Closes <identifier>` in its body) merges. If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
 
+## PR body magic words
+
+Linear's GitHub integration scans the **whole** PR title and body for issue ids, not just the `Closes` line. On merge it moves every id referenced with a **closing** magic word to the team's `completed` state.
+
+- **Closing** (auto-completes on merge): `close`, `closes`, `closed`, `closing`, `fix`, `fixes`, `fixed`, `fixing`, `resolve`, `resolves`, `resolved`, `resolving`, `complete`, `completes`, `completed`, `completing`, `implement`, `implements`, `implemented`, `implementing`.
+- **Non-closing / contributing** (links only, **no** status change on merge): `ref`, `refs`, `references`, `part of`, `related to`, `contributes to`, `toward`, `towards`.
+
+**Rule when composing the PR body:** close only the issues this PR actually finishes, and mark each one **explicitly** — `Closes <identifier>` on **its own line**, one per line. A PR may legitimately close more than one issue (`Closes <TEAM>-12` / `Closes <TEAM>-13` on separate lines); that is fine as long as each closing line is clear and each named issue was truly completed. The danger is never an explicit `Closes`; it is an id that gets **inferred** as a closing link. So: every Linear id that appears anywhere in the **title or body** must carry an explicit magic word — a closing one (`Closes …`) for an issue this PR completes, or a non-closing one (`related to …`, `part of …`) for a blocker / sibling / follow-up it merely references (these may also repeat, one clearly-marked reference per line). A bare `<TEAM>-NNN` token is the bug: in practice Linear treats it as a closing link and auto-completes that sibling on merge, even though the PR did none of its work. **Do not** rely on a bare Linear URL as the escape hatch either — the URL embeds the raw id (`…/issue/<TEAM>-NNN/…`), so it carries the same auto-close risk; only a non-closing magic word is verified to prevent it. This is exactly how an unrelated issue gets silently closed — guard against it every time an id appears that this PR did not finish.
+
 ## Find candidates
 
 1. **Preflight.** Run the shared preflight from `linear-common.md` (call `list_teams`, match `<linear.team>`, capture team `id`). Same failure messages.
