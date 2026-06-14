@@ -6,6 +6,15 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 > **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Merge is the only completion signal, and Linear's GitHub integration handles that automatically when the PR (with `Closes <identifier>` in its body) merges. If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
 
+## PR body magic words
+
+Linear's GitHub integration scans the **whole** PR title and body for issue ids, not just the `Closes` line. On merge it moves every id referenced with a **closing** magic word to the team's `completed` state.
+
+- **Closing** (auto-completes on merge): `close`, `closes`, `closed`, `closing`, `fix(es/ed/ing)`, `resolve(s/d)`, `resolving`, `complete(s/d)`, `completing`, `implement(s/ed)`, `implementing`.
+- **Non-closing / contributing** (links only, **no** status change on merge): `ref`, `refs`, `references`, `part of`, `related to`, `contributes to`, `toward`, `towards`.
+
+**Rule when composing the PR body:** exactly one closing reference — `Closes <claimed-identifier>` — for the issue this PR actually finishes. Every *other* Linear id that appears (a blocker, a sibling phase task, a follow-up named in the task description) **must** carry a non-closing magic word or be written as a full URL. A bare `PRE-NNN` token is the bug: in practice Linear treats it as a closing link and auto-completes that sibling on merge, even though the PR did none of its work. This is exactly how an unrelated issue gets silently closed — guard against it every time the body mentions more than the claimed id.
+
 ## Find candidates
 
 1. **Preflight.** Run the shared preflight from `linear-common.md` (call `list_teams`, match `<linear.team>`, capture team `id`). Same failure messages.
