@@ -10,10 +10,10 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 Linear's GitHub integration scans the **whole** PR title and body for issue ids, not just the `Closes` line. On merge it moves every id referenced with a **closing** magic word to the team's `completed` state.
 
-- **Closing** (auto-completes on merge): `close`, `closes`, `closed`, `closing`, `fix(es/ed/ing)`, `resolve(s/d)`, `resolving`, `complete(s/d)`, `completing`, `implement(s/ed)`, `implementing`.
+- **Closing** (auto-completes on merge): `close`, `closes`, `closed`, `closing`, `fix`, `fixes`, `fixed`, `fixing`, `resolve`, `resolves`, `resolved`, `resolving`, `complete`, `completes`, `completed`, `completing`, `implement`, `implements`, `implemented`, `implementing`.
 - **Non-closing / contributing** (links only, **no** status change on merge): `ref`, `refs`, `references`, `part of`, `related to`, `contributes to`, `toward`, `towards`.
 
-**Rule when composing the PR body:** exactly one closing reference — `Closes <claimed-identifier>` — for the issue this PR actually finishes. Every *other* Linear id that appears (a blocker, a sibling phase task, a follow-up named in the task description) **must** carry a non-closing magic word or be written as a full URL. A bare `PRE-NNN` token is the bug: in practice Linear treats it as a closing link and auto-completes that sibling on merge, even though the PR did none of its work. This is exactly how an unrelated issue gets silently closed — guard against it every time the body mentions more than the claimed id.
+**Rule when composing the PR body:** exactly one closing reference — `Closes <claimed-identifier>` — for the issue this PR actually finishes. Every *other* Linear id that appears anywhere in the **title or body** (a blocker, a sibling phase task, a follow-up named in the task description) **must** carry a non-closing magic word from the list above — e.g. `related to <TEAM>-NNN`. A bare `<TEAM>-NNN` token is the bug: in practice Linear treats it as a closing link and auto-completes that sibling on merge, even though the PR did none of its work. **Do not** rely on a bare Linear URL as the escape hatch either — the URL embeds the raw id (`…/issue/<TEAM>-NNN/…`), so it carries the same auto-close risk; only a non-closing magic word is verified to prevent it. This is exactly how an unrelated issue gets silently closed — guard against it every time the PR mentions more than the claimed id.
 
 ## Find candidates
 
