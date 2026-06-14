@@ -28,10 +28,10 @@ Call `<linear-mcp>__list_issue_labels` with `teamId`. Capture the ids for `auto-
 By default the promoter scores a **single** project, not the whole team backlog. Resolve one `projectId` (or, when explicitly widened, none) in this order:
 
 1. **`all` override.** If `$ARGUMENTS` contains `all`, set **no** `projectId` — score the whole team backlog. Note `scope: whole backlog (all)` in the step-8 report and skip the rest of this step.
-2. **Pinned.** Else if `linear.default_project` is set (non-empty), use it as `projectId`.
+2. **Pinned.** Else if `linear.default_project` is set (non-empty), use it as `projectId`. `default_project` is a UUID, but the step-8 report prints `scope: project <name>` — so resolve its name via `<linear-mcp>__list_projects` (match the id), falling back to the id in the report if no match. Honor the pin even if the project is archived/completed (it's a deliberate choice; an empty result is reported honestly).
 3. **Detect.** Else call `<linear-mcp>__list_projects` with `teamId` and `includeArchived: false`, and consider the **active** projects (state is not `completed`/`canceled`):
    - **Exactly one** → use its `id` as `projectId`. Note `scope: project <name>` in the report.
-   - **Multiple** → ask via `AskUserQuestion` (header `Project`) which one to score: offer the most recently updated projects (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `projectId` (as in the `all` override). Otherwise use the chosen project's `id`.
+   - **Multiple** → ask via `AskUserQuestion` (header `Project`) which one to score: offer the most recently updated projects labeled by `name` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `projectId` (as in the `all` override). Otherwise use the chosen project's `id` and capture its `name` for the report.
    - **Zero** → set **no** `projectId`; fall back to the whole team backlog. Note `scope: whole backlog (no projects)` in the report.
 
 The resolved `projectId` (or its absence) feeds **both** the candidate query and the parent-rollup cross-state sweep in step 5.
