@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.10.1] - 2026-06-14
+
+### Fixes
+
+- prevent bare sibling issue IDs in PR bodies from auto-closing unrelated tasks (cc0e50d)
+
 ## [1.10.0] - 2026-06-14
 
 ### Features
