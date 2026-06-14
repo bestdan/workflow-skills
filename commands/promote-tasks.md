@@ -1,7 +1,7 @@
 ---
 description: Score new tasks against the confidence check and promote them to ready or needs_refinement
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
-argument-hint: "[filter: dry-run|apply] (default apply)"
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
+argument-hint: "[dry-run] [all] (default: apply, scoped to one project/epic/milestone)"
 ---
 
 # Promote Tasks
@@ -9,6 +9,13 @@ argument-hint: "[filter: dry-run|apply] (default apply)"
 Scan `dev_docs/tasks/**/*.md` for tasks in `status: new`, score each against the confidence check, and flip status accordingly. This is the auto-promotion stage of the kanban flow — it never touches tasks past `new`. Humans own demotions from `ready`.
 
 When the configured handler is an external tracker, the same scoring runs against the tracker's backlog instead of files (see step 0).
+
+> **Arguments.** `$ARGUMENTS` is a set of independent, combinable tokens (order-insensitive):
+>
+> - `dry-run` — print proposed transitions and exit without writing.
+> - `all` — on a tracker handler, score the **whole** team/project/repo backlog instead of narrowing to a single project/epic/milestone (see each tracker handler's project-filter step). No effect on the file-based `repo-pr` path, which has no sub-project scope.
+>
+> Test each token with a "contains" check (e.g. `$ARGUMENTS` contains `dry-run`), not equality — `/promote-tasks dry-run all` enables both.
 
 > **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
 
@@ -24,15 +31,15 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 1 below (file-based path).
 - `handler: repo-pr` → continue to step 1 below (file-based path).
-- `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-promote.md` (the promote flow), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the tracker-specific scoring and transitions. Skip steps 1–4 of this file.
+- `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-promote.md` (the promote flow), passing `$ARGUMENTS` (the optional `dry-run` and `all` tokens) through. The handler owns the tracker-specific scoring and transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/linear-*.md`) and Read the result.
 
-- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
+- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run` and `all` tokens) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/gh-issue-promote.md`) and Read the result.
 
-- `handler: jira` → **dispatch to the jira handler.** Read `commands/handlers/jira-promote.md` (the promote flow; it cites `commands/handlers/jira.md` step 1 for the shared Atlassian MCP preflight and `commands/handlers/jira-config.md` for the optional `ready_status`/`refinement_status` config keys it uses — prompting for them when unset), passing `$ARGUMENTS` (the optional `dry-run` filter) through. The handler owns the jira scoring and status transitions. Skip steps 1–4 of this file.
+- `handler: jira` → **dispatch to the jira handler.** Read `commands/handlers/jira-promote.md` (the promote flow; it cites `commands/handlers/jira.md` step 1 for the shared Atlassian MCP preflight and `commands/handlers/jira-config.md` for the optional `ready_status`/`refinement_status` config keys it uses — prompting for them when unset), passing `$ARGUMENTS` (the optional `dry-run` and `all` tokens) through. The handler owns the jira scoring and status transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/jira-promote.md`) and Read the result.
 
@@ -69,7 +76,7 @@ Note: `is_blocked_by` is intentionally not part of the promotion check — `/do-
 
 ### 3. Apply
 
-If `$ARGUMENTS` is `dry-run`, print the proposed transitions and exit without writing.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions and exit without writing. (`all` has no effect on this file path — there is no sub-project scope to widen.)
 
 Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter in place:
 

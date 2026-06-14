@@ -23,8 +23,9 @@ linear:
   team: PreThink # required — team name (as shown in Linear) or team id/UUID.
   # The team key (e.g. PRE) is not accepted because `list_teams`
   # does not return it.
-  default_project: null # optional; skips the project prompt in /add-task
-  # (explicit project id/UUID, not a name).
+  default_project: null # optional; skips the project prompt in /add-task, and
+  # pins /promote-tasks to this project's backlog (else it detects one — see
+  # linear-promote.md step 4). Explicit project id/UUID, not a name.
   default_priority: 3 # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3).
   max_estimate: 3 # optional, used by /do-tasks (tracker path) — exclusive upper bound on
   # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task

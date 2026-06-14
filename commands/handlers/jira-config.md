@@ -29,7 +29,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 
 4. **Ask for `issue_type`** via `AskUserQuestion` (header: "Issue type") with options `Task` (recommended, first), `Story`, `Bug`. Use "Other" for anything else. Default is `Task` if the user skips.
 
-5. **Resolve `default_epic` against real epics — do not accept free-text.** This field is optional but, when set, must be a valid epic key in the chosen project (otherwise it silently breaks `/add-task`, which uses it to skip the per-task epic prompt).
+5. **Resolve `default_epic` against real epics — do not accept free-text.** This field is optional but, when set, must be a valid epic key in the chosen project (otherwise it silently breaks `/add-task`, which uses it to skip the per-task epic prompt). When set it also **pins** `/promote-tasks` to that epic's children; when unset the promote flow detects one open epic to scope to (`jira-promote.md` step 2a).
 
    Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<site>`
