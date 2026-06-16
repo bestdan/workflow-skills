@@ -6,7 +6,9 @@ argument-hint: [repo-pr | gh-issue | jira | linear]
 
 # Task Config
 
-Set up the destination handler for `/add-task` in this repo. Writes `dev_docs/tasks/.task-config.yml`, which `/add-task` reads to decide where a captured task lands. The file is **repo-committed and shared by the team** — everyone in the repo files to the same destination.
+Set up the destination handler for `/add-task` in this repo. Writes `dev_docs/tasks/.task-config.yml`, which `/add-task` reads to decide where a captured task lands. For every handler **except `repo-pr`**, treat this as **local** config: the setup step below adds `dev_docs/tasks/` to the repo's local git exclude (`.git/info/exclude`) so it stays out of `git status` and accidental commits, and each person configures their own destination.
+
+> **Why `repo-pr` is excepted.** The `repo-pr` handler commits task markdown into `dev_docs/tasks/` (via `git add dev_docs/tasks/<slug>.md`) — that's how the loop shares work. Adding `dev_docs/tasks/` to the local exclude would make `git add` of a new task file fail without `-f`, so the setup step **skips the exclude entirely when the handler is `repo-pr`** and the config is meant to be committed and shared. The exclude applies only to the external-tracker handlers (`gh-issue`, `jira`, `linear`), where nothing under `dev_docs/tasks/` is committed.
 
 This command is a thin dispatcher. The per-handler setup logic (preflight checks, prompts, config block shape) lives in `commands/handlers/<handler>-config.md`. The runtime delivery logic for each handler lives in `commands/handlers/<handler>.md`.
 
@@ -65,6 +67,13 @@ Ensure the directory exists and write the file:
 mkdir -p "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
 
+Then, **unless the chosen handler is `repo-pr`**, keep the directory out of git by adding it to the repo's local exclude (`.git/info/exclude` is per-clone and never committed). The `git check-ignore` guard makes this idempotent — safe to re-run without duplicating the entry. **For `repo-pr`, do not run this** — it commits task files under `dev_docs/tasks/` (see the note at the top):
+
+```bash
+# skip for repo-pr
+git check-ignore -q dev_docs/tasks/ || echo 'dev_docs/tasks/' >> "$(git rev-parse --git-dir)/info/exclude"
+```
+
 Write the config block returned by the per-handler file to `dev_docs/tasks/.task-config.yml`. Examples of the shape each handler returns:
 
 ```yaml
@@ -113,5 +122,6 @@ Tell the user:
   - `jira`: "`jira` supports: /add-task, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set). Not supported: /list-tasks, batch /do-tasks --all. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
-- That the file is repo-committed and shared — they should **commit it** so teammates pick up the same destination.
+- **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
+- **For `gh-issue` / `jira` / `linear`:** that `dev_docs/tasks/` was added to the repo's local git exclude, so the config stays local and out of `git status` (rerun the guarded `git check-ignore … || echo …` command above on any other clone). If they instead want teammates to share this destination, they can **commit** `.task-config.yml` rather than excluding it.
 - They can now run `/add-task`, or re-run `/task-config` to switch handlers.

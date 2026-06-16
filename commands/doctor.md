@@ -154,6 +154,17 @@ rules from `scripts/validate.py` and applying them yourself.
   suggest manual cleanup; never auto-delete, even under `--fix`. Skip this bullet if
   `gh` is unavailable.
 
+- **Config not excluded** (non-`repo-pr` handlers only) — for `gh-issue` / `jira` /
+  `linear`, `dev_docs/tasks/.task-config.yml` is local config and belongs in the repo's
+  local git exclude. If the file exists but `dev_docs/tasks/` is not listed in
+  `.git/info/exclude` (`git check-ignore -q dev_docs/tasks/.task-config.yml` exits
+  non-zero), flag it: `WARN`, fixable under `--fix` by appending `dev_docs/tasks/` to
+  `$(git rev-parse --git-dir)/info/exclude`. **Skip the flag when the config is already
+  tracked/committed** (`git ls-files --error-unmatch dev_docs/tasks/.task-config.yml`
+  succeeds — the team chose to share it; excluding a tracked file is a no-op).
+  **Skip entirely for `repo-pr`**, which commits task files under `dev_docs/tasks/` and
+  must not exclude them — see the `repo-pr` caveat in `commands/task-config.md`.
+
 Nothing found → `PASS`.
 
 ### 3. Report (and fix under `--fix`)
@@ -184,6 +195,9 @@ with each fixed check marked `FIXED`:
 - **Hygiene → expired tasks** → these are non-terminal cards past `expires`; prune
   them (`git rm`) per the lifecycle. Confirm the list with `AskUserQuestion` before
   deleting if there are more than a handful, since a stale `expires` can hide live work.
+- **Hygiene → config not excluded** → append `dev_docs/tasks/` to
+  `$(git rev-parse --git-dir)/info/exclude` (skip for `repo-pr`, or if the config is
+  tracked, per the check above).
 
 Leave every `WARN` (unknown handler, failing auth/MCP, orphan branches) untouched
 and still reported — those need a human. Do **not** stage or commit; the next git
