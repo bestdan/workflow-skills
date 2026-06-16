@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.10.2] - 2026-06-16
+
+### Fixes
+
+- skip dev_docs/tasks/ exclude for repo-pr handler (5facd65)
+- make exclude appends idempotent and pass CI (8899bae)
+
 ## [1.10.1] - 2026-06-14
 
 ### Fixes
