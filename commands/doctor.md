@@ -158,11 +158,12 @@ rules from `scripts/validate.py` and applying them yourself.
   belongs in the repo's local git exclude. If the file exists but `dev_docs/tasks/`
   is not listed in `.git/info/exclude` (`git check-ignore -q dev_docs/tasks/.task-config.yml`
   exits non-zero), flag it: `WARN`, fixable under `--fix` by appending
-  `dev_docs/tasks/` to `$(git rev-parse --git-dir)/info/exclude`. **Skip this for
-  `repo-pr` if the file is already tracked/committed** (the team chose to share the
-  destination — `git ls-files --error-unmatch dev_docs/tasks/.task-config.yml`
-  succeeds); excluding a tracked file is pointless and excluding the dir would block
-  `git add` of new task files. See the `repo-pr` caveat in `commands/task-config.md`.
+  `dev_docs/tasks/` to `$(git rev-parse --git-dir)/info/exclude`. **Skip this for any
+  handler when the config file is already tracked/committed** (the team chose to share
+  the destination — `git ls-files --error-unmatch dev_docs/tasks/.task-config.yml`
+  succeeds): excluding a tracked file is a no-op. For `repo-pr` specifically, also note
+  that excluding the dir would block `git add` of new task files — see the `repo-pr`
+  caveat in `commands/task-config.md`.
 
 Nothing found → `PASS`.
 
