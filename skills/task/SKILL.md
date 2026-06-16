@@ -26,7 +26,7 @@ Capture is destination-agnostic; only the handler decides where the task lands.
 
 ### Handlers and config
 
-The delivery destination is a **handler** named in a repo-committed config file, `dev_docs/tasks/.task-config.yml`:
+The delivery destination is a **handler** named in a local config file, `dev_docs/tasks/.task-config.yml` (added to the repo's local git exclude by `/task-config`; see that command for the `repo-pr` caveat):
 
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
