@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.10.3] - 2026-06-19
+
+### Fixes
+
+- retire gemini as a built-in reviewer (2ac0359)
+
 ## [1.10.2] - 2026-06-16
 
 ### Fixes
