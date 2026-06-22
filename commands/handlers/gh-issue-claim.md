@@ -72,11 +72,11 @@ nothing and report the WIP-limit decline).
 ## Find candidates
 
 ```bash
-gh issue list --state open --search "label:auto-eligible no:assignee" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
+gh issue list --state open --search "label:auto-eligible no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
 ```
 
-- `label:auto-eligible` selects promoted, ready issues; `no:assignee` skips anything already claimed. (Both ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.)
-- From the result, drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` (a defensive filter — `no:assignee` already excludes most claimed work).
+- `label:auto-eligible` selects promoted, ready issues; `no:assignee` skips anything already claimed; `-label:auto-claimed -label:human-approval-requested -label:blocked` excludes already-claimed, unrefined, or blocked issues. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.
+- As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through — these receive no claim action.
 - **Rank** by a `priority:<urgent|high|medium|low>` label if present (urgent → high → medium → low, none last), then by issue age (oldest `createdAt` first — let aging issues bubble up).
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
