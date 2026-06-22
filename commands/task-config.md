@@ -24,10 +24,13 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | do — single (`/do-tasks`)           | yes       | yes        | yes    | yes      |
 | process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
+| reoptimize (`/reoptimize-tasks`)    | no        | report     | yes    | yes      |
 
 `repo-pr` is the only full-loop handler. `jira`, `gh-issue`, and `linear` all add list, promote, and single `do` (but not batch process). Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 **Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
+
+`reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files: `linear` and `jira` apply the approved fixes natively (relation edits, priority, duplicates), `gh-issue` is **report-only** because GitHub Issues have no native dependency edge, and `repo-pr` is `no` here because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
 
 `/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear`, `gh-issue`, and `jira` it claims and executes one issue in the current session.
 
