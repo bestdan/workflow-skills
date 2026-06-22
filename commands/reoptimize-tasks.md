@@ -1,5 +1,5 @@
 ---
-description: Re-optimize an existing tracker backlog — across a project, initiative, or team — by reconciling prose dependencies against native relations, surfacing hidden cross-project blockers, detecting cycles/stale links/priority inversions and overlap, then applying the approved fixes. Linear is fully supported; jira is mirrored; gh-issue and repo-pr are report-only.
+description: Re-optimize an existing tracker backlog — across a project, initiative, or team — by reconciling prose dependencies against native relations, surfacing hidden cross-project blockers, detecting cycles/stale links/priority inversions and overlap, then applying the approved fixes. v1 supports the linear handler only; jira and gh-issue are planned; repo-pr is unsupported (re-optimize the plan files directly).
 allowed-tools: Bash(git *), Bash(cat *), Glob, Read, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_initiatives, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_initiatives, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
 argument-hint: "[project|initiative|team] [name]"
 ---
@@ -17,9 +17,11 @@ rather than native relations.
 It is **propose-then-apply**: every analysis is read-only, the findings are
 presented for review, and nothing is mutated until you approve it per group.
 
-This command is a thin dispatcher. The real analysis + apply logic lives in
-`commands/handlers/<handler>-reoptimize.md`; the Linear handler is the reference
-implementation.
+This command is a thin dispatcher. **v1 implements the `linear` handler only** —
+its analysis + apply logic lives in `commands/handlers/linear-reoptimize.md`.
+`jira` and `gh-issue` re-optimize are planned follow-ups (see the capability
+matrix in `commands/task-config.md`); until they land, those handlers stop with
+a "planned" message rather than running a half-wired flow.
 
 ## 1. Resolve the handler
 
@@ -32,16 +34,12 @@ Dispatch on the `handler:` key (same resolution as `/push-plan` §1):
 - `handler: linear` → follow `commands/handlers/linear-reoptimize.md` (§Linear
   below names the steps; that file has the detail). If the relative path doesn't
   resolve, find it with **Glob** (`**/commands/handlers/linear-reoptimize.md`).
-- `handler: jira` → **mirror** the Linear flow with two differences: read native
-  links via `getJiraIssue`/JQL and apply blocker fixes as native `Blocks` links
-  (`createIssueLink`, the second-pass pattern from push-plan §5b.5). Priority and
-  duplicate edits use `editJiraIssue`. Everything analytical (§Analysis) is
-  identical — only the read/write tool surface differs.
-- `handler: gh-issue` → **report-only.** GitHub Issues have no native dependency
-  edge, so the dependency findings (Dimensions 1–2) are surfaced as a report and
-  a suggested `Blocked by: #<n>` body footer only; do not claim to have created
-  links. Priority/label-style fixes can still be applied if the user approves.
-  State this downgrade in the report, exactly as push-plan does.
+- `handler: jira` or `handler: gh-issue` → **planned, not yet implemented.**
+  **stop** with: "`/reoptimize-tasks` supports the `linear` handler in v1;
+  `<handler>` re-optimize is a planned follow-up. For now, re-order in your
+  tracker directly." (When these land they'll each get a `commands/handlers/<handler>-reoptimize.md`
+  reference and the tool surface — Atlassian MCP for jira, `gh` CLI for gh-issue —
+  in this command's `allowed-tools`, mirroring `push-plan.md`.)
 - `handler: repo-pr`, no `handler:` key, or file absent → **stop** with:
   `repo-pr handler: tasks live as local plan files, not a tracker graph — re-optimize the plan directly, or /push-plan first to get a tracker to re-optimize.`
 - Any other value → **stop** with: "Unknown task handler `<value>` in
@@ -76,7 +74,7 @@ Print the findings grouped by dimension, each with the **evidence quoted** (the
 prose phrase or `<issue>` mention, the conflicting native relation, the inverted
 priorities) and the **proposed mutation**. Mark inferred/semantic findings as
 **lower-confidence** so the user vets them. Include the recommended topological
-execution order and any handler downgrade note (gh-issue/jira).
+execution order.
 
 ## 5. Apply (gated)
 

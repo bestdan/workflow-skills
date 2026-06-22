@@ -23,7 +23,9 @@ the exact `save_issue` fields documented in `linear-add.md` step 4.
    `includeRelations: true` to get the full `description` plus native
    `blocks` / `blockedBy` / `relatedTo` / `duplicateOf`. Do this for `Done` and
    `Canceled` issues too — a stale or never-satisfiable edge is only visible from
-   the terminal side, and skipping them is the most common blind spot.
+   the terminal side, and skipping them is the most common blind spot. This is
+   one `get_issue` per issue; for a very large scope (a whole team with many
+   issues), confirm with the user before fanning out.
 4. **Build the graph.** Nodes carry `{id, title, projectId, priority, estimate,
    statusType, description, relations}`. Edges come from native `blockedBy`.
    Keep terminal nodes in the graph for Dimension 1; **exclude** them from the
@@ -49,8 +51,10 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
   - dependency phrases: `unblocks`, `blocked on`, `blocked by`, `relies on`,
     `depends on`, `requires`, `with X in place`, `re-scoped per`, `part of … plan`.
 
-  For each referenced issue **not already covered by a native relation**, propose
-  the missing link, classified by phrasing strength:
+  For each referenced issue — **excluding the issue's own id**, so a body that
+  restates its own identifier never yields a self-block — **not already covered
+  by a native relation**, propose the missing link, classified by phrasing
+  strength:
   - strong (`blocked on/by`, `relies on`, `depends on`, `requires`, `unblocks`)
     → **`blockedBy`** (on the dependent) or **`blocks`** (on the blocker);
   - weak (`part of`, `re-scoped per`, a bare mention) → **`relatedTo`**.
@@ -79,17 +83,21 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
 
 - **Topological order.** After folding in the approved Dimension 1–2 edges,
   topologically sort the non-terminal nodes → a valid execution order. Within the
-  topo constraints, rank by Linear `priority` (urgent→none; remember `0`=none is
-  _lowest_, not highest — see `linear-list.md` step 5), then value/effort
-  (`priority` ÷ `estimate`), then age — the same ranking notion `linear-promote.md`
-  uses. **Output the order as a recommendation** (a printed ordered list): the
-  Linear MCP doesn't expose board rank, so re-ordering is advisory.
+  topo constraints, rank by **sequential sort keys** (not a single formula —
+  Linear's `priority` is `1`=Urgent…`4`=Low with `0`=None, so arithmetic like
+  `priority ÷ estimate` is incoherent): first by urgency (Urgent→Low, with
+  `0`=None sorted **last**), then smaller `estimate` first (quick wins), then age
+  — the same ranking notion `linear-promote.md` uses. **Output the order as a
+  recommendation** (a printed ordered list): the Linear MCP doesn't expose board
+  rank, so re-ordering is advisory.
 - **Priority-inversion sweep (systematic, every edge).** For **each** `blockedBy`
   edge, compare the blocker's `priority` to the dependent's. A blocker that is
-  _less_ urgent (numerically larger non-zero `priority`, or `0`=none) than what it
-  blocks is an inversion — the dependent can't start until a lower-priority task
-  finishes → propose raising the blocker's priority to ≥ the dependent's. Sweep
-  the full edge set, not a sample.
+  _less_ urgent (numerically larger non-zero `priority`, or `0`=None) than what it
+  blocks is an inversion — the dependent can't start until a less-urgent task
+  finishes → propose making the blocker **at least as urgent as the dependent**:
+  its numeric `priority` ≤ the dependent's, treating `0`=None as least urgent (so
+  a `0` blocker is raised to a real priority). Sweep the full edge set, not a
+  sample.
 - **Concurrency sanity (report-only).** Flag any chain where multiple issues on
   the _same_ `blockedBy` path are simultaneously `In Progress` — a blocker and its
   dependent can't both legitimately be in flight.
