@@ -113,7 +113,7 @@ Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue
    gh pr list --state open --search "[#<n>] in:title" --json number,url,title [--repo <repo>]
    ```
 
-   Any match → `Skipped #<n>: open PR already exists (<url>)`.
+   GitHub search tokenizes on punctuation, so `[#12]` searches the bare token `12` and over-matches (`[#120]`, `[#212]`, …). Before skipping, confirm a returned PR's `title` actually contains the literal `[#<n>]` token — only then **skip** with `Skipped #<n>: open PR already exists (<url>)`. (The linked-branch check in step 1 is exact and needs no post-filter.)
 
 In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
 

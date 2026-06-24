@@ -263,8 +263,10 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    `branchName` and by `[<IDENTIFIER>]` title) and an existing remote branch, plus
    the `started`/`auto-claimed`/assigned-to-another gates. If in flight, skip with a
    clear message — ranked mode moves to the next candidate; a direct `<identifier>`
-   pick stops. This runs on **every** entry path (ranked, direct identifier,
-   `--claim-only`, `--no-claim`).
+   pick stops. This full gate runs on the paths that **begin** work (ranked, direct
+   identifier, `--claim-only`); the `--no-claim` resume runs only the open-PR subset,
+   since the issue's own branch/state/label are the caller's own claim markers (see
+   that section's `--no-claim` note).
 4. **Claim** — `linear-claim.md` "Claim the issue": claim-then-verify — set the
    `started`-type state + `auto-claimed` label (creating it if absent) + the viewer
    as `assignee` in one `save_issue`, then re-read to confirm you hold the claim. On

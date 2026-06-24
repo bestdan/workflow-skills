@@ -63,7 +63,9 @@ Print the chosen issue's identifier, title, and a one-sentence rationale for why
 
 ## Pre-flight: is work already in flight?
 
-Runs on the chosen candidate **after "Judge feasibility" and before "Claim the issue"**, on **every** entry path that begins work: the ranked-candidate pick, a `/do-tasks <identifier>` direct pick, the `--claim-only` reserve, and the `--no-claim` resume guard. This is the cheapest, highest-value guard against duplicated work — it catches a sibling session that is already building this issue even when the `auto-claimed` label race below has not yet resolved (a remote branch or open PR is visible from a fresh clone the instant it is pushed, long before the loser's claim write lands). If **any** check trips, **do not claim and do not build**.
+Runs on the chosen candidate **after "Judge feasibility" and before "Claim the issue"**, on every path that **begins** work: the ranked-candidate pick, a `/do-tasks <identifier>` direct pick, and the `--claim-only` reserve. This is the cheapest, highest-value guard against duplicated work — it catches a sibling session that is already building this issue even when the `auto-claimed` label race below has not yet resolved (a remote branch or open PR is visible from a fresh clone the instant it is pushed, long before the loser's claim write lands). If **any** check trips, **do not claim and do not build**.
+
+> **`--no-claim` runs a reduced form.** A `--no-claim` resume targets a task **this caller already claimed** — it is _expected_ to be in a `started`-type state, carry `auto-claimed`, be assigned to the caller, and possibly already have its branch pushed. So a resume runs **only the open-PR checks (steps 2–3)**: an open PR means the work is already published (stop and report it), but the issue's own remote branch (step 4) and started-state/`auto-claimed`/self-assignment (step 5) are the caller's _own_ claim markers — **skip steps 4–5 on the `--no-claim` path** so they don't abort a legitimate resume.
 
 1. **Resolve the branch name.** Use the candidate's Linear `branchName` (already fetched in "Find candidates"; fetch it lazily via `<linear-mcp>__get_issue` if absent). **Do not synthesize it** — Linear publishes it deterministically per issue, and the exact string is what the checks below key on.
 
@@ -81,7 +83,7 @@ Runs on the chosen candidate **after "Judge feasibility" and before "Claim the i
    gh pr list --state open --search "<IDENTIFIER> in:title" --json number,url,title
    ```
 
-   Same **skip** + message on any match.
+   GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter (`PRE-12` matches the tokens `PRE` and `12`, which can also hit unrelated titles). Before skipping, confirm a returned PR's `title` actually contains the literal `[<IDENTIFIER>]` bracket token — only then **skip** with the same message. (The branch check in step 2 is exact and needs no post-filter.)
 
 4. **Remote branch (no PR yet).** A pushed branch with no PR is a strong signal another session is mid-build:
 
@@ -93,7 +95,7 @@ Runs on the chosen candidate **after "Judge feasibility" and before "Claim the i
 
 5. **Tracker-state signals.** Treat the issue as in flight (skip) if it is already in a `started`-type state, already carries `auto-claimed`, or its `assignee` is set to **another** user — not the current viewer (`<linear-mcp>__get_user` with no args returns the viewer). The ranked path's "Find candidates" filters (step 5) already exclude these, but the **direct-identifier path** must enforce the same gates **here** instead of overriding them.
 
-**Outcome by path.** In ranked-candidate mode, an in-flight result means move to the **next** candidate (re-run "Judge feasibility" on it). On a direct `/do-tasks <identifier>` pick, surface the skip message and **stop** — do not fall through to another issue. In the `--claim-only`/`--no-claim` paths, an in-flight result means the work is already reserved or published — stop and report it instead of (re-)claiming or re-executing.
+**Outcome by path.** In ranked-candidate mode, an in-flight result means move to the **next** candidate (re-run "Judge feasibility" on it). On a direct `/do-tasks <identifier>` pick, surface the skip message and **stop** — do not fall through to another issue. On the `--claim-only` reserve, an in-flight result means the work is already reserved or being built — stop and report it. On the `--no-claim` resume (open-PR checks only, per the note above), an open PR means the work is already published — stop and report it; otherwise proceed with the resume.
 
 ## Claim the issue
 

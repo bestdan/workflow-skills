@@ -139,7 +139,7 @@ Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue
    gh pr list --state open --search "[<KEY>] in:title" --json number,url,title
    ```
 
-   Any match → `Skipped <KEY>: open PR already exists (<url>)`.
+   GitHub search tokenizes on punctuation, so `[PROJ-45]` searches the tokens `PROJ` and `45` and can over-match. Before skipping, confirm a returned PR's `title` actually contains the literal `[<KEY>]` token — only then **skip** with `Skipped <KEY>: open PR already exists (<url>)`. (The `task/<KEY>` branch check in step 2 is exact and needs no post-filter.)
 
 2. **Remote branch (no PR yet).** A pushed `task/<KEY>` with no PR signals another session mid-build:
 
