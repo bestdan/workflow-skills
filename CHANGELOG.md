@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.10.5] - 2026-06-24
+
+### Fixes
+
+- scope --no-claim pre-flight and harden title search (e2400f1)
+- pre-flight in-flight PRs/branches and claim-then-verify at start of work (f17a685)
+
 ## [1.10.4] - 2026-06-24
 
 ### Fixes
