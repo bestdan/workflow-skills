@@ -66,6 +66,20 @@ uses these exact steps:
    and move to the next candidate. A `task-blocked` match needs a human to resolve the
    block, so never auto-re-claim it.
 
+   Also probe for an **in-flight branch with no PR yet** — a `task/<slug>` pushed by a
+   session that has not yet opened its claim PR (or whose PR was closed leaving the
+   branch behind). This is the cheapest cross-session signal and gives a clear early
+   skip instead of a generic push rejection at Acquire:
+
+   ```bash
+   git ls-remote --heads origin "task/<slug>"
+   ```
+
+   A non-empty result → **STOP** and report `remote branch task/<slug> already exists`
+   (move to the next candidate). In a branch-pinned environment that cannot create
+   `task/<slug>`, this probe simply returns nothing and the PR-marker checks above carry
+   the lock, as before.
+
 2. **Acquire.** Switch to a work branch — prefer `git checkout -b task/<slug>`; in a
    branch-pinned environment where you cannot push a new branch, **stay on the current
    session branch** (the branch name no longer carries the lock). Flip the task file
