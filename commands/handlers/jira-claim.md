@@ -129,9 +129,31 @@ If feasible: continue with this candidate (proceed to "Claim the issue"). If not
 
 **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's key, summary, and a one-sentence rationale, then proceed.
 
+## Pre-flight: is work already in flight?
+
+Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue"**, on every claiming path (single, direct `<KEY>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight, keyed on the handler's deterministic `task/<KEY>` branch (Jira publishes no branch of its own). If **any** check trips, **do not claim and do not build** — skip and report.
+
+1. **Open PR by key.** The execute path titles PRs `[<KEY>] <summary>`, so an open PR carrying the key is an in-flight build:
+
+   ```bash
+   gh pr list --state open --search "[<KEY>] in:title" --json number,url,title
+   ```
+
+   GitHub search tokenizes on punctuation, so `[PROJ-45]` searches the tokens `PROJ` and `45` and can over-match. Before skipping, confirm a returned PR's `title` actually contains the literal `[<KEY>]` token — only then **skip** with `Skipped <KEY>: open PR already exists (<url>)`. (The `task/<KEY>` branch check in step 2 is exact and needs no post-filter.)
+
+2. **Remote branch (no PR yet).** A pushed `task/<KEY>` with no PR signals another session mid-build:
+
+   ```bash
+   git ls-remote --heads origin "task/<KEY>"
+   ```
+
+   A non-empty result → `Skipped <KEY>: remote branch task/<KEY> already exists`.
+
+In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+
 ## Claim the issue
 
-Jira has no transactional claim, so use a **read-then-write guard** (the analogue of `linear-claim.md`'s concurrency guard and `gh-issue-claim.md`'s assignee guard): self-assign and move the issue to an In-Progress status, then re-read to confirm no one raced in.
+Jira has no transactional claim, so use a **claim-then-verify** guard (read-then-write, then re-read — the analogue of `linear-claim.md`'s concurrency guard and `gh-issue-claim.md`'s assignee guard): self-assign and move the issue to an In-Progress status, then re-read to confirm no one raced in.
 
 1. **Resolve your account id.** Call `<atlassian-mcp>__atlassianUserInfo` (no args) and capture the current user's `account_id`. (`@me` has no JQL/edit equivalent in Jira — assignment is by account id.)
 

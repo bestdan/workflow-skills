@@ -94,9 +94,32 @@ gh issue comment <n> --body "Skipped by /do-tasks: <reason>" [--repo <repo>]
 
 **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's number, title, and a one-sentence rationale, then proceed.
 
+## Pre-flight: is work already in flight?
+
+Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue"**, on every claiming path (single, direct `<#n>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight: catch a sibling session that is already building this issue. If **any** check trips, **do not claim and do not build** — skip and report.
+
+1. **Linked branch + its PR.** GitHub links a `gh issue develop` branch to the issue; list it and check for an open PR on that head:
+
+   ```bash
+   gh issue develop <n> --list [--repo <repo>]                       # linked branch name(s), if any
+   gh pr list --state open --head "<branch>" --json number,url,headRefName [--repo <repo>]
+   ```
+
+   If `gh issue develop --list` names a branch, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch <branch> already exists`.
+
+2. **Open PR by issue number.** The execute path titles PRs `[#<n>] <title>`, so also catch a PR opened from an unlinked branch:
+
+   ```bash
+   gh pr list --state open --search "[#<n>] in:title" --json number,url,title [--repo <repo>]
+   ```
+
+   GitHub search tokenizes on punctuation, so `[#12]` searches the bare token `12` and over-matches (`[#120]`, `[#212]`, …). Before skipping, confirm a returned PR's `title` actually contains the literal `[#<n>]` token — only then **skip** with `Skipped #<n>: open PR already exists (<url>)`. (The linked-branch check in step 1 is exact and needs no post-filter.)
+
+In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+
 ## Claim the issue
 
-GitHub has no transactional claim, so use a **read-then-write guard** (the analogue of `linear-claim.md`'s concurrency guard):
+GitHub has no transactional claim, so use a **claim-then-verify** guard (read-then-write, then re-read — the analogue of `linear-claim.md`'s concurrency guard plus verify):
 
 1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or carries `auto-claimed`, **another session beat you** — return `race`, fall back to the next candidate.
 2. **Mutate** — assign yourself, flip the status label:

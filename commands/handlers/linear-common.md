@@ -64,7 +64,7 @@ Resolve state ids at runtime by Linear's state **type** (not display name — di
 | `new`              | `backlog`         | `Backlog`                                          | —                                                                                                                                     |
 | `needs_refinement` | `backlog`         | `Backlog`                                          | `human-approval-requested`                                                                                                            |
 | `ready`            | `unstarted`       | `Todo`                                             | `auto-eligible` (set by promoter)                                                                                                     |
-| `in_progress`      | `started`         | `In Progress`                                      | `auto-claimed` (concurrency guard)                                                                                                    |
+| `in_progress`      | `started`         | `In Progress`                                      | `auto-claimed` + viewer as `assignee` (the claim marker; concurrency guard)                                                           |
 | `blocked`          | `started`         | `In Progress`                                      | `blocked`                                                                                                                             |
 | `needs_review`     | `started`         | `In Progress` (or `In Review` if the team has one) | — (the open PR is the review signal via Linear's GitHub integration or the explicit `links` attachment from the tracker execute path) |
 | `done`             | `completed`       | `Done`                                             | —                                                                                                                                     |
@@ -73,7 +73,7 @@ Transitions:
 
 - `/add-task` (`linear-add.md`) creates the issue in the team's default `backlog`-type state.
 - `/promote-tasks` (Linear flavor) scores cards in that backlog state: HIGH → move to the `unstarted`-type state (`Todo`) and add `auto-eligible`; LOW → leave it where it is and add `human-approval-requested`.
-- `/do-tasks` (tracker path, `linear-claim.md`) picks issues from the `unstarted` state. On claim it moves the issue to the `started` state, adds `auto-claimed`, and (on PR open) optionally moves to an `In Review` state if one exists.
+- `/do-tasks` (tracker path, `linear-claim.md`) picks issues from the `unstarted` state. Before claiming it runs a pre-flight check that skips the issue if an open PR or remote branch already exists for it (another session is already building it). On claim it moves the issue to the `started` state, adds `auto-claimed`, and sets the viewer as `assignee` (assignee + label are the claim marker), then re-reads to confirm it won the claim; on PR open it optionally moves to an `In Review` state if one exists.
 - Linear's GitHub integration moves the issue to the `completed` state on PR merge via `Closes <KEY>`. `/do-tasks` also adds an explicit `links` attachment to the issue so the PR↔issue link does not depend on branch-name matching.
 - Bail path: revert to the backlog state, add `human-approval-requested`, remove `auto-claimed`, and leave a comment.
 
