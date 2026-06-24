@@ -60,9 +60,10 @@ error: stop and ask which one was meant.
     Do **not** delete the file or convert it to a `task-loop` review PR. The claim lock
     is that PR, not the branch name, so this works in branch-pinned environments that
     cannot create `task/<slug>`.
-  - `linear`: run only "Claim the issue" in `commands/handlers/linear-claim.md`
-    (the atomic `auto-claimed` guard, move to the `started`-type state, record the
-    branch name), then stop before "Branch + execute".
+  - `linear`: run "Pre-flight: is work already in flight?" then "Claim the issue"
+    in `commands/handlers/linear-claim.md` (skip if a PR/branch already exists; else
+    claim-then-verify — `started`-type state + `auto-claimed` + viewer assignee, then
+    re-read), record the branch name, then stop before "Branch + execute".
   - `gh-issue`: run only the pre-claim WIP gate and "Claim the issue" in
     `commands/handlers/gh-issue-claim.md` (the read-then-write guard: assign `@me`,
     add `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute".
@@ -88,9 +89,11 @@ error: stop and ask which one was meant.
     branch-pinned session, to that session's branch). Then do the work, validate,
     delete the file, commit, push, and **finish the PR** (relabel `task-claim` →
     `task-loop`, fill the body, `gh pr ready`) per `repo-pr-execute.md`.
-  - `linear`: check out Linear's verbatim `branchName`, then do the work, open the
-    PR, and "Move to review on PR open" (per `linear-claim.md`) — without
-    re-claiming.
+  - `linear`: first run "Pre-flight: is work already in flight?" (per
+    `linear-claim.md`) — if an open PR already exists for this issue, the work is
+    already published, so stop and report it rather than re-executing. Otherwise
+    check out Linear's verbatim `branchName`, do the work, open the PR, and "Move to
+    review on PR open" — without re-claiming.
   - `gh-issue`: check out the claim branch — `gh issue develop <n> --list` lists it;
     `git fetch` + check out an existing one, or `gh issue develop <n> --checkout` to
     create it when the claim was `--claim-only` (which leaves no branch). Then do the
@@ -255,14 +258,22 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 2. **Judge feasibility** — `linear-claim.md` "Judge feasibility": take candidates
    in ranked order, one at a time, and stop at the first this session can finish
    without a human; comment `Skipped by /do-tasks: <reason>` on each one rejected.
-3. **Claim** — `linear-claim.md` "Claim the issue": add `auto-claimed` (creating
-   the label if absent — the concurrency guard), move to the `started`-type state,
-   comment the branch name. On an `auto-claimed` race, fall back to the next
-   candidate.
-4. **Branch + execute** — branch with Linear's **verbatim** `branchName` (never
+3. **Pre-flight** — `linear-claim.md` "Pre-flight: is work already in flight?":
+   before claiming the chosen candidate, check for an existing open PR (by Linear's
+   `branchName` and by `[<IDENTIFIER>]` title) and an existing remote branch, plus
+   the `started`/`auto-claimed`/assigned-to-another gates. If in flight, skip with a
+   clear message — ranked mode moves to the next candidate; a direct `<identifier>`
+   pick stops. This runs on **every** entry path (ranked, direct identifier,
+   `--claim-only`, `--no-claim`).
+4. **Claim** — `linear-claim.md` "Claim the issue": claim-then-verify — set the
+   `started`-type state + `auto-claimed` label (creating it if absent) + the viewer
+   as `assignee` in one `save_issue`, then re-read to confirm you hold the claim. On
+   a race (lost on the pre-write read or the post-write verify), fall back to the
+   next candidate.
+5. **Branch + execute** — branch with Linear's **verbatim** `branchName` (never
    reconstruct it when the field is present), do the work, run the project's
    tests/lints (`just check` here).
-5. **PR** — `gh pr create` with the Linear identifier in brackets in the title
+6. **PR** — `gh pr create` with the Linear identifier in brackets in the title
    (`[PRE-12] …`) and `Closes <identifier>` on its own line in the body; post the
    PR URL as a Linear comment. **Close only issues this PR actually finishes, each
    as its own `Closes <identifier>` line** (more than one is fine when the PR
@@ -274,12 +285,12 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    URL, which embeds one — is treated as a closing link and the sibling issue gets
    auto-completed even though this PR did not do its work. See `linear-claim.md`
    "PR body magic words".
-6. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
+7. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
    PR via `links` and move to `In Review` if the team has one. **Never move the
    issue to a `completed`/`canceled` state** — merge is the only completion signal,
    handled by Linear's GitHub integration. This hard rule from `linear-claim.md`
    carries over unchanged.
-7. **Bail** — if the work proves infeasible mid-execution, `linear-claim.md`
+8. **Bail** — if the work proves infeasible mid-execution, `linear-claim.md`
    "Bail": `git stash push -u` the WIP, remove `auto-claimed`, add
    `human-approval-requested`, revert the issue to the `backlog`-type state, and
    comment what tripped the bail. Stop — do not auto-pick another candidate.
