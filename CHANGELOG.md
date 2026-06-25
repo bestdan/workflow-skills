@@ -4,6 +4,16 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.11.0] - 2026-06-25
+
+### Features
+
+- add GraphQL parent-rollup detection to promote handler (58ddd68)
+
+### Fixes
+
+- honor configured repo in parent-rollup GraphQL query (b62487a)
+
 ## [1.10.6] - 2026-06-25
 
 ### Fixes
