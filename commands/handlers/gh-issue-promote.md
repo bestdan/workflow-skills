@@ -46,7 +46,32 @@ gh issue list --state open --search "-label:auto-eligible -label:human-approval-
 
 Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
 
-> **Parent rollup guard:** GitHub's sub-issue relationship is not exposed as a bulk-filterable field on `gh issue list`, so there is no efficient equivalent to the cross-state `parentId` sweep `linear-promote.md` applies (issues with sub-issues are skipped there — see step 5). If the repo uses GitHub's task-list sub-issues feature, the promote handler cannot detect parent shells — the user should manually exclude them by closing them or removing the `auto-eligible` label.
+### 3a. Filter parent rollups via GraphQL
+
+Set aside any candidate that is a **parent rollup** — an issue broken into sub-issues that now serves only as a shell. Promoting a parent rollup would move an empty shell to `auto-eligible` where `/do-tasks` would try to claim it (the gh analogue of `linear-promote.md` step 5).
+
+GitHub's `gh issue list` does not expose sub-issue counts as a filterable field, but `gh api graphql` can retrieve them in bulk for all open issues in one call:
+
+```bash
+REPO="<repo>"  # gh-issue.repo from .task-config.yml if set (step 2a); else resolve cwd
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
+OWNER=${REPO%%/*}
+REPONAME=${REPO##*/}
+gh api graphql -f query='
+  query($owner: String!, $repo: String!) {
+    repository(owner: $owner, name: $repo) {
+      issues(states: [OPEN], first: 100) {
+        nodes { number subIssues(first: 0) { totalCount } }
+      }
+    }
+  }' -F owner="$OWNER" -F repo="$REPONAME"
+```
+
+Build a parent-number set from every issue in the response where `subIssues.totalCount > 0`. Any candidate whose number appears in that set is a parent rollup — add it to the `skipped` list with reason `parent rollup` and exclude it from scoring.
+
+**Fallback:** if the GraphQL call errors with an unknown-field error on `subIssues` (the field is available only on repos/orgs where GitHub's sub-issues feature is active), skip parent detection and note `parent rollup detection skipped (subIssues field unavailable)` in the step-6 report. The promote run still continues with all remaining candidates.
 
 ### 4. Score each candidate
 
@@ -100,9 +125,9 @@ Promoted 4 of 6 candidates:
     - #148  Remove stale alias
   needs_refinement (1):
     - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)
-  skipped (2, already scored):
-    - #109
-    - #110
+  skipped (2):
+    - #109  (already scored)
+    - #110  (parent rollup)
 ```
 
-Append the truncation note from step 3 if it applied.
+Skipped issues are reported with their reason — `already scored` or `parent rollup`. Append the truncation note from step 3 if it applied. If parent rollup detection was skipped due to the `subIssues` field being unavailable, append that note here too.
