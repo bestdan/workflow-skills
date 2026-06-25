@@ -53,7 +53,10 @@ Set aside any candidate that is a **parent rollup** — an issue broken into sub
 GitHub's `gh issue list` does not expose sub-issue counts as a filterable field, but `gh api graphql` can retrieve them in bulk for all open issues in one call:
 
 ```bash
-REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+REPO="<repo>"  # gh-issue.repo from .task-config.yml if set (step 2a); else resolve cwd
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
 OWNER=${REPO%%/*}
 REPONAME=${REPO##*/}
 gh api graphql -f query='
