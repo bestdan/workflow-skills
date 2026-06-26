@@ -23,9 +23,16 @@ linear:
   team: PreThink # required — team name (as shown in Linear) or team id/UUID.
   # The team key (e.g. PRE) is not accepted because `list_teams`
   # does not return it.
-  default_project: null # optional; skips the project prompt in /add-task, and
-  # pins /promote-tasks to this project's backlog (else it detects one — see
-  # linear-promote.md step 4). Explicit project id/UUID, not a name.
+  projects: # optional — list of project scopes. Absent/empty = whole-team scope.
+    - id: <project-uuid> # required — Linear project UUID.
+      name: My Project   # optional — display label; resolved via list_projects when absent.
+      wip_limit: 3       # optional — per-project WIP cap; inherits top-level wip_limit when absent.
+      max_estimate: 3    # optional — per-project max estimate; inherits linear.max_estimate when absent.
+  # Schema rules:
+  # - absent/empty → whole-team scope (global wip_limit + max_estimate, no projectId filter).
+  # - exactly one entry → equivalent to the old scalar project pin.
+  # - per-project keys are limited to wip_limit and max_estimate.
+  # - team, base_branch, default_priority are global (not per-project).
   default_priority: 3 # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3).
   max_estimate: 3 # optional, used by /do-tasks (tracker path) — exclusive upper bound on
   # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task
@@ -39,7 +46,7 @@ linear:
 ## Linear concepts → task concepts
 
 - **Team** is required for every issue.
-- **Project** is an optional grouping that can span teams.
+- **Project** is an optional grouping that can span teams. `linear.projects` in the config controls which projects task operations are scoped to; see "Resolve configured projects" below.
 
 ## Preflight pattern
 
@@ -52,6 +59,26 @@ Every Linear-handled command starts the same way. Failure messages are identical
    - Capture the resolved team `id` and pass it to the rest of the flow.
 
 2. (Per-verb files do additional setup — e.g. `list_workflow_states` for `/list-tasks` and `/do-tasks`.) The shared part is just the team check.
+
+## Resolve configured projects
+
+Every Linear-handled command that needs project scope calls this helper. It reads `linear.projects` from `.task-config.yml` and returns a list of `{ id, name, wip_limit, max_estimate }` objects with inheritance applied.
+
+**Algorithm:**
+
+1. Read `linear.projects` from `.task-config.yml`. If absent or empty, return a single synthetic entry:
+   `{ id: null, name: "whole team", wip_limit: <top-level wip_limit>, max_estimate: <linear.max_estimate> }`
+   This puts the command in whole-team scope — no `projectId` filter is passed to Linear queries.
+
+2. For each entry in `linear.projects`:
+   - `id`: use as-is (required; the project UUID).
+   - `name`: use as-is if present; resolve lazily via `<linear-mcp>__list_projects` only when the name is needed for display. Do not call `list_projects` unless the name is absent and needed for display.
+   - `wip_limit`: use the per-project value if set; else inherit the top-level `wip_limit` (default `3`).
+   - `max_estimate`: use the per-project value if set; else inherit `linear.max_estimate` (default `3`).
+
+3. Return the resolved list. Callers iterate over it to scope their queries and WIP counts, one project at a time.
+
+**Exactly one entry** is equivalent to the old scalar `default_project` pin — the command operates in that single project's scope without prompting.
 
 ## Kanban mapping
 
