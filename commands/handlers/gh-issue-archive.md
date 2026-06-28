@@ -27,18 +27,28 @@ things, neither of which changes completion state:
 
 1. **Resolve config.** Read the `gh-issue:` block from
    `dev_docs/tasks/.task-config.yml` for `repo` (default: current repo via
-   `gh repo view --json nameWithOwner --jq .nameWithOwner`).
+   `gh repo view --json nameWithOwner --jq .nameWithOwner`) and `labels` (the
+   task-loop labels, e.g. `[follow-up]`).
 
-2. **Find candidates.** List closed issues older than the threshold. `gh` filters
-   closed issues by update time; use `closed` state and filter by `closedAt`:
+2. **Find candidates — scope to task-loop issues.** List closed issues older than
+   the threshold, **filtered to the configured `gh-issue.labels`** so the sweep
+   only ever touches loop-filed issues — never unrelated product/bug issues that
+   merely happen to be old and closed. This mirrors the label filter the List
+   path (`gh-issue.md`) uses. Pass one `--label` per configured label (AND
+   filter); `gh` filters closed issues by `closedAt`:
 
    ```bash
    gh issue list --repo <repo> --state closed --limit 200 \
+     --label "<label1>" --label "<label2>" \
      --json number,title,closedAt,labels
    ```
 
-   Keep issues whose `closedAt` is more than `N` days before today and that do
-   **not** already carry the `archived` label. Never touch open issues.
+   When `gh-issue.labels` is **empty/unset**, there is no durable task-loop marker
+   to scope by — do **not** fall back to sweeping every closed issue. Instead
+   **stop** and report that archiving needs at least one configured label to
+   distinguish loop issues from the rest of the repo. Keep issues whose `closedAt`
+   is more than `N` days before today and that do **not** already carry the
+   `archived` label. Never touch open issues.
 
 3. **Always print the candidate list first** (number + title + closed date). If
    `dry-run`, stop here and report "nothing archived (dry-run)".

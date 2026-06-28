@@ -23,12 +23,12 @@ correct, conservative scope: it never has to guess at PR state.
 
 ## Steps
 
-1. **Resolve the archive dir.** Read `repo-pr.archive_dir` from
-   `dev_docs/tasks/.task-config.yml`; default to `dev_docs/tasks/_archive/` when
-   unset. Create it if needed:
+1. **Ensure the archive dir exists.** The archive dir is fixed at
+   `dev_docs/tasks/_archive/` (a constant, not configurable — the four task-file
+   scans hardcode the same path, so it must not drift). Create it if needed:
 
    ```bash
-   mkdir -p "$(git rev-parse --show-toplevel)/<archive_dir>"
+   mkdir -p "$(git rev-parse --show-toplevel)/dev_docs/tasks/_archive"
    ```
 
 2. **Find candidates.** Scan task files and keep only those with `status: done`
@@ -41,9 +41,12 @@ correct, conservative scope: it never has to guess at PR state.
 
    For each, read the frontmatter; keep it only if `status: done`. Determine its
    completion date from `completed` if present, else fall back to the file's last
-   git-commit date (`git log -1 --format=%cs -- <file>`). Keep it only if that
-   date is more than `N` days before today. Never move a file in any non-`done`
-   status, whatever its age.
+   git-commit date (`git log -1 --format=%cs -- <file>`); if that is empty too
+   (the file is uncommitted/untracked), fall back to **today's date** — so a
+   freshly written, not-yet-committed `done` file has age 0 and is conservatively
+   left in place until it has a real date. Keep it only if the resolved date is
+   more than `N` days before today. Never move a file in any non-`done` status,
+   whatever its age.
 
 3. **Always print the candidate list first** (path + completion date). If
    `dry-run`, stop here and report "nothing archived (dry-run)".

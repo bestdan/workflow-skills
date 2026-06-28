@@ -70,6 +70,11 @@ native window, or needs to drain a workspace that has already hit the cap.
    ambiguous and may not resolve (`"<name>" isn't an item`); the explicit
    reference is unambiguous:
 
+   `$LINEAR_API_KEY_REF` holds the `linear.api_key_ref` value from
+   `dev_docs/tasks/.task-config.yml`. The agent already parses that config block,
+   so it reads the value directly (no YAML-scraping one-liner); a cron/Action sets
+   `$LINEAR_API_KEY_REF` — or `$LINEAR_API_KEY` outright — in the job env.
+
    ```bash
    LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # e.g. op://Private/Linear API/credential
    # or, by item UUID + field:
@@ -94,7 +99,7 @@ standalone script uses, and it ran cleanly against a real workspace:
 ```graphql
 query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!) {
   issues(first: 100, after: $cursor, filter: {
-    team: { name: { eq: $team } },          # or id: { eq: $teamId }
+    team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
     state: { type: { eq: $type } },         # "completed" (Done) — repeat for "canceled"
     completedAt: { lt: $cutoff }            # use canceledAt for the canceled pass
   }) {
@@ -105,9 +110,13 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
 ```
 
 3. **Scope** the same way the rest of the Linear handler scopes — always bind the
-   team (`name`/`id`), and if `linear.default_project` is set (non-empty) add
-   `project: { id: { eq: $projectId } }` so only that project is swept; otherwise
-   omit it and sweep the whole team.
+   team. `linear.team` may be a **name or a UUID id**: filter on
+   `team: { id: { eq: $team } }` when the value is UUID-shaped, else
+   `team: { name: { eq: $team } }` — otherwise a UUID-configured team matches
+   nothing and the archive silently no-ops. (The shipped script auto-detects this;
+   the agent path can resolve the id via the common preflight instead.) If
+   `linear.default_project` is set (non-empty) add `project: { id: { eq: $projectId } }`
+   so only that project is swept; otherwise omit it and sweep the whole team.
 4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
    `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
    exhausted — a single page silently undercounts a backlog at the cap. The

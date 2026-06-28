@@ -83,8 +83,6 @@ Write the config block returned by the per-handler file to `dev_docs/tasks/.task
 # repo-pr
 handler: repo-pr
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
-# repo-pr:
-#   archive_dir: dev_docs/tasks/_archive/   # optional — where /archive-tasks parks stale done files
 ```
 
 ```yaml
@@ -121,7 +119,7 @@ linear:
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 
-**`archive_after`** is a top-level key (sibling of `wip_limit`), shared by every handler: the default age threshold `/archive-tasks` uses when `--older-than` is omitted. With neither set, `/archive-tasks` refuses to mutate (dry-run-only) to avoid a surprise bulk archive. The per-handler archive keys (`repo-pr.archive_dir`, `jira.archive_status`, `linear.api_key_ref`) are documented in each handler's `*-config.md`.
+**`archive_after`** is a top-level key (sibling of `wip_limit`), shared by every handler: the default age threshold `/archive-tasks` uses when `--older-than` is omitted. With neither set, `/archive-tasks` refuses to mutate (dry-run-only) to avoid a surprise bulk archive. The per-handler archive keys (`jira.archive_status`, `linear.api_key_ref`) are documented in each handler's `*-config.md`. (`repo-pr` has no archive key — it parks files in the fixed `dev_docs/tasks/_archive/`.)
 
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 

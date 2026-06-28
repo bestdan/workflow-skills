@@ -28,6 +28,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -35,10 +36,15 @@ from datetime import datetime, timedelta, timezone
 
 API = "https://api.linear.app/graphql"
 
+# linear.team may be a team NAME or a UUID id (see linear-common.md / linear-config.md).
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+)
+
 QUERY = """
 query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!, $project: ID) {
   issues(first: 100, after: $cursor, filter: {
-    team: { name: { eq: $team } }
+    team: { %s: { eq: $team } }
     state: { type: { eq: $type } }
     %s: { lt: $cutoff }
     %s
@@ -87,8 +93,9 @@ def gql(key, query, variables=None):
 
 
 def find(key, team, project, state_type, ts_field, cutoff):
+    team_field = "id" if UUID_RE.match(team) else "name"  # UUID team id, else name
     extra = "project: { id: { eq: $project } }" if project else ""
-    query = QUERY % (ts_field, extra, ts_field)
+    query = QUERY % (team_field, ts_field, extra, ts_field)
     out, cursor = [], None
     while True:
         page = gql(

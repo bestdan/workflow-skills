@@ -35,11 +35,9 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
    # wip_limit: 3            # optional — caps how many tasks /do-tasks --all dispatches at once
    # auto_execute_max_size: 2 # optional — batch auto-routing: auto-execute size <= this, reserve bigger for a human
    # archive_after: 30       # optional, top-level — default /archive-tasks age threshold (days)
-   # repo-pr:
-   #   archive_dir: dev_docs/tasks/_archive/  # optional — where /archive-tasks parks stale done files
    ```
 
-   Three optional settings (plus the shared top-level `archive_after`):
+   Two optional settings (plus the shared top-level `archive_after`):
 
    - **`wip_limit`** (default `3`) bounds batch dispatch: `/do-tasks --all` counts
      work already in flight — tasks with `status: in_progress` plus open
@@ -52,14 +50,12 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
      (`size > auto_execute_max_size`) are **reserved** (`--claim-only` semantics —
      claimed but not executed) for a human to pick up. The default of `2`
      auto-does size `1`–`2` and reserves size `3`+. Omit the key to accept it.
-   - **`repo-pr.archive_dir`** (default `dev_docs/tasks/_archive/`) is where
-     `/archive-tasks` `git mv`s stale `done` task files. It lives under
-     `dev_docs/tasks/`, and the `/promote-tasks`, `/do-tasks`, and `/list-tasks`
-     scans exclude it via `-not -path '*/_archive/*'` — so if you change the dir
-     name away from `_archive`, those scans will no longer skip it. See
-     `commands/handlers/repo-pr-archive.md`. The shared top-level **`archive_after`**
-     (days) is the default age threshold when `/archive-tasks` is run without
-     `--older-than`.
+   - **`archive_after`** (shared top-level key, days) is the default age threshold
+     when `/archive-tasks` runs without `--older-than`. `/archive-tasks` `git mv`s
+     stale `done` task files into the fixed `dev_docs/tasks/_archive/` (not
+     configurable — the `/promote-tasks`, `/do-tasks`, and `/list-tasks` scans
+     hardcode the matching `-not -path '*/_archive/*'` exclusion, so the location
+     must not drift). See `commands/handlers/repo-pr-archive.md`.
 
    Omit any key to accept its default. Single-task dispatch (`/do-tasks` or
    `/do-tasks <slug>`) ignores the WIP/size keys — an explicit pick is always
