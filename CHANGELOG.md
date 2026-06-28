@@ -4,6 +4,16 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.12.0] - 2026-06-28
+
+### Features
+
+- add /archive-tasks handler-dispatched verb (cadb084)
+
+### Fixes
+
+- apply co-review fixes (b56d009)
+
 ## [1.11.0] - 2026-06-25
 
 ### Features
