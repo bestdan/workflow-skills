@@ -59,8 +59,10 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
 ## Archive key (`linear.api_key_ref`)
 
-`linear.api_key_ref` is **optional** and only used by `/archive-tasks`. It is a **1Password `op://` reference** (e.g. `op://Private/Linear API/credential`) to a Linear **personal API key**.
+`linear.api_key_ref` is **optional** and only used by `/archive-tasks`. It is a **full 1Password `op://<vault>/<item>/<field>` reference** (e.g. `op://Private/Linear API/credential`) to a Linear **personal API key** — use the explicit vault/item/field form (or the item UUID), **not a bare item name**, which is ambiguous and may not resolve.
 
 Why a raw key and not the MCP: the Linear MCP exposes **no archive mutation** (only `save_issue`, which can't archive, and `delete_*` for comments/attachments). So `/archive-tasks`'s backstop calls Linear's GraphQL `issueArchive` mutation directly, and that needs a personal API key the MCP's OAuth session can't provide. Store the key in 1Password and reference it here — **never paste the key into the config or the repo.** The archive flow resolves it with `op read "<ref>"` at runtime (see `commands/handlers/linear-archive.md`).
+
+> **Where the resolve actually works.** With 1Password **desktop-app integration**, `op` only unlocks in _your_ authorized terminal — **not** in an agent's tool-spawned subshell (there it errors `account is not signed in`). So the Linear archive step runs either in your terminal via the session `!` prefix, or headless with `OP_SERVICE_ACCOUNT_TOKEN` / a CI secret. This is why the backstop is happiest as the standalone script in `linear-archive.md` → "Run it without an agent", scheduled on a cron.
 
 This key is **not** needed for `/add-task`, `/list-tasks`, `/promote-tasks`, or `/do-tasks` — only for the GraphQL archive backstop. If the team relies solely on Linear's **native team auto-archive** (the recommended primary mechanism), the key is unnecessary; leave it unset. Don't prompt for it during `/task-config` setup — mention it only if the user asks about archiving or hits the 250-issue cap.
