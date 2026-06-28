@@ -156,76 +156,36 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    calls just for the count). In dry-run, report the candidates and that nothing
    was changed.
 
-## Run it without an agent — reference script
+## Run it without an agent — the shipped script
 
 Because the backstop needs only the API key, it runs as a standalone job with no
 agent session — the cleanest way to dodge the `op`-in-agent-shell gotcha
-entirely. Drop this in a cron / GitHub Action (key from a CI secret or
-`OP_SERVICE_ACCOUNT_TOKEN`), or run it from your own terminal. It **defaults to a
-dry run** and only mutates with `--apply` — keep that safety. Validated against a
-real workspace (archived 75 issues, 0 failures):
+entirely, and the form to schedule on a cron / GitHub Action. The whole flow
+above (paginated query → candidate list → per-id `issueArchive` loop) is packaged
+as a runnable script:
 
-```python
-#!/usr/bin/env python3
-"""Archive <TEAM> Linear issues that are Done and older than N days.
-Dry run by default; pass --apply to archive. Key from $LINEAR_API_KEY or 1Password."""
+**`commands/handlers/assets/linear-archive.py`** (Glob `**/handlers/assets/linear-archive.py` if the relative path doesn't resolve).
 
-import json, os, subprocess, sys, urllib.request
-from datetime import datetime, timedelta, timezone
+It **defaults to a dry run** and only mutates with `--apply` — preserve that. It
+reads the key from `$LINEAR_API_KEY`, else `op read "$LINEAR_API_KEY_REF"`. This
+is the exact script validated against a real workspace (archived 75 issues, 0
+failures).
 
-TEAM, STATE_TYPE, DAYS = "PreThink", "completed", 10  # "canceled" for the cancel pass
-APPLY = "--apply" in sys.argv
-API = "https://api.linear.app/graphql"
+```bash
+# Dry run (lists candidates, changes nothing):
+python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10
 
+# Archive them:
+python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10 --apply
 
-def key():
-    k = os.environ.get("LINEAR_API_KEY")
-    if k:
-        return k
-    # op MUST run in an authorized shell (your terminal) or with OP_SERVICE_ACCOUNT_TOKEN.
-    return subprocess.run(
-        ["op", "read", os.environ["LINEAR_API_KEY_REF"]], capture_output=True, text=True
-    ).stdout.strip()
-
-
-def gql(k, q, v=None):
-    req = urllib.request.Request(
-        API,
-        json.dumps({"query": q, "variables": v or {}}).encode(),
-        {"Authorization": k, "Content-Type": "application/json"},
-    )  # personal key, no "Bearer"
-    d = json.loads(urllib.request.urlopen(req).read())
-    if "errors" in d:
-        sys.exit(json.dumps(d["errors"], indent=2))
-    return d["data"]
-
-
-K = key()
-cutoff = (datetime.now(timezone.utc) - timedelta(days=DAYS)).strftime(
-    "%Y-%m-%dT%H:%M:%S.000Z"
-)
-Q = """query($c:String,$cut:DateTimeOrDuration!,$t:String!,$ty:String!){
-  issues(first:100,after:$c,filter:{team:{name:{eq:$t}},state:{type:{eq:$ty}},completedAt:{lt:$cut}}){
-    nodes{id identifier completedAt} pageInfo{hasNextPage endCursor}}}"""
-items, cur = [], None
-while True:
-    p = gql(K, Q, {"c": cur, "cut": cutoff, "t": TEAM, "ty": STATE_TYPE})["issues"]
-    items += p["nodes"]
-    if not p["pageInfo"]["hasNextPage"]:
-        break
-    cur = p["pageInfo"]["endCursor"]
-print(f"{len(items)} candidate(s) older than {cutoff}")
-for i in sorted(items, key=lambda x: x["completedAt"]):
-    print(f"  {i['identifier']:<10} {i['completedAt'][:10]}")
-if not APPLY:
-    sys.exit(f"DRY RUN — re-run with --apply to archive these {len(items)}.")
-M = "mutation($id:String!){issueArchive(id:$id,trash:false){success}}"
-ok = sum(gql(K, M, {"id": i["id"]})["issueArchive"]["success"] for i in items)
-print(
-    f"Archived {ok}/{len(items)}. Archived issues no longer count toward the 250 cap."
-)
+# Scope to a project and also sweep Canceled:
+python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
+  --project <uuid> --include-canceled --apply
 ```
 
-Scope by `project` too where needed, and add the `canceled`/`canceledAt` pass if
-you want cancellations swept. Scheduling guidance for the agent-driven path lives
-in `commands/archive-tasks.md` → "Scheduling".
+`--team`/`--older-than` also read `$LINEAR_TEAM`/`$ARCHIVE_AFTER`, so a cron entry
+can set those plus `$LINEAR_API_KEY` (or `$OP_SERVICE_ACCOUNT_TOKEN` +
+`$LINEAR_API_KEY_REF`) and run with just `--apply`. The agent-driven flow
+(sections above) and this script are the same logic; the script is the
+no-`op`-gotcha path. Scheduling guidance lives in `commands/archive-tasks.md` →
+"Scheduling".
