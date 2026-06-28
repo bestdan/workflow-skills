@@ -35,8 +35,13 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 ### 2. Find task files
 
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
+find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
+  -not -path '*/_archive/*' 2>/dev/null
 ```
+
+The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
+`/archive-tasks` parks retired `done` task files (see
+`commands/handlers/repo-pr-archive.md`).
 
 If the directory doesn't exist or is empty, report "No tasks found in this repo."
 

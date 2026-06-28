@@ -31,7 +31,11 @@ linear:
   # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task
   # `size` — see "Task size" in skills/task/SKILL.md). Default 3 (i.e. claim issues with estimate 1 or 2).
   base_branch: main # optional, used by /do-tasks (tracker path) — branch /do-tasks branches
-# from. Default main.
+  # from. Default main.
+  api_key_ref: op://Private/Linear API/credential # optional, used by /archive-tasks —
+# a 1Password op:// reference to a Linear PERSONAL API key. The MCP has no archive
+# mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key.
+# See linear-config.md → "Archive key" and commands/handlers/linear-archive.md.
 # labels support is deferred — the Linear MCP create_issue tool takes label UUIDs, not names,
 # and resolving names → ids requires an extra tool call. Add a tag in the body for now.
 ```

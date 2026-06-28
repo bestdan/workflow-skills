@@ -134,10 +134,14 @@ PR's `headRefName`.
 ## 1. Scan for tasks
 
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
+find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
+  -not -path '*/_archive/*' 2>/dev/null
 ```
 
-Parse YAML frontmatter from each file. Skip any file with `type: epic` (those are
+The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
+`/archive-tasks` moves stale `done` task files (see
+`commands/handlers/repo-pr-archive.md`), so retired work never re-enters the
+scan. Parse YAML frontmatter from each file. Skip any file with `type: epic` (those are
 epic rollups, not task cards) and any with no frontmatter (e.g. a plan overview).
 Filter to `status: ready`. Sort by:
 

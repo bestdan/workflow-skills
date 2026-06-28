@@ -22,6 +22,11 @@ Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue cre
      repo: owner/name
      labels: [follow-up]
      assignees: []
+   # archive_after: 30   # optional, top-level — default /archive-tasks age threshold (days)
    ```
 
    Omit any optional key the user didn't set.
+
+## Archiving (`/archive-tasks`)
+
+gh-issue needs **no archive-specific config key**. GitHub has no active-issue cap and no true issue archive, so `/archive-tasks` is **hygiene only** here: it adds an `archived` label to issues that have been **closed** longer than the threshold (creating the label once if missing), purely so they can be filtered out of `gh issue list` / `/list-tasks` views. It scopes the sweep to your configured **`gh-issue.labels`** so it only touches loop-filed issues — and **refuses to run when no labels are configured** (without a task-loop marker it can't tell loop issues from unrelated closed issues, and relabeling those is pure downside on a tracker with no cap). The shared top-level **`archive_after`** (days) sets the default age threshold when `--older-than` is omitted. See `commands/handlers/gh-issue-archive.md`.
