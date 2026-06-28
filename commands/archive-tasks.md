@@ -1,0 +1,126 @@
+---
+description: Retire completed/canceled work items — a handler-dispatched archive/prune of terminal-state tasks past an age threshold
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(mkdir *), Bash(op *), Bash(curl *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
+argument-hint: "[--older-than <N>d] [dry-run]"
+---
+
+# Archive Tasks
+
+The task loop **creates** work items but never **retires** them. Over a
+high-velocity month the configured tracker fills with completed/canceled items
+that still count as live records, and on some trackers that is a hard wall:
+**Linear's free plan caps a workspace at 250 _active_ issues** (archived issues
+are unlimited and excluded from the cap), so a busy loop hits
+`Usage limit exceeded` and silently breaks — `/add-task` can't file and
+`/push-plan` can't push. `/archive-tasks` is the generic cleanup verb that retires
+terminal-state work past an age threshold.
+
+Like `/do-tasks` and `/promote-tasks`, this command is a **thin dispatcher**: it
+resolves the **handler** from `dev_docs/tasks/.task-config.yml` (absent →
+`repo-pr`) and then reads and follows `commands/handlers/<handler>-archive.md`,
+which owns the tracker-specific terminal-state query and the retire operation.
+The mechanics live in the handler files this command **references rather than
+re-specifies**, so the two cannot drift.
+
+> **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/`
+> directory exists, run the **Legacy migration** prompt from
+> `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
+
+## What it touches — and what it never touches
+
+`/archive-tasks` only ever retires items in a **terminal state** (the handler's
+`done`/`completed`/`canceled` equivalent) whose completion timestamp is **older
+than the threshold**. It never archives `new`, `ready`, `in_progress`,
+`blocked`, or `needs_review` work — open work is always left alone, regardless of
+age. This is the one hard safety rule every handler file restates.
+
+## Arguments
+
+`$ARGUMENTS` is a set of independent, combinable tokens (order-insensitive). Test
+each with a **"contains" check, never equality** — the same arg-parsing rule
+`/promote-tasks` documents (`$ARGUMENTS` contains `dry-run`, not
+`$ARGUMENTS == "dry-run"`), so `/archive-tasks --older-than 14d dry-run` enables
+both. A bare `dry-run`, a bare `--older-than 14d`, and both together must all
+parse.
+
+- **`--older-than <N>d`** — the age threshold. Only terminal items whose
+  completion timestamp is more than `N` days ago are candidates. Accept `14d` or
+  a bare `14` (both mean 14 days). This **overrides** the config default.
+- **`dry-run`** — list the candidates and stop. Change nothing. (A run with no
+  resolvable threshold is dry-run-only regardless — see below.)
+
+### Resolving the threshold (and the no-threshold safety default)
+
+Resolve the effective threshold in this order:
+
+1. **`--older-than <N>d`** from `$ARGUMENTS`, if present.
+2. else the **`archive_after`** key (days) from `dev_docs/tasks/.task-config.yml`
+   (top-level, the same level as `wip_limit`).
+3. else **no threshold** → **refuse to mutate.** Without a cutoff there is no
+   candidate list to compute, so **stop** and explain: "No archive threshold set.
+   Pass `--older-than <N>d`, or set `archive_after: <N>` in
+   `dev_docs/tasks/.task-config.yml`, then re-run." This guards against a
+   surprise bulk archive when someone runs the bare command.
+
+So the only way to mutate is an explicit `--older-than` **or** a configured
+`archive_after`, **and** the absence of `dry-run`. Always **print the candidate
+list first**; in dry-run, stop there.
+
+## 1. Resolve the handler
+
+Read `dev_docs/tasks/.task-config.yml`:
+
+```bash
+cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+```
+
+- File absent, or `handler: repo-pr` → read and follow
+  **`commands/handlers/repo-pr-archive.md`** (move stale `done` task files to an
+  archive dir).
+- `handler: linear` → read and follow **`commands/handlers/linear-archive.md`**
+  (native auto-archive guidance + the GraphQL `issueArchive` backstop; uses
+  `commands/handlers/linear-common.md` for preflight/state-type mapping).
+- `handler: gh-issue` → read and follow
+  **`commands/handlers/gh-issue-archive.md`** (close/label stale completed
+  issues; hygiene-only, GitHub has no cap).
+- `handler: jira` → read and follow **`commands/handlers/jira-archive.md`**
+  (transition terminal issues to an archived status where one exists; default to
+  a documented no-op otherwise).
+- Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
+  dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
+
+If the relative path doesn't resolve, find the handler file with **Glob**
+(`**/commands/handlers/<handler>-archive.md`) and Read the result. Pass the
+resolved threshold and the `dry-run` flag through.
+
+## 2. Report
+
+The handler file owns its report format, but every handler reports the same
+skeleton:
+
+- **Candidates** — the terminal-state items older than the threshold, each with
+  its identifier/slug and completion date. Always printed first.
+- **dry-run** — the candidate list and nothing else; an explicit "nothing
+  archived (dry-run)".
+- **applied** — what was archived (count + identifiers), and for `linear`
+  whether it went through native auto-archive (no-op here) or the GraphQL
+  backstop.
+- **none** — "no terminal-state items older than `<N>d` — nothing to archive."
+
+## 3. Scheduling (handler-agnostic)
+
+`/archive-tasks` is meant to run on a cadence so the tracker never drifts back to
+the cap. Two ways, neither handler-specific:
+
+- **`/schedule`** — a cloud routine that runs `/archive-tasks --older-than <N>d`
+  on a cron (e.g. daily). Best for keeping a Linear workspace permanently under
+  the 250-issue cap.
+- **`/loop`** — `/loop 24h /archive-tasks --older-than 30d` in a session you keep
+  open.
+
+For the **Linear** GraphQL backstop specifically, the retire step needs only a
+personal API key, so it can alternatively run as a standalone scheduled job (a
+GitHub Action or cron) **independent of an agent session** — see the "Run it
+without an agent" note in `commands/handlers/linear-archive.md`. Keep the
+scheduling decision here; the handler files own only the per-tracker retire
+mechanics.

@@ -167,6 +167,35 @@ rules from `scripts/validate.py` and applying them yourself.
 
 Nothing found → `PASS`.
 
+**Check 6 — Archive health.** Whether `/archive-tasks` can retire completed work
+so the tracker doesn't fill up (acute for `linear`, whose free plan caps a
+workspace at 250 _active_ issues). Read-only signal, **`WARN`/`PASS` only** —
+never auto-fixed, since every remedy is a human decision (set a threshold, enable
+auto-archive, store an API key). Report against the resolved handler:
+
+- **`archive_after` set?** If the top-level `archive_after` key is present, note
+  it (`PASS`); if absent, `WARN`: "`archive_after` unset — `/archive-tasks` is
+  dry-run-only until you pass `--older-than <N>d` or set it." (Not a failure — a
+  bare `/archive-tasks` safely refuses to mutate; this just flags that scheduled
+  archiving won't run.)
+- **Handler has an archive file.** Confirm `commands/handlers/<handler>-archive.md`
+  resolves for the resolved handler (Glob fallback as elsewhere). Missing → `WARN`
+  pointing at the gap.
+- **`linear` specifics** — assume **native team auto-archive** is the primary
+  mechanism and the GraphQL script is the backstop (state this, since `/doctor`
+  can't read Linear's team settings). If `linear.api_key_ref` is set, note the
+  backstop is wired; if unset, `WARN`: "no `linear.api_key_ref` — the GraphQL
+  archive backstop is unavailable; rely on native auto-archive or add a key (see
+  `linear-config.md` → 'Archive key')."
+- **`jira` specifics** — if `jira.archive_status` is unset, note `/archive-tasks`
+  is a no-op for jira (native archival is Premium) — informational `WARN`.
+- **`gh-issue`** — informational `PASS`: GitHub has no cap; archiving is hygiene
+  only.
+
+`PASS` when `archive_after` is set, the archive file resolves, and the
+handler-specific prerequisite (Linear key / Jira status) is satisfied or
+not-applicable.
+
 ### 3. Report (and fix under `--fix`)
 
 **Report-only (default).** Print the status block and stop — no writes:
@@ -179,8 +208,9 @@ Nothing found → `PASS`.
   FAIL  Legacy dirs — dev_docs/todos/ present → migrate to dev_docs/tasks/
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
+  WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
 
-2 fail, 1 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 2 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block

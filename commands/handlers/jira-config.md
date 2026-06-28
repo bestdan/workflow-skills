@@ -59,6 +59,8 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      blocked_statuses: []
      ready_status: Selected for Development
      refinement_status: Needs Refinement
+     # archive_status: Archived   # optional — /archive-tasks target (see "Archive status")
+   # archive_after: 30            # optional, top-level — default /archive-tasks age threshold (days)
    ```
 
    Omit any optional key the user didn't set.
@@ -71,6 +73,12 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 - **`refinement_status`** — the target status a LOW-confidence (underspecified) issue is transitioned to (the jira analogue of `needs_refinement`/`human-approval-requested`).
 
 Both are **target status names** — set each to the name of the status you want the issue moved to in your project. The promote flow resolves each name to the matching workflow transition id per issue at apply time (`transitionJiraIssue` takes a transition id, not a status name), so the name just has to match a status an available transition leads to. Each **must differ from the project's initial/new status** (the status new issues enter): the candidate query excludes issues already in `ready_status`/`refinement_status`, so pointing either at the initial status would filter out every new issue and promote nothing. Both keys are **optional**. When a key is unset, `/promote-tasks` (the `jira-promote.md` flow) resolves the project's reachable statuses dynamically from a candidate's available transitions and prompts you to pick via `AskUserQuestion`, then offers to persist the choice back here so the prompt does not recur — no status id or name is ever hard-coded. They are likewise unused in `/add-task`-only setups — they only matter for promote.
+
+## Archive status (`archive_status`)
+
+`archive_status` is an **optional** status **name** used only by `/archive-tasks`. **Native Jira issue archival is a Jira Premium feature** and is not reachable through the Atlassian MCP, so this handler instead transitions terminal (`statusCategory = Done`) issues older than the threshold to a status you've modeled as "archived" — typically an extra status in the `Done` category that your board's default filter hides. Set it to that status's name (e.g. `Archived`). The archive flow resolves the name to a per-issue transition id the same way the promote keys do (`transitionJiraIssue` takes a transition id, not a name).
+
+**When `archive_status` is unset, `/archive-tasks` is a no-op** for jira — it reports that there's nothing to do rather than guessing. The shared top-level **`archive_after`** (days) is the default age threshold when `/archive-tasks` is run without `--older-than`. See `commands/handlers/jira-archive.md`.
 
 ## Blocked statuses (`blocked_statuses`)
 

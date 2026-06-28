@@ -48,9 +48,13 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 ### 1. Find candidates
 
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f 2>/dev/null
+find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
+  -not -path '*/_archive/*' 2>/dev/null
 ```
 
+The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
+`/archive-tasks` moves stale `done` task files (see
+`commands/handlers/repo-pr-archive.md`), so retired work stays out of the scan.
 Skip any file with `type: epic` in its frontmatter — epic rollup files are never scored (see **Epics** in `skills/task/SKILL.md`). The tracker path applies the analogous skip: backlog issues with sub-issues (children) are treated as **parent rollups** and are never scored — see `commands/handlers/linear-promote.md` step 5. Then filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
 
 ### 2. Score each candidate

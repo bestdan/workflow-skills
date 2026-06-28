@@ -56,3 +56,11 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    Omit any optional key the user didn't set.
 
 > Labels are not supported in the v1 `linear` handler. The Linear MCP's `create_issue` takes label UUIDs, not names, and resolving names → ids requires an extra tool call (and an `allowed-tools` update). Skip the prompt; if a user asks for labels, the handler can be extended later.
+
+## Archive key (`linear.api_key_ref`)
+
+`linear.api_key_ref` is **optional** and only used by `/archive-tasks`. It is a **1Password `op://` reference** (e.g. `op://Private/Linear API/credential`) to a Linear **personal API key**.
+
+Why a raw key and not the MCP: the Linear MCP exposes **no archive mutation** (only `save_issue`, which can't archive, and `delete_*` for comments/attachments). So `/archive-tasks`'s backstop calls Linear's GraphQL `issueArchive` mutation directly, and that needs a personal API key the MCP's OAuth session can't provide. Store the key in 1Password and reference it here — **never paste the key into the config or the repo.** The archive flow resolves it with `op read "<ref>"` at runtime (see `commands/handlers/linear-archive.md`).
+
+This key is **not** needed for `/add-task`, `/list-tasks`, `/promote-tasks`, or `/do-tasks` — only for the GraphQL archive backstop. If the team relies solely on Linear's **native team auto-archive** (the recommended primary mechanism), the key is unnecessary; leave it unset. Don't prompt for it during `/task-config` setup — mention it only if the user asks about archiving or hits the 250-issue cap.
