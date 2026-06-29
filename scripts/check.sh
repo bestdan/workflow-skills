@@ -33,6 +33,7 @@ run() {
 run dprint check
 run claude plugin validate . --strict
 run uv run scripts/validate.py
+run bash scripts/test-await-pr-review.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then
