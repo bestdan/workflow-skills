@@ -69,6 +69,14 @@ done
 [ -n "$repo" ] || die "--repo is required"
 [ "${#reviewers[@]}" -gt 0 ] || reviewers=("Copilot")
 case "$mode" in all|any) ;; *) die "--mode must be 'all' or 'any'" ;; esac
+# Non-integer interval/timeout would make `sleep` fail and the `-ge` comparison
+# error every tick — with no `set -e` that busy-spins, hammering the gh API.
+case "$interval" in *[!0-9]*|"") die "--interval must be a non-negative integer (seconds)" ;; esac
+case "$timeout" in *[!0-9]*|"") die "--timeout must be a non-negative integer (seconds)" ;; esac
+# A missing dependency would otherwise look like a transient empty response and
+# loop until timeout — fail fast with an actionable message instead.
+command -v gh >/dev/null 2>&1 || die "gh CLI is required but not found in PATH"
+command -v jq >/dev/null 2>&1 || die "jq is required but not found in PATH"
 
 # Lowercase helper for case-insensitive matching.
 lc() { tr '[:upper:]' '[:lower:]'; }
@@ -84,7 +92,7 @@ first_poll=1
 
 SECONDS=0
 while :; do
-  json="$(gh pr view "$pr" --repo "$repo" --json reviews,reviewRequests 2>/dev/null)"
+  json="$(gh pr view "$pr" --repo "$repo" --json reviews,reviewRequests)"
   if [ -z "$json" ]; then
     # Transient gh/network failure: surface it (don't silently swallow) and
     # retry on the next tick rather than treating it as "landed".
@@ -105,7 +113,7 @@ while :; do
         still_pending+=("$token")
       fi
     done
-    pending=(${still_pending[@]+"${still_pending[@]}"})  # empty-safe under bash 3.2 set -u
+    pending=("${still_pending[@]+"${still_pending[@]}"}")  # empty-safe under bash 3.2 set -u
 
     if [ "$mode" = "any" ] && [ "${#landed[@]}" -gt 0 ]; then
       IFS=,; echo "AWAIT_REVIEW: landed reviewer=${landed[*]} after=${SECONDS}s"; exit 0
