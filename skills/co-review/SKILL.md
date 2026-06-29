@@ -109,6 +109,13 @@ Why this is narrow:
 
 3. **Gather inputs.**
    - **GitHub mode** (in parallel):
+     - **Wait for the bot reviewer first if the PR was just opened.** When you want to reconcile against a bot reviewer (e.g. Copilot) that hasn't posted yet, don't hand-write a `gh pr view … | sleep` poll loop — they drift on interval, timeout, and (critically) the reviewer login. Invoke the shared fixture instead and proceed once it reports `landed`:
+
+       ```bash
+       "${CLAUDE_PLUGIN_ROOT}/scripts/await-pr-review.sh" --pr <n> --repo <owner/name>
+       ```
+
+       It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer).
      - `gh pr view <n> --json title,body,reviews,comments,files`
      - `gh pr diff <n>`
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
