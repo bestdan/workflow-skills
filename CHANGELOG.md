@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.13.0] - 2026-06-29
+
+### Features
+
+- add shared await-pr-review bot-watcher fixture (#90) (8cb11a3)
+
 ## [1.12.0] - 2026-06-28
 
 ### Features
