@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.15.0] - 2026-06-30
+
+### Features
+
+- [PRE-330] projects-list schema + resolve-configured-projects helper (#99) (d596f79)
+
 ## [1.14.0] - 2026-06-30
 
 ### Features
