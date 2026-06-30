@@ -234,7 +234,26 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
    gh-issue `/^(\S*#)?\d+$/` (§5.3), jira `/^[A-Z][A-Z0-9]*-\d+$/` (§5b.3).
 2. **Delete every migrated task file** — hard delete; the body now lives in the
    issue. **Kept files stay** (a failed create re-runs safely; a held task pushes
-   on a later run). The epic file and the plan directory are **not** touched here.
+   on a later run).
+3. **Delete the epic file and the plan directory — only behind the gate.** The
+   overview epic is removed only when **both** hold:
+   - **Every task is migrated** — no kept (held/failed) task file remains in the
+     plan dir. If any does, **skip** epic deletion (the plan isn't fully migrated
+     yet; a later run finishes it).
+   - **The overview reached the tracker** — the epic's `tracker_id` is a
+     **description-bearing container**: a Linear project id, a gh-issue milestone
+     **number**, or a jira Epic key (i.e. present and **not** a `label:plan:<name>`
+     sentinel). This is true exactly when §4.2 / §5.2 / §5b.2 _created_ the
+     container with the overview body in its description.
+
+   When both hold, delete the epic file, then remove the now-empty `<name>_plan/`
+   directory and any empty `phase_N/` subdirectories. When the second condition
+   fails — the gh-issue `plan:<name>` **label fallback** (§5.2 step 3), or a
+   **reused `default_project`** that left no description-bearing `tracker_id` on
+   the epic (§4.2 case 2) — **keep the epic file** and **warn** that the overview
+   was kept locally because it has no tracker description home (§7). Because the
+   epic is removed only after every task file is gone, a kept task's `parent`
+   back-reference to the epic never dangles.
 
 ## 5. gh-issue path
 
@@ -460,20 +479,32 @@ pass** — the link pass walks every task to draw its native `Blocks` edges, so 
 files (and the in-memory map) must still be intact when it runs; only once all
 links exist are the migrated files deleted.
 
-## 6. Idempotency
+## 6. Idempotency and the migrate-then-delete contract
 
-The behavior above is **create-missing-only** and safe to re-run (spike §4):
+Each plan file is **deleted once its migration is confirmed** (§4.5): a task file
+when its `tracker_id` is recorded, the epic file and plan directory when every task
+is migrated and the overview reached a description-bearing container. After a
+**fully** migrated push the plan directory is gone and the tracker is the **only**
+source of truth — re-pushing is a no-op because nothing remains locally, and new
+work for the plan goes straight to the tracker via `/add-task`, not back into
+deleted files.
 
-- A file with a non-empty `tracker_id` is skipped, never duplicated.
-- A recorded container id is reused, never duplicated.
-- Skipped files still feed the slug→id map, so newly added tasks resolve their
-  blockers on a later push.
+A **partial** push (anything held by `--ready-only`, or a create that failed) still
+re-runs safely — this is **create-missing-only** (spike §4):
+
+- A file with a non-empty `tracker_id` is skipped, never duplicated — though after
+  cleanup a fully-migrated task no longer has a file at all; it is simply absent.
+- A recorded container id is reused, never duplicated. The container's description
+  is written **only on create**, never overwritten on reuse.
+- Kept files still feed the slug→id map, and a deleted blocker's id survives on its
+  kept dependents because §4.5 rewrote their `is_blocked_by` slug to that id — so a
+  held task resolves its blockers (and keeps native links) on a later push.
 - For jira, the §5b.5 link pass is create-missing-only too: it checks the
   dependent's existing `Blocks` links before adding one, so a re-push draws no
   duplicate "is blocked by" edges.
-- v1 **never updates or deletes** remote issues, and **never deletes** the local
-  plan files — they keep their `tracker_id` as a traceable back-link (spike §5).
-  Local `status:` goes stale after push; the tracker becomes the source of truth.
+- v1 **never updates or deletes** remote issues. It now **does** delete local plan
+  files, but only after their content is safely in the tracker (the migrated issue
+  body, or the container description for the overview).
 
 ## 7. Report
 
@@ -486,10 +517,18 @@ Print:
 - **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
   resolved blockers if any.
 - **Deleted locally:** each migrated task file removed by the §4.5 cleanup —
-  `<slug> → <identifier> (<url>)`.
+  `<slug> → <identifier> (<url>)`. Plus the epic file + plan directory when the
+  whole plan migrated.
+- **Kept locally:** files **not** deleted, each with why — a task held by
+  `--ready-only` or whose create failed (re-runs safely), and the epic file when
+  it was kept because the overview had no description home (the gh-issue
+  `plan:<name>` label fallback, or a reused `default_project`).
 - **Already pushed:** skipped files with their `tracker_id`.
 - **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
   or held (`--ready-only`), each with what's needed to resolve it.
 
-A re-run with no changes should report only "already pushed" lines and "container
-reused" — the signal that idempotency held.
+After a **fully** migrated push the plan directory is gone — the **Deleted
+locally** block (ending in the epic + directory) is the signal that the plan fully
+landed and the tracker now owns it. A **partial** re-run reports the remaining
+"created"/"deleted" lines plus "container reused"; once nothing is left to push,
+the directory is removed.
