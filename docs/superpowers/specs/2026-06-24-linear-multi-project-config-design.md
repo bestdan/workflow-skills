@@ -33,6 +33,8 @@ handlers read only the new format.
 ```yaml
 handler: linear
 wip_limit: 3 # top-level global default (still shared w/ repo-pr & gh-issue handlers)
+global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across all projects
+# (absent → no global ceiling; the sum of per-project caps applies)
 linear:
   team: PreThink
   default_priority: 3 # global
@@ -96,6 +98,17 @@ The in-flight count — computed once for the pin today — becomes **per-projec
 - **Single `/do-tasks`:** rank candidates across all configured projects; the pre-claim
   gate checks the **chosen candidate's** project slack. If that project is full, skip to
   the next candidate (which may live in another project) rather than declining outright.
+- **Global ceiling (optional `global_wip_limit`).** Per-project caps alone let total
+  concurrent work scale to `Σ project.wip_limit` — e.g. three projects each inheriting
+  the default `wip_limit: 3` permit **9** in-flight, defeating the point of a global
+  cap. When `global_wip_limit` is set, it is an **absolute upper bound on total
+  in-flight across all configured projects**, enforced _in addition to_ the per-project
+  caps: a claim proceeds only if **both** the chosen candidate's project has slack
+  **and** `Σ in_flight` across all projects `< global_wip_limit`. For `--all`, the batch
+  is additionally clamped so the run never pushes the global total past the ceiling
+  (dispatch `min(per-project slack, remaining global slack)` as projects are filled in
+  rank order). Absent → no global ceiling; the sum of per-project caps applies (today's
+  behavior). Its decline message: `Global WIP limit <N> reached (<count> in flight across all projects) — no issue claimed`.
 - **Decline message** gains the project name:
   `WIP limit 5 reached (5 in flight) in project <name> — no issue claimed`.
 
@@ -108,8 +121,12 @@ The in-flight count — computed once for the pin today — becomes **per-projec
 - **`/doctor`** Check 1 gains:
   1. **Un-migrated WARN** — if scalar `default_project` is still present, warn with the
      fix ("run `/task-config` to migrate").
-  2. **Shape validation** — `projects` is a list; each entry has an `id`; per-entry
-     `wip_limit`/`max_estimate` are positive integers when present.
+  2. **Shape validation** — `projects` is a list; each entry has an `id`; the `id`
+     values are **unique** across the list (duplicates would double-count in-flight
+     issues and fire redundant `list_issues` queries during WIP enforcement — ERROR
+     with the offending id); per-entry `wip_limit`/`max_estimate` are positive integers
+     when present; `global_wip_limit`, when set, is a positive integer (and ideally
+     `≥` the largest per-project `wip_limit`, else it would mask them — WARN if not).
 
 ## Files touched
 
