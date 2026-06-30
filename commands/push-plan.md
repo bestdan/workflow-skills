@@ -180,6 +180,32 @@ Walk the tasks in topological order. For each:
    <identifier>` (e.g. `PRE-12`) and optional `tracker_url`, and add
    `<slug> → <identifier>` to the map so later dependents resolve.
 
+### 4.5 Cleanup — delete each migrated task file
+
+After the create walk (for jira, after the §5b.5 link pass — see §5b.6), every
+successfully created task's full `Context` / `Task` / `Acceptance Criteria` body
+lives in its issue, so its **local file is deleted**. This is the
+migrate-then-delete contract that makes the tracker the single source of truth
+(§6) and stops stale, uncommitted plan files leaking across branches. All three
+paths run this same cleanup; only the timing differs for jira.
+
+Let **migrated** = the tasks whose create succeeded this run (a `tracker_id` was
+written back and the create call returned a url/id); **kept** = everything else (a
+task held by `--ready-only`, or one whose create failed — no `tracker_id`).
+
+1. **Rewrite kept dependents first.** For each migrated task `<S> → <ID>`, find
+   every **kept** task file whose `is_blocked_by` names the slug `<S>` and rewrite
+   that entry to `<ID>` (preserve single-value vs list shape — translate only the
+   matching entry). An id-shaped entry is a pass-through in both the ordering step
+   (§4.3 — not an ordering edge) and the create step (§4.4 — handed straight to
+   the native `blockedBy` collector), so a kept dependent keeps its native blocker
+   link on a later push and never mis-warns "unknown slug (typo?)" once `<S>`'s
+   file is gone. Use the handler's own id shape: Linear `/^[A-Z]+-\d+$/` (§4.3),
+   gh-issue `/^(\S*#)?\d+$/` (§5.3), jira `/^[A-Z][A-Z0-9]*-\d+$/` (§5b.3).
+2. **Delete every migrated task file** — hard delete; the body now lives in the
+   issue. **Kept files stay** (a failed create re-runs safely; a held task pushes
+   on a later run). The epic file and the plan directory are **not** touched here.
+
 ## 5. gh-issue path
 
 The gh-issue path mirrors the Linear path (§4) — same topological order, same
@@ -284,6 +310,12 @@ Walk the tasks in topological order. For each:
    (`owner/repo#<number>`, or `#<number>` when `gh-issue.repo` is unset) and
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map
    so later dependents resolve.
+
+### 5.5 Cleanup — delete each migrated task file
+
+Run the **§4.5 cleanup** unchanged, using gh-issue's slug→reference map (§5.4) and
+its id shape `/^(\S*#)?\d+$/` (§5.3). Each migrated task file is deleted once its
+`tracker_id` is recorded; held/failed files stay.
 
 ## 5b. jira path
 
@@ -390,6 +422,14 @@ reference) have no key to link to — **warn** and skip them, matching the Linea
 `--ready-only` caveat in §3. The `## Link` step is itself create-missing-only, so a
 re-push adds no duplicate edges.
 
+### 5b.6 Cleanup — delete each migrated task file
+
+Run the **§4.5 cleanup**, using jira's slug→key map (§5b.4) and its id shape
+`/^[A-Z][A-Z0-9]*-\d+$/` (§5b.3). For jira this **must run after the §5b.5 link
+pass** — the link pass walks every task to draw its native `Blocks` edges, so the
+files (and the in-memory map) must still be intact when it runs; only once all
+links exist are the migrated files deleted.
+
 ## 6. Idempotency
 
 The behavior above is **create-missing-only** and safe to re-run (spike §4):
@@ -415,6 +455,8 @@ Print:
   (§5b.5).
 - **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
   resolved blockers if any.
+- **Deleted locally:** each migrated task file removed by the §4.5 cleanup —
+  `<slug> → <identifier> (<url>)`.
 - **Already pushed:** skipped files with their `tracker_id`.
 - **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
   or held (`--ready-only`), each with what's needed to resolve it.
