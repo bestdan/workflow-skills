@@ -1,6 +1,6 @@
 # linear handler — /task-config setup
 
-Configures the `linear` handler, which creates Linear issues via the official Linear MCP server (connected from `https://mcp.linear.app/mcp`) at `/add-task` time. This file owns the Linear MCP preflight and the team/default_project/default_priority prompts; the actual create flow lives in `linear.md`.
+Configures the `linear` handler, which creates Linear issues via the official Linear MCP server (connected from `https://mcp.linear.app/mcp`) at `/add-task` time. This file owns the Linear MCP preflight and the team/projects/default_priority prompts (including migrating a pre-existing scalar `default_project`); the actual create flow lives in `linear.md`.
 
 Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
@@ -28,32 +28,33 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
    **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PRE`), so a key value will not match downstream and `/add-task`/`/list-tasks`/`/do-tasks` will all stop at preflight with "Configured Linear team `PRE` is not in your accessible teams." The `name` (e.g. `PreThink`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
 
-3. **Resolve `default_project` against real projects — do not accept free-text.** This field is optional but, when set, must be a valid project in the chosen team (otherwise it silently breaks `/add-task`, which uses it to skip the per-task project prompt).
+3. **Resolve `projects` — one or more, validated against real projects (no free-text).** The handler scopes to a **list** of projects (`linear.projects`), which replaces the old scalar `default_project`. See `linear-common.md` "Config block" + "Resolve configured projects" for the full schema and the inheritance rules (per-project `wip_limit`/`max_estimate` fall back to the global defaults). An unvalidated id silently breaks `/add-task`, so resolve every entry against `list_projects` — never accept a typed id blind.
 
-   Call `<linear-mcp>__list_projects` with:
-   - `teamId`: id of the resolved team from step 2
-   - `includeArchived`: `false`
+   **3a. Migrate an existing scalar `default_project` first.** If the current config (shown by `/task-config` step 1) carries a scalar `linear.default_project`, it predates the list. Resolve its name via `<linear-mcp>__list_projects` (match the id) and **seed** the projects list with it as a single `{ id }` entry (no overrides — it inherits the globals). Tell the user once: "Migrating pinned project `<name>` to the new `projects:` list." The written config will contain **only** `projects:` — the scalar `default_project` key is **dropped** (hard cut: handlers read only `projects:` going forward). The user can then add or remove entries in 3b.
 
-   Present the result via `AskUserQuestion` (header: "Default project"):
-   - One option per project, labeled `<name>` (cap at 2 project options so 2 projects + "None" + "Other" fits the 4-option max; show the 2 most recently updated).
-   - A `"None — prompt me per-task"` option (this is the recommended default if the user is unsure).
-   - "Other" lets the user type a project name; if they pick "Other", look it up by calling `list_projects` again and matching the typed name (case-insensitive). If no match, push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. Do not write the config with an unvalidated value.
+   **3b. Add projects (loop).** Call `<linear-mcp>__list_projects` (`teamId` from step 2, `includeArchived: false`), then loop:
+   - Present via `AskUserQuestion` (header: "Add project"): one option per not-yet-chosen project (cap at 2 most-recently-updated), a **"Done — that's all"** option, and — **only on the first iteration when nothing is chosen yet** — a **"None — prompt me per-task"** option (the recommended default if the user is unsure). "Other" lets the user type a project name, looked up via `list_projects` and matched case-insensitively; on no match push back ("`<TYPED>` is not a project in team `<team>`") and re-ask.
+   - For each chosen project, **only if the user volunteers one**, capture a per-project `wip_limit` and/or `max_estimate` override — don't prompt by default; most entries inherit the global defaults. Record `{ id, name, wip_limit?, max_estimate? }`.
+   - Repeat until the user picks **"Done — that's all"**.
+   - **"None — prompt me per-task"** (only offered when no project is chosen yet) → write **no** `projects` key at all (whole-team scope — today's no-pin behavior).
 
-   If the user picks "None — prompt me per-task", omit `default_project` from the written config. Otherwise write the project's id as-is.
+   **3c. Optional `global_wip_limit`.** Only when **2 or more** projects are configured, optionally ask for `linear.global_wip_limit` — an absolute ceiling on total in-flight across **all** configured projects (on top of the per-project caps). Skip the prompt for 0–1 projects (a global cap is meaningless there). Unset by default (no global ceiling).
 
 4. **Optional `default_priority`** — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
 
-5. **Return the config block** to `/task-config`:
+5. **Return the config block** to `/task-config` (the new `projects` shape — never a scalar `default_project`):
 
    ```yaml
    handler: linear
    linear:
      team: PreThink # team NAME (or UUID id) — never the team key like "PRE"
-     default_project: null
      default_priority: 3
+     projects:
+       - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; add wip_limit/max_estimate to override the globals
+     # global_wip_limit: 6  # include only when 2+ projects are configured
    ```
 
-   Omit any optional key the user didn't set.
+   Shape rules: write `projects:` as a list of `{ id, name?, wip_limit?, max_estimate? }`; include `global_wip_limit` (under `linear:`) only when 2+ projects are set; add a top-level `wip_limit` only if the user chose a non-default global (it defaults to `3`). When the user picked "None — prompt me per-task", **omit `projects` entirely** (whole-team scope). Omit any optional key the user didn't set, and **never** emit a scalar `default_project`. (Full schema: `linear-common.md` "Config block".)
 
 > Labels are not supported in the v1 `linear` handler. The Linear MCP's `create_issue` takes label UUIDs, not names, and resolving names → ids requires an extra tool call (and an `allowed-tools` update). Skip the prompt; if a user asks for labels, the handler can be extended later.
 
