@@ -273,9 +273,14 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    read-before-write guard, then post a token-bearing claim comment **first** (the
    lock), then set the `started`-type state + `auto-claimed` label (creating it if
    absent) + the viewer as `assignee` in one `save_issue`. After a jittered delay,
-   re-read the comments and elect the winner = the earliest **state-backed** claim
-   comment (orphan-GC ignores claims whose issue write never landed). If you lost,
-   delete your own claim comment and fall back to the next candidate.
+   re-read the comments and elect the winner = the earliest **eligible** claim
+   comment. Eligibility has two filters: (a) a **live-window bound** — ignore any
+   comment created before this session last saw the card unclaimed, so a stale
+   orphan from a prior attempt can't win once a live racer's write flips the card to
+   `started` (the load-bearing fix against deadlock); and (b) **state-backed** —
+   ignore claims whose `save_issue` never landed. If you lost — or the post-election
+   confirm read shows your markers were overwritten — delete your own claim comment
+   and fall back to the next candidate.
 4. **Judge feasibility** — `linear-claim.md` "Judge feasibility", run **while holding
    the claim**: read the full issue and decide whether this session can finish it
    without a human. If **feasible**, proceed to branch + execute. If **not**, this is

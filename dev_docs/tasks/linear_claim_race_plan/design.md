@@ -24,7 +24,7 @@ Phase order changes from `find → judge → pre-flight → claim` to:
 
 1. **Find candidates** — unchanged. The existing `estimate`/labels/`assignee` filters in find-candidates step 5 _are_ the cheap pre-screen and stay before the claim.
 2. **Pre-flight in-flight check** — unchanged checks (open PR by branch, open PR by `[<IDENTIFIER>]` title, remote branch, started/`auto-claimed`/assigned-to-other), now run on the top-ranked candidate immediately before the claim.
-3. **Claim** — claim-then-verify (see Change 2).
+3. **Claim** — token-comment lock (see Change 2).
 4. **Judge feasibility** — the expensive step (full description read + repo grep) now runs **while holding the claim**.
 
 This collapses the unclaimed window from "minutes of feasibility analysis" to "pre-flight + the claim's two writes."
@@ -63,18 +63,21 @@ A true **mid-execution** bail (work broke _while building_) still **halts** the 
 
 ## Testing
 
-The repo's `evals/` are prompt-based skill evals (`evals/prompts/*.txt` + `manifest.tsv`). Add eval prompts asserting:
+**No evals ship with this change — eval coverage is deferred.** The repo's `evals/` harness (`scripts/eval.sh`) asserts skill **routing** only: it greps a headless run log for a `Skill` invocation matching the expected skill. It has no way to assert the claim **mechanics** below (skip-on-open-PR, lost-race yield, release-and-continue, halt), and adding prompts for them would falsely imply coverage. The concurrency fidelity is therefore **verified by inspection** (this design + the reconciled co-review on the PR), not by the harness.
+
+The assertions below are the evals that **would** be added if/when a mechanics-capable harness (e.g. an LLM-judge or scripted behavioral check) exists — they are future work, not part of this PR:
 
 1. A card with an existing open PR is **skipped pre-claim** with the existing-PR message.
 2. A lost token-comment race **yields** (deletes its claim comment, falls to next candidate) rather than building.
 3. A card claimed and then **rejected at Judge feasibility** is released (backlog state, `auto-claimed` removed, `human-approval-requested` added, `assignee` cleared, claim comment deleted, reason comment posted) **and** the session proceeds to the **next ranked candidate** — exercising Change 3's release-and-continue.
 4. A true **mid-execution bail** still **halts** the run and does **not** auto-pick another candidate — the load-bearing distinction Change 3 introduces.
 
-Items 1, 3, and 4 are expressible in the single-agent prompt-eval harness (no concurrency needed). Item 2's full two-agent race may not be — if so, cover the single-agent claim mechanics (token mint, comment-then-claim ordering, orphan-GC) and state the concurrent-race fidelity guarantee is verified by inspection in the PR description rather than inventing a concurrency harness.
+Of these, items 1, 3, and 4 are single-agent (no concurrency needed); item 2's full two-agent race likely needs a concurrency harness the repo does not have.
 
 ## Files changed
 
 - `commands/handlers/linear-claim.md` — reorder phases; rewrite "Claim the issue" as the token-comment lock; split feasibility-reject (release-and-continue) from mid-execution bail (halt).
 - `commands/handlers/linear-common.md` — update the kanban-mapping claim note to describe the token-comment lock and claim-before-judge ordering.
 - `commands/do-tasks.md` §3 — reorder the "Claim and execute" step list (pre-flight + claim before judge) and the release-and-continue loop.
-- `evals/` — add the skip-on-open-PR eval prompt (+ manifest entry).
+
+(No `evals/` changes ship — eval coverage is deferred; see "Testing" above.)
