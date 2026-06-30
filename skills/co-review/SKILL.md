@@ -51,6 +51,14 @@ local_reviewers:
 **Detection (PATH probe + config override):** the known default list is `codex` and `agy` (`gemini` is retired — skip it if present). Probe each with `command -v`. The config may also name agents that aren't on the default list, supplying a `command:` for how to invoke them.
 
 > **`agy` (Google Antigravity CLI)** is a built-in default. Unlike `codex`, it talks to a cloud backend, so it **requires an Antigravity login** and **network access** — its invocation cannot run inside a restrictive Bash sandbox. If `agy` errors with `not logged into Antigravity` or a network/permission failure, treat it like any missing reviewer: note it, skip it, never fatal.
+>
+> **`agy` is a stateful, memory-backed agent — not a stateless review function like `codex exec`.** It persists every session to a per-conversation SQLite store and keeps cross-session memory (`~/.gemini/antigravity-cli/{conversations,brain,knowledge}`). This changes how you must drive it as a reviewer:
+>
+> - **Validate `<INPUT>` is non-empty before piping to `agy`.** On empty/failed stdin `agy` does **not** error — it silently retrieves a **prior conversation** and reviews stale, unrelated code with full confidence. Guard the dispatch: `[ -s "<INPUT>" ] && cat "<INPUT>" | agy …` (or check the byte count), and if `<INPUT>` is empty, skip `agy` rather than run it blind.
+> - **Never place `<INPUT>` under `.git/`.** In a git **worktree** `.git` is a _file_ (a gitdir pointer), not a directory, so a redirect into `.git/…` fails — which is exactly what triggers the empty-stdin fabrication above. Use a real directory.
+> - **Always start a fresh conversation.** Never pass `--continue` / `--conversation` for a review — each review must depend only on the current diff, never on accumulated memory.
+> - **Treat `agy` as advisory-only, always reconciled.** It emits confidently-wrong findings on substance (in testing it invented a non-existent `BashUnsandboxed` permission prefix), and being agentic it explores/writes state even under `--sandbox -p`. Never let it be the sole reviewer; its output must always pass through the reconciler.
+> - **Pin `--model`** if you want a reproducible reviewer identity — the default model can drift between runs.
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one stdin stream**; the prompt argument is a short **fixed pointer**. Because nothing variable ends up in the command string, the command is invariant and can be approved once with an exact-match rule (see Permissions).
 
