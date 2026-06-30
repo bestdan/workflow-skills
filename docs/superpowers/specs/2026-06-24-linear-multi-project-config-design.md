@@ -42,13 +42,14 @@ handlers read only the new format.
 ```yaml
 handler: linear
 wip_limit: 3 # top-level global default (still shared w/ repo-pr & gh-issue handlers)
-global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across all projects
-# (absent → no global ceiling; the sum of per-project caps applies)
 linear:
   team: PreThink
   default_priority: 3 # global
   base_branch: main # global
   max_estimate: 3 # global default
+  global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across all projects
+  # (absent → no global ceiling; the sum of per-project caps applies). Lives under
+  # linear: because it's Linear-multi-project-specific, unlike the cross-handler wip_limit.
   projects: # NEW — replaces scalar default_project
     - id: ebbc284b-…
       name: Handler parity follow-ups # optional, for prompts/reports
@@ -84,16 +85,22 @@ When `projects` is absent/empty it returns a single synthetic "whole team" scope
 
 | Command                          | Behavior with multiple configured projects                                                                                                                                            |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/do-tasks --all` (unscoped)     | Pulls across **all** configured projects; each enforces its **own** `wip_limit` independently. `--project X` narrows to one.                                                          |
+| `/do-tasks --all` (unscoped)     | Pulls across **all** configured projects; each enforces its **own** `wip_limit` independently.                                                                                        |
 | `/do-tasks` (single, foreground) | Ranks candidates across all configured projects; before claiming the chosen one, checks **that project's** WIP slack, skips to the next candidate (possibly another project) if full. |
-| `/add-task`                      | Prompts among the **configured** projects (+ "No project (team backlog)"). Skips the prompt when only one project is configured.                                                      |
+| `/add-task`                      | Prompts among the **configured** projects only (no "team backlog" option once projects are configured). Skips the prompt when only one project is configured.                         |
 | `/list-tasks`                    | Prompts to pick one; `/list-tasks all` shows the union, grouped/labeled by project.                                                                                                   |
 | `/promote-tasks`                 | Prompts to pick one configured project; `/promote-tasks all` scores all configured backlogs.                                                                                          |
-| `/archive-tasks`                 | Sweeps across **all** configured projects (union), each scoped by its `projectId` — replaces today's single-`default_project` sweep. `--project X` narrows to one.                    |
-| `/push-plan`                     | Targets the configured project; with multiple, **prompts** which one (or honors an explicit `--project X`) instead of silently using the lone pin.                                    |
+| `/archive-tasks`                 | Sweeps across **all** configured projects (union), each scoped by its `projectId` — replaces today's single-`default_project` sweep.                                                  |
+| `/push-plan`                     | Targets the configured project; with multiple, **prompts** which one instead of silently using the lone pin.                                                                          |
 
 `all` means **all configured projects**, not the whole team backlog — the config now
 enumerates the projects of interest.
+
+> **Planning decisions (2026-06-30).** `global_wip_limit` lives **under `linear:`** (not
+> top-level). `/add-task` offers **configured projects only** — no team-backlog escape once
+> projects are set. A **`--project X`** narrowing flag (for `/do-tasks`, `/archive-tasks`,
+> `/push-plan`) is **deferred to a follow-up** — v1 always operates across all configured
+> projects. The scalar→list migration is a **hard cut** (handlers read only `projects:`).
 
 ## Per-project WIP enforcement
 
@@ -149,7 +156,7 @@ _Refreshed against `main` 2026-06-30. Ordering is roughly dependency order (sche
 | `commands/handlers/linear-common.md`  | New `projects:` + `global_wip_limit` schema in the Config block; shared "resolve configured projects" helper (list of `{id, name, wip_limit, max_estimate}` with inheritance, + global ceiling) |
 | `commands/handlers/linear-config.md`  | `/task-config` setup: loop the project prompt to add one-or-more; migrate scalar `default_project` → one-entry `projects:` list (owns id resolution against `list_projects`)                    |
 | `commands/handlers/linear-claim.md`   | Find candidates across configured projects; per-project WIP slack in the claim                                                                                                                  |
-| `commands/do-tasks.md`                | Pre-claim WIP gate per-project + `--all` batch slack per-project + the `global_wip_limit` ceiling; `--project X` narrowing                                                                      |
+| `commands/do-tasks.md`                | Pre-claim WIP gate per-project + `--all` batch slack per-project + the `linear.global_wip_limit` ceiling                                                                                        |
 | `commands/handlers/linear-add.md`     | Prompt among configured projects (skip if exactly one)                                                                                                                                          |
 | `commands/handlers/linear-list.md`    | Pick-one / `all` union, grouped by project                                                                                                                                                      |
 | `commands/handlers/linear-promote.md` | Scope among configured projects; `all` = all configured backlogs                                                                                                                                |
