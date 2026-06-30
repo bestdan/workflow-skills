@@ -1,6 +1,8 @@
 # Linear handler — /do-tasks tracker flow
 
-Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is configured. This file holds the full tracker execute flow, run in the current session: **find candidates** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **move to review on PR open** (mutating, after the PR is opened), and a **report** at the end. A separate **bail** phase runs when work proves infeasible mid-execution. `/do-tasks` orchestrates the branch-and-execute and `gh pr create` between the claim and move-to-review phases.
+Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is configured. This file holds the full tracker execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **claim the issue** (mutating, before work starts — a token-comment lock), **judge feasibility** (read-only, run _while holding the claim_), **move to review on PR open** (mutating, after the PR is opened), and a **report** at the end. The **bail** phase has two distinct triggers: a _feasibility reject_ on an already-claimed card **releases the claim and continues** to the next candidate, while a _mid-execution_ failure **halts** the run. `/do-tasks` orchestrates the branch-and-execute and `gh pr create` between the judge and move-to-review phases.
+
+> **Why claim before judging?** Every step up to the claim is read-only, so two sessions that start near each other both rank the same issue #1 and both spend _minutes_ judging feasibility while the issue sits unclaimed — they collide. Claiming immediately after the cheap pre-flight (and judging feasibility only once the claim is held) collapses that unclaimed window to the pre-flight plus the lock's writes. And because racing sessions are usually authenticated as the **same** Linear user, `assignee` cannot distinguish a winner; the claim is therefore a first-writer-wins election on an append-only **comment** log carrying a unique per-session token.
 
 **Shared reference:** see `linear-common.md` for connection details, full config schema (including the `max_estimate` and `base_branch` keys used here), preflight pattern, and the kanban mapping table this file reads against.
 
@@ -40,30 +42,15 @@ Linear's GitHub integration scans the **whole** PR title and body for issue ids,
 
 6. **Rank.** Sort remaining issues by Linear `priority` (urgent=1 → low=4, then none=0 last), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
 
-7. **Return** the ranked list to the **Judge feasibility** phase below. Each entry needs: `id`, `identifier`, `title`, `priority`, `estimate`, `description`, `labels`, `url`, **`branchName`** (Linear's published git branch name — used verbatim when `/do-tasks` branches), and the resolved `id`s for: team, current `state`, target `started`-type `state` (see "Claim the issue" below). The Judge feasibility phase will read the description and decide feasibility.
+7. **Return** the ranked list to the **Pre-flight** phase below. Each entry needs: `id`, `identifier`, `title`, `priority`, `estimate`, `description`, `labels`, `url`, **`branchName`** (Linear's published git branch name — used verbatim when `/do-tasks` branches), and the resolved `id`s for: team, current `state`, target `started`-type `state` (see "Claim the issue" below). The execute path takes candidates in ranked order and, for each, runs **pre-flight → claim → judge feasibility** — the feasibility read now happens _after_ the claim, while the lock is held.
 
-   If the MCP response does not include `branchName` on `list_issues` results, fetch it lazily via `<linear-mcp>__get_issue` for whichever candidate the Judge feasibility phase selects. **Do not synthesize a branch name when the field is reachable** — using Linear's exact published string maximizes the chance of GitHub-integration auto-detection, even though the tracker path also adds an explicit `links` attachment as a fallback.
+   If the MCP response does not include `branchName` on `list_issues` results, fetch it lazily via `<linear-mcp>__get_issue` for the top-ranked candidate the Pre-flight phase operates on (and for each next candidate as the loop advances). **Do not synthesize a branch name when the field is reachable** — using Linear's exact published string maximizes the chance of GitHub-integration auto-detection, even though the tracker path also adds an explicit `links` attachment as a fallback.
 
    If the `/do-tasks` argument was a specific identifier (e.g. `PRE-12`), skip steps 3–6 (keep step 2 — the cached state map is still needed by "Claim the issue" and "Move to review") and call `<linear-mcp>__get_issue` with that identifier. Apply the filters from step 5 to that one issue; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct identifier — `/do-tasks` will surface the reason and stop.
 
-## Judge feasibility
-
-Take candidates in ranked order, **one at a time** — stop at the first feasible one. For each candidate, read the full issue (title, description, labels, links) and decide whether this session can finish it without a human in the loop.
-
-Apply judgment, not a checklist. Ask:
-
-- Does the description describe a concrete outcome (not "investigate X")?
-- Are the files or systems it touches identifiable from the description, or by a single grep in this repo?
-- Would a reasonable engineer expect to land a PR in under ~1 hour of focused work, given the codebase?
-- Is there anything that screams "needs a product/design call" or "depends on infra I don't have access to"?
-
-If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line Linear comment on the candidate (`Skipped by /do-tasks: <reason>`) and move to the next candidate. **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar.
-
-Print the chosen issue's identifier, title, and a one-sentence rationale for why this one is feasible, then proceed.
-
 ## Pre-flight: is work already in flight?
 
-Runs on the chosen candidate **after "Judge feasibility" and before "Claim the issue"**, on every path that **begins** work: the ranked-candidate pick, a `/do-tasks <identifier>` direct pick, and the `--claim-only` reserve. This is the cheapest, highest-value guard against duplicated work — it catches a sibling session that is already building this issue even when the `auto-claimed` label race below has not yet resolved (a remote branch or open PR is visible from a fresh clone the instant it is pushed, long before the loser's claim write lands). If **any** check trips, **do not claim and do not build**.
+Runs on the **top-ranked candidate** immediately **before "Claim the issue"** — no feasibility judgment yet (that now runs _after_ the claim, while holding it). On every path that **begins** work: the ranked-candidate pick, a `/do-tasks <identifier>` direct pick, and the `--claim-only` reserve. This is the cheapest, highest-value guard against duplicated work — it catches a sibling session that is already building this issue even when the token-comment lock below has not yet resolved (a remote branch or open PR is visible from a fresh clone the instant it is pushed, long before the loser's claim write lands). If **any** check trips, **do not claim and do not build**.
 
 > **`--no-claim` runs a reduced form.** A `--no-claim` resume targets a task **this caller already claimed** — it is _expected_ to be in a `started`-type state, carry `auto-claimed`, be assigned to the caller, and possibly already have its branch pushed. So a resume runs **only the open-PR checks (steps 2–3)**: an open PR means the work is already published (stop and report it), but the issue's own remote branch (step 4) and started-state/`auto-claimed`/self-assignment (step 5) are the caller's _own_ claim markers — **skip steps 4–5 on the `--no-claim` path** so they don't abort a legitimate resume.
 
@@ -95,37 +82,63 @@ Runs on the chosen candidate **after "Judge feasibility" and before "Claim the i
 
 5. **Tracker-state signals.** Treat the issue as in flight (skip) if it is already in a `started`-type state, already carries `auto-claimed`, or its `assignee` is set to **another** user — not the current viewer (`<linear-mcp>__get_user` with no args returns the viewer). The ranked path's "Find candidates" filters (step 5) already exclude these, but the **direct-identifier path** must enforce the same gates **here** instead of overriding them.
 
-**Outcome by path.** In ranked-candidate mode, an in-flight result means move to the **next** candidate (re-run "Judge feasibility" on it). On a direct `/do-tasks <identifier>` pick, surface the skip message and **stop** — do not fall through to another issue. On the `--claim-only` reserve, an in-flight result means the work is already reserved or being built — stop and report it. On the `--no-claim` resume (open-PR checks only, per the note above), an open PR means the work is already published — stop and report it; otherwise proceed with the resume.
+**Outcome by path.** In ranked-candidate mode, an in-flight result means move to the **next** candidate (re-run "Pre-flight" on it, then claim, then judge). On a direct `/do-tasks <identifier>` pick, surface the skip message and **stop** — do not fall through to another issue. On the `--claim-only` reserve, an in-flight result means the work is already reserved or being built — stop and report it. On the `--no-claim` resume (open-PR checks only, per the note above), an open PR means the work is already published — stop and report it; otherwise proceed with the resume.
 
 ## Claim the issue
 
-The claim must be **claim-then-verify**: two agents that both pass the pre-flight above must not both proceed, so we write the claim and then re-read to confirm we hold it. Given the chosen candidate from "Judge feasibility" and the branch name `/do-tasks` will create:
+The claim is a deterministic **first-writer-wins election on an append-only log** (Linear comments): two sessions that both pass the pre-flight must not both proceed, but `assignee` cannot decide a winner when both racers are authenticated as the **same** Linear user (both write — and re-read — the identical viewer id). So the lock is a **claim comment carrying a unique per-session token**, and the winner is whoever's comment is oldest. The `started`-type state, `auto-claimed` label, and viewer `assignee` stay on as the **human-visible** claim marker and as the orphan-GC guard the election reads against. Given the **top-ranked candidate** from "Pre-flight" and the branch name `/do-tasks` will create:
 
 1. **Resolve the `auto-claimed` label id.** Call `<linear-mcp>__list_issue_labels` with `teamId`. If a label named `auto-claimed` exists, capture its id. If not, create it via `<linear-mcp>__create_issue_label` (`teamId`, `name: auto-claimed`, a recognizable color like `#5E6AD2`) and capture the new id.
 
 2. **Resolve the target `started`-type state id.** From the cached state map (find-candidates step 2), pick the team's default `started`-type state. If multiple exist, prefer one named `In Progress`; otherwise take the first.
 
-3. **Resolve the viewer.** Call `<linear-mcp>__get_user` with no args; capture the current viewer's `id`. The viewer as `assignee` — together with the `auto-claimed` label — is the claim marker that the verify step (step 6) checks.
+3. **Resolve the viewer.** Call `<linear-mcp>__get_user` with no args; capture the current viewer's `id`. The viewer as `assignee` — together with the `auto-claimed` label — is the human-visible claim marker (and the state-backing the election's orphan-GC checks for).
 
-4. **Concurrency guard — read before write.** Call `<linear-mcp>__get_issue` with the candidate's `id` to re-read its labels and assignee. If `auto-claimed` is now present, or `assignee` is now another user, **stop and report the race**: return `race` so the tracker path can fall back to the next candidate. (This is the cheap early-out; the post-write verify in step 6 closes the residual both-read-Todo window.)
+4. **Read-before-write guard** (cheap early-out). Call `<linear-mcp>__get_issue` with the candidate's `id` to re-read labels and assignee. If `auto-claimed` is now present, or `assignee` is now another user, **yield now**: return `race` so the tracker path falls back to the next candidate. (This catches an already-resolved claim before you spend a write; the comment election below closes the residual both-read-Todo window.)
 
-5. **Claim (write).** In **one** `<linear-mcp>__save_issue` call set state, label, and assignee together:
+5. **Mint a unique session token.** Build `do-tasks-claim:<rand>` where `<rand>` is a long random hex string — `openssl rand -hex 16`, or `printf '%s%s' "$(date +%s%N)" "$RANDOM"` if `openssl` is absent. Wrap the whole token in an HTML comment so it is invisible in rendered Linear: `<!-- do-tasks-claim:<rand> -->`. **Do not** embed email, hostname, or pid in the token — the election needs only uniqueness and the ordering key, and this comment lands in a shared workspace; human attribution comes from the viewer `assignee`, not the token.
+
+6. **Post the claim comment first — it is the lock.** Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` and a body that carries the token **and** a human line:
+
+   ```
+   Claimed by /do-tasks. Working on branch `<branch>`; PR link will follow.
+   <!-- do-tasks-claim:<rand> -->
+   ```
+
+   **Then** — and only then — claim the issue body in **one** `<linear-mcp>__save_issue` call:
    - `id`: candidate `id`
    - `state`: the `started`-type state id from step 2 (the `save_issue` field is named `state`, not `stateId`; it accepts a state id, name, or type)
    - `labels`: the issue's existing label ids/names **plus** `auto-claimed` (the `save_issue` field is named `labels`, not `labelIds`; the call replaces the label set, so include the existing ones to avoid clobbering)
    - `assignee`: the viewer `id` from step 3
 
-6. **Verify (re-read).** Immediately call `<linear-mcp>__get_issue` again on the candidate's `id`. The claim holds **iff** the re-read shows `assignee` equal to the viewer `id` from step 3 **and** `auto-claimed` present **and** the state still the `started`-type state you set. If `assignee` is now a different user (a concurrent claimer's write landed after yours), or the state was moved off your `started` state by someone else — **you lost the race**: do **not** build; return `race` so the tracker path falls back to the next candidate. Only proceed to "Branch + execute" when the re-read confirms **you** hold the claim.
+   Posting the comment before the issue write makes the comment the lock and the issue write the state-backing the election checks for.
 
-7. **Comment.** Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` and a body like:
+7. **Jittered delay.** `sleep` a randomized interval with a concrete floor — start at ~2–3 s (the propagation budget; tune up from observed Linear read lag). This breaks symmetry between racers and lets Linear propagate the comment and issue writes before the verify read.
 
-   ```
-   Claimed by /do-tasks. Working on branch `<branch>`; PR link will follow.
-   ```
+8. **Verify — elect the winner.** Call `<linear-mcp>__list_comments` on the candidate's `id`, filter to comments whose body contains the `do-tasks-claim:` marker, and elect the winner = the **state-backed** claim comment with the **earliest `createdAt`** (tie-break: **lowest comment id**). Every reader computes the same winner deterministically.
+   - **Orphan garbage-collection (avoid deadlock).** A claim comment counts as a valid lock **only if the issue currently carries the `started`-type state + `auto-claimed` + an `assignee`** — i.e. the claim's issue write actually landed. A comment left by a session that crashed after `save_comment` but before/around `save_issue` sits on a card still in Todo with no `auto-claimed`; **ignore** such orphaned comments when electing (and `delete_comment` one if you posted it). Elect among the remaining state-backed claims only, so a stale earliest comment can never permanently block the card.
+   - **Read-lag residual.** The election is only as good as what `list_comments` returns. Under Linear's eventual-consistency read lag a session may see **only its own** claim comment and wrongly conclude it won. If the re-read returns **only your own** marker, treat it as **inconclusive** — re-poll once or twice after a short delay before declaring a win. This narrows but cannot fully close the window (no server-side atomic CAS exists); the jitter floor in step 7 is the primary mitigation.
+   - **If my comment is the winner** (state-backed, earliest) → I hold the claim. Re-read the issue (`<linear-mcp>__get_issue`) to confirm the `started`-type state, `auto-claimed`, and viewer `assignee` survived, then proceed to **Judge feasibility**.
+   - **If my comment is not the winner** → I lost: `delete_comment` my own claim comment (keep the log clean), do **not** build, and return `race` so the tracker path falls back to the next candidate.
 
-8. **Return** the issue identifier and url so `/do-tasks` can proceed to branch + execute.
+9. **Return** the issue identifier and url so `/do-tasks` can proceed to Judge feasibility (then branch + execute).
+
+> **Implementation note:** the lock hinges on `list_comments` returning a usable `createdAt` and a stable comment `id` for the tie-break. Confirm both during implementation; if either is missing or non-monotonic, define the fallback ordering key before relying on the election.
 
 > **Never** move the issue to a `completed`/`canceled` state from this path — merge is the only completion signal (the hard rule at the top of this file). The claim sets a `started`-type state only.
+
+## Judge feasibility
+
+Runs on the candidate this session **just claimed** (the token-comment lock is held). Read the full issue (title, description, labels, links) and decide whether this session can finish it without a human in the loop. (`--claim-only` stops _before_ this phase — it reserves the card without judging; see "Untouched invariants" in the design.)
+
+Apply judgment, not a checklist. Ask:
+
+- Does the description describe a concrete outcome (not "investigate X")?
+- Are the files or systems it touches identifiable from the description, or by a single grep in this repo?
+- Would a reasonable engineer expect to land a PR in under ~1 hour of focused work, given the codebase?
+- Is there anything that screams "needs a product/design call" or "depends on infra I don't have access to"?
+
+If **feasible**: print the issue's identifier, title, and a one-sentence rationale, then proceed to "Branch + execute". If **not feasible**: this is a **feasibility reject** on a card you already hold — run **"Bail — feasibility reject (release-and-continue)"** below: release the claim and move to the **next ranked candidate**, re-running Pre-flight → Claim → Judge on it. **Do not halt** (halting is reserved for a _mid-execution_ failure). If every candidate is rejected, summarize the reasons and stop — do not lower the bar.
 
 ## Move to review on PR open
 
@@ -147,7 +160,14 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
 
 > Linear's GitHub integration may also create its own PR↔issue link if the team's repo is connected, but that depends on branch-name matching or magic words in the PR body — neither is reliable. The explicit `links` attachment above does not depend on the GitHub integration at all. If the integration also fires, you end up with one link (Linear de-duplicates by URL).
 
-## Bail (when execution proves infeasible mid-flight)
+## Bail
+
+Bail releases a claim this session holds. There are **two triggers**, and they differ only in what happens _after_ the release — the release mechanics (steps 1–5) are identical:
+
+- **Feasibility reject** — "Judge feasibility" rejected the card _before_ any building started. → **release-and-continue.**
+- **Mid-execution failure** — work broke _while building_ (after "Branch + execute" began). → **halt.**
+
+**Release the claim (both triggers):**
 
 1. **Resolve `human-approval-requested` label id** (create if absent, same pattern as `auto-claimed`).
 
@@ -156,11 +176,15 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
 3. Call `save_issue` with the candidate's `id`:
    - `state`: backlog state id (field is `state`, not `stateId`)
    - `labels`: existing labels **minus** `auto-claimed` **plus** `human-approval-requested` (field is `labels`, not `labelIds`; call replaces the set)
-   - `assignee`: `null` — release the claim's assignee so the issue returns to backlog unclaimed (the claim marker is assignee + `auto-claimed`; clear both on bail)
+   - `assignee`: `null` — release the claim's assignee so the issue returns to backlog unclaimed (the human-visible claim marker is assignee + `auto-claimed`; clear both on bail)
 
-4. **Comment** the bail reason via `save_comment`. Include what was tried and what tripped the bail.
+4. **Delete this session's claim comment** via `<linear-mcp>__delete_comment` (the token comment posted in "Claim the issue" step 6 is the lock — removing it fully releases the card so a later session can win the election cleanly). Then **comment** the bail reason via `save_comment`, including what was tried and what tripped the bail.
 
-5. Return the comment URL to `/do-tasks`. Do not silently pick a different candidate after a bail — the human should look at what tripped the bail before more work is auto-claimed.
+**Then, by trigger:**
+
+5a. **Feasibility reject → release-and-continue.** Move to the **next ranked candidate** and re-run Pre-flight → Claim → Judge on it. This is the _only_ bail that auto-advances; it never built anything, so there is no half-done work for a human to inspect.
+
+5b. **Mid-execution failure → halt.** Return the comment URL to `/do-tasks` and **stop** — do **not** silently pick a different candidate. Work was already in flight when it broke, so a human should look at what tripped the bail before more work is auto-claimed. This is the load-bearing distinction: a reject that never built continues; a build that broke halts.
 
 ## Report
 

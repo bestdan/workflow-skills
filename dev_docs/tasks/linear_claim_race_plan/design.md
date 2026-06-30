@@ -1,7 +1,7 @@
 # Design: Linear claim race — timeliness + fidelity
 
 **Date:** 2026-06-25
-**Status:** Approved, pre-implementation
+**Status:** Implemented (evals deferred — the repo's eval harness is skill-routing only; see "Testing" note below)
 **Scope:** `commands/handlers/linear-claim.md`, `commands/handlers/linear-common.md`, `commands/do-tasks.md` §3. **Linear handler only** — gh-issue/jira/repo-pr are out of scope.
 
 ## Problem
@@ -10,7 +10,7 @@ Two independent `/do-tasks` sessions very often claim and fully build the **same
 
 ### Root cause 1 — the claim happens after the slowest step (timeliness)
 
-The Linear flow runs `find candidates → judge feasibility → pre-flight → claim`. Every step before the claim is **read-only**. Two sessions starting near each other both query Todo, both rank the same issue #1, and both spend *minutes* in "Judge feasibility" (reading the full description, grepping the repo). During that entire window the issue sits in Todo, unclaimed; the pre-flight passes for both (neither has pushed a branch or claimed). The unclaimed window ≈ the whole feasibility-judgment time. That is the "claim-lag."
+The Linear flow runs `find candidates → judge feasibility → pre-flight → claim`. Every step before the claim is **read-only**. Two sessions starting near each other both query Todo, both rank the same issue #1, and both spend _minutes_ in "Judge feasibility" (reading the full description, grepping the repo). During that entire window the issue sits in Todo, unclaimed; the pre-flight passes for both (neither has pushed a branch or claimed). The unclaimed window ≈ the whole feasibility-judgment time. That is the "claim-lag."
 
 ### Root cause 2 — the verify is last-write-wins on a non-distinguishing field (fidelity)
 
@@ -22,7 +22,7 @@ The claim marker is `assignee`, a reference to a Linear **user**. The racing ses
 
 Phase order changes from `find → judge → pre-flight → claim` to:
 
-1. **Find candidates** — unchanged. The existing `estimate`/labels/`assignee` filters in find-candidates step 5 *are* the cheap pre-screen and stay before the claim.
+1. **Find candidates** — unchanged. The existing `estimate`/labels/`assignee` filters in find-candidates step 5 _are_ the cheap pre-screen and stay before the claim.
 2. **Pre-flight in-flight check** — unchanged checks (open PR by branch, open PR by `[<IDENTIFIER>]` title, remote branch, started/`auto-claimed`/assigned-to-other), now run on the top-ranked candidate immediately before the claim.
 3. **Claim** — claim-then-verify (see Change 2).
 4. **Judge feasibility** — the expensive step (full description read + repo grep) now runs **while holding the claim**.
@@ -35,7 +35,7 @@ The claim becomes a deterministic **first-writer-wins on an append-only log** (L
 
 1. **Read-before-write guard** (existing cheap early-out): `get_issue`; if `auto-claimed` is already present or `assignee` is another user, yield now and fall back to the next candidate.
 2. **Mint a unique session token:** an **opaque random** identifier — `do-tasks-claim:<rand>` where `<rand>` is a long random hex string (e.g. `openssl rand -hex 16`, or `date +%s%N` + `$RANDOM` if `openssl` is absent) — wrapped in an HTML comment (`<!-- ... -->`) so it is invisible in rendered Linear. **Do not** embed email, hostname, or pid in the token: the election only needs uniqueness + the ordering key, and this comment lands in a shared workspace. Human attribution comes from the viewer `assignee` on the issue, not the token.
-3. **Post the claim comment first** (it is the lock), via `save_comment`. *Then* `save_issue` with the `started`-type state + `auto-claimed` label + viewer `assignee` — assignee + label remain the **human-visible** claim marker.
+3. **Post the claim comment first** (it is the lock), via `save_comment`. _Then_ `save_issue` with the `started`-type state + `auto-claimed` label + viewer `assignee` — assignee + label remain the **human-visible** claim marker.
 4. **Jittered delay:** `sleep` a randomized interval with a concrete floor (the propagation budget — start at ~2–3 s, tune from observed Linear read lag) to break symmetry between racers and let Linear propagate the writes before the verify read.
 5. **Verify:** `list_comments` on the issue, filter to comments containing the `do-tasks-claim:` marker, and compute the winner = the comment with the **earliest `createdAt`** (tie-break: **lowest comment id**). Every reader computes the same winner deterministically.
    - **Orphan garbage-collection (avoid deadlock):** a claim comment counts as a valid lock **only if the issue currently carries the `started`-type state + `auto-claimed` + an `assignee`** — i.e. the claim writes actually landed. A comment left by a session that crashed after `save_comment` but before/around `save_issue` sits on a card still in Todo with no `auto-claimed`; **ignore** such orphaned comments when electing the winner (and delete one if you posted it), so a stale earliest comment can never permanently block the card. Elect among the remaining state-backed claims only.
@@ -52,7 +52,7 @@ When the deep "Judge feasibility" rejects a card that this session has **already
 - **Bail the card** with bail semantics: revert to the `backlog`-type state, add `human-approval-requested`, remove `auto-claimed`, clear `assignee`, delete the session's claim comment, and post a comment naming the reason.
 - **Then move to the next ranked candidate** and re-run pre-flight → claim → judge.
 
-A true **mid-execution** bail (work broke *while building*) still **halts** the run per the existing hard rule ("do not silently pick a different candidate after a bail"). The two bail triggers are now distinguished: feasibility-reject is release-and-continue; mid-execution failure is halt.
+A true **mid-execution** bail (work broke _while building_) still **halts** the run per the existing hard rule ("do not silently pick a different candidate after a bail"). The two bail triggers are now distinguished: feasibility-reject is release-and-continue; mid-execution failure is halt.
 
 ## Untouched invariants
 
