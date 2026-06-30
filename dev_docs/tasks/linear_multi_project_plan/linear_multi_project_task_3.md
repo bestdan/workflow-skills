@@ -7,7 +7,7 @@ created: 2026-06-30
 source_branch: main
 related_files:
   - commands/handlers/linear-claim.md # Find candidates query (~L24-49); per-project projectId scoping
-  - commands/do-tasks.md # §3 Tracker path: pre-claim WIP gate, --all batch slack, --project flag
+  - commands/do-tasks.md # §3 Tracker path: pre-claim WIP gate, --all batch slack, global ceiling
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, do-tasks, wip]

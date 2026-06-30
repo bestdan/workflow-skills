@@ -34,7 +34,8 @@ In `commands/handlers/linear-config.md`:
 1. **Multi-project setup (fresh):** loop the existing single-project resolution prompt so
    the user can add **one or more** projects, each resolved against `list_projects` (keep
    the no-free-text rule). Offer optional per-project `wip_limit`/`max_estimate` overrides,
-   and the optional top-level `global_wip_limit`. Write them as the `projects:` list.
+   and the optional `linear.global_wip_limit` (nested under `linear:`). Write them as the
+   `projects:` list.
    Preserve the "None — prompt me per-task" path (writes empty/absent `projects`).
 2. **Migration (existing scalar):** detect a scalar `linear.default_project`, resolve its
    name via `list_projects`, and rewrite it as a **one-entry** `projects:` list with no

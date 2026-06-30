@@ -7,7 +7,7 @@ created: 2026-06-30
 source_branch: main
 related_files:
   - commands/handlers/linear-archive.md # sweep scope (~L117-119); sweep all configured projects
-  - commands/push-plan.md # plan placement (~L115); prompt/honor --project with multiple
+  - commands/push-plan.md # plan placement (~L115); prompt which project when multiple
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, archive-tasks, push-plan]
@@ -33,9 +33,9 @@ Design refs: spec §"Selection semantics" (`/archive-tasks`, `/push-plan` rows).
   Whole-team scope (projects absent) unchanged. (`--project X` narrowing is **deferred** to
   the same follow-up as Task 3 — don't build it here.)
 - `commands/push-plan.md`: when **multiple** projects are configured, **prompt** which one
-  to push the plan into (or honor an explicit `--project X`) instead of silently using the
-  lone pin. With exactly one configured project, use it directly. (A plan goes to one
-  project — see Open Questions on per-task routing.)
+  to push the plan into, instead of silently using the lone pin. With exactly one configured
+  project, use it directly. (A plan goes to one project — see Open Questions on per-task
+  routing. `--project X` narrowing is deferred with the rest of the flag.)
 
 ## Acceptance Criteria
 
