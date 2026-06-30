@@ -38,7 +38,7 @@ linear:
       # list_projects when absent.
       wip_limit: 5 # optional — per-project override (else inherits the top-level wip_limit).
       max_estimate: 5 # optional — per-project override (else inherits linear.max_estimate).
-    - id: 9f3a0b1c-… # a second project with no overrides → inherits wip_limit 3, max_estimate 3.
+    - id: 9f3a0b1c-0000-0000-0000-000000000000 # a second project, no overrides → inherits wip_limit 3, max_estimate 3.
   global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across ALL configured
   # projects, enforced on top of the per-project caps (absent → no global ceiling; the sum of
   # per-project caps applies). Lives under linear: because it is multi-project-specific, unlike
@@ -61,13 +61,13 @@ linear:
 
 ### Resolve configured projects
 
-Every Linear-handled command that scopes to projects calls **this one resolution step** instead of reading `default_project` (or `projects`) directly, so inheritance and the whole-team fallback are defined in exactly one place. It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
+Every Linear-handled command that scopes to projects **must call** this one resolution step instead of reading `default_project`/`projects` directly, so inheritance and the whole-team fallback live in exactly one place. (Consumers still read the scalar `default_project` today; each is rewired to this helper in **PRE-331…335** — this task defines the helper, it does not migrate the consumers.) It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
 
-1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit>, max_estimate: <linear.max_estimate> }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
+1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit, default 3>, max_estimate: <linear.max_estimate, default 3> }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
 2. **Otherwise**, map each entry to `{ id, name, wip_limit, max_estimate }`:
    - `id` — the entry's required `id` (verbatim UUID).
-   - `wip_limit` — the entry's `wip_limit` if set, **else** the top-level `wip_limit`.
-   - `max_estimate` — the entry's `max_estimate` if set, **else** `linear.max_estimate`.
+   - `wip_limit` — the entry's `wip_limit` if set, **else** the top-level `wip_limit` (which itself defaults to `3` when unset).
+   - `max_estimate` — the entry's `max_estimate` if set, **else** `linear.max_estimate` (which itself defaults to `3` when unset).
    - `name` — the entry's `name` if set; **else** resolve it **lazily** via `<linear-mcp>__list_projects` (match the `id`) only when a name is actually needed for a prompt or report — never eagerly.
 
 Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-tasks`) use `id` + `name`; consumers that enforce WIP (`/do-tasks`, `/archive-tasks` scope) use `wip_limit` too. The optional **`linear.global_wip_limit`** is a separate scalar the `/do-tasks` WIP gate reads alongside this list (the ceiling across all returned scopes); it is not part of a per-project entry. Treat the returned list as read-only config — do not mutate it.

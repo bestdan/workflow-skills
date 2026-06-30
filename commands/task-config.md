@@ -115,12 +115,10 @@ wip_limit: 3 # top-level — per-project default each linear.projects entry inhe
 linear:
   team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
   default_priority: 3
-  projects: # optional — projects this repo scopes to (replaces scalar default_project).
-    # Absent/empty → whole team. See linear-common.md "Config block" + "Resolve configured projects".
-    - id: ebbc284b-… # required project id/UUID
-# name / wip_limit / max_estimate are optional per-entry overrides
-# global_wip_limit: 6  # optional — ceiling on TOTAL in-flight across all configured projects
-# api_key_ref: op://Private/Linear API/credential  # optional — 1Password ref for /archive-tasks GraphQL backstop
+  projects: # replaces scalar default_project; absent/empty → whole team
+    - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; optional per-entry wip_limit/max_estimate
+# Full schema — per-entry overrides, linear.global_wip_limit, linear.api_key_ref —
+# in commands/handlers/linear-common.md ("Config block" + "Resolve configured projects").
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 
