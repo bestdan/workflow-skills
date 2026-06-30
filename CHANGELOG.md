@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.13.1] - 2026-06-30
+
+### Fixes
+
+- close the Linear claim race with a token-comment lock (#96) (283c312)
+
 ## [1.13.0] - 2026-06-29
 
 ### Features
