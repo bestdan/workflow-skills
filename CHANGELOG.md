@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.14.0] - 2026-06-30
+
+### Features
+
+- add Google Antigravity (agy) as a built-in reviewer (#98) (03d9e97)
+
 ## [1.13.1] - 2026-06-30
 
 ### Fixes
