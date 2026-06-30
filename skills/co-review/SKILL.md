@@ -58,7 +58,7 @@ local_reviewers:
 > - **Never place `<INPUT>` under `.git/`.** In a git **worktree** `.git` is a _file_ (a gitdir pointer), not a directory, so a redirect into `.git/…` fails — which is exactly what triggers the empty-stdin fabrication above. Use a real directory.
 > - **Always start a fresh conversation.** Never pass `--continue` / `--conversation` for a review — each review must depend only on the current diff, never on accumulated memory.
 > - **Treat `agy` as advisory-only, always reconciled.** It emits confidently-wrong findings on substance (in testing it invented a non-existent `BashUnsandboxed` permission prefix), and being agentic it explores/writes state even under `--sandbox -p`. Never let it be the sole reviewer; its output must always pass through the reconciler.
-> - **Pin `--model`** if you want a reproducible reviewer identity — the default model can drift between runs.
+> - **Pin `--model`** for a reproducible reviewer identity (the unpinned default drifts between runs) **and** to exploit agy's real edge — a non-Claude voice. The built-in invocation defaults to `"Gemini 3.5 Flash (High)"`: vendor diversity at low quota cost, and in testing it caught the highest-value finding in ~14s. Pinning a model also makes empty-input degrade gracefully rather than fabricate. Reserve the heavier `"Gemini 3.1 Pro (High)"` for deep or high-stakes reviews — it consumes quota faster.
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one stdin stream**; the prompt argument is a short **fixed pointer**. Because nothing variable ends up in the command string, the command is invariant and can be approved once with an exact-match rule (see Permissions).
 
@@ -69,15 +69,17 @@ Assemble the input **and** pipe it to the agent in a **single shell invocation**
 
 - `codex`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only "<POINTER>"`
 - `codex`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
-- `agy`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | agy --sandbox -p "<POINTER>"` — `agy` reads the diff/rubric on stdin and merges it with the `-p` pointer; `--sandbox` enables its read-only terminal restrictions. `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
-- `agy`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | agy --sandbox -p "<POINTER>"`
+- `agy`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | agy --sandbox --model "Gemini 3.5 Flash (High)" -p "<POINTER>"` — `agy` reads the diff/rubric on stdin and merges it with the `-p` pointer; `--sandbox` enables its read-only terminal restrictions. The leading `[ -s "<INPUT>" ] &&` is an **agy-only guard** (a harmless shell-builtin test): it skips the call when `<INPUT>` is empty, defending against the stale-conversation fabrication (the pointer's `NO INPUT` clause is the second layer). `--model "Gemini 3.5 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review, but doing so changes the command string and re-prompts the exact-match approval. `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
+- `agy`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | agy --sandbox --model "Gemini 3.5 Flash (High)" -p "<POINTER>"`
 - `--local` mode → swap `gh pr diff <n>` for `git diff <base>`, and append any untracked files you read **in the same invocation**: `… ; git diff <base> >> "<INPUT>"; cat <untracked-file> … >> "<INPUT>"; cat "<INPUT>" | <agent> …`.
 
-Each `;`/`|`-separated segment is permission-matched on its own — `cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, `git diff …` → `Bash(git diff:*)`, and the `codex` tail → its exact rule — and redirection (`>`, `>>`) is transparent to matching, so this assemble-then-dispatch line is fully covered by the rules below. The only things that change between runs are the contents of `<REQUESTS>`, `<INPUT>`, and the diff — all files, never the command text.
+Each `;`/`|`/`&&`-separated segment is permission-matched on its own — `cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, `git diff …` → `Bash(git diff:*)`, the agy-only `[ -s "<INPUT>" ]` guard → a shell-builtin test (harmless; `agy` runs unsandboxed and prompts regardless), and the `codex`/`agy` tail → its exact rule — and redirection (`>`, `>>`) is transparent to matching, so this assemble-then-dispatch line is fully covered by the rules below. The only things that change between runs are the contents of `<REQUESTS>`, `<INPUT>`, and the diff — all files, never the command text.
 
 where `<POINTER>` is exactly:
 
-> Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.
+> Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.
+
+(The `Do NOT explore … or retrieve any prior conversation` and `If stdin is empty … NO INPUT` clauses exist to discipline **agentic, memory-backed** reviewers like `agy`: they stop it wandering the filesystem and — critically — stop it silently reviewing a **stale prior conversation** when stdin is empty. The clauses are harmless to stateless reviewers like `codex`, so the pointer stays shared.)
 
 A custom agent must supply its own `command:` (input is piped on stdin).
 
@@ -98,8 +100,8 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
       "Bash(cat:*)",
       "Bash(gh pr diff:*)",
       "Bash(git diff:*)",
-      "Bash(codex exec --sandbox read-only \"Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.\")",
-      "Bash(agy --sandbox -p \"Review the rubric and diff on stdin. Output findings as file:line, the issue, and a suggested fix. Read only: do not modify files or run commands.\")"
+      "Bash(codex exec --sandbox read-only \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")",
+      "Bash(agy --sandbox --model \"Gemini 3.5 Flash (High)\" -p \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")"
     ]
   }
 }
@@ -109,7 +111,7 @@ Why this is narrow:
 
 - The `codex` and `agy` rules are **exact** — each authorizes only this one read-only review command with that exact prompt. They do **not** grant arbitrary `codex exec` / `agy` runs, and they pin the read-only sandbox flag into the approved string. Edit the pointer and Claude Code re-prompts, so the approval can't silently come to mean something else.
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
-- The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` version uses a different read-only flag, update both.
+- The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` or `agy` version uses a different read-only flag (or you pin a different `agy --model`), update both.
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
 ## Steps
