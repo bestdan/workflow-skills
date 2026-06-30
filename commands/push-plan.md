@@ -130,14 +130,35 @@ order, and **reuse before create** so re-push never duplicates the container:
    (`--project X` narrowing is deferred; don't build it here.)
 3. Else **create** a project named after the epic `title` via
    `<linear-mcp>__save_project` (no `id` — that's the create primitive) with
-   `teamIds: [<team id>]` and `name: <epic title>`. Capture the returned project
-   `id` (and `url` if present).
+   `teamIds: [<team id>]`, `name: <epic title>`, and `description: <overview
+   body>` (the epic file's markdown below its frontmatter — Goal / Scope /
+   Approach / Tasks / Open questions, so the overview survives in the tracker once
+   the local file is deleted, §7). Capture the returned project `id` (and `url` if
+   present).
 
 Whenever a project is resolved in **case 2** (used directly or picked from the
 prompt) or **newly created** in case 3, **write its id back** onto the epic file's
 frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`) — so a re-push
 hits case 1 and never re-prompts or re-resolves (matching the Jira and GitHub
 paths). Only case 1, which already carries the id, writes nothing new.
+
+The **description** carries the overview and is written only when it is safe to do
+so — never blindly overwritten on a shared project:
+
+- **Case 3 (create)** always sets `description: <overview body>` (above), so a
+  freshly created project owns the overview.
+- **Case 2 (reuse)** writes the description **only if the project is
+  plan-dedicated**: its `name` equals the epic `title` (case-insensitive) **and**
+  its current `description` is empty or already equals the overview body (fetch
+  both via `<linear-mcp>__list_projects` while resolving the name). A configured
+  project picked for a plan is normally a standing project whose name ≠ the epic
+  title, so this is usually **false** and the description is left untouched.
+- Otherwise (a shared/reused project, or case 1) the overview has **no description
+  home**; §4.5 keeps the epic file and §7 reports it.
+
+Set a run-local **`overview_written`** flag true whenever the description was
+written this run (case 3, or a plan-dedicated case-2 reuse); §4.5 gates epic
+deletion on it — **not** on the shape of `tracker_id`.
 
 ### 4.3 Order the tasks (topological)
 
@@ -230,21 +251,27 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
    gh api "repos/<repo>/milestones?state=all" \
      --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url}'
 
-   # Only if the lookup returned nothing, create it:
+   # Only if the lookup returned nothing, create it — with the overview body as
+   # the milestone description, so it survives once the local file is deleted (§7):
    gh api "repos/<repo>/milestones" -f title="<epic title>" \
-     --jq '{number, url: .html_url}'
+     -f description="<overview body>" --jq '{number, url: .html_url}'
    ```
 
    (Use the resolved `<repo>`, or the current repo's `OWNER/NAME` from
    `gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
-   unset — the `gh api` path needs an explicit repo.) Capture the milestone
-   `number` and `html_url`. **Write them back** onto the epic file's frontmatter
-   (`tracker_id: <number>`, `tracker_url: <html_url>`).
+   unset — the `gh api` path needs an explicit repo.) `<overview body>` is the
+   epic file's markdown below its frontmatter. Set the `description` **only on
+   create** — the reuse-by-title branch above leaves an existing milestone's
+   description untouched. Capture the milestone `number` and `html_url`. **Write
+   them back** onto the epic file's frontmatter (`tracker_id: <number>`,
+   `tracker_url: <html_url>`).
 3. **Fallback (spike O2).** If milestone creation fails (e.g. the token lacks
    issues-write on milestones), fall back to a shared **`plan:<name>` label**:
    `gh label create "plan:<name>" --repo "<repo>" 2>/dev/null`, record
    `tracker_id: label:plan:<name>` on the epic file, and **note the downgrade in
-   the report** (weaker grouping — issues share a label, not a milestone).
+   the report** (weaker grouping — issues share a label, not a milestone). A label
+   has no description field, so the overview has no tracker home in this case — §7
+   keeps the epic file locally and warns.
 
 ### 5.3 Order the tasks (topological)
 
@@ -335,7 +362,12 @@ The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
    exactly, reuse its `key`. Otherwise create the Epic via
    `<atlassian-mcp>__createJiraIssue` (`cloudId: <jira.site>`, `projectKey: <project>`,
    `issueTypeName: "Epic"`, `summary: <epic title>`, `description:` the epic body,
-   `contentFormat: "markdown"`). Capture the new Epic `key` and `webUrl`.
+   `contentFormat: "markdown"`). The epic body (the overview markdown below the
+   frontmatter) is the Jira path's container description — so, like the Linear
+   project description (§4.2) and the gh-issue milestone description (§5.2), the
+   overview survives in the tracker once the local file is deleted (§7). It is set
+   **only on create**; the lookup-reuse branch leaves an existing Epic's
+   description untouched. Capture the new Epic `key` and `webUrl`.
 
 Whenever an Epic is resolved by **lookup or create** (case 2 — i.e. any time case 1
 didn't already supply it), **write its key back** onto the epic file's frontmatter:
