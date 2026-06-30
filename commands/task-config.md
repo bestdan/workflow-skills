@@ -111,11 +111,16 @@ jira:
 ```yaml
 # linear
 handler: linear
+wip_limit: 3 # top-level — per-project default each linear.projects entry inherits unless overridden
 linear:
   team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
-  default_project: null
   default_priority: 3
-  # api_key_ref: op://Private/Linear API/credential  # optional — 1Password ref for /archive-tasks GraphQL backstop
+  projects: # optional — projects this repo scopes to (replaces scalar default_project).
+    # Absent/empty → whole team. See linear-common.md "Config block" + "Resolve configured projects".
+    - id: ebbc284b-… # required project id/UUID
+# name / wip_limit / max_estimate are optional per-entry overrides
+# global_wip_limit: 6  # optional — ceiling on TOTAL in-flight across all configured projects
+# api_key_ref: op://Private/Linear API/credential  # optional — 1Password ref for /archive-tasks GraphQL backstop
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 

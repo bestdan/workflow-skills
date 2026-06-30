@@ -15,23 +15,34 @@ Linear is accessed via the official MCP server connected from `https://mcp.linea
 
 ## Config block
 
-The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. The full `linear:` block:
+The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. The config keys (top-level `wip_limit` plus the `linear:` block):
 
 ```yaml
 handler: linear
+wip_limit: 3 # top-level — shared with the repo-pr & gh-issue handlers. For Linear it is the
+# per-project default that each `linear.projects` entry inherits unless it sets its own.
 linear:
   team: PreThink # required — team name (as shown in Linear) or team id/UUID.
-  # The team key (e.g. PRE) is not accepted because `list_teams`
-  # does not return it.
-  default_project: null # optional; skips the project prompt in /add-task, and
-  # pins /promote-tasks to this project's backlog (else it detects one — see
-  # linear-promote.md step 4). Explicit project id/UUID, not a name.
+  # The team key (e.g. PRE) is not accepted because `list_teams` does not return it.
   default_priority: 3 # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3).
-  max_estimate: 3 # optional, used by /do-tasks (tracker path) — exclusive upper bound on
-  # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task
-  # `size` — see "Task size" in skills/task/SKILL.md). Default 3 (i.e. claim issues with estimate 1 or 2).
+  max_estimate: 3 # optional default for /do-tasks (tracker path) — exclusive upper bound on
+  # `estimate` (Linear's `estimate` uses the same Fibonacci scale as our task `size` — see
+  # "Task size" in skills/task/SKILL.md). Default 3. Inherited by each project unless overridden.
   base_branch: main # optional, used by /do-tasks (tracker path) — branch /do-tasks branches
   # from. Default main.
+  projects: # optional — the Linear projects this repo's task commands scope to. Replaces the
+    # old scalar `default_project`. Absent or empty → whole-team scope (today's "no pin" behavior);
+    # exactly one entry → equivalent to a single pin.
+    - id: ebbc284b-a1c1-4cb3-96e0-914e210a79a2 # required — project id/UUID, not a name.
+      name: Handler parity follow-ups # optional — for prompts/reports; resolved via
+      # list_projects when absent.
+      wip_limit: 5 # optional — per-project override (else inherits the top-level wip_limit).
+      max_estimate: 5 # optional — per-project override (else inherits linear.max_estimate).
+    - id: 9f3a0b1c-… # a second project with no overrides → inherits wip_limit 3, max_estimate 3.
+  global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across ALL configured
+  # projects, enforced on top of the per-project caps (absent → no global ceiling; the sum of
+  # per-project caps applies). Lives under linear: because it is multi-project-specific, unlike
+  # the cross-handler top-level wip_limit.
   api_key_ref: op://Private/Linear API/credential # optional, used by /archive-tasks —
 # a 1Password op:// reference to a Linear PERSONAL API key. The MCP has no archive
 # mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key.
@@ -39,6 +50,27 @@ linear:
 # labels support is deferred — the Linear MCP create_issue tool takes label UUIDs, not names,
 # and resolving names → ids requires an extra tool call. Add a tag in the body for now.
 ```
+
+**Schema rules:**
+
+- `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
+- `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
+- Per-project override keys are **only** `wip_limit` and `max_estimate`. `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global.
+- Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
+- `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
+
+### Resolve configured projects
+
+Every Linear-handled command that scopes to projects calls **this one resolution step** instead of reading `default_project` (or `projects`) directly, so inheritance and the whole-team fallback are defined in exactly one place. It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
+
+1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit>, max_estimate: <linear.max_estimate> }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
+2. **Otherwise**, map each entry to `{ id, name, wip_limit, max_estimate }`:
+   - `id` — the entry's required `id` (verbatim UUID).
+   - `wip_limit` — the entry's `wip_limit` if set, **else** the top-level `wip_limit`.
+   - `max_estimate` — the entry's `max_estimate` if set, **else** `linear.max_estimate`.
+   - `name` — the entry's `name` if set; **else** resolve it **lazily** via `<linear-mcp>__list_projects` (match the `id`) only when a name is actually needed for a prompt or report — never eagerly.
+
+Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-tasks`) use `id` + `name`; consumers that enforce WIP (`/do-tasks`, `/archive-tasks` scope) use `wip_limit` too. The optional **`linear.global_wip_limit`** is a separate scalar the `/do-tasks` WIP gate reads alongside this list (the ceiling across all returned scopes); it is not part of a per-project entry. Treat the returned list as read-only config — do not mutate it.
 
 ## Linear concepts → task concepts
 
