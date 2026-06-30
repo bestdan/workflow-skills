@@ -13,10 +13,19 @@ single top-level `wip_limit`. A repo whose work spans multiple Linear projects c
   projects (only "one project" or "the whole team"); and
 - give each project its own WIP ceiling — `wip_limit` is one global number.
 
-`default_project` is a flat scalar read by five consumers (`linear-add.md`,
-`linear-list.md`, `linear-promote.md`, `linear-claim.md`, `do-tasks.md`); nothing
+`default_project` is a flat scalar read across the Linear handler — the five
+**selection** consumers (`linear-add.md`, `linear-list.md`, `linear-promote.md`,
+`linear-claim.md`, `do-tasks.md`), the **archive** sweep (`linear-archive.md`, added
+with `/archive-tasks`), **plan placement** (`push-plan.md`), and the **config/migration**
+surface (`linear-config.md` owns the `/task-config` setup prompt and id resolution; the
+schema is documented in `linear-common.md` and `commands/task-config.md`). Nothing
 consumes a list. There is no rigid schema — `/doctor` only checks the file parses as
 YAML — so the gap is in the handler instructions, not validation.
+
+> **Implementation surface refreshed 2026-06-30** against `main` (after the
+> `archive-tasks` and `linear-config.md` merges). The design below is unchanged; only
+> the consumer enumeration and "Files touched" table were corrected — the original
+> "five consumers" predated `linear-archive.md`, `linear-config.md`, and `push-plan.md`.
 
 ## Goals
 
@@ -80,6 +89,8 @@ When `projects` is absent/empty it returns a single synthetic "whole team" scope
 | `/add-task`                      | Prompts among the **configured** projects (+ "No project (team backlog)"). Skips the prompt when only one project is configured.                                                      |
 | `/list-tasks`                    | Prompts to pick one; `/list-tasks all` shows the union, grouped/labeled by project.                                                                                                   |
 | `/promote-tasks`                 | Prompts to pick one configured project; `/promote-tasks all` scores all configured backlogs.                                                                                          |
+| `/archive-tasks`                 | Sweeps across **all** configured projects (union), each scoped by its `projectId` — replaces today's single-`default_project` sweep. `--project X` narrows to one.                    |
+| `/push-plan`                     | Targets the configured project; with multiple, **prompts** which one (or honors an explicit `--project X`) instead of silently using the lone pin.                                    |
 
 `all` means **all configured projects**, not the whole team backlog — the config now
 enumerates the projects of interest.
@@ -114,10 +125,11 @@ The in-flight count — computed once for the pin today — becomes **per-projec
 
 ## Migration & doctor
 
-- **`/task-config`** detects a scalar `linear.default_project`, resolves its name via
-  `list_projects`, and rewrites it as a one-entry `projects:` list. Fresh setup lets the
-  user add one or more projects. After conversion it is a **hard cut** — handlers read
-  only `projects:`.
+- **`/task-config`** (Linear setup lives in `linear-config.md`, which owns the
+  team/project prompts and id resolution) detects a scalar `linear.default_project`,
+  resolves its name via `list_projects`, and rewrites it as a one-entry `projects:` list.
+  Fresh setup lets the user add one or more projects (looping the existing single-project
+  prompt). After conversion it is a **hard cut** — handlers read only `projects:`.
 - **`/doctor`** Check 1 gains:
   1. **Un-migrated WARN** — if scalar `default_project` is still present, warn with the
      fix ("run `/task-config` to migrate").
@@ -130,16 +142,21 @@ The in-flight count — computed once for the pin today — becomes **per-projec
 
 ## Files touched
 
-| File                                                 | Change                                                                                                                   |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `commands/handlers/linear-common.md`                 | New schema; shared "resolve configured projects" helper (list of `{id, name, wip_limit, max_estimate}` with inheritance) |
-| `commands/handlers/linear-claim.md`                  | Find candidates across configured projects; per-project WIP in claim                                                     |
-| `commands/do-tasks.md`                               | Pre-claim WIP gate + batch slack computed per-project                                                                    |
-| `commands/handlers/linear-add.md`                    | Prompt among configured projects (skip if one)                                                                           |
-| `commands/handlers/linear-list.md`                   | Pick-one / `all` union                                                                                                   |
-| `commands/handlers/linear-promote.md`                | Scope among configured projects; `all` = all configured                                                                  |
-| `skills/task-config/*` (+ any Linear config handler) | Migration + multi-project setup                                                                                          |
-| `commands/doctor.md`                                 | Migration WARN + new-shape validation                                                                                    |
+_Refreshed against `main` 2026-06-30. Ordering is roughly dependency order (schema/helper first, then consumers, then migration/validation)._
+
+| File                                  | Change                                                                                                                                                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commands/handlers/linear-common.md`  | New `projects:` + `global_wip_limit` schema in the Config block; shared "resolve configured projects" helper (list of `{id, name, wip_limit, max_estimate}` with inheritance, + global ceiling) |
+| `commands/handlers/linear-config.md`  | `/task-config` setup: loop the project prompt to add one-or-more; migrate scalar `default_project` → one-entry `projects:` list (owns id resolution against `list_projects`)                    |
+| `commands/handlers/linear-claim.md`   | Find candidates across configured projects; per-project WIP slack in the claim                                                                                                                  |
+| `commands/do-tasks.md`                | Pre-claim WIP gate per-project + `--all` batch slack per-project + the `global_wip_limit` ceiling; `--project X` narrowing                                                                      |
+| `commands/handlers/linear-add.md`     | Prompt among configured projects (skip if exactly one)                                                                                                                                          |
+| `commands/handlers/linear-list.md`    | Pick-one / `all` union, grouped by project                                                                                                                                                      |
+| `commands/handlers/linear-promote.md` | Scope among configured projects; `all` = all configured backlogs                                                                                                                                |
+| `commands/handlers/linear-archive.md` | **(new consumer)** sweep across **all** configured projects instead of the single `default_project`; `--project X` narrows                                                                      |
+| `commands/push-plan.md`               | **(new consumer)** with multiple projects, prompt for / honor `--project` instead of using the lone pin                                                                                         |
+| `commands/task-config.md`             | Update the documented example schema (`projects:` list + `global_wip_limit`) to match                                                                                                           |
+| `commands/doctor.md`                  | Migration WARN (scalar `default_project` still present) + shape validation (unique ids, positive ints, global-ceiling sanity)                                                                   |
 
 ## Out of scope
 
