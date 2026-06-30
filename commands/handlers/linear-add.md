@@ -6,15 +6,19 @@ Creates a Linear issue via `<linear-mcp>__save_issue` (called without `id` — t
 
 > **One value, two field names.** The Linear MCP is inconsistent: `list_projects` takes `teamId`, `save_issue` takes `team`. Both accept the same value — the team's UUID resolved in step 1. Pass it under whichever name the call requires; this doc uses the exact field name in each call below.
 
-> **Required interaction:** step 2 (project selection) MUST prompt the user via `AskUserQuestion` unless `linear.default_project` is set in config. This applies in auto mode too. Treat a missing or empty `linear.default_project` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `save_issue` without having asked AND with an empty `linear.default_project`, stop and go back to step 2.
+> **Required interaction:** step 2 (project selection) resolves the configured projects via the "Resolve configured projects" step in `linear-common.md` and MUST prompt the user via `AskUserQuestion` to pick among them — **unless exactly one project is configured** (use it directly, no prompt). This applies in auto mode too. When **no** projects are configured (the helper returns the synthetic whole-team scope), fall back to today's flow: prompt among the team's projects with an explicit "No project (team backlog)" opt-out. If you find yourself about to call `save_issue` without having resolved the project this way, stop and go back to step 2.
 
 ## Steps
 
 1. **Preflight.** Run the preflight from `linear-common.md` (call `list_teams`, match `<linear.team>`, capture team `id`). Use the same failure messages.
 
-2. **Select the project. HARD STOP — DO NOT SKIP.** You MUST ask the user which project to attach the issue to before creating it, using `AskUserQuestion`. Do not infer the project from the title, the team, or recent activity. Do not proceed to step 3 until the user has answered. The ONLY way to skip this prompt is if `linear.default_project` is set in the config file (then use that value as-is and proceed).
+2. **Select the project. HARD STOP — DO NOT SKIP.** Resolve the configured projects via the "Resolve configured projects" step in `linear-common.md`; the result drives the prompt. Do not infer the project from the title, the team, or recent activity. Do not proceed to step 3 until the project is resolved.
 
-   Fetch the team's active projects:
+   **One or more projects configured** (the helper returns real `id`s): the issue MUST be attached to one of the **configured** projects — there is **no** "team backlog" opt-out once projects are configured.
+   - **Exactly one** configured project → use its `id` directly, **skip the prompt**, proceed to step 3.
+   - **Two or more** configured → ask via `AskUserQuestion` (header: "Linear project") which configured project to attach to. Each option is labeled by the project's `name` (resolved lazily via `list_projects` when absent — see the helper). `AskUserQuestion` enforces a 4-option max — show at most 3 configured projects (the 3 most recently updated) plus "Other". "Other" lets the user type one of the **configured** project names (match case-insensitively against the configured list; if no match, push back — "`<TYPED>` is not a configured project" — and re-ask) or a UUID. Do not offer projects outside the configured list. Capture the chosen project id.
+
+   **No projects configured** (the helper returns the synthetic whole-team scope, `id: null`): keep today's flow. Fetch the team's active projects:
 
    Call `<linear-mcp>__list_projects` with:
    - `teamId`: the team UUID from step 1

@@ -25,23 +25,21 @@ Call `<linear-mcp>__list_issue_labels` with `teamId`. Capture the ids for `auto-
 
 ### 4. Resolve the project scope
 
-By default the promoter scores a **single** project, not the whole team backlog. Resolve one `projectId` (or, when explicitly widened, none) in this order:
+By default the promoter scores a **single** project, not the whole team backlog. Resolve scope from the configured projects (the "Resolve configured projects" step in `linear-common.md`) in this order:
 
-1. **`all` override.** If `$ARGUMENTS` contains `all`, set **no** `projectId` — score the whole team backlog. Note `scope: whole backlog (all)` in the step-8 report and skip the rest of this step.
-2. **Pinned.** Else if `linear.default_project` is set (non-empty), use it as `projectId`. `default_project` is a UUID, but the step-8 report prints `scope: project <name>` — so resolve its name via `<linear-mcp>__list_projects` (match the id), falling back to the id in the report if no match. Honor the pin even if the project is archived/completed (it's a deliberate choice; an empty result is reported honestly).
-3. **Detect.** Else call `<linear-mcp>__list_projects` with `teamId` and `includeArchived: false`, and consider the **active** projects (state is not `completed`/`canceled`):
-   - **Exactly one** → use its `id` as `projectId`. Note `scope: project <name>` in the report.
-   - **Multiple** → ask via `AskUserQuestion` (header `Project`) which one to score: offer the most recently updated projects labeled by `name` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `projectId` (as in the `all` override). Otherwise use the chosen project's `id` and capture its `name` for the report.
-   - **Zero** → set **no** `projectId`; fall back to the whole team backlog. Note `scope: whole backlog (no projects)` in the report.
+1. **`all` override.** If `$ARGUMENTS` contains `all`, score **all configured** projects' backlogs (their union) — **not** the whole team. Use each configured project's `id` as a `projectId` (one query per project in step 5). Resolve each `name` lazily for the report and note `scope: all configured projects (<names>)`, then skip the rest of this step. (If **no** projects are configured, `all` degrades to the whole team backlog — set **no** `projectId` and note `scope: whole backlog (no projects)`.)
+2. **No projects configured** (the helper returns the synthetic whole-team scope, `id: null`): set **no** `projectId` — score the whole team backlog. Note `scope: whole backlog (no projects)` in the report.
+3. **Exactly one configured project** → use its `id` as `projectId`. Resolve its `name` lazily for the report (`scope: project <name>`).
+4. **Two or more configured** → ask via `AskUserQuestion` (header `Project`) which one to score: offer the configured projects labeled by `name` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — all configured projects`** option. If the user picks `All`, score all configured backlogs (as in the `all` override). Otherwise use the chosen project's `id` and capture its `name` for the report.
 
-The resolved `projectId` (or its absence) feeds **both** the candidate query and the parent-rollup cross-state sweep in step 5.
+The resolved scope — a single `projectId`, the set of all configured `projectId`s, or none (whole team) — feeds **both** the candidate query and the parent-rollup cross-state sweep in step 5.
 
 ### 5. Query candidates
 
 Call `<linear-mcp>__list_issues` with:
 
 - `teamId`: resolved team id
-- `projectId`: from step 4 (omit if not set)
+- `projectId`: from step 4 — omit when whole-team; for a single configured project use its `id`; for the all-configured scope run this query once per configured project `id` and merge the candidates (tag each with its project for the report).
 - `stateId`: each `backlog`-type state id from step 2 (loop or pass as list per the tool's accepted shape)
 - `includeArchived`: `false`
 - Limit: 50. If more exist, note the truncation in the report; do not paginate.
@@ -50,7 +48,7 @@ Set aside (do **not** score) any candidate that **already** carries `auto-eligib
 
 Also set aside (do **not** score) any candidate that is a **parent rollup** — a backlog issue that has been decomposed by `/break-down-task` into child issues. Promoting a parent rollup would move an empty shell to `Todo` where `/do-tasks` would try to claim it. This is the tracker-path analogue of the file path's `type: epic` skip (see `commands/promote-tasks.md` step 1).
 
-**Detecting parent rollups:** after the backlog query, call `<linear-mcp>__list_issues` with the same `teamId` (and `projectId` if set), `includeArchived: false`, and `limit: 100` — **without** a `stateId` filter — to collect `parentId` values across all states. Build a `parentIds` set from every non-null `parentId` field in that response. Any backlog candidate whose `id` appears in `parentIds` has at least one child — skip it as a `parent rollup`. For projects where the cross-state query truncates at 100, fall back to calling `<linear-mcp>__list_issues` with `parentId` = candidate `id` and `limit: 1` for any candidate not yet confirmed safe. Keep all identified parent rollups in the `skipped` list with reason `parent rollup`; they receive no `save_issue` call.
+**Detecting parent rollups:** after the backlog query, call `<linear-mcp>__list_issues` with the same `teamId` (and the same `projectId` scope from step 4 — once per project when the scope is multiple configured projects), `includeArchived: false`, and `limit: 100` — **without** a `stateId` filter — to collect `parentId` values across all states. Build a `parentIds` set from every non-null `parentId` field in that response. Any backlog candidate whose `id` appears in `parentIds` has at least one child — skip it as a `parent rollup`. For projects where the cross-state query truncates at 100, fall back to calling `<linear-mcp>__list_issues` with `parentId` = candidate `id` and `limit: 1` for any candidate not yet confirmed safe. Keep all identified parent rollups in the `skipped` list with reason `parent rollup`; they receive no `save_issue` call.
 
 ### 6. Score each candidate
 
@@ -82,7 +80,7 @@ Never move an issue to a `completed`- or `canceled`-type state, and never touch 
 
 ### 8. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: whole backlog (all)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
 
 ```
 scope: project Payments revamp
