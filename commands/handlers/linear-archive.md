@@ -101,6 +101,7 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
   issues(first: 100, after: $cursor, filter: {
     team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
     state: { type: { eq: $type } },         # "completed" (Done) — repeat for "canceled"
+    # project: { id: { eq: $projectId } },  # added per §3 — loop once per configured project (omit for whole-team)
     completedAt: { lt: $cutoff }            # use canceledAt for the canceled pass
   }) {
     nodes { id identifier title completedAt }
@@ -114,9 +115,20 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    `team: { id: { eq: $team } }` when the value is UUID-shaped, else
    `team: { name: { eq: $team } }` — otherwise a UUID-configured team matches
    nothing and the archive silently no-ops. (The shipped script auto-detects this;
-   the agent path can resolve the id via the common preflight instead.) If
-   `linear.default_project` is set (non-empty) add `project: { id: { eq: $projectId } }`
-   so only that project is swept; otherwise omit it and sweep the whole team.
+   the agent path can resolve the id via the common preflight instead.) For the
+   **project** scope, call the **"Resolve configured projects"** step in
+   `commands/handlers/linear-common.md` (do **not** read the scalar
+   `default_project`). It returns a list of `{ id, name, wip_limit, max_estimate }`:
+   - **Whole-team scope** — the list is the single synthetic entry with `id: null`
+     (projects absent/empty): omit the `project` filter and sweep the whole team,
+     unchanged from today.
+   - **One or more configured projects** — each entry has a non-null `id`: **loop
+     the query once per `project.id`**, adding `project: { id: { eq: $projectId } }`
+     for that project, and **union** the candidates across all projects (dedupe by
+     issue `id`). This sweeps **every** configured project, not just one.
+
+   (`--project X` narrowing — restricting the sweep to a single named project — is
+   deferred; don't build it here.)
 4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
    `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
    exhausted — a single page silently undercounts a backlog at the cap. The
@@ -124,11 +136,12 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    idempotent: already-archived items simply don't come back. (No `archivedAt`
    filter needed.)
 5. **Cutoff & the canceled pass.** `$cutoff` is `now − N days` as an ISO-8601
-   string (`DateTimeOrDuration`). Run the query once per terminal type: `completed`
-   filtered on `completedAt`, and — only if the user wants canceled work swept too
-   — `canceled` filtered on `canceledAt`. An issue missing the relevant timestamp
-   is skipped (never archive on an unknown date). Collect each match's UUID `id`
-   and `identifier`.
+   string (`DateTimeOrDuration`). Run the query once per terminal type **× per
+   configured project** (§3's loop): `completed` filtered on `completedAt`, and —
+   only if the user wants canceled work swept too — `canceled` filtered on
+   `canceledAt`. An issue missing the relevant timestamp is skipped (never archive
+   on an unknown date). Collect each match's UUID `id` and `identifier` into the
+   unioned candidate set (dedupe by `id`).
 
 > **In-session alternative (no key for the query).** If you are already in an
 > agent session with the Linear MCP, you _can_ do the read half over the MCP:

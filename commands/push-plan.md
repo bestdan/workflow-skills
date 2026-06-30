@@ -112,7 +112,18 @@ The overview epic maps to a Linear **project** (spike §3.1). Resolve it in this
 order, and **reuse before create** so re-push never duplicates the container:
 
 1. If the **epic file** already records a `tracker_id`, reuse that project id.
-2. Else if `linear.default_project` is set in config, use it.
+2. Else call the **"Resolve configured projects"** step in
+   `commands/handlers/linear-common.md` (do **not** read the scalar
+   `default_project`). A plan goes to **one** project — no per-task routing:
+   - **Exactly one** configured project (the list has a single entry with a
+     non-null `id`) → use it directly, no prompt.
+   - **Multiple** configured projects → **prompt** via `AskUserQuestion` which one
+     to push this plan into (offer each by `name`, resolving names lazily via
+     `<linear-mcp>__list_projects` for the prompt). Use the chosen project's `id`.
+   - **Whole-team scope** (the list is the single synthetic entry with `id: null`,
+     i.e. `linear.projects` absent/empty) → no pin; fall through to case 3.
+
+   (`--project X` narrowing is deferred; don't build it here.)
 3. Else **create** a project named after the epic `title` via
    `<linear-mcp>__save_project` (no `id` — that's the create primitive) with
    `teamIds: [<team id>]` and `name: <epic title>`. Capture the returned project
