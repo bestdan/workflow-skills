@@ -4,6 +4,8 @@ title: Linear multi-project config — implementation
 status: active
 owner: dp.egan@gmail.com
 created: 2026-06-30
+tracker_id: f51052a1-5148-43de-a8a4-6863a5653db4
+tracker_url: https://linear.app/prethinkio/project/linear-multi-project-config-implementation-aa3ed05c7d67
 ---
 
 # Linear multi-project config — implementation

@@ -11,6 +11,8 @@ related_files:
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, do-tasks, wip]
+tracker_id: PRE-332
+tracker_url: https://linear.app/prethinkio/issue/PRE-332/do-tasks-multi-project-execution-candidate-query-per-project-and
 ---
 
 > Plan: [[linear_multi_project_plan]]

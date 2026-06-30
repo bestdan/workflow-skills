@@ -11,6 +11,8 @@ related_files:
 is_blocked_by: []
 parent: linear_multi_project
 tags: [linear, config, schema]
+tracker_id: PRE-330
+tracker_url: https://linear.app/prethinkio/issue/PRE-330/schema-shared-resolve-configured-projects-helper
 ---
 
 > Plan: [[linear_multi_project_plan]]

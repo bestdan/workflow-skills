@@ -10,6 +10,8 @@ related_files:
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, config, migration]
+tracker_id: PRE-331
+tracker_url: https://linear.app/prethinkio/issue/PRE-331/task-config-multi-project-setup-scalarlist-migration
 ---
 
 > Plan: [[linear_multi_project_plan]]

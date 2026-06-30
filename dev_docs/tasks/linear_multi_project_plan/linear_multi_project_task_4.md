@@ -12,6 +12,8 @@ related_files:
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, add-task, list-tasks, promote-tasks]
+tracker_id: PRE-333
+tracker_url: https://linear.app/prethinkio/issue/PRE-333/selection-prompts-add-task-list-tasks-promote-tasks-scoping
 ---
 
 > Plan: [[linear_multi_project_plan]]

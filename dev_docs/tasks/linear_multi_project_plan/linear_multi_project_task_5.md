@@ -11,6 +11,8 @@ related_files:
 is_blocked_by: [linear_multi_project_task_1]
 parent: linear_multi_project
 tags: [linear, archive-tasks, push-plan]
+tracker_id: PRE-334
+tracker_url: https://linear.app/prethinkio/issue/PRE-334/remaining-consumers-archive-tasks-sweep-push-plan-targeting
 ---
 
 > Plan: [[linear_multi_project_plan]]

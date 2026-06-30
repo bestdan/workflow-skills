@@ -10,6 +10,8 @@ related_files:
 is_blocked_by: [linear_multi_project_task_2]
 parent: linear_multi_project
 tags: [linear, doctor, validation]
+tracker_id: PRE-335
+tracker_url: https://linear.app/prethinkio/issue/PRE-335/doctor-migration-warn-new-shape-validation
 ---
 
 > Plan: [[linear_multi_project_plan]]
