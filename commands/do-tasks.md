@@ -222,34 +222,53 @@ work, so `--all` / `-n N --claim-only` may claim several issues at once, bounded
 the pre-claim WIP gate below. `/do-tasks <identifier>` (a specific Linear id, e.g.
 `PRE-12`) claims that one issue.
 
-### Pre-claim WIP gate
+### Pre-claim WIP gate (per-project + optional global ceiling)
 
-The WIP limit carries over from the file path, but since tracker execution is
-single/foreground it is a **pre-claim gate**, not a batch cap. After the preflight
-resolves the team and workflow states, **before** judging feasibility or claiming:
+WIP is enforced **per configured project**, with an optional **global ceiling** across
+all of them. Resolve the caps and counts once, then check them per candidate. After the
+preflight resolves the team and workflow states, **before** judging feasibility or
+claiming:
 
-1. Resolve `wip_limit` from the top-level `wip_limit` key in
-   `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr
-   handler uses).
-2. Count current in-flight work = Linear issues in any `started`-type state
-   (e.g. `In Progress`, `In Review`), via `<linear-mcp>__list_issues` (resolve by
-   state **type**, not display name — names are team-configurable). **Scope the
-   count the same way "Find candidates" scopes its search:** always pass the
-   resolved `teamId`, and if `linear.default_project` is set (non-empty), also
-   pass it as `projectId` so only that project's in-flight issues count;
-   otherwise omit `projectId` and count across the whole team (still scoped by
-   `teamId`). The WIP limit then bounds the work you are actually
-   pulling from — counting team-wide while claiming from one project would let
-   unrelated projects (or epics) eat this project's slots. The started-type issue
-   is the canonical in-flight unit: an open PR is already reflected by its issue
-   sitting in a started state, so do **not** add open PRs separately — that
-   double-counts.
-3. If that count is **≥ `wip_limit`**, decline: report
-   `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do not
-   claim another card.
+1. **Resolve caps.** Take the resolved projects list from `linear-claim.md` "Find
+   candidates" step 3 (the `linear-common.md` "Resolve configured projects" helper) —
+   each scope carries its own `wip_limit` (per-project override else the top-level
+   `wip_limit`, default `3`). Also read the optional `linear.global_wip_limit` (absent →
+   no global ceiling).
+2. **Count in-flight per project.** For each resolved scope, count Linear issues in any
+   `started`-type state (e.g. `In Progress`, `In Review`) via `<linear-mcp>__list_issues`
+   — resolve by state **type**, not display name — passing the resolved `teamId` and the
+   scope's `id` as the `projectId` argument (omit when `id` is `null` — the whole-team
+   scope). That scope's
+   **slack = `wip_limit − in_flight`**. The started-type issue is the canonical in-flight
+   unit — an open PR is already reflected by its issue sitting in a started state, so do
+   **not** add open PRs separately (that double-counts). The **total in-flight** for the
+   global ceiling is `Σ in_flight` across all resolved scopes.
+3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight ≥
+   `global_wip_limit`**, **no** project can claim — decline outright:
+   `Global WIP limit <N> reached (<total> in flight across all projects) — no issue claimed`
+   and stop.
+4. **Per-project gate (ranked path).** Otherwise the per-project cap is checked **per
+   candidate** in the claim loop below: for the chosen candidate, if **its project's**
+   slack is `≤ 0`, that project is full → **skip to the next ranked candidate** (which may
+   live in another project with slack) rather than declining the whole run. The skip note
+   is `WIP limit <wip_limit> reached (<count> in flight) in project <name> — skipping to the next candidate`
+   (render `<name>` as `the whole team` when the scope's `name` is `null`; the same
+   convention applies to the direct-mode decline message in step 5).
+   If every remaining candidate's project is full, report that no issue was claimed.
+5. **Direct-identifier / single mode** (`/do-tasks <identifier>`): gate against **that
+   issue's own project** cap (its resolved scope — for a pick outside the configured
+   projects, the synthesized scope from `linear-claim.md` step 7; count its in-flight now
+   per step 2 if it wasn't among the pre-counted scopes) and the global ceiling. If either
+   is at its limit, **stop** — no fall-through — declining with the global message (step 3)
+   or, for the per-project cap,
+   `WIP limit <wip_limit> reached (<count> in flight) in project <name> — no issue claimed`.
 
-Single-issue mode (`/do-tasks <identifier>`) is gated too — the limit protects
-total in-flight work regardless of how the claim was initiated.
+**`--all --claim-only` batch.** Reserve up to each project's own slack independently:
+effective batch = `Σ max(0, slack_p)` across configured projects, no project over its own
+cap. Claim **candidates in rank order**, decrementing **both** the chosen project's
+remaining slack **and** — when `global_wip_limit` is set — the remaining global slack as
+you go; skip a candidate whose project's **remaining** slack is `0`, and stop the batch
+once the global slack hits `0`. The held-overflow report names each held task's project.
 
 ### Claim and execute
 
@@ -268,7 +287,13 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    a direct `<identifier>` pick stops. This full gate runs on the paths that **begin**
    work (ranked, direct identifier, `--claim-only`); the `--no-claim` resume runs only
    the open-PR subset, since the issue's own branch/state/label are the caller's own
-   claim markers (see that section's `--no-claim` note).
+   claim markers (see that section's `--no-claim` note). **Also apply the per-project
+   WIP gate here:** if the candidate's `project` has no **remaining** slack — its initial
+   slack (per "Pre-claim WIP gate" above) minus any issues already claimed for that
+   project in this run — treat it like an in-flight result: in ranked mode skip to the
+   next candidate (whose project may have slack), on a direct pick stop. (The global
+   ceiling, when set, is checked once up front and declines the whole run before the
+   loop.)
 3. **Claim** — `linear-claim.md` "Claim the issue": the **token-comment lock** —
    read-before-write guard, then post a token-bearing claim comment **first** (the
    lock), then set the `started`-type state + `auto-claimed` label (creating it if

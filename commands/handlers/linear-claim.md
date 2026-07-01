@@ -23,18 +23,20 @@ Linear's GitHub integration scans the **whole** PR title and body for issue ids,
 
 2. **Resolve workflow states.** Call `<linear-mcp>__list_workflow_states` with `teamId`. Cache the state-id → type map. Identify the state ids for type `unstarted` (= `ready` in the kanban mapping) — these are the only states the tracker path pulls from. Cards in `started` are by definition already claimed; cards in `backlog` are unrefined and must go through `/promote-tasks` first.
 
-3. **Project filter.** If `linear.default_project` is set (non-empty), pass it as `projectId`. Otherwise omit — search across all of the team's active issues.
+3. **Resolve project scope.** Call the **"Resolve configured projects"** helper from `linear-common.md` — it returns a list of scopes `{ id, name, wip_limit, max_estimate }` (inheritance already applied: per-project override else the global default). When `linear.projects` is absent/empty the list is a single synthetic **whole-team** scope (`id: null`). The query below runs **once per scope**; a `null` `id` means "omit `projectId`, search the whole team" (today's no-pin behavior).
 
-4. **Query.** Call `<linear-mcp>__list_issues` with:
+4. **Query — once per resolved scope.** For each scope from step 3, call `<linear-mcp>__list_issues` with:
    - `teamId`: resolved team id
-   - `projectId`: from step 3 (omit if not set)
+   - `projectId`: the scope's `id` (**omit** when `id` is `null` — the whole-team scope)
    - `stateId`: each `unstarted`-type state id from step 2 (loop or pass as list per the tool's accepted shape)
    - `includeArchived`: `false`
-   - Limit: 50. If more exist, note the truncation; do not paginate (claiming one card per call doesn't need exhaustive enumeration).
+   - Limit: 50 **per scope**. If a scope truncates, note it; do not paginate (claiming one card per call doesn't need exhaustive enumeration).
+
+   **Tag every returned issue with its source scope** — carry `project: { id, name, wip_limit, max_estimate }` on each candidate so the filter (step 5), the rank (step 6), and the per-project WIP gate in `do-tasks.md` read the **right per-project cap**. Union the candidates across scopes; an issue belongs to at most one project, so no dedup is needed (and a whole-team scope is a single list).
 
 5. **Filter.** From the returned issues, drop any that fail any of these gates. Each gate has a fixed reason string so the caller can report consistently. (Linear's native `estimate` uses the same Fibonacci scale as our task `size` — see "Task size" in skills/task/SKILL.md — so these thresholds select tasks small enough to finish in one session.)
    - `estimate` is `null`/missing → `no estimate set`
-   - `estimate >= <linear.max_estimate>` (default `3`) → `estimate <N> >= <max>`
+   - `estimate >= <max>`, where `<max>` is the candidate's resolved per-project `max_estimate` (from step 3, default `3`) → `estimate <N> >= <max>`
    - Has label `auto-claimed` → `already auto-claimed`
    - Has label `human-approval-requested` → `human-approval-requested`
    - Has label `blocked` → `blocked`
@@ -42,11 +44,11 @@ Linear's GitHub integration scans the **whole** PR title and body for issue ids,
 
 6. **Rank.** Sort remaining issues by Linear `priority` (urgent=1 → low=4, then none=0 last), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
 
-7. **Return** the ranked list to the **Pre-flight** phase below. Each entry needs: `id`, `identifier`, `title`, `priority`, `estimate`, `description`, `labels`, `url`, **`branchName`** (Linear's published git branch name — used verbatim when `/do-tasks` branches), and the resolved `id`s for: team, current `state`, target `started`-type `state` (see "Claim the issue" below). The execute path takes candidates in ranked order and, for each, runs **pre-flight → claim → judge feasibility** — the feasibility read now happens _after_ the claim, while the lock is held.
+7. **Return** the ranked list to the **Pre-flight** phase below. Each entry needs: `id`, `identifier`, `title`, `priority`, `estimate`, `description`, `labels`, `url`, **`branchName`** (Linear's published git branch name — used verbatim when `/do-tasks` branches), **`project`** (the `{ id, name, wip_limit, max_estimate }` scope it came from — `id: null` for whole-team — so the WIP gate checks the right per-project cap), and the resolved `id`s for: team, current `state`, target `started`-type `state` (see "Claim the issue" below). The execute path takes candidates in ranked order and, for each, runs **pre-flight → claim → judge feasibility** — the feasibility read now happens _after_ the claim, while the lock is held.
 
    If the MCP response does not include `branchName` on `list_issues` results, fetch it lazily via `<linear-mcp>__get_issue` for the top-ranked candidate the Pre-flight phase operates on (and for each next candidate as the loop advances). **Do not synthesize a branch name when the field is reachable** — using Linear's exact published string maximizes the chance of GitHub-integration auto-detection, even though the tracker path also adds an explicit `links` attachment as a fallback.
 
-   If the `/do-tasks` argument was a specific identifier (e.g. `PRE-12`), skip steps 3–6 (keep step 2 — the cached state map is still needed by "Claim the issue" and "Move to review") and call `<linear-mcp>__get_issue` with that identifier. Apply the filters from step 5 to that one issue; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct identifier — `/do-tasks` will surface the reason and stop.
+   If the `/do-tasks` argument was a specific identifier (e.g. `PRE-12`), skip the per-scope query in step 4 (keep step 2 — the cached state map is still needed by "Claim the issue" and "Move to review", and keep step 3 to resolve the configured scopes) and call `<linear-mcp>__get_issue` with that identifier. **Determine its `project` scope** by matching the issue's `projectId` against the resolved configured-projects list (step 3); if the issue isn't in any configured project, **synthesize a one-off scope** for it — `{ id: <issue's projectId>, name: <issue's project name>, wip_limit: <top-level`wip_limit`, default 3>, max_estimate: <`linear.max_estimate`, default 3> }` — so the WIP gate has a concrete cap **and** counts in-flight for that scope (`do-tasks.md` "Pre-claim WIP gate" step 5 counts it before gating). Apply the filters from step 5 to that one issue using **that scope's** `max_estimate`; if it fails any gate, return the failure reason rather than the issue. Do not auto-override the gates from a direct identifier — `/do-tasks` will surface the reason and stop.
 
 ## Pre-flight: is work already in flight?
 
