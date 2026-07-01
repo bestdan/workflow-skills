@@ -13,7 +13,7 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
    - **Projects configured and `$ARGUMENTS` is `all`:** scope is the **union** of all configured projects. Use each configured project's `id` as a `projectId` filter (one query per project in step 3) and tag each issue with its project so step 5 can group/label by project.
    - **Projects configured, no `all`:**
      - **Exactly one** configured → use its `id` as the `projectId` filter, no prompt.
-     - **Two or more** → ask via `AskUserQuestion` (header: "Linear project") which configured project to view: offer the configured projects by `name` (cap at 3 + "Other"/escape to fit the 4-option max) plus an explicit **`All — all configured projects`** option. If the user picks `All`, behave as the `all` argument (union, grouped). Otherwise use the chosen project's `id` as the `projectId` filter.
+     - **Two or more** → ask via `AskUserQuestion` (header: "Linear project") which configured project to view, offering an explicit **`All — all configured projects`** option alongside the projects. Stay within the 4-option max: with **3 or fewer** configured, show them all by `name` + `All`; with **4 or more**, show 2 projects by `name` + "Other" + `All`, where "Other" lets the user type a configured project name (matched case-insensitively against the configured list; re-ask on no match). If the user picks `All`, behave as the `all` argument (union, grouped). Otherwise use the chosen project's `id` as the `projectId` filter.
 
    The configured-project pick is the only place `/list-tasks` prompts; outside it the command stays a read-only snapshot.
 
@@ -21,7 +21,7 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
    - `teamId`: resolved team id from step 1
    - `projectId`: from step 2 — omit when whole-team; for a single configured project use its `id`; for the `all`/union scope run this query once per configured project `id` and merge the results.
    - `includeArchived`: `false`
-   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow to a single project or pass a section filter like "/list-tasks ready")` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
+   - Limit: 20 **per query** (so for the `all`/union scope each configured project is capped at 20 independently, matching the per-project render in step 5). If a query indicates more issues exist, render a `(showing first 20 of N — narrow to a single project or pass a section filter like "/list-tasks ready")` note at the end of that scope's summary line (per project under the union scope). Pagination/cursor handling is out of scope for v1.
 
    The goal is "everything still active in the team's kanban." Pull all non-archived issues in the `backlog`, `unstarted`, `started`, and recently-`completed` state types. To avoid over-fetching when `list_issues` doesn't accept a state-type filter directly, first resolve the team's workflow states by calling `<linear-mcp>__list_workflow_states` (with `teamId`), then pass the matching state ids into `list_issues` for each relevant type. Cache the state-id → type map for step 4's grouping.
 
