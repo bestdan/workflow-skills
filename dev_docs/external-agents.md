@@ -42,12 +42,16 @@ cat rubric.md diff.txt > "$SP/codex-prompt.txt"
 [ -s "$SP/codex-prompt.txt" ] || { echo "EMPTY PROMPT — aborting"; exit 1; }
 
 # 3. Dispatch with machine-readable capture (-o file, or --json) and a log.
-#    Pass the prompt as a FILE, never inline via $(cat …).
+#    Pass the prompt from the guarded, stable file (step 2) — never off an
+#    unstable temp path (see the note below on the positional-arg cat).
 codex exec --sandbox read-only -o "$SP/codex-out.md" \
   "$(cat "$SP/codex-prompt.txt")" > "$SP/codex.log" 2>&1
 
-# 4. Make an empty / failed result detectable: echo exit code + byte count.
-echo "exit=$? bytes=$(wc -c < "$SP/codex-out.md")"
+# 4. Make an empty / failed result detectable: capture exit code + byte count,
+#    and append them to the log so a poller detects completion in one place.
+exit_code=$?
+bytes=$(wc -c < "$SP/codex-out.md" 2>/dev/null || echo 0)
+echo "exit=$exit_code bytes=$bytes" >> "$SP/codex.log"
 ```
 
 Run step 3 with the Bash tool's **`run_in_background: true`** for any review that
@@ -74,20 +78,25 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
 - [ ] **Detect empty results.** Always echo the **exit code** and the output
       **byte count** — a 0-byte file or non-zero exit is how you catch a silent
       failure instead of trusting a blank review.
-- [ ] **Guard the prompt.** `[ -s "$SP/prompt.txt" ]` before dispatch; never
+- [ ] **Guard the prompt.** `[ -s "$SP/codex-prompt.txt" ]` before dispatch; never
       inline `$(cat "$TMPDIR/…")`.
-- [ ] **Run unsandboxed.** `codex` (and `agy`) need **network** — dispatch must
-      run with the Bash sandbox disabled. Request the sandbox escape on the
-      **first** call; a network-blocked failure (`could not resolve host`,
-      `connection refused`, socket `operation not permitted`) is the sandbox, not
-      a real error — don't retry inside it.
+- [ ] **Run unsandboxed — but only the _Bash_ sandbox.** `codex` (and `agy`) need
+      **network**, so dispatch must run with the **Bash/tool** sandbox disabled.
+      That is _not_ the same as the agent's own `--sandbox read-only` flag —
+      **keep that on** so the external agent can't edit files. Request the sandbox
+      escape on the **first** call; a network-blocked failure (`could not resolve
+      host`, `connection refused`, socket `operation not permitted`) is the Bash
+      sandbox, not a real error — don't retry inside it.
 
 ## Sandbox note
 
 `codex exec` and `agy` reach a backend over the network, so their dispatch step
-**cannot run inside a restrictive Bash sandbox** — run it unsandboxed. `agy`
-additionally needs an Antigravity login. Treat a network-blocked failure as "run
-this unsandboxed," not as a broken command. (This mirrors the "Sandbox" guidance
+**cannot run inside a restrictive Bash sandbox** — run it with the **Bash/tool**
+sandbox disabled. Disabling the Bash sandbox is orthogonal to the agent's own
+read-only mode: keep `codex exec --sandbox read-only` (and `agy --sandbox`) so the
+external agent stays a pure reviewer that can't write files. `agy` additionally
+needs an Antigravity login. Treat a network-blocked failure as "run this with the
+Bash sandbox off," not as a broken command. (This mirrors the "Sandbox" guidance
 in the user's global `AGENTS.md`: `codex`/`agy` are network tools and belong on
 the unsandboxed list.)
 
