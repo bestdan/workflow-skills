@@ -8,17 +8,20 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
 1. **Preflight.** Run the shared preflight from `linear-common.md` (call `list_teams`, match `<linear.team>`, capture team `id`). On any failure, stop with the same error messages.
 
-2. **Resolve project filter.**
-   - If `linear.default_project` is set (non-empty) in the config block, use it as the `projectId` filter.
-   - Otherwise, omit `projectId` — list across all of the team's active issues.
+2. **Resolve project scope.** Resolve the configured projects via the "Resolve configured projects" step in `linear-common.md`.
+   - **No projects configured** (the helper returns the synthetic whole-team scope, `id: null`): omit `projectId` — list across all of the team's active issues. No prompt (unchanged from today).
+   - **Projects configured and `$ARGUMENTS` is `all`:** scope is the **union** of all configured projects. Use each configured project's `id` as a `projectId` filter (one query per project in step 3) and tag each issue with its project so step 5 can group/label by project.
+   - **Projects configured, no `all`:**
+     - **Exactly one** configured → use its `id` as the `projectId` filter, no prompt.
+     - **Two or more** → ask via `AskUserQuestion` (header: "Linear project") which configured project to view, offering an explicit **`All — all configured projects`** option alongside the projects. Stay within the 4-option max: with **3 or fewer** configured, show them all by `name` + `All`; with **4 or more**, show 2 projects by `name` + "Other" + `All`, where "Other" lets the user type a configured project name (matched case-insensitively against the configured list; re-ask on no match). If the user picks `All`, behave as the `all` argument (union, grouped). Otherwise use the chosen project's `id` as the `projectId` filter.
 
-   No prompt. `/list-tasks` is a read-only view; do not call `AskUserQuestion` here.
+   The configured-project pick is the only place `/list-tasks` prompts; outside it the command stays a read-only snapshot.
 
 3. **Query issues.** Call `<linear-mcp>__list_issues` with:
    - `teamId`: resolved team id from step 1
-   - `projectId`: from step 2 (omit entirely when listing all team issues)
+   - `projectId`: from step 2 — omit when whole-team; for a single configured project use its `id`; for the `all`/union scope run this query once per configured project `id` and merge the results.
    - `includeArchived`: `false`
-   - Limit: 20. If the response indicates more issues exist, render a `(showing first 20 of N — narrow with linear.default_project in dev_docs/tasks/.task-config.yml, or pass a section filter like "/list-tasks ready")` note at the end of the summary line. Pagination/cursor handling is out of scope for v1.
+   - Limit: 20 **per query** (so for the `all`/union scope each configured project is capped at 20 independently, matching the per-project render in step 5). If a query indicates more issues exist, render a `(showing first 20 of N — narrow to a single project or pass a section filter like "/list-tasks ready")` note at the end of that scope's summary line (per project under the union scope). Pagination/cursor handling is out of scope for v1.
 
    The goal is "everything still active in the team's kanban." Pull all non-archived issues in the `backlog`, `unstarted`, `started`, and recently-`completed` state types. To avoid over-fetching when `list_issues` doesn't accept a state-type filter directly, first resolve the team's workflow states by calling `<linear-mcp>__list_workflow_states` (with `teamId`), then pass the matching state ids into `list_issues` for each relevant type. Cache the state-id → type map for step 4's grouping.
 
@@ -41,6 +44,8 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 5. **Render** as stacked vertical sections in this fixed order, omitting empty sections:
 
    `new` → `needs_refinement` → `ready` → `in_progress` → `blocked` → `needs_review` → `done`
+
+   When the scope is the **union** of all configured projects (`/list-tasks all` or the `All` pick), repeat this section layout once per configured project under a `# <project name>` header (omitting projects with no active issues), so each project's kanban is labeled and grouped separately. For a single-project or whole-team scope, render one un-grouped kanban as before.
 
    Use the same `## <section> (N)` header, single-line bullet, `---` separator layout as the file-based path in `commands/list-tasks.md` step 4. Sort within each section by Linear priority — **urgent first, then high, medium, low, then none last**. Note that Linear stores `none` as `0`, so do NOT sort numerically ascending; map `0` to the lowest rank (after `4=low`). Then by `updatedAt` (oldest first).
 
@@ -74,4 +79,4 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
    Append the truncation note from step 3 if applicable.
 
-7. **Filter argument.** If `$ARGUMENTS` is a section name (`new|needs_refinement|ready|in_progress|blocked|needs_review|done|all`), render only that section. Default: every non-empty section.
+7. **Filter argument.** If `$ARGUMENTS` is a section name (`new|needs_refinement|ready|in_progress|blocked|needs_review|done`), render only that section. `all` is **not** a section filter — it is the project-scope widener handled in step 2 (union of all configured projects). Default: every non-empty section.
