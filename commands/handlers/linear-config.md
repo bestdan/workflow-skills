@@ -1,6 +1,6 @@
 # linear handler — /task-config setup
 
-Configures the `linear` handler, which creates Linear issues via the official Linear MCP server (connected from `https://mcp.linear.app/mcp`) at `/add-task` time. This file owns the Linear MCP preflight and the team/projects/default_priority prompts (including migrating a pre-existing scalar `default_project`); the actual create flow lives in `linear.md`.
+Configures the `linear` handler, which creates Linear issues via the official Linear MCP server (connected from `https://mcp.linear.app/mcp`) at `/add-task` time. This file owns the Linear MCP preflight and the team/projects/default_priority prompts (including migrating a pre-existing scalar `default_project`); the actual create flow lives in `linear-add.md`.
 
 Linear's OAuth flow handles auth — no token to paste, and agents installed in the workspace don't consume seats.
 
@@ -30,13 +30,17 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
 3. **Resolve `projects` — one or more, validated against real projects (no free-text).** The handler scopes to a **list** of projects (`linear.projects`), which replaces the old scalar `default_project`. See `linear-common.md` "Config block" + "Resolve configured projects" for the full schema and the inheritance rules (per-project `wip_limit`/`max_estimate` fall back to the global defaults). An unvalidated id silently breaks `/add-task`, so resolve every entry against `list_projects` — never accept a typed id blind.
 
-   **3a. Migrate an existing scalar `default_project` first.** If the current config (shown by `/task-config` step 1) carries a scalar `linear.default_project`, it predates the list. Resolve its name via `<linear-mcp>__list_projects` (match the id) and **seed** the projects list with it as a single `{ id }` entry (no overrides — it inherits the globals). Tell the user once: "Migrating pinned project `<name>` to the new `projects:` list." The written config will contain **only** `projects:` — the scalar `default_project` key is **dropped** (hard cut: handlers read only `projects:` going forward). The user can then add or remove entries in 3b.
+   **3a. Migrate an existing scalar `default_project` first.** If the current config (shown by `/task-config` step 1) carries a scalar `linear.default_project`, it predates the list. Resolve its name via `<linear-mcp>__list_projects` (match the id) and **seed** the projects list with it as a single `{ id, name }` entry (the name is already in hand from that lookup, so write it for a readable config; no overrides — it inherits the globals). Tell the user once: "Migrating pinned project `<name>` to the new `projects:` list." The written config will contain **only** `projects:` — the scalar `default_project` key is **dropped** (hard cut: handlers read only `projects:` going forward). The user can then add or remove entries in 3b.
 
-   **3b. Add projects (loop).** Call `<linear-mcp>__list_projects` (`teamId` from step 2, `includeArchived: false`), then loop:
-   - Present via `AskUserQuestion` (header: "Add project"): one option per not-yet-chosen project (cap at 2 most-recently-updated), a **"Done — that's all"** option, and — **only on the first iteration when nothing is chosen yet** — a **"None — prompt me per-task"** option (the recommended default if the user is unsure). "Other" lets the user type a project name, looked up via `list_projects` and matched case-insensitively; on no match push back ("`<TYPED>` is not a project in team `<team>`") and re-ask.
-   - For each chosen project, **only if the user volunteers one**, capture a per-project `wip_limit` and/or `max_estimate` override — don't prompt by default; most entries inherit the global defaults. Record `{ id, name, wip_limit?, max_estimate? }`.
-   - Repeat until the user picks **"Done — that's all"**.
-   - **"None — prompt me per-task"** (only offered when no project is chosen yet) → write **no** `projects` key at all (whole-team scope — today's no-pin behavior).
+   **3b. Build the projects list (loop).** Call `<linear-mcp>__list_projects` (`teamId` from step 2, `includeArchived: false`) once, and keep a working **set of chosen projects** (seeded by 3a's migrated entry, if any). Each iteration, present a small **action menu** via `AskUserQuestion` (header: "Configure projects") whose options depend on the current set — always **≤ 4 counting the automatic "Other"**:
+   - **Set empty** → options: **"Add a project"** and **"None — prompt me per-task"** (the recommended default if unsure). No "Done" here — an empty set means either add one or choose None.
+   - **Set non-empty** → options: **"Add a project"**, **"Remove a project"**, and **"Done — that's all"**.
+
+   Then act on the choice:
+   - **Add a project** → a follow-up `AskUserQuestion` listing up to **3** not-yet-chosen projects (most-recently-updated); the automatic **"Other"** (4th slot) lets the user type a project name, looked up via `list_projects` and matched case-insensitively — on no match push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. For the chosen project, **only if the user volunteers one**, capture a per-project `wip_limit` and/or `max_estimate` override — don't prompt by default; most entries inherit the global defaults. Record `{ id, name?, wip_limit?, max_estimate? }` (write the `name` you already have from `list_projects`). Loop.
+   - **Remove a project** → a follow-up `AskUserQuestion` listing the currently-chosen projects; drop the picked one from the set. Loop (once the set is empty again, the menu re-offers "None").
+   - **Done — that's all** (offered only when ≥ 1 project is chosen) → finish with the chosen list.
+   - **None — prompt me per-task** (offered only when the set is empty) → write **no** `projects` key at all (whole-team scope — today's no-pin behavior). Do **not** write `projects: []`.
 
    **3c. Optional `global_wip_limit`.** Only when **2 or more** projects are configured, optionally ask for `linear.global_wip_limit` — an absolute ceiling on total in-flight across **all** configured projects (on top of the per-project caps). Skip the prompt for 0–1 projects (a global cap is meaningless there). Unset by default (no global ceiling).
 
