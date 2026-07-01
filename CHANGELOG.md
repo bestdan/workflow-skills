@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.17.0] - 2026-07-01
+
+### Features
+
+- [PRE-332] /do-tasks per-project candidate query + per-project/global WIP (#103) (3de46bd)
+
 ## [1.16.0] - 2026-07-01
 
 ### Features
