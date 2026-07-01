@@ -38,7 +38,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
    Then act on the choice:
    - **Add a project** → a follow-up `AskUserQuestion` listing up to **3** not-yet-chosen projects (most-recently-updated); the automatic **"Other"** (4th slot) lets the user type a project name, looked up via `list_projects` and matched case-insensitively — on no match push back ("`<TYPED>` is not a project in team `<team>`") and re-ask. For the chosen project, **only if the user volunteers one**, capture a per-project `wip_limit` and/or `max_estimate` override — don't prompt by default; most entries inherit the global defaults. Record `{ id, name?, wip_limit?, max_estimate? }` (write the `name` you already have from `list_projects`). Loop.
-   - **Remove a project** → a follow-up `AskUserQuestion` listing the currently-chosen projects; drop the picked one from the set. Loop (once the set is empty again, the menu re-offers "None").
+   - **Remove a project** → a follow-up `AskUserQuestion` listing the currently-chosen projects — cap at **3** (most-recently-added) so it stays within the 4-option max; the automatic **"Other"** (4th slot) lets the user type the name of any chosen project not shown, matched case-insensitively against the set. Drop the picked one from the set. Loop (once the set is empty again, the menu re-offers "None").
    - **Done — that's all** (offered only when ≥ 1 project is chosen) → finish with the chosen list.
    - **None — prompt me per-task** (offered only when the set is empty) → write **no** `projects` key at all (whole-team scope — today's no-pin behavior). Do **not** write `projects: []`.
 
