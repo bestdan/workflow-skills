@@ -1,6 +1,6 @@
 ---
 description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic (with native blocker links), in dependency order
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue
 argument-hint: "<plan-name> [--ready-only]"
 ---
 
@@ -240,25 +240,26 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
    - **Every task is migrated** — no kept (held/failed) task file remains in the
      plan dir. If any does, **skip** epic deletion (the plan isn't fully migrated
      yet; a later run finishes it).
-   - **The overview reached the tracker this run** — §4.2 / §5.2 / §5b.2 took the
-     **create** branch and wrote the overview body into the new container's
-     description. Track this with a run-local `overview_written` flag, set **only**
-     on that create branch; the gate reads the flag, **not** the shape of
-     `tracker_id`. This matters because a description-bearing `tracker_id`
-     (Linear project id, gh-issue milestone **number**, jira Epic key) is **not**
-     proof the overview is in the tracker: the gh-issue milestone-by-title (§5.2)
-     and jira Epic-by-title (§5b.2) **reuse** branches write such an id back but
-     leave the pre-existing container's description untouched, so gating on id
-     shape alone would hard-delete an epic whose overview was never migrated.
+   - **The overview reached the tracker this run** — the run-local
+     `overview_written` flag is set (§4.2). It is true when the description was
+     written this run: on a **create** (§4.2 case 3 / §5.2 / §5b.2), or on a
+     **plan-dedicated reuse** — a container whose name matches the epic title with
+     an empty/identical description (§4.2 case 2, and the milestone/Epic by-title
+     branches of §5.2 / §5b.2). The gate reads the flag, **not** the shape of
+     `tracker_id`: a description-bearing `tracker_id` (Linear project id, gh-issue
+     milestone **number**, jira Epic key) is **not** proof the overview is in the
+     tracker — a shared or reused container keeps its own description — so gating
+     on id shape alone would hard-delete an epic whose overview was never migrated.
 
    When both hold, delete the epic file, then remove the now-empty `<name>_plan/`
    directory and any empty `phase_N/` subdirectories. When the second condition
-   fails — the container was **reused**, not created this run: the gh-issue
-   `plan:<name>` **label fallback** (§5.2 step 3), a **reused `default_project`**
-   (§4.2 case 2), a recorded `tracker_id` (§4.2 / §5.2 / §5b.2 case 1), or a
-   **milestone/Epic matched by title** (§5.2 / §5b.2) — **keep the epic file** and
-   **warn** that the overview was kept locally because it was not written to the
-   tracker this run (§7). Because the epic is removed only after every task file
+   fails — the overview was **not** written this run: the gh-issue `plan:<name>`
+   **label fallback** (§5.2 step 3, no description field), a **reused, non-plan-
+   dedicated project** (§4.2 case 2), a recorded `tracker_id` (§4.2 / §5.2 / §5b.2
+   case 1), or a by-title milestone/Epic that was **not** plan-dedicated (its
+   description was non-empty and differed) — **keep the epic file** and **warn**
+   that the overview was kept locally because it was not written to the tracker
+   this run (§7). Because the epic is removed only after every task file
    is gone, a kept task's `parent` back-reference to the epic never dangles.
 
 ## 5. gh-issue path
@@ -299,8 +300,9 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
 
    ```bash
    # Reuse an existing milestone with this title, if any (empty output ⇒ none).
+   # Capture its description too, to decide whether it's plan-dedicated.
    gh api "repos/<repo>/milestones?state=all" \
-     --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url}'
+     --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url, description}'
 
    # Only if the lookup returned nothing, create it — with the overview body as
    # the milestone description, so it survives once the local file is deleted (§7):
@@ -311,11 +313,16 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
    (Use the resolved `<repo>`, or the current repo's `OWNER/NAME` from
    `gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
    unset — the `gh api` path needs an explicit repo.) `<overview body>` is the
-   epic file's markdown below its frontmatter. Set the `description` **only on
-   create** — the reuse-by-title branch above leaves an existing milestone's
-   description untouched. Capture the milestone `number` and `html_url`. **Write
-   them back** onto the epic file's frontmatter (`tracker_id: <number>`,
-   `tracker_url: <html_url>`).
+   epic file's markdown below its frontmatter. On **create**, the milestone owns
+   the overview — set `overview_written` (§4.2). On **reuse-by-title**, the
+   milestone is plan-dedicated by construction (its title equals the epic title),
+   so write the overview into its description **only if that description is empty
+   or already equals the overview body** (`gh api --method PATCH
+   "repos/<repo>/milestones/<number>" -f description="<overview body>"`), then set
+   `overview_written`; if it holds a different, non-empty description, leave it
+   untouched (don't clobber) and keep the epic file (§4.5 / §7). Capture the
+   milestone `number` and `html_url`. **Write them back** onto the epic file's
+   frontmatter (`tracker_id: <number>`, `tracker_url: <html_url>`).
 3. **Fallback (spike O2).** If milestone creation fails (e.g. the token lacks
    issues-write on milestones), fall back to a shared **`plan:<name>` label**:
    `gh label create "plan:<name>" --repo "<repo>" 2>/dev/null`, record
@@ -415,16 +422,21 @@ The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
    `title` already exists (a manual creation, or a prior run that didn't record the
    key), and reuse it if so — call `<atlassian-mcp>__searchJiraIssuesUsingJql`
    with `cloudId: <jira.site>`, `jql: project = "<project>" AND issuetype = Epic AND summary ~ "<epic title>"`,
-   and `fields: ["summary"]`. If a result's `summary` matches the epic title
-   exactly, reuse its `key`. Otherwise create the Epic via
+   and `fields: ["summary", "description"]`. If a result's `summary` matches the
+   epic title exactly, reuse its `key`. Otherwise create the Epic via
    `<atlassian-mcp>__createJiraIssue` (`cloudId: <jira.site>`, `projectKey: <project>`,
    `issueTypeName: "Epic"`, `summary: <epic title>`, `description:` the epic body,
    `contentFormat: "markdown"`). The epic body (the overview markdown below the
    frontmatter) is the Jira path's container description — so, like the Linear
    project description (§4.2) and the gh-issue milestone description (§5.2), the
-   overview survives in the tracker once the local file is deleted (§7). It is set
-   **only on create**; the lookup-reuse branch leaves an existing Epic's
-   description untouched. Capture the new Epic `key` and `webUrl`.
+   overview survives in the tracker once the local file is deleted (§7). On
+   **create** the Epic owns the overview — set `overview_written` (§4.2). On
+   **lookup-reuse** the Epic is plan-dedicated by construction (its summary equals
+   the epic title), so write the overview into its description via
+   `<atlassian-mcp>__editJiraIssue` **only if that description is empty or already
+   equals the overview body**, then set `overview_written`; if it holds a
+   different, non-empty description, leave it untouched (don't clobber) and keep
+   the epic file (§4.5 / §7). Capture the Epic `key` and `webUrl`.
 
 Whenever an Epic is resolved by **lookup or create** (case 2 — i.e. any time case 1
 didn't already supply it), **write its key back** onto the epic file's frontmatter:
@@ -489,7 +501,8 @@ links exist are the migrated files deleted.
 
 Each plan file is **deleted once its migration is confirmed** (§4.5): a task file
 when its `tracker_id` is recorded, the epic file and plan directory when every task
-is migrated and the overview reached a description-bearing container. After a
+is migrated and the overview was written to the tracker this run (§4.2
+`overview_written`). After a
 **fully** migrated push the plan directory is gone and the tracker is the **only**
 source of truth — re-pushing is a no-op because nothing remains locally, and new
 work for the plan goes straight to the tracker via `/add-task`, not back into
@@ -501,16 +514,21 @@ re-runs safely — this is **create-missing-only** (spike §4):
 - A file with a non-empty `tracker_id` is skipped, never duplicated — though after
   cleanup a fully-migrated task no longer has a file at all; it is simply absent.
 - A recorded container id is reused, never duplicated. The container's description
-  is written **only on create**, never overwritten on reuse.
+  is written on **create**, and on a **plan-dedicated reuse** (a same-title
+  container whose description is empty or already the overview — §4.2); a shared
+  container's existing description is **never** overwritten.
 - Kept files still feed the slug→id map, and a deleted blocker's id survives on its
   kept dependents because §4.5 rewrote their `is_blocked_by` slug to that id — so a
   held task resolves its blockers (and keeps native links) on a later push.
 - For jira, the §5b.5 link pass is create-missing-only too: it checks the
   dependent's existing `Blocks` links before adding one, so a re-push draws no
   duplicate "is blocked by" edges.
-- v1 **never updates or deletes** remote issues. It now **does** delete local plan
-  files, but only after their content is safely in the tracker (the migrated issue
-  body, or the container description for the overview).
+- v1 **never updates or deletes** remote **issues** (tasks). The one remote write
+  on reuse is narrow and container-only: the overview may be written into a
+  **plan-dedicated** container's description (§4.2), never onto a shared one and
+  never onto a task issue. It now **does** delete local plan files, but only after
+  their content is safely in the tracker (the migrated issue body, or the
+  container description for the overview).
 
 ## 7. Report
 
@@ -527,10 +545,11 @@ Print:
   whole plan migrated.
 - **Kept locally:** files **not** deleted, each with why — a task held by
   `--ready-only` or whose create failed (re-runs safely), and the epic file when
-  it was kept because the overview was not written to the tracker this run: the
-  container was **reused** rather than created (the gh-issue `plan:<name>` label
-  fallback, a reused `default_project`, a recorded `tracker_id`, or a
-  milestone/Epic matched by title — §4.5).
+  it was kept because the overview was not written to the tracker this run — the
+  container was reused and **not** plan-dedicated: the gh-issue `plan:<name>` label
+  fallback, a reused non-plan-dedicated configured project (§4.2 case 2), a
+  recorded `tracker_id`, or a same-title milestone/Epic that already held a
+  different description (§4.5).
 - **Already pushed:** skipped files with their `tracker_id`.
 - **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
   or held (`--ready-only`), each with what's needed to resolve it.
