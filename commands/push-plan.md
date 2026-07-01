@@ -142,19 +142,20 @@ frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`) — so a re-p
 hits case 1 and never re-prompts or re-resolves (matching the Jira and GitHub
 paths). Only case 1, which already carries the id, writes nothing new.
 
-The **description** carries the overview and is written only when it is safe to do
-so — never blindly overwritten on a shared project:
+The **description** carries the overview. It is set unconditionally on a freshly
+created container; on a reused one it is written **only when the container is
+plan-dedicated**, so a shared project's description is never clobbered:
 
 - **Case 3 (create)** always sets `description: <overview body>` (above), so a
   freshly created project owns the overview.
-- **Case 2 (reuse)** writes the description **only if the project is
-  plan-dedicated**: its `name` equals the epic `title` (case-insensitive) **and**
-  its current `description` is empty or already equals the overview body (fetch
-  both via `<linear-mcp>__list_projects` while resolving the name). A configured
-  project picked for a plan is normally a standing project whose name ≠ the epic
-  title, so this is usually **false** and the description is left untouched.
-- Otherwise (a shared/reused project, or case 1) the overview has **no description
-  home**; §4.5 keeps the epic file and §7 reports it.
+- **Case 2 (reuse)** **overwrites** the description with the current overview body
+  **only if the project is plan-dedicated**: its `name` equals the epic `title`
+  (case-insensitive). A same-title project is the plan's own container, so it is
+  refreshed to the latest overview on every push — no content comparison. A
+  configured project picked for a plan is normally a standing project whose name ≠
+  the epic title, so this is **false** and its description is left untouched.
+- Otherwise (a shared/reused project whose name ≠ the epic title, or case 1) the
+  overview has **no description home**; §4.5 keeps the epic file and §7 reports it.
 
 Set a run-local **`overview_written`** flag true whenever the description was
 written this run (case 3, or a plan-dedicated case-2 reuse); §4.5 gates epic
@@ -243,9 +244,10 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
    - **The overview reached the tracker this run** — the run-local
      `overview_written` flag is set (§4.2). It is true when the description was
      written this run: on a **create** (§4.2 case 3 / §5.2 / §5b.2), or on a
-     **plan-dedicated reuse** — a container whose name matches the epic title with
-     an empty/identical description (§4.2 case 2, and the milestone/Epic by-title
-     branches of §5.2 / §5b.2). The gate reads the flag, **not** the shape of
+     **plan-dedicated reuse** — a container whose name matches the epic title,
+     whose description is overwritten with the current overview (§4.2 case 2, and
+     the milestone/Epic by-title branches of §5.2 / §5b.2). The gate reads the
+     flag, **not** the shape of
      `tracker_id`: a description-bearing `tracker_id` (Linear project id, gh-issue
      milestone **number**, jira Epic key) is **not** proof the overview is in the
      tracker — a shared or reused container keeps its own description — so gating
@@ -255,9 +257,8 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
    directory and any empty `phase_N/` subdirectories. When the second condition
    fails — the overview was **not** written this run: the gh-issue `plan:<name>`
    **label fallback** (§5.2 step 3, no description field), a **reused, non-plan-
-   dedicated project** (§4.2 case 2), a recorded `tracker_id` (§4.2 / §5.2 / §5b.2
-   case 1), or a by-title milestone/Epic that was **not** plan-dedicated (its
-   description was non-empty and differed) — **keep the epic file** and **warn**
+   dedicated project** (§4.2 case 2, name ≠ epic title), or a recorded `tracker_id`
+   (§4.2 / §5.2 / §5b.2 case 1) — **keep the epic file** and **warn**
    that the overview was kept locally because it was not written to the tracker
    this run (§7). Because the epic is removed only after every task file
    is gone, a kept task's `parent` back-reference to the epic never dangles.
@@ -300,9 +301,8 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
 
    ```bash
    # Reuse an existing milestone with this title, if any (empty output ⇒ none).
-   # Capture its description too, to decide whether it's plan-dedicated.
    gh api "repos/<repo>/milestones?state=all" \
-     --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url, description}'
+     --jq '.[] | select(.title == "<epic title>") | {number, url: .html_url}'
 
    # Only if the lookup returned nothing, create it — with the overview body as
    # the milestone description, so it survives once the local file is deleted (§7):
@@ -316,13 +316,12 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
    epic file's markdown below its frontmatter. On **create**, the milestone owns
    the overview — set `overview_written` (§4.2). On **reuse-by-title**, the
    milestone is plan-dedicated by construction (its title equals the epic title),
-   so write the overview into its description **only if that description is empty
-   or already equals the overview body** (`gh api --method PATCH
-   "repos/<repo>/milestones/<number>" -f description="<overview body>"`), then set
-   `overview_written`; if it holds a different, non-empty description, leave it
-   untouched (don't clobber) and keep the epic file (§4.5 / §7). Capture the
-   milestone `number` and `html_url`. **Write them back** onto the epic file's
-   frontmatter (`tracker_id: <number>`, `tracker_url: <html_url>`).
+   so **overwrite** its description with the current overview body (`gh api
+   --method PATCH "repos/<repo>/milestones/<number>" -f description="<overview
+   body>"`) and set `overview_written` — the milestone is the plan's own container,
+   so it is refreshed to the latest overview on every push, no content comparison.
+   Capture the milestone `number` and `html_url`. **Write them back** onto the epic
+   file's frontmatter (`tracker_id: <number>`, `tracker_url: <html_url>`).
 3. **Fallback (spike O2).** If milestone creation fails (e.g. the token lacks
    issues-write on milestones), fall back to a shared **`plan:<name>` label**:
    `gh label create "plan:<name>" --repo "<repo>" 2>/dev/null`, record
@@ -422,8 +421,8 @@ The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
    `title` already exists (a manual creation, or a prior run that didn't record the
    key), and reuse it if so — call `<atlassian-mcp>__searchJiraIssuesUsingJql`
    with `cloudId: <jira.site>`, `jql: project = "<project>" AND issuetype = Epic AND summary ~ "<epic title>"`,
-   and `fields: ["summary", "description"]`. If a result's `summary` matches the
-   epic title exactly, reuse its `key`. Otherwise create the Epic via
+   and `fields: ["summary"]`. If a result's `summary` matches the epic title
+   exactly, reuse its `key`. Otherwise create the Epic via
    `<atlassian-mcp>__createJiraIssue` (`cloudId: <jira.site>`, `projectKey: <project>`,
    `issueTypeName: "Epic"`, `summary: <epic title>`, `description:` the epic body,
    `contentFormat: "markdown"`). The epic body (the overview markdown below the
@@ -432,11 +431,12 @@ The overview epic maps to a Jira **Epic** issue (spike §3.1). Resolve it
    overview survives in the tracker once the local file is deleted (§7). On
    **create** the Epic owns the overview — set `overview_written` (§4.2). On
    **lookup-reuse** the Epic is plan-dedicated by construction (its summary equals
-   the epic title), so write the overview into its description via
-   `<atlassian-mcp>__editJiraIssue` **only if that description is empty or already
-   equals the overview body**, then set `overview_written`; if it holds a
-   different, non-empty description, leave it untouched (don't clobber) and keep
-   the epic file (§4.5 / §7). Capture the Epic `key` and `webUrl`.
+   the epic title), so **overwrite** its description with the current overview body
+   via `<atlassian-mcp>__editJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey:
+   <epic key>`, `fields: { "description": <overview body> }`, `contentFormat:
+   "markdown"`) and set `overview_written` — the Epic is the plan's own container,
+   so it is refreshed to the latest overview on every push, no content comparison.
+   Capture the Epic `key` and `webUrl`.
 
 Whenever an Epic is resolved by **lookup or create** (case 2 — i.e. any time case 1
 didn't already supply it), **write its key back** onto the epic file's frontmatter:
@@ -514,9 +514,9 @@ re-runs safely — this is **create-missing-only** (spike §4):
 - A file with a non-empty `tracker_id` is skipped, never duplicated — though after
   cleanup a fully-migrated task no longer has a file at all; it is simply absent.
 - A recorded container id is reused, never duplicated. The container's description
-  is written on **create**, and on a **plan-dedicated reuse** (a same-title
-  container whose description is empty or already the overview — §4.2); a shared
-  container's existing description is **never** overwritten.
+  is written on **create**, and overwritten with the current overview on a
+  **plan-dedicated reuse** (a same-title container — §4.2); a shared container
+  (name ≠ epic title) is **never** overwritten.
 - Kept files still feed the slug→id map, and a deleted blocker's id survives on its
   kept dependents because §4.5 rewrote their `is_blocked_by` slug to that id — so a
   held task resolves its blockers (and keeps native links) on a later push.
@@ -524,8 +524,8 @@ re-runs safely — this is **create-missing-only** (spike §4):
   dependent's existing `Blocks` links before adding one, so a re-push draws no
   duplicate "is blocked by" edges.
 - v1 **never updates or deletes** remote **issues** (tasks). The one remote write
-  on reuse is narrow and container-only: the overview may be written into a
-  **plan-dedicated** container's description (§4.2), never onto a shared one and
+  on reuse is narrow and container-only: the overview is written into (overwriting)
+  a **plan-dedicated** container's description (§4.2), never onto a shared one and
   never onto a task issue. It now **does** delete local plan files, but only after
   their content is safely in the tracker (the migrated issue body, or the
   container description for the overview).
@@ -547,9 +547,8 @@ Print:
   `--ready-only` or whose create failed (re-runs safely), and the epic file when
   it was kept because the overview was not written to the tracker this run — the
   container was reused and **not** plan-dedicated: the gh-issue `plan:<name>` label
-  fallback, a reused non-plan-dedicated configured project (§4.2 case 2), a
-  recorded `tracker_id`, or a same-title milestone/Epic that already held a
-  different description (§4.5).
+  fallback, a reused non-plan-dedicated configured project (§4.2 case 2, name ≠
+  epic title), or a recorded `tracker_id` (§4.5).
 - **Already pushed:** skipped files with their `tracker_id`.
 - **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
   or held (`--ready-only`), each with what's needed to resolve it.
