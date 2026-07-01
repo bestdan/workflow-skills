@@ -240,20 +240,26 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
    - **Every task is migrated** — no kept (held/failed) task file remains in the
      plan dir. If any does, **skip** epic deletion (the plan isn't fully migrated
      yet; a later run finishes it).
-   - **The overview reached the tracker** — the epic's `tracker_id` is a
-     **description-bearing container**: a Linear project id, a gh-issue milestone
-     **number**, or a jira Epic key (i.e. present and **not** a `label:plan:<name>`
-     sentinel). This is true exactly when §4.2 / §5.2 / §5b.2 _created_ the
-     container with the overview body in its description.
+   - **The overview reached the tracker this run** — §4.2 / §5.2 / §5b.2 took the
+     **create** branch and wrote the overview body into the new container's
+     description. Track this with a run-local `overview_written` flag, set **only**
+     on that create branch; the gate reads the flag, **not** the shape of
+     `tracker_id`. This matters because a description-bearing `tracker_id`
+     (Linear project id, gh-issue milestone **number**, jira Epic key) is **not**
+     proof the overview is in the tracker: the gh-issue milestone-by-title (§5.2)
+     and jira Epic-by-title (§5b.2) **reuse** branches write such an id back but
+     leave the pre-existing container's description untouched, so gating on id
+     shape alone would hard-delete an epic whose overview was never migrated.
 
    When both hold, delete the epic file, then remove the now-empty `<name>_plan/`
    directory and any empty `phase_N/` subdirectories. When the second condition
-   fails — the gh-issue `plan:<name>` **label fallback** (§5.2 step 3), or a
-   **reused `default_project`** that left no description-bearing `tracker_id` on
-   the epic (§4.2 case 2) — **keep the epic file** and **warn** that the overview
-   was kept locally because it has no tracker description home (§7). Because the
-   epic is removed only after every task file is gone, a kept task's `parent`
-   back-reference to the epic never dangles.
+   fails — the container was **reused**, not created this run: the gh-issue
+   `plan:<name>` **label fallback** (§5.2 step 3), a **reused `default_project`**
+   (§4.2 case 2), a recorded `tracker_id` (§4.2 / §5.2 / §5b.2 case 1), or a
+   **milestone/Epic matched by title** (§5.2 / §5b.2) — **keep the epic file** and
+   **warn** that the overview was kept locally because it was not written to the
+   tracker this run (§7). Because the epic is removed only after every task file
+   is gone, a kept task's `parent` back-reference to the epic never dangles.
 
 ## 5. gh-issue path
 
@@ -521,8 +527,10 @@ Print:
   whole plan migrated.
 - **Kept locally:** files **not** deleted, each with why — a task held by
   `--ready-only` or whose create failed (re-runs safely), and the epic file when
-  it was kept because the overview had no description home (the gh-issue
-  `plan:<name>` label fallback, or a reused `default_project`).
+  it was kept because the overview was not written to the tracker this run: the
+  container was **reused** rather than created (the gh-issue `plan:<name>` label
+  fallback, a reused `default_project`, a recorded `tracker_id`, or a
+  milestone/Epic matched by title — §4.5).
 - **Already pushed:** skipped files with their `tracker_id`.
 - **Follow-up set:** not-ready tasks that were pushed anyway (whole-plan mode),
   or held (`--ready-only`), each with what's needed to resolve it.
