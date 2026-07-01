@@ -118,8 +118,12 @@ order, and **reuse before create** so re-push never duplicates the container:
    - **Exactly one** configured project (the list has a single entry with a
      non-null `id`) → use it directly, no prompt.
    - **Multiple** configured projects → **prompt** via `AskUserQuestion` which one
-     to push this plan into (offer each by `name`, resolving names lazily via
-     `<linear-mcp>__list_projects` for the prompt). Use the chosen project's `id`.
+     to push this plan into. Offer the **3 most-recently-updated** configured
+     projects by `name` (resolving names lazily via `<linear-mcp>__list_projects`)
+     plus the automatic **"Other"** (4th slot) to type a name, matched
+     case-insensitively against the configured list — the 4-option cap (see
+     `linear-add.md`) means you can't always list them all. Use the chosen
+     project's `id`.
    - **Whole-team scope** (the list is the single synthetic entry with `id: null`,
      i.e. `linear.projects` absent/empty) → no pin; fall through to case 3.
 
@@ -129,9 +133,11 @@ order, and **reuse before create** so re-push never duplicates the container:
    `teamIds: [<team id>]` and `name: <epic title>`. Capture the returned project
    `id` (and `url` if present).
 
-Whenever a project is newly created (case 3), **write its id back** onto the epic
-file's frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`). Cases
-1–2 write nothing new.
+Whenever a project is resolved in **case 2** (used directly or picked from the
+prompt) or **newly created** in case 3, **write its id back** onto the epic file's
+frontmatter: `tracker_id: <project id>` (+ optional `tracker_url`) — so a re-push
+hits case 1 and never re-prompts or re-resolves (matching the Jira and GitHub
+paths). Only case 1, which already carries the id, writes nothing new.
 
 ### 4.3 Order the tasks (topological)
 

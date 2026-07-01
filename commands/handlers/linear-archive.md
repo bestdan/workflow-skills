@@ -101,7 +101,7 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
   issues(first: 100, after: $cursor, filter: {
     team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
     state: { type: { eq: $type } },         # "completed" (Done) — repeat for "canceled"
-    # project: { id: { eq: $projectId } },  # added per §3 — loop once per configured project (omit for whole-team)
+    # project: { id: { eq: $projectId } },  # per §3: loop once per configured project (omit for whole-team) — also declare $projectId: String in the signature above
     completedAt: { lt: $cutoff }            # use canceledAt for the canceled pass
   }) {
     nodes { id identifier title completedAt }
@@ -124,8 +124,11 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
      unchanged from today.
    - **One or more configured projects** — each entry has a non-null `id`: **loop
      the query once per `project.id`**, adding `project: { id: { eq: $projectId } }`
-     for that project, and **union** the candidates across all projects (dedupe by
-     issue `id`). This sweeps **every** configured project, not just one.
+     to the filter **and** declaring `$projectId: String` in the query signature
+     (the base example above omits it, so enabling the filter without also adding
+     the variable fails GraphQL validation). **Union** the candidates across all
+     projects (dedupe by issue `id`). This sweeps **every** configured project, not
+     just one.
 
    (`--project X` narrowing — restricting the sweep to a single named project — is
    deferred; don't build it here.)
