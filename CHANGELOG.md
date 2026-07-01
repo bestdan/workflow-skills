@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.18.0] - 2026-07-01
+
+### Features
+
+- [PRE-333] migrate selection prompts to configured-projects list (#101) (66073d4)
+
 ## [1.17.0] - 2026-07-01
 
 ### Features
