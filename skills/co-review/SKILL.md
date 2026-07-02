@@ -160,7 +160,7 @@ Why this is narrow:
    - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also keep it out of git by adding the entire `dev_docs/co-review/` folder to the repo's `.gitignore` (the `git check-ignore` guard keeps it idempotent):
 
      ```bash
-     git check-ignore -q dev_docs/co-review/ || echo 'dev_docs/co-review/' >> "$(git rev-parse --show-toplevel)/.gitignore"
+     git check-ignore -q "$(git rev-parse --show-toplevel)/dev_docs/co-review/" || echo 'dev_docs/co-review/' >> "$(git rev-parse --show-toplevel)/.gitignore"
      ```
    - Empty list → no local reviewers; continue Claude-only.
    - Entries present → the built-in agents (`codex`, `agy`, `devin`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
