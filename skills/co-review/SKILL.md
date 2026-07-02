@@ -16,7 +16,7 @@ The main agent writes the review _and_ applies fixes, but does **not** judge whe
 Three mode choices:
 
 - **GitHub vs local** — by default co-review operates on a PR (fetches the diff and comments from GitHub). With `--local` it operates on your working tree instead: no PR required, no GitHub calls.
-- **Which reviewers** — the main agent always reviews. Other local agents (codex, …) join the pool if configured. `--remote` forces them off for one run.
+- **Which reviewers** — the main agent always reviews. Other local agents (codex, agy, devin, …) join the pool if configured. `--remote` forces them off for one run.
 - **What happens to the findings** — by default co-review assumes the PR is **yours**: it auto-fixes high-confidence items in your working tree. With `--post` it assumes you're reviewing **someone else's** PR: it never touches the code and instead posts the vetted findings back to GitHub as a PR review.
 
 ### Flags
@@ -36,6 +36,7 @@ Other local agents can act as extra reviewers. Resolution mirrors the task syste
 local_reviewers:
   - codex # known agent → built-in default invocation
   - agy # known agent (Google Antigravity CLI) → built-in default invocation
+  - devin # known agent (Cognition Devin CLI) → built-in default invocation
   - name: my-agent # custom agent → explicit invocation
     command: "my-agent review --stdin"
 ```
@@ -46,9 +47,9 @@ local_reviewers:
 
 - **File absent** → not configured yet. Probe `PATH` (`command -v`) for the known default agents and **ask the user** which (if any) to use, then write their choice to the config so it isn't asked again.
 - **`local_reviewers: []`** (explicit empty list) → the user chose "none." Run Claude-only and **do not re-ask**. (Absent ≠ empty — that distinction is what lets the skill remember and skip asking.)
-- **File with entries** → run the **known built-in agents** (`codex`, `agy`) silently and note which ran. Skip any `gemini` entry (retired — see above). Any **custom `command:`**, or any agent not on the built-in list, is untrusted (see the safety note below) — show the user the exact command and get explicit confirmation before running it.
+- **File with entries** → run the **known built-in agents** (`codex`, `agy`, `devin`) silently and note which ran. Skip any `gemini` entry (retired — see above). Any **custom `command:`**, or any agent not on the built-in list, is untrusted (see the safety note below) — show the user the exact command and get explicit confirmation before running it.
 
-**Detection (PATH probe + config override):** the known default list is `codex` and `agy` (`gemini` is retired — skip it if present). Probe each with `command -v`. The config may also name agents that aren't on the default list, supplying a `command:` for how to invoke them.
+**Detection (PATH probe + config override):** the known default list is `codex`, `agy`, and `devin` (`gemini` is retired — skip it if present). Probe each with `command -v`. The config may also name agents that aren't on the default list, supplying a `command:` for how to invoke them.
 
 > **`agy` (Google Antigravity CLI)** is a built-in default. Unlike `codex`, it talks to a cloud backend, so it **requires an Antigravity login** and **network access** — its invocation cannot run inside a restrictive Bash sandbox. If `agy` errors with `not logged into Antigravity` or a network/permission failure, treat it like any missing reviewer: note it, skip it, never fatal.
 >
@@ -59,6 +60,17 @@ local_reviewers:
 > - **Always start a fresh conversation.** Never pass `--continue` / `--conversation` for a review — each review must depend only on the current diff, never on accumulated memory.
 > - **Treat `agy` as advisory-only, always reconciled.** It emits confidently-wrong findings on substance (in testing it invented a non-existent `BashUnsandboxed` permission prefix), and being agentic it explores/writes state even under `--sandbox -p`. Never let it be the sole reviewer; its output must always pass through the reconciler.
 > - **Pin `--model`** for a reproducible reviewer identity (the unpinned default drifts between runs) **and** to exploit agy's real edge — a non-Claude voice. The built-in invocation defaults to `"Gemini 3.5 Flash (High)"`: vendor diversity at low quota cost, and in testing it caught the highest-value finding in ~14s. Pinning a model also makes empty-input degrade gracefully rather than fabricate. Reserve the heavier `"Gemini 3.1 Pro (High)"` for deep or high-stakes reviews — it consumes quota faster.
+
+> **`devin` (Cognition Devin CLI)** is a built-in default. Like `agy` — and unlike stateless `codex` — it is **cloud-backed and session-based**: it authenticates to Devin's cloud, runs the model there, and persists a **session per directory** (`devin list`, `-c/--continue`, `-r/--resume`). It therefore **requires a Devin login, network access, and a plan with model access** — its invocation **cannot run inside a restrictive Bash sandbox** (under sandbox it panics trying to write its own log file). If `devin` errors with `/upgrade to access this model`, `not authenticated`/`unauthorized`, or a network/permission failure, treat it like any missing reviewer: note it, skip it, never fatal.
+>
+> Because it's stateful and agentic, drive it as a reviewer the same disciplined way as `agy`:
+>
+> - **Reads its entire prompt from stdin in `-p`/`--print` mode.** So the assembled `rubric + requests + diff` stream **is** the whole instruction — there is **no separate `-p "<POINTER>"` argument** (giving one could replace stdin rather than merge with it; this machine's plan gated every model, so the merge behavior couldn't be verified live, and the stdin-only invocation is chosen precisely so it doesn't depend on that). The rubric (`review_prompt.md`) already states "you are read-only," which is what devin reads.
+> - **Validate `<INPUT>` is non-empty before piping** (`[ -s "<INPUT>" ] && …`), exactly as for `agy`: never feed a stateful agent empty stdin.
+> - **Always start a fresh session.** Never pass `-c`/`--continue` or `-r`/`--resume` for a review — each review must depend only on the current diff, never on an accumulated session. This (plus the empty-stdin guard) is what replaces agy's pointer clauses about stale conversations.
+> - **Read-only is enforced structurally, not by prose.** Pass **`--sandbox`** (devin's own OS-level read/write scope enforcement — macOS seatbelt / Linux bwrap+seccomp) **and** **`--permission-mode auto`** (auto-approves _only_ read-only tools; in non-interactive mode any edit/command that isn't auto-approved is denied, not queued). **Never** pass `accept-edits`, `smart`, or `dangerous`. Keep `--sandbox` in **both** the command and its allow-rule — don't rely on the rubric alone. (`--sandbox` here is devin's own sandbox for its tools; the `devin` process itself still runs **unsandboxed** at the Bash-tool level, since it needs network + log writes.)
+> - **Pin `--model`** for a reproducible, vendor-diverse reviewer identity (the unpinned default can panic/drift). The built-in invocation defaults to **`swe-1.6`** — Cognition's own SWE model, a voice distinct from Claude (the main agent), OpenAI (`codex`), and Gemini (`agy`), which is the whole point of a second reviewer. `swe-1.6-fast` is cheaper/faster; heavier options (`claude-opus-4.8`, `gpt-5.2`, `gemini-3-flash`, `glm-5.2`, `kimi-k2.7`) exist for deeper reviews. Changing the model changes the command string and re-prompts the exact-match approval.
+> - **Treat `devin` as advisory-only, always reconciled** — like every external reviewer, its output must pass through the reconciler; never let it be the sole reviewer.
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one stdin stream**; the prompt argument is a short **fixed pointer**. Because nothing variable ends up in the command string, the command is invariant and can be approved once with an exact-match rule (see Permissions).
 
@@ -71,9 +83,11 @@ Assemble the input **and** pipe it to the agent in a **single shell invocation**
 - `codex`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
 - `agy`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | agy --sandbox --model "Gemini 3.5 Flash (High)" -p "<POINTER>"` — `agy` reads the diff/rubric on stdin and merges it with the `-p` pointer; `--sandbox` enables its read-only terminal restrictions. The leading `[ -s "<INPUT>" ] &&` is an **agy-only guard** (a harmless shell-builtin test): it skips the call when `<INPUT>` is empty, defending against the stale-conversation fabrication (the pointer's `NO INPUT` clause is the second layer). `--model "Gemini 3.5 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review, but doing so changes the command string and re-prompts the exact-match approval. `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
 - `agy`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | agy --sandbox --model "Gemini 3.5 Flash (High)" -p "<POINTER>"`
+- `devin`, GitHub mode, **with** requests → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | devin -p --sandbox --model "swe-1.6" --permission-mode auto` — devin reads the **entire** stdin stream (rubric + requests + diff) as its prompt, so there is **no `-p "<POINTER>"` argument** (the rubric already carries the read-only instruction). The leading `[ -s "<INPUT>" ] &&` is the same empty-stdin guard used for `agy`. `--sandbox` + `--permission-mode auto` enforce read-only at the OS and tool layers; `--model "swe-1.6"` pins a vendor-diverse reviewer (swap for a heavier model to deepen the review, which re-prompts the exact-match approval). devin needs network + a Devin login, so this line must run **unsandboxed** in the Bash tool. **Never** add `-c`/`--continue`/`-r`/`--resume` — every review is a fresh session.
+- `devin`, GitHub mode, **no** requests → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && cat "<INPUT>" | devin -p --sandbox --model "swe-1.6" --permission-mode auto`
 - `--local` mode → swap `gh pr diff <n>` for `git diff <base>`, and append any untracked files you read **in the same invocation**: `… ; git diff <base> >> "<INPUT>"; cat <untracked-file> … >> "<INPUT>"; cat "<INPUT>" | <agent> …`.
 
-Each `;`/`|`/`&&`-separated segment is permission-matched on its own — `cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, `git diff …` → `Bash(git diff:*)`, the agy-only `[ -s "<INPUT>" ]` guard → a shell-builtin test (harmless; `agy` runs unsandboxed and prompts regardless), and the `codex`/`agy` tail → its exact rule — and redirection (`>`, `>>`) is transparent to matching, so this assemble-then-dispatch line is fully covered by the rules below. The only things that change between runs are the contents of `<REQUESTS>`, `<INPUT>`, and the diff — all files, never the command text.
+Each `;`/`|`/`&&`-separated segment is permission-matched on its own — `cat …` → `Bash(cat:*)`, `gh pr diff …` → `Bash(gh pr diff:*)`, `git diff …` → `Bash(git diff:*)`, the `[ -s "<INPUT>" ]` guard (used by `agy` and `devin`) → a shell-builtin test (harmless; those agents run unsandboxed and prompt regardless), and the `codex`/`agy`/`devin` tail → its exact rule — and redirection (`>`, `>>`) is transparent to matching, so this assemble-then-dispatch line is fully covered by the rules below. The only things that change between runs are the contents of `<REQUESTS>`, `<INPUT>`, and the diff — all files, never the command text.
 
 where `<POINTER>` is exactly:
 
@@ -85,9 +99,9 @@ A custom agent must supply its own `command:` (input is piped on stdin).
 
 > **Why a single shell call.** Splitting assembly and dispatch across two Bash calls silently feeds reviewers a **stale** diff: assembly runs sandboxed while the network-bound reviewer runs unsandboxed, and `$TMPDIR`/`/tmp` resolve differently across that boundary, so the read comes from a leftover file. Write **and** read `<INPUT>` in the **same** invocation, open it with `>` to truncate leftovers, and key it off a fixed absolute path — never `$TMPDIR`. Don't reach for a `{ }` group or here-doc either: they aren't in the matcher's splitter set (`|`, `&&`, `;`, `&`, newlines), so they'd void the approve-once exact-match rules.
 
-These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec` can edit files or run commands by default — the pointer says read-only and the `codex` invocation pins a sandbox flag, but never rely on the prompt alone: keep the sandbox flag in both the command and its allow-rule, especially in `--local` mode where edits are in flight.
+These agents must be constrained to **read-only**: they should emit a review and nothing else. Agentic CLIs like `codex exec`, `agy`, and `devin` can edit files or run commands by default — the pointer/rubric says read-only and each built-in invocation pins the agent's own read-only flag (`codex --sandbox read-only`, `agy --sandbox`, `devin --sandbox --permission-mode auto`), but never rely on the prompt alone: keep the sandbox flag(s) in both the command and its allow-rule, especially in `--local` mode where edits are in flight.
 
-> **Untrusted config — `.co-review.yml` is committed to the repo under review.** This skill runs in repos you don't control, so the config (and any custom `command:`) can be supplied by whoever wrote the repo. Treat a custom `command:`, or any agent not in the built-in list (`codex`, `agy`), as untrusted code: **never run it silently.** Print the agent name and the exact command, and get explicit user confirmation before executing. Only the built-in agents invoked through their documented commands may run without a prompt.
+> **Untrusted config — `.co-review.yml` is committed to the repo under review.** This skill runs in repos you don't control, so the config (and any custom `command:`) can be supplied by whoever wrote the repo. Treat a custom `command:`, or any agent not in the built-in list (`codex`, `agy`, `devin`), as untrusted code: **never run it silently.** Print the agent name and the exact command, and get explicit user confirmation before executing. Only the built-in agents invoked through their documented commands may run without a prompt.
 
 ## Permissions (approve once)
 
@@ -101,7 +115,8 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
       "Bash(gh pr diff:*)",
       "Bash(git diff:*)",
       "Bash(codex exec --sandbox read-only \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")",
-      "Bash(agy --sandbox --model \"Gemini 3.5 Flash (High)\" -p \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")"
+      "Bash(agy --sandbox --model \"Gemini 3.5 Flash (High)\" -p \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")",
+      "Bash(devin -p --sandbox --model \"swe-1.6\" --permission-mode auto)"
     ]
   }
 }
@@ -109,9 +124,9 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 
 Why this is narrow:
 
-- The `codex` and `agy` rules are **exact** — each authorizes only this one read-only review command with that exact prompt. They do **not** grant arbitrary `codex exec` / `agy` runs, and they pin the read-only sandbox flag into the approved string. Edit the pointer and Claude Code re-prompts, so the approval can't silently come to mean something else.
+- The `codex`, `agy`, and `devin` rules are **exact** — each authorizes only this one read-only review command with that exact prompt/flags. They do **not** grant arbitrary `codex exec` / `agy` / `devin` runs, and they pin the read-only sandbox flag(s) into the approved string (for `devin`, `--sandbox --permission-mode auto`, with no `--continue`/`--resume`). Edit the pointer or flags and Claude Code re-prompts, so the approval can't silently come to mean something else.
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
-- The pointer string must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex` or `agy` version uses a different read-only flag (or you pin a different `agy --model`), update both.
+- The pointer string (and, for `devin`, the flag set) must match **byte-for-byte** between the command and the rule. Copy the invocation and the rules together; if you edit one, edit the other. If your `codex`, `agy`, or `devin` version uses a different read-only flag (or you pin a different `agy`/`devin --model`), update both.
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
 ## Steps
@@ -144,7 +159,7 @@ Why this is narrow:
      git check-ignore -q dev_docs/co-review/ || echo 'dev_docs/co-review/' >> "$(git rev-parse --git-dir)/info/exclude"
      ```
    - Empty list → no local reviewers; continue Claude-only.
-   - Entries present → the built-in agents (`codex`, `agy`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
+   - Entries present → the built-in agents (`codex`, `agy`, `devin`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
 
 5. **Dispatch local-agent reviews** (if any) **in parallel.** Assemble the shared input stream (rubric + any reviewer-specific requests + diff) and pipe it to each agent with the fixed pointer prompt, exactly as described under **Local reviewers → Built-in invocations**; capture stdout. For any custom `command:` or non-built-in agent, show the command and get explicit user confirmation before the first run (untrusted config; see the note in Local reviewers). If an agent errors, times out, or isn't actually runnable, note it and continue — a missing reviewer is not fatal. Output is free-form prose; do not impose a JSON contract on external tools.
 
