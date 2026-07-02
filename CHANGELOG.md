@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.21.0] - 2026-07-02
+
+### Features
+
+- add Devin CLI as a built-in local reviewer (#105) (bdb5bb2)
+
 ## [1.20.0] - 2026-07-01
 
 ### Features
