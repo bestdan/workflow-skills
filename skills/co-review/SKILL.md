@@ -30,7 +30,7 @@ Three mode choices:
 
 Other local agents can act as extra reviewers. Resolution mirrors the task system's config pattern.
 
-**Config file (local):** `dev_docs/co-review/.co-review.yml`. Treat this as **local** config — the setup step below adds `dev_docs/co-review/` to the repo's local git exclude (`.git/info/exclude`) so it stays out of `git status` and never lands in an accidental commit, which matters most in repos you don't own. (If someone _has_ committed a `.co-review.yml` to a repo you're reviewing, the untrusted-config rules below still apply.)
+**Config file (local):** `dev_docs/co-review/.co-review.yml`. Treat this as **local** config — the setup step below adds the entire `dev_docs/co-review/` folder to the repo's `.gitignore` so it stays out of `git status` and never lands in an accidental commit. (If someone _has_ committed a `.co-review.yml` to a repo you're reviewing, the untrusted-config rules below still apply.)
 
 ```yaml
 local_reviewers:
@@ -157,10 +157,10 @@ Why this is narrow:
    - **Local mode** (`--local`): `git diff <base>` (default `base = main`) for tracked changes, **plus** untracked files via `git ls-files --others --exclude-standard` so new files aren't missed (mind the merge-base caveat in the Flags section if `<base>` has advanced). No `gh` calls. There are no GitHub comments to reconcile.
 
 4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `dev_docs/co-review/.co-review.yml`:
-   - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also suggest the user keep it out of git by adding the directory to the repo's local exclude (`.git/info/exclude` is per-clone and never committed; the `git check-ignore` guard keeps it idempotent):
+   - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also keep it out of git by adding the entire `dev_docs/co-review/` folder to the repo's `.gitignore` (the `git check-ignore` guard keeps it idempotent):
 
      ```bash
-     git check-ignore -q dev_docs/co-review/ || echo 'dev_docs/co-review/' >> "$(git rev-parse --git-dir)/info/exclude"
+     git check-ignore -q dev_docs/co-review/ || echo 'dev_docs/co-review/' >> "$(git rev-parse --show-toplevel)/.gitignore"
      ```
    - Empty list → no local reviewers; continue Claude-only.
    - Entries present → the built-in agents (`codex`, `agy`, `devin`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
