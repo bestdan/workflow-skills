@@ -57,13 +57,13 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                            |
-   | ----------- | ----------------------------------------------------------------- |
-   | Priority    | Linear `priority` mapped back to `urgent                          |
-   | Identifier  | Linear `identifier` (e.g. `PRE-12`)                               |
-   | Title       | Linear issue `title`                                              |
-   | Assignee    | Linear `assignee.displayName` (omit `— assignee …` if unassigned) |
-   | Annotations | See below                                                         |
+   | Field       | Source                                                                        |
+   | ----------- | ----------------------------------------------------------------------------- |
+   | Priority    | Linear `priority` mapped back to urgent/high/medium/low (0 = none sorts last) |
+   | Identifier  | Linear `identifier` (e.g. `PRE-12`)                                           |
+   | Title       | Linear issue `title`                                                          |
+   | Assignee    | Linear `assignee.displayName` (omit `— assignee …` if unassigned)             |
+   | Annotations | See below                                                                     |
 
    Inline annotations to surface when present (comma-separated, after the assignee):
    - `human-approval-requested` (label present)

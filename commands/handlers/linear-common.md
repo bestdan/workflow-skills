@@ -61,7 +61,7 @@ linear:
 
 ### Resolve configured projects
 
-Every Linear-handled command that scopes to projects **must call** this one resolution step instead of reading `default_project`/`projects` directly, so inheritance and the whole-team fallback live in exactly one place. (Consumers still read the scalar `default_project` today; each is rewired to this helper in **PRE-331…335** — this task defines the helper, it does not migrate the consumers.) It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
+Every Linear-handled command that scopes to projects **must call** this one resolution step instead of reading `default_project`/`projects` directly, so inheritance and the whole-team fallback live in exactly one place. It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
 
 1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit, default 3>, max_estimate: <linear.max_estimate, default 3> }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
 2. **Otherwise**, map each entry to `{ id, name, wip_limit, max_estimate }`:

@@ -23,7 +23,7 @@ Read `dev_docs/tasks/.task-config.yml`. Resolve `jira.site` and `jira.project` (
 - `jira.ready_status` — the HIGH transition target.
 - `jira.refinement_status` — the LOW transition target.
 - `jira.blocked_statuses` — optional list of status names that mean "blocked" on this board (e.g. `["Blocked", "On Hold/Blocked"]`); excluded from the step-3 candidate set. Omit or leave empty if the board has none.
-- `jira.default_epic` — optional epic key (`jira-config.md` step 5). When set, it pins the **scope** of this run (step 2a) the way `linear.default_project` does on the Linear path; the create flow uses the same key to skip the per-task epic prompt.
+- `jira.default_epic` — optional epic key (`jira-config.md` step 5). When set, it pins the **scope** of this run (step 2a) the way the configured `linear.projects` pin does on the Linear path; the create flow uses the same key to skip the per-task epic prompt.
 
 Both keys are **optional**. Classify the run:
 
