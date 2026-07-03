@@ -77,15 +77,23 @@ only `availability:`, which orchestrate-coders treats as absent for its own
 
 ## Selection
 
-1. **Profile the task** along the matrix dimensions. Most tasks are obvious
-   from the description; when genuinely ambiguous between profiles, ask one
-   question rather than guessing — **unless running non-interactively** (as a
-   subagent, e.g. under orchestrate-coders, where no user is reachable): then
-   don't block — pick the most likely profile, and state the assumption plus
-   the runner-up profile in the report so the caller can override.
+1. **Get the task profile** from the **assess-task** skill
+   (`skills/assess-task/SKILL.md`) — invoke it via the `Skill` tool rather than
+   re-deriving the rubric here. It returns a `task_profile` block (complexity,
+   creativity, scope, autonomy, speed/cost sensitivity, verification
+   criticality, and a routing `label`) and handles ambiguity for you: when a
+   user is reachable it asks one question; non-interactively (as a subagent,
+   e.g. under orchestrate-coders) it picks the most likely profile, sets
+   `confidence: low`, and puts the runner-up label in `runner_up`. Carry that
+   runner-up into your report so the caller can override. With `--plan`,
+   assess-task returns one `task_profile` per task file (keyed by filename) —
+   map each independently.
 
-2. **Map profile → candidates** using the routing table in `matrix.md`,
-   filtered to what's available. Produce a ranked list (best first), max 3.
+2. **Map each profile's `label` → candidates** using the routing table in
+   `matrix.md` (its label rows are keyed by the same labels assess-task emits;
+   the `cross-vendor` row is a select-coder-only modifier, not an assess-task
+   label), filtered to what's available. Produce a ranked list (best first),
+   max 3 per task. On `confidence: low`, also consider the `runner_up` row.
 
 3. **Apply the operational modifiers** (also in `matrix.md`) — these come
    from real pilot runs and outrank benchmark deltas:

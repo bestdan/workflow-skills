@@ -106,6 +106,7 @@ Never delete the original on LOW confidence. Instead:
 - **`/promote-tasks`** flags oversized cards (`scope exceeds size 5 — split into sub-tasks`) but never splits them — this skill is how that flag gets resolved.
 - **`plan-with-docs`** uses the same slicing judgment and output format; reach for it when planning from scratch, this skill when an existing task outgrew one PR.
 - **`/do-tasks`** runs the components once `/promote-tasks` flips them to `ready`; `is_blocked_by` keeps them in order.
+- **`/assess-task`** profiles a task's `complexity` + `scope` — a useful sizing signal when you're unsure whether a card is over the size-`5` line and worth splitting at all. Advisory only; the shear-point and confidence judgment above stays the deciding factor.
 
 ## Legacy migration preflight
 
