@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.0] - 2026-07-03
+
+### Features
+
+- gitignore the whole dev_docs/co-review folder on setup (#106) (90dc4e1)
+
 ## [1.21.0] - 2026-07-02
 
 ### Features
