@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.26.0] - 2026-07-03
+
+### Features
+
+- extract task profiling into a standalone /assess-task skill (#116) (b62400f)
+
 ## [1.25.0] - 2026-07-03
 
 ### Features
