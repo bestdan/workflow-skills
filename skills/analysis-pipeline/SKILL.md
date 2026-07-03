@@ -33,7 +33,7 @@ The core principle: **every number in a final document must trace to either an i
 
 For simple analyses, this can be as lightweight as a single script that prints results. For larger projects with narrative reports, a multi-stage pipeline works well:
 
-1. **Model** (notebook or script) computes all values and writes structured output (e.g., `model_output.json`)
+1. **Model** (script) computes all values and writes structured output (e.g., `model_output.json`)
 2. **Templates** (`.template.md`) contain `{{key}}` placeholders for data
 3. **Fill script** deterministically replaces placeholders from the model output
 4. **Narrate** (optional) pipes enriched templates through Claude CLI to fill prose sections
