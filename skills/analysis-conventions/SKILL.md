@@ -10,8 +10,8 @@ user-invocable: false
 
 ## When to Use Plain Scripts vs Marimo
 
-- **Plain `.py` script**: deterministic pipeline steps, one-shot computations, CI/automation contexts where a notebook adds unnecessary complexity.
-- **Marimo notebook**: exploratory analysis, interactive parameter tweaking, work that benefits from visible intermediate outputs and tables. Good default for analysis work.
+- **Plain `.py` script**: deterministic pipeline steps, one-shot computations, CI/automation contexts where a notebook adds unnecessary complexity. Always use plain scripts for pipeline model steps (see `analysis-pipeline` skill).
+- **Marimo notebook**: exploratory analysis, interactive parameter tweaking, work that benefits from visible intermediate outputs and tables. Use for exploratory/interactive analysis.
 
 When in doubt, start with a plain script. Refactor to marimo if the user wants interactivity.
 

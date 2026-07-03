@@ -1,6 +1,6 @@
 ---
 name: analysis-pipeline
-description: Use when building analyses where numbers feed into decisions, reports, or documents — financial projections, cost comparisons, capacity planning, scenario analysis — with more than a couple of variable inputs.
+description: Use when building analyses where numbers feed into decisions, reports, or documents — financial projections, cost comparisons, capacity planning, scenario analysis — with more than a couple of variable inputs. Not for one-off arithmetic or exploratory questions — just answer those directly.
 user-invocable: true
 ---
 
@@ -33,7 +33,7 @@ The core principle: **every number in a final document must trace to either an i
 
 For simple analyses, this can be as lightweight as a single script that prints results. For larger projects with narrative reports, a multi-stage pipeline works well:
 
-1. **Model** (notebook or script) computes all values and writes structured output (e.g., `model_report.json`)
+1. **Model** (notebook or script) computes all values and writes structured output (e.g., `model_output.json`)
 2. **Templates** (`.template.md`) contain `{{key}}` placeholders for data
 3. **Fill script** deterministically replaces placeholders from the model output
 4. **Narrate** (optional) pipes enriched templates through Claude CLI to fill prose sections
@@ -58,10 +58,7 @@ Naming: use `model.py` and `model_output.json` unless the pipeline has multiple 
 
 ## When to Use Plain Scripts vs Marimo
 
-- **Plain `.py` script** (default for pipelines): deterministic pipeline steps, one-shot computations, anything that writes JSON output for the template fill step.
-- **Marimo notebook**: exploratory analysis, interactive parameter tweaking, work that benefits from visible intermediate outputs. Not the default for pipelines — use when the user asks for interactivity or when the analysis is exploratory rather than producing a report.
-
-When building a pipeline that produces a document, always use a plain script for the model step.
+The model step is always a plain script — see the `analysis-conventions` skill for when marimo is appropriate.
 
 ## JSON Output Schema
 
@@ -140,7 +137,7 @@ When an analysis produces a narrative document, use templates to keep numbers ti
   - `{{key}}` — **data placeholders**, filled deterministically from the model's JSON output. These are reproducible: re-run the model, re-fill, get the same numbers.
   - `{{narrative:section_name}}` — **prose placeholders**, filled by piping the enriched template through Claude CLI. These are regenerable but not deterministic — the data they reference is pinned, but the wording may vary.
 
-- **Fill step**: a script (e.g., `fill_templates.py`, a `jq` one-liner, whatever fits) reads `model_report.json` and replaces `{{key}}` placeholders. This step has no LLM involvement and should be trivially verifiable.
+- **Fill step**: a script (e.g., `fill_templates.py`, a `jq` one-liner, whatever fits) reads `model_output.json` and replaces `{{key}}` placeholders. This step has no LLM involvement and should be trivially verifiable.
 
 - **Narrate step** (optional): passes the data-filled template to Claude CLI to expand `{{narrative:*}}` blocks into prose. The LLM sees the real numbers in context, so the narrative stays consistent with the model.
 
