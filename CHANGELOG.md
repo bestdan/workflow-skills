@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.7] - 2026-07-03
+
+### Fixes
+
+- scope is_blocked_by validation per handler (#113) (af4850c)
+
 ## [1.22.6] - 2026-07-03
 
 ### Fixes
