@@ -19,13 +19,13 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
 | ----------------------------------- | --------- | ---------- | ------ | -------- |
 | capture (`/add-task`)               | yes       | yes        | yes    | yes      |
-| list (`/list-tasks`)                | yes       | yes        | no     | yes      |
+| list (`/list-tasks`)                | yes       | yes        | yes    | yes      |
 | promote (`/promote-tasks`)          | yes       | yes        | yes    | yes      |
 | do — single (`/do-tasks`)           | yes       | yes        | yes    | yes      |
 | process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
 
-`repo-pr` is the only full-loop handler. `jira` adds promote and single `do` (but not list); `gh-issue` adds list, promote, and single `do`; `linear` adds list, promote, and single `do` but not batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`repo-pr` is the only full-loop handler. `jira` adds list, promote, and single `do`; `gh-issue` adds list, promote, and single `do`; `linear` adds list, promote, and single `do` but not batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 **Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 
@@ -133,7 +133,7 @@ Tell the user:
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
-  - `jira`: "`jira` supports: /add-task, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: /list-tasks, batch /do-tasks --all. You can still manage these in Jira directly."
+  - `jira`: "`jira` supports: /add-task, /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.

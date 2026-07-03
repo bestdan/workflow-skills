@@ -40,8 +40,10 @@ The `repo-pr` handler is the default. It captures tasks as markdown files via PR
    Two optional settings (plus the shared top-level `archive_after`):
 
    - **`wip_limit`** (default `3`) bounds batch dispatch: `/do-tasks --all` counts
-     work already in flight — tasks with `status: in_progress` plus open
-     `task-loop` PRs (the `needs_review` queue) — and dispatches only up to
+     work already in flight — distinct slugs deduped across three sources: open
+     `task-claim` PRs (claimed, work underway), open `task-loop` PRs (the
+     `needs_review` queue), and `status: in_progress` files (see
+     `repo-pr-execute.md` step 4) — and dispatches only up to
      `wip_limit - current_wip` tasks, holding the rest. This keeps the human
      PR-review bottleneck from being flooded.
    - **`auto_execute_max_size`** (default `2`) size-gates batch auto-routing in
