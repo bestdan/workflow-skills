@@ -32,6 +32,14 @@ Other local agents can act as extra reviewers. Resolution mirrors the task syste
 
 **Config file (local):** `dev_docs/co-review/.co-review.yml`. Treat this as **local** config — the setup step below adds the entire `dev_docs/co-review/` folder to the repo's `.gitignore` so it stays out of `git status` and never lands in an accidental commit. (If someone _has_ committed a `.co-review.yml` to a repo you're reviewing, the untrusted-config rules below still apply.)
 
+Because the folder is git-ignored, it lives only in the **main working tree** — a linked git worktree checks out tracked files only, so it never receives the config. Always resolve the config dir against the main working tree, not the current worktree, so every worktree shares one copy:
+
+```bash
+CO_REVIEW_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/dev_docs/co-review"
+```
+
+In the main worktree this is just `<root>/dev_docs/co-review`; in a linked worktree it points back to the main tree's copy. Use `$CO_REVIEW_DIR` wherever this skill reads or writes `.co-review.yml` (and the same main-tree root for the `.gitignore` guard).
+
 ```yaml
 local_reviewers:
   - codex # known agent → built-in default invocation
@@ -158,11 +166,12 @@ Why this is narrow:
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
    - **Local mode** (`--local`): `git diff <base>` (default `base = main`) for tracked changes, **plus** untracked files via `git ls-files --others --exclude-standard` so new files aren't missed (mind the merge-base caveat in the Flags section if `<base>` has advanced). No `gh` calls. There are no GitHub comments to reconcile.
 
-4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `dev_docs/co-review/.co-review.yml`:
-   - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also keep it out of git by adding the entire `dev_docs/co-review/` folder to the repo's `.gitignore` (the `git check-ignore` guard keeps it idempotent):
+4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `$CO_REVIEW_DIR/.co-review.yml` (resolve `CO_REVIEW_DIR` against the main working tree as shown under **Local reviewers → Config file** — do **not** use `git rev-parse --show-toplevel`, which points at the current worktree and misses the git-ignored config):
+   - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also keep it out of git by adding the entire `dev_docs/co-review/` folder to the main tree's `.gitignore` (the `git check-ignore` guard keeps it idempotent):
 
      ```bash
-     git check-ignore -q "$(git rev-parse --show-toplevel)/dev_docs/co-review/" || echo 'dev_docs/co-review/' >> "$(git rev-parse --show-toplevel)/.gitignore"
+     MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+     git check-ignore -q "$MAIN_ROOT/dev_docs/co-review/" || echo 'dev_docs/co-review/' >> "$MAIN_ROOT/.gitignore"
      ```
    - Empty list → no local reviewers; continue Claude-only.
    - Entries present → the built-in agents (`codex`, `agy`, `devin`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
