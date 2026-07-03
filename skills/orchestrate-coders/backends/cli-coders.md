@@ -9,9 +9,10 @@ the diff and the verification run are the ground truth.
 Per packet:
 
 1. **Workspace.** Create a dedicated worktree and branch:
-   `git worktree add <dir> -b bestdan/<packet-slug> main` (base on the
-   integration branch when packets are dependent). `<dir>` lives under the
-   session scratchpad, never inside the repo.
+   `git worktree add <dir> -b orchestrate/<packet-slug> <base>`, where `<base>`
+   is the repo's current branch (`git rev-parse --abbrev-ref HEAD`) — not a
+   hardcoded `main`; use the integration branch instead when packets are
+   dependent. `<dir>` lives under the session scratchpad, never inside the repo.
 2. **Spec file.** Write the packet brief (same shape as the opus packet
    prompt: task, scope, constraints, verify command, report format) to
    `<dir>/.packet-spec.md`. Files, not inline prompt text, carry everything
@@ -39,7 +40,8 @@ Per packet:
    changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
    commit — so the branch actually carries the work that SKILL.md step 6
    merges. Then hand the branch back to the orchestrator's integrate step.
-   Remove the worktree after integration.
+   After integration, remove the worktree with `git worktree remove <dir>`
+   (not a manual `rm`, which leaves stale `.git/worktrees` metadata).
 
 ## Known invocations
 

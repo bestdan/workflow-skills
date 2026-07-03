@@ -84,7 +84,8 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
    and verifiable — roughly PR-sized or smaller. Write each packet spec as a
    self-contained brief: goal, files in scope, constraints (relevant
    CLAUDE.md/AGENTS.md rules the coder won't otherwise see), and the exact
-   verification command (`dli check` or the project's test/lint invocation).
+   verification command (the project's own gate — e.g. `just check`, `npm test`,
+   `pytest`).
    With `--plan`, the plan's task files are the packets — don't re-slice them.
    If the task doesn't decompose (one coherent change), it's a single packet;
    that's fine — orchestration still buys verification and isolation.
@@ -94,7 +95,7 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
 4. **Dispatch packets** — up to `N` in flight, independent packets in
    parallel, dependent ones in dependency order. Every coder that edits files
    works in **its own git worktree** on **its own branch** (branch names
-   prefixed `bestdan/`), never in the user's working tree — two coders in one
+   prefixed `orchestrate/`), never in the user's working tree — two coders in one
    tree, or a coder in the tree the orchestrator is watching, is how work gets
    clobbered. Per-backend dispatch mechanics are in the backend reference
    files; the orchestrator only ever sees the packet's resulting diff. Expect a
@@ -108,11 +109,13 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
    is defined as diff **plus** untracked files) — a CLI coder (notably agy)
    can land correct edits there instead of its worktree. If the main checkout
    is dirty on the packet's files, recover **scoped to the packet's files
-   only**: extract their tracked diff (`git diff -- <packet files> > patch`),
-   apply it to the worktree (`git apply --3way`), move any packet-scoped
-   untracked files into the worktree, then restore just those paths
-   (`git restore -- <packet files>`). Never diff or restore paths outside the
-   packet's scope — they may be the user's own uncommitted work. **Do this
+   only**: extract their diff including staged edits
+   (`git diff HEAD -- <packet files> > patch`), apply it to the worktree
+   (`git apply --3way`), move any packet-scoped untracked files into the
+   worktree, then reset just those paths in the checkout
+   (`git restore --staged --worktree --source=HEAD -- <packet files>`). Never
+   diff or restore paths outside the packet's scope — they may be the user's
+   own uncommitted work. **Do this
    before judging an empty worktree diff** as failure. Then read the diff yourself (the orchestrator is the reviewer of
    record — never merge a coder's diff unread) and run the packet's
    verification command in that worktree. Classify failures:

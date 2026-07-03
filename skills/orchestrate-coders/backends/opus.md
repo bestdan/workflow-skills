@@ -61,9 +61,12 @@ that the spec left open.
   result — harvest the diff from its worktree branch, not from its prose.
 - Retry protocol (SKILL.md step 5): a **content failure** goes back via
   **SendMessage to the same agent ID** with the failure output — it still has
-  its packet context; don't respawn. An empty diff, error, or timeout is
-  **not** re-messaged — it re-dispatches to a **different** coder per
-  SKILL.md's Safety rules.
+  its packet context; don't respawn. If SendMessage isn't available in the
+  environment (it can require agent-teams support), fall back to spawning a
+  **fresh** subagent with the same packet prompt plus a `## Previous attempt
+  failed` section — the stateless retry the CLI coders use. An empty diff,
+  error, or timeout is **not** re-messaged — it re-dispatches to a
+  **different** coder per SKILL.md's Safety rules.
 - `CLAUDE_CODE_SUBAGENT_MODEL`, if set in the environment, overrides the
   `model:` parameter for every subagent. If packets seem to run on the wrong
   model, check for it and tell the user rather than fighting it.
