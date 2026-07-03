@@ -224,7 +224,7 @@ created: 2026-06-07
 
 A `plan-with-docs` overview (`<name>_plan.md`) is written as this epic file — see `skills/plan-with-docs/SKILL.md`.
 
-When a plan is pushed to a tracker, the epic file records the grouping container's id (Linear project, Jira epic, gh-issue milestone) in the same optional `tracker_id` / `tracker_url` fields a task uses for its issue id — written by the planned `/push-plan` flow.
+When a plan is pushed to a tracker, the epic file records the grouping container's id (Linear project, Jira epic, gh-issue milestone) in the same optional `tracker_id` / `tracker_url` fields a task uses for its issue id — written by the `/push-plan` flow. This recorded id is transient: once the whole plan has migrated, `/push-plan` deletes the epic file and the plan directory along with the migrated task files, leaving the tracker container as the only source of truth. On the `repo-pr` handler nothing is pushed or deleted — the files stay.
 
 **Epic slug.** An epic's slug is its filename stem with a trailing `_plan` removed (so `task_loop_improvements_plan` → `task_loop_improvements`); a standalone epic file not named `*_plan.md` uses its bare stem.
 
