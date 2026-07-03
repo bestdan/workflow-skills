@@ -15,8 +15,9 @@
 #   scripts/probe-coders.sh
 #
 # Exit status: always 0 (a missing coder is data, not an error).
-# Network: only `devin auth status` touches the network; everything else is
-# local. Run unsandboxed if devin is installed.
+# Network: `devin auth status` and `agy models` touch the network (both are
+# cheap auth probes — no inference, no quota); everything else is local. Run
+# unsandboxed if agy or devin is installed.
 
 set -u
 
@@ -34,7 +35,16 @@ if command -v codex >/dev/null 2>&1; then
 fi
 
 agy_installed=false
-command -v agy >/dev/null 2>&1 && agy_installed=true
+agy_logged_in=false
+if command -v agy >/dev/null 2>&1; then
+  agy_installed=true
+  # `agy models` is a free metadata list (no inference, ~1s) that returns
+  # non-zero with "Please sign in" when the token is dead — so it doubles as
+  # a quota-free auth probe. Over SSH agy uses a file-based token store that
+  # GUI logins don't refresh, so presence alone does NOT imply usable auth.
+  # (Same probe co-review's pre-flight uses — keep the two in sync.)
+  agy models >/dev/null 2>&1 && agy_logged_in=true
+fi
 
 devin_installed=false
 devin_logged_in=false
@@ -62,6 +72,7 @@ availability:
     default_model: $codex_model
   agy:
     installed: $agy_installed
+    logged_in: $agy_logged_in # false when the token is dead (e.g. stale file-store over SSH)
   devin:
     installed: $devin_installed
     logged_in: $devin_logged_in
