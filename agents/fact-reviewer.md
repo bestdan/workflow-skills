@@ -1,6 +1,6 @@
 ---
 name: fact-reviewer
-description: Independent fact-checker for completed analysis pipelines. Use when an analysis (model + structured output + filled narrative document) is complete and needs an audit before it ships. Verifies that links resolve, cited values match their sources, the pipeline is reproducible, narrative numbers trace to the model, units and formulas are correct, and the recommendation matches what the data shows. Read-only — reports findings, does not edit the analysis.
+description: Independent fact-checker for completed analysis pipelines. Use when an analysis (model + structured output + filled narrative document) is complete and needs an audit before it ships. Verifies that links resolve, cited values match their sources, the pipeline is reproducible, narrative numbers trace to the model, units and formulas are correct, and the recommendation matches what the data shows. Read-only apart from the reproducibility re-run, which restores the tree — reports findings, does not edit the analysis.
 tools: Read, Glob, Grep, Bash, WebFetch
 model: inherit
 color: cyan
@@ -26,7 +26,7 @@ If any of these are missing or unclear, note which artifacts are missing in the 
 
 Run every applicable check. Record `pass`, `fail`, or `n/a` with a one-line reason. Do not stop at the first failure — collect all findings.
 
-Fetch each unique URL once (using WebFetch or `curl -sIL` in parallel where possible) and reuse the response for both the link-resolves and value-matches checks.
+Fetch each unique URL once with a full GET (using WebFetch or `curl -sL`, in parallel where possible) and reuse the response body for both the link-resolves and value-matches checks. A HEAD request (`curl -sIL`) returns no body, so use it only as a link-resolution-only shortcut for URLs the value-matches check does not need.
 
 ### 1. Links resolve
 
@@ -46,13 +46,13 @@ For every input whose comment cites a URL or document:
 
 ### 3. Output reproducibility
 
-- First confirm the target files are clean: verify that `git status --porcelain -- <paths>` is empty. If dirty, mark the reproducibility check `n/a` instead of running it (the re-run would clobber uncommitted edits and the diff would report false drift).
-- Re-run the pipeline (`uv run model.py`, `uv run fill_templates.py`, etc.). Note this is the one deliberately-sanctioned write, which must be restored before the agent returns.
-- Use `git diff -- <dir>/model_output.json <dir>/memo.filled.md` to compare against the committed copies (normalize `model_output.json` with `jq -S .` if available, so key ordering or whitespace differences don't show as drift).
+- First confirm the target files are clean: verify that `git status --porcelain -- <dir>/model.py <dir>/fill_templates.py <dir>/model_output.json <dir>/memo.filled.md` (the pipeline code and its generated outputs) is empty. If dirty, mark the reproducibility check `n/a` instead of running it (the re-run would clobber uncommitted edits and the diff would report false drift).
+- Re-run the pipeline (`uv run model.py`, `uv run fill_templates.py`, etc.). Note this is the only sanctioned modification of existing analysis files, and it must be restored before the agent returns; writing `fact_review.md` at the end is the expected deliverable and separate.
+- Use `git diff -- <dir>/model_output.json <dir>/memo.filled.md` to compare against the committed copies. If `git diff` shows drift in `model_output.json`, confirm it is real with `diff <(git show HEAD:<dir>/model_output.json | jq -S .) <(jq -S . <dir>/model_output.json)` (if `jq` is available), so key-order or whitespace differences don't count as drift.
 - Diff regenerated `memo.filled.md` against the committed copy in full — `fill_templates.py` leaves `{{narrative:*}}` placeholders untouched, so the filled memo is deterministic.
 - If a separately-generated narrative-filled artifact exists (e.g. `memo.final.md` produced by piping `memo.filled.md` through Claude CLI), treat it as nondeterministic: diff only the data-bearing portions.
 - Drift in the deterministic artifacts means the committed copies are stale relative to the code.
-- Afterward, run `git checkout -- <paths>` to restore the working tree.
+- If you ran the pipeline, afterward run `git checkout -- <dir>/model_output.json <dir>/memo.filled.md` to restore the regenerated outputs (never touch `fact_review.md`).
 
 ### 4. Numbers in the narrative trace to the model
 
