@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.1] - 2026-07-03
+
+### Fixes
+
+- make eval.sh timeout portable on macOS (#76) (c9675d2)
+
 ## [1.22.0] - 2026-07-03
 
 ### Features
