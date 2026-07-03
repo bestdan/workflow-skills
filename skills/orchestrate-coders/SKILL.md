@@ -39,7 +39,10 @@ into the task description.
 
 - `--coder <spec>` — which coder(s) to use. Repeatable: with several, assign
   packets round-robin unless a packet's nature clearly favors one (note the
-  assignment in the report). Absent → config default → resolution flow below.
+  assignment in the report). The `select-coder` skill scores packets against
+  its capability matrix and produces exactly these per-packet overrides — use
+  it when the assignment isn't obvious. Absent → config default → resolution
+  flow below.
 - `-n N` — max packets in flight at once (default 3).
 - `--plan <name>` — skip decomposition and execute an existing
   `dev_docs/tasks/<name>_plan/` plan (from `/plan-with-docs`), one packet per
@@ -68,7 +71,10 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
 - File absent → probe `PATH` (`command -v`) for `codex`, `agy`, `devin`; `opus`
   is always available. Ask the user which to use and what the default should
   be, then write the config so it isn't asked again.
-- File present → use `default_coder`. A `--coder` flag always overrides.
+- File present **with `default_coder`** → use it. A file lacking
+  `default_coder` (e.g. holding only select-coder's `availability:` cache) →
+  treat as absent for this flow: probe/ask as above, then merge the new keys
+  into the existing file. A `--coder` flag always overrides.
 - A named coder that isn't in `coders:` and isn't a known backend → stop and
   ask rather than guess.
 
