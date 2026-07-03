@@ -1,0 +1,1 @@
+I don't want you writing the code for this refactor yourself. Act as the supervisor: split the work into pieces, farm each piece out to codex or an opus subagent to implement, check their diffs, and stitch the results together.
