@@ -1,6 +1,6 @@
 ---
 name: review-facts
-description: Independent fact-check of a completed analysis pipeline. Spawns the `fact-reviewer` subagent (fresh context, read-only tools) to verify links, cited values, reproducibility, number-trace, units, formulas, and recommendation correctness. Use when an analysis (model + structured output + filled narrative document, per analysis-pipeline) is complete and needs an audit before it ships.
+description: Independent fact-check of a completed analysis pipeline. Spawns the `fact-reviewer` subagent (fresh context, read-only tools apart from the reproducibility re-run, which restores the tree) to verify links, cited values, reproducibility, number-trace, units, formulas, and recommendation correctness. Use when an analysis (model + structured output + filled narrative document, per analysis-pipeline) is complete and needs an audit before it ships.
 user-invocable: true
 ---
 
@@ -41,7 +41,7 @@ Skip this skill for drafts in progress, exploratory notebooks, or single-number 
 
 ## What this skill does not do
 
-- It does not edit the analysis. The reviewer reports; the author fixes.
+- It does not edit the analysis (apart from the reproducibility re-run, which restores the tree). The reviewer reports; the author fixes.
 - It does not re-do the analysis. If methodology is wrong, it's flagged, not silently rewritten.
 - It does not check prose style, tone, or grammar. Out of scope.
 

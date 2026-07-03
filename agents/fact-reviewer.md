@@ -20,17 +20,19 @@ You will be given an analysis directory. Identify:
 - the filled document(s) (e.g. `memo.filled.md`)
 - any `inputs/` directory with raw source data
 
-If any of these are missing or unclear, ask the invoking agent before proceeding.
+If any of these are missing or unclear, note which artifacts are missing in the review output, mark their checks `n/a`, and run everything that applies.
 
 ## Checklist
 
 Run every applicable check. Record `pass`, `fail`, or `n/a` with a one-line reason. Do not stop at the first failure — collect all findings.
 
+Fetch each unique URL once (using WebFetch or `curl -sIL` in parallel where possible) and reuse the response for both the link-resolves and value-matches checks.
+
 ### 1. Links resolve
 
 For every URL in source comments, model code, JSON `source` fields, and the filled document:
 
-- Fetch the URL (WebFetch or `curl -sIL`). Treat 4xx/5xx as failures. Treat redirects to login pages, parked domains, or unrelated content as failures.
+- Treat 4xx/5xx as failures. Treat redirects to login pages, parked domains, or unrelated content as failures.
 - For scheme-less citations (e.g. `nimbus.io/pricing`), try `https://` then `http://` before flagging as broken.
 - For non-URL citations (local PDFs, internal docs, "vendor email 2025-11-12"), confirm the file exists at the cited path or note that the source is offline-only and cannot be auto-verified — do not flag as a dead link.
 - Note the date you checked.
@@ -39,17 +41,18 @@ For every URL in source comments, model code, JSON `source` fields, and the fill
 
 For every input whose comment cites a URL or document:
 
-- Fetch the source.
 - Confirm the cited value (price, rate, spec, date) actually appears at the source — or, if computed from the source, confirm the computation.
 - Flag mismatches with both the cited value and the value found at the source.
 
 ### 3. Output reproducibility
 
-- Re-run the pipeline (`uv run model.py`, `uv run fill_templates.py`, etc.).
-- Diff regenerated `model_output.json` against the committed copy (normalize with `jq -S .` if available, so key ordering or whitespace differences don't show as drift).
+- First confirm the target files are clean: verify that `git status --porcelain -- <paths>` is empty. If dirty, mark the reproducibility check `n/a` instead of running it (the re-run would clobber uncommitted edits and the diff would report false drift).
+- Re-run the pipeline (`uv run model.py`, `uv run fill_templates.py`, etc.). Note this is the one deliberately-sanctioned write, which must be restored before the agent returns.
+- Use `git diff -- <dir>/model_output.json <dir>/memo.filled.md` to compare against the committed copies (normalize `model_output.json` with `jq -S .` if available, so key ordering or whitespace differences don't show as drift).
 - Diff regenerated `memo.filled.md` against the committed copy in full — `fill_templates.py` leaves `{{narrative:*}}` placeholders untouched, so the filled memo is deterministic.
 - If a separately-generated narrative-filled artifact exists (e.g. `memo.final.md` produced by piping `memo.filled.md` through Claude CLI), treat it as nondeterministic: diff only the data-bearing portions.
 - Drift in the deterministic artifacts means the committed copies are stale relative to the code.
+- Afterward, run `git checkout -- <paths>` to restore the working tree.
 
 ### 4. Numbers in the narrative trace to the model
 
