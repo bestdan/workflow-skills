@@ -24,8 +24,9 @@ one-line fix:
 3. **Silent empty prompt.** The prompt was passed inline as
    `"$(cat "$TMPDIR/prompt.txt")"`. When `$TMPDIR` was stale the substitution
    expanded to an empty string and codex was handed an **empty prompt** with no
-   error. → **Never inline `$(cat …)`; pass a file path, and verify it's
-   non-empty first.**
+   error. → **Never inline `$(cat …)` off an unstable path: write the prompt to
+   a stable scratchpad file, verify it's non-empty (`[ -s … ]`), then feed it via
+   stdin (preferred) or an inline `$(cat …)` from that guarded file.**
 
 ## The pattern
 
