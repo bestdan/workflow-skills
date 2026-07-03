@@ -111,7 +111,7 @@ nothing and report the WIP-limit decline).
 
 3. **Filter.** Drop any returned issue that carries a `human-approval-requested` or `blocked` label (defensive backstop against JQL index lag — the step-2 query already excludes these server-side). Jira has no native `estimate`/size field (story points, when present, are a custom field), so there is no estimate gate here — scope is judged later in "Judge feasibility", exactly as `jira-promote.md` folds size into the scope judgment.
 
-Return the ranked list to **Pre-flight: is work already in flight?** Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
+Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
 
 If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields` plus `"Flagged"`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` / `Flagged IS EMPTY` gates to it; if it fails any gate, return the failure reason rather than the issue (a flagged issue reports as blocked). Do not auto-override the gates from a direct key — `/do-tasks` surfaces the reason and stops.
 
@@ -135,13 +135,13 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    A non-empty result → `Skipped <KEY>: remote branch task/<KEY> already exists`.
 
-In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate and re-runs pre-flight on it.
 
 ## Judge feasibility
 
-Take candidates that passed pre-flight in ranked order, **one at a time** — stop at the first feasible one. For each, read the full issue description and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
+Runs on the candidate that just passed pre-flight — one candidate at a time, in ranked order; stop at the first feasible one. Read the full issue description and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
 
-If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next:
+If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next candidate, starting it at pre-flight:
 
 ```
 <atlassian-mcp>__addCommentToJiraIssue

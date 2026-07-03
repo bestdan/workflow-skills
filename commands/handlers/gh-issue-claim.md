@@ -1,6 +1,6 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 1, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
 
 **Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -81,7 +81,7 @@ gh issue list --state open --search "label:auto-eligible no:assignee -label:auto
 - **Rank** by a `priority:<urgent|high|medium|low>` label if present (urgent → high → medium → low, none last), then by issue age (oldest `createdAt` first — let aging issues bubble up).
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
-Return the ranked list to **Pre-flight: is work already in flight?** If no candidate remains, report that and stop.
+Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
 
 ## Pre-flight: is work already in flight?
 
@@ -104,13 +104,13 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    GitHub search tokenizes on punctuation, so `[#12]` searches the bare token `12` and over-matches (`[#120]`, `[#212]`, …). Before skipping, confirm a returned PR's `title` actually contains the literal `[#<n>]` token — only then **skip** with `Skipped #<n>: open PR already exists (<url>)`. (The linked-branch check in step 1 is exact and needs no post-filter.)
 
-In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate and re-runs pre-flight on it.
 
 ## Judge feasibility
 
-Take candidates that passed pre-flight in ranked order, **one at a time** — stop at the first feasible one. For each, read the full issue body and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
+Runs on the candidate that just passed pre-flight — one candidate at a time, in ranked order; stop at the first feasible one. Read the full issue body and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
 
-If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next:
+If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next candidate, starting it at pre-flight:
 
 ```bash
 gh issue comment <n> --body "Skipped by /do-tasks: <reason>" [--repo <repo>]
