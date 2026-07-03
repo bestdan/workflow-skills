@@ -25,7 +25,7 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
 
-`repo-pr` is the only full-loop handler. `jira` adds list, promote, and single `do`; `gh-issue` adds list, promote, and single `do`; `linear` adds list, promote, and single `do` but not batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`repo-pr` is the only full-loop handler. `jira`, `gh-issue`, and `linear` all add list, promote, and single `do` (but not batch process). Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 **Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 
