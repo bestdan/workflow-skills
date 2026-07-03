@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.2] - 2026-07-03
+
+### Fixes
+
+- align trigger threshold and slice budget with the shared size scale (#108) (f372c8d)
+
 ## [1.22.1] - 2026-07-03
 
 ### Fixes
