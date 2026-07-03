@@ -1,6 +1,6 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 1, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
 
 **Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -15,14 +15,15 @@ flags (`--claim-only` / `--no-claim`, passed through from `/do-tasks`) split tha
 into composable steps so a claim now plus a `--no-claim` execute later add up to one
 normal run — passing both is an error: stop and ask which was meant.
 
-- **default** (neither flag) — run every phase below: pre-claim WIP gate → claim →
-  branch + execute → PR → move to review.
-- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue" (assign
-  `@me`, add `auto-claimed`, remove `auto-eligible`), then **stop**: no branch, no
-  execution, no PR. The assigned issue carrying `auto-claimed` is the reservation
-  marker — do **not** swap to `needs-review`. `--claim-only` is the one execute-family
-  action safe to batch, so `/do-tasks --all` / `-n N --claim-only` may reserve several
-  issues at once, each bounded by the WIP gate.
+- **default** (neither flag) — run every phase below: pre-claim WIP gate → find
+  candidates → pre-flight → judge → claim → branch + execute → PR → move to review.
+- **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
+  candidates, pre-flight, judge, then assign `@me`, add `auto-claimed`, remove
+  `auto-eligible`), then **stop**: no branch, no execution, no PR. The assigned issue
+  carrying `auto-claimed` is the reservation marker — do **not** swap to
+  `needs-review`. `--claim-only` is the one execute-family action safe to batch, so
+  `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
+  bounded by the WIP gate.
 - **`--no-claim <#n>`** — skip the claim and resume an issue this caller has
   **already** claimed. **Requires an explicit issue number** — there is no default
   selection. Guard: proceed only when the issue's assignee is this caller
@@ -80,23 +81,11 @@ gh issue list --state open --search "label:auto-eligible no:assignee -label:auto
 - **Rank** by a `priority:<urgent|high|medium|low>` label if present (urgent → high → medium → low, none last), then by issue age (oldest `createdAt` first — let aging issues bubble up).
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
-Return the ranked list to **Judge feasibility**. If no candidate remains, report that and stop.
-
-## Judge feasibility
-
-Take candidates in ranked order, **one at a time** — stop at the first feasible one. For each, read the full issue body and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
-
-If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next:
-
-```bash
-gh issue comment <n> --body "Skipped by /do-tasks: <reason>" [--repo <repo>]
-```
-
-**Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's number, title, and a one-sentence rationale, then proceed.
+Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
 
 ## Pre-flight: is work already in flight?
 
-Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue"**, on every claiming path (single, direct `<#n>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight: catch a sibling session that is already building this issue. If **any** check trips, **do not claim and do not build** — skip and report.
+Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<#n>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight: catch a sibling session that is already building this issue before spending the full issue-body read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
 1. **Linked branch + its PR.** GitHub links a `gh issue develop` branch to the issue; list it and check for an open PR on that head:
 
@@ -115,7 +104,21 @@ Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue
 
    GitHub search tokenizes on punctuation, so `[#12]` searches the bare token `12` and over-matches (`[#120]`, `[#212]`, …). Before skipping, confirm a returned PR's `title` actually contains the literal `[#<n>]` token — only then **skip** with `Skipped #<n>: open PR already exists (<url>)`. (The linked-branch check in step 1 is exact and needs no post-filter.)
 
-In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate and re-runs pre-flight on it.
+
+## Judge feasibility
+
+Runs on the candidate that just passed pre-flight — one candidate at a time, in ranked order; stop at the first feasible one. Read the full issue body and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
+
+If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next candidate, starting it at pre-flight:
+
+```bash
+gh issue comment <n> --body "Skipped by /do-tasks: <reason>" [--repo <repo>]
+```
+
+**Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's number, title, and a one-sentence rationale, then proceed.
+
+Keeping the order as pre-flight → judge → claim is acceptable here because the claim is a cheap read-then-write guard executed immediately after the judge, unlike Linear's slow token-comment election that forces the judge inside the claim.
 
 ## Claim the issue
 

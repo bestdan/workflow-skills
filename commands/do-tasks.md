@@ -67,14 +67,16 @@ error: stop and ask which one was meant.
     and elect the earliest state-backed claim as the winner), record the branch name,
     then stop before "Branch + execute" — `--claim-only` reserves the card **without**
     judging feasibility (the judge now runs after the claim, which `--claim-only` skips).
-  - `gh-issue`: run only the pre-claim WIP gate and "Claim the issue" in
-    `commands/handlers/gh-issue-claim.md` (the read-then-write guard: assign `@me`,
-    add `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute".
-    The assigned `auto-claimed` issue is the reservation marker — no branch, no PR.
-  - `jira`: run only the pre-claim WIP gate and "Claim the issue" in
-    `commands/handlers/jira-claim.md` (the read-then-write guard: self-assign + transition
-    to an In-Progress status), then stop before "Branch + execute". The assigned,
-    In-Progress issue is the reservation marker — no branch, no PR.
+  - `gh-issue`: run through "Claim the issue" in
+    `commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
+    pre-flight → judge → read-then-write claim: assign `@me`, add `auto-claimed`,
+    remove `auto-eligible`), then stop before "Branch + execute". The assigned
+    `auto-claimed` issue is the reservation marker — no branch, no PR.
+  - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
+    (pre-claim WIP gate → find candidates → pre-flight → judge → read-then-write
+    claim: self-assign + transition to an In-Progress status), then stop before
+    "Branch + execute". The assigned, In-Progress issue is the reservation marker —
+    no branch, no PR.
 - **`--no-claim`** — skip the claim step and execute a task this caller has
   **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
   no default selection, since the target is a specific already-claimed task, not
@@ -346,11 +348,11 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 ## 4. gh-issue path (`gh-issue` handler)
 
 Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
-the find-candidates query, the feasibility judgment, the read-then-write claim
-guard, the `gh issue develop` branch, `gh pr create` with `Closes #<n>`, the
-move-to-review label swap, bail mechanics, and the report format. `/do-tasks`
-runs these phases in the **current session** over the `gh` CLI. If the relative
-path doesn't resolve, find it with **Glob**
+the find-candidates query, the in-flight pre-flight, the feasibility judgment, the
+read-then-write claim guard, the `gh issue develop` branch, `gh pr create` with
+`Closes #<n>`, the move-to-review label swap, bail mechanics, and the report format.
+`/do-tasks` runs these phases in the **current session** over the `gh` CLI. If the
+relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
 
 **Single by nature.** Like the tracker path, gh-issue execution is foreground:
@@ -368,11 +370,11 @@ claim/execute split" and "Pre-claim WIP gate").
 
 Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
 config read (`ready_status` is required here), the find-candidates JQL, the
-feasibility judgment, the self-assign + transition read-then-write claim guard,
-the `task/<KEY>` branch, `gh pr create` with the `[<KEY>]` title prefix, the
-move-to-review transition, bail mechanics, and the report format. `/do-tasks`
-runs these phases in the **current session** over the Atlassian MCP. If the
-relative path doesn't resolve, find it with **Glob**
+in-flight pre-flight, the feasibility judgment, the self-assign + transition
+read-then-write claim guard, the `task/<KEY>` branch, `gh pr create` with the
+`[<KEY>]` title prefix, the move-to-review transition, bail mechanics, and the
+report format. `/do-tasks` runs these phases in the **current session** over the
+Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
 **Single by nature.** Like the tracker and gh-issue paths, jira execution is
