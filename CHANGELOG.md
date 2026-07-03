@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.4] - 2026-07-03
+
+### Fixes
+
+- make the audit protocol executable by a subagent (#110) (47de900)
+
 ## [1.22.3] - 2026-07-03
 
 ### Fixes
