@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.25.0] - 2026-07-03
+
+### Features
+
+- add /reoptimize-tasks command to audit and repair tracker backlogs (#83) (ab3d727)
+
 ## [1.24.0] - 2026-07-03
 
 ### Features
