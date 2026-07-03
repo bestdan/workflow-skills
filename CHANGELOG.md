@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.24.0] - 2026-07-03
+
+### Features
+
+- add agent/model selector skill and /select-coder command (#114) (8568e04)
+
 ## [1.23.0] - 2026-07-03
 
 ### Features
