@@ -1,0 +1,1 @@
+I have six implementation tasks queued up and access to codex, agy, devin, and Claude subagents. Before farming them out, figure out which agent and model is the best fit for each task given how hard, creative, or mechanical each one is.
