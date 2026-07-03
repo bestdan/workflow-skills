@@ -68,7 +68,7 @@ Rules for good slices:
 
 Score the proposed breakdown **HIGH** only if **all** hold:
 
-- Every component stays within the slice budget (**Find the shear points**) — your judgment, weighing each slice's `## Task` steps and `related_files`.
+- Every component stays within the slice budget's hard cap (size <= 5; see **Find the shear points**) — your judgment, weighing each slice's `## Task` steps and `related_files`.
 - The slices are MECE against the original scope — nothing dropped, no significant overlap.
 - The dependencies form an acyclic DAG and the order makes sense.
 - The union of the components' Acceptance Criteria covers the original's Acceptance Criteria.
