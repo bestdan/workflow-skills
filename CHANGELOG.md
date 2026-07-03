@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.5] - 2026-07-03
+
+### Fixes
+
+- standardize model_output.json and dedupe marimo guidance (#111) (cdbad4a)
+
 ## [1.22.4] - 2026-07-03
 
 ### Fixes
