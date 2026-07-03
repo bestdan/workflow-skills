@@ -48,8 +48,9 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
 - **Prose → native reconciliation (the core fix).** For **every** issue, parse
   the description for both signals — exhaustively, not a spot-check:
   - embedded mentions: `<issue id="…" href="…/PRE-NNN/…">` and bare `PRE-NNN`;
-  - dependency phrases: `unblocks`, `blocked on`, `blocked by`, `relies on`,
-    `depends on`, `requires`, `with X in place`, `re-scoped per`, `part of … plan`.
+  - dependency phrases (match case-insensitively): `unblocks`, `blocked on`,
+    `blocked by`, `relies on`, `depends on`, `requires`, `with X in place`,
+    `re-scoped per`, `part of … plan`.
 
   For each referenced issue — **excluding the issue's own id**, so a body that
   restates its own identifier never yields a self-block — **not already covered
@@ -81,8 +82,11 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
 
 ### Dimension 3 — Re-order & re-prioritize
 
-- **Topological order.** After folding in the approved Dimension 1–2 edges,
-  topologically sort the non-terminal nodes → a valid execution order. Within the
+- **Topological order.** Fold in the proposed Dimension 1–2 edges (the report
+  is printed before approval, so label the order **provisional** — it assumes
+  those edges are approved; if approval diverges in §5, restate the order over
+  the edges that survived), then topologically sort the non-terminal nodes → a
+  valid execution order. Within the
   topo constraints, rank by **sequential sort keys** (not a single formula —
   Linear's `priority` is `1`=Urgent…`4`=Low with `0`=None, so arithmetic like
   `priority ÷ estimate` is incoherent): first by urgency (Urgent→Low, with
@@ -116,14 +120,14 @@ the issue being changed. Use these fields (per `save_issue`'s schema — the
 relation fields are **append-only**, so adding a link never clobbers existing
 ones; paired `remove*` fields undo):
 
-| Finding                             | `save_issue` field on the target issue                                              |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| Add a blocker (dependent ← blocker) | `blockedBy: [<blocker id>]` on the dependent                                        |
-| Convert `relatedTo` → real block    | `blocks: [<dependent id>]` on the blocker, then `removeRelatedTo: [<dependent id>]` |
-| Remove a stale/cancelled blocker    | `removeBlockedBy: [<id>]`                                                           |
-| Add a weak relation                 | `relatedTo: [<id>]`                                                                 |
-| Fix a priority inversion            | `priority: <0–4>` on the blocker                                                    |
-| Mark a duplicate                    | `duplicateOf: <canonical id>`                                                       |
+| Finding                             | `save_issue` field on the target issue                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a blocker (dependent ← blocker) | `blockedBy: [<blocker id>]` on the dependent                                                                                                                                                  |
+| Convert `relatedTo` → real block    | `blocks: [<dependent id>]` + `removeRelatedTo: [<dependent id>]`, both in one `save_issue` call on the blocker (`relatedTo` is symmetric — removing it from the blocker side clears the pair) |
+| Remove a stale/cancelled blocker    | `removeBlockedBy: [<id>]`                                                                                                                                                                     |
+| Add a weak relation                 | `relatedTo: [<id>]`                                                                                                                                                                           |
+| Fix a priority inversion            | `priority: <0–4>` on the blocker                                                                                                                                                              |
+| Mark a duplicate                    | `duplicateOf: <canonical id>`                                                                                                                                                                 |
 
 **Hard rules (stop if you're about to break one):**
 
