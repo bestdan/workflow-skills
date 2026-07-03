@@ -21,8 +21,10 @@ profile stays a single source of truth rather than three divergent rubrics.
 
 ## The `task_profile` contract
 
-The output is a compact YAML block. Every field is a fixed enum — consumers
-switch on the values, so don't invent new ones.
+The output is a compact YAML block. The seven scored dimensions are fixed
+enums — consumers switch on their values, so don't invent new ones. `label` and
+`runner_up` draw from the routing-label set (the table under **Deriving
+`label`**); `confidence` is `high`/`low`; only `notes` is freeform.
 
 ```yaml
 task_profile:
@@ -33,9 +35,10 @@ task_profile:
   speed_sensitivity: low | high # is a tight, latency-critical loop the point?
   cost_sensitivity: low | high # is this cost-dominated / high-volume bulk?
   verification_criticality: low | high # is honestly running the checks the deliverable?
-  label: <routing label> # derived summary — see the table below
+  label: <one of the routing labels below> # derived summary
   confidence: high | low # low ⇒ genuinely ambiguous between profiles
-  notes: <one line> # assumptions and, on low confidence, the runner-up label
+  runner_up: <routing label> | null # the runner-up label when confidence is low, else null
+  notes: <one line> # freeform: assumptions and brief reasoning
 ```
 
 ### Dimension rubric
@@ -55,7 +58,7 @@ harder value only when the description warrants it.
 
 ### Deriving `label`
 
-The label is a one-word summary of the dominant demand, drawn from a fixed set.
+The label is a single tag summarizing the dominant demand, drawn from a fixed set.
 When several fit, pick the one that captures why the task is _hard to route_ —
 the standout dimension wins over the mild ones.
 
@@ -70,8 +73,8 @@ the standout dimension wins over the mild ones.
 | `verification-sensitive` | `verification_criticality: high` — the check is the task.                        |
 | `long-horizon`           | `autonomy: long-horizon` — overnight-scale autonomous work.                      |
 
-If two labels are genuinely tied, set `confidence: low` and name the runner-up
-in `notes` — consumers (e.g. select-coder) can then weigh both.
+If two labels are genuinely tied, set `confidence: low` and put the runner-up
+label in `runner_up` — consumers (e.g. select-coder) can then weigh both.
 
 ## Procedure
 
@@ -90,8 +93,8 @@ in `notes` — consumers (e.g. select-coder) can then weigh both.
 When genuinely torn between two profiles, ask **one** clarifying question rather
 than guessing — **unless running non-interactively** (as a subagent, e.g. under
 select-coder or orchestrate-coders, where no user is reachable): then don't
-block. Pick the most likely profile, set `confidence: low`, and record the
-runner-up label in `notes` so the caller can override. This mirrors how
+block. Pick the most likely profile, set `confidence: low`, and put the
+runner-up label in `runner_up` so the caller can override. This mirrors how
 select-coder handles ambiguity, so the two never diverge.
 
 ## Invocation

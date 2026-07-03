@@ -84,14 +84,16 @@ only `availability:`, which orchestrate-coders treats as absent for its own
    criticality, and a routing `label`) and handles ambiguity for you: when a
    user is reachable it asks one question; non-interactively (as a subagent,
    e.g. under orchestrate-coders) it picks the most likely profile, sets
-   `confidence: low`, and names the runner-up label in `notes`. Carry that
-   runner-up into your report so the caller can override.
+   `confidence: low`, and puts the runner-up label in `runner_up`. Carry that
+   runner-up into your report so the caller can override. With `--plan`,
+   assess-task returns one `task_profile` per task file (keyed by filename) —
+   map each independently.
 
-2. **Map the profile's `label` → candidates** using the routing table in
-   `matrix.md` (its "Task profile" rows are keyed by the same labels
-   assess-task emits), filtered to what's available. Produce a ranked list
-   (best first), max 3. On `confidence: low`, also consider the runner-up
-   label's row.
+2. **Map each profile's `label` → candidates** using the routing table in
+   `matrix.md` (its label rows are keyed by the same labels assess-task emits;
+   the `cross-vendor` row is a select-coder-only modifier, not an assess-task
+   label), filtered to what's available. Produce a ranked list (best first),
+   max 3 per task. On `confidence: low`, also consider the `runner_up` row.
 
 3. **Apply the operational modifiers** (also in `matrix.md`) — these come
    from real pilot runs and outrank benchmark deltas:

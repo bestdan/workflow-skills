@@ -77,8 +77,8 @@ cost-dominated bulk work on the pro tier (e.g. `devin:glm-5.2`).
 
 The **`label`** column is the routing label emitted by the **assess-task**
 skill (`skills/assess-task/SKILL.md`) — select-coder consumes that profile
-rather than re-deriving one, so these rows key directly off `task_profile.label`.
-The last row (`cross-vendor`) is a select-coder routing modifier, not an
+rather than re-deriving one, so the label rows below key off `task_profile.label`.
+The final `cross-vendor` row is a select-coder routing modifier, not an
 assess-task label — apply it when the task's value is a second opinion.
 
 | `label`                  | Task profile                                    | 1st                                                              | 2nd                           | 3rd                           |
