@@ -27,7 +27,9 @@ A coder is named as `<backend>[:<model>]`:
 The optional `:<model>` suffix pins the model **that backend** runs, passed
 through in whatever form the backend understands (an Anthropic model ID for
 `opus`, a `--model` value for a CLI coder). Examples: `opus:claude-sonnet-5`,
-`agy:Gemini 3.1 Pro (High)`.
+`agy:Gemini 3.1 Pro (High)`. A model suffix containing spaces must be quoted
+on invocation — `--coder "agy:Gemini 3.1 Pro (High)"` — or the tail bleeds
+into the task description.
 
 ## Invocation
 
@@ -101,12 +103,17 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
    signals, not a bug.
 
 5. **Verify each packet as it lands.** First, **check containment**: run
-   `git status --porcelain -uno` in the orchestrator's own main checkout — a
-   CLI coder (notably agy) can land correct edits there instead of its
-   worktree. If the main checkout is dirty on the packet's files, extract the
-   diff (`git diff > patch`), apply it to the worktree (`git apply --3way`),
-   and restore the checkout. **Do this before judging an empty worktree diff**
-   as failure. Then read the diff yourself (the orchestrator is the reviewer of
+   `git status --porcelain` in the orchestrator's own main checkout (no `-uno`
+   — an escaped coder can create untracked files there too, and coder output
+   is defined as diff **plus** untracked files) — a CLI coder (notably agy)
+   can land correct edits there instead of its worktree. If the main checkout
+   is dirty on the packet's files, recover **scoped to the packet's files
+   only**: extract their tracked diff (`git diff -- <packet files> > patch`),
+   apply it to the worktree (`git apply --3way`), move any packet-scoped
+   untracked files into the worktree, then restore just those paths
+   (`git restore -- <packet files>`). Never diff or restore paths outside the
+   packet's scope — they may be the user's own uncommitted work. **Do this
+   before judging an empty worktree diff** as failure. Then read the diff yourself (the orchestrator is the reviewer of
    record — never merge a coder's diff unread) and run the packet's
    verification command in that worktree. Classify failures:
    - **Content failure** (edits wrong on a clean re-run) → back to the **same**

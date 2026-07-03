@@ -1,6 +1,6 @@
 ---
 description: Orchestrate coding work across coder agents — the session decomposes the task into packets, dispatches each to a selected coder backend (opus subagent, codex, agy, devin, or a custom CLI), verifies the diffs, and integrates the results
-allowed-tools: Bash(git *), Bash(cat *), Bash(command -v *), Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill
+allowed-tools: Bash(git *), Bash(command -v *), Bash(codex *), Bash(agy *), Bash(devin *), Bash(dprint *), Bash(dli *), Glob, Grep, Read, Write, Edit, Agent, SendMessage, AskUserQuestion, Skill
 argument-hint: "<task> [--coder <backend>[:<model>]]... [-n N] [--plan <name>]"
 ---
 

@@ -29,13 +29,17 @@ Per packet:
    stderr** while stdout carries only stray paths, so parse the report from
    whichever stream holds it.
 4. **Harvest.** The result is `git -C <dir> diff` plus untracked files
-   (`git -C <dir> ls-files --others --exclude-standard`) — not the coder's
-   prose. **An empty worktree diff does not immediately mean failure:** first
+   (`git -C <dir> ls-files --others --exclude-standard -- ':!.packet-spec.md'`
+   — exclude the spec: it is orchestrator input, not coder output) — not the
+   coder's prose. **An empty worktree diff does not immediately mean failure:** first
    run the main-checkout containment check (SKILL.md step 5) — a CLI coder
    (notably agy) can land correct edits in the user's main checkout instead of
    its worktree. Empty diff **and** clean main checkout = failed packet.
-5. **Verify** in `<dir>` per the packet spec, then hand the branch back to the
-   orchestrator's integrate step. Remove the worktree after integration.
+5. **Verify** in `<dir>` per the packet spec, then **commit the packet's
+   changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
+   commit — so the branch actually carries the work that SKILL.md step 6
+   merges. Then hand the branch back to the orchestrator's integrate step.
+   Remove the worktree after integration.
 
 ## Known invocations
 

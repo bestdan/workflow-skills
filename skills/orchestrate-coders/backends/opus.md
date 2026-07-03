@@ -59,8 +59,11 @@ that the spec left open.
 
 - The subagent's final message returns to the orchestrator as the tool
   result — harvest the diff from its worktree branch, not from its prose.
-- Retry protocol (SKILL.md step 5) uses **SendMessage to the same agent ID**
-  with the failure output — it still has its packet context; don't respawn.
+- Retry protocol (SKILL.md step 5): a **content failure** goes back via
+  **SendMessage to the same agent ID** with the failure output — it still has
+  its packet context; don't respawn. An empty diff, error, or timeout is
+  **not** re-messaged — it re-dispatches to a **different** coder per
+  SKILL.md's Safety rules.
 - `CLAUDE_CODE_SUBAGENT_MODEL`, if set in the environment, overrides the
   `model:` parameter for every subagent. If packets seem to run on the wrong
   model, check for it and tell the user rather than fighting it.
