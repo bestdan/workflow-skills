@@ -10,3 +10,4 @@ analysis-pipeline	prompts/analysis-pipeline.txt	6
 break-down-task	prompts/break-down-task.txt	6
 orchestrate-coders	prompts/orchestrate-coders.txt	6
 select-coder	prompts/select-coder.txt	6
+assess-task	prompts/assess-task.txt	6

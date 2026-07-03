@@ -75,17 +75,23 @@ cost-dominated bulk work on the pro tier (e.g. `devin:glm-5.2`).
 
 ## Routing table (task profile → ranked candidates)
 
-| Task profile                                    | 1st                                                              | 2nd                           | 3rd                           |
-| ----------------------------------------------- | ---------------------------------------------------------------- | ----------------------------- | ----------------------------- |
-| Architecture / multi-file refactor / hard bug   | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | `agy:Gemini 3.1 Pro (High)`   |
-| Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.4`               | `agy:Gemini 3.5 Flash (High)` |
-| Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.4-mini`                                             | `opus:claude-haiku-4-5`       | `devin:swe-1.6`               |
-| Frontend / design / creative naming & API shape | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | `codex:gpt-5.5`               |
-| Latency-critical tight loop                     | `devin:swe-1.6-fast`                                             | `agy:Gemini 3.5 Flash (High)` | `codex:gpt-5.4-mini`          |
-| Whole-codebase context (1M-token reads)         | `agy:Gemini 3.5 Flash (High)`                                    | `opus:claude-sonnet-5`        | —                             |
-| Verification-sensitive (the check IS the task)  | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | — (avoid devin/codex-sandbox) |
-| Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | —                             |
-| Cross-vendor diversity (2nd opinion / review)   | pick a different vendor than the 1st author — codex ↔ opus ↔ agy |                               |                               |
+The **`label`** column is the routing label emitted by the **assess-task**
+skill (`skills/assess-task/SKILL.md`) — select-coder consumes that profile
+rather than re-deriving one, so these rows key directly off `task_profile.label`.
+The last row (`cross-vendor`) is a select-coder routing modifier, not an
+assess-task label — apply it when the task's value is a second opinion.
+
+| `label`                  | Task profile                                    | 1st                                                              | 2nd                           | 3rd                           |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------- | ----------------------------- | ----------------------------- |
+| `architecture`           | Architecture / multi-file refactor / hard bug   | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | `agy:Gemini 3.1 Pro (High)`   |
+| `standard-pr`            | Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.4`               | `agy:Gemini 3.5 Flash (High)` |
+| `mechanical-bulk`        | Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.4-mini`                                             | `opus:claude-haiku-4-5`       | `devin:swe-1.6`               |
+| `frontend-creative`      | Frontend / design / creative naming & API shape | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | `codex:gpt-5.5`               |
+| `latency-loop`           | Latency-critical tight loop                     | `devin:swe-1.6-fast`                                             | `agy:Gemini 3.5 Flash (High)` | `codex:gpt-5.4-mini`          |
+| `whole-codebase`         | Whole-codebase context (1M-token reads)         | `agy:Gemini 3.5 Flash (High)`                                    | `opus:claude-sonnet-5`        | —                             |
+| `verification-sensitive` | Verification-sensitive (the check IS the task)  | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | — (avoid devin/codex-sandbox) |
+| `long-horizon`           | Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | —                             |
+| `cross-vendor`           | Cross-vendor diversity (2nd opinion / review)   | pick a different vendor than the 1st author — codex ↔ opus ↔ agy |                               |                               |
 
 ## Operational modifiers (from pilot runs — outrank benchmark deltas)
 
