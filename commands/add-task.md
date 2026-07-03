@@ -67,7 +67,12 @@ From conversation context and diff, draft:
 - **Task** section: concrete steps to complete it
 - **Acceptance Criteria**: definition of done
 
-If the user indicates this task depends on another task, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that task's slug. In the file-based task system, the slug is the task's ID for cross-references. Validate that the referenced slug already exists somewhere under `dev_docs/tasks/**/*.md`. If it does not exist, stop and ask the user to correct the slug or remove the dependency rather than silently writing a dangling reference.
+If the user indicates this task depends on another task, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that task's slug/id. Validate each entry against the resolved handler (step 6; read the config now if needed):
+
+- For `repo-pr`, use local-slug existence validation: a slug must already exist somewhere under `dev_docs/tasks/**/*.md`. Also pass through entries that already match any tracker id shape from `push-plan.md` (Linear `/^[A-Z]+-\d+$/` §4.3, gh-issue `/^(\S*#)?\d+$/` §5.3, jira `/^[A-Z][A-Z0-9]*-\d+$/` §5b.3), because partial migrations can rewrite kept dependents' `is_blocked_by` values to tracker ids.
+- For tracker handlers (`gh-issue`/`jira`/`linear`), accept a known local slug or a reference matching that handler's id shape as defined in `push-plan.md` (Linear §4.3, gh-issue §5.3, jira §5b.3). Reject/flag only entries that are neither a known local slug nor id-shaped for the configured handler.
+
+If validation fails, stop and ask the user to correct the dependency or remove it rather than silently writing a dangling reference.
 
 ### 5. Present for review
 
