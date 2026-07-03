@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.22.3] - 2026-07-03
+
+### Fixes
+
+- run cheap in-flight pre-flight before feasibility judge in gh-issue and jira claim flows (#109) (45567ff)
+
 ## [1.22.2] - 2026-07-03
 
 ### Fixes
