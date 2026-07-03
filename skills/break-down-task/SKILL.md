@@ -1,6 +1,6 @@
 ---
 name: break-down-task
-description: Use when a task estimates size 3 or above, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work.
+description: Use when a task estimates larger than size 5, when /promote-tasks flags "scope exceeds size 5 — split into sub-tasks", or when the user says a task/card/ticket is "too big", "won't fit in one PR", or asks to "split", "slice", "break down", or "chunk up" existing work.
 ---
 
 # break-down-task — slice a too-large task into PR-sized components
@@ -11,7 +11,7 @@ It is the resolution of the `/promote-tasks` size gate, and the sibling of `plan
 
 ## When to use
 
-- A task estimates size `3` or above (multi-layer rework, many unrelated files, several behaviors at once).
+- A task estimates larger than size `5` (multi-layer rework, many unrelated files, several behaviors at once) — too big to capture as one card.
 - `/promote-tasks` scored a card LOW with `scope exceeds size 5 — split into sub-tasks`.
 - The user points at a specific task/card/ticket and says it's too big, won't fit one PR, or asks to split / slice / break down / chunk it.
 - Mid-`/do-tasks`, the executor realizes the claimed task is too large to finish in one PR and bails for breakdown.
@@ -41,7 +41,7 @@ The rest of this skill describes the **`repo-pr` file path**; the analysis (shea
 
 ## Find the shear points
 
-A **shear point** is a seam where the work naturally separates into pieces that can each ship as an independent, reviewable PR. You are looking for the cuts that yield the _fewest, largest_ slices that are each still ≤ size `2`. Prefer cuts that produce slices which are individually mergeable and leave the system working at each step.
+A **shear point** is a seam where the work naturally separates into pieces that can each ship as an independent, reviewable PR. You are looking for the cuts that yield the _fewest, largest_ slices within the **slice budget: target each slice at ≤ size `3`, hard cap size `5`.** Prefer cuts that produce slices which are individually mergeable and leave the system working at each step.
 
 Common seams, roughly in order of preference:
 
@@ -58,17 +58,17 @@ Common seams, roughly in order of preference:
 
 Rules for good slices:
 
-- **Each slice is ≤ size `2`.** If a proposed slice still looks like `≥ 3`, slice _it_ again (recurse) or pick a finer seam.
+- **Each slice stays within the slice budget above.** If a proposed slice exceeds the hard cap, slice _it_ again (recurse) or pick a finer seam.
 - **MECE.** Together the slices cover the _entire_ original scope (no dropped work) with minimal overlap. Re-read the original `## Task` and `## Acceptance Criteria` and check every item maps into exactly one slice.
 - **Clean dependency DAG.** Ordering between slices is expressed with `is_blocked_by`; there must be no cycle. A slice that depends on two earlier ones lists both (`is_blocked_by: [a, b]`).
 - **Each slice keeps the build green.** Prefer cuts where every intermediate PR leaves tests passing and the app working. A "preparatory refactor first" cut is usually the way to achieve this.
-- **Prefer few, fat slices.** Two size-`2`s beat four size-`1`s. Don't over-shatter — review overhead is real.
+- **Prefer few, fat slices.** A couple of at-target slices beat a swarm of trivial ones. Don't over-shatter — review overhead is real.
 
 ## Confidence gate
 
 Score the proposed breakdown **HIGH** only if **all** hold:
 
-- Every component plausibly fits size ≤ `5` (your judgment, weighing each slice's `## Task` steps and `related_files`).
+- Every component stays within the slice budget's hard cap (size <= 5; see **Find the shear points**) — your judgment, weighing each slice's `## Task` steps and `related_files`.
 - The slices are MECE against the original scope — nothing dropped, no significant overlap.
 - The dependencies form an acyclic DAG and the order makes sense.
 - The union of the components' Acceptance Criteria covers the original's Acceptance Criteria.
@@ -83,7 +83,7 @@ Otherwise it's **LOW**.
 1. **Present the proposed breakdown first** — a short numbered list (one line per component: title, size, what it covers, what it's blocked by) plus the seam you cut along. Removing the original is destructive (though git-recoverable), so let the user see the split before it lands. Proceed once they're good with it; if the user invoked this expecting an automatic split and the breakdown is clearly HIGH, a brief confirmation is enough — don't belabor it.
 2. **Write the component task files.** One file per component, **canonical task format** (`skills/task/SKILL.md`), born `status: new`:
    - **Slugs must be globally unique** because `is_blocked_by` resolves by slug across `dev_docs/tasks/**/*.md`. Prefix every component with the original slug: `<original-slug>__<short-suffix>` (e.g. `csv-export__schema`, `csv-export__api`, `csv-export__ui`) or `<original-slug>_part_N`. Descriptive suffixes read better in `/list-tasks`. Check for collisions and bump if needed.
-   - **Set each component's own `title` and `size`.** Each slice gets a fresh imperative `title` and its own per-slice `size` (Fibonacci `1`/`2`/`3`/`5`, each ≤ `5`) — these are per-slice, never inherited, and `size` is the whole point of the split. `status: new`.
+   - **Set each component's own `title` and `size`.** Each slice gets a fresh imperative `title` and its own per-slice `size` (Fibonacci `1`/`2`/`3`/`5`, each within the slice budget — **Find the shear points**) — these are per-slice, never inherited, and `size` is the whole point of the split. `status: new`.
    - **Inherit** `priority`, `source_branch`, `source_pr`, `tags`, and `impact` from the original unless a slice clearly differs. Set `created` to today, `expires` to the original's (or 30 days out). Carry the original's `parent` if it had one; if the original was itself a meaningful grouping you may instead **convert it into an epic** (set `type: epic` **and** `status: active`, conforming to the epic shape — see **Epics** in `skills/task/SKILL.md`) rather than deleting it, and point each component's `parent` at the original slug. A `parent` reference only resolves if the epic file still exists, so this is convert-not-delete — don't invent an epic just to look tidy.
    - **`related_files`** scoped to _that slice_ only, not the union.
    - **`is_blocked_by`** encodes the order: the root slice(s) have none within the breakdown; each later slice lists the slug(s) it depends on. If the original was itself `is_blocked_by` something upstream, **every root** of the breakdown DAG (each component with no blocker inside the breakdown) inherits those upstream blockers — not just one — so the chain stays connected and no parallel root runs prematurely.
