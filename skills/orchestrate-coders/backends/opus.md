@@ -13,10 +13,19 @@ One Agent call per packet:
 - `model:` the pinned model — `claude-opus-4-8` for plain `opus`, or whatever
   the `opus:<model>` suffix named. Any Anthropic alias or full model ID the
   session's `availableModels` allows is valid here.
-- `isolation: "worktree"` whenever more than one packet is in flight, or the
-  user's working tree is dirty. A single packet against a clean tree may run
-  in place — but then nothing else (including the orchestrator) edits files
-  until it returns.
+- **Worktree strategy:**
+  - _Mixed-backend runs (default)_ — the orchestrator creates the worktree and
+    branch itself (reuse the cli-coders step-1 workspace setup) and tells the
+    opus agent to work there by absolute path; opus differs from a CLI coder
+    only in dispatch. This gives uniform harvest/integration: the orchestrator
+    knows every packet's worktree path and branch, and `git -C <dir>` works
+    identically across all backends. Do **not** pass `isolation: "worktree"`
+    here — a harness-controlled worktree path is awkward to harvest from.
+  - _Opus-only runs_ — `isolation: "worktree"` is fine when more than one
+    packet is in flight or the tree is dirty; to harvest, resolve the agent's
+    worktree from its returned branch (`git worktree list`) before integrating.
+  - A single packet against a clean tree may run in place — but then nothing
+    else (including the orchestrator) edits files until it returns.
 - Independent packets go out **in one message** so they run concurrently.
 
 ## Packet prompt

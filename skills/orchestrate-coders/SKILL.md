@@ -57,6 +57,8 @@ coders:
   - opus # native subagent
   - name: my-coder # custom backend → explicit invocation
     command: "my-coder run --task-file {SPEC} --workdir {WORKTREE}"
+sandbox_workarounds: # project-specific; injected into each packet spec's constraints
+  - "dprint: run `dprint fmt --incremental=false` (the incremental cache dir is not writable in-sandbox)"
 ```
 
 **Resolution when no `--coder` is passed:**
@@ -93,13 +95,29 @@ coders:
    prefixed `bestdan/`), never in the user's working tree — two coders in one
    tree, or a coder in the tree the orchestrator is watching, is how work gets
    clobbered. Per-backend dispatch mechanics are in the backend reference
-   files; the orchestrator only ever sees the packet's resulting diff.
+   files; the orchestrator only ever sees the packet's resulting diff. Expect a
+   mixed notification model in one wave: CLI coders return via background
+   `Bash`, opus via the Agent tool — two different latency/notification
+   signals, not a bug.
 
-5. **Verify each packet as it lands.** Read the diff yourself (the orchestrator
-   is the reviewer of record — never merge a coder's diff unread), then run the
-   packet's verification command in that worktree. Failures go back to the
-   same coder **once** with the failure output appended to the spec; a second
-   failure parks the packet as `failed` for the report — don't loop.
+5. **Verify each packet as it lands.** First, **check containment**: run
+   `git status --porcelain -uno` in the orchestrator's own main checkout — a
+   CLI coder (notably agy) can land correct edits there instead of its
+   worktree. If the main checkout is dirty on the packet's files, extract the
+   diff (`git diff > patch`), apply it to the worktree (`git apply --3way`),
+   and restore the checkout. **Do this before judging an empty worktree diff**
+   as failure. Then read the diff yourself (the orchestrator is the reviewer of
+   record — never merge a coder's diff unread) and run the packet's
+   verification command in that worktree. Classify failures:
+   - **Content failure** (edits wrong on a clean re-run) → back to the **same**
+     coder **once** with the failure output appended to the spec; a second
+     failure parks the packet as `failed`.
+   - **Environmental failure** (the coder's sandbox, e.g. codex's home-dir
+     cache/permission errors) → the orchestrator's re-run outside the sandbox
+     is authoritative; do **not** count it as a content failure. Empty
+     diff / error / timeout → re-dispatch to a **different** coder once (Safety).
+
+   Don't loop past one retry in either class.
 
 6. **Integrate.** Merge verified packet branches together (or sequence them
    into one branch), resolve conflicts yourself — conflict resolution is
