@@ -39,10 +39,11 @@ into the task description.
 
 - `--coder <spec>` — which coder(s) to use. Repeatable: with several, assign
   packets round-robin unless a packet's nature clearly favors one (note the
-  assignment in the report). The `select-coder` skill scores packets against
-  its capability matrix and produces exactly these per-packet overrides — use
-  it when the assignment isn't obvious. Absent → config default → resolution
-  flow below.
+  assignment in the report). A packet's "nature" here is the task profile
+  `assess-task` produces (`skills/assess-task/SKILL.md`); the `select-coder`
+  skill scores that profile against its capability matrix and produces exactly
+  these per-packet overrides — use it when the assignment isn't obvious. Absent
+  → config default → resolution flow below.
 - `-n N` — max packets in flight at once (default 3).
 - `--plan <name>` — skip decomposition and execute an existing
   `dev_docs/tasks/<name>_plan/` plan (from `/plan-with-docs`), one packet per
