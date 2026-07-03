@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.23.0] - 2026-07-03
+
+### Features
+
+- add coder-orchestration skill and /orchestrate-coders command (#107) (0dc90ac)
+
 ## [1.22.7] - 2026-07-03
 
 ### Fixes
