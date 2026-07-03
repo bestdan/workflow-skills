@@ -1,6 +1,6 @@
 # jira handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the Atlassian MCP: **find candidates** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the Atlassian MCP instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
+Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the Atlassian MCP: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the Atlassian MCP instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
 
 **Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status` config key (the jira analogue of the Linear `Todo`/`unstarted` ready lane) is defined in `commands/handlers/jira-config.md`; `commands/handlers/linear-claim.md` is the structural template.
 
@@ -26,14 +26,15 @@ flags (`--claim-only` / `--no-claim`, passed through from `/do-tasks`) split tha
 into composable steps so a claim now plus a `--no-claim` execute later add up to one
 normal run — passing both is an error: stop and ask which was meant.
 
-- **default** (neither flag) — run every phase below: pre-claim WIP gate → claim →
-  branch + execute → PR → move to review.
-- **`--claim-only`** — run only "Pre-claim WIP gate" and "Claim the issue"
-  (self-assign, then transition to an In-Progress status), then **stop**: no branch,
-  no execution, no PR. The assigned, In-Progress issue is the reservation marker — do
-  **not** transition it to In Review. `--claim-only` is the one execute-family action
-  safe to batch, so `/do-tasks --all` / `-n N --claim-only` may reserve several issues
-  at once, each bounded by the WIP gate.
+- **default** (neither flag) — run every phase below: pre-claim WIP gate → find
+  candidates → pre-flight → judge → claim → branch + execute → PR → move to review.
+- **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
+  candidates, pre-flight, judge, then self-assign and transition to an In-Progress
+  status), then **stop**: no branch, no execution, no PR. The assigned, In-Progress
+  issue is the reservation marker — do **not** transition it to In Review.
+  `--claim-only` is the one execute-family action safe to batch, so `/do-tasks --all`
+  / `-n N --claim-only` may reserve several issues at once, each bounded by the WIP
+  gate.
 - **`--no-claim <KEY>`** — skip the claim and resume an issue this caller has
   **already** claimed. **Requires an explicit issue key** — there is no default
   selection. Guard: proceed only when the issue's assignee is this caller (its
@@ -108,30 +109,15 @@ nothing and report the WIP-limit decline).
 
    `assignee IS EMPTY` skips anything already claimed (the jira analogue of Linear's "pull only from `unstarted`" and gh-issue's `no:assignee`). `Flagged IS EMPTY` skips issues a human has flagged as an impediment — a native, site-level field, so the clause is safe on any board; it is the same blocked-issue guard `jira-promote.md` step 3 applies to its candidate query (the claim query is already pinned to one `status`, so the promoter's `blocked_statuses` exclusion isn't needed here). The `(labels IS EMPTY OR labels NOT IN ("human-approval-requested", "blocked"))` clause excludes issues already marked for human review or blocked — server-side; the `labels IS EMPTY` arm is required because JQL `NOT IN` does not match issues whose labels field is empty (an unlabeled issue would otherwise be dropped). The `ORDER BY` ranks by priority then age up front. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`). Limit 50 — if exactly 50 are returned the page may be truncated; note it in the report and do not paginate.
 
-3. **Filter.** Drop any returned issue that carries a `human-approval-requested` or `blocked` label (defensive backstop against JQL index lag — the step-2 query already excludes these server-side). Jira has no native `estimate`/size field (story points, when present, are a custom field), so there is no estimate gate here — scope is judged in the next phase, exactly as `jira-promote.md` folds size into the scope judgment.
+3. **Filter.** Drop any returned issue that carries a `human-approval-requested` or `blocked` label (defensive backstop against JQL index lag — the step-2 query already excludes these server-side). Jira has no native `estimate`/size field (story points, when present, are a custom field), so there is no estimate gate here — scope is judged later in "Judge feasibility", exactly as `jira-promote.md` folds size into the scope judgment.
 
-Return the ranked list to **Judge feasibility**. Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
+Return the ranked list to **Pre-flight: is work already in flight?** Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
 
 If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields` plus `"Flagged"`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` / `Flagged IS EMPTY` gates to it; if it fails any gate, return the failure reason rather than the issue (a flagged issue reports as blocked). Do not auto-override the gates from a direct key — `/do-tasks` surfaces the reason and stops.
 
-## Judge feasibility
-
-Take candidates in ranked order, **one at a time** — stop at the first feasible one. For each, read the full issue description and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
-
-If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next:
-
-```
-<atlassian-mcp>__addCommentToJiraIssue
-  cloudId: <jira.site>
-  issueIdOrKey: <KEY>
-  commentBody: "Skipped by /do-tasks: <reason>"
-```
-
-**Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's key, summary, and a one-sentence rationale, then proceed.
-
 ## Pre-flight: is work already in flight?
 
-Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue"**, on every claiming path (single, direct `<KEY>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight, keyed on the handler's deterministic `task/<KEY>` branch (Jira publishes no branch of its own). If **any** check trips, **do not claim and do not build** — skip and report.
+Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<KEY>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight, keyed on the handler's deterministic `task/<KEY>` branch (Jira publishes no branch of its own): catch a sibling session that is already building this issue before spending the full issue-description read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
 1. **Open PR by key.** The execute path titles PRs `[<KEY>] <summary>`, so an open PR carrying the key is an in-flight build:
 
@@ -150,6 +136,23 @@ Runs on the chosen issue **after "Judge feasibility" and before "Claim the issue
    A non-empty result → `Skipped <KEY>: remote branch task/<KEY> already exists`.
 
 In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate.
+
+## Judge feasibility
+
+Take candidates that passed pre-flight in ranked order, **one at a time** — stop at the first feasible one. For each, read the full issue description and decide whether this session can finish it without a human (a concrete outcome, identifiable files, a PR landable in ~1 hour, no product/design call or inaccessible infra needed).
+
+If feasible: continue with this candidate (proceed to "Claim the issue"). If not: leave a one-line skip comment and move to the next:
+
+```
+<atlassian-mcp>__addCommentToJiraIssue
+  cloudId: <jira.site>
+  issueIdOrKey: <KEY>
+  commentBody: "Skipped by /do-tasks: <reason>"
+```
+
+**Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's key, summary, and a one-sentence rationale, then proceed.
+
+Keeping the order as pre-flight → judge → claim is acceptable here because the claim is a cheap read-then-write guard executed immediately after the judge, unlike Linear's slow token-comment election that forces the judge inside the claim.
 
 ## Claim the issue
 
