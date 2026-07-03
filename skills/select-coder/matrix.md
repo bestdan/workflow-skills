@@ -23,12 +23,13 @@ vendor-self-reported numbers as upper bounds.
 
 ### opus (native Claude subagent — always available)
 
-| Spec                    | $/Mtok in/out | Cost | Speed  | Correctness                                        | Best for                                                              |
-| ----------------------- | ------------- | ---- | ------ | -------------------------------------------------- | --------------------------------------------------------------------- |
-| `opus:claude-opus-4-8`  | $5 / $25      | $$$  | medium | SWE-bench Pro ~69% · Terminal-Bench 2.1 ~79%       | Architecture, long-horizon, hardest packets; honest self-verification |
-| `opus:claude-sonnet-5`  | $3 / $15      | $$   | fast   | ~63% Pro — "~79% of Fable capability at 30% price" | Default PR-sized implementation; best cost/quality balance            |
-| `opus:claude-haiku-4-5` | $1 / $5       | $    | fast   | Modest; cheapest per solved task (~$0.13/point)    | Mechanical edits, renames, config churn, high-volume simple packets   |
-| `opus:claude-fable-5`   | $10 / $50     | $$$  | slow   | SWE-bench Pro ~80% · Terminal-Bench 2.1 88% (SOTA) | Only when the user explicitly opts in — hardest unsolved problems     |
+| Spec                     | $/Mtok in/out | Cost | Speed  | Correctness                                        | Best for                                                                                                                                  |
+| ------------------------ | ------------- | ---- | ------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `opus:claude-opus-4-8`   | $5 / $25      | $$$  | medium | SWE-bench Pro ~69% · Terminal-Bench 2.1 ~79%       | Architecture, long-horizon, hardest packets; honest self-verification                                                                     |
+| `opus:claude-sonnet-5`   | $3 / $15      | $$   | fast   | ~63% Pro — "~79% of Fable capability at 30% price" | Default PR-sized implementation; best cost/quality balance                                                                                |
+| `opus:claude-sonnet-4-6` | $3 / $15      | $$   | fast   | Previous-gen Sonnet; below Sonnet 5 on coding      | Fallback when Sonnet 5 is unavailable — note Sonnet 5's intro pricing ($2/$10 through 2026-08) currently undercuts it                     |
+| `opus:claude-haiku-4-5`  | $1 / $5       | $    | fast   | Modest; cheapest per solved task (~$0.13/point)    | Mechanical edits, renames, config churn, high-volume simple packets                                                                       |
+| `opus:claude-fable-5`    | $10 / $50     | $$$  | slow   | SWE-bench Pro ~80% · Terminal-Bench 2.1 88% (SOTA) | Hardest problems. Ask before selecting in most cases; may be picked without asking when the task is hard-but-small and confidence is high |
 
 Claude models carry the strongest practitioner consensus on **creativity/design
 taste** and convention-following; they are the default for frontend/visual
@@ -65,9 +66,12 @@ independently. 1M context makes agy good for whole-codebase context tasks.
 | `devin:swe-1.6-fast` | $0.30/$1.50 (pro, 0.5×)   | $    | fastest (~950 tok/s) | Same weights as swe-1.6                                                                                 | Latency-critical iteration loops       |
 | `devin:swe-1.6-slow` | free-tier pin             | $    | slow                 | Same family                                                                                             | Only option on the free tier           |
 
-Devin also exposes frontier passthroughs (Opus/Sonnet/GPT/Gemini) at credit
-multipliers — usually worse economics than calling those models via their
-native backend; don't route through devin for them.
+Devin also exposes passthrough models at credit multipliers. For frontier
+vendors (Opus/Sonnet/GPT/Gemini) that's usually worse economics than the
+native backend — don't route through devin for them. But devin is the **only
+route here to its open-weight passthroughs** — GLM-5.2 (open-weights leader,
+~62% SWE-bench Pro), DeepSeek V4, Kimi K2.6/K2.7 — worth considering for
+cost-dominated bulk work on the pro tier (e.g. `devin:glm-5.2`).
 
 ## Routing table (task profile → ranked candidates)
 

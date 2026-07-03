@@ -71,7 +71,10 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
 - File absent → probe `PATH` (`command -v`) for `codex`, `agy`, `devin`; `opus`
   is always available. Ask the user which to use and what the default should
   be, then write the config so it isn't asked again.
-- File present → use `default_coder`. A `--coder` flag always overrides.
+- File present **with `default_coder`** → use it. A file lacking
+  `default_coder` (e.g. holding only select-coder's `availability:` cache) →
+  treat as absent for this flow: probe/ask as above, then merge the new keys
+  into the existing file. A `--coder` flag always overrides.
 - A named coder that isn't in `coders:` and isn't a known backend → stop and
   ask rather than guess.
 
