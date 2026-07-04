@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.27.0] - 2026-07-04
+
+### Features
+
+- scope claim WIP per-project with an Unassigned bucket (#121) (4273c20)
+
 ## [1.26.2] - 2026-07-04
 
 ### Fixes
