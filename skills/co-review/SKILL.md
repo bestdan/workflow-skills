@@ -171,7 +171,7 @@ Why this is narrow:
 
      ```bash
      MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
-     git check-ignore -q "$MAIN_ROOT/dev_docs/co-review/" || echo 'dev_docs/co-review/' >> "$MAIN_ROOT/.gitignore"
+     git -C "$MAIN_ROOT" check-ignore -q dev_docs/co-review/ || echo 'dev_docs/co-review/' >> "$MAIN_ROOT/.gitignore"
      ```
    - Empty list → no local reviewers; continue Claude-only.
    - Entries present → the built-in agents (`codex`, `agy`, `devin`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
