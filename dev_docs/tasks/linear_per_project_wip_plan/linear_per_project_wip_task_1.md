@@ -6,11 +6,11 @@ status: new
 created: 2026-07-04
 source_branch: main
 related_files:
-  - commands/handlers/linear-common.md  # Config block (16-61), Resolve configured projects (62-73), new Resolve claim scope step
-  - commands/handlers/linear-claim.md   # Find candidates (20-51), direct-pick synthesis (51)
-  - commands/do-tasks.md                # Pre-claim WIP gate (227-273), Claim/execute re-check (292-298), --project flag
-  - commands/handlers/linear-config.md  # projects loop + global_wip_limit prompt (30-61)
-  - commands/handlers/linear-add.md     # step 2 project prompt to mirror (9-27)
+  - commands/handlers/linear-common.md # Config block (16-61), Resolve configured projects (62-73), new Resolve claim scope step
+  - commands/handlers/linear-claim.md # Find candidates (20-51), direct-pick synthesis (51)
+  - commands/do-tasks.md # Pre-claim WIP gate (227-273), Claim/execute re-check (292-298), --project flag
+  - commands/handlers/linear-config.md # projects loop + global_wip_limit prompt (30-61)
+  - commands/handlers/linear-add.md # step 2 project prompt to mirror (9-27)
 is_blocked_by:
 parent: linear_per_project_wip
 tags: [linear, wip, config, prompt, ux]
@@ -43,6 +43,7 @@ minimize `list_issues` calls (reuse counts/candidate results, avoid redundant
 sweeps) — see the ready-work probe note below.
 
 Settled design decisions (all resolved with the user):
+
 - **Unassigned membership** = no project **or** a project not in `linear.projects`.
 - **Unassigned cap** = `linear.unassigned_wip_limit ?? wip_limit`; `0` = never
   ranked-claim unassigned. Bucket exists only when ≥1 project is configured.
@@ -57,6 +58,7 @@ if execution reveals it's larger, split along the four numbered edit groups belo
 ## Task
 
 **1. Config + resolver foundation** — `commands/handlers/linear-common.md`:
+
 - Config block (16–61): document `linear.unassigned_wip_limit` (optional, default =
   top-level `wip_limit`; `0` = never ranked-claim unassigned; lives under `linear:`
   like `global_wip_limit`; takes effect only with ≥1 project configured).
@@ -75,6 +77,7 @@ if execution reveals it's larger, split along the four numbered edit groups belo
   configured; emit only when set non-default.
 
 **2. Candidate discovery + direct-pick fix** — `commands/handlers/linear-claim.md`:
+
 - Find candidates step 4: when the scope list includes the Unassigned bucket, add
   **one** whole-team `unstarted` query, keep only issues whose `projectId` is null
   or ∉ configured set, tag Unassigned, union in (no dedup — disjoint by exclusion).
@@ -85,6 +88,7 @@ if execution reveals it's larger, split along the four numbered edit groups belo
 
 **3. WIP gate — per-project counting + Unassigned by subtraction** —
 `commands/do-tasks.md` "Pre-claim WIP gate" (227–273):
+
 - Count step: count only what the chosen scope needs (single project → just its
   count). Run **one** whole-team count only when the chosen scope is **Unassigned or
   Any** (needs the subtraction) **or** `global_wip_limit` is set (needs the total) —
@@ -102,6 +106,7 @@ if execution reveals it's larger, split along the four numbered edit groups belo
 
 **4. Resolve claim scope + `--project` flag** — `commands/handlers/linear-common.md`
 new step (mirrors `linear-add.md` step 2) + `commands/do-tasks.md` wiring:
+
 - `--project <name|id|unassigned|any>` given → resolve directly, no prompt (`any`
   → full scope list; `unassigned` → bucket; name/id → that scope; push back on
   unresolvable). Add the flag to the `/do-tasks` argument surface.
@@ -130,9 +135,11 @@ new step (mirrors `linear-add.md` step 2) + `commands/do-tasks.md` wiring:
 ## Acceptance Criteria
 
 **Code-enforced:**
+
 - `scripts/validate.py` passes (handler bundling intact); `dli check` clean.
 
 **User-run:**
+
 - **Root-cause fix:** trace `/do-tasks` (no flag) on finplan-shaped state (0
   configured, 4 live projects with ready work), interactive → **prompts** with
   ready-work projects + Unassigned + Any; WIP scoped to the pick, not whole-team.

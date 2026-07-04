@@ -54,6 +54,7 @@ to whole-team aggregation. We close both by:
    `--project <name|id|unassigned|any>` flag skips the prompt.
 
 Key settled decisions:
+
 - **Unassigned membership** = no project **or** a project not in `linear.projects`.
 - **Unassigned cap** = `linear.unassigned_wip_limit ?? wip_limit`; `0` = never
   ranked-claim unassigned work.
