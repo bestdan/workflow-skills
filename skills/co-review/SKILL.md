@@ -93,8 +93,12 @@ A built-in agent may be written as a bare string (`- devin`) or, to override its
 
 **Pre-flight auth probe.** The cloud-backed reviewers (`agy`, `devin`) fail slow when their auth is dead — `agy` in particular burns a fixed **30s** on a doomed OAuth flow _per dispatch_ (see the `agy` note above). Before dispatching either one, run its cheap auth probe and **skip the reviewer on failure** (note it, never fatal) so a logged-out agent costs ~1s instead of 30s. `codex` needs no probe (stateless, sandboxed). The probes are read-only, invariant commands — approve each once (see Permissions):
 
-- **`agy`** → `agy models` — rc 0 (lists models) when authed; rc≠0 + `Please sign in to view available models` in ~0.8s when not. Run it, and only proceed to the `agy` dispatch if it exits 0. (Reseed instructions for a persistent failure are in the `agy` note above.)
-- **`devin`** → `devin auth status` — rc 0 when logged in (prints tier + allowed models); rc≠0 / `not authenticated` when not. Only dispatch `devin` if it exits 0.
+- **`agy`** → run bare `agy models` (no `timeout` wrapper — see below) — rc 0 (lists models) when authed; rc≠0 + `Please sign in to view available models` in ~0.8s when not. Run it, and only proceed to the `agy` dispatch if it exits 0. (Reseed instructions for a persistent failure are in the `agy` note above.)
+- **`devin`** → run bare `devin auth status` (no `timeout` wrapper — see below) — rc 0 when logged in (prints tier + allowed models); rc≠0 / `not authenticated` when not. Only dispatch `devin` if it exits 0.
+
+> **Run the probe bare; never wrap it in `timeout`.** The probe already self-bounds at ~1s (that's the point), so it needs no ceiling. `timeout`/`gtimeout` is **not** on stock macOS (no coreutils unless the user `brew install`ed it), so a `timeout 5 agy models` wrapper is itself `command not found` → the shell returns **rc 127**, which reads exactly like the reviewer failing auth when it's fully logged in. Observed 2026-07-04: this false-negatived *both* cloud reviewers at once. If you genuinely need a ceiling, gate on `command -v gtimeout` first — but you don't.
+>
+> **Don't blind-discard the probe's stderr; disambiguate `127`.** A `127` (or any non-zero) with *no* captured stderr is almost always the **wrapper/tool missing**, not the reviewer unauthenticated — a `2>&1 >/dev/null` swallows the telltale `command not found: timeout`. Before skipping a reviewer, confirm the failure came from the reviewer binary itself (it prints `Please sign in …` / `not authenticated`), not from a missing wrapper. Only skip on a genuine auth failure.
 
 The probe is a fast gate that runs **before** dispatch, not alongside it: in step 5, run the probes first (they're ~1s each — batch them in parallel if you like), wait for them to finish, then dispatch only the reviewers that passed. A probe failure is a **skip**, reported in the run summary alongside any missing reviewers.
 
