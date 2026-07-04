@@ -43,6 +43,7 @@ availability:
     logged_in: true # script-probed via `agy models` (free); false when the token is dead
   devin:
     installed: true
+    logged_in: true # script-probed via `devin auth status`; false when creds are dead
     tier: pro # free tier pins swe-1.6-slow; pro unlocks swe-1.6/-fast + passthroughs
 ```
 
