@@ -43,6 +43,11 @@ linear:
   # projects, enforced on top of the per-project caps (absent → no global ceiling; the sum of
   # per-project caps applies). Lives under linear: because it is multi-project-specific, unlike
   # the cross-handler top-level wip_limit.
+  unassigned_wip_limit: 3 # optional — WIP cap for the synthetic "Unassigned" bucket that
+  # catches every in-flight issue with NO project OR in a project not listed under projects
+  # above. Default = top-level wip_limit. Set to 0 to never ranked-claim unassigned work.
+  # Only takes effect when 1+ projects are configured — with none, the whole-team scope already
+  # covers everything, so there is no "outside".
   api_key_ref: op://Private/Linear API/credential # optional, used by /archive-tasks —
 # a 1Password op:// reference to a Linear PERSONAL API key. The MCP has no archive
 # mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key.
@@ -58,6 +63,7 @@ linear:
 - Per-project override keys are **only** `wip_limit` and `max_estimate`. `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global.
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
+- `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).
 
 ### Resolve configured projects
 
@@ -70,7 +76,32 @@ Every Linear-handled command that scopes to projects **must call** this one reso
    - `max_estimate` — the entry's `max_estimate` if set, **else** `linear.max_estimate` (which itself defaults to `3` when unset).
    - `name` — the entry's `name` if set; **else** resolve it **lazily** via `<linear-mcp>__list_projects` (match the `id`) only when a name is actually needed for a prompt or report — never eagerly.
 
-Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-tasks`) use `id` + `name`; consumers that enforce WIP (`/do-tasks`, `/archive-tasks` scope) use `wip_limit` too. The optional **`linear.global_wip_limit`** is a separate scalar the `/do-tasks` WIP gate reads alongside this list (the ceiling across all returned scopes); it is not part of a per-project entry. Treat the returned list as read-only config — do not mutate it.
+Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-tasks`) use `id` + `name`; consumers that enforce WIP (`/do-tasks`, `/archive-tasks` scope) use `wip_limit` too. The optional **`linear.global_wip_limit`** is a separate scalar the `/do-tasks` WIP gate reads alongside this list (the ceiling across all returned scopes); it is not part of a per-project entry. Treat the returned list as read-only config — do not mutate it. This helper returns **only** the configured projects (or the single whole-team scope) — it does **not** include the Unassigned bucket below, so the select/query consumers can pass every returned `id` as a `projectId` safely.
+
+### The Unassigned bucket
+
+A synthetic scope the **`/do-tasks` claim path only** (its "Find candidates" and "Pre-claim WIP gate") composes on top of the resolved configured projects — the select-only consumers (`/add-task`, `/list-tasks`, `/promote-tasks`) never see it. It exists **only when 1+ projects are configured** (with none, the whole-team scope already spans everything, so there is no "outside"):
+
+- `{ id: "__unassigned__", name: "Unassigned", wip_limit: <linear.unassigned_wip_limit if set, else the top-level wip_limit (default 3)>, max_estimate: <linear.max_estimate, default 3>, unassigned: true }`.
+- `id: "__unassigned__"` is a **sentinel**, not a real Linear project id and **distinct from `id: null`** (which means "whole team — omit `projectId`"). It is the catch-all for issues with **no project** or in a project **not** among the configured `id`s. Because the Linear MCP `list_issues` `project` argument has no null-project value, this scope's membership is resolved **by exclusion** (client-side filter on each issue's `projectId`) and its in-flight is counted **by subtraction** (whole-team − Σ configured) — **never** by passing the sentinel as a `projectId`.
+- When `unassigned_wip_limit` is `0`, the bucket still appears (so it can be reported) but its cap is `0` → it is never ranked-claimed.
+
+### Resolve claim scope
+
+`/do-tasks` (tracker path) calls this to decide **which scope to claim from** when the user hasn't pinned one — the claim-side mirror of `/add-task`'s project prompt (`linear-add.md` step 2). It runs **after** `linear-claim.md` "Find candidates" has produced the ranked, scope-tagged candidate list, and **narrows** that list to the chosen scope(s). It consumes the candidate tags — **it issues no `list_issues` calls of its own** (the Linear MCP is token-expensive; "which projects have ready work" is read straight from the distinct `project` scopes present among the ranked candidates, not a fresh probe).
+
+Inputs: the **claim scope set** = the resolved configured projects ("Resolve configured projects") **plus the Unassigned bucket** ("The Unassigned bucket", when 1+ projects are configured), the ranked candidates (each tagged with its `project` scope), a `--project <value>` flag if the user passed one, and whether the session is **interactive** (an `AskUserQuestion` prompt is possible — false for headless `/loop`/cron).
+
+1. **`--project <value>` given → resolve directly, no prompt:**
+   - `any` → **Any**: return the full resolved scopes list (rank across all; each candidate still gated by its own per-scope cap). This is today's cross-project behavior.
+   - `unassigned` → the Unassigned bucket scope (error if 0 projects are configured, so no bucket exists: "no Unassigned bucket — configure projects first, or drop --project").
+   - a project **name or id** → match against the resolved scopes (case-insensitive name, or exact id/UUID); if none matches, match against the team's live projects via `<linear-mcp>__list_projects` (an unconfigured project is valid — it becomes a one-run scope inheriting the global `wip_limit`/`max_estimate`, and triggers the persist offer in step 4). On no match anywhere, push back ("`<value>` is not a project in team `<team>`") and stop.
+2. **No flag → determine ambiguity** from the ranked candidates. Let `scopes_with_work` = the distinct `project` scopes that own at least one ranked candidate (a real project, and/or the Unassigned bucket).
+   - **0 or 1** scope with ready work → use it (or the single whole-team scope when 0 projects are configured); **no prompt**.
+   - **2+** scopes with ready work **and interactive** → prompt: `AskUserQuestion` (header "Claim from") listing up to **3** of `scopes_with_work` (most-recent candidate first; names resolved lazily) — including **Unassigned** when it has work — plus **Any** and the automatic **"Other"** (type a project name/id → resolve as in step 1, incl. live/unconfigured projects). Return the chosen scope, the Unassigned bucket, or the full list for **Any**.
+   - **2+** scopes with ready work **and non-interactive** → **Any** (full list), no prompt.
+3. **Narrow.** Filter the ranked candidate list to the chosen scope(s): a single project → only its candidates; Unassigned → only bucket candidates; **Any** → all. Hand the narrowed list and the chosen scope(s) to `do-tasks.md`'s "Pre-claim WIP gate" (which counts only the chosen scope(s), except the whole-team count it always needs for the Unassigned subtraction / global ceiling).
+4. **Offer to persist an unconfigured project** (interactive only). If the chosen scope is a **concrete live project whose id is not in `linear.projects`** (reached via `--project <name|id>` or the prompt's "Other"), ask once via `AskUserQuestion` whether to add it to the config. On **yes**, append a `{ id, name }` entry to `linear.projects` (the `linear-config.md` step 3b shape — it inherits the global `wip_limit`/`max_estimate`) and write `.task-config.yml`, touching **only** that key (append one entry; do not rewrite unrelated keys). On **no**, proceed for this run only (the project stays in the Unassigned bucket next time). **Never** offer for `any`, `unassigned`, an already-configured project, or non-interactively. This is the only place `/do-tasks` writes the config.
 
 ## Linear concepts → task concepts
 

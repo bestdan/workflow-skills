@@ -1,7 +1,7 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
-argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim]"
+argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X]"
 ---
 
 # Do Tasks
@@ -28,6 +28,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --remote` / `/do-tasks --local` — choose where execution runs (default: remote dispatch)
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
+- `/do-tasks --project <name|id|unassigned|any>` — **tracker handler only**: pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
 dispatch (each task gets its own cloud VM). Foreground pairing is inherently
@@ -224,29 +225,69 @@ work, so `--all` / `-n N --claim-only` may claim several issues at once, bounded
 the pre-claim WIP gate below. `/do-tasks <identifier>` (a specific Linear id, e.g.
 `PRE-12`) claims that one issue.
 
+### Resolve claim scope (which project to claim from)
+
+Unless the user pins a scope, `/do-tasks` **asks which project to claim from** when
+ready work spans more than one — the claim-side mirror of `/add-task`'s project
+prompt. Run the **"Resolve claim scope"** step in `linear-common.md` **after**
+`linear-claim.md` "Find candidates" has ranked the scope-tagged candidates (it reads
+those tags — it issues **no** extra `list_issues` calls, since the Linear MCP is
+token-expensive) and **before** the WIP gate below:
+
+- `--project <name|id|unassigned|any>` given → resolve directly, no prompt.
+- No flag, **2+ scopes have ready work, interactive** → prompt (projects with work +
+  Unassigned + Any). **0–1 scope with work** → use it, no prompt.
+- No flag, **non-interactive** (headless `/loop`/cron) → **Any** (ranked across all,
+  per-project caps) — never blocks on a prompt.
+
+The step narrows the candidate list to the chosen scope(s) and may offer to persist a
+newly-picked unconfigured project to `.task-config.yml` (interactive only). The WIP
+gate then counts only the chosen scope(s) (plus the one whole-team count it always
+needs for the Unassigned subtraction / global ceiling). **Any** hands the full scope
+list to the gate, so it never collapses to a whole-team aggregate — each candidate is
+checked against its own project cap.
+
 ### Pre-claim WIP gate (per-project + optional global ceiling)
 
-WIP is enforced **per configured project**, with an optional **global ceiling** across
-all of them. Resolve the caps and counts once, then check them per candidate. After the
-preflight resolves the team and workflow states, **before** judging feasibility or
-claiming:
+WIP is enforced **per configured project** (plus the Unassigned bucket), with an
+optional **global ceiling** across all of them. Resolve the caps and counts once, then
+check them per candidate. After the preflight resolves the team and workflow states and
+the claim scope is resolved (above), **before** judging feasibility or claiming:
 
-1. **Resolve caps.** Take the resolved projects list from `linear-claim.md` "Find
-   candidates" step 3 (the `linear-common.md` "Resolve configured projects" helper) —
-   each scope carries its own `wip_limit` (per-project override else the top-level
-   `wip_limit`, default `3`). Also read the optional `linear.global_wip_limit` (absent →
-   no global ceiling).
-2. **Count in-flight per project.** For each resolved scope, count Linear issues in any
+1. **Resolve caps.** Take the **chosen scope(s)** from "Resolve claim scope" above — one
+   project, the Unassigned bucket, or (for **Any**/non-interactive) the full resolved
+   list, each carrying its own `wip_limit` (per-project override else the top-level
+   `wip_limit`, default `3`; the Unassigned bucket uses `unassigned_wip_limit`). Also read
+   the optional `linear.global_wip_limit` (absent → no global ceiling). The global ceiling
+   always applies regardless of the chosen scope.
+2. **Count in-flight per project.** Count only what the chosen scope needs (the Linear MCP
+   is token-expensive): a **single real project** pick needs just that project's count; the
+   **Unassigned bucket** or **Any** needs every configured project's count (the subtraction
+   below sums them). For each such **configured** scope (real project `id`, or the single
+   whole-team scope when 0 projects are configured), count Linear issues in any
    `started`-type state (e.g. `In Progress`, `In Review`) via `<linear-mcp>__list_issues`
    — resolve by state **type**, not display name — passing the resolved `teamId` and the
    scope's `id` as the `projectId` argument (omit when `id` is `null` — the whole-team
    scope). That scope's
    **slack = `wip_limit − in_flight`**. The started-type issue is the canonical in-flight
    unit — an open PR is already reflected by its issue sitting in a started state, so do
-   **not** add open PRs separately (that double-counts). The **total in-flight** for the
-   global ceiling is `Σ in_flight` across all resolved scopes.
-3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight ≥
-   `global_wip_limit`**, **no** project can claim — decline outright:
+   **not** add open PRs separately (that double-counts).
+
+   **Whole-team count (once) → Unassigned + global total.** When 1+ projects are
+   configured (so the **Unassigned bucket** applies — see `linear-common.md` "The
+   Unassigned bucket") **or** `linear.global_wip_limit` is set, run **one** whole-team
+   `started` count (omit `projectId`). Then:
+   - `unassigned_in_flight = whole_team_in_flight − Σ(configured in_flight)`; the bucket's
+     **slack = `unassigned_wip_limit − unassigned_in_flight`** (a cap of `0` → slack ≤ 0,
+     never claimed). The Unassigned bucket is **never** counted with a `projectId` filter —
+     the MCP has no null-project value; subtraction is the only correct count.
+   - the **total in-flight** for the global ceiling **is that same whole-team count** —
+     compute it once and reuse it. Do **not** sum the per-scope counts for the ceiling
+     (that would double-count issues and, once the Unassigned bucket exists, is simply
+     wrong).
+3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight** (the
+   whole-team count from step 2) **≥ `global_wip_limit`**, **no** project can claim —
+   decline outright:
    `Global WIP limit <N> reached (<total> in flight across all projects) — no issue claimed`
    and stop.
 4. **Per-project gate (ranked path).** Otherwise the per-project cap is checked **per
@@ -258,19 +299,23 @@ claiming:
    convention applies to the direct-mode decline message in step 5).
    If every remaining candidate's project is full, report that no issue was claimed.
 5. **Direct-identifier / single mode** (`/do-tasks <identifier>`): gate against **that
-   issue's own project** cap (its resolved scope — for a pick outside the configured
-   projects, the synthesized scope from `linear-claim.md` step 7; count its in-flight now
-   per step 2 if it wasn't among the pre-counted scopes) and the global ceiling. If either
-   is at its limit, **stop** — no fall-through — declining with the global message (step 3)
-   or, for the per-project cap,
-   `WIP limit <wip_limit> reached (<count> in flight) in project <name> — no issue claimed`.
+   issue's own resolved scope** cap — a configured project, or the **shared Unassigned
+   bucket** when the issue is outside the configured projects (`linear-claim.md` step 7).
+   The Unassigned bucket's in-flight is the subtraction from step 2 (already computed once
+   the bucket exists); a configured project's is its per-project count. Also gate against
+   the global ceiling. If either is at its limit, **stop** — no fall-through — declining
+   with the global message (step 3) or, for the per-project cap,
+   `WIP limit <wip_limit> reached (<count> in flight) in project <name> — no issue claimed`
+   (render `<name>` as `Unassigned` for the bucket, `the whole team` for a `null` scope).
 
-**`--all --claim-only` batch.** Reserve up to each project's own slack independently:
-effective batch = `Σ max(0, slack_p)` across configured projects, no project over its own
-cap. Claim **candidates in rank order**, decrementing **both** the chosen project's
-remaining slack **and** — when `global_wip_limit` is set — the remaining global slack as
-you go; skip a candidate whose project's **remaining** slack is `0`, and stop the batch
-once the global slack hits `0`. The held-overflow report names each held task's project.
+**`--all --claim-only` batch.** Reserve up to each scope's own slack independently:
+effective batch = `Σ max(0, slack_p)` across **all resolved scopes** (configured projects
+**and** the Unassigned bucket), no scope over its own cap. Claim **candidates in rank
+order**, decrementing **both** the chosen scope's remaining slack **and** — when
+`global_wip_limit` is set — the remaining global slack as you go; skip a candidate whose
+scope's **remaining** slack is `0` (so `unassigned_wip_limit: 0` reserves nothing for
+unassigned work), and stop the batch once the global slack hits `0`. The held-overflow
+report names each held task's project (`Unassigned` for the bucket).
 
 ### Claim and execute
 

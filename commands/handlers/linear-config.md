@@ -44,6 +44,8 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
    **3c. Optional `global_wip_limit`.** Only when **2 or more** projects are configured, optionally ask for `linear.global_wip_limit` — an absolute ceiling on total in-flight across **all** configured projects (on top of the per-project caps). Skip the prompt for 0–1 projects (a global cap is meaningless there). Unset by default (no global ceiling).
 
+   **3d. Optional `unassigned_wip_limit`.** Only when **1 or more** projects are configured, optionally ask for `linear.unassigned_wip_limit` — the WIP cap for the synthetic **Unassigned** bucket that `/do-tasks` uses for issues with no project or in a project not in this list. Default = the top-level `wip_limit`; `0` = never ranked-claim unassigned work. Skip the prompt when **0** projects are configured (the whole-team scope already spans everything). Unset by default (inherits `wip_limit`); emit it only when the user sets a non-default value.
+
 4. **Optional `default_priority`** — skip the prompt unless the user volunteers a preference. Linear priorities are 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Default `3` is applied by the handler if omitted.
 
 5. **Return the config block** to `/task-config` (the new `projects` shape — never a scalar `default_project`):
@@ -55,10 +57,11 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
      default_priority: 3
      projects:
        - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; add wip_limit/max_estimate to override the globals
-     # global_wip_limit: 6  # include only when 2+ projects are configured
+     # global_wip_limit: 6       # include only when 2+ projects are configured
+     # unassigned_wip_limit: 3   # include only when 1+ projects are configured and set non-default
    ```
 
-   Shape rules: write `projects:` as a list of `{ id, name?, wip_limit?, max_estimate? }`; include `global_wip_limit` (under `linear:`) only when 2+ projects are set; add a top-level `wip_limit` only if the user chose a non-default global (it defaults to `3`). When the user picked "None — prompt me per-task", **omit `projects` entirely** (whole-team scope). Omit any optional key the user didn't set, and **never** emit a scalar `default_project`. (Full schema: `linear-common.md` "Config block".)
+   Shape rules: write `projects:` as a list of `{ id, name?, wip_limit?, max_estimate? }`; include `global_wip_limit` (under `linear:`) only when 2+ projects are set; include `unassigned_wip_limit` (under `linear:`) only when 1+ projects are set **and** the user chose a non-default value; add a top-level `wip_limit` only if the user chose a non-default global (it defaults to `3`). When the user picked "None — prompt me per-task", **omit `projects` entirely** (whole-team scope). Omit any optional key the user didn't set, and **never** emit a scalar `default_project`. (Full schema: `linear-common.md` "Config block".)
 
 > Labels are not supported in the v1 `linear` handler. The Linear MCP's `create_issue` takes label UUIDs, not names, and resolving names → ids requires an extra tool call (and an `allowed-tools` update). Skip the prompt; if a user asks for labels, the handler can be extended later.
 
