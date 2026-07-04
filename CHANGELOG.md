@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.26.1] - 2026-07-04
+
+### Fixes
+
+- resolve local-reviewer config from the main working tree (#117) (fa14e80)
+
 ## [1.26.0] - 2026-07-03
 
 ### Features
