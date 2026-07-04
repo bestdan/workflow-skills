@@ -40,9 +40,10 @@ availability:
     default_model: gpt-5.5 # from `codex config get model` or config.toml
   agy:
     installed: true
-    logged_in: true # a failed call reporting `not logged into Antigravity` → false
+    logged_in: true # script-probed via `agy models` (free); false when the token is dead
   devin:
     installed: true
+    logged_in: true # script-probed via `devin auth status`; false when creds are dead
     tier: pro # free tier pins swe-1.6-slow; pro unlocks swe-1.6/-fast + passthroughs
 ```
 
@@ -51,23 +52,27 @@ than 30 days, or a recommendation just failed because a model turned out to
 be unavailable. Otherwise trust the cache.
 
 **Probing is scripted** — run the deterministic fixture instead of ad-hoc
-commands (unsandboxed if devin is installed; only `devin auth status`
-touches the network):
+commands (unsandboxed if agy or devin is installed; `devin auth status` and
+`agy models` touch the network — both are cheap auth probes, no quota):
 
 ```bash
 scripts/probe-coders.sh
 ```
 
-It emits the `availability:` block on stdout (it writes nothing). Two
-fields the script can't know, fill in yourself before merging:
+It emits the `availability:` block on stdout (it writes nothing). The script
+auth-probes **both** cloud coders — `devin auth status` and `agy models` (a
+free metadata list, no inference/quota) — so `agy.logged_in` and
+`devin.logged_in` are trustworthy. This matters most for agy: over SSH it
+falls back to a file-based token store that GUI logins don't refresh, so a
+present-but-dead agy is common and worth catching before dispatch (it's the
+same probe co-review's pre-flight uses — keep the two in sync). One field the
+script can't know, fill in yourself before merging:
 
 - `opus.models` — the script emits `[]`; populate from the session's
   `availableModels` (opus itself is always available).
-- agy `logged_in` — the script only checks presence; don't burn quota
-  probing login. If a later real call fails with a login error, flip it to
-  `false` then. Likewise, a devin `tier: unknown` resolves on first use
-  (an `/upgrade to access this model` error means free tier →
-  `swe-1.6-slow` only).
+
+A devin `tier: unknown` still resolves on first use (an `/upgrade to access
+this model` error means free tier → `swe-1.6-slow` only).
 
 Write the block back after probing. Create
 `dev_docs/orchestrate-coders/.coders.yml` if absent — the file may then hold
