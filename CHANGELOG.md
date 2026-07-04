@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.26.2] - 2026-07-04
+
+### Fixes
+
+- harden agy/devin auth with pre-flight probes; consolidate with select-coder (#115) (b99301e)
+
 ## [1.26.1] - 2026-07-04
 
 ### Fixes
