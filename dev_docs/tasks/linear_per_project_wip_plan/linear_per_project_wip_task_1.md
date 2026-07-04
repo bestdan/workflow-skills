@@ -60,12 +60,16 @@ if execution reveals it's larger, split along the four numbered edit groups belo
 - Config block (16–61): document `linear.unassigned_wip_limit` (optional, default =
   top-level `wip_limit`; `0` = never ranked-claim unassigned; lives under `linear:`
   like `global_wip_limit`; takes effect only with ≥1 project configured).
-- Resolve configured projects (62–73): when the mapped list is **non-empty**,
-  append a synthetic scope
-  `{ id: <UNASSIGNED sentinel>, name: "Unassigned", wip_limit: <unassigned_wip_limit ?? wip_limit>, max_estimate: <linear.max_estimate>, unassigned: true }`.
-  Define the sentinel and distinguish it from `id: null` (whole team). Document that
-  its in-flight is counted **by exclusion/subtraction**, not a `projectId` filter.
-  Leave the empty-`projects` whole-team scope unchanged (no bucket in that case).
+- The Unassigned bucket is a **separate construct** the `/do-tasks` claim path
+  composes on top of the resolved configured projects — the shared "Resolve
+  configured projects" helper keeps returning **only** configured projects (so the
+  select/query consumers `/add-task`, `/list-tasks`, `/promote-tasks`,
+  `/archive-tasks` never receive the sentinel and can pass every `id` as a
+  `projectId`). Define the bucket
+  `{ id: <UNASSIGNED sentinel>, name: "Unassigned", wip_limit: <unassigned_wip_limit ?? wip_limit>, max_estimate: <linear.max_estimate>, unassigned: true }`
+  (exists only with ≥1 project configured), distinguish the sentinel from `id: null`
+  (whole team), and document that its in-flight is counted **by exclusion/subtraction**,
+  not a `projectId` filter.
 - `commands/handlers/linear-config.md`: alongside the `global_wip_limit` prompt
   (step 3c, line 45) prompt for `unassigned_wip_limit` only when ≥1 project is
   configured; emit only when set non-default.
@@ -81,12 +85,16 @@ if execution reveals it's larger, split along the four numbered edit groups belo
 
 **3. WIP gate — per-project counting + Unassigned by subtraction** —
 `commands/do-tasks.md` "Pre-claim WIP gate" (227–273):
-- Count step: keep per-configured-project `projectId` counts; when the bucket
-  exists, run **one** whole-team count and set
-  `unassigned_in_flight = whole_team − Σ(configured)`, `slack = unassigned_wip_limit
-  − unassigned_in_flight`. State the whole-team count **doubles** as the
-  `global_wip_limit` total (computed once — do **not** re-sum per-project counts for
-  the ceiling; double-count guard). `unassigned_wip_limit: 0` → slack ≤ 0.
+- Count step: count only what the chosen scope needs (single project → just its
+  count). Run **one** whole-team count only when the chosen scope is **Unassigned or
+  Any** (needs the subtraction) **or** `global_wip_limit` is set (needs the total) —
+  **not** merely because projects are configured. For Unassigned/Any, set
+  `unassigned_in_flight = max(0, whole_team − Σ(configured))` (clamped — guards a
+  mid-count transition), `slack = unassigned_wip_limit − unassigned_in_flight`; do the
+  subtraction **only** for Unassigned/Any (a single-project pick never counted the
+  other projects). The same whole-team count **doubles** as the `global_wip_limit`
+  total (computed once — do **not** re-sum per-project counts for the ceiling;
+  double-count guard). `unassigned_wip_limit: 0` → slack ≤ 0.
 - Gate paths (ranked skip / direct stop / batch reservation, incl. 268–273) treat
   Unassigned as an ordinary scope; the 292–298 re-check decrements its remaining
   slack on an in-run Unassigned claim. Report strings render `Unassigned` (parallel
@@ -101,9 +109,10 @@ new step (mirrors `linear-add.md` step 2) + `commands/do-tasks.md` wiring:
   **Token-cost flag (Linear MCP is expensive):** do **not** add a separate probe
   sweep — derive "has ready work" from the candidate query results the claim flow
   already runs (task group 2), or note the exact call count if a light probe is
-  unavoidable. Then: 0/1 project with work → use it, no prompt; 2+ with work +
-  interactive → `AskUserQuestion` (header "Claim from") among ready-work projects
-  (≤3) + Unassigned + Any + Other; 2+ with work + non-interactive → **Any**.
+  unavoidable. Then: 0 with work → nothing to claim; exactly 1 → use it, no prompt;
+  2+ with work + interactive → `AskUserQuestion` (header "Claim from") among **≤2**
+  ready-work scopes (incl. Unassigned) + Any + Other — staying within
+  `AskUserQuestion`'s **4-option max**; 2+ with work + non-interactive → **Any**.
 - Call the step **before** the WIP gate; feed the chosen scope(s) to both the gate
   and Find candidates. Document the headless rule (no TTY + no flag → Any) by the gate.
 - **Offer to persist an unconfigured project.** When the resolved scope is a

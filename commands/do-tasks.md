@@ -225,27 +225,38 @@ work, so `--all` / `-n N --claim-only` may claim several issues at once, bounded
 the pre-claim WIP gate below. `/do-tasks <identifier>` (a specific Linear id, e.g.
 `PRE-12`) claims that one issue.
 
+> **Runtime order (the sections below are not in execution order).** The tracker
+> path runs: **Find candidates** (`linear-claim.md` "Find candidates" — documented
+> under "Claim and execute" step 1 below) → **Resolve claim scope** → **Pre-claim WIP
+> gate** → claim/execute. The two gate sections are documented first for reference,
+> but Find candidates' queries run before both. The one exception is a **specific
+> pin** (`--project <name|id|unassigned>` or a project typed into the prompt's
+> "Other"): it is resolved **before** Find candidates and scopes that query — see
+> `linear-common.md` "Resolve claim scope" step 1.
+
 ### Resolve claim scope (which project to claim from)
 
 Unless the user pins a scope, `/do-tasks` **asks which project to claim from** when
 ready work spans more than one — the claim-side mirror of `/add-task`'s project
-prompt. Run the **"Resolve claim scope"** step in `linear-common.md` **after**
-`linear-claim.md` "Find candidates" has ranked the scope-tagged candidates (it reads
-those tags — it issues **no** extra `list_issues` calls, since the Linear MCP is
-token-expensive) and **before** the WIP gate below:
+prompt. Run the **"Resolve claim scope"** step in `linear-common.md`; for the no-flag
+and `--project any` paths it runs **after** `linear-claim.md` "Find candidates" has
+ranked the scope-tagged candidates (reading those tags — **no** extra `list_issues`
+calls) and **before** the WIP gate below:
 
-- `--project <name|id|unassigned|any>` given → resolve directly, no prompt.
-- No flag, **2+ scopes have ready work, interactive** → prompt (projects with work +
-  Unassigned + Any). **0–1 scope with work** → use it, no prompt.
+- `--project <name|id|unassigned>` → **specific pin**, resolved up front; it scopes
+  the candidate query and the WIP count to that one scope (a live unconfigured pin
+  gets queried directly, not via the Unassigned pass). `--project any` → Any, no prompt.
+- No flag, **2+ scopes have ready work, interactive** → prompt (≤2 projects with work
+  incl. Unassigned + Any + Other, within the 4-option max). **Exactly 1 scope with
+  work** → use it, no prompt. **0 scopes with work** → nothing to claim.
 - No flag, **non-interactive** (headless `/loop`/cron) → **Any** (ranked across all,
   per-project caps) — never blocks on a prompt.
 
 The step narrows the candidate list to the chosen scope(s) and may offer to persist a
 newly-picked unconfigured project to `.task-config.yml` (interactive only). The WIP
-gate then counts only the chosen scope(s) (plus the one whole-team count it always
-needs for the Unassigned subtraction / global ceiling). **Any** hands the full scope
-list to the gate, so it never collapses to a whole-team aggregate — each candidate is
-checked against its own project cap.
+gate then counts only the chosen scope(s). **Any** hands the full scope list to the
+gate, so it never collapses to a whole-team aggregate — each candidate is checked
+against its own project cap.
 
 ### Pre-claim WIP gate (per-project + optional global ceiling)
 
@@ -273,17 +284,24 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    unit — an open PR is already reflected by its issue sitting in a started state, so do
    **not** add open PRs separately (that double-counts).
 
-   **Whole-team count (once) → Unassigned + global total.** When 1+ projects are
-   configured (so the **Unassigned bucket** applies — see `linear-common.md` "The
-   Unassigned bucket") **or** `linear.global_wip_limit` is set, run **one** whole-team
-   `started` count (omit `projectId`). Then:
-   - `unassigned_in_flight = whole_team_in_flight − Σ(configured in_flight)`; the bucket's
-     **slack = `unassigned_wip_limit − unassigned_in_flight`** (a cap of `0` → slack ≤ 0,
-     never claimed). The Unassigned bucket is **never** counted with a `projectId` filter —
-     the MCP has no null-project value; subtraction is the only correct count.
-   - the **total in-flight** for the global ceiling **is that same whole-team count** —
-     compute it once and reuse it. Do **not** sum the per-scope counts for the ceiling
-     (that would double-count issues and, once the Unassigned bucket exists, is simply
+   **Whole-team count (once) → Unassigned and/or global total.** Run **one** whole-team
+   `started` count (omit `projectId`) only when it is actually needed — i.e. when the
+   **chosen scope is the Unassigned bucket or Any** (needs the subtraction below) **or**
+   `linear.global_wip_limit` is set (needs the total). A **single real-project** pick
+   with no global ceiling needs neither, so **skip the whole-team count** — the Linear
+   MCP is token-expensive. These are two independent triggers:
+   - **Unassigned subtraction** (only for an Unassigned/Any pick, where step 2 counted
+     **every** configured project): `unassigned_in_flight = max(0, whole_team_in_flight −
+     Σ(configured in_flight))` — clamped so a mid-count state transition can't drive it
+     negative and hand back phantom slack. The bucket's **slack = `unassigned_wip_limit −
+     unassigned_in_flight`** (a cap of `0` → slack ≤ 0, never claimed). The Unassigned
+     bucket is **never** counted with a `projectId` filter — the MCP has no null-project
+     value; subtraction is the only correct count. (Do **not** attempt this subtraction on
+     a single-project pick — the other projects weren't counted, so `Σ(configured)` is
+     incomplete.)
+   - **Global ceiling total** (whenever `global_wip_limit` is set, any config): the total
+     in-flight **is that same whole-team count**. Do **not** sum the per-scope counts for
+     the ceiling (that would double-count, and once the Unassigned bucket exists is simply
      wrong).
 3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight** (the
    whole-team count from step 2) **≥ `global_wip_limit`**, **no** project can claim —
