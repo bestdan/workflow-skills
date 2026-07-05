@@ -19,6 +19,13 @@ Two inputs drive the choice:
 2. **What the task needs** — scored against the capability matrix in
    [`matrix.md`](matrix.md).
 
+Availability means "runnable by the orchestrator," not "registered as a Claude
+`Agent` tool subagent." `opus` is native to the Agent tool. `codex`, `agy`, and
+`devin` are external CLI backends and are available when the probe says the
+command exists and any required auth is valid. Recommend them as
+`<backend>:<model>` specs for `orchestrate-coders`; do not reject them merely
+because Claude Code cannot spawn them through the Agent tool.
+
 ## Pre-flight: availability probe
 
 Availability is probed once and cached — not on every invocation. The cache
@@ -115,6 +122,10 @@ only `availability:`, which orchestrate-coders treats as absent for its own
    tier (`$`, `$$`, `$$$` per matrix). If the top pick is unavailable but
    would clearly win, say so and name what it would take (e.g. "devin pro
    tier would unlock swe-1.6-fast").
+   When recommending a CLI backend, include a short operational note only when
+   it affects dispatch: "runs via Bash CLI, not Agent tool"; "needs unsandboxed
+   Bash for network"; or "auth probe failed, unavailable." Keep the primary
+   output as the ranked coder specs.
 
 ## Invocation
 

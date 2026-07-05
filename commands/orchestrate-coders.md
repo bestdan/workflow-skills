@@ -11,6 +11,8 @@ Invoke the **orchestrate-coders** skill with the arguments as given. The skill
 config resolution, decomposition, dispatch, verification, integration, and the
 per-backend mechanics in `skills/orchestrate-coders/backends/`. This command
 adds nothing beyond routing; do not re-derive or restate the workflow here.
+Do not limit delegation to Agent-tool subagents: `codex`, `agy`, `devin`, and
+custom coders are dispatched by Bash through the skill's CLI backend contract.
 
 - `<task>` — what to build; may be omitted when `--plan <name>` names an
   existing `dev_docs/tasks/<name>_plan/` plan to execute.

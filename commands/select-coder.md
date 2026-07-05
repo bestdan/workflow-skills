@@ -11,6 +11,8 @@ Invoke the **select-coder** skill with the arguments as given. The skill
 pre-flight and its cache, the capability matrix and its refresh protocol,
 task profiling, and the routing rules. This command adds nothing beyond
 routing; do not re-derive or restate the workflow here.
+Treat installed CLI coders as available delegates even though they are not
+Claude Agent-tool subagents; the orchestrator dispatches them through Bash.
 
 - `<task description>` — the task to route to a coder.
 - `--plan <name>` — score each task file in `dev_docs/tasks/<name>_plan/`
