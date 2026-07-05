@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -41,8 +42,10 @@ UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
 )
 
+# $project is declared only when a project filter is actually used — an unused
+# declared variable fails GraphQL's NoUnusedVariables validation (HTTP 400).
 QUERY = """
-query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!, $project: ID) {
+query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!%s) {
   issues(first: 100, after: $cursor, filter: {
     team: { %s: { eq: $team } }
     state: { type: { eq: $type } }
@@ -85,8 +88,11 @@ def gql(key, query, variables=None):
             "Content-Type": "application/json",
         },  # personal key, no "Bearer"
     )
-    with urllib.request.urlopen(req) as r:
-        payload = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req) as r:
+            payload = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
     return payload["data"]
@@ -94,21 +100,15 @@ def gql(key, query, variables=None):
 
 def find(key, team, project, state_type, ts_field, cutoff):
     team_field = "id" if UUID_RE.match(team) else "name"  # UUID team id, else name
-    extra = "project: { id: { eq: $project } }" if project else ""
-    query = QUERY % (team_field, ts_field, extra, ts_field)
+    project_decl = ", $project: ID" if project else ""
+    project_filter = "project: { id: { eq: $project } }" if project else ""
+    query = QUERY % (project_decl, team_field, ts_field, project_filter, ts_field)
+    variables = {"cutoff": cutoff, "team": team, "type": state_type}
+    if project:
+        variables["project"] = project
     out, cursor = [], None
     while True:
-        page = gql(
-            key,
-            query,
-            {
-                "cursor": cursor,
-                "cutoff": cutoff,
-                "team": team,
-                "type": state_type,
-                "project": project,
-            },
-        )["issues"]
+        page = gql(key, query, {**variables, "cursor": cursor})["issues"]
         out.extend(page["nodes"])
         if not page["pageInfo"]["hasNextPage"]:
             return out
