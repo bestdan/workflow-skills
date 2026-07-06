@@ -43,16 +43,16 @@ Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-
 
 Available handlers — each owns its own auth/preflight, config schema, prerequisites, and limitations:
 
-| Handler    | Lands the task as…                                              | Reference file                                                                                         |
-| ---------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `repo-pr`  | a committed markdown file in `dev_docs/tasks/` via PR (default) | `commands/handlers/repo-pr.md`                                                                         |
-| `gh-issue` | a GitHub Issue                                                  | `commands/handlers/gh-issue.md`                                                                        |
-| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md`                                                                            |
-| `linear`   | a Linear issue under a team                                     | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` |
+| Handler    | Lands the task as…                                              | Reference file                                                                                                                                                                     |
+| ---------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo-pr`  | a committed markdown file in `dev_docs/tasks/` via PR (default) | `commands/handlers/repo-pr.md`                                                                                                                                                     |
+| `gh-issue` | a GitHub Issue                                                  | `commands/handlers/gh-issue.md`                                                                                                                                                    |
+| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md`                                                                                                                                                        |
+| `linear`   | a Linear issue under a team                                     | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` / `linear-complete.md` / `linear-sweep-complete.md` / `linear-reconcile.md` |
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The reconciler verbs — `/complete-task`, `/sweep-for-complete`, and `/reconcile-tasks` — are `linear`-only in v1. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -102,7 +102,7 @@ Per-handler support:
 
 1. Asks the handler for unclaimed, small-enough candidates.
 2. Walks candidates in priority order and asks the model "can I finish this in this session without a human?" — first feasible candidate wins. Rejected candidates get a one-line skip comment in the tracker.
-3. Handler claims the chosen candidate atomically (concurrency guard against parallel claims), branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the merge automatically marks the work done.
+3. Handler claims the chosen candidate atomically (concurrency guard against parallel claims), branches from `<base>` (default `main`) using the handler-published branch name, does the work, opens a PR with a tracker-link in the body so the follow-on reconciler flow can complete the issue once that linked PR merges.
 4. Bail path (mid-execution infeasibility): handler unclaims and flags for human review; `/do-tasks` stops without silently rolling to the next candidate.
 
 ### List (`/list-tasks`)
@@ -254,6 +254,8 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 | `done`             | PR merged                                              | terminal                                                                                                                     |
 
 > **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The task file is deleted as part of readying the review PR, so it cannot carry these statuses in the file system. `/list-tasks` populates these two columns by querying `gh pr list --label task-loop --state open` (needs_review) and `--state merged` (recent done). An in-flight **claim** uses the separate `task-claim` label (and keeps its `in_progress` file), so it does **not** appear in `needs_review` — the claim PR only becomes a `task-loop` PR once the work is done and the file is deleted. For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
+>
+> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr`, `gh-issue`, and `jira` paths keep their native merge-derived completion behavior.
 
 ### Confidence check (used by `/promote-tasks`)
 

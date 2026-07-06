@@ -79,7 +79,11 @@ the auth flows):
   keychain access (see `commands/handlers/gh-issue-config.md` step 1).
 - `linear` → the Linear MCP is reachable: call `<linear-mcp>__list_teams` and
   confirm it returns teams (see `commands/handlers/linear-common.md` → "Preflight
-  pattern").
+  pattern"). Also confirm the reconciler handler files
+  `commands/handlers/linear-complete.md`,
+  `commands/handlers/linear-sweep-complete.md`, and
+  `commands/handlers/linear-reconcile.md` resolve; if any are missing, report
+  `WARN` with the missing path.
 - `jira` → the Atlassian MCP is reachable: call
   `<atlassian-mcp>__getAccessibleAtlassianResources` and confirm it returns sites
   (see `commands/handlers/jira-config.md` step 1).
