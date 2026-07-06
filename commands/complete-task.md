@@ -22,7 +22,8 @@ handler's terminal `done`/`completed` state.
 > face value and completes it. The merge-verification step lives **one layer
 > up**, in `/sweep-for-complete` (a future command that discovers merged PRs and
 > then calls this primitive per verified issue, passing an already-verified
-> signal — see the handler file's `--assume-verified` contract). `/complete-task`
+> signal — see the handler file's `assume_verified` caller contract, an internal
+> parameter set only by the sweep, not a user-facing flag). `/complete-task`
 > itself does no PR discovery and no verification: it is the purely mechanical
 > "flip this one state" step, nothing more. Do not add merge-detection logic
 > here — that belongs in the sweep, one layer up.

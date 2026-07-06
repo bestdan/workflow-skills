@@ -38,7 +38,11 @@ This phase takes, in addition to the identifier:
   set it.
 - **`comment_body`** (string, optional) — the completion note to post. The
   sweep passes something like `Closed by merge of PR #<n>`; a bare manual
-  invocation with no note supplied defaults to `Completed via /complete-task`.
+  invocation with no note supplied (the parameter **omitted**) defaults to
+  `Completed via /complete-task`. To post **no comment at all**, the caller
+  passes an **empty string** (`comment_body: ""`) — that is the explicit
+  no-comment signal step 7 checks for; omitted and empty are deliberately
+  distinct.
 
 ## Steps
 
@@ -47,10 +51,10 @@ This phase takes, in addition to the identifier:
    failure, stop with the same error messages.
 
 2. **Resolve the issue.** Call `<linear-mcp>__get_issue` with the given
-   identifier. Capture its UUID `id`, current `state` (`id`, `name`, `type`),
-   and `type` (bug/feature/etc. — not needed for the transition itself, but
-   useful in the report). If the identifier doesn't resolve, stop and report
-   "no issue found for `<identifier>`".
+   identifier. Capture its UUID `id` and current `state` (`id`, `name`, and the
+   state's `type` — the workflow-state type enum, the only "type" this flow
+   reads). If the identifier doesn't resolve, stop and report "no issue found
+   for `<identifier>`".
 
 3. **Resolve the target `completed`-type state id.** Call
    `<linear-mcp>__list_workflow_states` with the team `id` from step 1. Pick the
@@ -60,9 +64,13 @@ This phase takes, in addition to the identifier:
    exists, prefer the one marked default by the API; otherwise take the first.
 
 4. **Idempotence check.** If the issue's current state `type` (from step 2) is
-   already `completed` or `canceled`, **stop here** — do not write. Report:
-   "`<IDENTIFIER>` is already complete (`<current state name>`) — no change
-   made."
+   already `completed` or `canceled`, **stop here** — do not write. The two
+   terminal types get **distinct** reports (a canceled issue is not complete,
+   and this flow never silently resurrects one):
+   - `completed` → "`<IDENTIFIER>` is already complete (`<current state
+     name>`) — no change made."
+   - `canceled` → "`<IDENTIFIER>` is canceled (`<current state name>`) — not
+     changing it. Reopen it first if you really mean to complete it."
 
 5. **`--dry-run` and confirmation.**
    - **`dry_run: true`** → print the planned transition and **stop, no write**:
@@ -90,9 +98,10 @@ This phase takes, in addition to the identifier:
 7. **Comment (optional, caller-supplied).** Call `<linear-mcp>__save_comment`
    with `issueId` = the issue's UUID `id` and `body` = `comment_body` from the
    caller contract, defaulting to `Completed via /complete-task` when the
-   caller supplied none. Skip this step only if the caller explicitly passes an
-   empty/no-comment signal (the sweep may choose to batch its own summary
-   comment elsewhere instead).
+   parameter was omitted. Skip this step only when the caller passed the
+   explicit no-comment signal — `comment_body: ""` (empty string), per the
+   caller contract — e.g. a sweep that batches its own summary comment
+   elsewhere instead.
 
 8. **Report.** Identifier, old state name → new state name, and whether a
    comment was posted (and its body, if short). On dry-run or idempotent
