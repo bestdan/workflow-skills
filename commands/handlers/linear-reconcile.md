@@ -75,6 +75,10 @@ counts into this command's combined report under the `→ Done` heading.
    `state` filter is single-valued, so a team with two `backlog`-type states
    and one `unstarted`-type state means three calls per scope; union the
    results per scope, same pattern as `linear-sweep-complete.md` step 2.2.
+   **Never** pass the synthetic `"__unassigned__"` sentinel as a `projectId`
+   — the Unassigned scope is covered by the client-side exclusion pass
+   (`projectId` omitted, keep only issues outside the configured projects),
+   exactly as `linear-claim.md` "Find candidates" does.
 
 2. **Resolve each issue's PR.** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`
@@ -138,7 +142,9 @@ explicit "nothing changed (dry-run)."
 - **Row 2** — for each row-2 candidate, **one** `<linear-mcp>__save_issue`
   call setting `id` to the issue's UUID and `state` to the resolved
   In-Review/started state id from step 3.4 above (do not touch `labels` or
-  `assignee`), followed by **one** `<linear-mcp>__save_comment` call:
+  `assignee`), followed by **one** `<linear-mcp>__save_comment` call (with
+  `issueId` = the issue's UUID and `body` = the text below — same parameter
+  names as `linear-claim.md` and `linear-complete.md`):
 
   ```
   Moved to In Review by /reconcile-tasks — open PR #<n> (<url>) found while
