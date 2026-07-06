@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.28.0] - 2026-07-06
+
+### Features
+
+- add staleness pre-flight so reviews never run on stale local state (#129) (76acb0b)
+
 ## [1.27.0] - 2026-07-04
 
 ### Features
