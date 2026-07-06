@@ -39,9 +39,9 @@ die() { echo "preflight-freshness: $*" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --remote) remote="$2"; shift 2 ;;
-    --ref) refs+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
+    --ref) [ $# -ge 2 ] || die "missing value for --ref"; refs+=("$2"); shift 2 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
