@@ -6,9 +6,11 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 **Shared reference:** see `linear-common.md` for connection details, full config schema (including the `max_estimate` and `base_branch` keys used here), preflight pattern, and the kanban mapping table this file reads against.
 
-> **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Merge is the only completion signal, and Linear's GitHub integration handles that automatically when the PR (with `Closes <identifier>` in its body) merges. If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
+> **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Completion is now driven by the reconciler verbs — `/complete-task` (the primitive), `/sweep-for-complete` (the merge-verified sweep), and `/reconcile-tasks` (the bounded reconciler built on both) — not by Linear's GitHub integration, which is **disabled** (it over-closed: a bare `<TEAM>-NNN` id anywhere in a PR's title or body was treated as a closing link and swept unrelated sibling issues to `Done`). If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
 
 ## PR body magic words
+
+> **Inert for completion while the integration is disabled.** The magic words below no longer drive any state change — nothing reads them to complete an issue; that job now belongs to the reconciler verbs, which key off the explicit `links` attachment (see "Move to review on PR open"), never off ids parsed from PR text. This section is kept as intent documentation and re-enables cleanly if the integration is ever turned back on. The bare-id discipline below stays **mandatory regardless**: it is the exact reason the integration was disabled, and a bare id would go live again the moment anyone re-enables it.
 
 Linear's GitHub integration scans the **whole** PR title and body for issue ids, not just the `Closes` line. On merge it moves every id referenced with a **closing** magic word to the team's `completed` state.
 
@@ -134,7 +136,7 @@ The claim is a deterministic **first-writer-wins election on an append-only log*
 
 > **Implementation note:** the lock hinges on `list_comments` returning a usable `createdAt` and a stable comment `id` for the tie-break. Confirm both during implementation; if either is missing or non-monotonic, define the fallback ordering key before relying on the election.
 
-> **Never** move the issue to a `completed`/`canceled` state from this path — merge is the only completion signal (the hard rule at the top of this file). The claim sets a `started`-type state only.
+> **Never** move the issue to a `completed`/`canceled` state from this path — completion belongs to the reconciler verbs, not the claim path (the hard rule at the top of this file). The claim sets a `started`-type state only.
 
 ## Judge feasibility
 
@@ -153,7 +155,7 @@ If **feasible**: print the issue's identifier, title, and a one-sentence rationa
 
 Called from `/do-tasks` immediately after `gh pr create` succeeds.
 
-This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing), and it transitions the issue to a review state if the team has one.
+This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing, and the GitHub integration that would otherwise create this link is disabled), and it transitions the issue to a review state if the team has one.
 
 1. **Resolve the target state.** From the cached state map (find-candidates step 2), look for a `started`-type state whose name (case-insensitive) is `In Review`. If found, capture its id. If not, leave the state field unset in step 3 — the issue stays in its current `started` state (`In Progress`). Never move the issue to a `completed`-type state here, regardless of how done the work feels.
 
@@ -167,7 +169,7 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
 
 4. **No additional comment.** The PR-URL comment already posted by `/do-tasks` right after `gh pr create` is the user-facing signal that review has started; the `links` attachment is the structural one.
 
-> Linear's GitHub integration may also create its own PR↔issue link if the team's repo is connected, but that depends on branch-name matching or magic words in the PR body — neither is reliable. The explicit `links` attachment above does not depend on the GitHub integration at all. If the integration also fires, you end up with one link (Linear de-duplicates by URL).
+> With Linear's GitHub integration **disabled**, the explicit `links` attachment above is not just the reliable path — it is the **only** one. It does not depend on branch-name matching or magic words in the PR body at all, and it is exactly what `/sweep-for-complete` reads later to verify this issue's own PR merged and complete it. If the integration is ever re-enabled, it may also create its own PR↔issue link on branch-name/magic-word detection; that's fine to leave de-duplicating by URL against the one set here, but do not rely on it.
 
 ## Bail
 

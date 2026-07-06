@@ -394,12 +394,17 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    (`related to`, `part of`, `towards`). A **bare** identifier — or a bare Linear
    URL, which embeds one — is treated as a closing link and the sibling issue gets
    auto-completed even though this PR did not do its work. See `linear-claim.md`
-   "PR body magic words".
+   "PR body magic words". With Linear's GitHub integration disabled, this magic
+   word is inert for completion — completion is driven by the reconciler verbs
+   (`/sweep-for-complete` / `/reconcile-tasks`), not by anything parsed from the
+   PR body — but it stays because it documents which issue this PR finishes and
+   re-enables cleanly if the integration is ever turned back on.
 7. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
    PR via `links` and move to `In Review` if the team has one. **Never move the
-   issue to a `completed`/`canceled` state** — merge is the only completion signal,
-   handled by Linear's GitHub integration. This hard rule from `linear-claim.md`
-   carries over unchanged.
+   issue to a `completed`/`canceled` state** — completion belongs to the
+   reconciler verbs (`/complete-task`, `/sweep-for-complete`, `/reconcile-tasks`),
+   not to Linear's GitHub integration, which is disabled. This hard rule from
+   `linear-claim.md` carries over unchanged.
 8. **Bail (mid-execution → halt)** — if the work breaks _while building_ (after
    step 5 began), `linear-claim.md` "Bail": `git stash push -u` the WIP, remove
    `auto-claimed`, add `human-approval-requested`, revert the issue to the
