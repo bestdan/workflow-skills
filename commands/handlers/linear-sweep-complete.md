@@ -54,24 +54,24 @@ already terminal.
 
 1. Call `<linear-mcp>__list_workflow_states` with the team `id` (cache the
    state-id → type map, same cache `linear-claim.md` and `linear-complete.md`
-   build). Resolve the state ids for type `started` whose **name**
-   (case-insensitive) is `In Progress` **or** `In Review` — both are
-   `started`-type per the kanban mapping in `linear-common.md`, and both are
-   candidates: an `In Review` issue is exactly the case where a PR opened,
+   build). Resolve **every** state id of type `started` — by **type only,
+   never display name** (names are user-configurable; see the kanban mapping
+   in `linear-common.md`). On a default team that is `In Progress` and
+   `In Review`, but a team with renamed or extra started columns is covered
+   the same way: any started-type issue can be the case where a PR opened,
    got reviewed, and merged, but nothing moved the Linear issue.
 2. Call `<linear-mcp>__list_issues` once per resolved scope from step 1
-   above:
+   above **per started-type state id from step 2.1** — the tool's `state`
+   filter takes a **single** value, so a scope with two started states means
+   two calls; union the results per scope:
    - `teamId`: resolved team id
    - `projectId`: the scope's `id` (omit for the whole-team scope and for
      `--all`); **never** pass the Unassigned sentinel as a `projectId` — use
      the same exclusion-pass technique as `linear-claim.md`.
-   - `stateId`: the `started`-type state ids from step 2.1 (both `In
-     Progress` and `In Review`, where the team has a distinct `In Review`
-     state — some teams only have one `started`-type state, in which case
-     this is a single id)
+   - `state`: one `started`-type state id from step 2.1 per call
    - `includeArchived`: `false`
-   - Limit: 50 per scope. If a scope truncates, note it in the report — do
-     not paginate.
+   - Limit: 50 per scope × state. If a query truncates, note it in the
+     report — do not paginate.
 3. Union the results across scopes (tag each with its source scope for the
    report; no dedup needed — the Unassigned exclusion pass is disjoint by
    construction, same as `linear-claim.md`).
@@ -116,8 +116,12 @@ this as an error.
 For each issue with a resolved PR, call:
 
 ```bash
-gh pr view <url-or-number> --json state,mergedAt
+gh pr view <url-or-number> --json number,url,state,mergedAt
 ```
+
+(`number` and `url` are captured here so step 6's completion comment has
+them from the merge-verification read itself, whichever step-3 fallback
+resolved the PR.)
 
 Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
 candidate for step 5.
@@ -160,7 +164,8 @@ confirmation," "Apply," "Comment," and "Report") with:
   independently merge-verified against its **own** PR before this call, never
   inferred from another issue's PR.
 - `comment_body: "Closed by merge of PR #<n> (<PR URL>)"` — `<n>` and the URL
-  from step 4's `gh pr view` result for that issue.
+  from the `number`/`url` fields step 4's `gh pr view` captured for that
+  issue.
 
 Complete **only** the issue whose own linked PR merged — never a sibling or a
 co-mentioned issue. `linear-complete.md`'s own idempotence check (its step 4)
