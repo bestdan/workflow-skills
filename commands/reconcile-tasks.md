@@ -12,7 +12,10 @@ top of it — it fixes issues sitting in the **wrong** state against a fixed,
 enumerated rule table, not open-ended "fix whatever looks off" judgment. **v1
 enforces exactly two rows**, both promote/complete-only:
 
-1. Linked PR **merged**, issue not `completed` → **Done**.
+1. Linked PR **merged**, issue still in a **started**-type state → **Done**
+   (delegated to the `/sweep-for-complete` flow, whose started-type scope this
+   row inherits — a merged PR on a non-started issue is reported as an
+   anomaly, not acted on).
 2. **Open** PR, issue in a **non-started** column (Backlog/Todo) → **In
    Review**.
 

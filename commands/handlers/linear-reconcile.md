@@ -8,8 +8,13 @@ nothing else:
 
 | # | Detected drift                                                | Correction  |
 | - | ------------------------------------------------------------- | ----------- |
-| 1 | linked PR **merged**, issue not `completed`                   | → Done      |
+| 1 | linked PR **merged**, issue still in a **started**-type state | → Done      |
 | 2 | **open** PR, issue in a **non-started** column (Backlog/Todo) | → In Review |
+
+Row 1 is scoped to **started**-type issues because it delegates wholesale to
+`linear-sweep-complete.md`, whose candidate query covers exactly those. A
+merged PR on a **non-started** issue falls between the rows — v1 reports it
+as an anomaly (step 3.3) rather than acting.
 
 > **Bounded-rule-set doctrine.** This table is deliberately closed, not a
 > starting point. Two more rows are known, deferred follow-ups — **do not add
