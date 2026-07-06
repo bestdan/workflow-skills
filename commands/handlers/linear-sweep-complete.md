@@ -79,7 +79,13 @@ already terminal.
 ## 3. Resolve each issue's PR
 
 For each in-flight issue from step 2, resolve its **own** PR in this priority
-order — stop at the first that resolves:
+order — stop at the first **source** that resolves, but keep **every** PR that
+source yields. A source can return more than one PR (several `links`
+attachments, several bracket-token title hits, several PRs off one branch) —
+an issue can legitimately accumulate a stale closed-unmerged PR _and_ a newer
+merged one, and picking the first hit could mask the merged one. Step 4
+checks **all** of a source's PRs and the issue qualifies if **any** of its own
+PRs verified as merged (report that one):
 
 1. **The issue's `links` attachment** — the explicit attachment `/do-tasks`
    writes in `linear-claim.md` "Move to review on PR open." Call
@@ -113,7 +119,7 @@ this as an error.
 
 ## 4. Check merge state
 
-For each issue with a resolved PR, call:
+For **each** of the issue's resolved PRs (step 3 can yield several), call:
 
 ```bash
 gh pr view <url-or-number> --json number,url,state,mergedAt
