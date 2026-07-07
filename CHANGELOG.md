@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.29.0] - 2026-07-07
+
+### Features
+
+- add GitHub Copilot CLI as a built-in co-reviewer (#132) (2243993)
+
 ## [1.28.0] - 2026-07-06
 
 ### Features
