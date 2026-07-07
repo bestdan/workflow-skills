@@ -1,0 +1,39 @@
+# co-review reviewer — `devin` (Cognition Devin CLI)
+
+`devin` is a built-in default reviewer. Like `agy` — and unlike stateless `codex` — it is **cloud-backed and session-based**: it authenticates to Devin's cloud, runs the model there, and persists a **session per directory** (`devin list`, `-c/--continue`, `-r/--resume`). It therefore **requires a Devin login, network access, and a plan with access to the pinned model** — its invocation **cannot run inside a restrictive Bash sandbox** (under sandbox it panics trying to write its own log file). If `devin` errors with `/upgrade to access this model`, `not authenticated`/`unauthorized`, or a network/permission failure, treat it like any missing reviewer: note it, skip it, never fatal. Its voice is Cognition's own SWE model, distinct from Claude, OpenAI (`codex`), and Gemini (`agy`).
+
+Read the shared dispatch contract in [`../SKILL.md`](../SKILL.md) — single-shell-call, the `<INPUT>` / `<REQUESTS>` / `<POINTER>` placeholders, per-agent paths, and the shared **probe warnings** (never wrap a probe in `timeout`; disambiguate `127`) — before using the probe and invocation below.
+
+## Pre-flight probe
+
+Auth is file-based, so it has **no keychain/SSH split like `agy`** — credentials live in `~/.local/share/devin/credentials.toml` and work identically over SSH. But still **pre-flight probe before dispatching**: run bare `devin auth status` (no `timeout` wrapper — see the shared probe warnings in SKILL.md) — **rc 0** in <1s when logged in and prints the tier plus **allowed models** (so it doubles as a model-gating check); **rc≠0** / `not authenticated` when not. If it fails, **skip `devin`** (note it, never fatal) instead of dispatching.
+
+## Driving quirks (verified against `devin 2026.8.18`)
+
+Because it's stateful and agentic, drive it as a reviewer this specific way:
+
+- **Feed the prompt via `--prompt-file`, never stdin.** This is not the codex/agy stdin pattern. Bare `devin -p` reading piped stdin **panics** (`repl_mode` unwrap on `None`); an inline `devin -p "<prompt>"` argument **suppresses stdin entirely** and makes devin ignore your diff and instead auto-load ambient repo context (git status, `AGENTS.md`, etc.). The only reliable path is to write the assembled `rubric + requests + diff` to `<INPUT>` and pass `--prompt-file "<INPUT>"`. `<INPUT>` is a **fixed absolute path** so the command stays invariant — but note it now appears **in the command string**, so devin's exact-match allow-rule includes that literal path (unlike codex/agy/copilot, which pipe via `cat` and keep the path out of the command).
+- **Validate `<INPUT>` is non-empty first** (`[ -s "<INPUT>" ] && devin …`), exactly as for `agy`: never hand a stateful agent an empty prompt file.
+- **Always start a fresh session.** Never pass `-c`/`--continue` or `-r`/`--resume` for a review — each review must depend only on the current diff, never on an accumulated session.
+- **Read-only is enforced structurally, not by prose.** Pass **`--sandbox`** (devin's own OS-level read/write scope enforcement — macOS seatbelt / Linux bwrap+seccomp) **and** **`--permission-mode auto`** (auto-approves _only_ read-only tools; in non-interactive mode any edit/command that isn't auto-approved is denied, not queued). **Never** pass `accept-edits`, `smart`, or `dangerous`. Keep both flags in the command **and** its allow-rule — don't rely on the rubric alone. (`--sandbox` here is devin's own sandbox for its tools; the `devin` process itself still runs **unsandboxed** at the Bash-tool level, since it needs network + log writes.) devin is agentic and will otherwise explore the repo, so the rubric's "review only what follows" framing matters.
+- **Pin `--model`; default `swe-1.6`.** The built-in invocation defaults to **`swe-1.6`** — Cognition's own current-gen SWE model; in testing it flagged an injected bug correctly in ~3.5s. **Model access is tier-gated, and the gating is not obvious:** on the **Devin Free tier** every model except `swe-1.6-slow` returns `/upgrade to access this model` (and the unpinned default panics), so Free users must pin **`swe-1.6-slow`**; on **Pro** the `swe-1.6-slow` variant disappears from the model list and `swe-1.6`/`swe-1.6-fast`/`gpt-5.2`/`claude-*`/`gemini-*` become available. Pin whatever your tier allows via the config object form `- {name: devin, model: <m>}`. Note a stale-auth trap: right after upgrading, the cached auth still reports the old gating, so a just-unlocked model can spuriously return `/upgrade` on the first call — re-run `devin auth status` (which re-fetches) and retry before concluding a model is unavailable. Changing the model changes the command string and re-prompts the exact-match approval.
+- **Treat `devin` as advisory-only, always reconciled** — like every external reviewer, its output must pass through the reconciler; never let it be the sole reviewer.
+
+## Invocation (assemble + dispatch in one shell call)
+
+- **GitHub mode, with requests** → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && devin -p --prompt-file "<INPUT>" --model "swe-1.6" --sandbox --permission-mode auto` — devin reads the assembled `rubric + requests + diff` from the file via **`--prompt-file`** (there is **no stdin pipe** and **no `-p "<POINTER>"` argument** — piping stdin panics and an inline prompt suppresses the file; the rubric itself carries the read-only instruction). The leading `[ -s "<INPUT>" ] &&` is the same empty-input guard used for `agy`. `--sandbox` + `--permission-mode auto` enforce read-only at the OS and tool layers; `--model "swe-1.6"` is the default pin (use `swe-1.6-slow` on the Free tier, or swap to `swe-1.6-fast`/`gpt-5.2`/… via the config object form, which re-prompts the exact-match approval). devin needs network + a Devin login, so this line must run **unsandboxed** in the Bash tool. **Never** add `-c`/`--continue`/`-r`/`--resume` — every review is a fresh session.
+- **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; [ -s "<INPUT>" ] && devin -p --prompt-file "<INPUT>" --model "swe-1.6" --sandbox --permission-mode auto`
+- **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md. Keep the `--prompt-file "<INPUT>"` tail (there is no `cat "<INPUT>" |` pipe for devin).
+
+## Permission allow-rules (exact-match, approve once)
+
+Merge into the `permissions.allow` array (see SKILL.md → Permissions). The first is the reviewer command; the second is the pre-flight auth probe. Replace `<INPUT>` in the rule with the **same literal fixed absolute path** the invocation writes to (it appears in the command because devin reads it via `--prompt-file`); keep it a stable user-level path so one rule works across repos:
+
+```json
+"Bash(devin -p --prompt-file \"<INPUT>\" --model \"swe-1.6\" --sandbox --permission-mode auto)",
+"Bash(devin auth status)"
+```
+
+The `--prompt-file "<INPUT>"` path plus the flag set must match **byte-for-byte** between the command and the rule. If you pin a different `devin --model` or a different read-only flag, update both.
+
+> `devin auth status` is the same per-coder probe the `select-coder` skill's [`scripts/probe-coders.sh`](../../../scripts/probe-coders.sh) runs for its availability cache. co-review keeps its own **live** rc-gate rather than reading that (possibly 30-day-stale) cache. If you change the probe command, update it in both places so they don't drift.
