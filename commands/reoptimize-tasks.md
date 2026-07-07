@@ -1,6 +1,6 @@
 ---
-description: Re-optimize an existing tracker backlog — across a project, initiative, or team — by reconciling prose dependencies against native relations, surfacing hidden cross-project blockers, detecting cycles/stale links/priority inversions and overlap, then applying the approved fixes. v1 supports the linear handler only; jira and gh-issue are planned; repo-pr is unsupported (re-optimize the plan files directly).
-allowed-tools: Bash(git *), Bash(cat *), Bash(python3 *), Glob, Read, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_initiatives, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_initiatives, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
+description: Re-optimize an existing tracker backlog — across a project, initiative, or team — by reconciling prose dependencies against native relations, surfacing hidden cross-project blockers, detecting cycles/stale links/priority inversions and overlap, then applying the approved fixes. v1 supports the linear and gh-issue (report-only) handlers; jira is planned; repo-pr is unsupported (re-optimize the plan files directly).
+allowed-tools: Bash(git *), Bash(cat *), Bash(python3 *), Bash(gh *), Glob, Read, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_initiatives, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_initiatives, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
 argument-hint: "[project|initiative|team] [name]"
 ---
 
@@ -40,12 +40,18 @@ Dispatch on the `handler:` key (same resolution as `/push-plan` §1):
 - `handler: linear` → follow `commands/handlers/linear-reoptimize.md` (§Linear
   below names the steps; that file has the detail). If the relative path doesn't
   resolve, find it with **Glob** (`**/commands/handlers/linear-reoptimize.md`).
-- `handler: jira` or `handler: gh-issue` → **planned, not yet implemented.**
-  **stop** with: "`/reoptimize-tasks` supports the `linear` handler in v1;
-  `<handler>` re-optimize is a planned follow-up. For now, re-order in your
-  tracker directly." (When these land they'll each get a `commands/handlers/<handler>-reoptimize.md`
-  reference and the tool surface — Atlassian MCP for jira, `gh` CLI for gh-issue —
-  in this command's `allowed-tools`, mirroring `push-plan.md`.)
+- `handler: gh-issue` → follow `commands/handlers/gh-issue-reoptimize.md` — a
+  **report-only** downgrade of the Linear flow: GitHub Issues have no native
+  dependency edge, so Dimensions 1–2 only ever propose a suggested `Blocked
+  by:`/`Related:` body footer line, never a real link; priority/label fixes
+  still apply via `gh issue edit`. If the relative path doesn't resolve, find
+  it with **Glob** (`**/commands/handlers/gh-issue-reoptimize.md`).
+- `handler: jira` → **planned, not yet implemented.** **stop** with:
+  "`/reoptimize-tasks` supports the `linear` and `gh-issue` handlers today;
+  `jira` re-optimize is a planned follow-up. For now, re-order in your tracker
+  directly." (When it lands it'll get a `commands/handlers/jira-reoptimize.md`
+  reference and the Atlassian MCP tool surface in this command's
+  `allowed-tools`, mirroring `push-plan.md`.)
 - `handler: repo-pr`, no `handler:` key, or file absent → **stop** with:
   `repo-pr handler: tasks live as local plan files, not a tracker graph — re-optimize the plan directly, or /push-plan first to get a tracker to re-optimize.`
 - Any other value → **stop** with: "Unknown task handler `<value>` in
@@ -64,7 +70,9 @@ ask via `AskUserQuestion` (header: "Scope").
   the user's concern is "ordering across projects."
 - **team** — every issue in the team.
 
-Run the handler's preflight to resolve the team id (Linear: `linear-common.md`).
+Run the handler's preflight to resolve the team id (Linear: `linear-common.md`;
+gh-issue: `gh auth status` + repo resolution, and note gh-issue has no
+initiative-level grouping — see `gh-issue-reoptimize.md` §Load).
 Match a typed name case-insensitively against the real projects/initiatives; on
 no match, push back and re-ask rather than guessing.
 
