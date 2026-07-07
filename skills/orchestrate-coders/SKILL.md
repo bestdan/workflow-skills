@@ -12,6 +12,12 @@ agentic coder that can take a task spec and produce a diff qualifies. One
 backend (`opus`, a native Claude subagent) is special-cased because it needs no
 external CLI; everything else is driven the same way through a shell contract.
 
+Important distinction for Claude Code sessions: the `Agent` tool only reaches
+registered Claude subagents. Do not treat that as the availability boundary for
+this workflow. `codex`, `agy`, `devin`, and custom coders are valid delegates
+when their CLIs are installed; dispatch them with `Bash` using the CLI contract
+instead of trying to spawn them through `Agent`.
+
 ## Coder spec
 
 A coder is named as `<backend>[:<model>]`:
@@ -86,6 +92,10 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
 2. **Resolve coders** per the config flow above. For each resolved CLI backend,
    verify it's actually runnable (`command -v`); a missing coder is reported
    and skipped, and if **no** coder remains, fall back to `opus` and say so.
+   "Not registered as an Agent-tool subagent" is not a reason to skip a CLI
+   backend. For network-bound CLIs, request the required Bash sandbox escape at
+   dispatch time; a sandbox/network denial is an environmental dispatch issue,
+   not evidence that the coder is unavailable.
 
 3. **Decompose into packets.** Each packet must be independently implementable
    and verifiable — roughly PR-sized or smaller. Write each packet spec as a
@@ -109,6 +119,14 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
    mixed notification model in one wave: CLI coders return via background
    `Bash`, opus via the Agent tool — two different latency/notification
    signals, not a bug.
+
+   The packet spec is the delegated coder's initial prompt. It must explicitly
+   say that the recipient is a delegated implementation agent, name its
+   workspace root, require edits only under that root, and ask for a short final
+   report with files changed and verification status. CLI coders receive that
+   prompt through `Bash` (usually stdin or `--prompt-file`), while `opus`
+   receives the same content as the Agent prompt. The orchestrator remains the
+   only actor that decides whether the diff is acceptable.
 
 5. **Verify each packet as it lands.** First, **check containment**: run
    `git status --porcelain` in the orchestrator's own main checkout (no `-uno`

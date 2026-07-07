@@ -22,6 +22,15 @@ Per packet:
    `dprint check` inside the coder's verification run. Include any
    `sandbox_workarounds` from `.coders.yml` in the spec's constraints so
    sandboxed coders don't rediscover them (see Environmental failures).
+   The first paragraph is the initial prompt every CLI coder sees:
+
+   ```md
+   You are a delegated implementation agent for this repository. Your workspace
+   root is <dir>; edit only files under that directory. Implement the task below,
+   run the verification command if your tool permissions allow it, and finish
+   with a short report listing changed files, verification status, and any
+   environmental failures separately from content failures.
+   ```
 3. **Invoke** the coder with cwd `<dir>` (invocations below). **Capture both
    stdout and stderr, and read only the final message / tail** — coders stream
    full file contents and reasoning (codex stdout can exceed 10K lines /
@@ -46,15 +55,19 @@ Per packet:
 ## Known invocations
 
 **codex** — stateless, local, purpose-built for this
-(`codex exec` is its non-interactive mode):
+(`codex exec` is its non-interactive mode). Use stdin with `-`; current Codex
+CLI versions document `--full-auto` as deprecated in favor of
+`--sandbox workspace-write` plus the configured approval policy:
 
 ```sh
-cat "<dir>/.packet-spec.md" | codex exec --cd "<dir>" --full-auto "Implement the task specified on stdin. Work only inside the current directory. Run the verification command in the spec before finishing."
+[ -s "<dir>/.packet-spec.md" ] && codex exec --cd "<dir>" --sandbox workspace-write - < "<dir>/.packet-spec.md"
 ```
 
-`--full-auto` (or your codex version's equivalent workspace-write sandbox
-flag) is safe **only because** the cwd is a throwaway worktree. Add `--json`
-if you need structured events; the final message lands on stdout either way.
+Workspace-write autonomy is safe **only because** the cwd is a throwaway
+worktree. Add `--json` if you need structured events; the final message lands
+on stdout either way. If an older Codex build lacks `--sandbox workspace-write`,
+use that version's equivalent workspace-write/full-auto flag, but keep the
+same non-empty spec-file guard and worktree boundary.
 
 **agy** (Google Antigravity CLI) — agentic, **stateful and memory-backed**,
 needs an Antigravity login and network (run unsandboxed). Three hard rules,
