@@ -1,32 +1,32 @@
 ---
 type: design
-title: Overnight mode — /overnight + /run-task
+title: Auto-pilot mode — /auto-pilot + /deliver-task
 status: draft
 created: 2026-07-08
 revised: 2026-07-08 # after gpt-5.5 high-effort design review (14 findings folded in)
 supersedes-notes: autonomos-mode.md
 ---
 
-# Overnight mode design
+# Auto-pilot mode design
 
 "Claude, pick up this Project and grind autonomously on it overnight."
 
 Grounded in the learnings in `autonomos-mode.md`. Two new skills:
 
-- **`/run-task`** — a standalone primitive that takes ONE task through the full
+- **`/deliver-task`** — a standalone primitive that takes ONE task through the full
   lifecycle: claim → do → PR → co-review → iterate → hand off. Useful
-  interactively on its own; the overnight orchestrator's per-task unit.
-- **`/overnight`** — a two-part skill: an interactive **launch phase** (pre-flight
+  interactively on its own; the auto-pilot orchestrator's per-task unit.
+- **`/auto-pilot`** — a two-part skill: an interactive **launch phase** (pre-flight
   + spawn) and an unattended **run phase** (a thin orchestrator that walks the
-  task graph calling `/run-task`).
+  task graph calling `/deliver-task`).
 
 ## Design principle: compose, never duplicate
 
-The existing skills and handler protocols are battle-tested. `/run-task` and
-`/overnight` are **compositions over them** — they invoke the existing verb or
+The existing skills and handler protocols are battle-tested. `/deliver-task` and
+`/auto-pilot` are **compositions over them** — they invoke the existing verb or
 handler section for every discrete step and add only orchestration. Where an
 existing skill almost fits, we tweak that skill (e.g. add a non-interactive
-mode); we do not fork its logic into overnight-specific prose. Concretely:
+mode); we do not fork its logic into auto-pilot-specific prose. Concretely:
 
 | Step | Reuses |
 |---|---|
@@ -75,7 +75,7 @@ Three stores exist; only one is authoritative.
 
 ### Crash / resume
 
-Not "automated recovery" — but resumable by design. `/overnight --resume`
+Not "automated recovery" — but resumable by design. `/auto-pilot --resume`
 re-reads the run-state branch, reconciles each task's phase against reality
 (does the branch exist? is the PR open? does the tracker show the claim?),
 completes or rolls back the half-done transition using the same write order,
@@ -83,7 +83,7 @@ and continues. A crash costs at most one *phase* of one task, not the night.
 Tasks that can't be reconciled cleanly are `parked` with a morning-report entry
 rather than retried blindly.
 
-## `/run-task` — the per-task lifecycle primitive
+## `/deliver-task` — the per-task lifecycle primitive
 
 One task in, one reviewed PR out. Handler-dispatched like the other task
 skills. Ends at **hand-off, never done**: the task's terminal in-run state is
@@ -147,9 +147,9 @@ read-lag, branch naming) live inside the adapter, not downstream:
   Plan tasks are born `status: new`; launch pre-flight runs the promotion
   check (`promote-tasks` semantics) so the run only ever sees ready tasks.
 
-## `/overnight` — launch phase (interactive, tonight)
+## `/auto-pilot` — launch phase (interactive, tonight)
 
-`/overnight <linear-project | plan-dir> [--until <time>] [--resume]`
+`/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
 
 Pre-flight is automated and runs while the human is awake to fix failures.
 Any hard failure **blocks launch**.
@@ -169,14 +169,14 @@ Any hard failure **blocks launch**.
 7. Spawn the detached orchestrator under sandboxed yolo; report where state
    lives; user goes to bed.
 
-## `/overnight` — run phase (unattended orchestrator)
+## `/auto-pilot` — run phase (unattended orchestrator)
 
 A thin loop; it never writes code itself.
 
 ```
 while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
-    /run-task it (with per-task wall-clock + retry bounds)
+    /deliver-task it (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
 ```
