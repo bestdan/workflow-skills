@@ -30,7 +30,7 @@ behavior (what the adapter does when the underlying handler step fails).
 | `claim`            | Reserve **one** task first-writer-wins; return the claim handle + the branch name to build on | Lost race / already in flight → return "not claimed" so the loop moves on    |
 | `link_pr`          | Attach the opened PR to the task; **leave status unchanged** (the pr-open half of hand-off)   | Attach failure → `flag_for_human` (a built-but-unlinked PR needs a human)    |
 | `set_needs_review` | Transition the task to its **needs-review** state (the hand-off half)                         | Transition failure → `flag_for_human`; never force-complete                  |
-| `flag_for_human`   | Task can't proceed/reconcile: keep it in flight, **raise its priority**, leave a reason       | Best-effort; if even the flag write fails, record it in `MORNING.md`         |
+| `flag_for_human`   | Task can't proceed/reconcile: keep it in flight, **raise its priority**, leave a reason       | Best-effort; if even the flag write fails, record it in `REPORT.md`          |
 | `comment_progress` | Post a progress breadcrumb visible to a human watching the source                             | Best-effort; a failed comment never blocks the loop                          |
 | `wip_limit`        | Return the in-flight cap for the source's scope (the loop honors it before claiming)          | Unknown → treat as the configured default; never claim past an unknown cap   |
 
@@ -101,7 +101,7 @@ frontmatter; status lives in each task file's frontmatter (the vocabulary is
 | `link_pr`          | `repo-pr-execute.md` — relabel the reservation `task-claim` PR → `task-loop` and fill its body; the task file's `status` stays `in_progress`                                                       |
 | `set_needs_review` | Set the task file `status: needs_review`; the open `task-loop` PR **is** the review signal (`skills/task/SKILL.md` **Kanban columns**)                                                             |
 | `flag_for_human`   | Set the task file `status: needs_refinement` (the plan store's human-approval column) + append the reason to the task file; leave branch/PR as-is                                                  |
-| `comment_progress` | **no-op on the source** — a plan file has no comment log; the breadcrumb is routed to the run log / `MORNING.md` instead                                                                           |
+| `comment_progress` | **no-op on the source** — a plan file has no comment log; the breadcrumb is routed to the run log / `REPORT.md` instead                                                                            |
 | `wip_limit`        | `repo-pr-execute.md` **WIP cap** (`wip_limit` from `.task-config.yml`) when configured; otherwise **no-op** (no cap) for a bare plan directory                                                     |
 
 ## Explicit no-ops
@@ -109,10 +109,10 @@ frontmatter; status lives in each task file's frontmatter (the vocabulary is
 Rather than leave any verb undefined per source, the ones that have no natural
 sink are called out:
 
-| Verb               | linear | plan                                                                   |
-| ------------------ | ------ | ---------------------------------------------------------------------- |
-| `comment_progress` | active | **no-op** — routed to `MORNING.md` (no per-task comment log in a plan) |
-| `wip_limit`        | active | **no-op** unless `.task-config.yml` sets `wip_limit` for the repo      |
+| Verb               | linear | plan                                                                  |
+| ------------------ | ------ | --------------------------------------------------------------------- |
+| `comment_progress` | active | **no-op** — routed to `REPORT.md` (no per-task comment log in a plan) |
+| `wip_limit`        | active | **no-op** unless `.task-config.yml` sets `wip_limit` for the repo     |
 
 Every other verb is active on both adapters. The loop calls the verb the same
 way regardless; a no-op adapter simply satisfies the contract without a

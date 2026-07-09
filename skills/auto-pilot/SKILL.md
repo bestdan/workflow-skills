@@ -14,16 +14,17 @@ battle-tested skills and handler protocols rather than duplicating them.
 
 Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/auto-pilot-mode-design.md).
 
-> **Status:** v1 is being built. This SKILL.md establishes the skill home and
-> the run-state reference below. The interactive **launch** phase, the unattended
-> **run** loop, and **`--resume`** are added by the remaining plan tasks; until
-> then this skill is not yet invocable end-to-end.
+> **Status:** v1 is being built. This SKILL.md establishes the skill home, the
+> references below, and the interactive **launch** phase. The unattended **run**
+> loop (which the spawned orchestrator executes) and **`--resume`** land in later
+> tasks; until they do, launch will spawn an orchestrator whose run loop is not
+> yet implemented, so the skill is not yet invocable end-to-end.
 
 ## References
 
 - [`references/run-state.md`](references/run-state.md) — the canonical formats
   and invariants for a run's durable state: the three run files
-  (`RUN.md` / `QUESTIONS.md` / `MORNING.md`), the seven task lifecycle phases,
+  (`RUN.md` / `QUESTIONS.md` / `REPORT.md`), the seven task lifecycle phases,
   the dedicated run-state branch convention, the fixed write order
   (push code → update tracker → commit run state), and the crash-reconciliation
   table `--resume` uses. Launch, run, and resume all read this — no other
@@ -33,3 +34,188 @@ Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/
   `link_pr`, `set_needs_review`, `flag_for_human`, `comment_progress`,
   `wip_limit`) that normalize a Linear project or a plan-with-docs directory to
   the run-state representation, each delegating to an existing handler section.
+- [`references/launch-runtime.md`](references/launch-runtime.md) — the two launch
+  runtime decisions: how the detached orchestrator is spawned (detached
+  `claude -p`, not an in-session Agent) and the sandbox profile it runs under
+  (worktree-confined writes, a default-deny network egress allowlist, and the
+  non-interactive credential model). Launch's spawn step reads this.
+
+## Launch phase (interactive)
+
+Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
+(`commands/auto-pilot.md`). Launch runs **interactively, tonight, while the human
+can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
+**BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
+problem to 3am. It ends by spawning the detached, unattended orchestrator and
+telling the user the run is underway. The unattended **run** loop and
+**`--resume`** are separate (later) tasks; the run loop is what the spawned
+orchestrator executes.
+
+**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`. If
+`--resume` is present, **stop** with the PRE-465 pointer (per
+`commands/auto-pilot.md`) — it is not implemented here. Detect the source
+(existing `dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear**
+project) and resolve the handler from `dev_docs/tasks/.task-config.yml`; any
+handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan only).
+Pick the matching adapter (`references/adapters.md`).
+
+The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
+**supply-and-demand**: steps 2–3 probe what the configured environment can
+_supply_ (auth, resolved config), and the **scout** in step 6 checks what the
+_plan_ will _demand_ (which coder each task routes to) against that supply — the
+join is where a run that would otherwise pass green but die at 3am gets caught
+tonight.
+
+### Step 1 — Worktree + run-state branch (BLOCKS LAUNCH)
+
+Create the dedicated run **worktree** and the **run-state branch**
+`auto-pilot/<run_id>` (the `<run_id>` and branch convention are defined in
+[`references/run-state.md`](references/run-state.md) "Run-state branch"). Confirm
+the plan / task instructions are **committed and present in the worktree** — an
+**untracked plan is a launch blocker** (it is one of the real overnight failures
+this pre-flight exists to catch: a plan that lives only in an uncommitted file
+never reaches the detached orchestrator). If the source is a plan directory, the
+plan files must be committed on the branch the run builds from; if Linear, the
+project must resolve and be reachable. Fail here with the specific missing
+artifact, not a generic error.
+
+### Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
+
+Probe every credential the run will need, each **non-interactively** — a probe
+that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
+failure (see [`references/launch-runtime.md`](references/launch-runtime.md) §3).
+Probe, per dependency:
+
+The probe path depends on the **environment class** (below): a `local-full` run
+authenticates through CLIs; a `claude-web` run has **no local CLIs** and
+authenticates through **MCP** instead. Probe whichever applies:
+
+- **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
+  confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
+- **Linear** (linear source) — `local-full`: resolve the API key from its
+  `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
+  `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
+  Either way, run `linear-common.md`'s shared **preflight** (`list_teams` →
+  match the team) to confirm auth actually works, not just that it resolves.
+- **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
+  configured coder's auth probe via `scripts/probe-coders.sh`, the **single
+  source of truth** for how each coder is probed; don't restate its per-coder
+  commands here (they would drift from the script). A logged-out coder the run
+  depends on is a blocker, not a silent skip.
+- **MCP** — any MCP the tasks touch: one cheap read call to confirm the token is
+  live.
+
+Each probe runs **through the sandbox wrapper** the orchestrator will use (per
+§"Step 7"), so a probe can't pass outside the jail while failing inside it. Any
+interactive-only or failing auth **BLOCKS LAUNCH** with the specific dependency
+named.
+
+While probing, capture the **environment fingerprint** — which coder/tool
+binaries exist on `PATH` (`codex`, `devin`, `agy`, `op`, `gh`) and the resulting
+**environment class** (`local-full` when the local CLIs are present; `claude-web`
+when running in the cloud/web environment, which has **no local CLIs** and a
+narrower permission surface). **Detect** the facts (a `command -v` probe can't
+lie); a declared class may be recorded too, but **detection wins on conflict**.
+Record the fingerprint on the run-state branch — the step-6 scout joins against
+it, and `--resume` in a different environment (launched local, resumed from web)
+re-runs that join.
+
+Also confirm **unattended viability** here, up front while the human is present
+rather than at spawn: a `local-full` run needs the machine to stay awake for the
+run's duration (lid-open, or a tested clamshell/power setup — `caffeinate` alone
+does not survive lid-close; see
+[`references/launch-runtime.md`](references/launch-runtime.md) "Laptop sleep").
+If it can't be guaranteed, **BLOCKS LAUNCH**. (This and the auth/binary probes
+are good candidates to extract into a small pre-flight helper script.)
+
+### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
+
+Collapse every config decision the unattended run could hit into a fixed choice,
+so nothing prompts at 3am:
+
+- **Co-review reviewer set** — resolve `/co-review`'s reviewer set from
+  `.co-review.yml` into the concrete list that will run under `--non-interactive`
+  (bounded per-reviewer timeouts; the reviewer prompt is never asked mid-run).
+- **Coder config** — run `select-coder` once to resolve each task's
+  `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
+  dispatches without prompting for a missing default.
+- **Custom/local commands** are **disabled** for the run unless explicitly
+  approved at this step (untrusted-config posture, matching co-review's rule).
+
+Any decision that can't be resolved here — and would therefore prompt mid-run —
+**BLOCKS LAUNCH**.
+
+### Step 4 — Gitignore sanity check
+
+Check the file types the tasks will produce (the plan's `related_files` and any
+expected build/output artifacts) against the repo's ignore rules with
+`git check-ignore`. A match — an **intended output that is git-ignored** — does
+**not** block launch: an ignored directory is common and usually fine to force
+through. Record that the orchestrator commits those paths with `git add -f` so
+the work lands despite the ignore rule, and surface the list in the launch
+summary so the human can still catch a genuinely wrong ignore (an output that
+should never be committed) while awake.
+
+### Step 5 — Record verify tooling + exercise path
+
+Resolve the project's named check command (`dli check` → `just check` →
+`scripts/check.*`, the same precedence the repo's check tooling uses) and the
+end-to-end **exercise path** (how a task's feature is driven, not just its tests
+— the work's definition of done). Write both into `RUN.md`'s `verify_command` and
+`exercise_path` front-matter fields (format per
+[`references/run-state.md`](references/run-state.md) "`RUN.md`"), so every task's
+`/deliver-task` verifies the same way.
+
+### Step 6 — Materialize the task graph into run state
+
+Run the adapter's `list_ready` and `dependency_graph`
+([`references/adapters.md`](references/adapters.md)) to build the run's task graph
+and its blocker edges. Write `.auto-pilot/RUN.md` — front matter (`run_id`,
+`work_source`, `base_branch`, `verify_command`/`exercise_path` from step 5) plus
+the per-task table with each task's initial **phase** and its `base` edge (main
+for an independent task, the parent's branch for a chained one) — in the exact
+format defined in [`references/run-state.md`](references/run-state.md) "`RUN.md`".
+Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/REPORT.md`. **Commit**
+all three to the run-state branch (the first write under the run-state branch's
+fixed write order). Do **not** restate the run-state formats here — they live in
+that reference.
+
+**Scout — per-task capability join (BLOCKS LAUNCH).** With the graph now
+materialized and each task's coder resolved (step 3) against the environment
+fingerprint (step 2), check the **demand** side the auth probes structurally
+can't see: for **each** task, take the `<backend>` it routes to and confirm that
+backend **exists in this environment**. A task routed to a backend absent
+here — the motivating case is a `codex` task in a `claude-web` run with no
+`codex` binary — **BLOCKS LAUNCH**, naming the task, the missing backend, and the
+fix (install it, or re-route the task in the `select-coder` config). This is a
+**deterministic** check only: it blocks solely on a provable route-vs-environment
+gap, never on a guess about what a task's prose might need. (Inferring
+capability demands from task _text_ — "needs a DB", "needs network" — is the
+predictive scout, a warn-only follow-up; it is deliberately **not** here, so
+nothing blocks launch on a speculative read.)
+
+**v1 treats every route as _required_** — an absent backend blocks. Softening
+this to **required-vs-preferred** (a _preferred_ backend that's absent warns and
+falls back to the next-ranked `select-coder` spec instead of blocking, while a
+_required_ one still blocks) is a planned follow-up — `select-coder` already
+returns ranked specs, so the fallback order exists; the missing piece is the
+require/prefer bit on the task route.
+
+### Step 7 — Spawn the detached orchestrator
+
+Per [`references/launch-runtime.md`](references/launch-runtime.md):
+
+1. Write the self-contained **launch script** — env, the sandbox wrapper (the
+   two-layer profile: seatbelt/bwrap for filesystem+process, the harness network
+   allowlist narrowed to this run's tools for host egress), and log redirection
+   to `.auto-pilot/orchestrator.log`.
+2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
+   bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
+   awake was already confirmed in the pre-flight (step 2).
+3. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
+   `setsid` on Linux) so the orchestrator outlives this session; record its
+   **PID + process start-time + `--until` deadline** on the run-state branch for
+   later stale-run detection (the start-time guards against a recycled PID being
+   mistaken for a live run).
+4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
+   files, and the log path — and tell the user the run is going.
