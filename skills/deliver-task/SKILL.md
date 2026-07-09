@@ -116,8 +116,8 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    else detect it (a `just check` recipe, an executable `scripts/check.sh` /
    `scripts/check.py`, or `dli check` — locate the actual file before running it,
    don't shell-glob `scripts/check.*`) — **and exercise the feature itself**:
-   drive the changed behavior end-to-end (inline — this plugin has no `verify`
-   skill), not just the tests. Capture **observable evidence**: the check output,
+   drive the changed behavior end-to-end, not just the tests. Capture
+   **observable evidence**: the check output,
    and any screenshots / command output / artifact paths. Record those paths —
    the review half puts them in the PR body.
 

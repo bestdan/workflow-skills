@@ -9,7 +9,8 @@ supersedes-notes: autonomos-mode.md
 
 # Auto-pilot mode design
 
-"Claude, pick up this Project and grind autonomously on it overnight."
+"Claude, pick up this Project and advance it independently — work the workstream
+without a person in the loop."
 
 Grounded in the learnings in `autonomos-mode.md`. Two new skills:
 
