@@ -87,6 +87,29 @@ only `availability:`, which orchestrate-coders treats as absent for its own
 `default_coder` setup (it merges its keys in later) — and keep it out of git:
 `git check-ignore -q dev_docs/orchestrate-coders/ || echo 'dev_docs/orchestrate-coders/' >> "$(git rev-parse --git-dir)/info/exclude"`.
 
+### Resolved config (non-interactive callers)
+
+`dev_docs/orchestrate-coders/.coders.yml` — the `availability:` block above,
+plus, when orchestrate-coders is also in play, `default_coder:`/`coders:` — is
+the **resolved-config shape** both this skill and orchestrate-coders consume
+(the `.coders.yml` structure shown above, not this SKILL.md).
+This is the one place that shape is defined; orchestrate-coders' Config
+section points back here rather than redefining it.
+
+A caller that already holds a fully populated file of this shape — chiefly
+`/auto-pilot`'s launch phase, which resolves availability and coder choice
+once at launch so an unattended run never blocks on a question — or that
+passes `--non-interactive`, gets a guarantee this skill never prompts:
+
+- Probing is skipped whenever `availability:` is present, regardless of
+  `probed_at` age, **unless `--refresh` is explicitly passed** — a
+  non-interactive run does not stop to ask for a refresh, but an explicit
+  `--refresh` still forces a re-probe.
+- On genuine ambiguity (e.g. candidates tie on the task's primary dimension),
+  apply the cheaper/faster tiebreak from Rules below to rank them, and pick
+  the top-ranked spec instead of asking; log the choice and the reason in the
+  report.
+
 ## Selection
 
 1. **Get the task profile** from the **assess-task** skill
@@ -130,7 +153,7 @@ only `availability:`, which orchestrate-coders treats as absent for its own
 ## Invocation
 
 ```
-/select-coder <task description> [--plan <name>] [--refresh] [-n N]
+/select-coder <task description> [--plan <name>] [--refresh] [-n N] [--non-interactive]
 ```
 
 - `<task description>` — the task to route. With `--plan <name>`, score each
@@ -139,6 +162,8 @@ only `availability:`, which orchestrate-coders treats as absent for its own
   round-robin override.
 - `--refresh` — force a re-probe of availability.
 - `-n N` — return the top N candidates per task (default 3).
+- `--non-interactive` — never prompt; see "Resolved config (non-interactive
+  callers)" above.
 
 ## Rules
 

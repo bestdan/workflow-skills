@@ -40,7 +40,7 @@ into the task description.
 ## Invocation
 
 ```
-/orchestrate-coders <task description> [--coder <spec>]... [-n N] [--plan <name>]
+/orchestrate-coders <task description> [--coder <spec>]... [-n N] [--plan <name>] [--non-interactive]
 ```
 
 - `--coder <spec>` — which coder(s) to use. Repeatable: with several, assign
@@ -54,6 +54,8 @@ into the task description.
 - `--plan <name>` — skip decomposition and execute an existing
   `dev_docs/tasks/<name>_plan/` plan (from `/plan-with-docs`), one packet per
   dependency-ready task file.
+- `--non-interactive` — never prompt on coder choice; see "Resolution when no
+  `--coder` is passed" below.
 - The task description is whatever remains; with `--plan` it may be empty.
 
 ## Config
@@ -73,6 +75,10 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
   - "dprint: run `dprint fmt --incremental=false` (the incremental cache dir is not writable in-sandbox)"
 ```
 
+This file is the **resolved-config shape**, defined once in
+`skills/select-coder/SKILL.md` ("Resolved config (non-interactive callers)")
+and shared here rather than redefined.
+
 **Resolution when no `--coder` is passed:**
 
 - File absent → probe `PATH` (`command -v`) for `codex`, `agy`, `devin`; `opus`
@@ -84,6 +90,16 @@ sandbox_workarounds: # project-specific; injected into each packet spec's constr
   into the existing file. A `--coder` flag always overrides.
 - A named coder that isn't in `coders:` and isn't a known backend → stop and
   ask rather than guess.
+- **Non-interactive callers** — `--non-interactive`, or a caller that already
+  supplies a resolved config — never hit the two "ask" branches above. Missing
+  `default_coder` falls back to the first available known backend in
+  probe-order `codex`, `agy`, `devin`, `opus`; a named coder that isn't in
+  `coders:` and isn't a known backend is skipped, not asked about. Custom
+  `command:` backends are only ever used if they already appear in the
+  supplied `coders:` list — this flow never invents one. Every automatic
+  choice made this way is logged in the report (step 7), not silently taken.
+  `/auto-pilot`'s launch phase is the caller expected to supply this resolved
+  config for unattended runs.
 
 ## Steps
 
