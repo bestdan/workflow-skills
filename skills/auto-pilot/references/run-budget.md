@@ -8,9 +8,9 @@ and the state formats (`parked`, write order) in
 
 Design source:
 [`auto-pilot.md`](../../../dev_docs/auto-pilot.md)
-§"`/auto-pilot` — launch, run, resume" + §"Out of scope (v1)". The open
-implementation questions left there were resolved in a design consult; this
-file bakes in those decisions.
+§"`/auto-pilot` — launch, run, resume" + §"Out of scope (v1)". The architecture
+doc sets the run's budget posture at a high level; this file bakes in the
+detailed budget decisions (resolved in a design consult).
 
 **Scope.** v1 is **rate-window discipline + per-task bounds only** — no
 `--budget` dollar/token cap. The one hard money rule is the paid/overflow
