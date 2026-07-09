@@ -28,3 +28,8 @@ Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/
   (push code → update tracker → commit run state), and the crash-reconciliation
   table `--resume` uses. Launch, run, and resume all read this — no other
   document restates a run-state format.
+- [`references/adapters.md`](references/adapters.md) — the work-source adapter
+  interface: the eight verbs (`list_ready`, `dependency_graph`, `claim`,
+  `link_pr`, `set_needs_review`, `flag_for_human`, `comment_progress`,
+  `wip_limit`) that normalize a Linear project or a plan-with-docs directory to
+  the run-state representation, each delegating to an existing handler section.
