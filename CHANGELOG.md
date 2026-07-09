@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.33.0] - 2026-07-09
+
+### Features
+
+- run phase — orchestrator loop, budget bounds, pause/wake (PRE-464) (#145) (431493d)
+
 ## [1.32.1] - 2026-07-09
 
 ### Fixes
