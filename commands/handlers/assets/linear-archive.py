@@ -41,8 +41,12 @@ UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
 )
 
+# %s slots: project var decl, team field, ts field, extra filter, ts field (nodes).
+# The $project variable is declared only when scoping to a project — GraphQL
+# rejects (HTTP 400) an operation that declares a variable it never uses, which
+# is exactly what the whole-team path (no --project) would otherwise do.
 QUERY = """
-query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!, $project: ID) {
+query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!%s) {
   issues(first: 100, after: $cursor, filter: {
     team: { %s: { eq: $team } }
     state: { type: { eq: $type } }
@@ -94,21 +98,20 @@ def gql(key, query, variables=None):
 
 def find(key, team, project, state_type, ts_field, cutoff):
     team_field = "id" if UUID_RE.match(team) else "name"  # UUID team id, else name
+    var_decl = ", $project: ID" if project else ""
     extra = "project: { id: { eq: $project } }" if project else ""
-    query = QUERY % (team_field, ts_field, extra, ts_field)
+    query = QUERY % (var_decl, team_field, ts_field, extra, ts_field)
     out, cursor = [], None
     while True:
-        page = gql(
-            key,
-            query,
-            {
-                "cursor": cursor,
-                "cutoff": cutoff,
-                "team": team,
-                "type": state_type,
-                "project": project,
-            },
-        )["issues"]
+        variables = {
+            "cursor": cursor,
+            "cutoff": cutoff,
+            "team": team,
+            "type": state_type,
+        }
+        if project:
+            variables["project"] = project
+        page = gql(key, query, variables)["issues"]
         out.extend(page["nodes"])
         if not page["pageInfo"]["hasNextPage"]:
             return out
