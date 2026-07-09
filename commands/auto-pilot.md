@@ -26,10 +26,11 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
   at this time (and a hard outer watchdog enforces it — see
   `skills/auto-pilot/references/launch-runtime.md`). Omit for the skill's default
   bound.
-- `--resume` — **not yet implemented.** Resume lands in a later task (PRE-465).
-  Parse it, and if present **stop immediately** with:
-  "`--resume` is not available yet (lands in PRE-465); re-run without it." Do not
-  silently ignore it and do not fall through to a fresh launch.
+- `--resume` — reconcile a crashed or paused run's state against reality, then
+  continue the run. Parse it, and if present, dispatch to the SKILL's **Resume
+  phase** (`skills/auto-pilot/SKILL.md`, "Resume phase (--resume)") instead of
+  running the launch pre-flight; do not restate its reconciliation steps here.
+  The resumed run still ends at hand-off, same as a fresh launch.
 
 ## Dispatch
 

@@ -1,6 +1,6 @@
 ---
 name: auto-pilot
-description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume flows land in later tasks.
+description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
 ---
 
 # auto-pilot — unattended autonomous runs
@@ -15,10 +15,11 @@ battle-tested skills and handler protocols rather than duplicating them.
 Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/auto-pilot-mode-design.md).
 
 > **Status:** v1 is being built. This SKILL.md establishes the skill home, the
-> references below, and the interactive **launch** phase. The unattended **run**
-> loop (which the spawned orchestrator executes) and **`--resume`** land in later
-> tasks; until they do, launch will spawn an orchestrator whose run loop is not
-> yet implemented, so the skill is not yet invocable end-to-end.
+> references below, the interactive **launch** phase, the unattended **run**
+> loop (which the spawned orchestrator executes), and **`--resume`**'s crash
+> reconciliation. The three phases compose end-to-end: launch spawns an
+> orchestrator that runs the loop, and a crashed or paused run resumes into
+> that same loop.
 
 ## References
 
@@ -53,13 +54,13 @@ Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
 can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
 problem to 3am. It ends by spawning the detached, unattended orchestrator and
-telling the user the run is underway. The unattended **run** loop and
-**`--resume`** are separate (later) tasks; the run loop is what the spawned
-orchestrator executes.
+telling the user the run is underway. The unattended **run** loop is what the
+spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
+run's state and then falls into that same loop (see "Resume phase" below).
 
 **Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`. If
-`--resume` is present, **stop** with the PRE-465 pointer (per
-`commands/auto-pilot.md`) — it is not implemented here. Detect the source
+`--resume` is present, route to the **Resume phase** section below instead of
+running the rest of this launch pre-flight. Detect the source
 (existing `dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear**
 project) and resolve the handler from `dev_docs/tasks/.task-config.yml`; any
 handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan only).
@@ -225,6 +226,82 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
    mistaken for a live run).
 4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
    files, and the log path — and tell the user the run is going.
+
+## Resume phase (--resume)
+
+Invoked by `/auto-pilot <source> --resume` (`commands/auto-pilot.md`). Resume's
+job is to reconcile a crashed or paused run's durable state against reality,
+then fall into the normal **Run phase** loop below for whatever remains ready.
+
+**Re-run only the pre-flight that can rot; skip the launch-only steps.**
+Worktree + run-state-branch creation (step 1) and the **task-graph
+materialization** half of step 6 already exist on the run-state branch from the
+original launch, so resume does not re-create them; **source normalization
+still runs** — resume must normalize `<source>` to resolve which run-state
+branch it reads from, even though it never re-creates that branch. What can rot
+between launch and resume, and so is re-run: the non-interactive **auth probes**
+and the **environment fingerprint** (Launch step 2) — a run launched
+`local-full` may resume under `claude-web`, or vice versa, so step 6's _other_
+half, the scout's **capability join**, must re-run against the current
+environment — and **base freshness**. As at launch, a hard failure here
+**BLOCKS THE RESUME**, fail-closed the same way.
+
+**Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
+but run-state branches are named `auto-pilot/<run_id>`
+([`references/run-state.md`](references/run-state.md) "Run-state branch") and
+nothing stops more than one run existing for the same source. After normalizing
+`<source>`, enumerate the `auto-pilot/*` branches whose `RUN.md` front matter
+records that source and require **exactly one** in a resumable (`active` /
+`paused` / `systemic`) state. Zero matches, or more than one, is **fail-closed**:
+report the ambiguous `run_id`s by name and stop rather than guess which run to
+resume — the same never-guess posture the reconciliation below takes.
+
+**Stale-orchestrator guard.** Read `orchestrator_pid` / `orchestrator_started_at`
+/ `until` from `RUN.md`'s front matter
+([`references/run-state.md`](references/run-state.md) "`RUN.md`"). If a live
+orchestrator with the matching start-time is still running at that PID
+([`references/launch-runtime.md`](references/launch-runtime.md) "Orphan / stale
+detection"), do not start a second one — report it and stop. A dead PID, or a
+start-time mismatch (a recycled PID), means it's safe to proceed; the
+start-time is exactly what tells the two cases apart.
+
+**Reconcile each non-terminal task.** Re-read `RUN.md` from the run-state
+branch. `handed-off` and `parked` tasks are terminal and left untouched. For
+every other task (`claimed` / `implementing` / `pr-open` / `in-review` /
+`iterating`), observe reality in the **write order's** direction — git first,
+then tracker, then run files. The freshness relation remote ≥ tracker ≥ run
+files ([`references/run-state.md`](references/run-state.md) "Write order") is
+exactly why that read order needs no guessing: does the task branch exist
+locally / on the remote, is there an open PR for its head branch, what state
+does the tracker show, is a worker worktree left behind. Match the observed
+reality to a row of that reference's **crash-reconciliation table**
+("Crash reconciliation", rows G1–G7) and apply that row's action, in the same
+fixed write order — reconcile by that table, don't restate it here. The
+load-bearing invariant that makes this decidable: `needs_review` is only ever
+written at the hand-off tracker write, never the pr-open one, so a task that
+crashed at `pr-open` always reconciles to `started` plus a linked PR (G5),
+never to hand-off.
+
+**Idempotency.** Resume must be safe to run repeatedly. It leans on G4's
+idempotency check — an existing PR for a task's head branch is detected and
+adopted, never duplicated — so re-resuming never opens a duplicate PR or
+re-claims a task already in flight.
+
+**Orphaned worker worktrees.** A crash mid-`implementing`/`iterating` (G2) can
+leave a worker worktree behind; resume removes it before any re-dispatch.
+
+**Never blind-retry.** A task whose observed reality doesn't match any
+reconciliation row cleanly is set to `parked` and gets a `REPORT.md` entry
+describing what was found ([`references/run-state.md`](references/run-state.md)
+"`REPORT.md`") — resume never guesses or retries blindly.
+
+**Then fall into the run loop.** Once reconciliation leaves `RUN.md` accurate,
+resume continues into the **Run phase** loop below for the remaining ready
+tasks; it does not re-derive that loop. If the run was paused (`status: paused`
+/ `paused_until` set), resume clears those run-level pause markers before
+re-entering the loop, per
+[`references/run-budget.md`](references/run-budget.md) "Near-cap → pause +
+relaunch past reset" — pause semantics live there, not here.
 
 ## Run phase (unattended)
 
