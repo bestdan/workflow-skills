@@ -17,8 +17,8 @@ Grounded in the learnings in `autonomos-mode.md`. Two new skills:
   lifecycle: claim → do → PR → co-review → iterate → hand off. Useful
   interactively on its own; the auto-pilot orchestrator's per-task unit.
 - **`/auto-pilot`** — a two-part skill: an interactive **launch phase** (pre-flight
-  + spawn) and an unattended **run phase** (a thin orchestrator that walks the
-  task graph calling `/deliver-task`).
+  - spawn) and an unattended **run phase** (a thin orchestrator that walks the
+    task graph calling `/deliver-task`).
 
 ## Design principle: compose, never duplicate
 
@@ -28,16 +28,17 @@ handler section for every discrete step and add only orchestration. Where an
 existing skill almost fits, we tweak that skill (e.g. add a non-interactive
 mode); we do not fork its logic into auto-pilot-specific prose. Concretely:
 
-| Step | Reuses |
-|---|---|
-| Claim | handler claim protocols (`linear-claim.md` token-comment election; `repo-pr-execute.md` claim-PR markers) — never a bespoke "mark started" |
-| Implement | `select-coder` routing + `orchestrate-coders` dispatch rules (workers in their own worktrees) |
-| Review | `/co-review` (with a non-interactive mode, see tweaks below) |
-| Complete | **nothing in-run** — completion stays merge-verified via `/sweep-for-complete`; the execute path never completes an issue (`linear-claim.md` hard rule) |
-| Plan source | `plan-with-docs` output via the repo-pr/file handler semantics |
-| Pause/wake | `/loop` machinery |
+| Step        | Reuses                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claim       | handler claim protocols (`linear-claim.md` token-comment election; `repo-pr-execute.md` claim-PR markers) — never a bespoke "mark started"              |
+| Implement   | `select-coder` routing + `orchestrate-coders` dispatch rules (workers in their own worktrees)                                                           |
+| Review      | `/co-review` (with a non-interactive mode, see tweaks below)                                                                                            |
+| Complete    | **nothing in-run** — completion stays merge-verified via `/sweep-for-complete`; the execute path never completes an issue (`linear-claim.md` hard rule) |
+| Plan source | `plan-with-docs` output via the repo-pr/file handler semantics                                                                                          |
+| Pause/wake  | `/loop` machinery                                                                                                                                       |
 
 Required tweaks to existing skills (small, PR-able independently):
+
 - `co-review`: a `--non-interactive` mode — no config prompts, bounded reviewer
   timeouts, custom commands disabled unless pre-approved at launch.
 - `select-coder`/`orchestrate-coders`: accept a resolved coder config instead of
@@ -45,17 +46,17 @@ Required tweaks to existing skills (small, PR-able independently):
 
 ## Decisions (locked)
 
-| Dimension | Decision |
-|---|---|
-| Work source | Unified: a Linear project **or** a plan-with-docs directory, via adapters |
-| Topology | Long-lived orchestrator + fresh worker subagents per task |
-| PR shape | Dependency-driven: independent tasks → PRs off main; dependent chains → stacked (with the freeze rule below) |
-| Permissions | Sandboxed yolo: bypassPermissions inside the OS sandbox (worktree-confined writes, allowlisted network) |
-| Pre-authorized | Push branches, open PRs, update Linear, spawn paid coder agents (bounded, see budget) |
-| NOT authorized | Merging PRs, completing tracker issues — nothing lands or closes unattended |
-| Budget | Rate-window aware + per-task bounds; hard-stop before paid overflow |
-| Morning UX | `MORNING.md` report + evidence-carrying PR bodies, all in git |
-| Packaging | Skills in this plugin; launch phase runs in the user's interactive session |
+| Dimension      | Decision                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| Work source    | Unified: a Linear project **or** a plan-with-docs directory, via adapters                                    |
+| Topology       | Long-lived orchestrator + fresh worker subagents per task                                                    |
+| PR shape       | Dependency-driven: independent tasks → PRs off main; dependent chains → stacked (with the freeze rule below) |
+| Permissions    | Sandboxed yolo: bypassPermissions inside the OS sandbox (worktree-confined writes, allowlisted network)      |
+| Pre-authorized | Push branches, open PRs, update Linear, spawn paid coder agents (bounded, see budget)                        |
+| NOT authorized | Merging PRs, completing tracker issues — nothing lands or closes unattended                                  |
+| Budget         | Rate-window aware + per-task bounds; hard-stop before paid overflow                                          |
+| Morning UX     | `MORNING.md` report + evidence-carrying PR bodies, all in git                                                |
+| Packaging      | Skills in this plugin; launch phase runs in the user's interactive session                                   |
 
 ## State model (single source of truth)
 
@@ -64,7 +65,7 @@ Three stores exist; only one is authoritative.
 - **The tracker is authoritative for task status** (Linear, or plan files for
   the plan source). Run files never disagree with it on purpose.
 - **Run files are a cache + report**: `RUN.md` (task graph, per-task lifecycle
-  *phase*), `QUESTIONS.md` (decision log), `MORNING.md` (rolling report). They
+  _phase_), `QUESTIONS.md` (decision log), `MORNING.md` (rolling report). They
   live on a **dedicated run-state branch** in the worktree — never on task
   branches, so bookkeeping commits can't pollute task PRs.
 - **Fixed write order per transition**: push code → update tracker → commit run
@@ -79,7 +80,7 @@ Not "automated recovery" — but resumable by design. `/auto-pilot --resume`
 re-reads the run-state branch, reconciles each task's phase against reality
 (does the branch exist? is the PR open? does the tracker show the claim?),
 completes or rolls back the half-done transition using the same write order,
-and continues. A crash costs at most one *phase* of one task, not the night.
+and continues. A crash costs at most one _phase_ of one task, not the night.
 Tasks that can't be reconciled cleanly are `parked` with a morning-report entry
 rather than retried blindly.
 
@@ -117,7 +118,7 @@ later, merge-verified, via `/sweep-for-complete`.
    bot findings are logged for morning, never applied, so stacked children
    never go stale mid-run.
 
-Definition of done for the *work* (verbatim from the notes doc): fewer tasks
+Definition of done for the _work_ (verbatim from the notes doc): fewer tasks
 genuinely finished beats all tasks superficially touched; you exercised the
 feature itself, not just its tests.
 
