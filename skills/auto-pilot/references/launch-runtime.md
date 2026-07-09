@@ -24,6 +24,20 @@ is the primitive. The launch step picks the right one for the host.
 **Rejected alternative.** A backgrounded Agent/Task spawned from the interactive
 launch session.
 
+**Relaunchable, not one-shot.** The run-budget pause/wake model
+([`run-budget.md`](run-budget.md) "Near-cap → pause + relaunch past reset")
+depends on a paused orchestrator being able to exit and then be **woken by
+something else** past its `paused_until` reset — a bare `setsid`/`launchctl
+submit` fire-and-forget spawn only ever runs once. So the detach primitive
+must itself be relaunchable: on **macOS**, spawn as a `launchd` job with a
+`StartCalendarInterval` (or `KeepAlive` gated on the `paused_until`
+sentinel) rather than a one-shot `launchctl submit`; on **Linux**, the
+`setsid` spawn needs a companion wake — a `systemd` timer or an `at` job
+scheduled for `paused_until`. If a relaunchable supervisor genuinely isn't
+available in an environment, the documented fallback is a bounded
+in-process sleep guarded by `--until` — stated here as the **fallback**,
+not the default.
+
 **Why.**
 
 - **It must outlive the launch session.** The human runs launch interactively,
