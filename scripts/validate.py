@@ -185,6 +185,14 @@ if task_dir.is_dir():
                 if v is not None and not isinstance(v, str):
                     err(rel(t), f"{field} must be a string")
             continue
+        dtype = data.get("type")
+        if dtype is not None and dtype != "task":
+            # Non-task reference docs (e.g. `type: design`, `type: notes`) may
+            # live under dev_docs/tasks/ alongside cards. They are not task
+            # cards, so the task-shape checks don't apply; scans key off
+            # status new/ready, so they stay invisible to /do-tasks and
+            # /promote-tasks regardless.
+            continue
         for field in ("size", "impact"):
             v = data.get(field)
             # bool is an int subclass (True == 1) and 3.0 == 3, so a bare
