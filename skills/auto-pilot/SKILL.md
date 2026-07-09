@@ -267,7 +267,12 @@ independent task, the parent task's branch for a chained one. `/deliver-task`
 ([`commands/deliver-task.md`](../../commands/deliver-task.md)) owns the entire
 per-task lifecycle — claim, implement, PR, co-review, iterate, hand-off — the
 run loop does not re-derive any of it. The `--questions` path is where the
-non-blocking decision protocol below appends entries.
+non-blocking decision protocol below appends entries. If a `/deliver-task` call
+**fails outright** — a crash or non-zero exit, rather than a clean hand-off or
+park — the orchestrator applies the per-task retry bound (one re-dispatch, then
+**park**; [`references/run-budget.md`](references/run-budget.md) "Per-task retry
+limit") and continues to the next ready task; a failed delivery never aborts the
+loop or leaves run state half-written.
 
 **Non-blocking decisions.** The run **never waits** on a human. For any
 reversible call, the orchestrator (or `/deliver-task` beneath it) picks the
@@ -296,10 +301,12 @@ restating budget rules, which that reference owns.
 task's work branch must start from the **parent's frozen tip**, which the
 readiness rule guarantees is stable (the parent is already `handed-off`
 before a child becomes ready). Before dispatching a chained task, the
-orchestrator confirms the recorded `base` still matches the parent branch's
-current tip. If the parent branch has moved since `base` was recorded, the
-child would build on a stale base — **park** the task instead, record it, and
-continue to the next ready task.
+orchestrator compares the parent branch's **current tip SHA** against the child's
+recorded `base_sha` — the parent's frozen tip captured at its hand-off (per
+[`references/run-state.md`](references/run-state.md) "`RUN.md`"); comparing the
+`base` branch _name_ to a tip could never detect movement. If they differ, the
+parent has moved since the base was frozen and the child would build on a stale
+base — **park** the task instead, record it, and continue to the next ready task.
 
 **State update after each task.** After `/deliver-task` returns, update
 `RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
@@ -315,9 +322,12 @@ near-cap pause, or a circuit-breaker halt writes state and exits per that
 reference.
 
 **Loop termination.** The loop ends when no ready task remains or a budget
-hard-stop fires. Either way, the orchestrator writes the final `REPORT.md` and
-commits it on the run-state branch, then **exits cleanly**, emitting a
-**one-line summary** to `.auto-pilot/orchestrator.log`
+hard-stop fires. Either way, the orchestrator writes the final `REPORT.md`
+(setting run-level `status: done`), commits it on the run-state branch, then
+**tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
+if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
+"Relaunchable, not one-shot") — so a finished run is never re-woken, and finally
+**exits cleanly**, emitting a **one-line summary** to `.auto-pilot/orchestrator.log`
 ([`references/launch-runtime.md`](references/launch-runtime.md) "Logs /
 observability") — e.g. `auto-pilot done: 4 handed-off, 1 parked, 0 skipped —
 see REPORT.md`. Nothing is merged or tracker-completed by this exit: every

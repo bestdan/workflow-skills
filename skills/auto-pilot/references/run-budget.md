@@ -55,7 +55,10 @@ When the proxy crosses its near-cap threshold, or the error backstop fires:
    including `paused_until: <reset>` and the pause reason — then **exit**.
    This is a **checkpoint-then-exit**, not an in-process sleep: the process
    holding hours of context does not sit and wait, it dies and lets a
-   relaunch reconstruct everything from the run-state branch.
+   relaunch reconstruct everything from the run-state branch. When the
+   triggering signal carries **no explicit reset time** — a rate-limit error
+   frequently won't — fall back to a default pause of **1 hour** so
+   `paused_until` is always a schedulable timestamp, never empty.
 2. A relaunch past `paused_until` starts a **fresh** process. Per
    [`launch-runtime.md`](launch-runtime.md) "Spawn mechanics" ("Relaunchable,
    not one-shot"), a relaunchable supervisor (macOS `launchd` timer/`KeepAlive`,
@@ -124,9 +127,14 @@ doesn't actually block.
 
 ## Run-level circuit breaker
 
-**N consecutive parks/failures (default 3) → halt the run with a `systemic`
-status**, plus one clear alarm entry in `REPORT.md`, instead of continuing
-to the next ready task.
+**N consecutive genuine failures (default 3) → halt the run with run-level
+`status: systemic`** (per [`run-state.md`](run-state.md) "`RUN.md`"), plus one
+clear alarm entry in `REPORT.md`, instead of continuing to the next ready task.
+Count only **genuine delivery failures** — a crashed/non-zero `/deliver-task`, or
+a task parked because its verify never passed — toward the breaker. **Exclude
+expected, graceful parks** (a moved-base mismatch, or a paid-cap park with no free
+routing): those are healthy run outcomes, not a signal that something systemic is
+wrong, and counting them would halt a perfectly good run.
 
 **Why.** The per-task bounds above cap one runaway task each, but nothing
 caps _systemic_ failure — a broken `main`, a dead network, expired `gh`

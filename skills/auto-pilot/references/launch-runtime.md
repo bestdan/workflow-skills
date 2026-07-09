@@ -27,16 +27,28 @@ launch session.
 **Relaunchable, not one-shot.** The run-budget pause/wake model
 ([`run-budget.md`](run-budget.md) "Near-cap → pause + relaunch past reset")
 depends on a paused orchestrator being able to exit and then be **woken by
-something else** past its `paused_until` reset — a bare `setsid`/`launchctl
-submit` fire-and-forget spawn only ever runs once. So the detach primitive
-must itself be relaunchable: on **macOS**, spawn as a `launchd` job with a
-`StartCalendarInterval` (or `KeepAlive` gated on the `paused_until`
-sentinel) rather than a one-shot `launchctl submit`; on **Linux**, the
-`setsid` spawn needs a companion wake — a `systemd` timer or an `at` job
-scheduled for `paused_until`. If a relaunchable supervisor genuinely isn't
-available in an environment, the documented fallback is a bounded
-in-process sleep guarded by `--until` — stated here as the **fallback**,
-not the default.
+something else** past its `paused_until` reset — a fire-and-forget spawn (a bare
+`setsid`, or the deprecated `launchctl submit`) only ever runs once. So the detach
+primitive must itself be relaunchable:
+
+- **macOS** — a `launchd` job that wakes on a schedule: a `StartCalendarInterval`
+  / `StartInterval` timer, or `KeepAlive` gated on a **`PathState` sentinel file**.
+  `launchd`'s `KeepAlive` keys test file existence and process state, **not** a
+  timestamp — so the relaunch is gated by the orchestrator dropping/removing a
+  sentinel file, never by comparing `paused_until` directly. Load it with
+  `launchctl bootstrap` (the modern replacement for the deprecated
+  `launchctl submit`).
+- **Linux** — the `setsid` spawn needs a companion wake: a `systemd` timer, or a
+  single `at` job scheduled for `paused_until`.
+
+A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down at
+clean end-of-run** (`launchctl bootout` / disable the timer) so a finished run is
+never re-woken — the run loop's termination step does this
+([`../SKILL.md`](../SKILL.md) "Run phase (unattended)", "Loop termination"). A
+**one-shot** `at` job fired once at `paused_until` is self-terminating and needs no
+teardown. If a relaunchable supervisor genuinely isn't available in an environment,
+the documented fallback is a bounded in-process sleep guarded by `--until` — stated
+here as the **fallback**, not the default.
 
 **Why.**
 
