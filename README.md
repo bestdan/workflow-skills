@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-11 skills, 15 commands, and 1 subagent, organized into six workflows:
+12 skills, 16 commands, and 1 subagent, organized into six workflows:
 
 ### PR review
 
@@ -61,9 +61,10 @@ For the `linear` handler, merged PRs are reconciled explicitly via `/complete-ta
 
 ### Autonomous execution
 
-| Skill          | Trigger                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **auto-pilot** | `/auto-pilot <linear-project \| plan-dir>` — "grind on this overnight" _(in progress)_ | Advance a whole task graph unattended: an isolated worktree, a thin orchestrator walking the graph, and `/deliver-task` per task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state. v1 is being built — see [the design](dev_docs/tasks/auto-pilot-mode-design.md); this release ships the skill home and the [run-state reference](skills/auto-pilot/references/run-state.md). |
+| Skill            | Trigger                                                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **auto-pilot**   | `/auto-pilot <linear-project \| plan-dir>` — advance a workstream independently, no person in the loop _(in progress)_ | Advance a whole task graph unattended: an isolated worktree, a thin orchestrator walking the graph, and `/deliver-task` per task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state. v1 is being built — see [the design](dev_docs/tasks/auto-pilot-mode-design.md); this release ships the skill home and the [run-state reference](skills/auto-pilot/references/run-state.md).                                                |
+| **deliver-task** | `/deliver-task <slug \| id> [--base <branch>]`                                                                         | Deliver ONE task through its per-task lifecycle: claim it via the handler's own protocol, implement it via a `select-coder`-routed worker in an isolated worktree, integrate the diff, and verify (check + exercise the feature), leaving a verified diff on a task branch with evidence captured. The depth verb (one task, all the way) to `/do-tasks`'s breadth; the per-task unit `/auto-pilot` calls. Claim→do half; PR/co-review/hand-off land separately. |
 
 ### Auditable analysis
 
