@@ -133,16 +133,23 @@ exercised the feature itself, not just its tests.
 
 ## 4. Open the PR
 
-Open the PR for the task branch. Readiness follows repo **ownership**:
+Open the PR for the task branch, targeting **`--base`** (default `main`) — a
+stacked/chained task must point at its parent's branch, not the repo default, or
+its diff shows the parent's changes too.
 
-- **Ready-for-review** when the user owns the repo; **draft** otherwise. Detect
-  with `gh repo view --json viewerPermission` (`ADMIN`/`WRITE` → ready; else
-  draft), or an owner match on the remote.
+Readiness follows repo **write access**: **ready-for-review** when the viewer can
+write, **draft** otherwise. Detect with `gh repo view --json viewerPermission` —
+`ADMIN` / `MAINTAIN` / `WRITE` → ready; else draft. (`MAINTAIN` also grants
+write, so it must count as ready.) If the permission can't be determined, default
+to **draft** — the safe choice.
+
 - On **repo-pr** this is the claim→review-PR **conversion** — relabel the draft
-  `task-claim` PR to `task-loop`, fill the body, `gh pr ready` — per
-  `repo-pr-execute.md`; **do not open a second PR**. On **linear/gh-issue/jira**,
-  open the PR with the handler's own title/link conventions (e.g. `[PRE-12]` +
-  the linked issue).
+  `task-claim` PR to `task-loop`, fill the body — per `repo-pr-execute.md`; **do
+  not open a second PR**. Call `gh pr ready` **only when the viewer can write**
+  (the same `ADMIN`/`MAINTAIN`/`WRITE` gate); otherwise leave it a draft and hand
+  off in that state — never fail trying to ready a PR you lack permission to. On
+  **linear/gh-issue/jira**, open the PR with the handler's own title/link
+  conventions (e.g. `[PRE-12]` + the linked issue), draft per the same gate.
 - **PR body:** the evidence captured in step 3 (check output, screenshots,
   artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
   exactly how to judge it and what a "no" would invalidate.
@@ -155,20 +162,26 @@ Open the PR for the task branch. Readiness follows repo **ownership**:
 Run `/co-review --non-interactive` on the PR (via the `Skill` tool). Its
 never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
-line goes into the hand-off summary (step 7).
+line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
+(every reviewer unavailable, MCP/auth failure), don't bail — the work is already
+verified; note `co-review unavailable` and proceed to hand-off (review is
+advisory).
 
 ## 6. Iterate (bounded)
 
-Apply co-review's **high-confidence** fixes; re-verify (step 3's check) and
-re-push. **Judgment calls** (medium findings) are never applied silently:
+Each iteration is a full round: apply co-review's **high-confidence** fixes,
+re-verify (step 3's check), re-push, then **re-run `/co-review --non-interactive`
+on the updated PR** to gather fresh findings. **Judgment calls** (medium findings)
+are never applied silently:
 
 - append each to the **caller-provided** `--questions <path>` decision log when
   one is passed (the `/auto-pilot` orchestrator's `QUESTIONS.md`);
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
 
-**Hard bound: 2 iterations.** After the second, record any remaining findings and
-proceed — don't loop.
+**Hard bound: 2 rounds** (two review→fix passes total). Stop early when a round
+surfaces no new high-confidence fixes; after the second round, record any
+remaining findings and proceed — don't loop.
 
 ## 7. Hand off (and freeze)
 
