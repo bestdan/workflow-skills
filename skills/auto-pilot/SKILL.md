@@ -24,7 +24,7 @@ Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/
 
 - [`references/run-state.md`](references/run-state.md) — the canonical formats
   and invariants for a run's durable state: the three run files
-  (`RUN.md` / `QUESTIONS.md` / `MORNING.md`), the seven task lifecycle phases,
+  (`RUN.md` / `QUESTIONS.md` / `REPORT.md`), the seven task lifecycle phases,
   the dedicated run-state branch convention, the fixed write order
   (push code → update tracker → commit run state), and the crash-reconciliation
   table `--resume` uses. Launch, run, and resume all read this — no other
@@ -47,8 +47,9 @@ Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
 can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
 problem to 3am. It ends by spawning the detached, unattended orchestrator and
-telling the user to go to bed. The unattended **run** loop and **`--resume`** are
-separate (later) tasks; the run loop is what the spawned orchestrator executes.
+telling the user the run is underway. The unattended **run** loop and
+**`--resume`** are separate (later) tasks; the run loop is what the spawned
+orchestrator executes.
 
 **Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`. If
 `--resume` is present, **stop** with the PRE-465 pointer (per
@@ -85,15 +86,22 @@ that would open a prompt (a browser OAuth, a biometric `op signin`) is itself th
 failure (see [`references/launch-runtime.md`](references/launch-runtime.md) §3).
 Probe, per dependency:
 
-- **GitHub** — `gh auth status` (PRs + git push).
-- **Linear** (linear source) — resolve the API key from its `op://` reference
-  (`api_key_ref` in `commands/handlers/linear-common.md`) via `op read`, and run
-  that file's shared **preflight** (`list_teams` → match the team) to confirm the
-  key works, not just that it resolves.
-- **Coder CLIs** — the configured coders' auth probes, exactly as
-  `scripts/probe-coders.sh` runs them (codex is stateless; `agy`/`devin` have the
-  rc-gated `agy models` / `devin auth status` probes). A logged-out coder = a
-  blocker, not a silent skip, since the run depends on it.
+The probe path depends on the **environment class** (below): a `local-full` run
+authenticates through CLIs; a `claude-web` run has **no local CLIs** and
+authenticates through **MCP** instead. Probe whichever applies:
+
+- **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
+  confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
+- **Linear** (linear source) — `local-full`: resolve the API key from its
+  `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
+  `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
+  Either way, run `linear-common.md`'s shared **preflight** (`list_teams` →
+  match the team) to confirm auth actually works, not just that it resolves.
+- **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
+  configured coder's auth probe via `scripts/probe-coders.sh`, the **single
+  source of truth** for how each coder is probed; don't restate its per-coder
+  commands here (they would drift from the script). A logged-out coder the run
+  depends on is a blocker, not a silent skip.
 - **MCP** — any MCP the tasks touch: one cheap read call to confirm the token is
   live.
 
@@ -112,6 +120,14 @@ Record the fingerprint on the run-state branch — the step-6 scout joins agains
 it, and `--resume` in a different environment (launched local, resumed from web)
 re-runs that join.
 
+Also confirm **unattended viability** here, up front while the human is present
+rather than at spawn: a `local-full` run needs the machine to stay awake for the
+run's duration (lid-open, or a tested clamshell/power setup — `caffeinate` alone
+does not survive lid-close; see
+[`references/launch-runtime.md`](references/launch-runtime.md) "Laptop sleep").
+If it can't be guaranteed, **BLOCKS LAUNCH**. (This and the auth/binary probes
+are good candidates to extract into a small pre-flight helper script.)
+
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
 Collapse every config decision the unattended run could hit into a fixed choice,
@@ -129,13 +145,16 @@ so nothing prompts at 3am:
 Any decision that can't be resolved here — and would therefore prompt mid-run —
 **BLOCKS LAUNCH**.
 
-### Step 4 — Gitignore sanity check (BLOCKS LAUNCH)
+### Step 4 — Gitignore sanity check
 
 Check the file types the tasks will produce (the plan's `related_files` and any
 expected build/output artifacts) against the repo's ignore rules with
-`git check-ignore`. An **intended output that is git-ignored** — the "gitignored
-output" overnight failure, where the work runs but the artifact never commits —
-**BLOCKS LAUNCH** with the offending path + pattern.
+`git check-ignore`. A match — an **intended output that is git-ignored** — does
+**not** block launch: an ignored directory is common and usually fine to force
+through. Record that the orchestrator commits those paths with `git add -f` so
+the work lands despite the ignore rule, and surface the list in the launch
+summary so the human can still catch a genuinely wrong ignore (an output that
+should never be committed) while awake.
 
 ### Step 5 — Record verify tooling + exercise path
 
@@ -156,7 +175,7 @@ and its blocker edges. Write `.auto-pilot/RUN.md` — front matter (`run_id`,
 the per-task table with each task's initial **phase** and its `base` edge (main
 for an independent task, the parent's branch for a chained one) — in the exact
 format defined in [`references/run-state.md`](references/run-state.md) "`RUN.md`".
-Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/MORNING.md`. **Commit**
+Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/REPORT.md`. **Commit**
 all three to the run-state branch (the first write under the run-state branch's
 fixed write order). Do **not** restate the run-state formats here — they live in
 that reference.
@@ -175,6 +194,13 @@ capability demands from task _text_ — "needs a DB", "needs network" — is the
 predictive scout, a warn-only follow-up; it is deliberately **not** here, so
 nothing blocks launch on a speculative read.)
 
+**v1 treats every route as _required_** — an absent backend blocks. Softening
+this to **required-vs-preferred** (a _preferred_ backend that's absent warns and
+falls back to the next-ranked `select-coder` spec instead of blocking, while a
+_required_ one still blocks) is a planned follow-up — `select-coder` already
+returns ranked specs, so the fallback order exists; the missing piece is the
+require/prefer bit on the task route.
+
 ### Step 7 — Spawn the detached orchestrator
 
 Per [`references/launch-runtime.md`](references/launch-runtime.md):
@@ -184,13 +210,12 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
    allowlist narrowed to this run's tools for host egress), and log redirection
    to `.auto-pilot/orchestrator.log`.
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
-   bare) — a failure here is a launch blocker (ties to step 2).
-3. Confirm the machine will stay awake for the run (lid-open / tested clamshell);
-   if it can't be guaranteed, **block** (see the reference's "Laptop sleep").
-4. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
+   bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
+   awake was already confirmed in the pre-flight (step 2).
+3. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
    `setsid` on Linux) so the orchestrator outlives this session; record its
    **PID + process start-time + `--until` deadline** on the run-state branch for
    later stale-run detection (the start-time guards against a recycled PID being
    mistaken for a live run).
-5. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
-   files, and the log path — and tell the user the run is going and to go to bed.
+4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
+   files, and the log path — and tell the user the run is going.

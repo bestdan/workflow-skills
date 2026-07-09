@@ -28,7 +28,7 @@ the **run-state branch** (below) — never to a task branch. Paths:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.auto-pilot/RUN.md`       | The task graph + each task's current lifecycle **phase** and the run's verify tooling. The machine-readable state the run loop and `--resume` read. |
 | `.auto-pilot/QUESTIONS.md` | The decision log — one indexed entry per reversible call the run made without a human.                                                              |
-| `.auto-pilot/MORNING.md`   | The rolling human-facing report the user wakes to.                                                                                                  |
+| `.auto-pilot/REPORT.md`    | The rolling human-facing report the user wakes to.                                                                                                  |
 
 ### `RUN.md`
 
@@ -70,7 +70,7 @@ Append-only, indexed. One entry per reversible decision the run made on its own
 Every entry carries: the question, the options considered, the call made, the
 reasoning, and the reversibility. Prefer the reversible option when uncertain.
 
-### `MORNING.md`
+### `REPORT.md`
 
 The report, rewritten after every unit of work. Sections:
 
@@ -90,7 +90,7 @@ The run files live on a **dedicated branch**, distinct from every task branch:
 
 - **Name:** `auto-pilot/<run_id>` — e.g. `auto-pilot/2026-07-08-auto-pilot-mode`.
   It is created at launch and never merged into `main`.
-- **Why separate:** bookkeeping commits (`RUN.md`/`QUESTIONS.md`/`MORNING.md`
+- **Why separate:** bookkeeping commits (`RUN.md`/`QUESTIONS.md`/`REPORT.md`
   updates after every unit) must never land on a task branch, or every task PR
   would carry unrelated run-state churn. Keeping them on their own branch means
   task PRs contain only their code, and a dead orchestrator still leaves a
@@ -114,7 +114,10 @@ below decidable.
 
 `handed-off` is the success terminal — completion itself is merge-verified later
 by `/sweep-for-complete`, never by the run. In-run dependency readiness keys off
-`handed-off`, not tracker completion.
+`handed-off`, not tracker completion. The tracker state `needs_review` here means
+**co-review is already complete** (it ran during `/deliver-task`); the remaining
+gate is a **human** reviewer/merger — the automated review is not what
+`needs_review` is waiting on.
 
 ## Write order
 
@@ -151,7 +154,7 @@ which transition the crash interrupted — the pr-open tracker write (G5) links
 the PR and stays `started`, while `needs_review` is written only at the hand-off
 tracker write (G6). `--resume` matches the on-disk reality to a row and applies
 its action; anything that doesn't match cleanly is set to `parked` with a
-`MORNING.md` entry rather than blindly retried.
+`REPORT.md` entry rather than blindly retried.
 
 | #  | Crash point                                                         | Observed reality                                               | Reconcile action                                                                                                  |
 | -- | ------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

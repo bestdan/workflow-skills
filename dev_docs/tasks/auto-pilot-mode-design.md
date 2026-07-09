@@ -56,7 +56,7 @@ Required tweaks to existing skills (small, PR-able independently):
 | Pre-authorized | Push branches, open PRs, update Linear, spawn paid coder agents (bounded, see budget)                        |
 | NOT authorized | Merging PRs, completing tracker issues — nothing lands or closes unattended                                  |
 | Budget         | Rate-window aware + per-task bounds; hard-stop before paid overflow                                          |
-| Morning UX     | `MORNING.md` report + evidence-carrying PR bodies, all in git                                                |
+| Morning UX     | `REPORT.md` report + evidence-carrying PR bodies, all in git                                                 |
 | Packaging      | Skills in this plugin; launch phase runs in the user's interactive session                                   |
 
 ## State model (single source of truth)
@@ -66,7 +66,7 @@ Three stores exist; only one is authoritative.
 - **The tracker is authoritative for task status** (Linear, or plan files for
   the plan source). Run files never disagree with it on purpose.
 - **Run files are a cache + report**: `RUN.md` (task graph, per-task lifecycle
-  _phase_), `QUESTIONS.md` (decision log), `MORNING.md` (rolling report). They
+  _phase_), `QUESTIONS.md` (decision log), `REPORT.md` (rolling report). They
   live on a **dedicated run-state branch** in the worktree — never on task
   branches, so bookkeeping commits can't pollute task PRs.
 - **Fixed write order per transition**: push code → update tracker → commit run
@@ -187,7 +187,7 @@ while unblocked tasks remain and inside budget bounds:
   is an indexed `QUESTIONS.md` entry and the run proceeds. Prefer the
   reversible option when uncertain.
 - **Human checkpoints produce artifacts**: working end-to-end + how-to-evaluate
-  in the PR body and `MORNING.md`, then proceed.
+  in the PR body and `REPORT.md`, then proceed.
 - **Budget bounds** (all explicit): rate-window check after each task, pause +
   scheduled wake-up past reset when near a cap, hard-stop before paid/overflow
   credits; **per-task wall-clock limit** (default ~45 min, then park);
@@ -196,7 +196,7 @@ while unblocked tasks remain and inside budget bounds:
 
 ## Morning interface
 
-- `MORNING.md`: per-task outcome (handed-off / parked / skipped + why),
+- `REPORT.md`: per-task outcome (handed-off / parked / skipped + why),
   decision-log highlights, evidence links, the how-to-evaluate queue, which
   review classes ran per PR, spend summary.
 - PRs: dependency-shaped, frozen, each carrying its own evidence. Nothing
