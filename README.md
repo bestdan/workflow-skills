@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-10 skills, 15 commands, and 1 subagent, organized into five workflows:
+11 skills, 15 commands, and 1 subagent, organized into six workflows:
 
 ### PR review
 
@@ -58,6 +58,12 @@ For the `linear` handler, merged PRs are reconciled explicitly via `/complete-ta
 | **orchestrate-coders** | `/orchestrate-coders <task> [--coder <backend>[:<model>]]... [-n N] [--plan <name>]`, or "farm this out to codex / have opus implement these" | Turn the current session into an orchestrator that doesn't write feature code itself: it decomposes the task into PR-sized packets, dispatches each to a coder backend — a native `opus` subagent, or an external coder CLI (`codex`, `agy`, `devin`, custom) driven in an isolated git worktree — verifies every diff, integrates the branches, and reports per-packet outcomes. The backend and its model are selectable per run and rememberable via `dev_docs/orchestrate-coders/.coders.yml`.                                                                           |
 | **select-coder**       | `/select-coder <task> [--plan <name>] [--refresh] [-n N]`, or "which model should implement this / pick the best coder for these packets"     | Recommend which coder agent and model should execute a task: a one-time pre-flight probes which backends and models are actually available (cached in `.coders.yml`), the task is profiled (via `assess-task`) and its profile mapped against a capability matrix (correctness, speed, cost, creativity, autonomy, verification behavior — with a refresh protocol so the data doesn't go stale), and the result is up to N ranked `<backend>:<model>` specs with rationale — directly usable as orchestrate-coders `--coder` arguments or per-packet round-robin overrides. |
 | **assess-task**        | `/assess-task <task> [--plan <name>]`, or "how hard / creative / mechanical is this task / profile this work"                                 | Profile what a coding task demands, independent of who executes it: score it along stable dimensions (complexity, creativity, scope, autonomy, speed/cost sensitivity, verification criticality) and return a compact `task_profile` block plus a routing `label`. Pure assessment — it never picks a model, sizes, or dispatches. `select-coder` consumes it for routing; `break-down-task` and `promote-tasks` reference it as a sizing/confidence signal.                                                                                                                 |
+
+### Autonomous execution
+
+| Skill          | Trigger                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **auto-pilot** | `/auto-pilot <linear-project \| plan-dir>` — "grind on this overnight" _(in progress)_ | Advance a whole task graph unattended: an isolated worktree, a thin orchestrator walking the graph, and `/deliver-task` per task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state. v1 is being built — see [the design](dev_docs/tasks/auto-pilot-mode-design.md); this release ships the skill home and the [run-state reference](skills/auto-pilot/references/run-state.md). |
 
 ### Auditable analysis
 
