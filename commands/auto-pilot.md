@@ -20,10 +20,12 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
   project (id, name, or slug) **or** a `dev_docs/tasks/<name>_plan/` directory (a
   `/plan-with-docs` output). Detect which: an existing directory path → plan
   source; otherwise → resolve as a Linear project. The chosen adapter
-  (`references/adapters.md`) normalizes it to the run-state representation.
+  (`skills/auto-pilot/references/adapters.md`) normalizes it to the run-state
+  representation.
 - `--until <time>` — wall-clock bound for the run; the orchestrator stops itself
   at this time (and a hard outer watchdog enforces it — see
-  `references/launch-runtime.md`). Omit for the skill's default bound.
+  `skills/auto-pilot/references/launch-runtime.md`). Omit for the skill's default
+  bound.
 - `--resume` — **not yet implemented.** Resume lands in a later task (PRE-465).
   Parse it, and if present **stop immediately** with:
   "`--resume` is not available yet (lands in PRE-465); re-run without it." Do not

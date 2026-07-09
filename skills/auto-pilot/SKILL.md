@@ -162,7 +162,8 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
    if it can't be guaranteed, **block** (see the reference's "Laptop sleep").
 4. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
    `setsid` on Linux) so the orchestrator outlives this session; record its
-   **PID + `--until` deadline** on the run-state branch for later stale-run
-   detection.
+   **PID + process start-time + `--until` deadline** on the run-state branch for
+   later stale-run detection (the start-time guards against a recycled PID being
+   mistaken for a live run).
 5. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
    files, and the log path — and tell the user the run is going and to go to bed.

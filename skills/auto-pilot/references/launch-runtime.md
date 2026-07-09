@@ -49,7 +49,7 @@ launch session.
 | **Logs / observability**     | `claude -p --output-format stream-json` redirected to `.auto-pilot/orchestrator.log`. The real report channel stays the committed `RUN.md` / `QUESTIONS.md` / `MORNING.md`; the log is forensic, not primary.                                                                                                                                                                                                                                                                           |
 | **`--until <time>` bound**   | Defense in depth: a hard outer `timeout`/watchdog kill computed from `--until` at launch, **plus** the prompt-level "stop yourself at T" instruction the run loop honors.                                                                                                                                                                                                                                                                                                               |
 | **Non-interactive auth**     | The detached process reuses the launching user's stored credentials (`~/.claude`). A launch-time smoke test (`claude -p 'ok' --max-turns 1`) verifies **before** detaching — but it must run **through the exact sandbox wrapper, env, and mounts** the orchestrator will use, or it can pass outside the jail while `~/.claude`/DNS/network fail inside it. A dead credential then fails loudly at launch, not silently at 3am (pre-flight step 2).                                    |
-| **Orphan / stale detection** | The launch step records the orchestrator **PID + `--until` deadline** on the run-state branch, so `--resume` or a fresh launch can detect and kill a stale orchestrator before starting a new one.                                                                                                                                                                                                                                                                                      |
+| **Orphan / stale detection** | The launch step records the orchestrator **PID + process start-time + `--until` deadline** on the run-state branch, so `--resume` or a fresh launch can detect and kill a stale orchestrator before starting a new one. The **start-time** (e.g. `ps -p <pid> -o lstart=`) is recorded with the PID so a **recycled PID** — the OS reassigning a dead orchestrator's number to an unrelated process — can't be mistaken for a live run.                                                 |
 | **Laptop sleep**             | Detaching survives session exit, **not** machine sleep — and `caffeinate -is` does **not** by itself keep a MacBook awake after **lid close**: clamshell sleep still wins unless clamshell conditions are met (external power + display/keyboard) or the lid stays open. So pre-flight treats "cannot guarantee the machine stays awake for an unattended run" as a **launch blocker** (or the user keeps the lid open / uses a tested clamshell setup), rather than a soft mitigation. |
 
 ## Sandbox profile — sandboxed yolo
@@ -142,5 +142,15 @@ orchestrator runs under **one sandbox scoped to its whole process tree**: a
 seatbelt profile permitting `exec` of the coder binaries (the FS/process layer),
 plus a network allowlist that is the **union of the configured coders'
 endpoints** (the harness network layer, narrowed at pre-flight, §2). Workers
-inherit both via `exec`; the profile permits the coder binaries and their
+inherit that jail via `exec`; the profile permits the coder binaries and their
 allowlisted hosts, and nothing wider.
+
+**But a worker must not inherit the orchestrator's credential surface.** §1
+mounts `~/.claude` / `~/.config/gh` / `~/.config/op` read-only for the
+**orchestrator**, which needs them — a worker does **not**, and a worker runs
+untrusted third-party code (an npm post-install, a test suite) that could read
+any credential in its jail. So the shared process-tree profile is credential-
+**subtractive** for workers: a worker's exec drops every mount except **its own
+coder's** credential file (a codex worker sees only its OpenAI credential, never
+`gh`/`op`/`~/.claude`) and that coder's network hosts. Least privilege per §3
+holds down into the workers, not just at the orchestrator.
