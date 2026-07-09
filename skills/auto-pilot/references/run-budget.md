@@ -7,7 +7,7 @@ and the state formats (`parked`, write order) in
 [`run-state.md`](run-state.md).
 
 Design source:
-[`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md)
+[`auto-pilot.md`](../../../dev_docs/auto-pilot.md)
 §"Budget bounds" + §"Out of scope". The three open implementation questions
 left there were resolved in a design consult; this file bakes in those
 decisions.

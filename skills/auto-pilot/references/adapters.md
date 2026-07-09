@@ -11,7 +11,7 @@ no new tracker logic of its own. The source-specific differences (WIP caps,
 labels, MCP read-lag, branch naming, what "needs a human" looks like) live
 **inside the adapter**, so no downstream phase ever has to know them.
 
-Design source: [`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md) §"Work-source adapters".
+Design source: [`auto-pilot.md`](../../../dev_docs/auto-pilot.md) §"Work-source adapters".
 
 > **Compose, never duplicate.** Every verb row cites the handler file + section
 > it delegates to, or is marked an explicit **no-op**. If a verb ever grows its

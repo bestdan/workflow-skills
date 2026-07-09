@@ -12,7 +12,7 @@ worktree, a thin orchestrator that walks the graph, and `/deliver-task` per task
 (claim → implement → PR → co-review → iterate → hand-off). It composes existing,
 battle-tested skills and handler protocols rather than duplicating them.
 
-Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/auto-pilot-mode-design.md).
+Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
 
 > **Status:** v1 is being built. This SKILL.md establishes the skill home, the
 > references below, the interactive **launch** phase, the unattended **run**

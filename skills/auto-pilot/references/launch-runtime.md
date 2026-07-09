@@ -7,7 +7,7 @@ and rationale only — the ordered launch steps live in
 [`run-state.md`](run-state.md).
 
 Design source:
-[`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md)
+[`auto-pilot.md`](../../../dev_docs/auto-pilot.md)
 §"Decisions" (sandboxed yolo) + §"Open implementation questions". Both were left
 open in the design doc and are resolved here.
 
