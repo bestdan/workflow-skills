@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.34.0] - 2026-07-09
+
+### Features
+
+- [PRE-465] --resume phase — crash reconciliation into the run loop (#146) (4a33150)
+
 ## [1.33.0] - 2026-07-09
 
 ### Features
