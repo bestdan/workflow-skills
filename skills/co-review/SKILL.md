@@ -26,7 +26,7 @@ Three mode choices:
 - `--remote` — skip local agents for this run: the main agent reviews and folds in GitHub comments as usual, but codex is not probed, asked about, or dispatched, and the config is left untouched. Useful for a quick "just the normal PR review" without spinning up extra agents. Mutually exclusive with `--local` (which drops GitHub entirely); if both are passed, stop and ask which the user meant.
 - `--post` — review someone else's PR and post the vetted findings **back to the PR** instead of editing local files. The review and reconciliation are identical to the default flow, but the auto-fix step is replaced: nothing in the working tree is ever changed, and high/medium findings (after you vet them) are submitted as a single GitHub PR review with inline comments. Requires a PR — mutually exclusive with `--local`; if both are passed, stop and ask which the user meant. Composes with `--remote` (post a Claude-only review) and with local reviewers (post a reconciled multi-agent review).
 - `--non-interactive` — run unattended: never prompt, bound every reviewer wait, and disable untrusted custom commands. Built for callers with no human in the loop (the auto-pilot `/deliver-task` lifecycle). Every decision that would otherwise prompt takes a documented default or is skipped with a logged note, and the run summary reports which reviewer classes actually ran. See **Non-interactive mode** for the full policy. Composes with all other flags.
-- `--allow-command <cmd>` — pre-approve one custom/non-built-in reviewer command for this run (repeatable). Only meaningful with `--non-interactive`, where untrusted commands are otherwise skipped (they can't be confirmed with no human present). The value must match the config's `command:` string byte-for-byte; a non-matching custom command is still skipped and logged.
+- `--allow-command <cmd>` — pre-approve one custom/non-built-in reviewer command for this run (repeatable). Only meaningful with `--non-interactive`, where untrusted commands are otherwise skipped (they can't be confirmed with no human present). The value must match the config's `command:` string byte-for-byte; a non-matching custom command is still skipped and logged. This allowlist is the **caller's** explicit approval (the user or orchestrator passing the flag) — it is never sourced from the repo's `.co-review.yml`, so a repo can't self-approve its own custom command.
 
 ## Local reviewers
 
@@ -143,7 +143,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 **Reviewer-class timeouts.** Three classes, three bounds:
 
 - **Local reviewer agents** (the main Claude review and the reconciler sub-agent, in-process) — **no extra bound**; they don't wait on anything external.
-- **CLI reviewers** (`codex`, `agy`, `devin`, `copilot` dispatched as local CLIs) — **15 min** each. Background the dispatch (`run_in_background: true`, per the **Long reviews** note) and stop waiting at 15 min; a reviewer still running is treated as timed-out — noted, skipped, never fatal.
+- **CLI reviewers** (`codex`, `agy`, `devin`, `copilot` dispatched as local CLIs) — **15 min** each. Background the dispatch (`run_in_background: true`, per the **Long reviews** note) and stop waiting at 15 min; a reviewer still running is treated as timed-out — noted, skipped, never fatal. **Kill the backgrounded process and discard its partial output** when you stop waiting, so no orphaned reviewer keeps running or emits late output into its scratch file after the run moves on.
 - **Remote bots** (a GitHub bot review polled via `await-pr-review.sh`, e.g. Copilot) — **20 min**, i.e. pass `--timeout 1200`. On its non-zero (timeout) exit, proceed with whatever landed.
 
 **Per-decision defaults (each replaces a prompt):**
@@ -277,7 +277,7 @@ The remaining steps depend on disposition.
 
 **`--post` disposition (someone else's PR):**
 
-10. **Vet before posting.** Never touch the working tree — you don't own this code. Present the numbered post-candidate list and let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing.
+10. **Vet before posting.** Never touch the working tree — you don't own this code. Present the numbered post-candidate list and let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing. **Under `--non-interactive`** there is no one to vet: skip this gate and treat the reconciled high+medium set as the final post set (low findings stay excluded), then continue to step 11 — see **Non-interactive mode**.
 
 11. **Choose the verdict.** Ask the user which review event to submit: `COMMENT` (neutral), `REQUEST_CHANGES`, or `APPROVE`. Ask this every run; don't assume. Under `--non-interactive`, don't ask: default to **`COMMENT`** (never `REQUEST_CHANGES`/`APPROVE` unattended) and post the vetted high+medium set without a prompt (see **Non-interactive mode**).
 
