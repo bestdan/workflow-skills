@@ -1,6 +1,6 @@
 ---
 name: co-review
-description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files.
+description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files; --non-interactive runs unattended with no prompts and bounded reviewer waits.
 ---
 
 # co-review — collaborative PR review
@@ -25,6 +25,8 @@ Three mode choices:
 - `--base <branch>` — base to diff against in `--local` mode. Defaults to `main`.
 - `--remote` — skip local agents for this run: the main agent reviews and folds in GitHub comments as usual, but codex is not probed, asked about, or dispatched, and the config is left untouched. Useful for a quick "just the normal PR review" without spinning up extra agents. Mutually exclusive with `--local` (which drops GitHub entirely); if both are passed, stop and ask which the user meant.
 - `--post` — review someone else's PR and post the vetted findings **back to the PR** instead of editing local files. The review and reconciliation are identical to the default flow, but the auto-fix step is replaced: nothing in the working tree is ever changed, and high/medium findings (after you vet them) are submitted as a single GitHub PR review with inline comments. Requires a PR — mutually exclusive with `--local`; if both are passed, stop and ask which the user meant. Composes with `--remote` (post a Claude-only review) and with local reviewers (post a reconciled multi-agent review).
+- `--non-interactive` — run unattended: never prompt, bound every reviewer wait, and disable untrusted custom commands. Built for callers with no human in the loop (the auto-pilot `/deliver-task` lifecycle). Every decision that would otherwise prompt takes a documented default or is skipped with a logged note, and the run summary reports which reviewer classes actually ran. See **Non-interactive mode** for the full policy. Composes with all other flags.
+- `--allow-command <cmd>` — pre-approve one custom/non-built-in reviewer command for this run (repeatable). Only meaningful with `--non-interactive`, where untrusted commands are otherwise skipped (they can't be confirmed with no human present). The value must match the config's `command:` string byte-for-byte; a non-matching custom command is still skipped and logged.
 
 ## Local reviewers
 
@@ -132,6 +134,29 @@ Verdict handling:
 
 `git ls-remote` needs network, so this call must run unsandboxed in the Bash tool (like the cloud reviewer dispatches).
 
+## Non-interactive mode
+
+`--non-interactive` makes the whole flow safe to run with **no human in the loop** — the auto-pilot orchestrator's `/deliver-task` lifecycle calls it this way. Two guarantees hold for the entire run: **it never prompts**, and **every wait is bounded**. When the flag is absent, everything below is unchanged — the interactive behavior documented elsewhere in this file is the default.
+
+The governing rule: **any decision that would prompt takes the documented default below, or is skipped with a logged note** — never a pending prompt. The run summary (step 9) then reports which reviewer classes ran, which timed out, and which were skipped, so the caller can act on the gaps in the morning.
+
+**Reviewer-class timeouts.** Three classes, three bounds:
+
+- **Local reviewer agents** (the main Claude review and the reconciler sub-agent, in-process) — **no extra bound**; they don't wait on anything external.
+- **CLI reviewers** (`codex`, `agy`, `devin`, `copilot` dispatched as local CLIs) — **15 min** each. Background the dispatch (`run_in_background: true`, per the **Long reviews** note) and stop waiting at 15 min; a reviewer still running is treated as timed-out — noted, skipped, never fatal.
+- **Remote bots** (a GitHub bot review polled via `await-pr-review.sh`, e.g. Copilot) — **20 min**, i.e. pass `--timeout 1200`. On its non-zero (timeout) exit, proceed with whatever landed.
+
+**Per-decision defaults (each replaces a prompt):**
+
+- **Conflicting flags** (`--local`+`--remote`, `--local`+`--post`) — can't be resolved without asking, so this is a **hard error**: stop with a logged reason (not a prompt). A correct caller passes a valid combination; the orchestrator does.
+- **Staleness `stale`** (step 3) — do **not** stop and offer to update. Log the stale refs and **proceed** (the auto-pilot caller runs its own per-task `git fetch` + freshness gate upstream, per the spec). An `unknown` verdict is warned-and-continued as usual.
+- **Reviewer config absent** (step 4) — do **not** prompt and do **not** write `.co-review.yml`. Probe `PATH` and run the **built-in** reviewers that are available and pass their auth probe; if none are, run Claude-only. Log which were used. (The auto-pilot launch phase is where reviewer config is meant to be resolved deliberately; absent config unattended just means "built-ins if present.")
+- **Untrusted custom / non-built-in command** (Local reviewers, step 5) — **skip it** with a logged note, **unless** its `command:` string was pre-approved via `--allow-command <cmd>` (byte-for-byte). Repo-controlled code is never run unattended on the strength of the config alone.
+- **Medium-confidence findings** (default disposition, steps 9/11) — there's no one to answer the per-item yes/no. Apply **only** high-confidence auto-fixes; record every medium finding as a **deferred judgment call** in the summary (the `/deliver-task` caller logs these to its `QUESTIONS.md` for morning review). Never apply a medium item unattended.
+- **`--post` verdict** (step 11, `--post` only) — default the review event to **`COMMENT`** (never `REQUEST_CHANGES`/`APPROVE` unattended) and post the high+medium set without a vetting prompt. `/deliver-task` uses the default (own-PR) disposition, so this path is rare, but it stays deterministic.
+
+**Bots-unavailable fallback.** If the remote bot times out (20 min) or can't run at all (e.g. a draft PR on a repo whose bots don't review drafts), fall back to **local reviewers only** — the run still completes and the summary records that the bot class was skipped and why.
+
 ## Permissions (approve once)
 
 The reviewer command is **invariant**: everything that varies per PR (the diff and any reviewer-specific requests) travels in the `<INPUT>` file — reached on stdin with a fixed pointer argument (`codex`, `agy`, `copilot`) or via `--prompt-file "<INPUT>"` (`devin`) — so the command string never changes. Approve each reviewer **once** with an **exact-match** rule — no broad wildcard. Two layers of rules:
@@ -163,14 +188,14 @@ Why this is narrow:
 
 ## Steps
 
-1. **Parse invocation.** Note any `--local`, `--remote`, `--post`, and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant. `--post` requires a PR and is **mutually exclusive with `--local`** — if both are present, stop and ask which was meant.
+1. **Parse invocation.** Note any `--local`, `--remote`, `--post`, `--non-interactive`, `--allow-command <cmd>` (repeatable), and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant. `--post` requires a PR and is **mutually exclusive with `--local`** — if both are present, stop and ask which was meant. Under `--non-interactive` a conflicting-flag combination cannot be resolved by asking, so it is a **hard error** (stop with a logged reason), not a prompt — see **Non-interactive mode**.
 
 2. **Identify the PR** (skip entirely in `--local` mode).
    - If the user passed a PR number, use it.
    - Otherwise: run `git branch --show-current` first, then `gh pr list --head <branch> --json number,url` with the literal branch value substituted in. Do **not** combine them with `$(...)` — command substitution inside a Bash tool call is rejected by the permission matcher even when both subcommands are allowlisted.
    - If none, stop and say so (or suggest `--local` if the user just wants to review uncommitted work).
 
-3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Then:
+3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Under `--non-interactive`, a `stale` verdict is **logged and proceeded past** rather than stopped on (see **Non-interactive mode**). Then:
    - **GitHub mode** (in parallel):
      - **Wait for the bot reviewer first if the PR was just opened.** When you want to reconcile against a bot reviewer (e.g. Copilot) that hasn't posted yet, don't hand-write a `gh pr view … | sleep` poll loop — they drift on interval, timeout, and (critically) the reviewer login. Invoke the shared fixture instead and proceed once it reports `landed`:
 
@@ -178,13 +203,13 @@ Why this is narrow:
        "${CLAUDE_PLUGIN_ROOT}/scripts/await-pr-review.sh" --pr <n> --repo <owner/name>
        ```
 
-       It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer).
+       It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer). Under `--non-interactive`, bound the wait at the remote-bot ceiling — pass `--timeout 1200` (20 min) — and on its timeout (non-zero) exit, proceed with whatever landed and note the bot class as skipped (see **Non-interactive mode**).
      - `gh pr view <n> --json title,body,reviews,comments,files`
      - `gh pr diff <n>`
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
    - **Local mode** (`--local`): `git diff <base>` (default `base = main`) for tracked changes, **plus** untracked files via `git ls-files --others --exclude-standard` so new files aren't missed (mind the merge-base caveat in the Flags section if `<base>` has advanced). No `gh` calls. There are no GitHub comments to reconcile.
 
-4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `$CO_REVIEW_DIR/.co-review.yml` (resolve `CO_REVIEW_DIR` against the main working tree as shown under **Local reviewers → Config file** — do **not** use `git rev-parse --show-toplevel`, which points at the current worktree and misses the git-ignored config):
+4. **Resolve local reviewers.** If `--remote` was passed, skip this step entirely — no probe, no prompt, no config write — and continue with no local agents. Otherwise read `$CO_REVIEW_DIR/.co-review.yml` (resolve `CO_REVIEW_DIR` against the main working tree as shown under **Local reviewers → Config file** — do **not** use `git rev-parse --show-toplevel`, which points at the current worktree and misses the git-ignored config). **Under `--non-interactive`, config-absent does not prompt or write** — probe `PATH` and run the available built-in reviewers (Claude-only if none), logging which were used (see **Non-interactive mode**); the bullets below are the interactive behavior:
    - Absent → probe `PATH` for the known agents and ask the user which to use, then write the choice (including an empty list if they decline all) to the config. Since this is local config, also keep it out of git by adding the entire `dev_docs/co-review/` folder to the main tree's `.gitignore` (the `git check-ignore` guard keeps it idempotent):
 
      ```bash
@@ -194,7 +219,7 @@ Why this is narrow:
    - Empty list → no local reviewers; continue Claude-only.
    - Entries present → the built-in agents (`codex`, `agy`, `devin`, `copilot`) are used; for any custom `command:` or unknown agent, show it and get explicit confirmation first (see the untrusted-config note). Skip any `gemini` entry (retired — note it was ignored and offer to drop it from the config). Note which will run.
 
-5. **Dispatch local-agent reviews** (if any) **in parallel.** **Read each dispatched reviewer's file under [`reviewers/`](reviewers/) first** and follow it — it carries that reviewer's probe, exact invocation, and quirks. For the probe-gated cloud reviewers, **run the pre-flight auth probe first** (`agy models` / `devin auth status`) and dispatch only the ones that exit 0; a probe failure is a skip (noted in the summary, never fatal), which spares you `agy`'s 30s auth-timeout hang. `copilot` has no probe — dispatch it directly and, if its first output line is an auth/policy error rather than a review, skip it (note it, never fatal). Then assemble the `<INPUT>` file (rubric + any reviewer-specific requests + diff) and hand it to each surviving agent per its file — piped on stdin with the fixed pointer prompt for `codex`/`agy`/`copilot`, or via `--prompt-file "<INPUT>"` for `devin`; capture stdout (`copilot` also captures stderr via `2>&1`). **Give each parallel reviewer its own fixed `<INPUT>` path** (suffix per agent) so their truncate-then-read cycles can't race on a shared file — see the per-agent-path note under Built-in invocations. For any custom `command:` or non-built-in agent, show the command and get explicit user confirmation before the first run (untrusted config; see the note in Local reviewers). If an agent errors, times out, or isn't actually runnable, note it and continue — a missing reviewer is not fatal. Output is free-form prose; do not impose a JSON contract on external tools.
+5. **Dispatch local-agent reviews** (if any) **in parallel.** **Read each dispatched reviewer's file under [`reviewers/`](reviewers/) first** and follow it — it carries that reviewer's probe, exact invocation, and quirks. For the probe-gated cloud reviewers, **run the pre-flight auth probe first** (`agy models` / `devin auth status`) and dispatch only the ones that exit 0; a probe failure is a skip (noted in the summary, never fatal), which spares you `agy`'s 30s auth-timeout hang. `copilot` has no probe — dispatch it directly and, if its first output line is an auth/policy error rather than a review, skip it (note it, never fatal). Then assemble the `<INPUT>` file (rubric + any reviewer-specific requests + diff) and hand it to each surviving agent per its file — piped on stdin with the fixed pointer prompt for `codex`/`agy`/`copilot`, or via `--prompt-file "<INPUT>"` for `devin`; capture stdout (`copilot` also captures stderr via `2>&1`). **Give each parallel reviewer its own fixed `<INPUT>` path** (suffix per agent) so their truncate-then-read cycles can't race on a shared file — see the per-agent-path note under Built-in invocations. For any custom `command:` or non-built-in agent, show the command and get explicit user confirmation before the first run (untrusted config; see the note in Local reviewers) — **under `--non-interactive` this cannot be confirmed, so the custom command is skipped and logged unless it was pre-approved via `--allow-command <cmd>`** (see **Non-interactive mode**). If an agent errors, times out, or isn't actually runnable, note it and continue — a missing reviewer is not fatal. Under `--non-interactive`, also stop waiting on any CLI reviewer at its **15-min** bound (background the dispatch per the **Long reviews** note) and treat a still-running reviewer as timed-out. Output is free-form prose; do not impose a JSON contract on external tools.
 
 6. **Assess scope first.** Before any per-line review, judge whether the change is too big and should be split. Only raise this if you have **high confidence** — don't flag every multi-file change. Signals that justify a split call:
    - Multiple unrelated concerns in one diff (e.g., a refactor + a feature + a config change).
@@ -222,7 +247,7 @@ Why this is narrow:
    - Treat suggestions that are over-engineered for this codebase (e.g., enterprise hardening for a personal repo) or that don't apply to its actual setup (e.g., worktree handling on a directly-cloned repo) as **low** confidence and say why — the sub-agent won't see this skill's Rules section unless you pass it along.
    - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
-9. **Reconcile and present** to the user. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Then branch on disposition:
+9. **Reconcile and present** to the user. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
    - **Default (your PR):**
      - Auto-fix list (high confidence) — state what you will change.
      - Ask list (medium) — one yes/no question per item.
@@ -240,7 +265,7 @@ The remaining steps depend on disposition.
     - Code: lint / type-check / tests if the project has them
     - Don't bundle in unrelated cleanups.
 
-11. **Wait for the user's answers** on the medium items. Apply the ones they say yes to.
+11. **Wait for the user's answers** on the medium items. Apply the ones they say yes to. Under `--non-interactive` there is no one to answer: **skip every medium item** and record it as a deferred judgment call in the summary (the `/deliver-task` caller logs these for morning review) — never apply a medium item unattended. See **Non-interactive mode**.
 
 12. **Commit and push the changes.** Once the fixes are applied and verified, commit them and push to the current branch's upstream:
     - **Never commit/push to the default branch.** If the current branch is the repo's default branch (`main`/`master`), stop and tell the user to move the fixes onto a feature branch first — don't auto-commit or push review fixes straight to the default branch.
@@ -254,7 +279,7 @@ The remaining steps depend on disposition.
 
 10. **Vet before posting.** Never touch the working tree — you don't own this code. Present the numbered post-candidate list and let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing.
 
-11. **Choose the verdict.** Ask the user which review event to submit: `COMMENT` (neutral), `REQUEST_CHANGES`, or `APPROVE`. Ask this every run; don't assume.
+11. **Choose the verdict.** Ask the user which review event to submit: `COMMENT` (neutral), `REQUEST_CHANGES`, or `APPROVE`. Ask this every run; don't assume. Under `--non-interactive`, don't ask: default to **`COMMENT`** (never `REQUEST_CHANGES`/`APPROVE` unattended) and post the vetted high+medium set without a prompt (see **Non-interactive mode**).
 
 12. **Post one batched PR review.** Submit a single review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
     - `event` = the chosen verdict.
@@ -274,4 +299,5 @@ The remaining steps depend on disposition.
 - Don't re-ask the local-reviewer question once a config (including an explicit empty list) exists.
 - Never silently run a custom `command:` or non-built-in agent from `.co-review.yml` — it's repo-controlled, untrusted code. Show it and confirm first.
 - In `--post` mode, never edit the reviewed code — it isn't yours. The only output is the GitHub review.
-- In `--post` mode, nothing is posted to GitHub until the user has vetted and explicitly approved the final comment set and chosen the verdict.
+- In `--post` mode, nothing is posted to GitHub until the user has vetted and explicitly approved the final comment set and chosen the verdict. **Exception:** `--non-interactive` posts the vetted high+medium set as a `COMMENT` review without a prompt (see **Non-interactive mode**).
+- `--non-interactive` never prompts and bounds every reviewer wait. It takes a documented default at each decision point, disables untrusted custom commands (unless pre-approved via `--allow-command`), applies only high-confidence fixes (medium items are logged, never applied), and reports every reviewer class as ran / timed-out / skipped. When the flag is absent, all interactive behavior is unchanged.
