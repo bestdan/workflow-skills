@@ -58,9 +58,12 @@ project) and resolve the handler from `dev_docs/tasks/.task-config.yml`; any
 handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan only).
 Pick the matching adapter (`references/adapters.md`).
 
-The pre-flight is an **ordered, fail-closed** sequence. Steps 2–5 are the
-config/auth/output checks (fleshed out in the next task); steps 1, 6, and 7
-below are complete.
+The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
+**supply-and-demand**: steps 2–3 probe what the configured environment can
+_supply_ (auth, resolved config), and the **scout** in step 6 checks what the
+_plan_ will _demand_ (which coder each task routes to) against that supply — the
+join is where a run that would otherwise pass green but die at 3am gets caught
+tonight.
 
 ### Step 1 — Worktree + run-state branch (BLOCKS LAUNCH)
 
@@ -98,6 +101,16 @@ Each probe runs **through the sandbox wrapper** the orchestrator will use (per
 §"Step 7"), so a probe can't pass outside the jail while failing inside it. Any
 interactive-only or failing auth **BLOCKS LAUNCH** with the specific dependency
 named.
+
+While probing, capture the **environment fingerprint** — which coder/tool
+binaries exist on `PATH` (`codex`, `devin`, `agy`, `op`, `gh`) and the resulting
+**environment class** (`local-full` when the local CLIs are present; `claude-web`
+when running in the cloud/web environment, which has **no local CLIs** and a
+narrower permission surface). **Detect** the facts (a `command -v` probe can't
+lie); a declared class may be recorded too, but **detection wins on conflict**.
+Record the fingerprint on the run-state branch — the step-6 scout joins against
+it, and `--resume` in a different environment (launched local, resumed from web)
+re-runs that join.
 
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
@@ -147,6 +160,20 @@ Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/MORNING.md`. **Commi
 all three to the run-state branch (the first write under the run-state branch's
 fixed write order). Do **not** restate the run-state formats here — they live in
 that reference.
+
+**Scout — per-task capability join (BLOCKS LAUNCH).** With the graph now
+materialized and each task's coder resolved (step 3) against the environment
+fingerprint (step 2), check the **demand** side the auth probes structurally
+can't see: for **each** task, take the `<backend>` it routes to and confirm that
+backend **exists in this environment**. A task routed to a backend absent
+here — the motivating case is a `codex` task in a `claude-web` run with no
+`codex` binary — **BLOCKS LAUNCH**, naming the task, the missing backend, and the
+fix (install it, or re-route the task in the `select-coder` config). This is a
+**deterministic** check only: it blocks solely on a provable route-vs-environment
+gap, never on a guess about what a task's prose might need. (Inferring
+capability demands from task _text_ — "needs a DB", "needs network" — is the
+predictive scout, a warn-only follow-up; it is deliberately **not** here, so
+nothing blocks launch on a speculative read.)
 
 ### Step 7 — Spawn the detached orchestrator
 
