@@ -234,9 +234,11 @@ job is to reconcile a crashed or paused run's durable state against reality,
 then fall into the normal **Run phase** loop below for whatever remains ready.
 
 **Re-run only the pre-flight that can rot; skip the launch-only steps.**
-Worktree + run-state-branch creation (step 1), source normalization, and
-materializing the task graph (step 6) already exist on the run-state branch
-from the original launch, so resume does not repeat them. What can rot between
+Worktree + run-state-branch creation (step 1) and materializing the task graph
+(step 6) already exist on the run-state branch from the original launch, so
+resume does not re-create them; **source normalization still runs** — resume
+must normalize `<source>` to resolve which run-state branch it reads from, even
+though it never re-creates that branch. What can rot between
 launch and resume, and so is re-run: the non-interactive **auth probes** and
 the **environment fingerprint** (Launch step 2) — a run launched `local-full`
 may resume under `claude-web`, or vice versa, so the step-6 scout's capability
