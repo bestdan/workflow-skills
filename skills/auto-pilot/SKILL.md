@@ -241,7 +241,7 @@ still runs** — resume must normalize `<source>` to resolve which run-state
 branch it reads from, even though it never re-creates that branch. What can rot
 between launch and resume, and so is re-run: the non-interactive **auth probes**
 and the **environment fingerprint** (Launch step 2) — a run launched
-`local-full` may resume under `claude-web`, or vice versa, so step 6's *other*
+`local-full` may resume under `claude-web`, or vice versa, so step 6's _other_
 half, the scout's **capability join**, must re-run against the current
 environment — and **base freshness**. As at launch, a hard failure here
 **BLOCKS THE RESUME**, fail-closed the same way.
