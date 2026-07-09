@@ -234,16 +234,27 @@ job is to reconcile a crashed or paused run's durable state against reality,
 then fall into the normal **Run phase** loop below for whatever remains ready.
 
 **Re-run only the pre-flight that can rot; skip the launch-only steps.**
-Worktree + run-state-branch creation (step 1) and materializing the task graph
-(step 6) already exist on the run-state branch from the original launch, so
-resume does not re-create them; **source normalization still runs** — resume
-must normalize `<source>` to resolve which run-state branch it reads from, even
-though it never re-creates that branch. What can rot between
-launch and resume, and so is re-run: the non-interactive **auth probes** and
-the **environment fingerprint** (Launch step 2) — a run launched `local-full`
-may resume under `claude-web`, or vice versa, so the step-6 scout's capability
-join must re-run against the current environment — and **base freshness**. As
-at launch, a hard failure here **BLOCKS THE RESUME**, fail-closed the same way.
+Worktree + run-state-branch creation (step 1) and the **task-graph
+materialization** half of step 6 already exist on the run-state branch from the
+original launch, so resume does not re-create them; **source normalization
+still runs** — resume must normalize `<source>` to resolve which run-state
+branch it reads from, even though it never re-creates that branch. What can rot
+between launch and resume, and so is re-run: the non-interactive **auth probes**
+and the **environment fingerprint** (Launch step 2) — a run launched
+`local-full` may resume under `claude-web`, or vice versa, so step 6's *other*
+half, the scout's **capability join**, must re-run against the current
+environment — and **base freshness**. As at launch, a hard failure here
+**BLOCKS THE RESUME**, fail-closed the same way.
+
+**Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
+but run-state branches are named `auto-pilot/<run_id>`
+([`references/run-state.md`](references/run-state.md) "Run-state branch") and
+nothing stops more than one run existing for the same source. After normalizing
+`<source>`, enumerate the `auto-pilot/*` branches whose `RUN.md` front matter
+records that source and require **exactly one** in a resumable (`active` /
+`paused` / `systemic`) state. Zero matches, or more than one, is **fail-closed**:
+report the ambiguous `run_id`s by name and stop rather than guess which run to
+resume — the same never-guess posture the reconciliation below takes.
 
 **Stale-orchestrator guard.** Read `orchestrator_pid` / `orchestrator_started_at`
 / `until` from `RUN.md`'s front matter
@@ -286,7 +297,11 @@ describing what was found ([`references/run-state.md`](references/run-state.md)
 
 **Then fall into the run loop.** Once reconciliation leaves `RUN.md` accurate,
 resume continues into the **Run phase** loop below for the remaining ready
-tasks; it does not re-derive that loop.
+tasks; it does not re-derive that loop. If the run was paused (`status: paused`
+/ `paused_until` set), resume clears those run-level pause markers before
+re-entering the loop, per
+[`references/run-budget.md`](references/run-budget.md) "Near-cap → pause +
+relaunch past reset" — pause semantics live there, not here.
 
 ## Run phase (unattended)
 
