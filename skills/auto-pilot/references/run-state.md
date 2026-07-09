@@ -41,16 +41,32 @@ work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
 base_branch: main
 verify_command: dli check # the named check (design pre-flight §5)
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
+status: active # run-level: active | paused | systemic | done
+paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused
+pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
+orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
+orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
+until: 2026-07-09T06:00:00 # the run's --until deadline
 ---
 
-| task    | phase        | branch            | base              | pr   | notes                  |
-| ------- | ------------ | ----------------- | ----------------- | ---- | ---------------------- |
-| PRE-459 | handed-off   | bestdan/pre-459-… | main              | #140 | 2 co-review rounds     |
-| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | —    | chained on PRE-459 tip |
+| task    | phase        | branch            | base              | base_sha | pr   | notes                  |
+| ------- | ------------ | ----------------- | ----------------- | -------- | ---- | ---------------------- |
+| PRE-459 | handed-off   | bestdan/pre-459-… | main              | —        | #140 | 2 co-review rounds     |
+| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | a1b2c3d  | —    | chained on PRE-459 tip |
 ```
 
 - `base` encodes the dependency edge for a stacked task: `main` for an
   independent task, or the parent task's branch for a chained one.
+- `base_sha` is the parent branch's **frozen-tip SHA**, recorded when the parent
+  reaches `handed-off`. A chained child's stacked-PR check compares the parent
+  branch's _current_ tip against this recorded SHA to detect a moved base (→ park);
+  empty (`—`) for an independent task, whose `base` is `main`.
+- `status` / `paused_until` / `pause_reason` are the **run-level** fields the run
+  loop writes: `paused_until` (+ reason) at a rate-window pause, `status: systemic`
+  (+ reason) when the circuit breaker halts, `status: done` at a clean end-of-run.
+- `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
+  record launch writes at spawn (launch-runtime.md "Orphan / stale detection");
+  `--resume` and a fresh launch read them to detect a stale orchestrator.
 - `phase` is one of the seven values below; it is the field `--resume` reconciles.
 
 ### `QUESTIONS.md`

@@ -39,6 +39,12 @@ Design: [`../../dev_docs/tasks/auto-pilot-mode-design.md`](../../dev_docs/tasks/
   `claude -p`, not an in-session Agent) and the sandbox profile it runs under
   (worktree-confined writes, a default-deny network egress allowlist, and the
   non-interactive credential model). Launch's spawn step reads this.
+- [`references/run-budget.md`](references/run-budget.md) — the run's resource
+  bounds: rate-window checks (proxy + rate-limit-error backstop), the
+  near-cap checkpoint-then-exit-then-relaunch pause, the hard-stop before
+  paid/overflow credits, per-task wall-clock and retry limits, the paid-agent
+  dispatch cap, and the run-level circuit breaker. The run loop's budget
+  check reads this.
 
 ## Launch phase (interactive)
 
@@ -219,3 +225,112 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
    mistaken for a live run).
 4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
    files, and the log path — and tell the user the run is going.
+
+## Run phase (unattended)
+
+This is what the detached orchestrator spawned by launch (step 7) executes,
+alone, with no human watching. It never writes code itself — every code change
+happens inside a `/deliver-task` call — and it reads and writes only the
+run-state formats defined in
+[`references/run-state.md`](references/run-state.md). It advances a task as
+far as `handed-off` and stops there; it never merges a PR or completes a
+tracker item (that is `/sweep-for-complete`'s job, later, with a human's PR
+approval in between).
+
+The loop is deliberately thin:
+
+```
+while unblocked tasks remain and inside budget bounds:
+    pick next unblocked task (phase-based readiness)
+    /deliver-task it (with per-task wall-clock + retry bounds)
+    update run state on the run-state branch
+    check rate-window usage
+```
+
+**Readiness + ordering.** Walk the `RUN.md` task graph
+([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
+**ready** when every task it is blocked by is at phase `handed-off` — never
+tracker done-state (per that reference's phase table, `handed-off` is the
+success terminal the run keys off, not `needs_review`'s eventual completion).
+Pick the next ready task in dependency order. Each task's `base` column
+encodes whether it is independent (`main`) or chained (the parent task's
+branch) — that distinction drives the stacked-PR handling below.
+
+**The per-task step.** Dispatch exactly one call per task:
+
+```
+/deliver-task <id> --base <branch> --questions .auto-pilot/QUESTIONS.md
+```
+
+where `<branch>` is the task's `base` from `RUN.md` — `main` for an
+independent task, the parent task's branch for a chained one. `/deliver-task`
+([`commands/deliver-task.md`](../../commands/deliver-task.md)) owns the entire
+per-task lifecycle — claim, implement, PR, co-review, iterate, hand-off — the
+run loop does not re-derive any of it. The `--questions` path is where the
+non-blocking decision protocol below appends entries. If a `/deliver-task` call
+**fails outright** — a crash or non-zero exit, rather than a clean hand-off or
+park — the orchestrator applies the per-task retry bound (one re-dispatch, then
+**park**; [`references/run-budget.md`](references/run-budget.md) "Per-task retry
+limit") and continues to the next ready task; a failed delivery never aborts the
+loop or leaves run state half-written.
+
+**Non-blocking decisions.** The run **never waits** on a human. For any
+reversible call, the orchestrator (or `/deliver-task` beneath it) picks the
+**reversible option** when uncertain, appends an indexed `QUESTIONS.md` entry
+(format per [`references/run-state.md`](references/run-state.md)
+"`QUESTIONS.md`"), and proceeds. Two sources feed the same log:
+`/deliver-task`'s own deferred judgment calls (written via its `--questions`
+path above) and orchestrator-level decisions made in this loop itself — e.g.
+skip vs park, a stacked-PR base-reconciliation choice.
+
+**Human checkpoints produce artifacts, then proceed.** When a task hits
+something that genuinely needs human judgment, the run still does not block:
+`/deliver-task` ensures the PR carries a working end-to-end state plus a
+how-to-evaluate note, the orchestrator records the same entry in `REPORT.md`'s
+_How-to-evaluate queue_, and the loop moves on. Nothing waits for a reply.
+
+**Rolling `REPORT.md` update.** After every task's state update above, rewrite
+`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the six
+sections in [`references/run-state.md`](references/run-state.md)'s "`REPORT.md`"
+order. Commit it on the run-state branch as part of that state update's commit,
+under the write order's last step. Its _Spend_ section stays a one-line
+pointer to [`references/run-budget.md`](references/run-budget.md) rather than
+restating budget rules, which that reference owns.
+
+**Stacked-PR handling.** Chains are processed in dependency order; a chained
+task's work branch must start from the **parent's frozen tip**, which the
+readiness rule guarantees is stable (the parent is already `handed-off`
+before a child becomes ready). Before dispatching a chained task, the
+orchestrator compares the parent branch's **current tip SHA** against the child's
+recorded `base_sha` — the parent's frozen tip captured at its hand-off (per
+[`references/run-state.md`](references/run-state.md) "`RUN.md`"); comparing the
+`base` branch _name_ to a tip could never detect movement. If they differ, the
+parent has moved since the base was frozen and the child would build on a stale
+base — **park** the task instead, record it, and continue to the next ready task.
+
+**State update after each task.** After `/deliver-task` returns, update
+`RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
+the run-state branch, following the fixed **write order** in
+[`references/run-state.md`](references/run-state.md) "Write order".
+`/deliver-task` already performed that order's push + tracker-write steps; the
+orchestrator's remaining job here is the _run-state commit_ — the order's
+last step — reconciling `RUN.md` to the phase it just observed.
+
+After each task's state update, apply the budget checks in
+[`references/run-budget.md`](references/run-budget.md). A hard-stop, a
+near-cap pause, or a circuit-breaker halt writes state and exits per that
+reference.
+
+**Loop termination.** The loop ends when no ready task remains or a budget
+hard-stop fires. Either way, the orchestrator writes the final `REPORT.md`
+(setting run-level `status: done`), commits it on the run-state branch, then
+**tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
+if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
+"Relaunchable, not one-shot") — so a finished run is never re-woken, and finally
+**exits cleanly**, emitting a **one-line summary** to `.auto-pilot/orchestrator.log`
+([`references/launch-runtime.md`](references/launch-runtime.md) "Logs /
+observability") — e.g. `auto-pilot done: 4 handed-off, 1 parked, 0 skipped —
+see REPORT.md`. Nothing is merged or tracker-completed by this exit: every
+task sits at whatever phase it reached (`handed-off` on the tracker as
+`needs_review`, or `started` for a `parked` task), ready for
+`/sweep-for-complete` once a human has reviewed and merged.
