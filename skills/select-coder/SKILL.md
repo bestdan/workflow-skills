@@ -91,7 +91,8 @@ only `availability:`, which orchestrate-coders treats as absent for its own
 
 `dev_docs/orchestrate-coders/.coders.yml` — the `availability:` block above,
 plus, when orchestrate-coders is also in play, `default_coder:`/`coders:` — is
-the **resolved-config shape** both this skill and orchestrate-coders consume.
+the **resolved-config shape** both this skill and orchestrate-coders consume
+(the `.coders.yml` structure shown above, not this SKILL.md).
 This is the one place that shape is defined; orchestrate-coders' Config
 section points back here rather than redefining it.
 
@@ -101,10 +102,13 @@ once at launch so an unattended run never blocks on a question — or that
 passes `--non-interactive`, gets a guarantee this skill never prompts:
 
 - Probing is skipped whenever `availability:` is present, regardless of
-  `probed_at` age — a non-interactive run does not stop to ask for a refresh.
+  `probed_at` age, **unless `--refresh` is explicitly passed** — a
+  non-interactive run does not stop to ask for a refresh, but an explicit
+  `--refresh` still forces a re-probe.
 - On genuine ambiguity (e.g. candidates tie on the task's primary dimension),
-  apply the cheaper/faster tiebreak from Rules below and pick the top-ranked
-  spec instead of asking; log the choice and the reason in the report.
+  apply the cheaper/faster tiebreak from Rules below to rank them, and pick
+  the top-ranked spec instead of asking; log the choice and the reason in the
+  report.
 
 ## Selection
 
