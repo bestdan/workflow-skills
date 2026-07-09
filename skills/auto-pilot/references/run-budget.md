@@ -18,24 +18,31 @@ stop below; everything else governs the free rate window and per-task time.
 
 ## Rate-window check
 
-Run after every task's state update (the run loop's hook point). Two
-mechanisms, layered because neither alone is trustworthy:
+Run after every task's state update (the run loop's hook point). Headroom is
+read two ways, layered because neither alone is enough:
 
-- **Primary — a conservative time/dispatch proxy.** Track elapsed wall-clock
-  and dispatch count against a threshold tuned **below** the real rate-limit
-  cap, and treat crossing it as "near cap" (see below). This is a proxy, not
-  an observation of the actual limit.
-- **Backstop, authoritative — a rate-limit error handler.** Any dispatch
-  (orchestrator model call or coder CLI call) that comes back with a
-  rate-limit error is treated as the authoritative "pause now" signal,
-  independent of what the proxy currently reads. The backstop can fire even
-  when the proxy thinks there's headroom.
+- **Primary — a direct usage query, when the backend exposes one.** A
+  **structured numeric usage/limit read** (Claude exposes one) is first-best: it
+  reports real remaining headroom, not a guess. Wiring the concrete query is a
+  follow-up (PRE-479); until it lands, the primary degrades to a **conservative
+  time/dispatch proxy** — elapsed wall-clock and dispatch count against a
+  threshold tuned **below** the real cap, crossing it → "near cap" (below).
+- **Backstop — a rate-limit _error_, classified by the supervisor, not the
+  agent.** A rate-limit denies exactly the capability an in-band handler would
+  need: if the orchestrator _itself_ is rate-limited, its reasoning can't run to
+  checkpoint and pause. So the backstop lives in the **outer supervisor** that
+  wraps `claude -p` (the relaunchable supervisor from
+  [`launch-runtime.md`](launch-runtime.md) "Spawn mechanics" — "Relaunchable, not
+  one-shot"): with **no model call** it inspects the process's exit code / stderr
+  for a rate-limit signal (429 / `rate_limit_error` / overloaded) and owns the
+  reschedule. The agent never self-handles a rate-limit — if a subagent dispatch
+  returns one, it simply exits non-zero and lets the supervisor classify it.
 
-**Why this split, not CLI-output parsing.** Scraping a CLI's human-readable
-usage output for the real number was rejected: that text is unversioned UI,
-drifts silently across CLI releases, and would make the pause decision
-depend on a format the orchestrator doesn't control. A conservative
-proxy plus a real error is a bound the orchestrator can trust in code.
+**Why a usage query or a real error, not CLI-output scraping.** _Parsing a CLI's
+human-readable usage text_ stays rejected: it is unversioned UI that drifts
+silently across releases. A **structured** usage query (first-best) and a real
+rate-limit error (authoritative backstop) are both things the orchestrator can
+trust in code; a scraped console string is not.
 
 **Caveats, stated rather than hidden:**
 
@@ -75,6 +82,28 @@ only memory; nothing else needs to survive a pause. A process that exits is
 always safe to kill — crash mid-wait just means the relaunch timer still
 fires. An in-process `sleep` holding hours of accumulated context is not
 safe to kill, and buys nothing a relaunch doesn't already give for free.
+
+**Two pause kinds — who writes the checkpoint.** The proxy pause above is an
+**agent pause**: the orchestrator still has headroom, so it writes both
+`paused_until` and `status: paused` itself and exits 0, and the supervisor
+relaunches past the reset. A rate-limit backstop is a **supervisor pause**: the
+agent died
+rate-limited and wrote nothing this cycle, so the _supervisor_ records the pause
+on the run-state branch — a minimal marker (reason, timestamp, `attempt`, and a
+`resume_at` it computes mechanically: the error's `retry-after` if present, else
+the top of the next window) — and reschedules. The relaunched fresh process reads
+that marker first, treats the last in-flight task as dirty and reconciles it
+(that reconciliation is `--resume`'s job — PRE-465), then clears the marker and
+continues. This is why "the branch is the only memory" still holds under a
+rate-limit: the agent is simply **not its only writer**.
+
+**Crash-loop guard.** The supervisor never relaunches immediately on a rate-limit
+exit — a limit that recurs at once would spin a tight relaunch loop. It backs off
+exponentially keyed on the marker's `attempt` (e.g. 30 min → 1 h → 2 h, capped
+~6 h), reset on any successful agent cycle. After N consecutive supervisor pauses
+(default 4) it stops relaunching, sets run-level `status: systemic` with the
+rate-limit reason, and surfaces the alarm in `REPORT.md` — the same stalled-run
+terminal the circuit breaker reaches, arrived at from the resource side.
 
 ## Hard-stop before paid/overflow credits
 

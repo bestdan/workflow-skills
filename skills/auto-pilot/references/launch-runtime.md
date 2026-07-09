@@ -50,6 +50,12 @@ teardown. If a relaunchable supervisor genuinely isn't available in an environme
 the documented fallback is a bounded in-process sleep guarded by `--until` — stated
 here as the **fallback**, not the default.
 
+This same supervisor is also where the **rate-limit backstop** lives: with no model
+call it classifies the orchestrator's exit code / stderr for a rate-limit signal
+and records a supervisor-written pause marker before rescheduling — because a
+rate-limited agent can't run its own pause bookkeeping (see
+[`run-budget.md`](run-budget.md) "Rate-window check" and "Two pause kinds").
+
 **Why.**
 
 - **It must outlive the launch session.** The human runs launch interactively,
