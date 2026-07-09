@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.30.0] - 2026-07-09
+
+### Features
+
+- add --non-interactive mode for unattended runs (#135) (a8a64e6)
+
 ## [1.29.0] - 2026-07-07
 
 ### Features
