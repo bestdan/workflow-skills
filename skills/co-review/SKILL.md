@@ -144,7 +144,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 - **Local reviewer agents** (the main Claude review and the reconciler sub-agent, in-process) — **no extra bound**; they don't wait on anything external.
 - **CLI reviewers** (`codex`, `agy`, `devin`, `copilot` dispatched as local CLIs) — **15 min** each. Background the dispatch (`run_in_background: true`, per the **Long reviews** note) and stop waiting at 15 min; a reviewer still running is treated as timed-out — noted, skipped, never fatal. **Kill the backgrounded process and discard its partial output** when you stop waiting, so no orphaned reviewer keeps running or emits late output into its scratch file after the run moves on.
-- **Remote bots** (a GitHub bot review polled via `await-pr-review.sh`, e.g. Copilot) — **20 min**, i.e. pass `--timeout 1200`. On its non-zero (timeout) exit, proceed with whatever landed.
+- **Remote bots** (a GitHub bot review polled via `await-pr-review.sh`, e.g. Copilot) — **20 min**, i.e. pass `--timeout 1200`. The script **exits non-zero on timeout**, which would fail the Bash tool call and halt the run — so invoke it tolerantly (`… --timeout 1200 || true`, or capture and inspect the `AWAIT_REVIEW:` line) and, on timeout, proceed with whatever landed.
 
 **Per-decision defaults (each replaces a prompt):**
 
@@ -203,7 +203,7 @@ Why this is narrow:
        "${CLAUDE_PLUGIN_ROOT}/scripts/await-pr-review.sh" --pr <n> --repo <owner/name>
        ```
 
-       It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer). Under `--non-interactive`, bound the wait at the remote-bot ceiling — pass `--timeout 1200` (20 min) — and on its timeout (non-zero) exit, proceed with whatever landed and note the bot class as skipped (see **Non-interactive mode**).
+       It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer). Under `--non-interactive`, bound the wait at the remote-bot ceiling — pass `--timeout 1200` (20 min) — and invoke it tolerantly (`… || true`, since it **exits non-zero on timeout** and would otherwise fail the Bash call and halt the run); on timeout, proceed with whatever landed and note the bot class as skipped (see **Non-interactive mode**).
      - `gh pr view <n> --json title,body,reviews,comments,files`
      - `gh pr diff <n>`
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
@@ -268,7 +268,7 @@ The remaining steps depend on disposition.
 11. **Wait for the user's answers** on the medium items. Apply the ones they say yes to. Under `--non-interactive` there is no one to answer: **skip every medium item** and record it as a deferred judgment call in the summary (the `/deliver-task` caller logs these for morning review) — never apply a medium item unattended. See **Non-interactive mode**.
 
 12. **Commit and push the changes.** Once the fixes are applied and verified, commit them and push to the current branch's upstream:
-    - **Never commit/push to the default branch.** If the current branch is the repo's default branch (`main`/`master`), stop and tell the user to move the fixes onto a feature branch first — don't auto-commit or push review fixes straight to the default branch.
+    - **Never commit/push to the default branch.** If the current branch is the repo's default branch (`main`/`master`), stop and tell the user to move the fixes onto a feature branch first — don't auto-commit or push review fixes straight to the default branch. **Under `--non-interactive`** there is no one to tell: this is a **logged hard error that ends the run** (never a prompt), preserving the no-prompt guarantee. A correct caller (the `/deliver-task` orchestrator) always runs on a feature branch, so this shouldn't trigger.
     - Stage only the files you changed as part of the review fixes — don't sweep in unrelated work that was already in the working tree.
     - Write a concise commit message describing the review fixes (e.g., `Apply co-review fixes`), summarizing the items addressed.
     - Push the current branch. If it already has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` succeeds), a plain `git push` is enough. Otherwise set one explicitly against the branch's intended remote — `git push -u <remote> HEAD`, where `<remote>` is the configured remote (default `origin`, but don't assume it: fall back to whatever `git remote` reports if `origin` isn't present).
