@@ -5,7 +5,7 @@ The launch, run, and resume flows all read and write these; this file is the
 single definition so none of them restate a format. Formats and invariants
 only — no orchestration prose.
 
-Design source: `dev_docs/tasks/auto-pilot-mode-design.md` §"State model".
+Design source: [`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md) §"State model".
 
 ## Authority
 
@@ -36,17 +36,17 @@ Front matter records the run's fixed parameters; a table records per-task state.
 
 ```markdown
 ---
-run_id: auto-pilot/2026-07-08-auto-pilot-mode # matches the run-state branch
+run_id: 2026-07-08-auto-pilot-mode # bare id; the run-state branch is auto-pilot/<run_id>
 work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
 base_branch: main
 verify_command: dli check # the named check (design pre-flight §5)
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
 ---
 
-| task    | phase        | branch            | base            | pr   | notes                  |
-| ------- | ------------ | ----------------- | --------------- | ---- | ---------------------- |
-| PRE-459 | handed-off   | bestdan/pre-459-… | main            | #140 | 2 co-review rounds     |
-| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459 | —    | chained on PRE-459 tip |
+| task    | phase        | branch            | base              | pr   | notes                  |
+| ------- | ------------ | ----------------- | ----------------- | ---- | ---------------------- |
+| PRE-459 | handed-off   | bestdan/pre-459-… | main              | #140 | 2 co-review rounds     |
+| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | —    | chained on PRE-459 tip |
 ```
 
 - `base` encodes the dependency edge for a stacked task: `main` for an
@@ -108,7 +108,7 @@ below decidable.
 | `implementing` | Worker dispatched; diff being integrated + verified                     | started                    | local commits possible, **not pushed**    | may exist       |
 | `pr-open`      | Code pushed and PR opened (draft or ready)                              | started                    | branch pushed, PR open                    | removed         |
 | `in-review`    | `/co-review --non-interactive` running                                  | started                    | PR open                                   | none            |
-| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                          | started                    | PR updated                                | none            |
+| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                          | started                    | PR updated                                | may exist       |
 | `handed-off`   | **Terminal (success):** PR linked, tracker at `needs_review`, PR frozen | needs_review               | PR open, linked                           | none            |
 | `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human    | started (+ reason comment) | whatever existed at the stall             | removed         |
 
@@ -132,22 +132,37 @@ So `--resume` reconciles by reading in that same order — trust git first, then
 the tracker, then rewrite the run files to match — and never has to guess which
 store "won."
 
+The **"update tracker" step is phase-specific**, which is what makes a crash's
+reconcile action depend on _which_ transition it interrupted:
+
+- at the **pr-open** transition it **links the PR** and leaves the status
+  `started` (review hasn't happened yet);
+- only at the **hand-off** transition — after co-review and iterate — does it set
+  `needs_review`.
+
+So `needs_review` is never written before review; a crash at pr-open reconciles
+to `started` + a linked PR, not to hand-off.
+
 ## Crash reconciliation
 
-One row per write-order gap (a crash landing between two steps of the order),
-plus the two pre-push edges. `--resume` matches the on-disk reality to a row and
-applies its action; anything that doesn't match cleanly is set to `parked` with
-a `MORNING.md` entry rather than blindly retried.
+One row per write-order gap (a crash landing between two steps of the order).
+Because the tracker write is phase-specific (above), the rows are ordered by
+which transition the crash interrupted — the pr-open tracker write (G5) links
+the PR and stays `started`, while `needs_review` is written only at the hand-off
+tracker write (G6). `--resume` matches the on-disk reality to a row and applies
+its action; anything that doesn't match cleanly is set to `parked` with a
+`MORNING.md` entry rather than blindly retried.
 
-| #  | Crash point                                            | Observed reality                                               | Reconcile action                                                                                   |
-| -- | ------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| G1 | Mid-`implementing`, worker worktree left behind        | orphan worker worktree; no pushed branch                       | remove the orphan worktree; re-dispatch from a clean base, or `parked`                             |
-| G2 | After local commit, **before push**                    | local commits ahead of remote; tracker still started; no PR    | push the branch, then continue at the PR-open step                                                 |
-| G3 | After **push**, before PR opened                       | remote branch exists; **no PR**; tracker not linked            | idempotency-check for an existing PR by head branch; open it if absent; then update tracker        |
-| G4 | After **PR opened**, before **tracker updated**        | PR open; tracker still `started`, no PR link                   | link the PR + set `needs_review`; then commit run state                                            |
-| G5 | After **tracker updated**, before **run-state commit** | tracker current (`needs_review`, linked); `RUN.md` phase stale | recompute the phase from tracker + git; commit run state                                           |
-| G6 | After **claim**, before any implementation             | tracker claimed; no branch, no PR                              | verify the claim is still ours; resume `implementing`, or release + `parked` if the claim was lost |
+| #  | Crash point                                                         | Observed reality                                               | Reconcile action                                                                                                  |
+| -- | ------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| G1 | After **claim**, before any implementation                          | tracker claimed; no branch, no PR                              | verify the claim is still ours; resume `implementing`, or release + `parked` if the claim was lost                |
+| G2 | Mid-`implementing`/`iterating`, worker worktree left behind         | orphan worker worktree; commits maybe unpushed                 | remove the orphan worktree; re-verify; re-dispatch from a clean base, or `parked`                                 |
+| G3 | After local commit, **before push**                                 | local commits ahead of remote; tracker `started`; no/stale PR  | push the branch, then continue to the open/refresh-PR step                                                        |
+| G4 | After **push**, before PR opened/refreshed                          | remote branch exists; **no (or stale) PR**; tracker not linked | idempotency-check for an existing PR by head branch; open/refresh it if absent; then do the pr-open tracker write |
+| G5 | pr-open transition: after PR opened, **before tracker link**        | PR open; tracker still `started`, PR not linked                | **link the PR; keep the status `started`** (review hasn't run); phase → `pr-open`; commit run state               |
+| G6 | hand-off transition: after review+iterate, **before tracker write** | PR open and reviewed; tracker still `started`                  | set `needs_review` + ensure the PR is linked; phase → `handed-off`; commit run state                              |
+| G7 | After **any tracker write**, before **run-state commit**            | tracker current (any status); `RUN.md` phase stale             | recompute the phase from tracker + git; commit run state                                                          |
 
-G3's idempotency check is what makes resume safe to run repeatedly: a re-push or
+G4's idempotency check is what makes resume safe to run repeatedly: a re-push or
 a second launch never opens a duplicate PR, because an existing PR for the head
 branch is detected and adopted.
