@@ -103,7 +103,12 @@ def find(key, team, project, state_type, ts_field, cutoff):
     query = QUERY % (var_decl, team_field, ts_field, extra, ts_field)
     out, cursor = [], None
     while True:
-        variables = {"cursor": cursor, "cutoff": cutoff, "team": team, "type": state_type}
+        variables = {
+            "cursor": cursor,
+            "cutoff": cutoff,
+            "team": team,
+            "type": state_type,
+        }
         if project:
             variables["project"] = project
         page = gql(key, query, variables)["issues"]
