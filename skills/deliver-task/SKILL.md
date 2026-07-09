@@ -24,11 +24,11 @@ copied.
 
 | Step                                            | Delegates to                                                                                  |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Claim                                           | the handler's own claim section (see step 1) — never a bespoke claim                          |
+| Claim                                           | the handler's own claim section (see step 2) — never a bespoke claim                          |
 | Route the worker                                | `select-coder` (`skills/select-coder/SKILL.md`), non-interactive                              |
 | Run the worker in isolation, integrate the diff | the worktree + integrate rules in `orchestrate-coders` (`skills/orchestrate-coders/SKILL.md`) |
 | Base-freshness                                  | `scripts/preflight-freshness.sh`                                                              |
-| Exercise the feature                            | the `verify` skill where the change has a runtime surface                                     |
+| Exercise the feature                            | driving the changed behavior end-to-end, inline (see step 3)                                  |
 
 ## Arguments
 
@@ -57,7 +57,22 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 If a relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
-## 1. Claim (the handler's protocol, verbatim)
+## 1. Fetch the base (before the claim)
+
+The claim step (below) acquires the work branch, so the base must be fresh
+**before** it runs — otherwise the branch is cut from a stale local base. Update
+the local base ref **explicitly** (a bare `git fetch` may not move the local
+`<base>` branch, which is the ref the freshness check reads), then check it:
+
+```bash
+git fetch origin <base>:<base>          # default <base> = main
+scripts/preflight-freshness.sh --ref <base>
+```
+
+On `stale`, stop and surface it (the work branch would start behind); on
+`unknown`, warn and proceed.
+
+## 2. Claim (the handler's protocol, verbatim)
 
 Run the resolved handler's **claim** section for the named task — do not restate
 or reinvent it here. The claim is the loop's distributed lock, and each handler's
@@ -74,45 +89,43 @@ version has hard-won race handling that must not be forked:
   (read-then-write assign + label/transition).
 
 **`--base`:** when the handler's claim acquires the work branch, base it on
-`--base` (default `main`) instead of the handler's default base — fetch `--base`
-first (step 2) so the branch starts from its current tip. Everything else in the
-claim section is unchanged.
+`--base` (default `main`) instead of the handler's default base — step 1 has
+already fetched it, so the branch starts from its current tip. Everything else in
+the claim section is unchanged.
 
 If the claim reports the task already claimed / in flight / blocked, **stop** and
 report it — never double-claim.
 
-## 2. Do (implement + verify)
+## 3. Do (implement + verify)
 
-With the claim held and the work branch checked out:
+With the base fetched (step 1), the claim held, and the work branch checked out:
 
-1. **Fetch + base-freshness.** Before dispatching, make sure the base isn't
-   stale: `git fetch` the base, then run the shared fixture on it —
-   `scripts/preflight-freshness.sh --ref <base>`. On `stale`, stop and surface it
-   (the work branch would start behind); on `unknown`, warn and proceed.
-2. **Route the worker.** Invoke `select-coder --non-interactive <task>` (via the
-   `Skill` tool) to pick the coder backend/model for this task — the
-   non-interactive path never prompts and reads the resolved `.coders.yml`
-   (`/auto-pilot`'s launch phase populates it). Route mechanical work cheap,
-   judgment-heavy work strong.
-3. **Dispatch in isolation, then integrate.** Dispatch the implementation to the
+1. **Route the worker.** Read the task's **content** first — the card body
+   (`repo-pr`) or the issue description (tracker) — and pass _that_ (not the bare
+   slug/id, which carries no signal) to `select-coder --non-interactive` (via the
+   `Skill` tool) to pick the coder backend/model. The non-interactive path never
+   prompts and reads the resolved `.coders.yml` (`/auto-pilot`'s launch phase
+   populates it). Route mechanical work cheap, judgment-heavy work strong.
+2. **Dispatch in isolation, then integrate.** Dispatch the implementation to the
    chosen coder **in its own git worktree on its own branch**, per the
    `orchestrate-coders` dispatch + integrate rules — the worker never edits this
    session's checkout. The orchestrating session then **owns the task branch**:
    read the worker's diff, integrate it onto the task branch, and **clean up the
    worker worktree**.
-4. **Verify.** Run the project's named check command (the caller/config names it;
-   else detect — `just check`, `scripts/check.*`, or `dli check`) **and exercise
-   the feature itself** — drive the changed behavior end-to-end (the `verify`
-   skill, where the change has a runtime surface), not just the tests. Capture
-   **observable evidence**: the check output, and any screenshots / command
-   output / artifact paths. Record those paths — the review half puts them in the
-   PR body.
+3. **Verify.** Run the project's named check command — the caller/config names it;
+   else detect it (a `just check` recipe, an executable `scripts/check.sh` /
+   `scripts/check.py`, or `dli check` — locate the actual file before running it,
+   don't shell-glob `scripts/check.*`) — **and exercise the feature itself**:
+   drive the changed behavior end-to-end (inline — this plugin has no `verify`
+   skill), not just the tests. Capture **observable evidence**: the check output,
+   and any screenshots / command output / artifact paths. Record those paths —
+   the review half puts them in the PR body.
 
 Definition of done for the work (from the design's anti-superficiality rule):
 fewer tasks genuinely finished beats all tasks superficially touched; you
 exercised the feature itself, not just its tests.
 
-## 3. Seam — stop here
+## 4. Seam — stop here
 
 This skill ends at **"verified diff on the task branch, evidence captured."**
 Do **not** open a PR, run `/co-review`, or move the tracker to `needs_review` —
