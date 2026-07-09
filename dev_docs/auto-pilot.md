@@ -62,7 +62,8 @@ run state, check budget headroom. See
 for the rate-window, pause/relaunch, hard-stop, and circuit-breaker rules.
 
 **Resume** reconciles the run-state branch against git and the tracker after
-a crash, using the write order and crash-reconciliation table below.
+a crash, using the write order and the crash-reconciliation table defined in
+the run-state reference (see State model below).
 
 ## State model
 

@@ -8,8 +8,8 @@ and rationale only — the ordered launch steps live in
 
 Design source:
 [`auto-pilot.md`](../../../dev_docs/auto-pilot.md)
-§"Decisions" (sandboxed yolo) + §"Open implementation questions". Both were left
-open in the design doc and are resolved here.
+§"Decisions (locked)" (sandboxed yolo). That decision was left open in the
+design doc and is resolved here.
 
 ## Spawn mechanics — detached `claude -p`
 
