@@ -7,3 +7,18 @@ dist/
 # co-review local-reviewer config — which local agents (gemini, codex, …) are
 # available is machine-specific, so this is not committed/shared.
 dev_docs/co-review/
+
+# Plan scaffolding under dev_docs/tasks/ is ephemeral, in-flight project-tracker
+# working state (see skills/plan-with-docs) — it graduates to a permanent
+# dev_docs/<name>.md and is deleted when the plan is done, so it isn't committed.
+# The handler config below is the one durable exception — a direct child of
+# dev_docs/tasks/ just needs its own negation. Prefer graduating durable wisdom
+# to a top-level dev_docs/<name>.md (never ignored) over keeping it here. To
+# force-track a file *inside* a plan subfolder, git won't re-include it while its
+# parent dir is excluded, so un-ignore the folder, re-ignore its contents, then
+# re-include the one file:
+#   !dev_docs/tasks/<name>_plan/
+#   dev_docs/tasks/<name>_plan/*
+#   !dev_docs/tasks/<name>_plan/keep-me.md
+dev_docs/tasks/*
+!dev_docs/tasks/.task-config.yml
