@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.35.0] - 2026-07-10
+
+### Features
+
+- --handler override, set by auto-pilot from source (PRE-482) (#149) (eb6c84e)
+
 ## [1.34.0] - 2026-07-09
 
 ### Features
