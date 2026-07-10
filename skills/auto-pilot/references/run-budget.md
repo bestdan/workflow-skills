@@ -6,10 +6,6 @@ these checks lives in [`../SKILL.md`](../SKILL.md) "Run phase (unattended)",
 and the state formats (`parked`, write order) in
 [`run-state.md`](run-state.md).
 
-The run's high-level budget posture is set in
-[`auto-pilot.md`](../../../dev_docs/auto-pilot.md); this file is authoritative
-for the detailed budget rules.
-
 **Scope.** v1 is **rate-window discipline + per-task bounds only** — no
 `--budget` dollar/token cap. The one hard money rule is the paid/overflow
 stop below; everything else governs the free rate window and per-task time.

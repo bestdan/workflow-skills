@@ -5,10 +5,6 @@ The launch, run, and resume flows all read and write these; this file is the
 single definition so none of them restate a format. Formats and invariants
 only — no orchestration prose.
 
-Design rationale (the _why_ behind this state model) lives in
-[`auto-pilot.md`](../../../dev_docs/auto-pilot.md); this file is authoritative
-for the formats.
-
 ## Authority
 
 Three stores exist; only one is authoritative for a given fact.
