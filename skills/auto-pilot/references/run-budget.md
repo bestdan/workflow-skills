@@ -6,12 +6,6 @@ these checks lives in [`../SKILL.md`](../SKILL.md) "Run phase (unattended)",
 and the state formats (`parked`, write order) in
 [`run-state.md`](run-state.md).
 
-Design source:
-[`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md)
-§"Budget bounds" + §"Out of scope". The three open implementation questions
-left there were resolved in a design consult; this file bakes in those
-decisions.
-
 **Scope.** v1 is **rate-window discipline + per-task bounds only** — no
 `--budget` dollar/token cap. The one hard money rule is the paid/overflow
 stop below; everything else governs the free rate window and per-task time.

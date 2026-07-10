@@ -5,8 +5,6 @@ The launch, run, and resume flows all read and write these; this file is the
 single definition so none of them restate a format. Formats and invariants
 only — no orchestration prose.
 
-Design source: [`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md) §"State model".
-
 ## Authority
 
 Three stores exist; only one is authoritative for a given fact.

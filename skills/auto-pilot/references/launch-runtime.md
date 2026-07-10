@@ -6,11 +6,6 @@ and rationale only — the ordered launch steps live in
 [`../SKILL.md`](../SKILL.md) "Launch phase," and the durable state formats in
 [`run-state.md`](run-state.md).
 
-Design source:
-[`auto-pilot-mode-design.md`](../../../dev_docs/tasks/auto-pilot-mode-design.md)
-§"Decisions" (sandboxed yolo) + §"Open implementation questions". Both were left
-open in the design doc and are resolved here.
-
 ## Spawn mechanics — detached `claude -p`
 
 **Decision.** The launch phase writes a self-contained **launch script** (env +
