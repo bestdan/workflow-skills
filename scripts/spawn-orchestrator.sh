@@ -228,6 +228,19 @@ render_network_allowlist() {
   done
   hosts+=(${mcp[@]+"${mcp[@]}"})
 
+  # Validate EVERY host, fail-closed. Host values from --mcp-host / --agy-host are
+  # resolved per-run from the (possibly adversary-influenced) work source, so an
+  # unvalidated value could smuggle a bare `*` (nullifying the allowlist) or inject
+  # JSON in hosts_to_json_array. Require a real hostname — labels of [A-Za-z0-9-]
+  # separated by dots, with at most a single leading `*.` subdomain wildcard (which
+  # `*.githubusercontent.com` legitimately uses; a bare `*` has no labels and is
+  # rejected). The agy-specific guard above additionally bans ANY wildcard for agy.
+  local h
+  for h in "${hosts[@]}"; do
+    printf '%s' "$h" | grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' \
+      || die "invalid egress host (fail-closed): $h"
+  done
+
   printf '%s\n' "${hosts[@]}" | sort -u
 }
 

@@ -143,9 +143,17 @@ sfc() { # <name> <want-substr> <args...>
     bad "settings fail-closed: $name" "exit=$c wrote=$([ -e "$t" ] && echo YES || echo no) msg=$o"
   fi
 }
-sfc "agy needs --agy-host" "requires --agy-host" --source plan --coder agy
-sfc "agy rejects wildcard"  "never a wildcard"    --source plan --coder agy --agy-host '*.googleapis.com'
-sfc "unknown source"        "unknown --source"    --source bogus --coder codex
+sfc "agy needs --agy-host"  "requires --agy-host"  --source plan --coder agy
+sfc "agy rejects wildcard"  "never a wildcard"     --source plan --coder agy --agy-host '*.googleapis.com'
+sfc "unknown source"        "unknown --source"     --source bogus --coder codex
+# host-value injection: a per-run --mcp-host must not smuggle a bare wildcard or JSON
+sfc "mcp bare wildcard"     "invalid egress host"  --source plan --coder codex --mcp-host '*'
+sfc "mcp JSON injection"    "invalid egress host"  --source plan --coder codex --mcp-host 'x","*'
+sfc "mcp bad chars"         "invalid egress host"  --source plan --coder codex --mcp-host 'evil;rm'
+# a well-formed mcp host and a legit subdomain wildcard are accepted
+"$SCRIPT" render-settings --source plan --coder codex --mcp-host mcp.example.com --out "$BASE/mcp.json" >/dev/null 2>&1
+have "settings: valid mcp host accepted" 'mcp.example.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
+have "settings: github wildcard kept"    '*.githubusercontent.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]
