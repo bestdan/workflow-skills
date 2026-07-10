@@ -26,6 +26,26 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/commands/handlers/assets/linear-ready.py"
 CONFIG="$ROOT/dev_docs/tasks/.task-config.yml"
+LOCAL_CONFIG="$ROOT/dev_docs/tasks/.task-config.local.yml" # gitignored personal override
+
+# Resolve an op:// ref to its secret WITHOUT ever hanging. `op read` BLOCKS on a
+# locked 1Password desktop session (a biometric prompt it can't answer in this
+# non-interactive subshell), which would stall check.sh — so run it in the
+# background and hard-kill it after ~6s. Prints the secret on success; non-zero
+# and empty on failure/timeout. (macOS ships no `timeout`, hence the manual bound.)
+op_read_bounded() {
+  command -v op >/dev/null 2>&1 || return 1
+  local tmp; tmp="$(mktemp)"
+  op read "$1" >"$tmp" 2>/dev/null &
+  local pid=$! i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -gt 60 ]; then kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -f "$tmp"; return 1; fi
+    sleep 0.1
+  done
+  if wait "$pid"; then cat "$tmp"; rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"; return 1
+}
 
 # --- resolve a key (opt-in) ---------------------------------------------------
 # Precedence: a raw $LINEAR_API_KEY; else an op:// ref in $LINEAR_API_KEY_REF;
@@ -38,13 +58,18 @@ KEY="${LINEAR_API_KEY:-}"
 REF_SRC=""
 if [ -z "$KEY" ]; then
   REF="${LINEAR_API_KEY_REF:-}"; [ -n "$REF" ] && REF_SRC="\$LINEAR_API_KEY_REF"
-  if [ -z "$REF" ] && [ -f "$CONFIG" ]; then
-    REF="$(sed -n 's/^[[:space:]]*api_key_ref:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$CONFIG" | head -1)"
-    REF="${REF%\"}"; REF="${REF#\"}"; REF="${REF%\'}"; REF="${REF#\'}"
-    [ -n "$REF" ] && REF_SRC="linear.api_key_ref (config)"
-  fi
-  if [ -n "$REF" ] && command -v op >/dev/null 2>&1; then
-    KEY="$(op read "$REF" 2>/dev/null || true)"
+  # Prefer the gitignored local override, then the committed config. A personal
+  # op://Private/... ref belongs in .task-config.local.yml — never committed to
+  # this public repo — so read it first.
+  for cfg in "$LOCAL_CONFIG" "$CONFIG"; do
+    if [ -z "$REF" ] && [ -f "$cfg" ]; then
+      REF="$(sed -n 's/^[[:space:]]*api_key_ref:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$cfg" | head -1)"
+      REF="${REF%\"}"; REF="${REF#\"}"; REF="${REF%\'}"; REF="${REF#\'}"
+      [ -n "$REF" ] && REF_SRC="linear.api_key_ref (${cfg##*/})"
+    fi
+  done
+  if [ -n "$REF" ]; then
+    KEY="$(op_read_bounded "$REF" || true)"
   fi
 fi
 
