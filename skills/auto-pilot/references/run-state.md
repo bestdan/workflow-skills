@@ -126,8 +126,10 @@ below decidable.
 | `handed-off`   | **Terminal (success):** PR linked, tracker at `needs_review`, PR frozen | needs_review               | PR open, linked                           | none            |
 | `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human    | started (+ reason comment) | whatever existed at the stall             | removed         |
 
-`handed-off` is the success terminal — completion itself is merge-verified later
-by `/sweep-for-complete`, never by the run. In-run dependency readiness keys off
+`handed-off` is the success terminal — completion itself is verified later by
+the source's own completion path (`/sweep-for-complete` for a `linear` source;
+repo-pr's native merge-derived signal — the merged code PR — for a plan source),
+never by the run. In-run dependency readiness keys off
 `handed-off`, not tracker completion. The tracker state `needs_review` here means
 **co-review is already complete** (it ran during `/deliver-task`); the remaining
 gate is a **human** reviewer/merger — the automated review is not what

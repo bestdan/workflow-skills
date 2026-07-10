@@ -34,8 +34,10 @@ behavior (what the adapter does when the underlying handler step fails).
 
 `set_needs_review` is the **success** hand-off; `flag_for_human` is the
 **blocked** one. Both leave the task in flight (never `completed`/`canceled`) —
-completion stays merge-verified by `/sweep-for-complete`, exactly as the
-run-state reference requires.
+completion (reaching `done`) is out of the run's scope, verified later by the
+source's own completion path (`/sweep-for-complete` for `linear`; repo-pr's
+native merge-derived signal for a plan source), exactly as the run-state
+reference requires.
 
 > **Why `link_pr` and `set_needs_review` are separate verbs, not one.** The
 > [write order](run-state.md#write-order) links the PR at the **pr-open**
@@ -102,7 +104,7 @@ run only ever sees ready tasks.
 | `claim`            | `repo-pr-execute.md` **Claim protocol** mechanics (open the draft `task-claim` PR); the `status: ready → in_progress` flip is committed on the **run-state branch** (see the note below), not the code branch |
 | `link_pr`          | `repo-pr-execute.md` — relabel the reservation `task-claim` PR → `task-loop` and fill its body; the task file's `status` stays `in_progress`                                                                  |
 | `set_needs_review` | Set the task file `status: needs_review` on the **run-state branch** (see the note below); the open `task-loop` PR **is** the review signal (`skills/task/SKILL.md` **Kanban columns**)                       |
-| `flag_for_human`   | Set the task file `status: needs_refinement` (the plan store's human-approval column) + append the reason to the task file; leave branch/PR as-is                                                             |
+| `flag_for_human`   | Set the task file `status: needs_refinement` (the plan store's human-approval column) on the **run-state branch** (see the note below) + append the reason to the task file; leave the code branch/PR as-is   |
 | `comment_progress` | **no-op on the source** — a plan file has no comment log; the breadcrumb is routed to the run log / `REPORT.md` instead                                                                                       |
 | `wip_limit`        | `repo-pr-execute.md` **WIP cap** (`wip_limit` from `.task-config.yml`) when configured; otherwise **no-op** (no cap) for a bare plan directory                                                                |
 
@@ -118,14 +120,17 @@ the **run-state branch** (`auto-pilot/<run_id>`, [`run-state.md`](run-state.md)
 file — so this adapter decouples the two:
 
 - The task-file status flips (`ready → in_progress` at `claim`, `→ needs_review`
-  at `set_needs_review`) are committed on the **run-state branch**, alongside
-  `RUN.md`/`QUESTIONS.md`, in the same [write order](run-state.md#write-order) —
-  **never** inside the code PR's diff.
+  at `set_needs_review`, or `→ needs_refinement` at `flag_for_human`) are
+  committed on the **run-state branch**, alongside `RUN.md`/`QUESTIONS.md`, in the
+  same [write order](run-state.md#write-order) — **never** inside the code PR's
+  diff.
 - The **code PR carries only code**; it never adds or deletes a
   `dev_docs/tasks/…` file. repo-pr's "task file deleted in this PR" done-signal
   does **not** apply here — the `needs_review` flip on the run-state branch is the
-  hand-off signal, and completion stays merge-verified by `/sweep-for-complete`
-  exactly as everywhere else.
+  hand-off signal, and the run's success terminal is `handed-off`
+  (`needs_review`). Completion to `done` is out of the run's scope: the **merged
+  code PR** is repo-pr's native done-signal, not `/sweep-for-complete` (which is
+  `linear`-only in v1, per `skills/task/SKILL.md`).
 
 This is why the `claim` / `set_needs_review` rows above delegate to
 `repo-pr-execute.md` for the **mechanics** (the `task-claim` → `task-loop` PR, the
