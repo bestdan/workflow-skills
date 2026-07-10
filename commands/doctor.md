@@ -190,7 +190,9 @@ auto-archive, store an API key). Report against the resolved handler:
   can't read Linear's team settings). If `linear.api_key_ref` is set, note the
   backstop is wired; if unset, `WARN`: "no `linear.api_key_ref` — the GraphQL
   archive backstop is unavailable; rely on native auto-archive or add a key (see
-  `linear-config.md` → 'Archive key')."
+  `linear-config.md` → 'Archive key')." The same key, when set, also enables the
+  `/do-tasks` read-only GraphQL fast-path for find-candidates (see
+  `linear-claim.md` "Find candidates") — informational only, no separate check.
 - **`jira` specifics** — if `jira.archive_status` is unset, note `/archive-tasks`
   is a no-op for jira (native archival is Premium) — informational `WARN`.
 - **`gh-issue`** — informational `PASS`: GitHub has no cap; archiving is hygiene
