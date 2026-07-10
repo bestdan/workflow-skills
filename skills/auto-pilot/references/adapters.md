@@ -86,10 +86,14 @@ trust a single lagging read).
 ## plan adapter
 
 Source: a `dev_docs/tasks/<name>_plan/` directory (a `/plan-with-docs` output,
-`handler: repo-pr`). The dependency graph is the tasks' `is_blocked_by`
-frontmatter; status lives in each task file's frontmatter (the vocabulary is
-`skills/task/SKILL.md` **Kanban columns**). Plan tasks are born `status: new`, so
-`list_ready` runs promotion first — the run only ever sees ready tasks.
+`handler: repo-pr`). This is the run's effective handler regardless of the
+repo's own `.task-config.yml` default, and it's what the run loop passes to
+`/deliver-task` via `--handler` (`SKILL.md` "The per-task step") so
+`/deliver-task` never re-derives it from that file. The dependency graph is
+the tasks' `is_blocked_by` frontmatter; status lives in each task file's
+frontmatter (the vocabulary is `skills/task/SKILL.md` **Kanban columns**).
+Plan tasks are born `status: new`, so `list_ready` runs promotion first — the
+run only ever sees ready tasks.
 
 | Verb               | Delegates to                                                                                                                                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

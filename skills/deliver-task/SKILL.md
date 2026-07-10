@@ -44,11 +44,18 @@ copied.
   judgment calls to (step 6). The `/auto-pilot` orchestrator passes its run's
   log; standalone, omit it and the calls ride out in the hand-off summary
   instead (this skill never writes run-state files itself).
+- `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
+  gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
+  `/auto-pilot` orchestrator passes its run's effective handler (a plan source
+  ⇒ `repo-pr`, per `references/adapters.md`) so the handler is never
+  mis-derived from a repo whose `.task-config.yml` default differs from the
+  run's source.
 
 ## 0. Resolve the handler
 
-Read `dev_docs/tasks/.task-config.yml` (absent → `repo-pr`), exactly as
-`/do-tasks` does:
+If `--handler <h>` was given, it is authoritative — skip the config read and
+map `<h>` directly (below). Otherwise read `dev_docs/tasks/.task-config.yml`
+(absent → `repo-pr`), exactly as `/do-tasks` does:
 
 ```bash
 cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
