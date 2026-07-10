@@ -36,6 +36,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 API = "https://api.linear.app/graphql"
@@ -59,11 +60,12 @@ query($name: String!) {
   }
 }"""
 
-# %s slots: project var decl, team field, extra filter.
+# %s slots: project var decl, extra filter. Team is always the resolved UUID id
+# (resolve_team returns team.id), so the filter is by id and $team is an ID.
 ISSUES_QUERY = """
-query($cursor: String, $first: Int!, $team: String!%s) {
+query($cursor: String, $first: Int!, $team: ID!%s) {
   issues(first: $first, after: $cursor, filter: {
-    team: { %s: { eq: $team } }
+    team: { id: { eq: $team } }
     state: { type: { eq: "unstarted" } }
     %s
   }) {
@@ -107,8 +109,13 @@ def gql(key, query, variables=None):
             "Content-Type": "application/json",
         },  # personal key, no "Bearer"
     )
-    with urllib.request.urlopen(req) as r:
-        payload = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req) as r:
+            payload = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # Linear returns query-validation errors as HTTP 400 with the detail in
+        # the body — surface it cleanly instead of letting urlopen raise.
+        sys.exit(f"GraphQL HTTP {e.code}: {e.read().decode(errors='replace')}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
     return payload["data"]
@@ -127,14 +134,13 @@ def resolve_team(key, team):
     return data["viewer"], node
 
 
-def fetch_issues(key, team_id_or_name, project_id, page_size):
-    team_field = "id" if UUID_RE.match(team_id_or_name) else "name"
+def fetch_issues(key, team_id, project_id, page_size):
     var_decl = ", $project: ID" if project_id else ""
     extra = "project: { id: { eq: $project } }" if project_id else ""
-    query = ISSUES_QUERY % (var_decl, team_field, extra)
+    query = ISSUES_QUERY % (var_decl, extra)
     out, cursor = [], None
     while True:
-        variables = {"cursor": cursor, "first": page_size, "team": team_id_or_name}
+        variables = {"cursor": cursor, "first": page_size, "team": team_id}
         if project_id:
             variables["project"] = project_id
         page = gql(key, query, variables)["issues"]
