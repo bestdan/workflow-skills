@@ -42,6 +42,10 @@ fi
 TEAM="${LINEAR_TEAM:-}"
 if [ -z "$TEAM" ] && [ -f "$CONFIG" ]; then
   TEAM="$(sed -n 's/^[[:space:]]*team:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$CONFIG" | head -1)"
+  # Strip surrounding quotes so a quoted `team: "ENG"` / `team: 'ENG'` resolves
+  # the same as unquoted (the sed capture keeps the quote chars).
+  TEAM="${TEAM%\"}"; TEAM="${TEAM#\"}"
+  TEAM="${TEAM%\'}"; TEAM="${TEAM#\'}"
 fi
 if [ -z "$TEAM" ]; then
   echo "WARNING: test-linear-ready-live has a key but no team (\$LINEAR_TEAM unset, none in $CONFIG) — skipping." >&2
@@ -85,6 +89,14 @@ if happy_rc == 0:
         bad("happy path: stdout is valid JSON", str(e))
 
 if d is not None:
+    if isinstance(d, dict) and set(d) == {"meta", "candidates", "dropped"}:
+        ok("top-level object is exactly {meta, candidates, dropped}")
+    else:
+        bad("top-level object is exactly {meta, candidates, dropped}",
+            "got %s%s" % (type(d).__name__, (" keys=" + str(sorted(d))) if isinstance(d, dict) else ""))
+        d = None  # malformed root — skip the cascading field checks below
+
+if d is not None:
     m = d.get("meta", {})
     ok("meta.viewer.id present") if m.get("viewer", {}).get("id") else bad("meta.viewer.id present")
     ok("meta.team.id present") if m.get("team", {}).get("id") else bad("meta.team.id present")
@@ -97,6 +109,12 @@ if d is not None:
     EXP = {"id", "identifier", "title", "priority", "estimate", "labels", "url", "branchName", "state", "project"}
     EXCL = {"auto-claimed", "human-approval-requested", "blocked"}
     cands = d.get("candidates", [])
+    if not isinstance(cands, list):
+        bad("candidates is a list", "got %s" % type(cands).__name__); cands = []
+    non_obj = [c for c in cands if not isinstance(c, dict)]
+    if non_obj:
+        bad("every candidate is a JSON object", "%d non-object element(s)" % len(non_obj))
+        cands = [c for c in cands if isinstance(c, dict)]
     wrong = [c.get("identifier") for c in cands if set(c) != EXP]
     ok("every candidate has the exact field set") if not wrong else bad("every candidate has the exact field set", str(wrong[:5]))
     ok("no candidate carries `description`") if all("description" not in c for c in cands) else bad("no candidate carries `description`")
@@ -109,7 +127,10 @@ if d is not None:
     ok("every candidate carries branchName") if not bn else bad("every candidate carries branchName", str(bn[:5]))
 
     pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+ >= \d+|assigned to .+)$")
-    off = [x for x in d.get("dropped", []) if not pat.match(x.get("reason", ""))]
+    dropped = d.get("dropped", [])
+    if not isinstance(dropped, list):
+        bad("dropped is a list", "got %s" % type(dropped).__name__); dropped = []
+    off = [x for x in dropped if not isinstance(x, dict) or not pat.match(x.get("reason", ""))]
     ok("every drop reason matches the canonical strings") if not off else bad("every drop reason matches the canonical strings", str(off[:5]))
 
 # --- bad-key fallback contract ------------------------------------------------
