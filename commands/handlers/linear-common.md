@@ -107,6 +107,27 @@ Inputs: the **claim scope set** = the resolved configured projects ("Resolve con
 4. **Narrow.** Filter the ranked candidate list to the chosen scope(s): a single project → only its candidates; Unassigned → only bucket candidates; **Any** → all. Hand the narrowed list and the chosen scope(s) to `do-tasks.md`'s "Pre-claim WIP gate".
 5. **Offer to persist an unconfigured project** (interactive only). If the chosen scope is a **concrete live project whose id is not in `linear.projects`** (reached via `--project <name|id>` or the prompt's "Other"), ask once via `AskUserQuestion` whether to add it to the config. On **yes**, append a `{ id, name }` entry to `linear.projects` with a **targeted `Edit`** (append one entry under the existing `projects:` key — a text edit, not a full re-serialize, so comments and unrelated keys are untouched); it inherits the global `wip_limit`/`max_estimate` (the `linear-config.md` step 3b shape). On **no**, proceed for this run only (the project stays in the Unassigned bucket next time). **Never** offer for `any`, `unassigned`, an already-configured project, or non-interactively. This is the only place `/do-tasks` writes the config.
 
+## Ready-candidate selection
+
+The gate and rank rules `/do-tasks` (tracker path) applies when picking claimable issues out of a candidate set.
+
+**State scope.** Only `unstarted`-type states (the `ready` kanban column) are eligible — `backlog` issues are unrefined and must go through `/promote-tasks` first, and `started` issues are by definition already claimed.
+
+**Gates.** Drop a candidate if any of these fail. Each has a fixed reason string so the caller can report consistently:
+
+| Gate                                                                               | Reason string              |
+| ---------------------------------------------------------------------------------- | -------------------------- |
+| `estimate` is `null`/missing                                                       | `no estimate set`          |
+| `estimate >= <max>` (candidate's resolved per-project `max_estimate`, default `3`) | `estimate <N> >= <max>`    |
+| Has label `auto-claimed`                                                           | `already auto-claimed`     |
+| Has label `human-approval-requested`                                               | `human-approval-requested` |
+| Has label `blocked`                                                                | `blocked`                  |
+| `assignee` is set and is **not** the current Linear user                           | `assigned to <name>`       |
+
+**Rank.** Sort remaining issues by Linear `priority`: urgent(1) → high(2) → medium(3) → low(4), then **none(0) last** (Linear stores "no priority" as `0`, so a naive numeric ascending sort would wrongly put it first), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
+
+This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep.
+
 ## Linear concepts → task concepts
 
 - **Team** is required for every issue.
