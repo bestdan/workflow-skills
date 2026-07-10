@@ -40,7 +40,10 @@ op_read_bounded() {
   local pid=$! i=0
   while kill -0 "$pid" 2>/dev/null; do
     i=$((i + 1))
-    if [ "$i" -gt 60 ]; then kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -f "$tmp"; return 1; fi
+    if [ "$i" -gt 60 ]; then
+      kill "$pid" 2>/dev/null; sleep 0.2; kill -9 "$pid" 2>/dev/null # TERM then KILL, so a TERM-ignoring op can't wedge the wait
+      wait "$pid" 2>/dev/null; rm -f "$tmp"; return 1
+    fi
     sleep 0.1
   done
   if wait "$pid"; then cat "$tmp"; rm -f "$tmp"; return 0; fi
@@ -78,7 +81,7 @@ if [ -z "$KEY" ]; then
     echo "test-linear-ready-live: SKIP — no key (expected in CI; keeps CI keyless)"
   elif [ -n "$REF_SRC" ]; then
     echo "WARNING: test-linear-ready-live DID NOT RUN — $REF_SRC is set but 'op read' could not resolve it non-interactively." >&2
-    echo "         Sign op in in this terminal, or set \$OP_SERVICE_ACCOUNT_TOKEN — or export \$LINEAR_API_KEY directly." >&2
+    echo "         Install + sign in op in this terminal, or set \$OP_SERVICE_ACCOUNT_TOKEN — or export \$LINEAR_API_KEY directly." >&2
     echo "         Linear API contract drift will NOT be detected on this run." >&2
   else
     echo "WARNING: test-linear-ready-live DID NOT RUN — no \$LINEAR_API_KEY / \$LINEAR_API_KEY_REF and no linear.api_key_ref in config." >&2
@@ -134,18 +137,20 @@ else:
 d = None
 if happy_rc == 0:
     try:
-        d = json.load(open(happy_out))
-        ok("happy path: stdout is valid JSON")
+        parsed = json.load(open(happy_out))
     except Exception as e:
         bad("happy path: stdout is valid JSON", str(e))
-
-if d is not None:
-    if isinstance(d, dict) and set(d) == {"meta", "candidates", "dropped"}:
-        ok("top-level object is exactly {meta, candidates, dropped}")
     else:
-        bad("top-level object is exactly {meta, candidates, dropped}",
-            "got %s%s" % (type(d).__name__, (" keys=" + str(sorted(d))) if isinstance(d, dict) else ""))
-        d = None  # malformed root — skip the cascading field checks below
+        ok("happy path: stdout is valid JSON")
+        # Validate the top-level shape HERE, in the parse block — a valid `null`
+        # payload decodes to None and would otherwise collide with the "not
+        # parsed" state and silently skip every check below.
+        if isinstance(parsed, dict) and set(parsed) == {"meta", "candidates", "dropped"}:
+            ok("top-level object is exactly {meta, candidates, dropped}")
+            d = parsed
+        else:
+            bad("top-level object is exactly {meta, candidates, dropped}",
+                "got %s%s" % (type(parsed).__name__, (" keys=" + str(sorted(parsed))) if isinstance(parsed, dict) else ""))
 
 if d is not None:
     m = d.get("meta", {})
@@ -170,18 +175,18 @@ if d is not None:
     ok("every candidate has the exact field set") if not wrong else bad("every candidate has the exact field set", str(wrong[:5]))
     ok("no candidate carries `description`") if all("description" not in c for c in cands) else bad("no candidate carries `description`")
     ok("no candidate carries internal `_updatedAt`") if all("_updatedAt" not in c for c in cands) else bad("no candidate carries internal `_updatedAt`")
-    est = [c.get("identifier") for c in cands if c.get("estimate") is None or c.get("estimate") >= 3]
+    est = [c.get("identifier") for c in cands if not isinstance(c.get("estimate"), (int, float)) or c.get("estimate") >= 3]
     ok("every candidate estimate < max (3)") if not est else bad("every candidate estimate < max (3)", str(est[:5]))
-    lab = [c.get("identifier") for c in cands if set(c.get("labels", [])) & EXCL]
+    lab = [c.get("identifier") for c in cands if set(c.get("labels") or []) & EXCL]
     ok("no candidate carries an excluded label") if not lab else bad("no candidate carries an excluded label", str(lab[:5]))
     bn = [c.get("identifier") for c in cands if not c.get("branchName")]
     ok("every candidate carries branchName") if not bn else bad("every candidate carries branchName", str(bn[:5]))
 
-    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+ >= \d+|assigned to .+)$")
+    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+(?:\.\d+)? >= \d+(?:\.\d+)?|assigned to .+)$")
     dropped = d.get("dropped", [])
     if not isinstance(dropped, list):
         bad("dropped is a list", "got %s" % type(dropped).__name__); dropped = []
-    off = [x for x in dropped if not isinstance(x, dict) or not pat.match(x.get("reason", ""))]
+    off = [x for x in dropped if not isinstance(x, dict) or not pat.match(str(x.get("reason") or ""))]
     ok("every drop reason matches the canonical strings") if not off else bad("every drop reason matches the canonical strings", str(off[:5]))
 
 # --- bad-key fallback contract ------------------------------------------------
