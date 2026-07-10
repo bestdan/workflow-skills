@@ -58,7 +58,9 @@ telling the user the run is underway. The unattended **run** loop is what the
 spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
 
-**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`. If
+**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`.
+`--until` accepts an absolute ISO-8601 time or a relative `now+<duration>`
+offset; launch resolves either to the absolute time recorded in `RUN.md`. If
 `--resume` is present, route to the **Resume phase** section below instead of
 running the rest of this launch pre-flight. Detect the source
 (existing `dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear**
@@ -204,8 +206,8 @@ end-to-end **exercise path** (how a task's feature is driven, not just its tests
 Run the adapter's `list_ready` and `dependency_graph`
 ([`references/adapters.md`](references/adapters.md)) to build the run's task graph
 and its blocker edges. Write `.auto-pilot/RUN.md` — front matter (`run_id`,
-`work_source`, `base_branch`, `verify_command`/`exercise_path` from step 5) plus
-the per-task table with each task's initial **phase** and its `base` edge (main
+`work_source`, `base_branch`, `verify_command`/`exercise_path` from step 5, and
+`min_task_budget` from step 3) plus the per-task table with each task's initial **phase** and its `base` edge (main
 for an independent task, the parent's branch for a chained one) — in the exact
 format defined in [`references/run-state.md`](references/run-state.md) "`RUN.md`".
 Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/REPORT.md`. **Commit**
@@ -345,7 +347,7 @@ The loop is deliberately thin:
 ```
 while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
-    if now + min_task_budget > until:      # pre-dispatch deadline guard
+    if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
     /deliver-task it (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
@@ -357,8 +359,8 @@ the `--until` deadline: `--until` is otherwise only consulted at spawn (record)
 and at a paused resume's wake, so without this check a task claimed at 22:40
 under a 22:45 deadline gets **hard-killed** mid-delivery, leaving a half-built
 `claimed`/`implementing` task — the worst `--resume` state. So **before claiming**
-each task, if `now + min_task_budget > until`, stop the loop cleanly instead of
-starting work that can't finish, and record why in `REPORT.md` (e.g. "2 tasks
+each task, **when `--until` is set**, if `now + min_task_budget > until`, stop the
+loop cleanly instead of starting work that can't finish, and record why in `REPORT.md` (e.g. "2 tasks
 left, 12 min to deadline, not starting — resume tomorrow"). `min_task_budget` is
 the reviewer-set-coupled floor resolved at launch (step 3) and read from `RUN.md`
 front matter — not a constant; see
@@ -445,12 +447,17 @@ reference.
 
 **Loop termination.** The loop ends when no ready task remains, a budget
 hard-stop fires, or the **pre-dispatch deadline guard** above stops it with ready
-tasks still left (those stay ready for a later `--resume`). In every case, the
-orchestrator writes the final `REPORT.md`
-(setting run-level `status: done`), commits it on the run-state branch, then
+tasks still left. The first two are a **finished run** — the final `REPORT.md`
+sets run-level `status: done`. The deadline-guard stop is **not** done: it sets
+`status: paused` with `pause_reason: "--until deadline reached; N tasks still
+ready"` and `paused_until` **empty**, keeping the run in `--resume`'s resumable
+set (those tasks stay ready for a later `--resume`) without any timer auto-wake.
+In every case the orchestrator writes and commits the final `REPORT.md` on the
+run-state branch, then
 **tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
 if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
-"Relaunchable, not one-shot") — so a finished run is never re-woken, and finally
+"Relaunchable, not one-shot") — so no run is re-woken by a timer (a
+deadline-stopped run resumes only by an explicit `--resume`), and finally
 **exits cleanly**, emitting a **one-line summary** to `.auto-pilot/orchestrator.log`
 ([`references/launch-runtime.md`](references/launch-runtime.md) "Logs /
 observability") — e.g. `auto-pilot done: 4 handed-off, 1 parked, 0 skipped —
