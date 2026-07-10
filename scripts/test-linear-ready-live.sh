@@ -2,8 +2,9 @@
 # Live smoke test for commands/handlers/assets/linear-ready.py.
 #
 # Unlike the other scripts/test-*.sh harnesses, this one hits the REAL Linear
-# GraphQL API, so it is OPT-IN and only runs when a key is resolvable
-# ($LINEAR_API_KEY, or $LINEAR_API_KEY_REF for the script's `op read` path).
+# GraphQL API, so it is OPT-IN and only runs when a key is resolvable: a raw
+# $LINEAR_API_KEY, an op:// ref in $LINEAR_API_KEY_REF, or `linear.api_key_ref`
+# from the repo config — the last two resolved via `op read`.
 # With no key it SKIPS and exits 0 — this keeps `check.sh` green for keyless
 # devs and keeps CI keyless *by construction*: a Linear personal API key is a
 # full-account bearer token that must never live in CI secrets (see
@@ -26,17 +27,42 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/commands/handlers/assets/linear-ready.py"
 CONFIG="$ROOT/dev_docs/tasks/.task-config.yml"
 
-# --- opt-in gate: no key -> warn + skip (exit 0) ------------------------------
-if [ -z "${LINEAR_API_KEY:-}" ] && [ -z "${LINEAR_API_KEY_REF:-}" ]; then
+# --- resolve a key (opt-in) ---------------------------------------------------
+# Precedence: a raw $LINEAR_API_KEY; else an op:// ref in $LINEAR_API_KEY_REF;
+# else linear.api_key_ref from the repo config. A ref is resolved with `op read`,
+# which only works non-interactively when op is signed in (an authorized
+# terminal) or $OP_SERVICE_ACCOUNT_TOKEN is set. Anything unresolved -> the test
+# WARNs (loud locally, quiet in CI) and exits 0 — it never fails the suite, so
+# keyless devs and CI stay green and the full-account key never lands in CI.
+KEY="${LINEAR_API_KEY:-}"
+REF_SRC=""
+if [ -z "$KEY" ]; then
+  REF="${LINEAR_API_KEY_REF:-}"; [ -n "$REF" ] && REF_SRC="\$LINEAR_API_KEY_REF"
+  if [ -z "$REF" ] && [ -f "$CONFIG" ]; then
+    REF="$(sed -n 's/^[[:space:]]*api_key_ref:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$CONFIG" | head -1)"
+    REF="${REF%\"}"; REF="${REF#\"}"; REF="${REF%\'}"; REF="${REF#\'}"
+    [ -n "$REF" ] && REF_SRC="linear.api_key_ref (config)"
+  fi
+  if [ -n "$REF" ] && command -v op >/dev/null 2>&1; then
+    KEY="$(op read "$REF" 2>/dev/null || true)"
+  fi
+fi
+
+if [ -z "$KEY" ]; then
   if [ -n "${CI:-}" ]; then
     echo "test-linear-ready-live: SKIP — no key (expected in CI; keeps CI keyless)"
-  else
-    echo "WARNING: test-linear-ready-live DID NOT RUN — no \$LINEAR_API_KEY / \$LINEAR_API_KEY_REF in env." >&2
+  elif [ -n "$REF_SRC" ]; then
+    echo "WARNING: test-linear-ready-live DID NOT RUN — $REF_SRC is set but 'op read' could not resolve it non-interactively." >&2
+    echo "         Sign op in in this terminal, or set \$OP_SERVICE_ACCOUNT_TOKEN — or export \$LINEAR_API_KEY directly." >&2
     echo "         Linear API contract drift will NOT be detected on this run." >&2
-    echo "         Export a key (e.g. LINEAR_API_KEY=\$(op read \"\$LINEAR_API_KEY_REF\")) to enable it." >&2
+  else
+    echo "WARNING: test-linear-ready-live DID NOT RUN — no \$LINEAR_API_KEY / \$LINEAR_API_KEY_REF and no linear.api_key_ref in config." >&2
+    echo "         Linear API contract drift will NOT be detected on this run." >&2
+    echo "         Export a key or set linear.api_key_ref to enable it." >&2
   fi
   exit 0
 fi
+export LINEAR_API_KEY="$KEY"
 
 # --- resolve the team ($LINEAR_TEAM, else linear.team from the config) --------
 TEAM="${LINEAR_TEAM:-}"
