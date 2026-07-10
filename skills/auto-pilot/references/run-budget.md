@@ -24,9 +24,12 @@ read two ways, layered because neither alone is enough:
   `limits[]` array carries one entry per window (`kind` of `session` — the
   5-hour rate window — `weekly_all`, and `weekly_scoped` (per-model, carrying
   a `scope`), each with `percent` and `resets_at`); the rate-window read is
-  `limits[kind=session].percent`
-  plus its `resets_at`. This is first-best: a **structured numeric read** of
-  real remaining headroom, not a guess. `~/src/dotfiles/scripts/claude_usage.sh`
+  `limits[kind=session].percent` plus its `resets_at`. **`percent` is percent
+  _consumed_, not remaining** — it rises toward 100 as the window is spent, so
+  "near cap" fires as it **approaches** the threshold (real headroom is
+  `100 - percent`); don't invert the comparison. This is first-best: a
+  **structured numeric read** of true usage, not a guess.
+  `~/src/dotfiles/scripts/claude_usage.sh`
   is prior art for the exact call.
 - **Fallback — a conservative time/dispatch proxy, when the query is
   unavailable.** Not every orchestrator environment can make the query above
