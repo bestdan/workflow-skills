@@ -15,12 +15,35 @@ stop below; everything else governs the free rate window and per-task time.
 Run after every task's state update (the run loop's hook point). Headroom is
 read two ways, layered because neither alone is enough:
 
-- **Primary — a direct usage query, when the backend exposes one.** A
-  **structured numeric usage/limit read** (Claude exposes one) is first-best: it
-  reports real remaining headroom, not a guess. Wiring the concrete query is a
-  follow-up (PRE-479); until it lands, the primary degrades to a **conservative
-  time/dispatch proxy** — elapsed wall-clock and dispatch count against a
-  threshold tuned **below** the real cap, crossing it → "near cap" (below).
+- **Primary — a direct usage query.** [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh)
+  performs it and is the orchestrator's entry point: it queries `GET
+  https://api.anthropic.com/api/oauth/usage` (headers `Authorization: Bearer
+  <token>` and `anthropic-beta: oauth-2025-04-20`) and emits the session
+  window as compact JSON (`--session-percent` for just the number). The
+  `<token>` is the Claude Code OAuth access token, resolved OS-appropriately —
+  the macOS Keychain (`security find-generic-password -s "Claude
+  Code-credentials" -w`) or, on Linux, `~/.claude/.credentials.json` — and read
+  as the `.claudeAiOauth.accessToken` field. The response's `limits[]` array
+  carries one entry per window (`kind` of `session` — the 5-hour rate window —
+  `weekly_all`, and `weekly_scoped` (per-model, carrying a `scope`), each with
+  `percent` and `resets_at`); the rate-window read is
+  `limits[kind=session].percent` plus its `resets_at`. **`percent` is percent
+  _consumed_, not remaining** — it rises toward 100 as the window is spent, so
+  "near cap" fires as it **approaches** the threshold (real headroom is
+  `100 - percent`); don't invert the comparison. This is first-best: a
+  **structured numeric read** of true usage, not a guess.
+- **Fallback — a conservative time/dispatch proxy, when the query is
+  unavailable.** Not every orchestrator environment can make the query above —
+  a `claude-web` orchestrator has no local credential store, and a non-Claude
+  backend may expose no equivalent usage endpoint at all. Any such failure —
+  a missing token store, a token read that fails or is denied, an unreachable
+  endpoint, or an unexpected response shape — makes
+  [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh) **exit
+  non-zero**, which is the signal to **fail closed to** elapsed wall-clock and
+  dispatch count against a threshold tuned **below** the real cap, crossing it
+  → "near cap" (below). The script treats the OAuth token as a secret — it is
+  passed to `curl` via a stdin config, never on the command line, and never
+  logged; a caller wiring the query directly must do the same.
 - **Backstop — a rate-limit _error_, classified by the supervisor, not the
   agent.** A rate-limit denies exactly the capability an in-band handler would
   need: if the orchestrator _itself_ is rate-limited, its reasoning can't run to
@@ -32,21 +55,27 @@ read two ways, layered because neither alone is enough:
   reschedule. The agent never self-handles a rate-limit — if a subagent dispatch
   returns one, it simply exits non-zero and lets the supervisor classify it.
 
+The same response's `spend.used.amount_minor` feeds the hard-stop below
+("Hard-stop before paid/overflow credits") — one query serves both checks.
+
 **Why a usage query or a real error, not CLI-output scraping.** _Parsing a CLI's
 human-readable usage text_ stays rejected: it is unversioned UI that drifts
-silently across releases. A **structured** usage query (first-best) and a real
-rate-limit error (authoritative backstop) are both things the orchestrator can
-trust in code; a scraped console string is not.
+silently across releases. The usage endpoint above is a **structured JSON
+query**, not scraped text — that, and a real rate-limit error (authoritative
+backstop), are both things the orchestrator can trust in code; a scraped
+console string is not.
 
 **Caveats, stated rather than hidden:**
 
-- **Strands headroom on light nights.** A conservative proxy will
-  sometimes pause a run that had capacity left. This is the deliberate safe
-  direction — pausing early wastes idle time; pausing late risks the wall.
-- **The cap is account-wide.** If a human uses the same account mid-window,
-  the proxy's tuning is invalidated — it has no visibility into usage
-  outside its own dispatches. Treat the proxy as a lower bound on real
-  remaining headroom, not an exact reading.
+- **Strands headroom on light nights.** The proxy fallback will sometimes
+  pause a run that had capacity left. This is the deliberate safe direction
+  — pausing early wastes idle time; pausing late risks the wall.
+- **The direct query is account-wide, closing the proxy's blind spot.** The
+  usage endpoint reports the account's actual consumption regardless of who
+  drove it, so it stays accurate if a human uses the same account mid-window.
+  The proxy fallback does not: it has no visibility into usage outside its
+  own dispatches, so treat it as a lower bound on real remaining headroom,
+  not an exact reading, whenever the direct query isn't available.
 
 ## Near-cap → pause + relaunch past reset
 
