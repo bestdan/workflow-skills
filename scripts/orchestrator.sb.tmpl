@@ -27,23 +27,17 @@
 (allow network-bind (local ip "localhost:*"))
 (allow system-socket)
 
-;; --- read-only system + base toolchain: without broad read of the OS image
-;;     nothing (bash, git, claude) can even exec. Writes here are still denied.
-(allow file-read*
-  (subpath "/usr")
-  (subpath "/bin")
-  (subpath "/sbin")
-  (subpath "/System")
-  (subpath "/Library")
-  (subpath "/opt/homebrew")
-  (subpath "/private/var/db/dyld")
-  (subpath "/private/etc")
-  (literal "/dev/null")
-  (literal "/dev/zero")
-  (literal "/dev/random")
-  (literal "/dev/urandom")
-  (literal "/dev/dtracehelper")
-  (literal "/dev/tty"))
+;; --- reads: BROAD by necessity (v1). The confinement smoke showed a scoped read
+;;     list makes programs abort (SIGABRT) — macOS needs *content* read, not just
+;;     metadata, to traverse to a writable target, and that traversal crosses
+;;     ancestors above any repo/worktree (/Users, /private/var/folders, …). So v1
+;;     allows all reads and enforces confinement on the axes that matter: WRITES
+;;     (worktrees only, below), EXEC (@@EXEC_PATHS@@ only), and NETWORK (layer 2).
+;;     Reads are still Unix-perm-bounded (a non-root sandboxed process can't read
+;;     root/other-user secrets). Narrowing reads (traverse-allow the ancestor chain
+;;     of each RO/RW path instead of allow-all) is a tracked follow-up; it must be
+;;     re-verified against smoke §1 so it doesn't re-break traversal.
+(allow file-read*)
 (allow file-write*
   (literal "/dev/null")
   (literal "/dev/tty"))
