@@ -151,6 +151,41 @@ if the bound is exceeded at a checkpoint. The real long pole is the
 the orchestrator's own bookkeeping, is what can actually run away. 45
 minutes is a stated default, overridable per run.
 
+## Minimum task budget — the pre-dispatch floor (reviewer-set-coupled)
+
+The wall-clock limit above is the **ceiling** that parks a runaway task; this is
+the **floor** — the smallest wall-clock a single `/deliver-task` can plausibly
+need to reach `handed-off`, used by the run loop's **pre-dispatch deadline
+guard** ([`../SKILL.md`](../SKILL.md) "Run phase (unattended)"). Before claiming
+the next task, **if a `--until` deadline is set**, the loop checks
+`now + min_task_budget > until`; if so it stops
+cleanly rather than starting work a hard `--until` kill would sever mid-delivery,
+leaving a half-built `claimed`/`implementing` task to `--resume` — the worst wake
+state.
+
+`min_task_budget` is **not a constant**. A single delivery is coder dispatch +
+independent verify + PR + co-review (bounded **per reviewer**) + up to 2 iterate
+rounds, and the co-review term is dominated by the **resolved reviewer set's**
+latency:
+
+- **Fast set** (codex + Claude + reconciler): codex is ~1–2 min, stateless and
+  sandboxed; the floor is ~**20 min**.
+- **With cloud reviewers** (`devin` / `agy`): each hits the `--non-interactive`
+  **15-min bound**, so they dominate a short run and push the floor to ~**45 min+**.
+
+As an approximation, `min_task_budget ≈ delivery overhead (coder implement +
+verify + PR, ~18 min) + co-review latency`, where the co-review term is the
+**slowest per-reviewer bound in the resolved set** carried across the initial
+review plus up to 2 iterate rounds: a ~2-min codex term keeps the fast-set floor
+near **20 min**, while a 15-min cloud-reviewer bound pushes it past **45 min**.
+
+Because it is coupled to that set, `min_task_budget` is **computed at launch from
+the resolved reviewer set** (Launch step 3) and recorded in `RUN.md`'s front
+matter ([`run-state.md`](run-state.md) "`RUN.md`"), so the pre-dispatch guard
+reads a concrete number rather than re-deriving it each iteration. A time-boxed
+run defaulting to the fast reviewer set is exactly what keeps this floor small
+enough that short windows can still fit a task.
+
 ## Per-task retry limit — 1 re-dispatch → park
 
 A failed delivery gets **one** re-dispatch; a second failure parks the task.

@@ -58,7 +58,9 @@ telling the user the run is underway. The unattended **run** loop is what the
 spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
 
-**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`. If
+**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`.
+`--until` accepts an absolute ISO-8601 time or a relative `now+<duration>`
+offset; launch resolves either to the absolute time recorded in `RUN.md`. If
 `--resume` is present, route to the **Resume phase** section below instead of
 running the rest of this launch pre-flight. Detect the source
 (existing `dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear**
@@ -70,6 +72,16 @@ passed to `/deliver-task` — is source-derived, not read back off that config: 
 adapter (`references/adapters.md`). This keeps a plan-source run correct even
 when the repo's own `.task-config.yml` default is `linear`. Pick the matching
 adapter (`references/adapters.md`).
+
+**Size `--until` realistically.** A single `/deliver-task` floors at **~20–45
+min** depending on the resolved reviewer set — ~20 min with the fast set
+(codex + Claude + reconciler), ~45 min+ once cloud reviewers (`devin` / `agy`,
+15-min bound each) are in it (see step 3 and
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget").
+`--until now+40min` for anything with cloud reviewers is under-provisioned: the
+pre-dispatch guard (Run phase) will simply decline to start the next task, so a
+too-tight window yields fewer tasks, not a hard-killed one. Provision at least
+one `min_task_budget` per task you expect to finish.
 
 The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
 **supply-and-demand**: steps 2–3 probe what the configured environment can
@@ -148,6 +160,17 @@ so nothing prompts at 3am:
 - **Co-review reviewer set** — resolve `/co-review`'s reviewer set from
   `.co-review.yml` into the concrete list that will run under `--non-interactive`
   (bounded per-reviewer timeouts; the reviewer prompt is never asked mid-run).
+  For a **time-boxed run** (`--until` set), default to a **fast reviewer set**
+  (codex + Claude + reconciler): codex is ~1–2 min, while cloud reviewers
+  (`devin` / `agy`) each hit the `--non-interactive` 15-min bound and dominate a
+  short window. Cloud reviewers are **optional/skippable** in this set — a
+  skipped reviewer is never fatal and is recorded (`REPORT.md` review classes).
+  Then **compute `min_task_budget` from this resolved set** — the pre-dispatch
+  floor is coupled to reviewer latency, not a constant (~20 min fast set,
+  ~45 min+ with cloud reviewers; formula in
+  [`references/run-budget.md`](references/run-budget.md) "Minimum task budget") —
+  and write it to `RUN.md` front matter (step 6) so the run loop's pre-dispatch
+  deadline guard reads a concrete number.
 - **Coder config** — run `select-coder` once to resolve each task's
   `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
   dispatches without prompting for a missing default.
@@ -183,8 +206,8 @@ end-to-end **exercise path** (how a task's feature is driven, not just its tests
 Run the adapter's `list_ready` and `dependency_graph`
 ([`references/adapters.md`](references/adapters.md)) to build the run's task graph
 and its blocker edges. Write `.auto-pilot/RUN.md` — front matter (`run_id`,
-`work_source`, `base_branch`, `verify_command`/`exercise_path` from step 5) plus
-the per-task table with each task's initial **phase** and its `base` edge (main
+`work_source`, `base_branch`, `verify_command`/`exercise_path` from step 5, and
+`min_task_budget` from step 3) plus the per-task table with each task's initial **phase** and its `base` edge (main
 for an independent task, the parent's branch for a chained one) — in the exact
 format defined in [`references/run-state.md`](references/run-state.md) "`RUN.md`".
 Also seed empty `.auto-pilot/QUESTIONS.md` and `.auto-pilot/REPORT.md`. **Commit**
@@ -324,10 +347,26 @@ The loop is deliberately thin:
 ```
 while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
+    if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
+        stop the loop cleanly (record "N left, M min to deadline, not starting")
     /deliver-task it (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
 ```
+
+**Pre-dispatch deadline guard.** The budget-bounds condition alone can't protect
+the `--until` deadline: `--until` is otherwise only consulted at spawn (record)
+and at a paused resume's wake, so without this check a task claimed at 22:40
+under a 22:45 deadline gets **hard-killed** mid-delivery, leaving a half-built
+`claimed`/`implementing` task — the worst `--resume` state. So **before claiming**
+each task, **when `--until` is set**, if `now + min_task_budget > until`, stop the
+loop cleanly instead of starting work that can't finish, and record why in `REPORT.md` (e.g. "2 tasks
+left, 12 min to deadline, not starting — resume tomorrow"). `min_task_budget` is
+the reviewer-set-coupled floor resolved at launch (step 3) and read from `RUN.md`
+front matter — not a constant; see
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget". This
+is a clean stop, not a park: the un-started tasks stay ready for a later
+`--resume`.
 
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
@@ -406,12 +445,19 @@ After each task's state update, apply the budget checks in
 near-cap pause, or a circuit-breaker halt writes state and exits per that
 reference.
 
-**Loop termination.** The loop ends when no ready task remains or a budget
-hard-stop fires. Either way, the orchestrator writes the final `REPORT.md`
-(setting run-level `status: done`), commits it on the run-state branch, then
+**Loop termination.** The loop ends when no ready task remains, a budget
+hard-stop fires, or the **pre-dispatch deadline guard** above stops it with ready
+tasks still left. The first two are a **finished run** — the final `REPORT.md`
+sets run-level `status: done`. The deadline-guard stop is **not** done: it sets
+`status: paused` with `pause_reason: "--until deadline reached; N tasks still
+ready"` and `paused_until` **empty**, keeping the run in `--resume`'s resumable
+set (those tasks stay ready for a later `--resume`) without any timer auto-wake.
+In every case the orchestrator writes and commits the final `REPORT.md` on the
+run-state branch, then
 **tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
 if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
-"Relaunchable, not one-shot") — so a finished run is never re-woken, and finally
+"Relaunchable, not one-shot") — so no run is re-woken by a timer (a
+deadline-stopped run resumes only by an explicit `--resume`), and finally
 **exits cleanly**, emitting a **one-line summary** to `.auto-pilot/orchestrator.log`
 ([`references/launch-runtime.md`](references/launch-runtime.md) "Logs /
 observability") — e.g. `auto-pilot done: 4 handed-off, 1 parked, 0 skipped —
