@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.38.0] - 2026-07-10
+
+### Features
+
+- Step-7 spawn mechanism — detach + launchd + jail generator (PRE-484 task 3) (3864082)
+
 ## [1.37.0] - 2026-07-10
 
 ### Features
