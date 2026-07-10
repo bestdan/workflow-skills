@@ -6,10 +6,9 @@ and rationale only — the ordered launch steps live in
 [`../SKILL.md`](../SKILL.md) "Launch phase," and the durable state formats in
 [`run-state.md`](run-state.md).
 
-Design source:
-[`auto-pilot.md`](../../../dev_docs/auto-pilot.md)
-§"Decisions (locked)" (sandboxed yolo). The architecture doc locks that
-decision; this reference works out the sandbox profile that implements it.
+The sandboxed-yolo decision this reference implements is recorded in
+[`auto-pilot.md`](../../../dev_docs/auto-pilot.md); this file works out the
+sandbox profile itself.
 
 ## Spawn mechanics — detached `claude -p`
 
