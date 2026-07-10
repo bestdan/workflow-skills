@@ -159,18 +159,25 @@ render_profile() {
     ex_c+=("$c")
   done
 
+  # Floor (ALWAYS, even without --confine-under): a write scope of "/" emits a
+  # whole-filesystem write rule that defeats the jail. Refuse it unconditionally —
+  # the containment guard below is opt-in and can't protect itself if a caller
+  # forgets --confine-under, so this floor closes the worst case regardless.
+  local w r under
+  for w in ${rw_c[@]+"${rw_c[@]}"}; do
+    [ "$w" = "/" ] && die "refusing --rw / (whole-filesystem write, fail-closed)"
+  done
   # Containment: when --confine-under roots are given, every WRITE scope must
-  # canonicalize inside one of them, so `--rw /` (or a worktree symlinked to /)
-  # can't emit a whole-filesystem write rule. Both sides are already pwd -P'd, so
-  # a prefix test is sound. RO/exec are intentionally exempt (creds and system
-  # binaries live outside the run root). Fail-closed on any escape.
+  # canonicalize inside one of them (so a worktree symlinked to /$HOME can't slip
+  # a broad write through). Both sides are already pwd -P'd; the prefix test is
+  # LITERAL (`${w#"$r"/}`, not a glob) so a root containing * / [ can't over-match.
+  # RO/exec are intentionally exempt (creds and system binaries live outside the
+  # run root). Fail-closed on any escape.
   if [ "${#confine_c[@]}" -gt 0 ]; then
-    local w r under
     for w in ${rw_c[@]+"${rw_c[@]}"}; do
       under=0
       for r in "${confine_c[@]}"; do
-        [ "$w" = "$r" ] || case "$w" in "$r"/*) under=1 ;; esac
-        [ "$w" = "$r" ] && under=1
+        { [ "$w" = "$r" ] || [ "${w#"$r"/}" != "$w" ]; } && under=1
       done
       [ "$under" = 1 ] || die "write scope escapes --confine-under (fail-closed): $w"
     done
@@ -317,10 +324,27 @@ render_settings() {
 
 PLIST_TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.plist.tmpl"
 
+# Escape a value for inclusion inside a plist <string>…</string>. `&` MUST be
+# replaced first. Without this, a value containing plist/XML metacharacters (legal
+# in macOS paths, and a label is caller-set) could inject launchd keys — e.g. a
+# second <key>ProgramArguments</key>, which launchd execs DIRECTLY, not under
+# sandbox-exec, bypassing the whole jail. This is the plist analogue of sbpl_escape.
+xml_escape() {
+  local s="$1"
+  s="${s//&/&amp;}"
+  s="${s//</&lt;}"
+  s="${s//>/&gt;}"
+  s="${s//\"/&quot;}"
+  printf '%s' "$s"
+}
+
 # Inline token replacement (bash, not sed) so arbitrary paths with regex-special
-# chars can't corrupt the render.
+# chars can't corrupt the render; every substituted string value is XML-escaped.
 render_plist() {
-  local label="$1" launch_script="$2" workdir="$3" log="$4" interval="$5" throttle="$6" template="$7"
+  local label launch_script workdir log
+  label="$(xml_escape "$1")"; launch_script="$(xml_escape "$2")"
+  workdir="$(xml_escape "$3")"; log="$(xml_escape "$4")"
+  local interval="$5" throttle="$6" template="$7"   # integers, validated numeric upstream
   local line
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line//@@LABEL@@/$label}"
@@ -341,7 +365,7 @@ render_plist() {
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT"
+        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -353,6 +377,7 @@ write_launch() {
       --label) label="$2"; shift 2 ;;
       --interval) interval="$2"; shift 2 ;;
       --throttle) throttle="$2"; shift 2 ;;
+      --claude-bin) claude_bin="$2"; shift 2 ;;
       --out-script) out_script="$2"; shift 2 ;;
       --out-plist) out_plist="$2"; shift 2 ;;
       --plist-template) plist_template="$2"; shift 2 ;;
@@ -361,6 +386,9 @@ write_launch() {
   done
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
   [ -n "$label" ] || die "write-launch requires --label"
+  # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
+  # plist injection on top of xml_escape, and it's what launchd expects anyway.
+  case "$label" in *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
   local f
   for f in "$profile" "$settings" "$prompt"; do
     [ -n "$f" ] || die "write-launch requires --profile, --settings, and --prompt-file"
@@ -371,6 +399,14 @@ write_launch() {
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
 
   local settings_json; settings_json="$(cat "$settings")"
+  # Resolve claude to an ABSOLUTE path: a detached launchd job runs with a minimal
+  # PATH (/usr/bin:/bin:/usr/sbin:/sbin) and would not find a Homebrew `claude`.
+  # The caller should pass --claude-bin (the same path it gave render-profile's
+  # --exec, so the launch invokes exactly the binary the profile permits); default
+  # to `command -v claude` for convenience.
+  [ -n "$claude_bin" ] || claude_bin="$(command -v claude 2>/dev/null)" || claude_bin=""
+  [ -n "$claude_bin" ] || die "claude not found (fail-closed): pass --claude-bin or put claude on PATH"
+  case "$claude_bin" in /*) ;; *) die "--claude-bin must be absolute (fail-closed): $claude_bin" ;; esac
 
   local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
   {
@@ -381,7 +417,7 @@ write_launch() {
     printf 'cd %q\n' "$workdir"
     # exec so the launchd-tracked PID is claude itself, not a wrapper shell.
     printf 'exec sandbox-exec -f %q \\\n' "$profile"
-    printf '  claude -p "$(cat %q)" \\\n' "$prompt"
+    printf '  %q -p "$(cat %q)" \\\n' "$claude_bin" "$prompt"
     printf '  --permission-mode bypassPermissions \\\n'
     printf '  --settings %q \\\n' "$settings_json"
     printf '  --output-format stream-json \\\n'
@@ -437,9 +473,16 @@ smoke_test() {
   [ -f "$profile" ] && [ -f "$settings" ] || die "smoke-test requires --profile and --settings files"
   command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
   local json; json="$(cat "$settings")"
-  if ! sandbox-exec -f "$profile" claude -p 'ok' --max-turns 1 --settings "$json" >/dev/null 2>&1; then
-    die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
-  fi
+  local claude_bin; claude_bin="$(command -v claude 2>/dev/null)" || die "claude not found on PATH"
+  # Match the REAL launch's posture (bypassPermissions + the wrapper + settings) so
+  # the smoke validates the same invocation the detached job will run. Assert on
+  # observable output, not just $?, so a degraded claude that exits 0 without a live
+  # credential can't false-pass the auth gate.
+  local out
+  out="$(sandbox-exec -f "$profile" "$claude_bin" -p 'ok' --max-turns 1 \
+    --permission-mode bypassPermissions --settings "$json" 2>/dev/null)" \
+    || die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+  [ -n "$out" ] || die "auth smoke-test produced no output THROUGH the wrapper — credential/jail suspect; not detaching"
   echo "spawn-orchestrator: smoke-test OK"
 }
 
@@ -479,7 +522,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
@@ -501,9 +544,20 @@ launch() {
 
   write_launch "${wl[@]}"
   smoke_test "${sm[@]}"            # BEFORE detach — a dead credential stops here.
+  teardown --label "$label" >/dev/null 2>&1   # clear any stale registration; bootstrap fails on a dup label.
   detach --plist "$plist"
-  local pid; pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
-  [ -n "$pid" ] || die "detached but could not read the orchestrator PID from launchctl"
+  # `launchctl bootstrap` is asynchronous — the pid may not be reported for a beat,
+  # so poll briefly rather than reading once (a single read fails closed spuriously).
+  local pid="" i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
+    case "$pid" in ''|*[!0-9]*) pid="" ;; *) break ;; esac
+    sleep 0.2
+  done
+  if [ -z "$pid" ]; then
+    teardown --label "$label" >/dev/null 2>&1   # don't leave an orphaned job loaded
+    die "detached but could not read the orchestrator PID from launchctl (job booted out)"
+  fi
   record_handle --pid "$pid" --until "$until" --out "$handle"
   echo "spawn-orchestrator: launched pid=$pid label=$label"
 }

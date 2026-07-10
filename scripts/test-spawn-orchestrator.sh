@@ -160,36 +160,58 @@ mkdir -p "$BASE/root/wt"
 "$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --exec "$BIN" --out "$BASE/cf.sb" >/dev/null 2>&1 \
   && ok "confine-under: rw inside root accepted" || bad "confine-under: rw inside root accepted"
 cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"; cfc=$?
-if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'escapes --confine-under'; then
+if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
   ok "confine-under: rw / fails closed"
 else
   bad "confine-under: rw / fails closed" "exit=$cfc"
 fi
+# floor holds even WITHOUT --confine-under (the guard is opt-in; the floor isn't)
+rfo="$("$SCRIPT" render-profile --rw / --out "$BASE/rf.sb" 2>&1)"; rfc=$?
+[ "$rfc" = 2 ] && [ ! -e "$BASE/rf.sb" ] && printf '%s' "$rfo" | grep -qF 'refusing --rw /' \
+  && ok "floor: rw / refused with no --confine-under" || bad "floor: rw / refused with no --confine-under" "exit=$rfc"
+# a sibling that shares a prefix but is NOT under the root is rejected (literal prefix)
+mkdir -p "$BASE/rootX/wt"
+sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/wt" --out "$BASE/sib.sb" 2>&1)"; sibc=$?
+[ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
+  && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
 
 # allowLocalBinding flag flips to true (task 3, Fable #6)
 "$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1
 have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(cat "$BASE/lb.json" 2>/dev/null)"
 
 # --- write-launch: launch script + plist generation (task 3) ------------------
+# Pass --claude-bin "$BIN" (a fixture) so the harness needs no real claude on PATH.
 printf 'run the graph\n' >"$BASE/prompt.txt"
 "$SCRIPT" render-settings --source plan --coder codex --out "$BASE/wl.json" >/dev/null 2>&1
 wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
   --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
 lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
-have "launch: bypassPermissions claude -p"     'claude -p'                          "$lbody"
+have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
+have "launch: -p reads prompt from file"       '-p "$(cat'                          "$lbody"
 have "launch: bypassPermissions flag"          '--permission-mode bypassPermissions' "$lbody"
 have "launch: passes --settings"               '--settings'                         "$lbody"
 have "launch: redirects to log"                ">>$BASE/o.log"                       "$lbody"
 if command -v plutil >/dev/null 2>&1; then
   if plutil -lint "$BASE/job.plist" >/dev/null 2>&1; then ok "launch: plist lints"; else bad "launch: plist lints"; fi
+  # plist injection: an XML-metachar path must still yield a VALID plist (escaped).
+  mkdir -p "$BASE/a&b<x"
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
+    --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
+    --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+  if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
 else
   echo "skip - launch: plist lint (plutil absent)"
 fi
+# label injection rejected at the source (defense-in-depth on top of xml_escape)
+"$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label 'a</string><key>x' --claude-bin "$BIN" \
+  --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
+  && bad "launch: injecting label rejected" || ok "launch: injecting label rejected"
 # write-launch fail-closed on a missing input file
 wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
