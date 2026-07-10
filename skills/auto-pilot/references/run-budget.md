@@ -15,31 +15,35 @@ stop below; everything else governs the free rate window and per-task time.
 Run after every task's state update (the run loop's hook point). Headroom is
 read two ways, layered because neither alone is enough:
 
-- **Primary — a direct usage query.** `GET
-  https://api.anthropic.com/api/oauth/usage`, called with `Authorization:
-  Bearer <token>` and `anthropic-beta: oauth-2025-04-20`, where `<token>` is
-  the Claude Code OAuth access token read from the macOS Keychain
-  (`security find-generic-password -s "Claude Code-credentials" -w`, then the
-  `.claudeAiOauth.accessToken` field of the JSON it prints). The response's
-  `limits[]` array carries one entry per window (`kind` of `session` — the
-  5-hour rate window — `weekly_all`, and `weekly_scoped` (per-model, carrying
-  a `scope`), each with `percent` and `resets_at`); the rate-window read is
+- **Primary — a direct usage query.** [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh)
+  performs it and is the orchestrator's entry point: it queries `GET
+  https://api.anthropic.com/api/oauth/usage` (headers `Authorization: Bearer
+  <token>` and `anthropic-beta: oauth-2025-04-20`) and emits the session
+  window as compact JSON (`--session-percent` for just the number). The
+  `<token>` is the Claude Code OAuth access token, resolved OS-appropriately —
+  the macOS Keychain (`security find-generic-password -s "Claude
+  Code-credentials" -w`) or, on Linux, `~/.claude/.credentials.json` — and read
+  as the `.claudeAiOauth.accessToken` field. The response's `limits[]` array
+  carries one entry per window (`kind` of `session` — the 5-hour rate window —
+  `weekly_all`, and `weekly_scoped` (per-model, carrying a `scope`), each with
+  `percent` and `resets_at`); the rate-window read is
   `limits[kind=session].percent` plus its `resets_at`. **`percent` is percent
   _consumed_, not remaining** — it rises toward 100 as the window is spent, so
   "near cap" fires as it **approaches** the threshold (real headroom is
   `100 - percent`); don't invert the comparison. This is first-best: a
   **structured numeric read** of true usage, not a guess.
-  `~/src/dotfiles/scripts/claude_usage.sh`
-  is prior art for the exact call.
 - **Fallback — a conservative time/dispatch proxy, when the query is
-  unavailable.** Not every orchestrator environment can make the query above
-  — a `claude-web` orchestrator has no macOS Keychain, and a non-Claude
-  backend may expose no equivalent usage endpoint at all. When the query
-  can't run — **including a token read that fails or is denied**, not just an
-  absent Keychain — **fail closed to** elapsed wall-clock and dispatch count
-  against a threshold tuned **below** the real cap, crossing it → "near cap"
-  (below). Treat the OAuth token as a secret: pass it only in-memory to the
-  request, never log it or the `Authorization` header.
+  unavailable.** Not every orchestrator environment can make the query above —
+  a `claude-web` orchestrator has no local credential store, and a non-Claude
+  backend may expose no equivalent usage endpoint at all. Any such failure —
+  a missing token store, a token read that fails or is denied, an unreachable
+  endpoint, or an unexpected response shape — makes
+  [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh) **exit
+  non-zero**, which is the signal to **fail closed to** elapsed wall-clock and
+  dispatch count against a threshold tuned **below** the real cap, crossing it
+  → "near cap" (below). The script treats the OAuth token as a secret — it is
+  passed to `curl` via a stdin config, never on the command line, and never
+  logged; a caller wiring the query directly must do the same.
 - **Backstop — a rate-limit _error_, classified by the supervisor, not the
   agent.** A rate-limit denies exactly the capability an in-band handler would
   need: if the orchestrator _itself_ is rate-limited, its reasoning can't run to
