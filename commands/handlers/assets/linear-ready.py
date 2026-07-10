@@ -110,12 +110,16 @@ def gql(key, query, variables=None):
         },  # personal key, no "Bearer"
     )
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:
             payload = json.loads(r.read())
     except urllib.error.HTTPError as e:
         # Linear returns query-validation errors as HTTP 400 with the detail in
         # the body — surface it cleanly instead of letting urlopen raise.
         sys.exit(f"GraphQL HTTP {e.code}: {e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        # Network failure or the timeout above — exit non-zero (not a hang) so the
+        # caller falls back to the MCP floor per this script's contract.
+        sys.exit(f"GraphQL request failed: {e.reason}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
     return payload["data"]
@@ -221,8 +225,12 @@ def main():
 
     if args.project:
         scopes = []
+        seen_project_ids = set()
         for raw in args.project:
             project_id, max_estimate = parse_project_arg(raw, args.max_estimate)
+            if project_id in seen_project_ids:
+                continue
+            seen_project_ids.add(project_id)
             scopes.append(
                 {"id": project_id, "name": None, "max_estimate": max_estimate}
             )
