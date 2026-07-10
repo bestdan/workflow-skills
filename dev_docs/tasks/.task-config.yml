@@ -2,3 +2,9 @@ handler: linear
 linear:
   team: PreThink
   default_project: ebbc284b-a1c1-4cb3-96e0-914e210a79a2 # workflow-skills: Handler parity follow-ups
+# api_key_ref (the op:// pointer to a Linear personal API key) is PERSONAL and
+# machine-specific — it does NOT belong in this committed, public config.
+# Put it in the gitignored local override instead: dev_docs/tasks/.task-config.local.yml
+#   linear:
+#     api_key_ref: op://<vault>/<item>/<field>
+# (or just export $LINEAR_API_KEY / $LINEAR_API_KEY_REF). Unset → the MCP floor.
