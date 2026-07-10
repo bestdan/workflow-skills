@@ -62,9 +62,14 @@ run's state and then falls into that same loop (see "Resume phase" below).
 `--resume` is present, route to the **Resume phase** section below instead of
 running the rest of this launch pre-flight. Detect the source
 (existing `dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear**
-project) and resolve the handler from `dev_docs/tasks/.task-config.yml`; any
-handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan only).
-Pick the matching adapter (`references/adapters.md`).
+project) and resolve `dev_docs/tasks/.task-config.yml`'s handler for
+validation only; any handler other than `linear`/`repo-pr` → stop (v1 supports
+linear + plan only). The run's **effective handler** — what actually gets
+passed to `/deliver-task` — is source-derived, not read back off that config: a
+**plan** source ⇒ `repo-pr`, a **linear** source ⇒ `linear`, per the matching
+adapter (`references/adapters.md`). This keeps a plan-source run correct even
+when the repo's own `.task-config.yml` default is `linear`. Pick the matching
+adapter (`references/adapters.md`).
 
 The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
 **supply-and-demand**: steps 2–3 probe what the configured environment can
@@ -336,11 +341,14 @@ branch) — that distinction drives the stacked-PR handling below.
 **The per-task step.** Dispatch exactly one call per task:
 
 ```
-/deliver-task <id> --base <branch> --questions .auto-pilot/QUESTIONS.md
+/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md
 ```
 
 where `<branch>` is the task's `base` from `RUN.md` — `main` for an
-independent task, the parent task's branch for a chained one. `/deliver-task`
+independent task, the parent task's branch for a chained one — and `<handler>`
+is the run's effective handler resolved from the source in the Preamble above
+(plan ⇒ `repo-pr`, linear ⇒ `linear`), never re-derived by `/deliver-task`
+itself. `/deliver-task`
 ([`commands/deliver-task.md`](../../commands/deliver-task.md)) owns the entire
 per-task lifecycle — claim, implement, PR, co-review, iterate, hand-off — the
 run loop does not re-derive any of it. The `--questions` path is where the
