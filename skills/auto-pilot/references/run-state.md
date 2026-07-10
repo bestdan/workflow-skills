@@ -45,6 +45,7 @@ pause_reason: # why the run paused/halted; set with status=paused (rate window) 
 orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
 orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
 until: 2026-07-09T06:00:00 # the run's --until deadline
+min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; run-budget.md)
 ---
 
 | task    | phase        | branch            | base              | base_sha | pr   | notes                  |
@@ -65,6 +66,12 @@ until: 2026-07-09T06:00:00 # the run's --until deadline
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
   record launch writes at spawn (launch-runtime.md "Orphan / stale detection");
   `--resume` and a fresh launch read them to detect a stale orchestrator.
+- `min_task_budget` is the **pre-dispatch floor** the run loop's deadline guard
+  reads: `now + min_task_budget > until` → stop before starting a task the
+  `--until` kill would sever mid-delivery. Launch step 3 computes it from the
+  resolved co-review reviewer set (it is reviewer-latency-coupled, not a
+  constant) and writes it here; formula and defaults live in
+  [`run-budget.md`](run-budget.md) "Minimum task budget".
 - `phase` is one of the seven values below; it is the field `--resume` reconciles.
 
 ### `QUESTIONS.md`

@@ -71,6 +71,16 @@ adapter (`references/adapters.md`). This keeps a plan-source run correct even
 when the repo's own `.task-config.yml` default is `linear`. Pick the matching
 adapter (`references/adapters.md`).
 
+**Size `--until` realistically.** A single `/deliver-task` floors at **~20–45
+min** depending on the resolved reviewer set — ~20 min with the fast set
+(codex + Claude + reconciler), ~45 min+ once cloud reviewers (`devin` / `agy`,
+15-min bound each) are in it (see step 3 and
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget").
+`--until now+40min` for anything with cloud reviewers is under-provisioned: the
+pre-dispatch guard (Run phase) will simply decline to start the next task, so a
+too-tight window yields fewer tasks, not a hard-killed one. Provision at least
+one `min_task_budget` per task you expect to finish.
+
 The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
 **supply-and-demand**: steps 2–3 probe what the configured environment can
 _supply_ (auth, resolved config), and the **scout** in step 6 checks what the
@@ -148,6 +158,17 @@ so nothing prompts at 3am:
 - **Co-review reviewer set** — resolve `/co-review`'s reviewer set from
   `.co-review.yml` into the concrete list that will run under `--non-interactive`
   (bounded per-reviewer timeouts; the reviewer prompt is never asked mid-run).
+  For a **time-boxed run** (`--until` set), default to a **fast reviewer set**
+  (codex + Claude + reconciler): codex is ~1–2 min, while cloud reviewers
+  (`devin` / `agy`) each hit the `--non-interactive` 15-min bound and dominate a
+  short window. Cloud reviewers are **optional/skippable** in this set — a
+  skipped reviewer is never fatal and is recorded (`REPORT.md` review classes).
+  Then **compute `min_task_budget` from this resolved set** — the pre-dispatch
+  floor is coupled to reviewer latency, not a constant (~20 min fast set,
+  ~45 min+ with cloud reviewers; formula in
+  [`references/run-budget.md`](references/run-budget.md) "Minimum task budget") —
+  and write it to `RUN.md` front matter (step 6) so the run loop's pre-dispatch
+  deadline guard reads a concrete number.
 - **Coder config** — run `select-coder` once to resolve each task's
   `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
   dispatches without prompting for a missing default.
@@ -324,10 +345,26 @@ The loop is deliberately thin:
 ```
 while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
+    if now + min_task_budget > until:      # pre-dispatch deadline guard
+        stop the loop cleanly (record "N left, M min to deadline, not starting")
     /deliver-task it (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
 ```
+
+**Pre-dispatch deadline guard.** The budget-bounds condition alone can't protect
+the `--until` deadline: `--until` is otherwise only consulted at spawn (record)
+and at a paused resume's wake, so without this check a task claimed at 22:40
+under a 22:45 deadline gets **hard-killed** mid-delivery, leaving a half-built
+`claimed`/`implementing` task — the worst `--resume` state. So **before claiming**
+each task, if `now + min_task_budget > until`, stop the loop cleanly instead of
+starting work that can't finish, and record why in `REPORT.md` (e.g. "2 tasks
+left, 12 min to deadline, not starting — resume tomorrow"). `min_task_budget` is
+the reviewer-set-coupled floor resolved at launch (step 3) and read from `RUN.md`
+front matter — not a constant; see
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget". This
+is a clean stop, not a park: the un-started tasks stay ready for a later
+`--resume`.
 
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
@@ -406,8 +443,10 @@ After each task's state update, apply the budget checks in
 near-cap pause, or a circuit-breaker halt writes state and exits per that
 reference.
 
-**Loop termination.** The loop ends when no ready task remains or a budget
-hard-stop fires. Either way, the orchestrator writes the final `REPORT.md`
+**Loop termination.** The loop ends when no ready task remains, a budget
+hard-stop fires, or the **pre-dispatch deadline guard** above stops it with ready
+tasks still left (those stay ready for a later `--resume`). In every case, the
+orchestrator writes the final `REPORT.md`
 (setting run-level `status: done`), commits it on the run-state branch, then
 **tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
 if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
