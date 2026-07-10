@@ -9,9 +9,9 @@
 #   2. host-level network egress  → the detached `claude -p`'s own
 #      sandbox.network allowlist (added by a later task)
 #
-# This first slice ships the layer-1 profile renderer + a compile check.
-# Subcommands added by sibling tasks: render-network, write-launch, detach,
-# teardown.
+# Ships the layer-1 profile renderer + compile check (render-profile /
+# check-profile) and the layer-2 egress-allowlist emitter (render-settings).
+# Subcommands added by sibling tasks: write-launch, detach, teardown.
 #
 # Usage:
 #   spawn-orchestrator.sh render-profile \
@@ -19,7 +19,17 @@
 #       --ro <path> [--ro <path> ...] \
 #       --exec <path> [--exec <path> ...] \
 #       --out <file> [--template <file>]
+#   spawn-orchestrator.sh render-settings \
+#       --source <linear|plan> \
+#       [--coder <codex|devin|agy> ...] [--agy-host <host>] \
+#       [--mcp-host <host> ...] [--npm] \
+#       --out <file>
 #   spawn-orchestrator.sh check-profile <file>
+#
+#   render-settings  Emit the ephemeral `claude -p --settings` JSON: layer-2
+#                    network egress (sandbox.network.allowedDomains) narrowed to
+#                    the resolved coders + source, deny-by-default. Fail-closed on
+#                    an unresolvable required host (e.g. agy without --agy-host).
 #
 #   render-profile  Render the Seatbelt (.sb) profile from resolved paths into
 #                   --out. Every path must be ABSOLUTE and EXIST; a relative or
@@ -173,6 +183,97 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   echo "spawn-orchestrator: profile OK $out"
 }
 
+# Build the narrowed egress host set (sorted, unique), fail-closed. This is
+# layer 2 of the jail: Seatbelt can't filter by hostname, so egress is enforced
+# by the detached `claude -p`'s own sandbox.network allowlist. The set is
+# narrowed to the run's resolved coders + source so a linear+codex run never
+# opens devin's or agy's endpoints. Args are parsed by render_settings below.
+render_network_allowlist() {
+  local source="" agy_host="" npm=0
+  local -a coders=() mcp=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --coder) [ $# -ge 2 ] || die "missing value for --coder"; coders+=("$2"); shift 2 ;;
+      --source) [ $# -ge 2 ] || die "missing value for --source"; source="$2"; shift 2 ;;
+      --agy-host) [ $# -ge 2 ] || die "missing value for --agy-host"; agy_host="$2"; shift 2 ;;
+      --mcp-host) [ $# -ge 2 ] || die "missing value for --mcp-host"; mcp+=("$2"); shift 2 ;;
+      --npm) npm=1; shift ;;
+      *) die "unknown allowlist argument: $1" ;;
+    esac
+  done
+  case "$source" in
+    linear|plan) ;;
+    "") die "network allowlist requires --source <linear|plan>" ;;
+    *) die "unknown --source (fail-closed): $source" ;;
+  esac
+
+  # Always needed: the orchestrator model + GitHub (PRs, git over HTTPS).
+  local -a hosts=(api.anthropic.com api.github.com github.com codeload.github.com '*.githubusercontent.com')
+  [ "$source" = linear ] && hosts+=(api.linear.app)
+  [ "$npm" = 1 ] && hosts+=(registry.npmjs.org)
+
+  local c
+  for c in ${coders[@]+"${coders[@]}"}; do
+    case "$c" in
+      codex) hosts+=(api.openai.com) ;;
+      devin) hosts+=(api.devin.ai server.codeium.com) ;;
+      agy)
+        [ -n "$agy_host" ] || die "coder 'agy' requires --agy-host <resolved Antigravity host> (fail-closed): install/re-route or resolve the host at pre-flight"
+        case "$agy_host" in
+          \**) die "agy host must be a concrete host, never a wildcard (fail-closed): $agy_host" ;;
+        esac
+        hosts+=("$agy_host") ;;
+      *) die "unknown --coder (fail-closed): $c" ;;
+    esac
+  done
+  hosts+=(${mcp[@]+"${mcp[@]}"})
+
+  printf '%s\n' "${hosts[@]}" | sort -u
+}
+
+# Emit a JSON array literal from the host lines on stdin.
+hosts_to_json_array() {
+  local first=1 out="["
+  local h
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    [ "$first" = 1 ] && first=0 || out+=","
+    out+="\"$h\""
+  done
+  out+="]"
+  printf '%s' "$out"
+}
+
+render_settings() {
+  local out=""
+  local -a passthru=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
+      *) passthru+=("$1"); shift ;;
+    esac
+  done
+  [ -n "$out" ] || die "render-settings requires --out <file>"
+  case "$out" in /*) ;; *) die "--out must be absolute (fail-closed): $out" ;; esac
+
+  # render_network_allowlist runs in a $() — its die() exits only the subshell,
+  # so capture the status and abort here (fail-closed: no settings on any error).
+  local hosts array
+  hosts="$(render_network_allowlist ${passthru[@]+"${passthru[@]}"})" || exit 2
+  array="$(printf '%s\n' "$hosts" | hosts_to_json_array)"
+
+  # Ephemeral run settings for `claude -p --settings '<json>'`: deny-by-default
+  # egress narrowed to $array, plus loopback for the enforcement proxy + local
+  # tooling. Written to --out (audit trail); the caller passes it via --settings,
+  # never mutating ~/.claude.
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-settings.XXXXXX")" || die "mktemp failed"
+  printf '{"sandbox":{"enabled":true,"network":{"allowedDomains":%s,"allowLocalBinding":true}}}\n' "$array" >"$tmp" \
+    || { rm -f "$tmp"; die "failed to write settings"; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write settings: $out"; }
+  echo "spawn-orchestrator: settings OK $out"
+}
+
 check_profile() {
   [ $# -eq 1 ] || die "check-profile takes exactly one <file>"
   local f="$1"
@@ -196,6 +297,7 @@ check_profile() {
 sub="$1"; shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
+  render-settings) render_settings "$@" ;;
   check-profile) check_profile "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

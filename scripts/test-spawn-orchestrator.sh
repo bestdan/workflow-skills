@@ -110,5 +110,42 @@ else
   echo "skip - check-profile: sandbox-exec not available on this host (non-macOS)"
 fi
 
+# --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
+sj="$BASE/settings.json"
+"$SCRIPT" render-settings --source linear --coder codex --out "$sj" >/dev/null 2>&1
+sbody="$(cat "$sj" 2>/dev/null)"
+have "settings: sandbox enabled"          '"enabled":true'          "$sbody"
+have "settings: deny-default allowlist"   '"allowedDomains"'        "$sbody"
+have "settings: loopback bind allowed"    '"allowLocalBinding":true' "$sbody"
+have "settings: {codex,linear} has openai" 'api.openai.com'          "$sbody"
+have "settings: {codex,linear} has linear" 'api.linear.app'          "$sbody"
+have "settings: always has anthropic"      'api.anthropic.com'       "$sbody"
+lack "settings: codex run omits devin"     'api.devin.ai'            "$sbody"
+lack "settings: no broad googleapis"       'googleapis'              "$sbody"
+if command -v python3 >/dev/null 2>&1; then
+  if python3 -m json.tool "$sj" >/dev/null 2>&1; then ok "settings: valid JSON"; else bad "settings: valid JSON"; fi
+else
+  echo "skip - settings: JSON validity (python3 absent)"
+fi
+
+# plan source omits the linear host
+"$SCRIPT" render-settings --source plan --coder codex --out "$BASE/plan.json" >/dev/null 2>&1
+lack "settings: plan source omits linear" 'api.linear.app' "$(cat "$BASE/plan.json" 2>/dev/null)"
+
+# fail-closed: unresolved / wildcard agy host writes nothing
+sfc() { # <name> <want-substr> <args...>
+  local name="$1" want="$2"; shift 2
+  local t="$BASE/sfc.json"; rm -f "$t"
+  local o c; o="$("$SCRIPT" render-settings "$@" --out "$t" 2>&1)"; c=$?
+  if [ "$c" = 2 ] && [ ! -e "$t" ] && printf '%s' "$o" | grep -qF "$want"; then
+    ok "settings fail-closed: $name"
+  else
+    bad "settings fail-closed: $name" "exit=$c wrote=$([ -e "$t" ] && echo YES || echo no) msg=$o"
+  fi
+}
+sfc "agy needs --agy-host" "requires --agy-host" --source plan --coder agy
+sfc "agy rejects wildcard"  "never a wildcard"    --source plan --coder agy --agy-host '*.googleapis.com'
+sfc "unknown source"        "unknown --source"    --source bogus --coder codex
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]
