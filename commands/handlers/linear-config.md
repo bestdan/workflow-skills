@@ -67,7 +67,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
 
 ## Archive key (`linear.api_key_ref`)
 
-`linear.api_key_ref` is **optional** and only used by `/archive-tasks`. It is a **full 1Password `op://<vault>/<item>/<field>` reference** (e.g. `op://Private/Linear API/credential`) to a Linear **personal API key** — use the explicit vault/item/field form (or the item UUID), **not a bare item name**, which is ambiguous and may not resolve.
+`linear.api_key_ref` is **optional**. Its primary consumer is `/archive-tasks`; when set, the same key **also** powers `/do-tasks`' read-only GraphQL fast-path for find-candidates (see the note at the end of this section, and `linear-claim.md` "Find candidates"). It is a **full 1Password `op://<vault>/<item>/<field>` reference** (e.g. `op://Private/Linear API/credential`) to a Linear **personal API key** — use the explicit vault/item/field form (or the item UUID), **not a bare item name**, which is ambiguous and may not resolve.
 
 Why a raw key and not the MCP: the Linear MCP exposes **no archive mutation** (only `save_issue`, which can't archive, and `delete_*` for comments/attachments). So `/archive-tasks`'s backstop calls Linear's GraphQL `issueArchive` mutation directly, and that needs a personal API key the MCP's OAuth session can't provide. Store the key in 1Password and reference it here — **never paste the key into the config or the repo.** The archive flow resolves it with `op read "<ref>"` at runtime (see `commands/handlers/linear-archive.md`).
 
