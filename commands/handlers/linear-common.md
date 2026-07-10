@@ -109,7 +109,7 @@ Inputs: the **claim scope set** = the resolved configured projects ("Resolve con
 
 ## Ready-candidate selection
 
-The gate and rank rules `/do-tasks` (tracker path) applies when picking claimable issues out of a candidate set.
+The gate and rank rules `/do-tasks` (tracker path) apply when picking claimable issues out of a candidate set.
 
 **State scope.** Only `unstarted`-type states (the `ready` kanban column) are eligible — `backlog` issues are unrefined and must go through `/promote-tasks` first, and `started` issues are by definition already claimed.
 
