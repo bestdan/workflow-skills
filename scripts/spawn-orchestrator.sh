@@ -129,12 +129,13 @@ emit_exec() {
 
 render_profile() {
   local out="" template="$TEMPLATE_DEFAULT"
-  local -a rw=() ro=() ex=()
+  local -a rw=() ro=() ex=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
+      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; confine+=("$2"); shift 2 ;;
       --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
       --template) [ $# -ge 2 ] || die "missing value for --template"; template="$2"; shift 2 ;;
       *) die "unknown render-profile argument: $1" ;;
@@ -147,8 +148,9 @@ render_profile() {
 
   # Canonicalize ALL inputs first — any bad path aborts before we write, so a
   # partial profile is never emitted.
-  local -a rw_c=() ro_c=() ex_c=()
+  local -a rw_c=() ro_c=() ex_c=() confine_c=()
   local p c
+  for p in ${confine[@]+"${confine[@]}"}; do c="$(canonicalize "$p")" || exit 2; confine_c+=("$c"); done
   for p in ${rw[@]+"${rw[@]}"}; do c="$(canonicalize "$p")" || exit 2; rw_c+=("$c"); done
   for p in ${ro[@]+"${ro[@]}"}; do c="$(canonicalize "$p")" || exit 2; ro_c+=("$c"); done
   for p in ${ex[@]+"${ex[@]}"}; do
@@ -156,6 +158,23 @@ render_profile() {
     { [ -f "$c" ] && [ -x "$c" ]; } || die "exec path is not an executable file (fail-closed): $c"
     ex_c+=("$c")
   done
+
+  # Containment: when --confine-under roots are given, every WRITE scope must
+  # canonicalize inside one of them, so `--rw /` (or a worktree symlinked to /)
+  # can't emit a whole-filesystem write rule. Both sides are already pwd -P'd, so
+  # a prefix test is sound. RO/exec are intentionally exempt (creds and system
+  # binaries live outside the run root). Fail-closed on any escape.
+  if [ "${#confine_c[@]}" -gt 0 ]; then
+    local w r under
+    for w in ${rw_c[@]+"${rw_c[@]}"}; do
+      under=0
+      for r in "${confine_c[@]}"; do
+        [ "$w" = "$r" ] || case "$w" in "$r"/*) under=1 ;; esac
+        [ "$w" = "$r" ] && under=1
+      done
+      [ "$under" = 1 ] || die "write scope escapes --confine-under (fail-closed): $w"
+    done
+  fi
 
   # Build the three token blocks.
   local ro_block rw_block ex_block
@@ -258,11 +277,15 @@ hosts_to_json_array() {
 }
 
 render_settings() {
-  local out=""
+  local out="" localbind=false
   local -a passthru=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
+      # Default OFF: a listen socket lets the inside process reach host-local
+      # services (the Solo control port, local proxies, …) — a pivot the jail
+      # shouldn't grant. Enable only if a run genuinely needs to bind loopback.
+      --allow-local-binding) localbind=true; shift ;;
       *) passthru+=("$1"); shift ;;
     esac
   done
@@ -281,10 +304,208 @@ render_settings() {
   # never mutating ~/.claude.
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-settings.XXXXXX")" || die "mktemp failed"
-  printf '{"sandbox":{"enabled":true,"network":{"allowedDomains":%s,"allowLocalBinding":true}}}\n' "$array" >"$tmp" \
+  printf '{"sandbox":{"enabled":true,"network":{"allowedDomains":%s,"allowLocalBinding":%s}}}\n' "$array" "$localbind" >"$tmp" \
     || { rm -f "$tmp"; die "failed to write settings"; }
   mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write settings: $out"; }
   echo "spawn-orchestrator: settings OK $out"
+}
+
+# ---------------------------------------------------------------------------
+# Task 3 — spawn mechanics: launch script + relaunchable launchd supervisor,
+# an auth smoke-test THROUGH the wrapper (before detaching), and the run handle.
+# ---------------------------------------------------------------------------
+
+PLIST_TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.plist.tmpl"
+
+# Inline token replacement (bash, not sed) so arbitrary paths with regex-special
+# chars can't corrupt the render.
+render_plist() {
+  local label="$1" launch_script="$2" workdir="$3" log="$4" interval="$5" throttle="$6" template="$7"
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line//@@LABEL@@/$label}"
+    line="${line//@@LAUNCH_SCRIPT@@/$launch_script}"
+    line="${line//@@WORKDIR@@/$workdir}"
+    line="${line//@@LOG@@/$log}"
+    line="${line//@@INTERVAL@@/$interval}"
+    line="${line//@@THROTTLE@@/$throttle}"
+    printf '%s\n' "$line"
+  done <"$template"
+}
+
+# Emit the self-contained launch script + the launchd plist from resolved inputs.
+# The launch script is what the plist runs: it composes the jail
+# (sandbox-exec -f <profile>) around `claude -p --permission-mode bypassPermissions`
+# with the layer-2 --settings, reads the run prompt from a file, and redirects to
+# the log. %q-quoting keeps every interpolated path/string shell-safe.
+write_launch() {
+  local profile="" settings="" workdir="" log="" prompt="" until="" \
+        label="" interval="300" throttle="30" out_script="" out_plist="" \
+        plist_template="$PLIST_TEMPLATE_DEFAULT"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile) profile="$2"; shift 2 ;;
+      --settings) settings="$2"; shift 2 ;;
+      --workdir) workdir="$2"; shift 2 ;;
+      --log) log="$2"; shift 2 ;;
+      --prompt-file) prompt="$2"; shift 2 ;;
+      --until) until="$2"; shift 2 ;;
+      --label) label="$2"; shift 2 ;;
+      --interval) interval="$2"; shift 2 ;;
+      --throttle) throttle="$2"; shift 2 ;;
+      --out-script) out_script="$2"; shift 2 ;;
+      --out-plist) out_plist="$2"; shift 2 ;;
+      --plist-template) plist_template="$2"; shift 2 ;;
+      *) die "unknown write-launch argument: $1" ;;
+    esac
+  done
+  [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
+  [ -n "$label" ] || die "write-launch requires --label"
+  local f
+  for f in "$profile" "$settings" "$prompt"; do
+    [ -n "$f" ] || die "write-launch requires --profile, --settings, and --prompt-file"
+    [ -f "$f" ] || die "not found (fail-closed): $f"
+  done
+  [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-launch requires an existing --workdir"
+  [ -n "$log" ] || die "write-launch requires --log"
+  case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
+
+  local settings_json; settings_json="$(cat "$settings")"
+
+  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Auto-pilot orchestrator launch script (generated — do not edit).\n'
+    printf 'set -uo pipefail\n'
+    printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
+    printf 'cd %q\n' "$workdir"
+    # exec so the launchd-tracked PID is claude itself, not a wrapper shell.
+    printf 'exec sandbox-exec -f %q \\\n' "$profile"
+    printf '  claude -p "$(cat %q)" \\\n' "$prompt"
+    printf '  --permission-mode bypassPermissions \\\n'
+    printf '  --settings %q \\\n' "$settings_json"
+    printf '  --output-format stream-json \\\n'
+    printf '  >>%q 2>&1\n' "$log"
+  } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
+  mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write launch script: $out_script"; }
+  chmod +x "$out_script"
+
+  [ -f "$plist_template" ] || die "plist template not found: $plist_template"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-plist.XXXXXX")" || die "mktemp failed"
+  render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
+    || { rm -f "$tmp"; die "failed to render plist"; }
+  mv "$tmp" "$out_plist" || { rm -f "$tmp"; die "failed to write plist: $out_plist"; }
+  echo "spawn-orchestrator: launch written $out_script $out_plist"
+}
+
+# Record the orchestrator's identity for stale/recycled-PID detection: the PID,
+# its process start-time (guards against a recycled PID being mistaken for a live
+# run), and the run's --until deadline.
+record_handle() {
+  local pid="" until="" out=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pid) pid="$2"; shift 2 ;;
+      --until) until="$2"; shift 2 ;;
+      --out) out="$2"; shift 2 ;;
+      *) die "unknown record-handle argument: $1" ;;
+    esac
+  done
+  [ -n "$pid" ] && [ -n "$out" ] || die "record-handle requires --pid and --out"
+  case "$pid" in *[!0-9]*|"") die "--pid must be numeric: $pid" ;; esac
+  local started; started="$(ps -p "$pid" -o lstart= 2>/dev/null)" || true
+  [ -n "$started" ] || die "no live process at pid $pid (cannot record a dead handle)"
+  {
+    printf 'orchestrator_pid: %s\n' "$pid"
+    printf 'orchestrator_started_at: %s\n' "$started"
+    printf 'until: %s\n' "$until"
+  } >"$out" || die "failed to write handle: $out"
+  echo "spawn-orchestrator: handle recorded $out"
+}
+
+# Auth smoke-test THROUGH the exact wrapper + settings, before detaching, so a
+# dead credential fails loudly now rather than silently at 3am. Executes claude.
+smoke_test() {
+  local profile="" settings=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile) profile="$2"; shift 2 ;;
+      --settings) settings="$2"; shift 2 ;;
+      *) die "unknown smoke-test argument: $1" ;;
+    esac
+  done
+  [ -f "$profile" ] && [ -f "$settings" ] || die "smoke-test requires --profile and --settings files"
+  command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
+  local json; json="$(cat "$settings")"
+  if ! sandbox-exec -f "$profile" claude -p 'ok' --max-turns 1 --settings "$json" >/dev/null 2>&1; then
+    die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+  fi
+  echo "spawn-orchestrator: smoke-test OK"
+}
+
+detach() {
+  local plist=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --plist) plist="$2"; shift 2 ;; *) die "unknown detach argument: $1" ;; esac
+  done
+  [ -f "$plist" ] || die "detach requires an existing --plist"
+  command -v launchctl >/dev/null 2>&1 || die "launchctl not available (macOS only)"
+  launchctl bootstrap "gui/$(id -u)" "$plist" || die "launchctl bootstrap failed for $plist"
+  echo "spawn-orchestrator: detached (launchd) $plist"
+}
+
+teardown() {
+  local label=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --label) label="$2"; shift 2 ;; *) die "unknown teardown argument: $1" ;; esac
+  done
+  [ -n "$label" ] || die "teardown requires --label"
+  command -v launchctl >/dev/null 2>&1 || die "launchctl not available (macOS only)"
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  echo "spawn-orchestrator: torn down $label"
+}
+
+# Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
+# smoke-test auth THROUGH the wrapper, and only if that passes, detach + record.
+# The ordering is load-bearing — detaching before auth is verified is exactly the
+# "fails silently at 3am" mode the pre-flight exists to prevent. `--dry-run` prints
+# the plan without executing (so the order is testable offline).
+launch() {
+  local dry=0
+  local -a wl=() sm=() dt=() rh=()
+  local plist="" out_script="" out_plist="" handle="" until="" label=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry=1; shift ;;
+      --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
+      --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template) wl+=("$1" "$2"); shift 2 ;;
+      --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
+      --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
+      --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
+      --out-plist) wl+=(--out-plist "$2"); out_plist="$2"; plist="$2"; shift 2 ;;
+      --handle) handle="$2"; shift 2 ;;
+      *) die "unknown launch argument: $1" ;;
+    esac
+  done
+  [ -n "$out_plist" ] && [ -n "$label" ] && [ -n "$handle" ] || die "launch requires --out-plist, --label, and --handle"
+
+  if [ "$dry" = 1 ]; then
+    printf 'launch plan (order is load-bearing — auth is verified BEFORE we spawn):\n'
+    printf '  1. write-launch  -> %s %s\n' "$out_script" "$out_plist"
+    printf '  2. smoke-test    (claude -p through the sandbox wrapper + settings)\n'
+    printf '  3. detach        (launchctl bootstrap %s)\n' "$plist"
+    printf '  4. record-handle -> %s\n' "$handle"
+    return 0
+  fi
+
+  write_launch "${wl[@]}"
+  smoke_test "${sm[@]}"            # BEFORE detach — a dead credential stops here.
+  detach --plist "$plist"
+  local pid; pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
+  [ -n "$pid" ] || die "detached but could not read the orchestrator PID from launchctl"
+  record_handle --pid "$pid" --until "$until" --out "$handle"
+  echo "spawn-orchestrator: launched pid=$pid label=$label"
 }
 
 check_profile() {
@@ -311,6 +532,12 @@ sub="$1"; shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
   render-settings) render_settings "$@" ;;
+  write-launch) write_launch "$@" ;;
+  record-handle) record_handle "$@" ;;
+  smoke-test) smoke_test "$@" ;;
+  detach) detach "$@" ;;
+  teardown) teardown "$@" ;;
+  launch) launch "$@" ;;
   check-profile) check_profile "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

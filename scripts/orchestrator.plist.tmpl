@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  orchestrator.plist.tmpl — launchd job TEMPLATE for the auto-pilot detached
+  orchestrator (macOS). Rendered by scripts/spawn-orchestrator.sh (write-launch):
+  the @@…@@ tokens are replaced with the run's resolved values. The job runs the
+  self-contained launch script (which composes `sandbox-exec … claude -p …`), not
+  claude directly — so this plist stays simple and the jail lives in the script.
+
+  Relaunchable supervisor (launch-runtime.md "Spawn mechanics"): RunAtLoad starts
+  it now; StartInterval re-wakes it so a paused orchestrator can resume past its
+  paused_until (the orchestrator self-gates on that timestamp and exits early if
+  it's not yet time). A clean end-of-run tears the job down via `launchctl bootout`
+  (spawn-orchestrator.sh --teardown), so a finished run is never re-woken.
+
+  Load:   launchctl bootstrap gui/$(id -u) <plist>
+  Remove: launchctl bootout   gui/$(id -u)/<label>
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@@LABEL@@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@@LAUNCH_SCRIPT@@</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@@WORKDIR@@</string>
+
+  <key>StandardOutPath</key>
+  <string>@@LOG@@</string>
+  <key>StandardErrorPath</key>
+  <string>@@LOG@@</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Re-wake interval (seconds): the relaunch timer past a paused_until reset. -->
+  <key>StartInterval</key>
+  <integer>@@INTERVAL@@</integer>
+
+  <!-- Never relaunch faster than this after an exit (crash-loop backstop; the
+       run-budget circuit breaker is the higher-level guard). -->
+  <key>ThrottleInterval</key>
+  <integer>@@THROTTLE@@</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
