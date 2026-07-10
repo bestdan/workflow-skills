@@ -56,6 +56,17 @@ count_is "profile: RO path is read-only"  1 "$REPO_RO"  "$body"
 # no unrendered template tokens remain
 lack "profile: no @@tokens@@ remain"      '@@'                     "$body"
 
+# --- A1 regression: an exec symlink must resolve to its real target -----------
+# (Seatbelt matches process-exec against the resolved vnode path, not the link;
+# `command -v` on Homebrew binaries returns the symlink, so the renderer must
+# canonicalize it or the exec is silently denied.)
+ln -s tool "$BASE/bin/tool-link"   # relative symlink → $BASE/bin/tool
+symprof="$BASE/sym.sb"
+"$SCRIPT" render-profile --rw "$RUN_WT" --exec "$BASE/bin/tool-link" --out "$symprof" >/dev/null 2>&1
+symbody="$(cat "$symprof" 2>/dev/null)"
+have "exec symlink resolves to real target" "(literal \"$BIN\")" "$symbody"
+lack "exec symlink literal not emitted"     "tool-link"          "$symbody"
+
 # --- fail-closed: bad inputs exit 2 and write nothing -------------------------
 fc() { # <name> <expected-substr> <args...>
   local name="$1" want="$2"; shift 2

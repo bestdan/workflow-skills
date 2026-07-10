@@ -58,7 +58,22 @@ canonicalize() {
   if [ -d "$p" ]; then
     (cd "$p" && pwd -P)
   else
-    local d b
+    # Resolve the file's symlink chain: Seatbelt matches process-exec (and file
+    # rules) against the vnode's canonical target, not the symlink literal. Many
+    # macOS binaries are symlinks (e.g. /opt/homebrew/bin/gh → Cellar/…), and
+    # `command -v` hands back the symlink — so authorizing only the symlink path
+    # would silently deny the exec. Follow links, re-canonicalizing the dir each
+    # hop, with a loop guard.
+    local d b target guard=0
+    while [ -L "$p" ]; do
+      guard=$((guard + 1))
+      [ "$guard" -le 40 ] || { echo "spawn-orchestrator: symlink chain too deep (fail-closed): $1" >&2; return 1; }
+      target="$(readlink "$p")" || { echo "spawn-orchestrator: cannot read link (fail-closed): $p" >&2; return 1; }
+      case "$target" in
+        /*) p="$target" ;;
+        *)  p="$(cd "$(dirname "$p")" && pwd -P)/$target" ;;
+      esac
+    done
     d="$(cd "$(dirname "$p")" && pwd -P)" || { echo "spawn-orchestrator: cannot resolve directory of: $p" >&2; return 1; }
     b="$(basename "$p")"
     printf '%s/%s' "$d" "$b"
@@ -182,6 +197,6 @@ sub="$1"; shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
   check-profile) check_profile "$@" ;;
-  -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac
