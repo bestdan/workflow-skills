@@ -450,8 +450,10 @@ hard-stop fires, or the **pre-dispatch deadline guard** above stops it with read
 tasks still left. The first two are a **finished run** — the final `REPORT.md`
 sets run-level `status: done`. The deadline-guard stop is **not** done: it sets
 `status: paused` with `pause_reason: "--until deadline reached; N tasks still
-ready"` and `paused_until` **empty**, keeping the run in `--resume`'s resumable
-set (those tasks stay ready for a later `--resume`) without any timer auto-wake.
+ready"` and `paused_until` **empty** — no reset time to wake past — keeping the
+run in `--resume`'s resumable set (those tasks stay ready for a later `--resume`).
+The supervisor teardown below (not the `paused_until` value, which the timer never
+reads directly) is what guarantees no timer re-wakes it.
 In every case the orchestrator writes and commits the final `REPORT.md` on the
 run-state branch, then
 **tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
