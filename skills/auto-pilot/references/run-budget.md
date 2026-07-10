@@ -35,8 +35,11 @@ read two ways, layered because neither alone is enough:
   unavailable.** Not every orchestrator environment can make the query above
   — a `claude-web` orchestrator has no macOS Keychain, and a non-Claude
   backend may expose no equivalent usage endpoint at all. When the query
-  can't run, fall back to elapsed wall-clock and dispatch count against a
-  threshold tuned **below** the real cap, crossing it → "near cap" (below).
+  can't run — **including a token read that fails or is denied**, not just an
+  absent Keychain — **fail closed to** elapsed wall-clock and dispatch count
+  against a threshold tuned **below** the real cap, crossing it → "near cap"
+  (below). Treat the OAuth token as a secret: pass it only in-memory to the
+  request, never log it or the `Authorization` header.
 - **Backstop — a rate-limit _error_, classified by the supervisor, not the
   agent.** A rate-limit denies exactly the capability an in-band handler would
   need: if the orchestrator _itself_ is rate-limited, its reasoning can't run to
