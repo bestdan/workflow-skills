@@ -68,15 +68,19 @@ else
   command -v curl >/dev/null 2>&1 || die_err "curl is required but not found in PATH"
 
   # Resolve the OAuth access token, OS-appropriately, without ever echoing it
-  # to a log. macOS keeps it in the Keychain; Linux in a credentials file.
+  # to a log. Prefer the macOS Keychain, but fall through to the Linux-style
+  # credentials file when the Keychain is absent *or* the lookup fails — a
+  # macOS box may keep the token in the file, so a failed Keychain read must
+  # not short-circuit that fallback.
+  creds_raw=""
   if command -v security >/dev/null 2>&1; then
-    creds_raw="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -w 2>/dev/null)" \
-      || die_unavail "no Claude Code credentials in the macOS Keychain"
-  elif [ -r "$LINUX_CREDS" ]; then
-    creds_raw="$(cat "$LINUX_CREDS")"
-  else
-    die_unavail "no OAuth token source (no macOS Keychain, no ${LINUX_CREDS})"
+    creds_raw="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -w 2>/dev/null)" || creds_raw=""
   fi
+  if [ -z "$creds_raw" ] && [ -r "$LINUX_CREDS" ]; then
+    creds_raw="$(cat "$LINUX_CREDS")"
+  fi
+  [ -n "$creds_raw" ] \
+    || die_unavail "no OAuth token source (Keychain lookup failed and no readable ${LINUX_CREDS})"
 
   token="$(printf '%s' "$creds_raw" | python3 -c \
     'import json,sys; print(json.load(sys.stdin)["claudeAiOauth"]["accessToken"])' 2>/dev/null)" \
