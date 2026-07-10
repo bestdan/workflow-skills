@@ -36,10 +36,16 @@ primitive must itself be relaunchable:
 - **Linux** — the `setsid` spawn needs a companion wake: a `systemd` timer, or a
   single `at` job scheduled for `paused_until`.
 
-A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down at
-clean end-of-run** (`launchctl bootout` / disable the timer) so a finished run is
-never re-woken — the run loop's termination step does this
-([`../SKILL.md`](../SKILL.md) "Run phase (unattended)", "Loop termination"). A
+A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down
+whenever the run loop terminates** (`launchctl bootout` / disable the timer) so
+no run is re-woken by a timer — this fires on **both** loop-termination branches:
+the clean end-of-run (`status: done`, no ready tasks or a budget hard-stop) **and**
+the pre-dispatch deadline-guard stop (`status: paused` with ready tasks left).
+The `paused` deadline-stop still tears the supervisor down because it must not be
+timer-woken past its `--until`; it resumes only by an explicit `--resume` (which
+re-spawns a supervisor), never by the recurring timer. The run loop's termination
+step does this ([`../SKILL.md`](../SKILL.md) "Run phase (unattended)", "Loop
+termination"). A
 **one-shot** `at` job fired once at `paused_until` is self-terminating and needs no
 teardown. If a relaunchable supervisor genuinely isn't available in an environment,
 the documented fallback is a bounded in-process sleep guarded by `--until` — stated
