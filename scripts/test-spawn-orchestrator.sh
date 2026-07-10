@@ -27,9 +27,9 @@ fail=0
 ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
 bad()  { fail=$((fail + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
 # assert helpers use if/else — `cond && bad || ok` double-fires when bad returns non-zero.
-have()    { if grep -qF "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
-lack()    { if grep -qF "$2" <<<"$3"; then bad "$1"; else ok "$1"; fi; }
-count_is() { local n; n="$(grep -cF "$3" <<<"$4")"; if [ "$n" = "$2" ]; then ok "$1"; else bad "$1" "want $2 got $n"; fi; }
+have()    { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
+lack()    { if grep -qF -- "$2" <<<"$3"; then bad "$1"; else ok "$1"; fi; }
+count_is() { local n; n="$(grep -cF -- "$3" <<<"$4")"; if [ "$n" = "$2" ]; then ok "$1"; else bad "$1" "want $2 got $n"; fi; }
 
 # Fixtures: real dirs + a real executable + a real plain file.
 RUN_WT="$BASE/run-wt"; WORKER_WT="$BASE/worker-wt"; REPO_RO="$BASE/repo-ro"
@@ -116,7 +116,7 @@ sj="$BASE/settings.json"
 sbody="$(cat "$sj" 2>/dev/null)"
 have "settings: sandbox enabled"          '"enabled":true'          "$sbody"
 have "settings: deny-default allowlist"   '"allowedDomains"'        "$sbody"
-have "settings: loopback bind allowed"    '"allowLocalBinding":true' "$sbody"
+have "settings: loopback bind off by default" '"allowLocalBinding":false' "$sbody"
 have "settings: {codex,linear} has openai" 'api.openai.com'          "$sbody"
 have "settings: {codex,linear} has linear" 'api.linear.app'          "$sbody"
 have "settings: always has anthropic"      'api.anthropic.com'       "$sbody"
@@ -154,6 +154,80 @@ sfc "mcp bad chars"         "invalid egress host"  --source plan --coder codex -
 "$SCRIPT" render-settings --source plan --coder codex --mcp-host mcp.example.com --out "$BASE/mcp.json" >/dev/null 2>&1
 have "settings: valid mcp host accepted" 'mcp.example.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
 have "settings: github wildcard kept"    '*.githubusercontent.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
+
+# --- hardening: --confine-under bounds write scopes (task 3, Fable #3) ---------
+mkdir -p "$BASE/root/wt"
+"$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --exec "$BIN" --out "$BASE/cf.sb" >/dev/null 2>&1 \
+  && ok "confine-under: rw inside root accepted" || bad "confine-under: rw inside root accepted"
+cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"; cfc=$?
+if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
+  ok "confine-under: rw / fails closed"
+else
+  bad "confine-under: rw / fails closed" "exit=$cfc"
+fi
+# floor holds even WITHOUT --confine-under (the guard is opt-in; the floor isn't)
+rfo="$("$SCRIPT" render-profile --rw / --out "$BASE/rf.sb" 2>&1)"; rfc=$?
+[ "$rfc" = 2 ] && [ ! -e "$BASE/rf.sb" ] && printf '%s' "$rfo" | grep -qF 'refusing --rw /' \
+  && ok "floor: rw / refused with no --confine-under" || bad "floor: rw / refused with no --confine-under" "exit=$rfc"
+# a sibling that shares a prefix but is NOT under the root is rejected (literal prefix)
+mkdir -p "$BASE/rootX/wt"
+sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/wt" --out "$BASE/sib.sb" 2>&1)"; sibc=$?
+[ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
+  && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
+
+# allowLocalBinding flag flips to true (task 3, Fable #6)
+"$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1
+have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(cat "$BASE/lb.json" 2>/dev/null)"
+
+# --- write-launch: launch script + plist generation (task 3) ------------------
+# Pass --claude-bin "$BIN" (a fixture) so the harness needs no real claude on PATH.
+printf 'run the graph\n' >"$BASE/prompt.txt"
+"$SCRIPT" render-settings --source plan --coder codex --out "$BASE/wl.json" >/dev/null 2>&1
+wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
+  --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
+lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
+have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
+have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
+have "launch: -p reads prompt from file"       '-p "$(cat'                          "$lbody"
+have "launch: bypassPermissions flag"          '--permission-mode bypassPermissions' "$lbody"
+have "launch: passes --settings"               '--settings'                         "$lbody"
+have "launch: redirects to log"                ">>$BASE/o.log"                       "$lbody"
+if command -v plutil >/dev/null 2>&1; then
+  if plutil -lint "$BASE/job.plist" >/dev/null 2>&1; then ok "launch: plist lints"; else bad "launch: plist lints"; fi
+  # plist injection: an XML-metachar path must still yield a VALID plist (escaped).
+  mkdir -p "$BASE/a&b<x"
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
+    --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
+    --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+  if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
+else
+  echo "skip - launch: plist lint (plutil absent)"
+fi
+# label injection rejected at the source (defense-in-depth on top of xml_escape)
+"$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label 'a</string><key>x' --claude-bin "$BIN" \
+  --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
+  && bad "launch: injecting label rejected" || ok "launch: injecting label rejected"
+# write-launch fail-closed on a missing input file
+wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
+[ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
+
+# --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
+rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"
+[ $? = 2 ] && [ ! -e "$BASE/h.txt" ] && printf '%s' "$rho" | grep -qF 'no live process' && ok "record-handle: dead pid fails closed" || bad "record-handle: dead pid fails closed"
+"$SCRIPT" record-handle --pid abc --out "$BASE/h.txt" >/dev/null 2>&1 && bad "record-handle: non-numeric pid fails" || ok "record-handle: non-numeric pid fails"
+
+# --- launch --dry-run: the safety-critical ordering (smoke BEFORE detach) ------
+dro="$("$SCRIPT" launch --dry-run --out-script "$BASE/l.sh" --out-plist "$BASE/l.plist" --label com.x --handle "$BASE/h2.txt" 2>&1)"
+smoke_ln="$(printf '%s\n' "$dro" | grep -n smoke-test | cut -d: -f1)"
+detach_ln="$(printf '%s\n' "$dro" | grep -n detach | cut -d: -f1)"
+if [ -n "$smoke_ln" ] && [ -n "$detach_ln" ] && [ "$smoke_ln" -lt "$detach_ln" ]; then
+  ok "launch: smoke-test ordered before detach"
+else
+  bad "launch: smoke-test ordered before detach" "smoke@$smoke_ln detach@$detach_ln"
+fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]
