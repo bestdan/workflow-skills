@@ -40,15 +40,9 @@ Linear's GitHub integration scans the **whole** PR title and body for issue ids,
 
    **Tag every returned issue with its source scope** — carry `project: { id, name, wip_limit, max_estimate }` (the Unassigned bucket for the exclusion pass) on each candidate so the filter (step 5), the rank (step 6), and the per-project WIP gate in `do-tasks.md` read the **right per-project cap**. Union the candidates across scopes; an issue belongs to at most one scope (the exclusion pass is disjoint from the per-project results by construction), so no dedup is needed.
 
-5. **Filter.** From the returned issues, drop any that fail any of these gates. Each gate has a fixed reason string so the caller can report consistently. (Linear's native `estimate` uses the same Fibonacci scale as our task `size` — see "Task size" in skills/task/SKILL.md — so these thresholds select tasks small enough to finish in one session.)
-   - `estimate` is `null`/missing → `no estimate set`
-   - `estimate >= <max>`, where `<max>` is the candidate's resolved per-project `max_estimate` (from step 3, default `3`) → `estimate <N> >= <max>`
-   - Has label `auto-claimed` → `already auto-claimed`
-   - Has label `human-approval-requested` → `human-approval-requested`
-   - Has label `blocked` → `blocked`
-   - `assignee` is set and is **not** the current Linear user (`<linear-mcp>__get_user` with no args returns the viewer) → `assigned to <name>`
+5. **Filter.** Apply the gates from `linear-common.md` → "Ready-candidate selection" (the `<max>` is the candidate's resolved per-project `max_estimate` from step 3, default `3`; `<linear-mcp>__get_user` with no args returns the viewer for the assignee gate). (Linear's native `estimate` uses the same Fibonacci scale as our task `size` — see "Task size" in skills/task/SKILL.md — so these thresholds select tasks small enough to finish in one session.)
 
-6. **Rank.** Sort remaining issues by Linear `priority` (urgent=1 → low=4, then none=0 last), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
+6. **Rank.** Rank per `linear-common.md` → "Ready-candidate selection".
 
 7. **Return** the ranked list to the **Pre-flight** phase below. Each entry needs: `id`, `identifier`, `title`, `priority`, `estimate`, `description`, `labels`, `url`, **`branchName`** (Linear's published git branch name — used verbatim when `/do-tasks` branches), **`project`** (the `{ id, name, wip_limit, max_estimate }` scope it came from — `id: null` for whole-team — so the WIP gate checks the right per-project cap), and the resolved `id`s for: team, current `state`, target `started`-type `state` (see "Claim the issue" below). The execute path takes candidates in ranked order and, for each, runs **pre-flight → claim → judge feasibility** — the feasibility read now happens _after_ the claim, while the lock is held.
 
