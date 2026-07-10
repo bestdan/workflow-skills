@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.37.0] - 2026-07-10
+
+### Features
+
+- layer-2 network egress allowlist emitter (PRE-484 task 2) (#153) (c8f38be)
+
 ## [1.36.0] - 2026-07-10
 
 ### Features
