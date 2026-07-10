@@ -346,7 +346,7 @@ branch) — that distinction drives the stacked-PR handling below.
 
 where `<branch>` is the task's `base` from `RUN.md` — `main` for an
 independent task, the parent task's branch for a chained one — and `<handler>`
-is the run's effective handler resolved from the source in the Preamble above
+is the run's effective handler resolved from the run's (normalized) source
 (plan ⇒ `repo-pr`, linear ⇒ `linear`), never re-derived by `/deliver-task`
 itself. `/deliver-task`
 ([`commands/deliver-task.md`](../../commands/deliver-task.md)) owns the entire
