@@ -1,0 +1,61 @@
+;; orchestrator.sb.tmpl — sandbox-exec (Seatbelt) profile TEMPLATE for the
+;; auto-pilot detached orchestrator. Rendered by scripts/spawn-orchestrator.sh
+;; (render-profile): the placeholder tokens below (each on its own line,
+;; delimited by double-at signs) are replaced with concrete allow rules built
+;; from the run's resolved paths. This is layer 1 of the two-layer jail
+;; (filesystem + process/exec); host-level network egress is layer 2, the
+;; detached `claude -p`'s own sandbox.network allowlist — see
+;; skills/auto-pilot/references/launch-runtime.md "Sandbox profile".
+;;
+;; Do not hand-edit a rendered copy; change this template + the renderer.
+
+(version 1)
+(deny default)
+
+;; --- process basics: the orchestrator must fork, signal itself, read sysctls
+;;     and reach the dynamic linker / system services to run at all.
+(allow process-fork)
+(allow signal (target self))
+(allow sysctl-read)
+(allow mach-lookup)
+
+;; --- network CLASS only (launch-runtime §"Sandbox profile"): Seatbelt gates
+;;     network by socket/class, NOT by hostname. Allow outbound as a class and
+;;     permit loopback bind so the layer-2 egress proxy (which DOES filter by
+;;     host) can run; all hostname allowlisting lives in layer 2, not here.
+(allow network-outbound)
+(allow network-bind (local ip "localhost:*"))
+(allow system-socket)
+
+;; --- read-only system + base toolchain: without broad read of the OS image
+;;     nothing (bash, git, claude) can even exec. Writes here are still denied.
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/opt/homebrew")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/etc")
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/dtracehelper")
+  (literal "/dev/tty"))
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/tty"))
+
+;; --- read-only: the rest of the repo, other worktrees, and credential stores
+;;     (~/.claude, ~/.config/gh, ~/.config/op, coder cred files). [§1 rows 4–5]
+@@RO_PATHS@@
+
+;; --- read-write: the run worktree + run-state checkout, worker worktrees, and
+;;     $TMPDIR / scratchpad. Writes are worktree-confined by construction. [§1 rows 1–3]
+@@RW_PATHS@@
+
+;; --- exec: only the resolved coder binaries + the base toolchain the
+;;     orchestrator drives (git, gh, claude, bash, uv, verify tooling). [§4]
+@@EXEC_PATHS@@
