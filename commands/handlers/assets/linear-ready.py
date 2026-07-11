@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """GraphQL fast-path for `/do-tasks` (tracker path) find-candidates: resolve one
 Linear team's ready (`unstarted`-type) issues, apply the canonical ready-candidate
-gates, and rank the survivors — in one filtered request per scope instead of the
+gates, and rank the survivors — with one filtered GraphQL query per scope
+(paginated to exhaustion when a scope has more than one page) instead of the
 ~6-call MCP fan-out (list_teams -> list_workflow_states -> list_issues per scope ->
 get_user -> lazy get_issue for branchName).
 
@@ -18,7 +19,8 @@ The API key is read, in order, from:
 
 IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
 authorized terminal — NOT in an agent's tool-spawned subshell. Run this from your
-own terminal, or headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
+own terminal, or headless with $LINEAR_API_KEY set directly, or
+$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
 
 On any failure (missing key, GraphQL error, team not found) this exits non-zero
 with the reason on stderr, so the caller can fall back to the MCP floor. Stdout
@@ -46,10 +48,16 @@ UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
 )
 
+# Resolve by id via the `teams(filter:)` form (not the root `team(id:)` arg):
+# it mirrors PRELUDE_BY_NAME and reuses the `id: { eq: <ID> }` comparator that
+# ISSUES_QUERY already proves takes `ID` — so $id is `ID!`, sidestepping the
+# String!-vs-ID mismatch that bit the issues filter.
 PRELUDE_BY_ID = """
-query($id: String!) {
+query($id: ID!) {
   viewer { id }
-  team(id: $id) { id name states { nodes { id name type } } }
+  teams(filter: { id: { eq: $id } }) {
+    nodes { id name states { nodes { id name type } } }
+  }
 }"""
 
 PRELUDE_BY_NAME = """
@@ -128,11 +136,10 @@ def gql(key, query, variables=None):
 def resolve_team(key, team):
     if UUID_RE.match(team):
         data = gql(key, PRELUDE_BY_ID, {"id": team})
-        node = data["team"]
     else:
         data = gql(key, PRELUDE_BY_NAME, {"name": team})
-        nodes = data["teams"]["nodes"]
-        node = nodes[0] if nodes else None
+    nodes = data["teams"]["nodes"]  # both preludes now return teams.nodes
+    node = nodes[0] if nodes else None
     if not node:
         sys.exit(f"Team not found: {team}")
     return data["viewer"], node
@@ -178,7 +185,8 @@ def gate(issue, max_estimate):
         return "blocked"
     assignee = issue.get("assignee")
     if assignee and not assignee.get("isMe"):
-        return f"assigned to {assignee.get('displayName')}"
+        who = assignee.get("displayName") or assignee.get("id") or "unknown"
+        return f"assigned to {who}"
     return None
 
 
