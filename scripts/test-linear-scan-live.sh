@@ -171,7 +171,7 @@ if d is not None:
     wrong = [i.get("identifier") for i in issues if set(i) != EXP]
     ok("every issue has the exact field set") if not wrong else bad("every issue has the exact field set", str(wrong[:5]))
     ok("no issue carries `description`") if all("description" not in i for i in issues) else bad("no issue carries `description`")
-    attach = [i.get("identifier") for i in issues if not isinstance(i.get("attachments"), list)]
+    attach = [i.get("identifier") for i in issues if not isinstance(i.get("attachments"), list) or not all(isinstance(u, str) for u in i["attachments"])]
     ok("every issue carries an attachments url list") if not attach else bad("every issue carries an attachments url list", str(attach[:5]))
     state_missing = [i.get("identifier") for i in issues if not isinstance(i.get("state"), dict) or "type" not in i.get("state", {})]
     ok("every issue carries state.type") if not state_missing else bad("every issue carries state.type", str(state_missing[:5]))
