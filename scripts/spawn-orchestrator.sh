@@ -86,9 +86,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.sb.tmpl"
-# The one done-sentinel filename, written by `teardown --done-sentinel` (its
-# default) and read by `status` — a single completion mechanism, never a
-# second independent marker (launch-runtime.md "Logs / observability").
+# The done-sentinel filename `status` looks for under <dir>/.auto-pilot/. Callers
+# pass the matching absolute path (<dir>/.auto-pilot/orchestrator.done) to
+# `teardown --done-sentinel`; the two agree on this one name so it's a single
+# completion mechanism, never a second independent marker (launch-runtime.md
+# "Logs / observability").
 DONE_SENTINEL_NAME="orchestrator.done"
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
