@@ -1,6 +1,6 @@
 ---
 title: "framing: de-anchor from 'overnight' — the property is UNATTENDED, not nocturnal"
-priority: 2
+priority: high
 size: 2
 status: new
 created: 2026-07-11

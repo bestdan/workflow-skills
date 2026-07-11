@@ -1,6 +1,6 @@
 ---
 title: "preflight: scripts/preflight.sh — one read-only pre-flight + base freshness"
-priority: 2
+priority: high
 size: 3
 status: done # merged as PR #173 (detached run #2, 2026-07-11)
 created: 2026-07-10

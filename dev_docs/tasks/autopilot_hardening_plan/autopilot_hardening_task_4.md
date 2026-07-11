@@ -1,6 +1,6 @@
 ---
 title: "verify: run the verify command outside the jail (resolve sandbox↔verify conflict)"
-priority: 2
+priority: high
 size: 3
 status: done # merged as PR #172 (detached run #2, 2026-07-11)
 created: 2026-07-10

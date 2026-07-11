@@ -1,6 +1,6 @@
 ---
 title: "run loop: never check out a task branch in the run worktree — isolate task work, keep run state on HEAD"
-priority: 2
+priority: high
 size: 3
 status: new
 created: 2026-07-11

@@ -1,6 +1,6 @@
 ---
 title: "jail: permit the harness's own $TMPDIR mux socket + cwd files — stop poisoning every Bash exit code"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11
@@ -45,14 +45,50 @@ for verify to be trustworthy in-jail.
 Blocked by task 3, which owns the profile's write-scope model (`--rw` state dirs
 and the co-located-credential deny) — this extends that same scope set.
 
+## CORRECTION (2026-07-11) — the required surface is bigger than this spec predicted
+
+Measured empirically while implementing this task (real `claude -p` under the
+rendered profile, PR #182). **The `claude-*-cwd` file named below is the wrong
+surface**, and permitting only it changes nothing:
+
+1. The Bash tool dies **before executing anything** on
+   `EPERM: mkdir '$HOME/.claude/session-env/<uuid>'` — the harness writes a
+   **per-session directory** under `~/.claude`, which the profile grants
+   read-only.
+2. Clearing that, it dies on `EPERM: mkdir '/tmp/claude-<uid>/<project>/<session>/…'`
+   — the harness's `/tmp` runtime is a **directory tree it `mkdir`s into**, not a
+   single file. A file-only grant never permits the enclosing `mkdir`.
+
+So the real write surface is **three** things: the `srt-mux-*.sock` socket
+(correctly predicted below), the `/tmp/claude-<uid>/` **tree**, and
+`~/.claude/session-env/`. With all three granted, `false` → 1 and `true` → 0
+in-jail and the inner sandbox initializes; containment is unchanged.
+
+**Design consequence the spec missed:** two of the three live **outside the run
+root**, so they cannot be passed as caller `--rw` — `render_profile`'s
+`--confine-under` guard fail-closes on those. They must be **renderer-owned
+fixed grants** (host-resolved, never caller-supplied), scoped to `session-env`
+specifically and never a blanket `~/.claude` write, which would put the
+credential file inside a writable scope and defeat task 3's cred-RO/state-RW
+split.
+
+**A rule with no enforcement, again:** the exit-code assertion this task adds is
+*structurally incapable* of failing while the smoke passes `--ro "$HOME/.claude"` —
+the Bash tool never runs, so no rc is ever recorded and the check reports
+"indeterminate" rather than failing. The smoke must render the profile **the way a
+real launch renders it**, and treat a missing rc as a **FAIL** (it *is* the pre-fix
+symptom), or the regression guard guards nothing.
+
 ## Task
 
 - Extend the rendered profile's write scopes to permit Claude Code's own runtime
-  files: the `srt-mux-*.sock` **socket bind/listen** under `$TMPDIR`, and the
-  `claude-*-cwd` cwd-tracking files. Prefer permitting the **specific** paths/
-  patterns the harness needs over widening all of `$TMPDIR`; a `(allow network-bind
-  (local ...))` / unix-socket grant may be needed alongside the file grant, since a
-  `listen()` on a unix socket is not purely a file write.
+  files: the `srt-mux-*.sock` **socket bind/listen** under `$TMPDIR`, the
+  `/tmp/claude-<uid>/` **tree**, and `~/.claude/session-env/` (see the CORRECTION
+  above — the `claude-*-cwd` file this spec originally named is not the real
+  surface). Prefer permitting the **specific** paths/patterns the harness needs
+  over widening all of `$TMPDIR`; a `(allow network-bind (local ...))` /
+  unix-socket grant may be needed alongside the file grant, since a `listen()` on
+  a unix socket is not purely a file write.
 - Re-verify that the **inner** sandbox now initializes (no `failed to initialize`
   line in the log) so the two-layer posture the design claims is actually the one
   that runs.

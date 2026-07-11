@@ -1,6 +1,6 @@
 ---
 title: "supervisor: classify a non-retryable auth failure (401) as fatal — halt, don't relaunch forever"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11

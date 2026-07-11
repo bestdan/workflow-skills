@@ -14,21 +14,47 @@ created: 2026-07-10
 #176, #178). Delivered by **detached run #2** — auto-pilot executing this plan on
 itself. Do **not** re-run them.
 
-**Tasks 10–20: `new`, none started.** These are the *output* of run #2: eleven new
-findings (#19–#28) it produced by **breaking in ways nobody had predicted while
-executing tasks 1–9**. Seven are P1.
+**Tasks 10, 12, 13, 18: PRs open** (#183, #182, #181, #184) — the attended
+substrate batch this STATUS recommended landing first. Task **21** is new, and
+falls out of 18.
 
-**Ready now** (no blockers): **t18**, **t13**. Everything else unblocks immediately —
-their blockers (t1/t3/t5/t6/t8) are all merged — leaving **t10, t12, t13, t15, t17,
-t18, t19** ready in parallel, then **t11, t14, t16, t20** behind them. The graph is
-wide, not deep: at most 2 levels.
+**Tasks 11, 14, 15, 16, 17, 19, 20: `new`, none started.**
 
-**Recommended sequencing.** Do **not** auto-pilot 10–20 straight away. Four P1s
-(**10, 12, 14, 16**) exist precisely *because the jail and supervisor are thinner than
-the docs claim* — exit codes are poisoned to 1 (#20), a stalled run is silent (#22),
-run invariants are unchecked (#23). Running an unattended run **on the broken
-substrate is how run #2 got into trouble**. Land **10, 12, 13, 18** first (attended),
-*then* auto-pilot the rest with a working alarm channel and heartbeat.
+### What the substrate batch measured (and the plan got wrong)
+
+Implementing 10/12/13/18 **disproved parts of this plan**. Two task specs were
+corrected in place (see each task's CORRECTION block); the headline:
+
+- **In-jail verification is broken on `main` today — measured, not predicted.**
+  Task 12's spec named the wrong surface. The harness needs `~/.claude/session-env/`
+  and a `/tmp/claude-<uid>/` **tree**, not the `claude-*-cwd` **file** the spec
+  predicted. Until #182 lands, the Bash tool **dies before executing anything**
+  in-jail, so *every* exit code is noise. This is the strongest available argument
+  for the sequencing below: an unattended run on today's `main` cannot trust a
+  single verify it performs.
+- **The exit-code regression guard could not have failed.** As specified, the smoke
+  passes `--ro "$HOME/.claude"` — the exact condition that kills the Bash tool — so
+  it records no exit code at all and reports *indeterminate* rather than *fail*. A
+  check that cannot fail is not a check.
+- **The restack orphans grandchildren**, and **its rebase moves the run worktree's
+  `HEAD`** — reintroducing finding #23, the bug task 13 exists to prevent. Neither
+  was in task 18's spec.
+
+**The pattern, again:** each of these shipped *green*. The plan's thesis —
+"auto-pilot's failure modes look like success" — reproduced itself inside the fixes
+for it. **Verify by observing behavior, not by reading the diff.**
+
+**Ready now** (no blockers): **t11, t14, t15, t16, t17, t19, t20** — the Phase B set.
+**t21** is blocked by t18.
+
+**Recommended sequencing — validated, not just advised.** This plan said: do **not**
+auto-pilot 10–20 straight away; land **10, 12, 13, 18** attended first, *then*
+auto-pilot the rest with a working alarm channel and heartbeat. **That was right, and
+for a reason stronger than the one given.** The original argument was that the jail and
+supervisor are "thinner than the docs claim." The attended batch then **measured** it:
+the Bash tool does not execute at all in-jail on today's `main` (task 12's CORRECTION),
+so an unattended run could not have trusted a single verify it performed. Do not launch
+Phase B until **#182** in particular is merged.
 
 **Loose end:** the plan scaffolding (`dev_docs/tasks/autopilot_hardening_plan/`) still
 exists. task_9 correctly declined to delete it from a `main`-based PR (finding #13).
@@ -140,7 +166,11 @@ checks reads green, and the only thing that actually caught both was a human ask
 
 19. [[autopilot_hardening_task_19]] — P2: **de-anchor from "overnight."** The load-bearing property is **unattended** (no human *attached*), not nocturnal — and the nocturnal framing directly produced the missing alarm channel (16) and the batch-digest `REPORT.md` (15). Run #2 did 8 of its 9 tasks between 06:00 and 11:35, with the human at their desk. Name the three attendance modes — attended / **partially attended** (the common case) / unattended. (#27)
 
-20. [[autopilot_hardening_task_20]] — **P1**: ship the **periodic status report** the operator had to hand-roll. An **alarm** (16) fires on a *predicted* condition; the heartbeat catches the failures **nobody anticipated** — #23 was found in 7 minutes by a routine check noticing reality ≠ `RUN.md`, and **no alarm rule for it could have existed**. On by default, supervisor-side, and its payload is the **delta** (incl. "no forward progress"). (#28)
+20. [[autopilot_hardening_task_20]] — **P1**: ship the **periodic status report** the operator had to hand-roll. An **alarm** (16) fires on a *predicted* condition; the heartbeat catches the failures **nobody anticipated** — #23 was found in 7 minutes by a routine check noticing reality ≠ `RUN.md`, and **no alarm rule for it could have existed**. On by default, supervisor-side, and its payload is the **delta** (incl. "no forward progress").
+
+### Added while implementing the substrate batch
+
+21. [[autopilot_hardening_task_21]] — **P1**: **enforce** the restack's re-verification. Task 18 shipped the *mechanism* (rebase / force-push / retarget / cascade / orphan-detect) but left the part the finding cared about — re-verify against the new base, diff-audit the child against the parent's post-hand-off review commits, flag the stale co-review — as a **contract with no enforcement**. A clean rebase is not evidence of correctness: in run #2 the parent gained two security fixes *during human review*, and only a human reading 6 deleted lines by hand established they survived. Blocked by 18. (#28)
 
 **Silence is not health.** Run #2's decisive lesson: every failure exited `0`,
 `is_error: false`, `terminal_reason: completed`. In a system where failure is

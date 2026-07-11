@@ -1,6 +1,6 @@
 ---
 title: "alarm: a halted or stalled run must actively tell a human — silence is the bug"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11

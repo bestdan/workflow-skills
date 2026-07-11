@@ -1,6 +1,6 @@
 ---
 title: "spawn: profile write-scopes — credential files RO vs tool state dirs RW"
-priority: 2
+priority: high
 size: 2
 status: done # merged as PR #177 (detached run #2, 2026-07-11)
 created: 2026-07-10

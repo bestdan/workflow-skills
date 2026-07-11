@@ -1,6 +1,6 @@
 ---
 title: "co-review: route cross-cutting deferred findings to a tracked follow-up task"
-priority: 3
+priority: medium
 size: 3
 status: done # merged as PR #175 (detached run #2, 2026-07-11)
 created: 2026-07-10

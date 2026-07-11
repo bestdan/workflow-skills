@@ -1,6 +1,6 @@
 ---
 title: "periodic status report — ship the heartbeat the operator had to hand-roll; catches the failures no alarm predicted"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11

@@ -1,6 +1,6 @@
 ---
 title: "supervisor: gate the relaunch on paused_until in shell — stop burning a model call every wake"
-priority: 2
+priority: high
 size: 2
 status: new
 created: 2026-07-11

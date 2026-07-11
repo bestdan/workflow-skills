@@ -1,6 +1,6 @@
 ---
 title: "stacked PRs: automate the post-merge restack — a human must never hand-rebase a stack under squash-merge"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11
@@ -79,6 +79,34 @@ load-bearing and corrects two assumptions:
   added. (Checked by hand this run: the fixes survived. That check must not be manual.)
 
 So the restack is not just a git operation — it is a **re-verification trigger**.
+
+## CORRECTION (2026-07-11) — two things this spec got wrong, found while implementing it (PR #184)
+
+- **The restack orphans grandchildren — the very failure it exists to fix.**
+  Force-pushing a restacked child **rewrites** it, so a grandchild still carrying
+  that child's old commits is orphaned by the restack itself. A fixed-point pass
+  over the table *detects* the chain but does the wrong thing with it: a
+  grandchild must be **cascaded onto its parent's new tip**, and its PR base must
+  **stay the parent's branch** — retargeting it to `main` would re-propose the
+  parent's entire changeset. The spec's "process children in dependency order"
+  is necessary but not sufficient.
+- **The rebase moves the caller's `HEAD`.** `git rebase --onto <base> <sha>
+  <branch>` **checks out `<branch>`**, so a restack run against the run worktree
+  parks its `HEAD` on a task branch — reintroducing **finding #23**, the exact bug
+  task 13 exists to prevent. Every rebase must run in a **throwaway detached
+  worktree**, removed on all exit paths (success, conflict-abort, push rejection),
+  with the caller's `HEAD` asserted unchanged on exit and a dirty caller worktree
+  fail-closed before anything is touched.
+
+**Shipped state (PR #184):** the *mechanism* — rebase, force-push with an explicit
+lease, PR retarget, cascade, orphan detection, fail-closed on conflict — is
+implemented and test-enforced. The **re-verification** below (re-run verify against
+the new base; diff-audit the child against the parent's post-hand-off review
+commits; flag the child's co-review as stale) is a **specified contract with no
+enforcement** — `restack` writes the requirement into `REPORT.md` so a human sees
+it, but nothing checks that it happened. That is the plan's own "a rule with no
+enforcement is a comment" pattern, reproduced inside the fix for it. Wiring it into
+the run loop / `/deliver-task` is **task 21**.
 
 ## Task
 

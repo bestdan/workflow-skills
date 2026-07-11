@@ -1,6 +1,6 @@
 ---
 title: "preflight: enforce the no-interactive-prompt rule — detaching via launchd re-triggers macOS consent gates nobody can answer"
-priority: 1
+priority: urgent
 size: 3
 status: new
 created: 2026-07-11

@@ -1,6 +1,6 @@
 ---
 title: "exit contract: distinguish 'paused mid-run' from 'run complete' — a heartbeat + an explicit exit reason"
-priority: 2
+priority: high
 size: 3
 status: new
 created: 2026-07-11

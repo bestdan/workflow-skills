@@ -1,6 +1,6 @@
 ---
 title: "spawn: write-launch emits --verbose + injects PATH (launch works end-to-end)"
-priority: 1
+priority: urgent
 size: 3
 status: done # merged as PR #169 (detached run #2, 2026-07-11)
 created: 2026-07-10
