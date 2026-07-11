@@ -10,6 +10,21 @@ this leans on live in [`run-state.md`](run-state.md); pause semantics live in
 Resume's job is to reconcile a crashed or paused run's durable state against
 reality, then fall into the normal **Run phase** loop for whatever remains ready.
 
+**HEAD guard, first — before anything else reads the worktree.** Run
+`scripts/spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id
+<run_id> --questions .auto-pilot/QUESTIONS.md`
+([`run-state.md`](run-state.md) "Run worktree HEAD invariant"). A run that
+crashed mid-task can leave the run worktree's `HEAD` parked on a task branch
+(finding #23); this restores it to `auto-pilot/<run_id>` and records the
+deviation before resume trusts anything else it reads off that worktree.
+
+**Read `RUN.md` from the branch, not the working tree.** Even with the guard
+above, resume's every read of `RUN.md` uses `git show
+auto-pilot/<run_id>:.auto-pilot/RUN.md` rather than the worktree's
+`.auto-pilot/RUN.md` file — the belt to the guard's braces. A mis-parked
+`HEAD` (or a not-yet-restored one) then can't feed resume a stale or absent
+`RUN.md` in the first place, whatever state the working tree happens to be in.
+
 **Re-run only the pre-flight that can rot; skip the launch-only steps.**
 Worktree + run-state-branch creation (Launch step 1) and the **task-graph
 materialization** half of Launch step 6 already exist on the run-state branch
@@ -41,7 +56,8 @@ start a second one — report it and stop. A dead PID, or a start-time mismatch 
 recycled PID), means it's safe to proceed; the start-time is exactly what tells
 the two cases apart.
 
-**Reconcile each non-terminal task.** Re-read `RUN.md` from the run-state branch.
+**Reconcile each non-terminal task.** Re-read `RUN.md` via the `git show`
+read above.
 `handed-off` and `parked` tasks are terminal and left untouched. For every other
 task (`claimed` / `implementing` / `pr-open` / `in-review` / `iterating`),
 observe reality in the **write order's** direction — git first, then tracker,

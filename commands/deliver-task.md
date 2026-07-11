@@ -29,3 +29,11 @@ routing; do not re-derive or restate the workflow here.
 The lifecycle is claim → do → open PR → co-review → iterate → hand-off, ending at
 `needs_review` — **never** `done` (completion is merge-verified later via
 `/sweep-for-complete`).
+
+This command **creates and removes its own worker worktree** for the
+implementation (the "Do" step's dispatch-in-isolation-then-integrate, via
+`orchestrate-coders`) — it never touches the caller's own worktree. Under
+`/auto-pilot`, that caller is the run worktree, whose `HEAD` must stay on the
+run-state branch for the entire run
+(`skills/auto-pilot/references/run-state.md` "Run worktree HEAD invariant");
+this command's worker worktree is what keeps task work off that branch.
