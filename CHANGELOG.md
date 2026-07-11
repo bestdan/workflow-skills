@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.44.0] - 2026-07-11
+
+### Features
+
+- verify broker — run the run verify OUTSIDE the jail (task_4, P1 #4/#6) (#172) (c74fda1)
+
 ## [1.43.0] - 2026-07-11
 
 ### Features
