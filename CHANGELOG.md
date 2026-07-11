@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.41.1] - 2026-07-11
+
+### Fixes
+
+- spawn-orchestrator launch works end-to-end (--verbose + PATH) (#169) (bc7acc9)
+
 ## [1.41.0] - 2026-07-11
 
 ### Features
