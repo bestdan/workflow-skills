@@ -6,11 +6,11 @@ status: new
 created: 2026-07-11
 source_branch: main
 related_files:
+  - scripts/spawn-orchestrator.sh
   - skills/auto-pilot/SKILL.md
   - skills/auto-pilot/references/run-state.md
   - commands/deliver-task.md
-  - scripts/spawn-orchestrator.sh
-is_blocked_by: autopilot_hardening_task_18
+is_blocked_by: [autopilot_hardening_task_18, autopilot_hardening_task_16]
 parent: autopilot_hardening
 tags: [auto-pilot, stacked-prs, co-review, p1]
 ---
@@ -48,10 +48,21 @@ Make the restack's re-verification an **enforced** step, not a `REPORT.md` note:
   re-verify **parks** the child and alarms (task 16) — it never silently keeps a
   PR that no longer builds on `main`.
 - **Diff-audit against the parent's post-hand-off review commits.** Compute the
-  parent's review delta (the commits added between hand-off and merge) and assert
-  no line it added is removed or contradicted by the child. This is mechanizable —
-  the SHAs are known — and it is precisely the check a human did by hand in run #2.
-  A violation is a **defect**, not a warning.
+  parent's review delta — the commits added between hand-off and merge — from its
+  two endpoints: the hand-off tip is the child's recorded `base_sha`, but the
+  **final pre-merge tip is not stored and may not be a local ref** (a
+  squash-merge can delete the parent branch, per task 18's finding #25). Obtain it
+  from GitHub — `refs/pull/<parent#>/head` (fetchable even after the branch is
+  deleted) or the API (`gh pr view <parent#> --json` for the head/merge SHA) —
+  never assume "the SHAs are already local." Then assert, **mechanically**, that no
+  line the review delta *added* is **removed or modified** in the child's
+  post-rebase tree (a line-level diff over the delta's touched files, accounting for
+  legitimate child edits and renames). This line-level check is the mechanizable
+  half and is precisely what the human did by hand in run #2; a violation is a
+  **defect**, not a warning. Deeper **semantic** contradiction — a reviewed line
+  that survives textually but is negated or overridden elsewhere — is **not**
+  mechanically decidable and is delegated to the mandatory co-review re-run below,
+  not claimed as part of this check.
 - **Flag the child's co-review as STALE and re-run it** when the parent's review
   touched files the child also touches. The overlap is computable from the two
   diffs; `/co-review --non-interactive` already exists to re-run.
@@ -59,6 +70,16 @@ Make the restack's re-verification an **enforced** step, not a `REPORT.md` note:
   a **re-verification trigger**, not just a git operation, and so a restacked child
   cannot reach hand-off carrying an approval that refers to code that no longer
   exists.
+- **Define the phase transition out of `handed-off`.** A restacked child is already
+  `handed-off`, which `run-state.md` defines as a **terminal** (success) phase —
+  PR linked, tracker at `needs_review`, PR frozen. Re-verifying it therefore
+  requires a legal transition *back* into an in-flight phase (e.g. `iterating`),
+  a matching tracker rollback (`needs_review` → `started`), and a new row in
+  `run-state.md`'s **Write order** / **Crash reconciliation** table so a crash
+  mid-rollback can't leave the tracker at `needs_review` while the run files say
+  `iterating` (or vice versa). This task must **amend `run-state.md`** so
+  `handed-off` is no longer strictly terminal, rather than silently breaking an
+  invariant stated in its own related file.
 
 ## Acceptance Criteria
 
@@ -69,8 +90,16 @@ Make the restack's re-verification an **enforced** step, not a `REPORT.md` note:
   new base, (b) **fails** when the child's rebase drops a line the parent's review
   commit added — even though the rebase itself applied cleanly — and (c) marks the
   child's co-review stale when the file sets overlap.
+- A test asserts that when the stale condition is set, `/co-review
+  --non-interactive` is actually **invoked and completes** on the restacked child,
+  and that **hand-off stays blocked** until the refreshed review passes — a
+  stale-marker-only implementation that never re-runs review must **fail** this
+  test.
 - A test asserts a re-verify failure **parks** the child rather than leaving an
-  apparently-healthy PR.
+  apparently-healthy PR, **and** that it fires the **task 16 alarm channel**
+  (ALARM sentinel / `REPORT.md` top-line) — parking without alarming, or a
+  `REPORT.md`-only notice, must fail (the exact regression this task exists to
+  prevent).
 - `bash scripts/check.sh` green.
 
 **User-run:**
