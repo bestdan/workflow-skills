@@ -463,7 +463,9 @@ if command -v shasum >/dev/null 2>&1; then
   fcr() { local name="$1" want="$2"; shift 2; local o c; o="$("$SCRIPT" verify-request "$@" 2>&1)"; c=$?
     if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi; }
   fcr "non-hex cmd-hash" "must be lowercase hex" --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "NOTHEX"
-  fcr "missing worktree"  "is not a directory"    --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
+  fcr "missing worktree"  "does not exist"        --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
+  printf 'x\n' >"$VB/notadir"
+  fcr "worktree is a file" "is not a directory"   --sentinel-dir "$SENT" --worktree "$VB/notadir" --cmd-hash "$PIN"
 
   # write-verify-broker: renders an UN-JAILED launch script (no sandbox-exec) + a
   # valid plist, with the verify command pinned in.

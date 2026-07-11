@@ -280,3 +280,17 @@ canonicalize **under the run root**. A stronger **third option** (wrap verify in
 its own fresh single-layer profile — repo RO, worktree+tmp RW, no network) is a
 tracked follow-up, but the two `test-*.sh` harnesses that themselves call
 `sandbox-exec` still won't nest under it, so v1 ships the **un-jailed** broker.
+
+**What the broker does _not_ defend: result authority.** The sentinel dir lives in
+the run worktree, which the jailed orchestrator can write — so it could forge its
+own `<id>.result` (`code: 0`) and skip the broker entirely. This is **deliberately
+out of scope**: the boundary the broker enforces is that an un-jailed process only
+ever runs the **pinned** command in a **contained** worktree — it stops the
+orchestrator from _laundering arbitrary code into an un-jailed exec_ (the actual
+jailbreak). It does **not** try to make the pass/fail verdict unforgeable, because
+the orchestrator is `claude -p --permission-mode bypassPermissions` — the trusted
+loop driver, gating on the result itself. An orchestrator that forges a result is
+equivalent to one that lies about its own gate or skips verify, which no in-jail
+mechanism can prevent. Defending _that_ (a signed result the orchestrator can't
+mint, written where it can't reach) is a separate, larger change tied to the
+per-worker least-privilege follow-up in §4.
