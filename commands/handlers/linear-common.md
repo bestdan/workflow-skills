@@ -130,7 +130,7 @@ This block is the single source of truth for `ready` selection. `linear-claim.md
 
 ## In-flight scan
 
-The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks` row 2 ("open PR, wrong column") each run to find issues that already have a PR attached, before resolving and merge-checking that PR.
+The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks` row 2 ("open PR, wrong column") each run to find in-flight issues within a named state scope. Resolving and merge-checking each issue's PR is a **separate downstream step** — the scan itself does not pre-filter to PR-bearing issues (PR resolution has its own attachment → title → branch fallback; a state-scope match with no attachment is still a candidate).
 
 **State scope (parameterized).** The caller names which state-type set applies:
 
@@ -139,11 +139,13 @@ The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks
 
 Either way, resolve state ids by **type only, never display name** (names are user-configurable — see "Kanban mapping" above).
 
-**Skinny fields.** The scan needs only `id identifier title url state { id type }` plus each issue's PR attachment URL — `attachments { nodes { url } }` in GraphQL, the `attachments`/`links` field via MCP — and **explicitly not `description`**: the scan never reads issue body text, only its state and its linked PR.
+**Skinny fields.** The scan needs only `id identifier title url state { id type }` and **explicitly not `description`**: it never reads issue body text, only state and (downstream) the linked PR. The PR attachment URL is fetched differently per backend: GraphQL folds `attachments { nodes { url } }` into the same scan query, while MCP `list_issues` does **not** return attachments — resolve them via a subsequent `get_issue` per issue (as `linear-sweep-complete.md` step 3 does).
 
-**Per-scope resolution.** Reuse "Resolve configured projects" plus the Unassigned bucket above, identical to the other commands — one `list_issues`/GraphQL query per resolved scope per state id, unioned per scope, with the Unassigned bucket's whole-team-query exclusion pass.
+**Scope resolution.** Identical to the other commands: with `--all`, a **single whole-team query**, no project resolution and no Unassigned pass; without `--all`, "Resolve configured projects" **plus** the Unassigned bucket above (including its whole-team-query exclusion pass).
 
-This block is the single source of truth for the in-flight scan. `linear-sweep-complete.md`, `linear-reconcile.md`, and `commands/handlers/assets/linear-scan.py` all implement exactly this — change it here and update all consumers in lockstep.
+**Per-scope query count.** MCP's `list_issues` `state` filter is single-valued, so MCP issues one `list_issues` call per resolved scope **per state id**, unioned per scope. GraphQL filters by state type in **one** query per scope (`state: { type: { in: [...] } }`, as `linear-ready.py` does) — never one query per state id.
+
+This block is the single source of truth for the in-flight scan. `linear-sweep-complete.md`, `linear-reconcile.md`, and `commands/handlers/assets/linear-scan.py` (added by the task-2 follow-up) all implement exactly this — change it here and update all consumers in lockstep.
 
 ## Linear concepts → task concepts
 
