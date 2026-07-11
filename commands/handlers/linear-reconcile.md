@@ -128,10 +128,13 @@ non-zero when no key is resolvable, so the fallback **is** the gate, same as
 3. **Skip the per-issue attachment read.** Each returned issue already
    carries its `attachments` URL list (the "In-flight scan" skinny fields),
    so resolving its PR needs none of step 2 below's `get_issue` →
-   title-search → `branchName` fallback chain — just take the first
-   `attachments` entry that matches a GitHub PR URL
-   (`github.com/.../pull/<n>`). An issue with no matching attachment is
-   **not a row-2 candidate**; skip it silently, same as step 2 below.
+   title-search → `branchName` fallback chain — take **every** `attachments`
+   entry that matches a GitHub PR URL (`github.com/.../pull/<n>`), **not just
+   the first**. This mirrors `linear-sweep-complete.md` step 3's multi-PR
+   rule: an issue can accumulate a stale closed-unmerged PR **and** a newer
+   open one, so picking only the first hit could mask the open PR that makes
+   it a row-2 candidate. An issue with **no** matching attachment is **not a
+   row-2 candidate**; skip it silently, same as step 2 below.
 
 4. **Continue at step 3 below** with the resolved issue + PR list — the PR
    open/merged check, target-state resolution, and hard guard are identical
@@ -165,13 +168,17 @@ per scope.
 
 ### Both paths
 
-3. **Check the PR's state.**
+3. **Check the PR's state.** Both paths resolve the issue's **own** PR(s) —
+   one or more (an issue can accumulate several attachments). Check **each**
+   resolved PR:
 
    ```bash
    gh pr view <url-or-number> --json number,url,state
    ```
 
-   Act **only** on `state == "OPEN"`.
+   Act if **any** of the issue's PRs is `state == "OPEN"` (the same "check
+   **all** of a source's PRs" rule as `linear-sweep-complete.md` step 4).
+   The bullets below cover an issue whose PRs are **all** non-open:
 
    - A **merged** PR on a non-started issue is **row 1's** business, not
      row 2's — `linear-sweep-complete.md`'s own scope only covers
