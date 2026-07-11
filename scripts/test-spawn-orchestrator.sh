@@ -791,6 +791,17 @@ lack "classify-exit: REPORT.md alarm echoed as a tool_result is not fatal" 'fata
 printf '{"error":{"message":"x"},"status":4013}\n' >"$CX/status4013.log"
 lack "classify-exit: '\"status\":4013' does not match 401" 'fatal:' \
   "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/status4013.log" 2>&1)"
+# R1: `API Error:` INSIDE a stream-json event (a tool_result echoing a coder
+# subagent's OWN failure) is content on a `{`-prefixed line — not the
+# orchestrator's error surface — so it must NOT halt the run.
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","content":"codex run failed: API Error: 401 Invalid authentication credentials"}]}}' >"$CX/coder-apierr.log"
+lack "classify-exit: 'API Error:' inside event content is not fatal" 'fatal:' \
+  "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/coder-apierr.log" 2>&1)"
+# R2: a plain-prose OAuth-expiry line on the CLI's OWN stderr (a NON-`{` line, so
+# real error surface) must still classify fatal even without an API Error: / 401.
+printf 'OAuth token has expired \xc2\xb7 Please obtain a new token or refresh your existing one.\n' >"$CX/prose-oauth.log"
+have "classify-exit: plain-prose OAuth-expiry on stderr -> fatal" 'fatal:' \
+  "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/prose-oauth.log" 2>&1)"
 
 # --- supervisor-check: fatal halt writes systemic status + REPORT alarm + teardown
 # (task 10) — fixture is a real git checkout so the run-state commit is observable.

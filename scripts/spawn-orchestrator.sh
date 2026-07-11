@@ -903,17 +903,20 @@ classify_exit() {
     *) content="$(tail -c "+$((offset + 1))" "$outfile" 2>/dev/null)" || content="$(cat "$outfile")" ;;
   esac
 
-  # Fatal auth signals are matched ONLY on the orchestrator's own error surface —
-  # a stream-json `"type":"error"` event, an `API Error:` line, or a structural
-  # JSON `"status":<code>` field — never the raw slice. Transcript prose, diffs,
-  # test logs, and the run's own REPORT.md (re-read after --resume) can all carry
-  # "401"/"authentication_failed" as CONTENT; matching those would halt a healthy
-  # run with a wrong diagnosis and re-poison every post-resume wake — reviving
-  # finding #22's loop via the durable files rather than the log. The `"status":`
-  # alternative is structural (a quoted JSON key + numeric value) so it catches a
-  # bare `{"error":…,"status":401}` error object without matching bare prose.
+  # Fatal auth signals are matched ONLY on the orchestrator's own error surface,
+  # never on transcript CONTENT. In `--output-format stream-json`, stdout is one
+  # JSON object per line (every event line starts with `{`), and the process's
+  # stderr — merged into the log — is plain prose. So the error surface is: any
+  # NON-`{` line (the CLI's own stderr: `API Error: …`, `OAuth token has expired
+  # · …`), a stream-json `"type":"error"` event, or a structural JSON
+  # `"status":<code>` field. An auth phrase sitting INSIDE a `{`-prefixed event
+  # (a tool_result, an assistant message, or the run's own REPORT.md re-read
+  # after --resume) is CONTENT — it never qualifies, so a task about auth, or the
+  # halt's own reason, can't revive finding #22's loop. (JSON escapes nested
+  # quotes, so a `"status"` written into event content arrives as `\"status\"`
+  # and matches neither the status nor the content path.)
   local err_lines
-  err_lines="$(grep -E '"type"[[:space:]]*:[[:space:]]*"error"|API Error:|"status"[[:space:]]*:[[:space:]]*[0-9]' <<<"$content" 2>/dev/null)"
+  err_lines="$(grep -E '^[^{]|"type"[[:space:]]*:[[:space:]]*"error"|"status"[[:space:]]*:[[:space:]]*[0-9]' <<<"$content" 2>/dev/null)"
   local p
   for p in "${_AUTH_FAIL_SIGNALS[@]}"; do
     if grep -qF -- "$p" <<<"$err_lines"; then
