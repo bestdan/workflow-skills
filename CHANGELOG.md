@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.38.1] - 2026-07-11
+
+### Fixes
+
+- assignee fallback, robust by-id team resolve, docstrings (#161) (ff7cada)
+
 ## [1.38.0] - 2026-07-10
 
 ### Features
