@@ -128,6 +128,84 @@ exponentially keyed on the marker's `attempt` (e.g. 30 min → 1 h → 2 h, capp
 rate-limit reason, and surfaces the alarm in `REPORT.md` — the same stalled-run
 terminal the circuit breaker reaches, arrived at from the resource side.
 
+## A third terminal kind — the supervisor halt (finding #22)
+
+The two pause kinds above are not the whole story: both assume the failure is
+**retryable** — waiting (or a token bucket resetting) fixes it. An expired
+OAuth credential is not retryable. In detached run #2, the launching user's
+Anthropic OAuth credential expired mid-run; every subsequent `claude -p` turn
+died on `401 Invalid authentication credentials`, and the supervisor —
+knowing only "retry later" — relaunched into the **same** 401 on every one of
+its ~52 wakes, over **4.3 hours**, doing zero work and raising zero signal.
+The circuit breaker above didn't catch it (the process died before it could
+dispatch a task, so it never counted as a _delivery_ failure), and the
+rate-limit backstop's premise — "back off, the window resets" — is simply
+**false** for a dead credential.
+
+So the supervisor carries a **third** kind, neither an agent pause nor a
+supervisor pause: a **supervisor halt**. It is implemented entirely in shell,
+before or on `claude -p`'s exit — a rate-limited or auth-dead agent cannot run
+its own bookkeeping, so the supervisor decides in shell what it can decide in
+shell (`scripts/spawn-orchestrator.sh classify-exit` / `supervisor-check`,
+called by the generated launch script after every wake):
+
+- **Fatal, non-retryable** — the exit's captured stdout+stderr names an auth
+  failure (`authentication_failed`, `Invalid authentication credentials`,
+  `OAuth token has expired`, or a `401` **in an auth context**): halt
+  **immediately**, on the first occurrence.
+- **Unknown/unclassified repeated failure — the no-progress guard.** Even
+  without a string match, N consecutive supervisor wakes (default 3) that
+  exit non-zero with **no run-state commit** between them (the run-state
+  branch's HEAD hasn't moved) halt too. This is the general backstop that
+  would have caught #22 even if its 401 text had never matched — the run
+  making no forward progress is the actual signal, the 401 string is just the
+  fast path to the same conclusion. A wake that lands while RUN.md's own
+  `status:` is `paused` never counts against this guard — a paused wake makes
+  no progress **by design** (the orchestrator is deliberately waiting out
+  `paused_until`; see task 11's shell-level pause gate), not a stall.
+
+A supervisor halt writes run-level `status: systemic` + a `pause_reason`
+naming the failure to `RUN.md`, appends one alarm entry to `REPORT.md`,
+commits both to the run-state branch, and **tears the supervisor job down**
+(`launchctl bootout`) — the same `status: systemic` terminal the circuit
+breaker and the rate-limit crash-loop guard above reach, arrived at from a
+third direction. Unlike those two, nothing about a supervisor halt is
+resumable by a timer: only a human fixing the underlying condition (typically
+re-authenticating) and then an explicit `--resume` moves the run forward
+again.
+
+**Two ways this classification can lie, and what stops them.** Both are about
+the same thing — a halt is only useful if its **diagnosis** is right, because
+the diagnosis is the instruction the operator acts on.
+
+- **Classify only what _this_ wake wrote.** The launch script _appends_ every
+  wake's output to one `orchestrator.log`, so classifying the whole file makes
+  an auth failure **sticky**: once any wake has emitted a 401 the string is in
+  that file forever, and every later non-zero exit — including exits after the
+  human re-authenticated and resumed — would re-classify as `fatal` and halt
+  again, blaming a credential that is now fine. The operator's fix would
+  appear not to work. So the launch script records the log's byte offset
+  _before_ invoking `claude` and passes it as `--since-offset`; the classifier
+  reads only from there. A missing or malformed offset degrades to reading the
+  whole file — **fail-safe, not fail-closed**: over-halting is recoverable,
+  silently relaunching forever is the bug this whole section exists to fix.
+- **Auth signals only count on the error surface, never as content.** The
+  classified bytes are a full stream-json transcript — model output, tool
+  results, diffs — where both `401` (line numbers `foo.py:401`, byte counts,
+  hunk headers) and the auth _phrases_ (`authentication_failed`, `OAuth token
+  has expired`) appear as ordinary content: in a task _about_ auth, in a test
+  log, or — most dangerously — in the run's **own** `REPORT.md` halt reason,
+  which a later wake re-reads after `--resume` and folds back into the log.
+  Matching any of these as a raw substring would halt a healthy run with a wrong
+  diagnosis and revive the sticky loop via the durable files. So every auth
+  signal (the three phrases _and_ the `401`) is matched **only on the
+  orchestrator's own error surface** — a stream-json `"type":"error"` event, an
+  `API Error:` line, or a structural JSON `"status":<code>` field — and the
+  `401` additionally needs a digit boundary so `4013` isn't a `401`. Run #2's
+  actual failure line — `API Error: 401 Invalid authentication credentials` —
+  still matches; the no-progress guard remains the catch-all for anything the
+  string match misses.
+
 ## Hard-stop before paid/overflow credits
 
 The absolute stop, distinct from the pause above. "Paid/overflow" means

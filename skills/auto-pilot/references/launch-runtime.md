@@ -57,6 +57,41 @@ and records a supervisor-written pause marker before rescheduling — because a
 rate-limited agent can't run its own pause bookkeeping (see
 [`run-budget.md`](run-budget.md) "Rate-window check" and "Two pause kinds").
 
+**The generated launch script does not `exec` into `claude` (finding #22).**
+An earlier version did — `exec sandbox-exec -f <profile> claude -p …`, so the
+launchd-tracked PID was `claude` itself, never a wrapper shell. That leaves
+no way for the supervisor to see the exit: `exec` replaces the process, so
+nothing runs after `claude` dies. The script instead runs the jailed `claude`
+in the foreground, captures its exit code, and calls
+`scripts/spawn-orchestrator.sh supervisor-check` before exiting itself — the
+launchd-tracked PID is now this wrapper, not `claude`, which is the
+deliberate trade against being able to classify the exit at all.
+
+**Consequence for the PID record.** The PID that `record-handle` writes and
+that `status` / the stale-orchestrator guard (**Orphan / stale detection**
+below) read is therefore the **supervising wrapper shell**, not the `claude`
+process itself — `claude` is now that wrapper's child. Liveness of the
+wrapper still means "this run's wake is in flight," which is what those
+consumers actually test, so the guard is unaffected; but a reader expecting
+`ps` to show `claude` at that PID should expect the wrapper.
+
+`supervisor-check` (built on the pure `classify-exit`) is the **third
+bucket** the rate-limit backstop above didn't have: a **supervisor halt**.
+Where the rate-limit backstop assumes the failure is retryable, a `401` /
+`authentication_failed` / expired-OAuth exit is not — waiting changes
+nothing for a dead credential. In detached run #2, an expired OAuth
+credential made the supervisor relaunch into the same `401` ~52 times over
+4.3 hours before a human happened to notice. `supervisor-check` now halts on
+the **first** such exit (writes `status: systemic` + `pause_reason` to
+`RUN.md`, appends one alarm to `REPORT.md`, commits both, then
+`launchctl bootout`s the job), and also halts on N (default 3) consecutive
+unclassified non-zero exits with no run-state commit between them — the
+general backstop that catches the same class of stall even without a string
+match, while never firing across a legitimate `paused_until` wait (a paused
+wake is expected to make no progress). Full mechanics in
+[`run-budget.md`](run-budget.md) "A third terminal kind — the supervisor
+halt (finding #22)".
+
 **Why.**
 
 - **It must outlive the launch session.** The human runs launch interactively,
