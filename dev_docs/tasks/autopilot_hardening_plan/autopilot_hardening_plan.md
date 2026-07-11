@@ -108,7 +108,7 @@ checks reads green, and the only thing that actually caught both was a human ask
 14. [[autopilot_hardening_task_14]] — **P1**: a **run doctor** — assert the run's own invariants every iteration (HEAD, run state readable from the branch, phases match git/PR reality, no orphan worktrees, forward progress); repair or halt, never drift. Generalizes #22/#23.
 15. [[autopilot_hardening_task_15]] — P2: an **exit contract** — `continuing` / `paused` / `done` / `systemic` / `deadline`, plus a **heartbeat**, so "finished" and "wedged mid-task" stop being the same observable event (`exit 0`). Makes task 8's done-sentinel load-bearing.
 16. [[autopilot_hardening_task_16]] — **P1**: an **alarm channel** — a halted *or merely stalled* run must actively notify a human, from the **supervisor in shell** (a dead agent can't alert anyone), saying what to *do*. #22 cost 4h14m of pure silence.
-17. [[autopilot_hardening_task_17]] — **P1**: **enforce** the no-interactive-prompt rule — probe each credential path with no TTY, through the jail; a Keychain/TCC gate must **block launch**, not pile up unanswered dialogs while the budget check runs blind. (#24)
+17. [[autopilot_hardening_task_17]] — **P1**: **enforce** the no-interactive-prompt rule — **detaching via launchd re-triggers macOS consent gates**, because TCC grants belong to your *terminal*, not to a launchd-spawned binary. Probe under the real (detached, no-TTY) attribution; any consent gate **blocks launch**. (#24)
 
 **A rule with no enforcement is a comment.** Task 17 is the third instance of one
 structural pattern, and the plan should say it plainly: `launch-runtime.md` §3 already
