@@ -105,6 +105,16 @@ artifact, not a generic error.
 
 ### Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
+Run `scripts/preflight.sh --source <plan|linear> --base <base branch>` first —
+it is the read-only pre-flight helper this step extracts to (below): the
+binary fingerprint / environment class, coder availability (via
+`scripts/probe-coders.sh`), base freshness (via
+`scripts/preflight-freshness.sh`), the resolved PATH/exec dirs, the add-task
+destination host, and the confinement smoke all come from its `PREFLIGHT …`
+output and its `PREFLIGHT VERDICT: go` / `no-go — <reason>` line. A `no-go`
+**BLOCKS LAUNCH** with the reason it names; treat its output as the source of
+truth for this step rather than re-deriving these facts by hand.
+
 Probe every credential the run will need, each **non-interactively** — a probe
 that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
 failure (see [`references/launch-runtime.md`](references/launch-runtime.md) §3).
@@ -149,8 +159,10 @@ rather than at spawn: a `local-full` run needs the machine to stay awake for the
 run's duration (lid-open, or a tested clamshell/power setup — `caffeinate` alone
 does not survive lid-close; see
 [`references/launch-runtime.md`](references/launch-runtime.md) "Laptop sleep").
-If it can't be guaranteed, **BLOCKS LAUNCH**. (This and the auth/binary probes
-are good candidates to extract into a small pre-flight helper script.)
+If it can't be guaranteed, **BLOCKS LAUNCH**. (Unattended-viability is a human
+judgment call, not a probe — it stays here rather than in
+`scripts/preflight.sh`, which covers the auth/binary/freshness/confinement
+probes above.)
 
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
