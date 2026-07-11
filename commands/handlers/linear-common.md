@@ -128,6 +128,23 @@ The gate and rank rules `/do-tasks` (tracker path) apply when picking claimable 
 
 This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep.
 
+## In-flight scan
+
+The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks` row 2 ("open PR, wrong column") each run to find issues that already have a PR attached, before resolving and merge-checking that PR.
+
+**State scope (parameterized).** The caller names which state-type set applies:
+
+- The merged→Done sweep scans every state id of type `started`.
+- Reconcile row 2's "open PR, wrong column" scans every state id of type `backlog` **plus** every state id of type `unstarted`.
+
+Either way, resolve state ids by **type only, never display name** (names are user-configurable — see "Kanban mapping" above).
+
+**Skinny fields.** The scan needs only `id identifier title url state { id type }` plus each issue's PR attachment URL — `attachments { nodes { url } }` in GraphQL, the `attachments`/`links` field via MCP — and **explicitly not `description`**: the scan never reads issue body text, only its state and its linked PR.
+
+**Per-scope resolution.** Reuse "Resolve configured projects" plus the Unassigned bucket above, identical to the other commands — one `list_issues`/GraphQL query per resolved scope per state id, unioned per scope, with the Unassigned bucket's whole-team-query exclusion pass.
+
+This block is the single source of truth for the in-flight scan. `linear-sweep-complete.md`, `linear-reconcile.md`, and `commands/handlers/assets/linear-scan.py` all implement exactly this — change it here and update all consumers in lockstep.
+
 ## Linear concepts → task concepts
 
 - **Team** is required for every issue.
