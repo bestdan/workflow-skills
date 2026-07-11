@@ -13,6 +13,67 @@ the exact `save_issue` fields documented in `linear-add.md` step 4.
 
 ## Load — build the graph (exhaustive)
 
+**One mechanism: try the fast path, fall back to the floor.** Same shape as
+`linear-claim.md`'s "Find candidates" gate — if `Bash` is available, attempt
+the GraphQL fast-path first; on **any** non-zero exit from
+`linear-relations.py`, or stdout that doesn't parse as the expected
+`{ meta, issues }` object, log one debug line
+(`Fast-path unavailable (<reason>) — falling back to MCP floor.`) and run the
+**MCP floor** instead. There is no separate `[ -n "$LINEAR_API_KEY" ]`
+pre-check gating this — the script itself exits fast and non-zero when no key
+is resolvable, so the fallback **is** the gate.
+
+> **This gate is also the security boundary.** A Linear personal API key is a
+> full-account bearer token and must **never** be injected into a
+> `claude.ai`/Claude Code **cloud** sandbox — see `linear-claim.md`'s "Find
+> candidates" security-boundary note, which applies here verbatim. Cloud
+> sessions never set `$LINEAR_API_KEY`/`$LINEAR_API_KEY_REF`, so `linear-
+> relations.py` exits non-zero before any GraphQL request and the run falls to
+> the MCP floor (OAuth-scoped, no raw key) by design.
+
+### Fast path (GraphQL, via `linear-relations.py`)
+
+On the fast path, the script's own prelude resolves the team itself, so this
+**replaces** the MCP-floor "Preflight" step below — do not also call
+`list_teams` on this path.
+
+1. **Resolve project scopes.** Use the **scope already resolved by
+   `reoptimize-tasks.md` §2** (the `project`/`initiative`/`team` from
+   `$ARGUMENTS`) — exactly the scope the floor's "Collect the scope's issues"
+   loads, so the two paths analyze the same issue set. For a single project,
+   pass its real `id` as `--project`; for an initiative, union its projects and
+   pass each as `--project`; for the whole-team scope, omit `--project` (the
+   whole-team `id: null` scope). Do **not** re-resolve from `linear.projects`
+   config here — that would make the fast path analyze the configured projects
+   instead of the requested scope, diverging from the floor.
+2. **Call the script.**
+
+   ```bash
+   python3 commands/handlers/assets/linear-relations.py --team "<linear.team>" \
+     --project "<scope-1-id>" --project "<scope-2-id>" ...
+   ```
+
+   Omit `--project` entirely for the whole-team scope. Parse stdout as the
+   `{ meta: { viewer, team, states }, issues: [...] }` object described in the
+   script's header comment; a parse failure is itself a fallback trigger (see
+   above). The query is **not** filtered by `state` — terminal (`Done`/
+   `Canceled`) issues are included by construction, same as the floor.
+3. **Build the graph.** Each `issues[]` entry already carries `description`
+   and the derived `blockedBy`/`blocks`/`relatedTo`/`duplicateOf` edge lists
+   (see the script's header for the exact `relations`/`inverseRelations`
+   derivation). Nodes carry `{id, title, project, priority, estimate, updatedAt,
+   statusType (from state.type), description, labels, relations}` — `estimate`
+   is selected so Dimension 3's "smaller estimate first (quick wins)" ordering
+   matches the floor. Edges come from native `blockedBy`. Keep terminal nodes in the graph for
+   Dimension 1; **exclude** them from the Dimension 3 ordering output. Because
+   this is a **single filtered query per scope** rather than a per-issue
+   fan-out, there is no need to confirm with the user before running it, even
+   on a whole-team scope — that is the whole point of the fast path.
+
+### MCP floor (fallback)
+
+Runs whenever the fast path isn't attempted or falls back per the gate above.
+
 1. **Preflight.** Resolve the team id via the `linear-common.md` preflight.
 2. **Collect the scope's issues.** Call `<linear-mcp>__list_issues` for the
    resolved scope (`teamId`, plus `projectId` when scope is one project; for an
@@ -25,7 +86,8 @@ the exact `save_issue` fields documented in `linear-add.md` step 4.
    `Canceled` issues too — a stale or never-satisfiable edge is only visible from
    the terminal side, and skipping them is the most common blind spot. This is
    one `get_issue` per issue; for a very large scope (a whole team with many
-   issues), confirm with the user before fanning out.
+   issues), confirm with the user before fanning out — this loop is still
+   expensive on the floor, unlike the fast path's single query.
 4. **Build the graph.** Nodes carry `{id, title, projectId, priority, estimate,
    statusType, description, relations}`. Edges come from native `blockedBy`.
    Keep terminal nodes in the graph for Dimension 1; **exclude** them from the
