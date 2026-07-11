@@ -44,10 +44,55 @@ denied  "write outside the worktree"  bash -c "echo x > $HOME/AUTOPILOT_SMOKE_SH
 allowed "write inside the worktree"   bash -c "echo x > $D/run/wt/ok"
 denied  "read /etc/sudoers"           bash -c "cat /etc/sudoers"
 denied  "exec unlisted /usr/bin/python3" /usr/bin/python3 -c "print(1)"
-rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" 2>/dev/null
+# The harness-runtime grant (task 12) opens ~/.claude/session-env for writes. It
+# must NOT have opened the rest of ~/.claude — a blanket state-dir write would
+# put the credential file in a writable scope (the very thing --cred-ro exists to
+# prevent). Assert the neighbouring write is still refused.
+denied  "write elsewhere under ~/.claude (session-env grant is not blanket)" \
+        bash -c "echo x > $HOME/.claude/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST"
+rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" "$HOME/.claude/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" 2>/dev/null
+
+# --- exit-code integrity (task 12 / finding #20) --------------------------
+# A jail that can't report a correct exit code is a BROKEN jail. When the
+# harness's OWN runtime surface is denied, the Bash tool dies with EPERM BEFORE
+# it ever runs the command (it can't mkdir its per-session dirs), and every Bash
+# tool call reports exit 1 regardless of the command's real result — so an agent
+# verifying by `$?` is reading pure noise. This is the real regression guard for
+# task 12: it FAILS against the pre-fix profile and PASSES once the harness's own
+# runtime paths are permitted (the renderer emits them; see @@HARNESS_RUNTIME@@).
+# It must run THROUGH `claude -p` itself, not bare sandbox-exec — only the real
+# harness exercises the session-env/scratch mkdirs and the mux socket.
+echo "== 1b. Exit-code integrity through the harness (claude -p) =="
+JSON="$(cat "$D/settings.json")"
+EC_LOG="$D/exit-code.log"
+exit_code_check(){ # <desc> <expect-rc> <shell-command> <rcfile-suffix>
+  local desc="$1" expect="$2" cmd="$3" name="rc_ec_$4"
+  local rcf="$D/run/wt/$name"; rm -f "$rcf"
+  sandbox-exec -f "$D/profile.sb" "$CLAUDE" -p \
+    "Run exactly this one bash command and then stop, nothing else: { $cmd ; } ; printf '%s' \$? > $rcf" \
+    --permission-mode bypassPermissions --settings "$JSON" --max-turns 4 \
+    --verbose --output-format stream-json >>"$EC_LOG" 2>&1
+  # No rc file is NOT indeterminate here — it is the exact pre-fix symptom (the
+  # Bash tool EPERM'd before running anything), so it must FAIL, not INDET.
+  if [ ! -s "$rcf" ]; then
+    FAIL "$desc (no rc recorded — the Bash tool never ran; harness runtime paths denied?)"
+    return
+  fi
+  local rc; rc="$(cat "$rcf")"
+  [ "$rc" = "$expect" ] && PASS "$desc (rc=$rc)" || FAIL "$desc (rc=$rc, expected $expect — the jail is lying about exit codes)"
+}
+exit_code_check "true reports exit 0"  0 true  true
+exit_code_check "false reports exit 1" 1 false false
+# The inner sandbox must actually initialize — a denied mux-socket bind/listen
+# makes the harness silently disable its own sandboxing, degrading the documented
+# two-layer posture to one layer.
+if grep -q 'Sandbox is enabled but failed to initialize' "$EC_LOG" 2>/dev/null; then
+  FAIL "inner sandbox initializes (found 'failed to initialize' — mux socket denied)"
+else
+  PASS "inner sandbox initializes (no 'failed to initialize' line)"
+fi
 
 echo "== 2. Layer 2 — network egress (through claude --settings) =="
-JSON="$(cat "$D/settings.json")"
 # egress_check writes the curl/socket exit code to a file in the RW worktree from
 # INSIDE the jailed claude, so we read a deterministic rc instead of parsing prose.
 egress_check(){ # <desc> <expect: reach|block> <rcfile-name> <shell-command>

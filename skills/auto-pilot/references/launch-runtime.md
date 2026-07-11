@@ -118,6 +118,50 @@ Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
 
+**The harness's own runtime surface is part of the required write surface —
+and the jail is _broken_ without it.** Three paths, each with its own failure
+mode if denied (finding #20 / task 12):
+
+| Path                              | What it is                                                            | Denied ⇒                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on  | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
+| `/tmp/claude-<uid>/…`             | its per-project/per-session scratch + cwd **tree** (dirs it `mkdir`s) | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
+| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                        | same — the Bash tool never executes the command at all                                   |
+
+The middle and last rows are the ones that **poison verification**: the Bash
+tool dies on its own `mkdir` _before_ the command ever runs, so **every Bash
+call reports exit 1 regardless of the command's real outcome**. An agent (or
+the orchestrator) verifying by `$?` is then reading pure noise — a passing
+command looks failed, and nothing distinguishes a real failure from the jail
+lying about it. Note these are **directory trees the harness creates**, not
+single files: a file-only grant does not permit the enclosing `mkdir` and so
+does not help at all.
+
+`render-profile` emits these as **fixed, renderer-owned grants** on every
+render — host-resolved, never caller-supplied `--rw` scopes. That ownership is
+load-bearing: two of the three live **outside the run root**, so passing them
+as `--rw` would trip the `--confine-under` containment guard (or force a caller
+to weaken it). Renderer-owned keeps the guard covering every caller scope while
+the harness still gets exactly what it needs.
+
+They are also **as narrow as the real requirement and no narrower**: never a
+blanket `$TMPDIR`/`/tmp` write, and — critically — **never a blanket
+`~/.claude` write**, which would put the credential file inside a writable
+scope and undo the cred-RO/state-RW split (§3) that `--cred-ro` exists to
+enforce. The grant is scoped to `session-env` specifically. Finally, a
+unix-domain socket bind/listen is gated on the socket's own path, not a free
+network class, so the srt-mux grant needs **both** a `file-write*` (create the
+socket special file) **and** a `network-bind` rule (actually bind/listen on
+it) — neither alone suffices.
+
+This is distinct from the `execve`-of-repo-scripts finding (#4, already fixed):
+that one is about executing the _repo's_ scripts inside the jail; this one is
+about the _harness's own_ socket and runtime dirs. Both must hold for in-jail
+verify to be trustworthy — see `smoke-confinement.sh`'s exit-code integrity
+check (`true` → 0, `false` → 1, in-jail through a real `claude -p`), the
+regression guard for this class of bug. A "no rc recorded" result there is a
+**FAIL, not indeterminate** — it is precisely the pre-fix symptom.
+
 **Residual confidentiality cost.** Reads are broad (§ above) and exec is now
 allowed over whole toolchain bin dirs, not just a literal per-binary list — so
 neither reads nor exec meaningfully bound what a running process can _see_.

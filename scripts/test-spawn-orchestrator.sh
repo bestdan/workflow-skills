@@ -56,6 +56,36 @@ count_is "profile: RO path is read-only"  1 "$REPO_RO"  "$body"
 # no unrendered template tokens remain
 lack "profile: no @@tokens@@ remain"      '@@'                     "$body"
 
+# --- task 12 / finding #20: the harness's OWN runtime surface (srt-mux socket +
+# the /tmp/claude-<uid> scratch tree + ~/.claude/session-env) must be permitted,
+# narrowly scoped — never a blanket $TMPDIR or ~/.claude write. These are
+# renderer-owned (host-resolved, never caller-supplied), so every render emits
+# them regardless of --rw/--ro and they bypass the --confine-under caller check.
+tmpdir_c="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+tmp_c="$(cd /tmp && pwd -P)"
+# The srt-mux pattern must appear TWICE: once under (allow file-write* …) (to
+# create the socket special file) and once under (allow network-bind …) (to
+# actually bind/listen on it) — neither alone suffices (verified empirically
+# against sandbox-exec).
+count_is "profile: srt-mux socket pattern present in file-write* AND network-bind" \
+  2 "(regex #\"^$tmpdir_c/srt-mux-[0-9]+-[0-9]+\\.sock\$\")" "$body"
+have "profile: network-bind block present for the srt-mux socket" \
+  '(allow network-bind' "$body"
+# The harness mkdir's a TREE under /tmp/claude-<uid> — a file-only grant would not
+# permit the enclosing mkdir, so this must be a subpath.
+have "profile: harness /tmp scratch tree granted as a subpath" \
+  "(subpath \"$tmp_c/claude-$(id -u)\")" "$body"
+have "profile: ~/.claude/session-env granted as a subpath" \
+  "(subpath \"$HOME/.claude/session-env\")" "$body"
+# …but NOT one inch wider: a blanket $TMPDIR or ~/.claude write would defeat the
+# jail (and, for ~/.claude, put the credential file in a writable scope).
+lack "profile: harness grant does not widen to a blanket TMPDIR subpath" \
+  "(subpath \"$tmpdir_c\")" "$body"
+lack "profile: harness grant does not widen to a blanket ~/.claude subpath" \
+  "(subpath \"$HOME/.claude\")" "$body"
+lack "profile: harness grant does not widen to a blanket /tmp subpath" \
+  "(subpath \"$tmp_c\")" "$body"
+
 # --- A1 regression: an exec symlink must resolve to its real target -----------
 # (Seatbelt matches process-exec against the resolved vnode path, not the link;
 # `command -v` on Homebrew binaries returns the symlink, so the renderer must

@@ -63,12 +63,45 @@
 ;;     $TMPDIR / scratchpad. Writes are worktree-confined by construction. [§1 rows 1–3]
 @@RW_PATHS@@
 
+;; --- Claude Code's OWN runtime surface — narrowly scoped (never a blanket
+;;     $TMPDIR or ~/.claude write). Renderer-owned: these paths are host-resolved
+;;     by render-profile, NOT caller-supplied --rw scopes, because two of the
+;;     three legitimately live OUTSIDE the run root and would otherwise trip (or
+;;     force a caller to weaken) the --confine-under containment guard.
+;;     Three paths, and the jail is BROKEN without each (finding #20 / task 12) —
+;;     distinct from the execve-of-repo-scripts finding (#4, fixed separately),
+;;     though both land as a jail that silently lies about verify:
+;;       - $TMPDIR/srt-mux-*.sock: the unix socket the harness's OWN inner
+;;         sandbox binds/listens on to mediate its own permission checks. A denied
+;;         bind/listen makes the inner sandbox silently DISABLE itself for the
+;;         session ("Sandbox is enabled but failed to initialize"), so the
+;;         two-layer posture this file documents (outer sandbox-exec here, plus
+;;         the harness's own inner sandbox) quietly degrades to one layer.
+;;       - /tmp/claude-<uid>/…: the harness's per-project/per-session scratch +
+;;         cwd tree. This is a DIRECTORY TREE it mkdir's into, not a single file —
+;;         a file-only grant does not permit the enclosing mkdir, so the Bash tool
+;;         dies with EPERM BEFORE it ever runs the command.
+;;       - ~/.claude/session-env/<session>: the per-session env dir the harness
+;;         mkdir's on startup. Same failure mode. Scoped to session-env
+;;         SPECIFICALLY — a blanket ~/.claude write would put the credential file
+;;         inside a writable scope and undo the cred-RO/state-RW split below.
+;;     Deny ANY of these and EVERY Bash tool call reports exit 1 regardless of the
+;;     command's real outcome — an agent verifying by `$?` is reading pure noise.
+;;     smoke-confinement.sh guards this: run `true`/`false` in-jail, assert 0/1.
+;;     A unix-domain socket bind/listen is gated on the socket's OWN path, not a
+;;     free network class, so the socket needs BOTH grants: file-write* (create the
+;;     socket special file) and network-bind (actually bind/listen on it) —
+;;     verified empirically against sandbox-exec that neither alone suffices.
+@@HARNESS_RUNTIME@@
+
 ;; --- credential files kept READ-ONLY even inside a read-write state dir. A tool
 ;;     state dir (~/.codex, ~/.claude) is write-granted above, but its own token
 ;;     must stay unwritable — and the subpath write allow silently covers it.
 ;;     Seatbelt honors the LAST matching rule, so the per-file write denials below
-;;     MUST come after the RW block to override it per co-located credential. Reads
-;;     are untouched (the tool still reads its token). [§3: file-RO vs state-RW]
+;;     MUST come after the RW block to override it per co-located credential — and
+;;     after the harness-runtime block above, so a cred file can never be
+;;     un-protected by either write grant. Reads are untouched (the tool still
+;;     reads its token). [§3: file-RO vs state-RW]
 @@CRED_DENY@@
 
 ;; --- exec: the resolved coder binaries (literal) plus, when --toolchain or
