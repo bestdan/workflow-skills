@@ -80,7 +80,7 @@ verify-request  ── writes ──▶  <dir>/<id>.request  {worktree, cmd_hash
 verify-await    ◀── reads ───  <dir>/<id>.result   {code, output}
 ```
 
-Two properties make that safe to hand a `bypassPermissions` agent:
+Two properties bound what a `bypassPermissions` agent can ask the broker to do:
 
 - **Command pinning.** The broker runs a fixed verify string baked in at install
   time (`write-verify-broker --verify-cmd`). The request carries only a **hash**
@@ -89,8 +89,26 @@ Two properties make that safe to hand a `bypassPermissions` agent:
 - **Worktree confinement.** `--confine-under <run root>` — the broker refuses any
   requested worktree outside the run root.
 
-The trust extended is exactly the trust the human already extends when they
-re-run `check.sh` before merging; the broker only moves it earlier.
+**Residual risk, stated plainly.** Those two properties pin the _invocation_;
+they do not pin the _content_ it executes. The pinned command is
+`bash scripts/check.sh`, and `check.sh` — along with every `test-*.sh`, hook, and
+tool config it shells out to — lives inside the worktree the jailed agent can
+write. A jailed agent that edits `check.sh` therefore gets its code run by the
+**un-jailed** broker, outside both walls. Command hashing and path confinement do
+not close this; nothing in the current design does.
+
+That is an **accepted** trust boundary, not an eliminated one — the same posture
+as the credential hard-link gap above, and it is recorded here rather than
+papered over. It is accepted because the jail's threat model is bounding
+_accidents and prompt injection_ in an agent running the repo's own code, not
+defending against an attacker who already holds repo write access (such an
+attacker can simply commit to `main`). The trust is close to what a human extends
+by re-running `check.sh` before merging — but not identical, and the difference is
+the point: the human runs it on content they chose, at a moment they chose, while
+the broker runs it unattended on content the agent may have just rewritten.
+Narrowing it (hashing the verify _script tree_, or running the check from a
+read-only mirror rather than the live worktree) is a live follow-up on the broker,
+not a solved problem.
 
 **The degradation protocol (what runs did before the broker existed).** Every
 hardening task in this very plan shipped under it, and it remains the fallback
@@ -216,7 +234,8 @@ resolutions outright rather than making each run re-derive them (task_6 / PR
   exist, so there is nothing to seed it with; and one serialized orchestrator has
   no race to arbitrate. **The run-state branch is the lock.** Still do the
   pre-claim `gh` PR scan, for `--resume` idempotency.
-- **The code PR carries only code (#3 of the dry-run).** Task files live on the
+- **The code PR carries only code** (a seam the attended dry-run surfaced; see
+  [`autopilot-dry-run.md`](./autopilot-dry-run.md)). Task files live on the
   run-state branch, so the `ready → in_progress → needs_review` status flips are
   committed **on the run-state branch**, never in the code PR's diff. repo-pr's
   "task file on `main`, deleted on merge" model does not apply.
