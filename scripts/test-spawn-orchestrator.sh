@@ -408,5 +408,90 @@ smoke_src="$(sed -n '/^smoke_test()/,/^}/p' "$SCRIPT")"
 have "smoke-test: uses --verbose"              '--verbose'                 "$smoke_src"
 have "smoke-test: uses --output-format stream-json" '--output-format stream-json' "$smoke_src"
 
+# --- task 4: verify broker (run verify OUTSIDE the jail) ----------------------
+# The broker just runs `bash -c "$cmd"`, so these round-trip in-jail with no
+# sandbox nesting — the pin/containment/fail-closed logic is fully exercised here.
+if command -v shasum >/dev/null 2>&1; then
+  VB="$BASE/vb"; mkdir -p "$VB/root/wt" "$VB/outside"; SENT="$VB/sentinel"
+  ROOT="$(cd "$VB/root" && pwd -P)"; WT="$(cd "$VB/root/wt" && pwd -P)"
+  CMD='echo VERIFY_RAN; exit 0'
+  PIN="$(printf '%s' "$CMD" | shasum -a 256 | awk '{print $1}')"
+
+  # round trip: request -> broker (one scan) -> await
+  "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "$PIN" --id rt >/dev/null 2>&1
+  have "verify-request: writes the request sentinel" "" "$([ -e "$SENT/rt.request" ] && echo present)"
+  "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
+  have "verify-broker: consumes the request"  "" "$([ ! -e "$SENT/rt.request" ] && echo consumed)"
+  rtres="$(cat "$SENT/rt.result" 2>/dev/null)"
+  have "verify-broker: result carries code 0"   'code: 0'    "$rtres"
+  have "verify-broker: ran the pinned command"  'VERIFY_RAN' "$rtres"
+  awo="$("$SCRIPT" verify-await --sentinel-dir "$SENT" --id rt --timeout 4 2>&1)"
+  have "verify-await: reports code + output"     'code=0'     "$awo"
+  have "verify-await: prints the verify output"  'VERIFY_RAN' "$awo"
+
+  # a request whose cmd_hash != the broker's pinned hash is REFUSED, never run
+  "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash deadbeef --id mism >/dev/null 2>&1
+  "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
+  mres="$(cat "$SENT/mism.result" 2>/dev/null)"
+  have "verify-broker: hash mismatch refused"    'cmd_hash mismatch' "$mres"
+  lack "verify-broker: refused req did not run"  'VERIFY_RAN'        "$mres"
+
+  # a worktree OUTSIDE the run root is REFUSED
+  OUT="$(cd "$VB/outside" && pwd -P)"
+  "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$OUT" --cmd-hash "$PIN" --id esc >/dev/null 2>&1
+  "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
+  have "verify-broker: worktree escape refused"  'escapes --confine-under' "$(cat "$SENT/esc.result" 2>/dev/null)"
+
+  # the broker's own --cmd-hash must match --verify-cmd (install/args mismatch)
+  bhm="$("$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --cmd-hash deadbeef --confine-under "$ROOT" 2>&1)"; bhc=$?
+  if [ "$bhc" = 2 ] && printf '%s' "$bhm" | grep -qF 'does not match'; then
+    ok "verify-broker: pinned hash/cmd mismatch fails closed"
+  else
+    bad "verify-broker: pinned hash/cmd mismatch fails closed" "exit=$bhc"
+  fi
+
+  # the 126-vs-0 contrast the whole task exists for: a #!/usr/bin/env bash script
+  # the broker runs via the pinned `bash <script>` (works) — the same script's
+  # direct shebang exec is what execve-denies in-jail (finding #4).
+  printf '#!/usr/bin/env bash\necho SHEBANG_OK\n' > "$WT/probe.sh"; chmod +x "$WT/probe.sh"
+  CMD2='bash probe.sh'; PIN2="$(printf '%s' "$CMD2" | shasum -a 256 | awk '{print $1}')"
+  "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "$PIN2" --id sb >/dev/null 2>&1
+  "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD2" --confine-under "$ROOT" >/dev/null 2>&1
+  have "verify-broker: runs a shebang script via pinned bash" 'SHEBANG_OK' "$(cat "$SENT/sb.result" 2>/dev/null)"
+
+  # verify-request fail-closed: non-hex cmd-hash, missing worktree
+  fcr() { local name="$1" want="$2"; shift 2; local o c; o="$("$SCRIPT" verify-request "$@" 2>&1)"; c=$?
+    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi; }
+  fcr "non-hex cmd-hash" "must be lowercase hex" --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "NOTHEX"
+  fcr "missing worktree"  "is not a directory"    --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
+
+  # write-verify-broker: renders an UN-JAILED launch script (no sandbox-exec) + a
+  # valid plist, with the verify command pinned in.
+  "$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'bash scripts/check.sh' \
+    --confine-under "$VB" --label com.autopilot.test.verify --workdir "$WT" --log "$VB/b.log" \
+    --path '/usr/bin:/bin' --out-script "$VB/broker.sh" --out-plist "$VB/broker.plist" >/dev/null 2>&1
+  vbody="$(cat "$VB/broker.sh" 2>/dev/null)"
+  have "write-verify-broker: invokes verify-broker"     'verify-broker'  "$vbody"
+  have "write-verify-broker: pins the verify command"   'bash scripts/check.sh' "$vbody"
+  have "write-verify-broker: pins a cmd-hash"           '--cmd-hash'     "$vbody"
+  lack "write-verify-broker: broker is UN-JAILED (no sandbox-exec)" 'sandbox-exec' "$vbody"
+  if command -v plutil >/dev/null 2>&1; then
+    if plutil -lint "$VB/broker.plist" >/dev/null 2>&1; then ok "write-verify-broker: plist lints"; else bad "write-verify-broker: plist lints"; fi
+  else
+    echo "skip - write-verify-broker: plist lint (plutil absent)"
+  fi
+  # write-verify-broker fail-closed: bad label
+  wvbc="$("$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'x' --confine-under "$VB" \
+    --label 'bad label' --workdir "$WT" --log "$VB/b.log" --path '/usr/bin:/bin' \
+    --out-script "$VB/x.sh" --out-plist "$VB/x.plist" 2>&1)"; wvc=$?
+  if [ "$wvc" = 2 ] && printf '%s' "$wvbc" | grep -qF 'must be [A-Za-z0-9._-]'; then
+    ok "write-verify-broker: bad label fails closed"
+  else
+    bad "write-verify-broker: bad label fails closed" "exit=$wvc"
+  fi
+else
+  echo "skip - verify broker: shasum not available (needed for the command pin)"
+fi
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

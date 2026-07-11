@@ -37,7 +37,7 @@ Front matter records the run's fixed parameters; a table records per-task state.
 run_id: 2026-07-08-auto-pilot-mode # bare id; the run-state branch is auto-pilot/<run_id>
 work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
 base_branch: main
-verify_command: dli check # the named check (design pre-flight §5)
+verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
 status: active # run-level: active | paused | systemic | done
 paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused
