@@ -144,14 +144,25 @@ fi
 fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"; fresh_status=$?
 printf '%s\n' "$fresh_out"
 case $fresh_status in
-  0) freshness_verdict=fresh ;;
+  0)
+    freshness_verdict=fresh
+    fresh_csv="$(printf '%s\n' "$fresh_out" | sed -n 's/^FRESHNESS: fresh refs=//p' | tail -1)"
+    base_checked=false
+    IFS=',' read -r -a fresh_refs <<<"$fresh_csv"
+    for r in "${fresh_refs[@]-}"; do
+      [ "$r" = "$base" ] && base_checked=true
+    done
+    if ! $base_checked; then
+      blockers+=("base '$base' was not actually checked for freshness — no local branch or no counterpart on origin; check the branch name")
+    fi
+    ;;
   1)
     freshness_verdict=stale
     blockers+=("base '$base' is stale — run: git fetch origin $base:$base")
     ;;
   3)
     freshness_verdict=unknown
-    skip_notes+=("base freshness could not be determined (ls-remote failed — offline/sandboxed); verify '$base' manually before launch")
+    blockers+=("base freshness could not be determined — ls-remote failed, offline or sandboxed; verify '$base' manually or re-run with network")
     ;;
   *)
     freshness_verdict=error
@@ -192,7 +203,8 @@ case "$handler" in
   gh-issue|repo-pr) dest_host="github.com" ;;
   *) dest_host="github.com" ;;
 esac
-echo "PREFLIGHT DEST_HOST: $dest_host (handler=$handler)"
+echo "PREFLIGHT DEST_HOST: $dest_host"
+echo "PREFLIGHT HANDLER: $handler"
 
 # --- 4. Confinement smoke ---------------------------------------------------
 # Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
@@ -213,28 +225,49 @@ else
     echo "PREFLIGHT SMOKE: skip (could not create a scratch dir)"
     skip_notes+=("confinement smoke skipped: scratch dir creation failed")
   else
+    scratch_done=false
+    smoke_cleanup() { $scratch_done || rm -rf "$scratch"; scratch_done=true; }
+    trap smoke_cleanup EXIT INT TERM
+
     ex_args=()
     for bin in $FINGERPRINT_BINS; do
       p="$(command -v "$bin" 2>/dev/null || true)"
       [ -n "$p" ] && ex_args+=(--exec "$p")
     done
+    # The smoke itself execs through the rendered profile (env, bash) to run
+    # its checks — those binaries must be on the exec whitelist too, or the
+    # smoke's own checks fail against the wall rather than testing it.
+    for smoke_bin in /usr/bin/env "$(command -v bash 2>/dev/null || true)"; do
+      [ -n "$smoke_bin" ] && [ -x "$smoke_bin" ] && ex_args+=(--exec "$smoke_bin")
+    done
     prof="$scratch/preflight.sb"
-    if bash "$SPAWN" render-profile --rw "$scratch" "${ex_args[@]}" --out "$prof" >/dev/null 2>&1; then
+    if bash "$SPAWN" render-profile --rw "$scratch" ${ex_args[@]+"${ex_args[@]}"} --out "$prof" >/dev/null 2>&1; then
+      smoke_exec_ok=false
       if sandbox-exec -f "$prof" /usr/bin/env bash -c 'exit 0' >/dev/null 2>&1; then
+        smoke_exec_ok=true
         echo "PREFLIGHT SMOKE_EXEC: pass (sed/git/env bash exec through the jail succeeds)"
       else
         echo "PREFLIGHT SMOKE_EXEC: FAIL"
         blockers+=("confinement smoke: exec through the rendered toolchain profile failed — the exec wall is broken, not just narrow")
       fi
 
-      home_probe="$HOME/.preflight-smoke-$$"
-      rm -f "$home_probe"
-      if sandbox-exec -f "$prof" /usr/bin/touch "$home_probe" >/dev/null 2>&1; then
-        rm -f "$home_probe"
-        echo "PREFLIGHT SMOKE_HOME_WRITE: FAIL (write to \$HOME succeeded through the jail)"
-        blockers+=("confinement smoke: a write to \$HOME succeeded through the rendered profile — the filesystem wall is broken")
+      if ! $smoke_exec_ok; then
+        echo "PREFLIGHT SMOKE_HOME_WRITE: skip (SMOKE_EXEC failed — exec wall is already a blocker)"
       else
-        echo "PREFLIGHT SMOKE_HOME_WRITE: pass (write to \$HOME denied, as expected)"
+        home_probe="$(mktemp -u "$HOME/.preflight-smoke-XXXXXXXX" 2>/dev/null || true)"
+        if [ -z "$home_probe" ] || [ -e "$home_probe" ]; then
+          echo "PREFLIGHT SMOKE_HOME_WRITE: skip (could not pick a collision-free probe path)"
+          skip_notes+=("confinement smoke: HOME-write check skipped — no collision-free probe path")
+        else
+          sandbox-exec -f "$prof" /usr/bin/env bash -c ': > "$1"' _ "$home_probe" >/dev/null 2>&1
+          if [ -e "$home_probe" ]; then
+            rm -f "$home_probe"
+            echo "PREFLIGHT SMOKE_HOME_WRITE: FAIL (write to \$HOME succeeded through the jail)"
+            blockers+=("confinement smoke: a write to \$HOME succeeded through the rendered profile — the filesystem wall is broken")
+          else
+            echo "PREFLIGHT SMOKE_HOME_WRITE: pass (write to \$HOME denied, as expected)"
+          fi
+        fi
       fi
 
       settings="$scratch/preflight-settings.json"
@@ -246,10 +279,11 @@ else
         blockers+=("confinement smoke: layer-2 egress allowlist did not render as an enabled, deny-by-default allowlist")
       fi
     else
-      echo "PREFLIGHT SMOKE: skip (render-profile failed for this environment's fingerprint)"
-      skip_notes+=("confinement smoke skipped: render-profile failed")
+      echo "PREFLIGHT SMOKE: FAIL (render-profile failed for this environment's fingerprint)"
+      blockers+=("confinement smoke: render-profile failed to produce a launch profile for this environment's fingerprint — the renderer is broken, not just narrow")
     fi
-    rm -rf "$scratch"
+    smoke_cleanup
+    trap - EXIT INT TERM
   fi
 fi
 

@@ -82,36 +82,64 @@ else
   ok "logged-in coders: no coder blocker"
 fi
 
-# --- the emitted PATH/exec-dir lines are absolute and existent ----------------
+# --- a crashed coder probe fails closed with a named blocker ------------------
+crash_probe="$BASE/crash-probe-coders.sh"
+cat >"$crash_probe" <<'EOF'
+#!/usr/bin/env bash
+echo boom >&2
+exit 3
+EOF
+chmod +x "$crash_probe"
+crash_out="$(PREFLIGHT_PROBE_CODERS="$crash_probe" bash "$SCRIPT" --source plan --base main 2>&1)"; crash_code=$?
+if [ "$crash_code" != 0 ]; then ok "crashed coder probe: non-zero exit"; else bad "crashed coder probe: non-zero exit" "$crash_out"; fi
+have "crashed coder probe: names the blocker" "PREFLIGHT BLOCKER: coder probe failed" "$crash_out"
+
+# --- the emitted PATH/exec-dir lines are always present, absolute and existent -
+count=0
 missing=0
 while IFS= read -r d; do
+  count=$((count + 1))
   case "$d" in
     /*) [ -d "$d" ] || missing=1 ;;
     *) missing=1 ;;
   esac
 done < <(printf '%s\n' "$out" | sed -n 's/^PREFLIGHT PATH_DIR: //p')
-[ "$missing" = 0 ] && ok "PATH_DIR lines are absolute and existent" || bad "PATH_DIR lines are absolute and existent" "$out"
+[ "$count" -gt 0 ] && [ "$missing" = 0 ] && ok "PATH_DIR lines are emitted, absolute and existent" || bad "PATH_DIR lines are emitted, absolute and existent" "$out"
 
+count=0
 missing=0
 while IFS= read -r d; do
+  count=$((count + 1))
   case "$d" in
     /*) [ -d "$d" ] || missing=1 ;;
     *) missing=1 ;;
   esac
 done < <(printf '%s\n' "$out" | sed -n 's/^PREFLIGHT EXEC_DIR: //p')
-[ "$missing" = 0 ] && ok "EXEC_DIR lines are absolute and existent" || bad "EXEC_DIR lines are absolute and existent" "$out"
+[ "$count" -gt 0 ] && [ "$missing" = 0 ] && ok "EXEC_DIR lines are emitted, absolute and existent" || bad "EXEC_DIR lines are emitted, absolute and existent" "$out"
+
+# --- DEST_HOST is a bare hostname, not the parenthesized handler tuple --------
+dest_host_line="$(printf '%s\n' "$out" | sed -n 's/^PREFLIGHT DEST_HOST: //p')"
+if [ -n "$dest_host_line" ] && [[ "$dest_host_line" != *" "* ]] && [[ "$dest_host_line" != *"(handler="* ]]; then
+  ok "DEST_HOST is a bare hostname"
+else
+  bad "DEST_HOST is a bare hostname" "$dest_host_line"
+fi
 
 # --- usage: missing --source fails closed --------------------------------------
 uo="$(bash "$SCRIPT" --base main 2>&1)"; uc=$?
 [ "$uc" = 2 ] && printf '%s' "$uo" | grep -qF -- '--source' \
   && ok "usage: missing --source fails closed" || bad "usage: missing --source fails closed" "exit=$uc msg=$uo"
 
-# --- the confinement smoke degrades to a logged SKIP, never a hard failure, when
-# nested sandbox-exec can't apply in this environment ---------------------------
-if printf '%s\n' "$out" | grep -qF "PREFLIGHT SMOKE: skip"; then
-  ok "confinement smoke: degrades to a logged SKIP when it cannot run"
+# --- the confinement smoke degrades to a logged SKIP, never a hard failure, only
+# for the two legitimate environmental reasons (sandbox-exec absent, or nested
+# apply denied) — a render-profile failure is a real defect and must NOT read as
+# this skip ----------------------------------------------------------------------
+if printf '%s\n' "$out" | grep -qE "PREFLIGHT SMOKE: skip \((sandbox-exec not available|nested sandbox-exec denied)"; then
+  ok "confinement smoke: degrades to a logged SKIP only for legitimate environmental reasons"
 else
-  have "confinement smoke: ran a real check when it could" "PREFLIGHT SMOKE_EXEC:" "$out"
+  have "confinement smoke: ran a real check when it could" "PREFLIGHT SMOKE_EXEC: pass" "$out"
+  have "confinement smoke: HOME-write check ran and passed" "PREFLIGHT SMOKE_HOME_WRITE: pass" "$out"
+  have "confinement smoke: egress check ran and passed" "PREFLIGHT SMOKE_EGRESS: pass" "$out"
 fi
 
 echo "test-preflight: $pass passed, $fail failed"
