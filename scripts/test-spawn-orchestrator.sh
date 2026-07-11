@@ -181,6 +181,7 @@ have "escape: denies mach-lookup to launchd"       'com.apple.xpc.launchd'      
 have "escape: denies mach-lookup to launchservices" 'com.apple.coreservices.launchservicesd' "$escbody"
 have "escape: denies exec of launchctl"            '(literal "/bin/launchctl")'     "$escbody"
 have "escape: denies exec of open"                 '(literal "/usr/bin/open")'      "$escbody"
+have "escape: denies exec of osascript"            '(literal "/usr/bin/osascript")' "$escbody"
 if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
   # /bin is exec-allowed here, so only the explicit process-exec deny can block
   # launchctl — a clean signal the escape binary is walled off, not merely absent.
