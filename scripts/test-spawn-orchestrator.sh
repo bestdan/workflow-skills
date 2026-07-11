@@ -722,8 +722,8 @@ ceo="$("$SCRIPT" classify-exit --exit-code 0 --output "$CX/clean.log" 2>&1)"; ce
 [ "$cec" = 0 ] && [ "$ceo" = "done" ] && ok "classify-exit: clean exit -> done" || bad "classify-exit: clean exit -> done" "$ceo"
 
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" 2>&1)"
-have "classify-exit: 401 -> fatal" 'fatal:' "$ceo"
-have "classify-exit: 401 -> fatal (reason names 401)" '401' "$ceo"
+have "classify-exit: expired-OAuth 401 -> fatal" 'fatal:' "$ceo"
+have "classify-exit: fatal reason names the auth failure" 'non-retryable auth failure' "$ceo"
 
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/rate.log" 2>&1)"
 have "classify-exit: rate-limit signal -> retry" 'retry:' "$ceo"
@@ -731,6 +731,43 @@ lack "classify-exit: rate-limit is not fatal" 'fatal:' "$ceo"
 
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/weird.log" 2>&1)"
 have "classify-exit: unclassified non-zero -> retry" 'retry:' "$ceo"
+
+# A bare `401` in a transcript is NOT an auth failure. The classified bytes are
+# a full stream-json transcript — line numbers, byte counts, SHAs, diffs — where
+# those three digits appear constantly. Matching them would halt a healthy run
+# with a WRONG diagnosis ("re-authenticate a credential that is fine").
+printf '{"type":"assistant","text":"see foo.py:401 and the 4013-byte hunk @@ -401,7 +401,9 @@"}\n' >"$CX/incidental401.log"
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/incidental401.log" 2>&1)"
+have "classify-exit: incidental 401 (line number/diff hunk) -> retry" 'retry:' "$ceo"
+lack "classify-exit: incidental 401 is NOT fatal"                     'fatal:' "$ceo"
+# ...but a 401 in a genuine auth CONTEXT still is, including the exact shape the
+# motivating run-#2 failure took.
+printf 'API Error: 401 Invalid authentication credentials\n' >"$CX/ctx1.log"
+have "classify-exit: run-#2 401 status line -> fatal" 'fatal:' "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/ctx1.log" 2>&1)"
+printf '{"error":{"message":"nope"},"status":401}\n' >"$CX/ctx2.log"
+have "classify-exit: HTTP status field 401 -> fatal" 'fatal:' "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/ctx2.log" 2>&1)"
+
+# --since-offset: the log is APPENDED to across wakes, so a stale 401 from an
+# earlier wake must not classify a later, unrelated failure as fatal — otherwise
+# a human who re-authenticates and resumes gets halted again and told, falsely,
+# that their credential is dead.
+cat "$CX/auth.log" >"$CX/appended.log"
+OFF="$(wc -c <"$CX/appended.log" | tr -d ' ')"
+printf 'some later unrelated crash\n' >>"$CX/appended.log"
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/appended.log" --since-offset "$OFF" 2>&1)"
+have "classify-exit: --since-offset ignores a previous wake's 401" 'retry:' "$ceo"
+lack "classify-exit: stale 401 is not sticky across wakes"         'fatal:' "$ceo"
+# without the offset the same file DOES read fatal — proving the offset is what
+# does the work here, not an accident of the fixture.
+have "classify-exit: whole-file read of the same log is fatal (the bug)" 'fatal:' \
+  "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/appended.log" 2>&1)"
+# a live 401 within THIS wake's slice still halts
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" --since-offset 0 2>&1)"
+have "classify-exit: --since-offset 0 still sees this wake's 401" 'fatal:' "$ceo"
+# fail-SAFE (not fail-closed): a garbage offset degrades to the whole file, so a
+# broken offset can only over-halt, never silently relaunch forever.
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" --since-offset bogus 2>&1)"
+have "classify-exit: invalid --since-offset falls back to the whole file" 'fatal:' "$ceo"
 
 # fail-closed: required args
 o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --exit-code' \
@@ -806,6 +843,17 @@ lbody10="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: calls supervisor-check after claude exits" 'supervisor-check' "$lbody10"
 have "launch: no longer execs claude directly"           'set +e'          "$lbody10"
 lack "launch: exec sandbox-exec no longer used"          'exec sandbox-exec' "$lbody10"
+# the log offset must be captured BEFORE claude runs, and handed to
+# supervisor-check — else classification reads every past wake's bytes too.
+have "launch: captures the log offset before the run" 'off=$(wc -c'      "$lbody10"
+have "launch: passes --since-offset to supervisor-check" '--since-offset "$off"' "$lbody10"
+off_ln="$(printf '%s\n' "$lbody10" | grep -n 'off=$(wc -c' | head -1 | cut -d: -f1)"
+sbx_ln="$(printf '%s\n' "$lbody10" | grep -n '^sandbox-exec -f' | head -1 | cut -d: -f1)"
+if [ -n "$off_ln" ] && [ -n "$sbx_ln" ] && [ "$off_ln" -lt "$sbx_ln" ]; then
+  ok "launch: log offset is captured before sandbox-exec runs"
+else
+  bad "launch: log offset is captured before sandbox-exec runs" "off@$off_ln sandbox@$sbx_ln"
+fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

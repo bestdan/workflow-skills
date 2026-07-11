@@ -150,9 +150,9 @@ shell (`scripts/spawn-orchestrator.sh classify-exit` / `supervisor-check`,
 called by the generated launch script after every wake):
 
 - **Fatal, non-retryable** — the exit's captured stdout+stderr names an auth
-  failure (`401`, `authentication_failed`, `Invalid authentication
-  credentials`, `OAuth token has expired`): halt **immediately**, on the
-  first occurrence.
+  failure (`authentication_failed`, `Invalid authentication credentials`,
+  `OAuth token has expired`, or a `401` **in an auth context**): halt
+  **immediately**, on the first occurrence.
 - **Unknown/unclassified repeated failure — the no-progress guard.** Even
   without a string match, N consecutive supervisor wakes (default 3) that
   exit non-zero with **no run-state commit** between them (the run-state
@@ -173,6 +173,32 @@ third direction. Unlike those two, nothing about a supervisor halt is
 resumable by a timer: only a human fixing the underlying condition (typically
 re-authenticating) and then an explicit `--resume` moves the run forward
 again.
+
+**Two ways this classification can lie, and what stops them.** Both are about
+the same thing — a halt is only useful if its **diagnosis** is right, because
+the diagnosis is the instruction the operator acts on.
+
+- **Classify only what _this_ wake wrote.** The launch script _appends_ every
+  wake's output to one `orchestrator.log`, so classifying the whole file makes
+  an auth failure **sticky**: once any wake has emitted a 401 the string is in
+  that file forever, and every later non-zero exit — including exits after the
+  human re-authenticated and resumed — would re-classify as `fatal` and halt
+  again, blaming a credential that is now fine. The operator's fix would
+  appear not to work. So the launch script records the log's byte offset
+  _before_ invoking `claude` and passes it as `--since-offset`; the classifier
+  reads only from there. A missing or malformed offset degrades to reading the
+  whole file — **fail-safe, not fail-closed**: over-halting is recoverable,
+  silently relaunching forever is the bug this whole section exists to fix.
+- **A bare `401` is not a signal.** The classified bytes are a full
+  stream-json transcript — model output, tool results, diffs — where `401`
+  turns up in line numbers (`foo.py:401`), byte counts, SHAs, and hunk
+  headers. Matching it as a bare substring would halt healthy runs and tell
+  the human to re-authenticate a working credential. `401` therefore only
+  counts in an **auth context** (an HTTP status field or status line, e.g.
+  `"status": 401`, `API Error: 401`, `401 Unauthorized`); the other three
+  phrases are distinctive enough to match literally. Run #2's actual failure
+  line — `401 Invalid authentication credentials` — still matches, and the
+  no-progress guard remains the catch-all for anything the string match misses.
 
 ## Hard-stop before paid/overflow credits
 

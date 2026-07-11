@@ -67,6 +67,14 @@ in the foreground, captures its exit code, and calls
 launchd-tracked PID is now this wrapper, not `claude`, which is the
 deliberate trade against being able to classify the exit at all.
 
+**Consequence for the PID record.** The PID that `record-handle` writes and
+that `status` / the stale-orchestrator guard (**Orphan / stale detection**
+below) read is therefore the **supervising wrapper shell**, not the `claude`
+process itself — `claude` is now that wrapper's child. Liveness of the
+wrapper still means "this run's wake is in flight," which is what those
+consumers actually test, so the guard is unaffected; but a reader expecting
+`ps` to show `claude` at that PID should expect the wrapper.
+
 `supervisor-check` (built on the pure `classify-exit`) is the **third
 bucket** the rate-limit backstop above didn't have: a **supervisor halt**.
 Where the rate-limit backstop assumes the failure is retryable, a `401` /

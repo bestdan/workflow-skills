@@ -46,18 +46,25 @@
 #           QUESTIONS.md entry recording the deviation (which then reaches
 #           REPORT.md via the existing rolling rewrite). Fail-closed only if
 #           the restore itself fails (e.g. uncommitted changes block checkout).
-#   spawn-orchestrator.sh classify-exit --exit-code <n> --output <file>
+#   spawn-orchestrator.sh classify-exit --exit-code <n> --output <file> \
+#       [--since-offset <bytes>]
 #   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
+#       [--since-offset <bytes>] \
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>]
 #
 #   classify-exit  Read-only, no model call (task 10 / finding #22): classify
 #                  an orchestrator exit from its exit code + captured
 #                  stdout+stderr. Prints exactly one of `done` (exit 0),
-#                  `fatal: <reason>` (a non-retryable auth failure — 401 /
-#                  authentication_failed / an expired-OAuth message), or
-#                  `retry: <reason>` (a rate-limit signal, or any other
-#                  non-zero exit). Always exits 0 — the classification is the
-#                  payload, not a pass/fail signal.
+#                  `fatal: <reason>` (a non-retryable auth failure —
+#                  authentication_failed / an expired-OAuth message / a 401 in
+#                  an auth CONTEXT, never a bare `401` substring, which occurs
+#                  incidentally in any transcript), or `retry: <reason>` (a
+#                  rate-limit signal, or any other non-zero exit). Always exits
+#                  0 — the classification is the payload, not a pass/fail
+#                  signal. `--since-offset` bounds the read to the bytes THIS
+#                  wake appended to the shared log, so a past wake's auth
+#                  failure can't keep halting a run that has since been
+#                  re-authenticated.
 #   supervisor-check  The per-wake decision the generated launch script calls
 #                  AFTER `claude -p` exits. Classifies the exit (above); a
 #                  `fatal` classification halts immediately. A `retry`
@@ -681,6 +688,12 @@ write_launch() {
     printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
     printf 'export PATH=%q\n' "$path"
     printf 'cd %q\n' "$workdir"
+    # Record the log's size BEFORE this wake writes to it. The log is appended
+    # to across every wake, so classify-exit must look only at the bytes THIS
+    # process wrote — otherwise an old wake's 401 stays in the file forever and
+    # would keep halting the run long after a human re-authenticated.
+    printf 'off=$(wc -c <%q 2>/dev/null | tr -d " ") || off=0\n' "$log"
+    printf ': "${off:=0}"\n'
     # NOT `exec`'d (task 10): the wrapper must observe claude's exit to
     # classify it, so the launchd-tracked PID is this wrapper, not claude
     # itself. `set +e`/`set -e` bracket the one command allowed to fail.
@@ -700,7 +713,7 @@ write_launch() {
     # run-state progress also halts (the general backstop). A retryable exit
     # (or a legitimate paused_until wait) just exits non-zero, and the
     # plist's StartInterval relaunches as before.
-    printf '%q supervisor-check --exit-code "$code" --log %q --dir %q --label %q --state %q --no-progress-limit %q\n' \
+    printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --dir %q --label %q --state %q --no-progress-limit %q\n' \
       "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit"
     printf 'exit $?\n'
   } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
@@ -832,23 +845,42 @@ teardown() {
 # call: a rate-limited or auth-dead agent cannot run its own bookkeeping.
 # ---------------------------------------------------------------------------
 
-# Literal substrings, not regexes — the exact signals named in finding #22
-# and run-budget.md's rate-limit backstop. Plain `grep -F` avoids any
-# metacharacter surprise in these fixed strings and keeps the match exact.
-_AUTH_FAIL_SIGNALS=('401' 'authentication_failed' 'Invalid authentication credentials' 'OAuth token has expired')
+# Unambiguous auth-failure phrases. These are distinctive enough that a literal
+# `grep -F` is safe: no transcript says "OAuth token has expired" incidentally.
+_AUTH_FAIL_SIGNALS=('authentication_failed' 'Invalid authentication credentials' 'OAuth token has expired')
+# A bare `401` is NOT one of them. The classified bytes are a full stream-json
+# transcript — model output, tool results, diffs — where `401` shows up in line
+# numbers (`foo.py:401`), byte counts, and SHAs. Matching it as a bare substring
+# would halt a healthy run with a WRONG diagnosis ("re-authenticate"), which is
+# the expensive kind of false positive. So 401 only counts in an auth-ish
+# CONTEXT — an HTTP status field or a status line. The motivating run-#2 failure
+# line (`401 Invalid authentication credentials`) still matches, via both the
+# literal above and the status-line alternative here.
+_AUTH_401_RE='("status"[[:space:]]*:[[:space:]]*401|[Ss]tatus[[:space:]]*:[[:space:]]*401|[Ee]rror[[:space:]]*:[[:space:]]*401|401[[:space:]]+(Invalid authentication credentials|Unauthorized))'
 _RATE_LIMIT_SIGNALS=('429' 'rate_limit_error' 'overloaded')
 
-# Classify an exit from its code + the process's captured stdout+stderr, with
+# Classify an exit from its code + the bytes the process wrote THIS WAKE, with
 # no model call. Prints exactly one of `done` / `fatal: <reason>` /
 # `retry: <reason>` and always exits 0 (the classification is the payload).
 # Auth is checked BEFORE rate-limit: it is the non-retryable case, and a
 # transcript that happens to mention both must still halt, not retry.
+#
+# --since-offset is load-bearing, not an optimization. The launch script appends
+# to one orchestrator.log across every wake, so classifying the WHOLE file makes
+# an auth failure STICKY: once any wake emits a 401 the string never leaves the
+# log, so every later non-zero exit — including ones after a human has
+# re-authenticated and resumed — would re-classify as `fatal` and halt again,
+# blaming a credential that is now fine. Reading only this wake's bytes is what
+# makes the classification about the CURRENT process. A missing/invalid offset
+# falls back to the whole file: over-halting is the safe direction, silently
+# relaunching forever is not (that is the bug this task exists to fix).
 classify_exit() {
-  local code="" outfile=""
+  local code="" outfile="" offset=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
       --output) [ $# -ge 2 ] || die "missing value for --output"; outfile="$2"; shift 2 ;;
+      --since-offset) [ $# -ge 2 ] || die "missing value for --since-offset"; offset="$2"; shift 2 ;;
       *) die "unknown classify-exit argument: $1" ;;
     esac
   done
@@ -862,15 +894,28 @@ classify_exit() {
     return 0
   fi
 
+  # Slice to this wake's bytes. A non-numeric offset is NOT fail-closed — it
+  # degrades to the whole file (see above), because refusing to classify at all
+  # would leave the supervisor relaunching blind.
+  local content
+  case "$offset" in
+    ''|*[!0-9]*) content="$(cat "$outfile")" ;;
+    *) content="$(tail -c "+$((offset + 1))" "$outfile" 2>/dev/null)" || content="$(cat "$outfile")" ;;
+  esac
+
   local p
   for p in "${_AUTH_FAIL_SIGNALS[@]}"; do
-    if grep -qF -- "$p" "$outfile"; then
+    if grep -qF -- "$p" <<<"$content"; then
       echo "fatal: non-retryable auth failure ($p)"
       return 0
     fi
   done
+  if grep -Eq -- "$_AUTH_401_RE" <<<"$content"; then
+    echo "fatal: non-retryable auth failure (401 in an auth context)"
+    return 0
+  fi
   for p in "${_RATE_LIMIT_SIGNALS[@]}"; do
-    if grep -qF -- "$p" "$outfile"; then
+    if grep -qF -- "$p" <<<"$content"; then
       echo "retry: rate-limit signal ($p)"
       return 0
     fi
@@ -981,11 +1026,12 @@ _supervisor_halt() {
 # The per-wake entry point the generated launch script calls after `claude -p`
 # exits. See the file-header comment above for the full decision.
 supervisor_check() {
-  local code="" log="" dir="" label="" state="" limit=3
+  local code="" log="" dir="" label="" state="" limit=3 offset=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
       --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
+      --since-offset) [ $# -ge 2 ] || die "missing value for --since-offset"; offset="$2"; shift 2 ;;
       --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --state) [ $# -ge 2 ] || die "missing value for --state"; state="$2"; shift 2 ;;
@@ -1000,7 +1046,7 @@ supervisor_check() {
   [ -d "$dir" ] || die "supervisor-check --dir not found: $dir"
   case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
 
-  local class; class="$(classify_exit --exit-code "$code" --output "$log")"
+  local class; class="$(classify_exit --exit-code "$code" --output "$log" --since-offset "$offset")"
 
   case "$class" in
     done)
