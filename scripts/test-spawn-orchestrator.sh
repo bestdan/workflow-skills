@@ -897,5 +897,175 @@ else
   bad "launch: log offset is captured before sandbox-exec runs" "off@$off_ln sandbox@$sbx_ln"
 fi
 
+# --- restack: post-merge restack of stacked PRs (task 18, finding #25) -------
+# Builds a REAL git repo (a bare "origin" + a working clone) with a
+# squash-merged parent + a stacked child, and a FAKE `gh` (offline — no
+# GitHub calls) so the git mechanics run for real while every GitHub
+# read/write is mocked and inspectable.
+if command -v git >/dev/null 2>&1; then
+  RS="$BASE/restack"; mkdir -p "$RS"
+  ORIGIN="$RS/origin.git"; WORK="$RS/work"
+  git init --bare -q "$ORIGIN"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "$ORIGIN"
+  git -C "$WORK" config user.email test@example.com
+  git -C "$WORK" config user.name "Test"
+  git -C "$WORK" checkout -q -b main
+  echo root >"$WORK/root.txt"; git -C "$WORK" add root.txt; git -C "$WORK" commit -q -m root
+  git -C "$WORK" push -q origin main
+
+  # parent branch (task_parent, PR #100): adds parent.txt
+  git -C "$WORK" checkout -q -b parent-branch
+  printf 'line1\n' >"$WORK/parent.txt"; git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "parent change"
+  git -C "$WORK" push -q origin parent-branch
+  PARENT_SHA="$(git -C "$WORK" rev-parse parent-branch)"   # the child's frozen base_sha
+
+  # child branch (task_child, PR #101): stacked on parent-branch, touches ONLY
+  # child.txt — must restack cleanly regardless of what else happens to main.
+  git -C "$WORK" checkout -q -b child-branch
+  echo child >"$WORK/child.txt"; git -C "$WORK" add child.txt; git -C "$WORK" commit -q -m "child change"
+  git -C "$WORK" push -q origin child-branch
+
+  # Simulate the human squash-merging the parent PR into main: a NEW squash
+  # commit on main, not an ancestor of parent-branch's own commits — the exact
+  # shape that orphans a child under squash-merge.
+  git -C "$WORK" checkout -q main
+  git -C "$WORK" merge -q --squash parent-branch >/dev/null
+  git -C "$WORK" commit -q -m "parent change (squashed)"
+  # Then simulate a POST-HAND-OFF human review fix on the SAME line (run-state.md
+  # "restacked child is stale" note): the child was co-reviewed against the
+  # pre-review parent, so a clean rebase later must not be mistaken for proof
+  # nothing was missed.
+  printf 'line1-SECURITY-FIXED\n' >"$WORK/parent.txt"
+  git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "parent: post-hand-off review fix"
+  git -C "$WORK" push -q origin main
+
+  # Fake gh: PR state lives in flat files under $FAKE_GH_DB; `pr edit --base`
+  # rewrites the base file (so a second restack observes the retarget) and
+  # appends to edits.log (so the test can assert exactly what was retargeted).
+  FAKE_GH_DB="$RS/ghdb"; mkdir -p "$FAKE_GH_DB"
+  printf 'MERGED\n' >"$FAKE_GH_DB/100.state"; printf 'main\n' >"$FAKE_GH_DB/100.base"
+  printf 'OPEN\n'   >"$FAKE_GH_DB/101.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/101.base"
+  FAKE_GH="$RS/gh"
+  cat >"$FAKE_GH" <<'GHEOF'
+#!/usr/bin/env bash
+set -uo pipefail
+db="${FAKE_GH_DB:?FAKE_GH_DB not set}"
+[ "$1" = pr ] || exit 1
+sub="$2"; num="$3"; shift 3
+case "$sub" in
+  view)
+    jqexpr=""
+    while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
+    case "$jqexpr" in
+      .baseRefName) cat "$db/$num.base" 2>/dev/null ;;
+      .state)       cat "$db/$num.state" 2>/dev/null ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  edit)
+    while [ $# -gt 0 ]; do
+      case "$1" in --base) printf '%s\n' "$2" >"$db/$num.base"; echo "$num $2" >>"$db/edits.log"; shift 2 ;; *) shift ;; esac
+    done
+    ;;
+  *) exit 1 ;;
+esac
+GHEOF
+  chmod +x "$FAKE_GH"
+  export FAKE_GH_DB
+
+  RUNDIR_RS="$RS/run"; mkdir -p "$RUNDIR_RS/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n'
+    printf '\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_parent | handed-off | parent-branch | main | - | #100 | |\n'
+    printf '| task_child  | handed-off | child-branch | parent-branch | %s | #101 | |\n' "$PARENT_SHA"
+  } >"$RUNDIR_RS/.auto-pilot/RUN.md"
+
+  rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc=$?
+  [ "$rsc" = 0 ] && ok "restack: exits 0 on a clean stacked restack" || bad "restack: exits 0 on a clean stacked restack" "$rsout"
+  have "restack: reports task_child done" 'restack task_child done' "$rsout"
+  have "restack: prints the copy-pasteable rebase command" 'git rebase --onto origin/main' "$rsout"
+  have "restack: retargets the PR base" '101 main' "$(cat "$FAKE_GH_DB/edits.log" 2>/dev/null)"
+
+  git -C "$WORK" fetch -q origin
+  diffnames="$(git -C "$WORK" diff --name-only origin/main origin/child-branch)"
+  if [ "$diffnames" = "child.txt" ]; then
+    ok "restack: child's post-restack diff contains ONLY its own file"
+  else
+    bad "restack: child's post-restack diff contains ONLY its own file" "got: $diffnames"
+  fi
+  lack "restack: child diff does not re-propose parent.txt" 'parent.txt' "$diffnames"
+
+  # idempotency: a second restack makes no additional rebase/push/gh-edit
+  editcount_before="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
+  rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc2=$?
+  [ "$rsc2" = 0 ] && ok "restack: idempotent second run exits 0" || bad "restack: idempotent second run exits 0" "$rsout2"
+  have "restack: idempotent second run reports no-op" 'already based on main (no-op)' "$rsout2"
+  editcount_after="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
+  [ "$editcount_before" = "$editcount_after" ] && ok "restack: idempotent run makes no additional gh edit" \
+    || bad "restack: idempotent run makes no additional gh edit" "before=$editcount_before after=$editcount_after"
+
+  # --- fail-closed on conflict: a second stacked child edits the SAME line the
+  # parent's post-hand-off review fix touched — the exact "clean rebase proves
+  # nothing" scenario run-state.md warns about, except here it's not clean: the
+  # rebase must conflict, abort, and never force-push or retarget.
+  git -C "$WORK" checkout -q parent-branch
+  git -C "$WORK" checkout -q -b conflict-child
+  PARENT_SHA2="$(git -C "$WORK" rev-parse parent-branch)"
+  printf 'line1-CONFLICTING-EDIT\n' >"$WORK/parent.txt"
+  git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "child edits the same line"
+  git -C "$WORK" push -q origin conflict-child
+  printf 'OPEN\n' >"$FAKE_GH_DB/102.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/102.base"
+  printf '| task_conflict | handed-off | conflict-child | parent-branch | %s | #102 | |\n' "$PARENT_SHA2" \
+    >>"$RUNDIR_RS/.auto-pilot/RUN.md"
+
+  precommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
+  rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc3=$?
+  [ "$rsc3" = 2 ] && ok "restack: fail-closed conflict exits non-zero" || bad "restack: fail-closed conflict exits non-zero" "exit=$rsc3"
+  have "restack: fail-closed conflict reports a conflict" 'FAILED — rebase conflict' "$rsout3"
+  postcommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
+  [ "$precommit_tip" = "$postcommit_tip" ] && ok "restack: conflict never force-pushes the broken branch" \
+    || bad "restack: conflict never force-pushes the broken branch"
+  lack "restack: conflict never retargets the PR" '102 main' "$(cat "$FAKE_GH_DB/edits.log" 2>/dev/null)"
+  [ -z "$(git -C "$WORK" status --porcelain 2>/dev/null)" ] && [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "conflict-child" ] \
+    && ok "restack: conflict leaves the working tree clean (rebase --abort ran)" \
+    || bad "restack: conflict leaves the working tree clean (rebase --abort ran)"
+
+  # --- orphaned-child detector: a merged/deleted base is a flagged defect ----
+  RSD="$RS/detect-run"; mkdir -p "$RSD/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_parent  | handed-off | parent-branch | main | - | #100 | |\n'
+    # deleted/unreadable base ref (LOUD case: gh has nothing for its baseRefName)
+    printf '| task_deleted | handed-off | deleted-child | gone-branch | deadbeef | #200 | |\n'
+    # base branch's own tracked PR is MERGED, but this child was never
+    # retargeted (QUIET case — restack itself can't fix it: no base_sha) —
+    # the exact "looks healthy, does nothing" shape finding #25 warns about
+    printf '| task_quiet   | handed-off | quiet-child   | parent-branch | - | #201 | |\n'
+  } >"$RSD/.auto-pilot/RUN.md"
+  printf 'OPEN\n' >"$FAKE_GH_DB/200.state"   # no 200.base file at all -> baseRefName lookup fails
+  printf 'OPEN\n' >"$FAKE_GH_DB/201.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/201.base"
+
+  dsout="$("$SCRIPT" restack --run-dir "$RSD" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dsc=$?
+  [ "$dsc" = 2 ] && ok "restack: orphan-detector run reports the missing-base_sha failure" \
+    || bad "restack: orphan-detector run reports the missing-base_sha failure" "exit=$dsc"
+  have "restack: flags a deleted/unreadable base as a defect" 'DEFECT task_deleted' "$dsout"
+  have "restack: flags a PR still targeting a merged branch as a defect" 'DEFECT task_quiet' "$dsout"
+  have "restack: defect summary count is non-zero" 'defects=2' "$dsout"
+
+  unset FAKE_GH_DB
+else
+  echo "skip - restack: git not available"
+fi
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

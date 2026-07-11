@@ -424,11 +424,12 @@ recorded `base_sha` — the parent's frozen tip captured at its hand-off (per
 parent has moved since the base was frozen and the child would build on a stale
 base — **park** the task instead, record it, and continue to the next ready task.
 
-This guard catches only the orchestrator moving a base, not a **human** merging
-a stacked PR out of order mid-run: a child's diff is correct only relative to
-its parent's branch, so out-of-order merges corrupt the stack. `REPORT.md`
-should tell the human to **merge bottom-up in dependency order** — each chain's
-root first, then its children, never a child ahead of its parent.
+This guard models one actor — the **orchestrator** moving a base mid-run — and
+must never fire on a **human** merging a parent PR, which is restack's normal
+trigger, not an error; see
+[`references/run-state.md`](references/run-state.md) "Restack (post-merge
+stacked-PR repair)" for the mechanized remedy (`spawn-orchestrator.sh restack`)
+and why a clean rebase alone is not proof the child is still correct.
 
 **State update after each task.** After `/deliver-task` returns, update
 `RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
