@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.48.0] - 2026-07-11
+
+### Features
+
+- supervisor halts on a fatal auth failure instead of relaunching forever (task 10) (#183) (a4bb80e)
+
 ## [1.47.2] - 2026-07-11
 
 ### Fixes
