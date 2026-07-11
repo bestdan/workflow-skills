@@ -377,6 +377,11 @@ render_network_allowlist() {
   # rejected). The agy-specific guard above additionally bans ANY wildcard for agy.
   local h
   for h in "${hosts[@]}"; do
+    # Reject an embedded newline FIRST: `grep -Eq` matches if ANY line matches,
+    # so a multiline value could pass the anchored regex on one line while
+    # hosts_to_json_array splits it into a second, unvalidated host — smuggling a
+    # wildcard past the allowlist. A real hostname never contains a newline.
+    case "$h" in *$'\n'*) die "invalid egress host (embedded newline, fail-closed): $h" ;; esac
     printf '%s' "$h" | grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' \
       || die "invalid egress host (fail-closed): $h"
   done

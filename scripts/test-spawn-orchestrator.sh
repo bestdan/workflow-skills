@@ -245,6 +245,9 @@ have "settings: github wildcard kept"    '*.githubusercontent.com' "$(cat "$BASE
 have "settings: plan source + add-task-host allows linear" 'api.linear.app' "$(cat "$BASE/addtask.json" 2>/dev/null)"
 sfc "add-task-host bare wildcard" "invalid egress host" --source plan --add-task-host '*'
 sfc "add-task-host bad chars"     "invalid egress host" --source plan --add-task-host 'evil*'
+sfc "add-task-host empty"         "invalid egress host" --source plan --add-task-host ''
+sfc "add-task-host JSON injection" "invalid egress host" --source plan --add-task-host 'x","*'
+sfc "add-task-host embedded newline" "invalid egress host" --source plan --add-task-host $'good.com\nevil*.com'
 
 # --- hardening: --confine-under bounds write scopes (task 3, Fable #3) ---------
 mkdir -p "$BASE/root/wt"
