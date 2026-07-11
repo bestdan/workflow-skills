@@ -28,8 +28,9 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
   bound.
 - `--resume` — reconcile a crashed or paused run's state against reality, then
   continue the run. Parse it, and if present, dispatch to the SKILL's **Resume
-  phase** (`skills/auto-pilot/SKILL.md`, "Resume phase (--resume)") instead of
-  running the launch pre-flight; do not restate its reconciliation steps here.
+  phase** (`skills/auto-pilot/SKILL.md`, "Resume phase (--resume)", whose
+  mechanics live in `skills/auto-pilot/references/resume.md`) instead of running
+  the launch pre-flight; do not restate its reconciliation steps here.
   The resumed run still ends at hand-off, same as a fresh launch.
 
 ## Dispatch

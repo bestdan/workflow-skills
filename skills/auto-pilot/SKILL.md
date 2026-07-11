@@ -46,6 +46,11 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   paid/overflow credits, per-task wall-clock and retry limits, the paid-agent
   dispatch cap, and the run-level circuit breaker. The run loop's budget
   check reads this.
+- [`references/resume.md`](references/resume.md) — the `--resume` reconciliation
+  procedure: which pre-flight is re-run vs skipped, locating the one resumable
+  run-state branch, the stale-orchestrator guard, and the per-task reconciliation
+  against run-state.md's crash-reconciliation table before falling into the run
+  loop. The Resume phase summarizes this; the mechanics live here.
 
 ## Launch phase (interactive)
 
@@ -271,79 +276,27 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
 
 ## Resume phase (--resume)
 
-Invoked by `/auto-pilot <source> --resume` (`commands/auto-pilot.md`). Resume's
-job is to reconcile a crashed or paused run's durable state against reality,
-then fall into the normal **Run phase** loop below for whatever remains ready.
+Invoked by `/auto-pilot <source> --resume` (`commands/auto-pilot.md`). Resume
+reconciles a crashed or paused run's durable state against reality, then falls
+into the normal **Run phase** loop below for whatever remains ready. The full
+procedure is in [`references/resume.md`](references/resume.md); in short:
 
-**Re-run only the pre-flight that can rot; skip the launch-only steps.**
-Worktree + run-state-branch creation (step 1) and the **task-graph
-materialization** half of step 6 already exist on the run-state branch from the
-original launch, so resume does not re-create them; **source normalization
-still runs** — resume must normalize `<source>` to resolve which run-state
-branch it reads from, even though it never re-creates that branch. What can rot
-between launch and resume, and so is re-run: the non-interactive **auth probes**
-and the **environment fingerprint** (Launch step 2) — a run launched
-`local-full` may resume under `claude-web`, or vice versa, so step 6's _other_
-half, the scout's **capability join**, must re-run against the current
-environment — and **base freshness**. As at launch, a hard failure here
-**BLOCKS THE RESUME**, fail-closed the same way.
-
-**Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
-but run-state branches are named `auto-pilot/<run_id>`
-([`references/run-state.md`](references/run-state.md) "Run-state branch") and
-nothing stops more than one run existing for the same source. After normalizing
-`<source>`, enumerate the `auto-pilot/*` branches whose `RUN.md` front matter
-records that source and require **exactly one** in a resumable (`active` /
-`paused` / `systemic`) state. Zero matches, or more than one, is **fail-closed**:
-report the ambiguous `run_id`s by name and stop rather than guess which run to
-resume — the same never-guess posture the reconciliation below takes.
-
-**Stale-orchestrator guard.** Read `orchestrator_pid` / `orchestrator_started_at`
-/ `until` from `RUN.md`'s front matter
-([`references/run-state.md`](references/run-state.md) "`RUN.md`"). If a live
-orchestrator with the matching start-time is still running at that PID
-([`references/launch-runtime.md`](references/launch-runtime.md) "Orphan / stale
-detection"), do not start a second one — report it and stop. A dead PID, or a
-start-time mismatch (a recycled PID), means it's safe to proceed; the
-start-time is exactly what tells the two cases apart.
-
-**Reconcile each non-terminal task.** Re-read `RUN.md` from the run-state
-branch. `handed-off` and `parked` tasks are terminal and left untouched. For
-every other task (`claimed` / `implementing` / `pr-open` / `in-review` /
-`iterating`), observe reality in the **write order's** direction — git first,
-then tracker, then run files. The freshness relation remote ≥ tracker ≥ run
-files ([`references/run-state.md`](references/run-state.md) "Write order") is
-exactly why that read order needs no guessing: does the task branch exist
-locally / on the remote, is there an open PR for its head branch, what state
-does the tracker show, is a worker worktree left behind. Match the observed
-reality to a row of that reference's **crash-reconciliation table**
-("Crash reconciliation", rows G1–G7) and apply that row's action, in the same
-fixed write order — reconcile by that table, don't restate it here. The
-load-bearing invariant that makes this decidable: `needs_review` is only ever
-written at the hand-off tracker write, never the pr-open one, so a task that
-crashed at `pr-open` always reconciles to `started` plus a linked PR (G5),
-never to hand-off.
-
-**Idempotency.** Resume must be safe to run repeatedly. It leans on G4's
-idempotency check — an existing PR for a task's head branch is detected and
-adopted, never duplicated — so re-resuming never opens a duplicate PR or
-re-claims a task already in flight.
-
-**Orphaned worker worktrees.** A crash mid-`implementing`/`iterating` (G2) can
-leave a worker worktree behind; resume removes it before any re-dispatch.
-
-**Never blind-retry.** A task whose observed reality doesn't match any
-reconciliation row cleanly is set to `parked` and gets a `REPORT.md` entry
-describing what was found ([`references/run-state.md`](references/run-state.md)
-"`REPORT.md`") — resume never guesses or retries blindly.
-
-**Then fall into the run loop.** Once reconciliation leaves `RUN.md` accurate,
-resume continues into the **Run phase** loop below for the remaining ready
-tasks; it does not re-derive that loop. If the run was paused (`status: paused`
-/ `paused_until` set), resume clears those run-level pause markers before
-re-entering the loop, per
-[`references/run-budget.md`](references/run-budget.md) "Near-cap → pause +
-relaunch past reset" — pause semantics live there, not here.
+- **Re-run only the pre-flight that can rot** — the auth probes, the environment
+  fingerprint, the scout's capability join, and base freshness (a run launched
+  `local-full` may resume under `claude-web`). Worktree + run-state-branch
+  creation and task-graph materialization already exist on the branch and are
+  not re-created; source normalization still runs. A hard failure **BLOCKS THE
+  RESUME**, fail-closed.
+- **Locate exactly one resumable run-state branch** for the normalized source
+  (zero or many is fail-closed), and **guard against a live orchestrator** at the
+  recorded PID + start-time before starting a second one.
+- **Reconcile each non-terminal task** by observing reality in the write order's
+  direction (git → tracker → run files) and matching it to `run-state.md`'s
+  crash-reconciliation table (rows G1–G7) — idempotent (adopts an existing PR,
+  never duplicates), removes orphaned worker worktrees, and **parks** anything
+  that matches no row cleanly rather than blind-retrying.
+- **Then fall into the run loop**, clearing any run-level pause markers first
+  ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 
 ## Run phase (unattended)
 
