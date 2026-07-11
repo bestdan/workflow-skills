@@ -131,24 +131,29 @@ fc "exec-dir plain file"  "not a directory"           --exec-dir "$PLAIN"
 
 if command -v sandbox-exec >/dev/null 2>&1; then
   EDBIN=""
-  for cand in /usr/bin/sed /bin/sed /usr/bin/env; do
+  # Prefer no-arg zero-exit binaries so the success check is portable — BSD/macOS
+  # `sed --version` exits non-zero (unknown flag), which would false-fail even when
+  # exec-dir confinement is working.
+  for cand in /usr/bin/true /bin/echo /usr/bin/env; do
     if command -v "$cand" >/dev/null 2>&1; then EDBIN="$cand"; break; fi
   done
   if [ -n "$EDBIN" ]; then
     EDDIR="$(dirname "$EDBIN")"
     edcprof="$BASE/execdir-confine.sb"
     "$SCRIPT" render-profile --exec-dir "$EDDIR" --rw "$RUN_WT" --out "$edcprof" >/dev/null 2>&1
-    if sandbox-exec -f "$edcprof" "$EDBIN" --version >/dev/null 2>&1; then
+    if sandbox-exec -f "$edcprof" "$EDBIN" >/dev/null 2>&1; then
       ok "exec-dir: exec inside allowed dir succeeds"
     else
       bad "exec-dir: exec inside allowed dir succeeds"
     fi
-    if sandbox-exec -f "$edcprof" bash -c "echo x > $HOME/outside" >/dev/null 2>&1; then
+    # Write outside the RW scope is denied — target the test's own temp tree
+    # ($BASE is outside --rw "$RUN_WT"), never the real $HOME.
+    if sandbox-exec -f "$edcprof" bash -c "echo x > $BASE/exec-dir-denied" >/dev/null 2>&1; then
       bad "exec-dir: write outside rw scope still denied"
     else
       ok "exec-dir: write outside rw scope still denied"
     fi
-    rm -f "$HOME/outside" 2>/dev/null
+    rm -f "$BASE/exec-dir-denied" 2>/dev/null
     if [ -x "$BIN" ] && [ "$(dirname "$BIN")" != "$EDDIR" ]; then
       if sandbox-exec -f "$edcprof" "$BIN" >/dev/null 2>&1; then
         bad "exec-dir: exec outside allowed dirs still denied"
