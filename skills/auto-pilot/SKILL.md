@@ -106,52 +106,43 @@ artifact, not a generic error.
 ### Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
 Run `scripts/preflight.sh --source <plan|linear> --base <base branch>` first —
-it is the read-only pre-flight helper this step extracts to (below): the
-binary fingerprint / environment class, coder availability (via
-`scripts/probe-coders.sh`), base freshness (via
-`scripts/preflight-freshness.sh`), the resolved PATH/exec dirs, the add-task
-destination host, and the confinement smoke all come from its `PREFLIGHT …`
-output and its `PREFLIGHT VERDICT: go` / `no-go — <reason>` line. A `no-go`
+the read-only pre-flight helper this step extracts to (below). Its `PREFLIGHT …`
+output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
+fingerprint / environment class, coder availability, base freshness, the
+resolved PATH/exec dirs, the add-task host, and the confinement smoke. A `no-go`
 **BLOCKS LAUNCH** with the reason it names; treat its output as the source of
-truth for this step rather than re-deriving these facts by hand.
+truth here rather than re-deriving these facts by hand.
 
 Probe every credential the run will need, each **non-interactively** — a probe
 that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
 failure (see [`references/launch-runtime.md`](references/launch-runtime.md) §3).
-Probe, per dependency:
-
-The probe path depends on the **environment class** (below): a `local-full` run
-authenticates through CLIs; a `claude-web` run has **no local CLIs** and
-authenticates through **MCP** instead. Probe whichever applies:
+The probe path depends on the **environment class** (below): `local-full`
+authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applies:
 
 - **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
   confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
 - **Linear** (linear source) — `local-full`: resolve the API key from its
   `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
   `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
-  Either way, run `linear-common.md`'s shared **preflight** (`list_teams` →
-  match the team) to confirm auth actually works, not just that it resolves.
+  Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
+  the team) to confirm auth actually works, not just that it resolves.
 - **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
   configured coder's auth probe via `scripts/probe-coders.sh`, the **single
-  source of truth** for how each coder is probed; don't restate its per-coder
-  commands here (they would drift from the script). A logged-out coder the run
-  depends on is a blocker, not a silent skip.
-- **MCP** — any MCP the tasks touch: one cheap read call to confirm the token is
-  live.
+  source of truth** (don't restate its per-coder commands here — they'd drift).
+  A logged-out coder the run depends on is a blocker, not a silent skip.
+- **MCP** — any MCP the tasks touch: one cheap read call to confirm a live token.
 
 Each probe runs **through the sandbox wrapper** the orchestrator will use (per
 §"Step 7"), so a probe can't pass outside the jail while failing inside it. Any
-interactive-only or failing auth **BLOCKS LAUNCH** with the specific dependency
-named.
+interactive-only or failing auth **BLOCKS LAUNCH**, naming the dependency.
 
 While probing, capture the **environment fingerprint** — which coder/tool
 binaries exist on `PATH` (`codex`, `devin`, `agy`, `op`, `gh`) and the resulting
-**environment class** (`local-full` when the local CLIs are present; `claude-web`
-when running in the cloud/web environment, which has **no local CLIs** and a
-narrower permission surface). **Detect** the facts (a `command -v` probe can't
-lie); a declared class may be recorded too, but **detection wins on conflict**.
-Record the fingerprint on the run-state branch — the step-6 scout joins against
-it, and `--resume` in a different environment (launched local, resumed from web)
+**environment class** (`local-full` = CLIs on `PATH`; `claude-web` = cloud/web,
+**no local CLIs** and a **narrower permission surface**). **Detect** the facts (a
+`command -v` probe can't lie); a declared class may be recorded too, but
+**detection wins on conflict**. Record the fingerprint on the run-state branch —
+the step-6 scout joins against it, and `--resume` in a different environment
 re-runs that join.
 
 Also confirm **unattended viability** here, up front while the human is present
@@ -159,10 +150,8 @@ rather than at spawn: a `local-full` run needs the machine to stay awake for the
 run's duration (lid-open, or a tested clamshell/power setup — `caffeinate` alone
 does not survive lid-close; see
 [`references/launch-runtime.md`](references/launch-runtime.md) "Laptop sleep").
-If it can't be guaranteed, **BLOCKS LAUNCH**. (Unattended-viability is a human
-judgment call, not a probe — it stays here rather than in
-`scripts/preflight.sh`, which covers the auth/binary/freshness/confinement
-probes above.)
+If it can't be guaranteed, **BLOCKS LAUNCH**. (This is a human judgment call, not
+a probe, so it stays here rather than in `scripts/preflight.sh`.)
 
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
@@ -467,13 +456,11 @@ recorded `base_sha` — the parent's frozen tip captured at its hand-off (per
 parent has moved since the base was frozen and the child would build on a stale
 base — **park** the task instead, record it, and continue to the next ready task.
 
-This guard catches only the orchestrator moving a base; it does not protect
-against a **human** merging a stacked PR out of order while the run is live —
-a child PR's diff is only correct relative to its parent's branch, so merging
-out of dependency order corrupts the stack or leaves a confusing diff.
-`REPORT.md` should tell the human to **merge bottom-up, in dependency order**:
-each chain's root PR first, then its children in order, never a child ahead of
-its parent.
+This guard catches only the orchestrator moving a base, not a **human** merging
+a stacked PR out of order mid-run: a child's diff is correct only relative to
+its parent's branch, so out-of-order merges corrupt the stack. `REPORT.md`
+should tell the human to **merge bottom-up in dependency order** — each chain's
+root first, then its children, never a child ahead of its parent.
 
 **State update after each task.** After `/deliver-task` returns, update
 `RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
@@ -511,9 +498,7 @@ task sits at whatever phase it reached (`handed-off` on the tracker as
 `needs_review`, or `started` for a `parked` task), ready for
 `/sweep-for-complete` once a human has reviewed and merged.
 
-For a **plan** source, the run's exit also does **not** delete the plan's
-`<name>_plan/` scaffolding — that graduate-then-delete cleanup
-(`skills/plan-with-docs/SKILL.md` "A `<name>_plan/` folder…") is a **run-level
-teardown** on the run-state/working branch, and ultimately a human follow-up,
-never a graph task the loop dispatches (see
-[`references/adapters.md`](references/adapters.md) "plan adapter").
+For a **plan** source, the exit also does **not** delete the plan's
+`<name>_plan/` scaffolding — that graduate-then-delete cleanup is a **run-level
+teardown** and ultimately a human follow-up, never a graph task the loop
+dispatches (see [`references/adapters.md`](references/adapters.md) "plan adapter").
