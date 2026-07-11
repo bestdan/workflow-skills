@@ -50,11 +50,16 @@ Claude Code cloud) never set either variable, so they hit the same non-zero
 exit and fall to the floor **by construction**, not by any cloud-detection
 logic — see the security boundary below.
 
-The two paths are provably equivalent by shared spec, not by coincidence:
-each script and its MCP-floor sibling both implement the same
-`linear-common.md` block (see next section), so a caller never needs to
+The two paths are kept equivalent by design, not by coincidence — by one of
+two means depending on the read. For a read with a `linear-common.md` block
+(ready-candidate, in-flight scan), the script and its MCP-floor sibling both
+implement that same block (see next section), so a caller never needs to
 reconcile "what did the fast path pick" against "what would the floor have
-picked" — they're defined to be the same selection.
+picked" — they're defined to be the same selection. For a single-consumer
+read with no block (relations load), equivalence is instead matched **by
+hand** between the script's docstring and the consumer's prose. (Archive is
+the exception with no floor at all — it is a GraphQL-only backstop, not a
+fast-path/floor pair; see the family table.)
 
 ## The shared read specs (`linear-common.md`)
 
@@ -115,14 +120,17 @@ reused verbatim by every sibling):
 Neither source is ever a literal key in a config file — `linear.api_key_ref`
 holds an `op://` reference, never a raw secret.
 
-**Never in a cloud sandbox.** `claude.ai` / Claude Code cloud sessions never
-set `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF`. Even on a cloud host that is
-`Bash`-capable and attempts a fast-path script, `get_key()` exits non-zero
-before any GraphQL request goes out, and the run falls to the MCP floor
-(OAuth-scoped, no raw key). The guarantee this design makes is that **the key
-is never present** in that environment — not that the script is never
-invoked. Do not "fix" this by wiring the key into cloud config; that defeats
-the entire boundary.
+**Never in a cloud sandbox.** This is a **deployment policy, not a check the
+code enforces** — `get_key()` will use whatever key it finds, so the boundary
+holds only because `claude.ai` / Claude Code cloud sessions are configured to
+**never set** `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF`. Given that policy,
+the design fails safe: even on a cloud host that is `Bash`-capable and attempts
+a fast-path script, `get_key()` finds no key, exits non-zero before any GraphQL
+request goes out, and the run falls to the MCP floor (OAuth-scoped, no raw
+key). The guarantee is that **the key is never present** in that environment —
+not that the script is never invoked, and not something `get_key()` verifies.
+So the policy is load-bearing: do **not** "fix" the fallback by wiring the key
+into cloud config; that silently defeats the entire boundary.
 
 **Under 1Password desktop-app integration**, `op` only unlocks in an
 authorized terminal, never in an agent's tool-spawned subshell — so an
