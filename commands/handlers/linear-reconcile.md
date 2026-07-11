@@ -134,7 +134,13 @@ non-zero when no key is resolvable, so the fallback **is** the gate, same as
    rule: an issue can accumulate a stale closed-unmerged PR **and** a newer
    open one, so picking only the first hit could mask the open PR that makes
    it a row-2 candidate. An issue with **no** matching attachment is **not a
-   row-2 candidate**; skip it silently, same as step 2 below.
+   row-2 candidate** on this path; skip it silently. Note this is a **narrower
+   skip** than the floor's step 2 below: the fast path resolves only
+   attachment-linked PRs, so an issue whose open PR is discoverable **solely**
+   by `[<IDENTIFIER>]` title-match or `branchName` (no Linear attachment) is
+   picked up only when its scope falls back to the MCP floor — an accepted
+   trade-off (the tracked claim/open flow always writes the PR attachment, so
+   this is an edge case), not fixed by expanding `linear-scan.py`.
 
 4. **Continue at step 3 below** with the resolved issue + PR list — the PR
    open/merged check, target-state resolution, and hard guard are identical
