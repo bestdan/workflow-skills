@@ -42,6 +42,30 @@ Task 8 introduces a **done-sentinel**; this task makes it *load-bearing* by defi
 the full exit vocabulary around it, and adds the **heartbeat** an external watcher
 (a human, a cron, `status --label`) needs to tell "working" from "wedged."
 
+## ALIGNMENT (2026-07-11) — the supervisor already classifies exits; this extends it
+
+The substrate batch landed, and it built half of this task's machinery. Read `main`
+first:
+
+- **`spawn-orchestrator.sh classify-exit` / `supervisor-check`** (task 10) already
+  classify an orchestrator exit — in shell, with no model call — into `done` /
+  `fatal` / `retry`, and already relaunch vs tear down on that basis. This task's
+  five-value vocabulary (`continuing` / `paused` / `done` / `systemic` / `deadline`)
+  is a **refinement of that existing classifier**, not a new one. In particular
+  `classify-exit` currently infers the bucket from the **exit code + log text**; this
+  task's contribution is that the orchestrator should **declare** its reason
+  explicitly, so the supervisor stops inferring what the agent already knows.
+- **The done-sentinel exists** (`orchestrator.done`, written by `teardown
+  --done-sentinel`, read by `status`) — task 8. The plan requires it be the **same**
+  file as the launchd relaunch sentinel: honor that, extend it, do not add a second.
+- **`status --label`** already reports the RUN.md status, phase table, PID liveness,
+  `--until`, and the done-sentinel. The heartbeat and exit-reason are new **fields**
+  on that existing surface.
+- Task 10 also added a per-run `supervisor-state` file (consecutive-failure counter +
+  last-seen run-state HEAD). Consider whether the heartbeat belongs there rather than
+  in a new file — but note it is deliberately **not** committed to the run-state
+  branch, while an exit reason must be.
+
 ## Task
 
 - Define an explicit **exit reason**, written to the run-state branch *before* the

@@ -14,24 +14,59 @@ created: 2026-07-10
 #176, #178). Delivered by **detached run #2** — auto-pilot executing this plan on
 itself. Do **not** re-run them.
 
-**Tasks 10, 12, 13, 18: PRs open** (#183, #182, #181, #184) — the attended
-substrate batch this STATUS recommended landing first. Task **21** is new, and
-falls out of 18.
+**Tasks 10, 12, 13, 18: `done`, all merged** (PRs #183, #182, #181, #184) — the
+attended substrate batch this STATUS recommended landing first. Task **21** is new,
+and falls out of 18.
 
-**Tasks 11, 14, 15, 16, 17, 19, 20: `new`, none started.**
+**Verified on merged `main`, not just green in CI:** `false` → rc 1 and `true` → rc 0
+**in-jail**, with `$HOME` / `~/.claude` / `/etc` writes and unlisted exec still denied.
+**In-jail verification is trustworthy for the first time.** Phase B is now safe to
+launch — that was the whole point of the sequencing.
+
+**Tasks 11, 14, 15, 16, 17, 19, 20: `new`, none started** — the Phase B set.
+
+### Phase B readiness (recompute — the substrate batch cleared most blockers)
+
+**Ready now:** **11** (t10 done) · **14** (t13 done) · **15** (t8 done) ·
+**16** (t10 done) · **17** (t5 done) · **19** (t6 done).
+**Behind them:** **20** (needs 15's heartbeat + exit reason) · **21** (needs 18 ✅ + 16).
+
+Six ready in parallel, two trailing. Wide, not deep.
+
+### Alignment sweep against merged `main` (2026-07-11)
+
+The substrate batch changed the ground the remaining tasks stand on. Each affected
+task now carries an **ALIGNMENT** block; the load-bearing ones:
+
+- **Task 16 (alarm) — the jail *forbids* the agent from alarming.** `orchestrator.sb.tmpl`
+  denies `osascript` / `open` / `launchctl` exec (a deliberate sandbox-escape fix — do
+  **not** relax it). The supervisor wrapper is **un-jailed**, so the alarm *must* fire
+  from there. "Agent-independent" was a design preference; it is now a hard constraint.
+- **Task 14 (doctor) — two of its seven invariants already exist.** Invariant 1 is
+  task 13's `assert-run-head`; invariant 7 has a supervisor-side guard from task 10.
+  Compose them; a second implementation would drift.
+- **Tasks 11/15 — the supervisor wrapper is real now** (`classify-exit`,
+  `supervisor-check`, `_supervisor_halt`, the `supervisor-state` file). Extend it;
+  don't build a parallel one.
+- **Task 19 (de-anchor) — the surface grew.** `references/resume.md` (PR #180) did not
+  exist when the task was written, and its grep guard was scoped to a **file list** —
+  which is precisely how a new file slips through. Guard a **directory**.
+- **Task 20 (heartbeat) — reuse task 18's orphan detector** for the PR-vs-`RUN.md`
+  reality cross-check rather than writing a second reconciler.
 
 ### What the substrate batch measured (and the plan got wrong)
 
 Implementing 10/12/13/18 **disproved parts of this plan**. Two task specs were
 corrected in place (see each task's CORRECTION block); the headline:
 
-- **In-jail verification is broken on `main` today — measured, not predicted.**
-  Task 12's spec named the wrong surface. The harness needs `~/.claude/session-env/`
-  and a `/tmp/claude-<uid>/` **tree**, not the `claude-*-cwd` **file** the spec
-  predicted. Until #182 lands, the Bash tool **dies before executing anything**
-  in-jail, so *every* exit code is noise. This is the strongest available argument
-  for the sequencing below: an unattended run on today's `main` cannot trust a
-  single verify it performs.
+- **In-jail verification was broken — measured, not predicted.** Task 12's spec named
+  the wrong surface. The harness needs `~/.claude/session-env/` and a
+  `/tmp/claude-<uid>/` **tree**, not the `claude-*-cwd` **file** the spec predicted.
+  Before #182, the Bash tool **died before executing anything** in-jail, so *every*
+  exit code was noise — an unattended run could not have trusted a single verify it
+  performed. **Fixed and behaviorally verified on merged `main`** (see STATUS above).
+  This is the strongest available argument for the sequencing: the plan's caution was
+  right for a reason nobody had measured until they tried.
 - **The exit-code regression guard could not have failed.** As specified, the smoke
   passes `--ro "$HOME/.claude"` — the exact condition that kills the Bash tool — so
   it records no exit code at all and reports *indeterminate* rather than *fail*. A
@@ -44,21 +79,18 @@ corrected in place (see each task's CORRECTION block); the headline:
 "auto-pilot's failure modes look like success" — reproduced itself inside the fixes
 for it. **Verify by observing behavior, not by reading the diff.**
 
-**Ready now** (no blockers): **t11, t14, t15, t16, t17, t19, t20** — the Phase B set.
-**t21** is blocked by t18.
-
-**Recommended sequencing — validated, not just advised.** This plan said: do **not**
-auto-pilot 10–20 straight away; land **10, 12, 13, 18** attended first, *then*
-auto-pilot the rest with a working alarm channel and heartbeat. **That was right, and
-for a reason stronger than the one given.** The original argument was that the jail and
-supervisor are "thinner than the docs claim." The attended batch then **measured** it:
-the Bash tool does not execute at all in-jail on today's `main` (task 12's CORRECTION),
-so an unattended run could not have trusted a single verify it performed. Do not launch
-Phase B until **#182** in particular is merged.
+**Sequencing — validated, not merely advised.** This plan said: do **not** auto-pilot
+10–20 straight away; land **10, 12, 13, 18** attended first, *then* auto-pilot the
+rest. That was right, and for a **stronger reason than the one it gave**. The original
+argument was that the jail and supervisor are "thinner than the docs claim." The
+attended batch **measured** it: the Bash tool did not execute at all in-jail, so an
+unattended run could not have trusted a single verify it performed. The substrate is
+now fixed and verified — **Phase B (11, 14, 15, 16, 17, 19, then 20/21) is cleared to
+launch.**
 
 **Loose end:** the plan scaffolding (`dev_docs/tasks/autopilot_hardening_plan/`) still
 exists. task_9 correctly declined to delete it from a `main`-based PR (finding #13).
-Delete it only once 10–20 land — they live here.
+Delete it only once 11–21 land — they live here.
 
 ## Goal
 
@@ -143,10 +175,10 @@ must be the **same** file as the launchd relaunch sentinel.
 Run #2 — the run that executed tasks 1–9 of *this* plan — surfaced five new findings
 by living through them. Four become tasks (the fifth, #21, folded into task 8):
 
-10. [[autopilot_hardening_task_10]] — **P0**: supervisor classifies a **401/auth** exit as **fatal, non-retryable** — halt + alarm, plus a no-progress guard. (#22)
+10. ✅ **DONE (#183)** — [[autopilot_hardening_task_10]] — P0: supervisor classifies a **401/auth** exit as **fatal, non-retryable** — halt + alarm, plus a no-progress guard. (#22)
 11. [[autopilot_hardening_task_11]] — P2: supervisor gates the relaunch on `paused_until` **in shell** — a pause must cost **zero** model calls. (#19)
-12. [[autopilot_hardening_task_12]] — **P1**: jail permits the harness's own `$TMPDIR` mux socket + cwd files — **stops every Bash exit code being poisoned to 1**. (#20)
-13. [[autopilot_hardening_task_13]] — P2: run loop must never check out a task branch in the run worktree; `--resume` reads run state from the **branch**, not the working tree. (#23)
+12. ✅ **DONE (#182)** — [[autopilot_hardening_task_12]] — P1: jail permits the harness's own `$TMPDIR` mux socket + cwd files — **stops every Bash exit code being poisoned to 1**. (#20)
+13. ✅ **DONE (#181)** — [[autopilot_hardening_task_13]] — P2: run loop must never check out a task branch in the run worktree; `--resume` reads run state from the **branch**, not the working tree. (#23)
 
 ### The class, not the instances — "failure modes look like success"
 
@@ -162,7 +194,7 @@ checks reads green, and the only thing that actually caught both was a human ask
 16. [[autopilot_hardening_task_16]] — **P1**: an **alarm channel** — a halted *or merely stalled* run must actively notify a human, from the **supervisor in shell** (a dead agent can't alert anyone), saying what to *do*. #22 cost 4h14m of pure silence.
 17. [[autopilot_hardening_task_17]] — **P1**: **enforce** the no-interactive-prompt rule — **detaching via launchd re-triggers macOS consent gates**, because TCC grants belong to your *terminal*, not to a launchd-spawned binary. Probe under the real (detached, no-TTY) attribution; any consent gate **blocks launch**. (#24)
 
-18. [[autopilot_hardening_task_18]] — **P1**: **automate the post-merge restack** of stacked PRs. Merging a parent under squash-merge orphans its children — loudly (base deleted → PR auto-closed, as happened to the P1 #172) or **quietly** (child still targets the parent's *branch*, so merging it never reaches `main`). Closes run-#1's finding #14. (#25)
+18. ✅ **DONE (#184)** — [[autopilot_hardening_task_18]] — P1: **automate the post-merge restack** of stacked PRs. Merging a parent under squash-merge orphans its children — loudly (base deleted → PR auto-closed, as happened to the P1 #172) or **quietly** (child still targets the parent's *branch*, so merging it never reaches `main`). Closes run-#1's finding #14. (#25)
 
 19. [[autopilot_hardening_task_19]] — P2: **de-anchor from "overnight."** The load-bearing property is **unattended** (no human *attached*), not nocturnal — and the nocturnal framing directly produced the missing alarm channel (16) and the batch-digest `REPORT.md` (15). Run #2 did 8 of its 9 tasks between 06:00 and 11:35, with the human at their desk. Name the three attendance modes — attended / **partially attended** (the common case) / unattended. (#27)
 

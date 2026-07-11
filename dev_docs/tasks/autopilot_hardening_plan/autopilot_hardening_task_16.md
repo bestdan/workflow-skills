@@ -43,11 +43,35 @@ rate-limited or auth-dead orchestrator cannot make a model call to alert anyone 
 so, like tasks 10/11, the alarm must be able to fire from the **supervisor, in
 shell**.
 
+## ALIGNMENT (2026-07-11) — the jail *forbids* the agent from alarming, so this isn't a preference
+
+The substrate batch landed, and it turns the "fire from the supervisor" corollary
+above from a **design preference into a hard constraint**. Check `main` before
+implementing:
+
+- **The jail denies `osascript`, `open`, and `launchctl` exec outright**
+  (`scripts/orchestrator.sb.tmpl`: `(deny process-exec (literal "/usr/bin/osascript")
+  (literal "/usr/bin/open") (literal "/bin/launchctl"))`), plus `mach-lookup` of the
+  launchd/LaunchServices brokers. These denies are a **deliberate sandbox-escape
+  fix** — do **not** relax them to make an alarm work. An alarm fired from **inside**
+  the agent would be silently denied, which is the exact failure this task exists to
+  prevent, wearing a disguise.
+- **The supervisor wrapper is un-jailed.** `write_launch` wraps only `claude` in
+  `sandbox-exec`; the wrapper shell that launchd runs is outside the jail. So
+  `osascript` from the **supervisor** works, and is the only path that works.
+- **The seam already exists.** Task 10 landed `spawn-orchestrator.sh
+  supervisor-check` (+ `classify-exit`), which already halts and tears down on a
+  fatal auth exit and on N consecutive no-progress wakes. **Extend that**; do not
+  add a second wrapper. Its halt path already writes `status: systemic` and appends
+  to `REPORT.md` — this task adds the *active* notification those writes currently lack.
+
 ## Task
 
 - Define the **alarm conditions** (all terminal-ish, all currently silent):
-  fatal auth halt (task 10) · circuit-breaker `systemic` · a failed invariant
-  (task 14) · N consecutive no-progress wakes · a park storm (≥N tasks parked) ·
+  fatal auth halt (task 10, **landed** — hook the alarm onto its existing halt path) ·
+  circuit-breaker `systemic` · a failed invariant
+  (task 14) · N consecutive no-progress wakes (**landed** in `supervisor-check`) ·
+  a park storm (≥N tasks parked) ·
   a run that blew its `--until` without finishing.
 - On any alarm condition, **actively notify** — do not merely write a file:
   - **Primary (agent-independent):** the supervisor emits an OS-level notification

@@ -57,6 +57,24 @@ keeps finding. It should be **on by default**.
 This directly serves the **partially attended** mode named in task 19 — a human checking
 in periodically, which run #2 showed is the *common* case, not the exception.
 
+## ALIGNMENT (2026-07-11) — build on the landed surfaces, and reuse the reality cross-check
+
+- **`spawn-orchestrator.sh status --label` exists** (task 8) and already assembles
+  much of the payload: run-level `status`, the phase table, PID liveness (guarding a
+  recycled PID via process start-time), `--until`, and the done-sentinel. The report
+  is a **periodic, delta-aware rendering of that**, not a second state reader.
+- **The supervisor is un-jailed and already runs shell logic every wake**
+  (`supervisor-check`, task 10) — that is where "emit with no model call" actually
+  lands. The jail denies the *agent* `osascript`/`open` exec, so any notification
+  path must be supervisor-side (see task 16).
+- **The reality cross-check already has an implementation to borrow.** Task 18's
+  `restack` includes an **orphan detector** that compares each task's live PR base +
+  state against `RUN.md` — precisely the "don't just echo `RUN.md`" check this task
+  needs. Reuse it rather than writing a second PR-vs-`RUN.md` reconciler that can
+  drift from it.
+- Task 15 (the blocker) owns the **heartbeat + exit reason**; this task consumes them.
+  Keep the split clean: 15 *produces* the signals, 20 *renders and delivers* them.
+
 ## Task
 
 - Add a **periodic status report** to the run, **on by default**, interval configurable

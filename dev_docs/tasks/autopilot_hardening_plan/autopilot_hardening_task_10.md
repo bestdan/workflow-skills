@@ -2,7 +2,7 @@
 title: "supervisor: classify a non-retryable auth failure (401) as fatal — halt, don't relaunch forever"
 priority: urgent
 size: 3
-status: new
+status: done # merged as PR #183 (attended substrate batch, 2026-07-11)
 created: 2026-07-11
 source_branch: main
 related_files:
