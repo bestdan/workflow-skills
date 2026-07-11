@@ -92,6 +92,7 @@ echo 'echo alive; sleep 2' > "$D/run/wt/noop-prompt.txt"   # stand-in prompt
 "$SO" write-launch --profile "$D/profile.sb" --settings "$D/settings.json" \
   --workdir "$D/run/wt" --log "$D/orch.log" --prompt-file "$D/run/wt/noop-prompt.txt" \
   --until "$(date -v+1H '+%FT%T' 2>/dev/null || echo T)" --label com.autopilot.smoke \
+  --path "$PATH" \
   --out-script "$D/launch.sh" --out-plist "$D/job.plist"
 plutil -lint "$D/job.plist"
 launchctl bootstrap "gui/$(id -u)" "$D/job.plist"

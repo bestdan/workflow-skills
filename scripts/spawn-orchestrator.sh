@@ -365,7 +365,7 @@ render_plist() {
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin=""
+        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -378,6 +378,7 @@ write_launch() {
       --interval) interval="$2"; shift 2 ;;
       --throttle) throttle="$2"; shift 2 ;;
       --claude-bin) claude_bin="$2"; shift 2 ;;
+      --path) path="$2"; shift 2 ;;
       --out-script) out_script="$2"; shift 2 ;;
       --out-plist) out_plist="$2"; shift 2 ;;
       --plist-template) plist_template="$2"; shift 2 ;;
@@ -385,6 +386,7 @@ write_launch() {
     esac
   done
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
+  [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
   [ -n "$label" ] || die "write-launch requires --label"
   # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
   # plist injection on top of xml_escape, and it's what launchd expects anyway.
@@ -414,12 +416,14 @@ write_launch() {
     printf '# Auto-pilot orchestrator launch script (generated — do not edit).\n'
     printf 'set -uo pipefail\n'
     printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
+    printf 'export PATH=%q\n' "$path"
     printf 'cd %q\n' "$workdir"
     # exec so the launchd-tracked PID is claude itself, not a wrapper shell.
     printf 'exec sandbox-exec -f %q \\\n' "$profile"
     printf '  %q -p "$(cat %q)" \\\n' "$claude_bin" "$prompt"
     printf '  --permission-mode bypassPermissions \\\n'
     printf '  --settings %q \\\n' "$settings_json"
+    printf '  --verbose \\\n'
     printf '  --output-format stream-json \\\n'
     printf '  >>%q 2>&1\n' "$log"
   } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
@@ -480,9 +484,15 @@ smoke_test() {
   # credential can't false-pass the auth gate.
   local out
   out="$(sandbox-exec -f "$profile" "$claude_bin" -p 'ok' --max-turns 1 \
-    --permission-mode bypassPermissions --settings "$json" 2>/dev/null)" \
+    --permission-mode bypassPermissions --settings "$json" \
+    --verbose --output-format stream-json 2>/dev/null)" \
     || die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
   [ -n "$out" ] || die "auth smoke-test produced no output THROUGH the wrapper — credential/jail suspect; not detaching"
+  # Assert the output is actually parseable stream-json (a line beginning with
+  # `{` and containing "type"), not just non-empty: a degraded claude could print
+  # a plain-text error to stdout and false-pass the emptiness check above.
+  printf '%s\n' "$out" | grep -Eq '^\{.*"type"' \
+    || die "auth smoke-test produced non-stream-json output THROUGH the wrapper — flag/jail suspect; not detaching"
   echo "spawn-orchestrator: smoke-test OK"
 }
 
@@ -522,7 +532,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;

@@ -72,7 +72,7 @@ echo "== 3. Detach + supervisor lifecycle =="
 printf 'noop\n' >"$D/run/wt/prompt.txt"
 if "$SO" write-launch --profile "$D/profile.sb" --settings "$D/settings.json" \
      --workdir "$D/run/wt" --log "$D/orch.log" --prompt-file "$D/run/wt/prompt.txt" \
-     --until T --label com.autopilot.smoke --claude-bin "$CLAUDE" \
+     --until T --label com.autopilot.smoke --claude-bin "$CLAUDE" --path "$PATH" \
      --out-script "$D/launch.sh" --out-plist "$D/job.plist" >/dev/null 2>&1 \
    && plutil -lint "$D/job.plist" >/dev/null 2>&1; then
   PASS "write-launch produced a valid plist"
