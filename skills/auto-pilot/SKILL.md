@@ -25,7 +25,7 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
 
 - [`references/run-state.md`](references/run-state.md) — the canonical formats
   and invariants for a run's durable state: the three run files
-  (`RUN.md` / `QUESTIONS.md` / `REPORT.md`), the seven task lifecycle phases,
+  (`RUN.md` / `QUESTIONS.md` / `REPORT.md`), the task lifecycle phases,
   the dedicated run-state branch convention, the fixed write order
   (push code → update tracker → commit run state), and the crash-reconciliation
   table `--resume` uses. Launch, run, and resume all read this — no other

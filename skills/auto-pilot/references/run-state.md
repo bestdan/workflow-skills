@@ -83,8 +83,9 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   constant) and writes it here; formula and defaults live in
   [`run-budget.md`](run-budget.md) "Minimum task budget".
 - `phase` is one of the seven in-flight/terminal values below, or the pre-claim
-  `pending` marker (see "Task lifecycle phases"); it is the field `--resume`
-  reconciles.
+  `pending` marker (see "Task lifecycle phases"); of those, only the seven
+  in-flight/terminal values are what `--resume` reconciles (a `pending` task has
+  no in-flight transaction to reconcile).
 
 ### `QUESTIONS.md`
 
@@ -149,15 +150,16 @@ The run files live on a **dedicated branch**, distinct from every task branch:
 
 ## Task lifecycle phases
 
-`phase` covers only **in-flight** tasks — from the moment a task is claimed to
-its terminal state. A task materialized into the graph but not yet claimed
-carries the pre-claim marker `pending` instead; it is not one of the seven
-in-flight/terminal phases below and is never a target of the crash-
-reconciliation table (there is nothing mid-transaction to reconcile before a
-claim exists). Which `pending` tasks are **eligible to claim next** — graph
-readiness — is computed separately from this field, by the adapter's
-`list_ready`/`dependency_graph` verbs ([`adapters.md`](adapters.md)), not by a
-`phase` value.
+`phase` spans all materialized tasks, but only the seven **in-flight/terminal**
+values below — from the moment a task is claimed to its terminal state —
+participate in crash reconciliation. A task materialized into the graph but not
+yet claimed carries the pre-claim marker `pending` instead; it is not one of
+those seven and is never a target of the crash-reconciliation table (there is
+nothing mid-transaction to reconcile before a claim exists). Which `pending`
+tasks are **eligible to claim next** — graph readiness — is not encoded in a
+`pending` task's own `phase`; it is computed from the graph edges and the
+blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
+([`adapters.md`](adapters.md)).
 
 | Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
 | --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
