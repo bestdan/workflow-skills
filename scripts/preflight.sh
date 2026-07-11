@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+# preflight.sh — READ-ONLY go/no-go pre-flight for an auto-pilot launch.
+#
+# Extracts the ad-hoc auth/env probing that skills/auto-pilot/SKILL.md "Step 2
+# — Non-interactive auth probes" used to describe inline (it names these as
+# "good candidates to extract into a small pre-flight helper script"), and
+# composes the existing probes rather than re-implementing them:
+#   - scripts/probe-coders.sh        coder CLI availability/auth
+#   - scripts/preflight-freshness.sh base-branch freshness vs its remote
+#   - scripts/spawn-orchestrator.sh  render-profile / render-settings, reused
+#                                    for the confinement smoke
+#
+# Never mutates git or filesystem state outside a private scratch dir it
+# creates and removes for the confinement smoke.
+#
+# Usage:
+#   scripts/preflight.sh --source <plan|linear> [--base <branch>]
+#
+#   --source  Task-graph source the run reads from. Required.
+#   --base    Base branch to check for staleness. Default: main.
+#
+# Output: parseable `PREFLIGHT <KEY>: <val>` lines on stdout, one key per
+# line, ending in a single `PREFLIGHT VERDICT: go` / `PREFLIGHT VERDICT:
+# no-go — <reason>` line.
+#
+# Exit status:
+#   0  go       — no hard blocker found
+#   1  no-go    — at least one hard blocker (see PREFLIGHT BLOCKER lines)
+#   2  usage or dependency error
+#
+# Env overrides (for tests only — never needed in normal use):
+#   PREFLIGHT_PROBE_CODERS  path to a probe-coders.sh-compatible executable.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROBE_CODERS="${PREFLIGHT_PROBE_CODERS:-$ROOT/scripts/probe-coders.sh}"
+FRESHNESS="$ROOT/scripts/preflight-freshness.sh"
+SPAWN="$ROOT/scripts/spawn-orchestrator.sh"
+FINGERPRINT_BINS="claude git gh codex uv node op"
+
+die() { echo "preflight: $*" >&2; exit 2; }
+
+source_arg=""
+base="main"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source) [ $# -ge 2 ] || die "missing value for --source"; source_arg="$2"; shift 2 ;;
+    --base) [ $# -ge 2 ] || die "missing value for --base"; base="$2"; shift 2 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+case "$source_arg" in
+  plan|linear) ;;
+  "") die "requires --source <plan|linear>" ;;
+  *) die "unknown --source (fail-closed): $source_arg" ;;
+esac
+[ -f "$PROBE_CODERS" ] || die "coder probe not found: $PROBE_CODERS"
+[ -f "$FRESHNESS" ] || die "not found: $FRESHNESS"
+[ -f "$SPAWN" ] || die "not found: $SPAWN"
+
+blockers=()
+skip_notes=()
+
+# --- 1. Auth/env probes --------------------------------------------------
+
+gh_ok=false
+if command -v gh >/dev/null 2>&1; then
+  gh auth status >/dev/null 2>&1 && gh_ok=true
+else
+  blockers+=("gh is not on PATH — install the GitHub CLI or confirm the GitHub MCP is connected instead")
+fi
+echo "PREFLIGHT GH_AUTH: $gh_ok"
+if command -v gh >/dev/null 2>&1 && ! $gh_ok; then
+  blockers+=("gh auth status failed — run: gh auth login")
+fi
+
+viewer_perm=""
+if $gh_ok; then
+  viewer_perm="$(gh repo view --json viewerPermission --jq .viewerPermission 2>/dev/null)"
+fi
+echo "PREFLIGHT VIEWER_PERMISSION: ${viewer_perm:-unknown}"
+
+# Binary fingerprint: absolute paths of the CLIs the run depends on, and the
+# unique dirnames those paths resolve to (feeds PATH_DIR / EXEC_DIR below).
+resolved_dirs=""
+codex_path=""
+for bin in $FINGERPRINT_BINS; do
+  p="$(command -v "$bin" 2>/dev/null || true)"
+  echo "PREFLIGHT BIN $bin: ${p:-absent}"
+  if [ -n "$p" ]; then
+    [ "$bin" = "codex" ] && codex_path="$p"
+    d="$(cd "$(dirname "$p")" && pwd -P)" || continue
+    resolved_dirs="$resolved_dirs
+$d"
+  fi
+done
+uniq_dirs="$(printf '%s\n' "$resolved_dirs" | sed '/^$/d' | sort -u)"
+
+env_class="claude-web"
+[ -n "$codex_path" ] && env_class="local-full"
+echo "PREFLIGHT ENV_CLASS: $env_class"
+
+coder_out="$(bash "$PROBE_CODERS" 2>&1)"
+yaml_field() { # <section> <key>
+  printf '%s\n' "$coder_out" | awk -v s="  $1:" -v k="$2:" '
+    $0==s {insec=1; next}
+    insec && /^  [a-zA-Z0-9_]+:/ {insec=0}
+    insec {
+      line=$0
+      gsub(/^[ \t]+/, "", line)
+      if (index(line, k)==1) {
+        sub(k, "", line); sub(/ *#.*/, "", line); gsub(/^ +| +$/, "", line); print line; exit
+      }
+    }
+  '
+}
+codex_installed="$(yaml_field codex installed)"
+codex_model="$(yaml_field codex default_model)"
+agy_installed="$(yaml_field agy installed)"
+agy_logged_in="$(yaml_field agy logged_in)"
+devin_installed="$(yaml_field devin installed)"
+devin_logged_in="$(yaml_field devin logged_in)"
+echo "PREFLIGHT CODER codex: installed=${codex_installed:-unknown} default_model=${codex_model:-unknown}"
+echo "PREFLIGHT CODER agy: installed=${agy_installed:-unknown} logged_in=${agy_logged_in:-unknown}"
+echo "PREFLIGHT CODER devin: installed=${devin_installed:-unknown} logged_in=${devin_logged_in:-unknown}"
+
+# Installed-but-logged-out is a hard blocker: the run resolved that coder as
+# available and would silently fail auth mid-flight. codex has no logged_in
+# field in probe-coders.sh (its config-file check doesn't imply auth), so it's
+# excluded from this check.
+if [ "$agy_installed" = "true" ] && [ "$agy_logged_in" = "false" ]; then
+  blockers+=("coder 'agy' is installed but not logged in — run: agy login (or refresh the SSH file-store token)")
+fi
+if [ "$devin_installed" = "true" ] && [ "$devin_logged_in" = "false" ]; then
+  blockers+=("coder 'devin' is installed but not logged in — run: devin auth login")
+fi
+
+# --- 2. Base freshness ----------------------------------------------------
+
+fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"; fresh_status=$?
+printf '%s\n' "$fresh_out"
+case $fresh_status in
+  0) freshness_verdict=fresh ;;
+  1)
+    freshness_verdict=stale
+    blockers+=("base '$base' is stale — run: git fetch origin $base:$base")
+    ;;
+  3)
+    freshness_verdict=unknown
+    skip_notes+=("base freshness could not be determined (ls-remote failed — offline/sandboxed); verify '$base' manually before launch")
+    ;;
+  *)
+    freshness_verdict=error
+    blockers+=("preflight-freshness.sh failed unexpectedly (exit $fresh_status) — see the FRESHNESS lines above")
+    ;;
+esac
+echo "PREFLIGHT FRESHNESS: $freshness_verdict"
+
+# --- 3. Resolved PATH/exec dirs + destination host -------------------------
+
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
+  echo "PREFLIGHT PATH_DIR: $d"
+done <<EOF
+$uniq_dirs
+EOF
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
+  echo "PREFLIGHT EXEC_DIR: $d"
+done <<EOF
+$uniq_dirs
+EOF
+
+task_cfg="$ROOT/dev_docs/tasks/.task-config.yml"
+task_cfg_local="$ROOT/dev_docs/tasks/.task-config.local.yml"
+handler="repo-pr"
+for f in "$task_cfg" "$task_cfg_local"; do
+  [ -f "$f" ] || continue
+  h="$(sed -n 's/^handler:[[:space:]]*//p' "$f" | head -1 | tr -d '[:space:]')"
+  [ -n "$h" ] && handler="$h"
+done
+case "$handler" in
+  linear) dest_host="api.linear.app" ;;
+  jira)
+    site="$(sed -n 's/^[[:space:]]*site:[[:space:]]*//p' "$task_cfg" "$task_cfg_local" 2>/dev/null | tail -1 | tr -d '[:space:]')"
+    dest_host="${site:-github.com}"
+    ;;
+  gh-issue|repo-pr) dest_host="github.com" ;;
+  *) dest_host="github.com" ;;
+esac
+echo "PREFLIGHT DEST_HOST: $dest_host (handler=$handler)"
+
+# --- 4. Confinement smoke ---------------------------------------------------
+# Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
+# egress) is the settings.json render-settings emits — see
+# skills/auto-pilot/references/launch-runtime.md "Sandbox profile". Nested
+# sandbox-exec is itself denied in some sandboxed dev environments, so probe
+# that capability first and degrade to a logged SKIP rather than a blocker.
+
+if ! command -v sandbox-exec >/dev/null 2>&1; then
+  echo "PREFLIGHT SMOKE: skip (sandbox-exec not available — non-macOS host)"
+  skip_notes+=("confinement smoke skipped: sandbox-exec absent (non-macOS host)")
+elif ! sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1; then
+  echo "PREFLIGHT SMOKE: skip (nested sandbox-exec denied in this environment)"
+  skip_notes+=("confinement smoke skipped: nested sandbox-exec apply failed in this environment")
+else
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/preflight-smoke.XXXXXX" 2>/dev/null || true)"
+  if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
+    echo "PREFLIGHT SMOKE: skip (could not create a scratch dir)"
+    skip_notes+=("confinement smoke skipped: scratch dir creation failed")
+  else
+    ex_args=()
+    for bin in $FINGERPRINT_BINS; do
+      p="$(command -v "$bin" 2>/dev/null || true)"
+      [ -n "$p" ] && ex_args+=(--exec "$p")
+    done
+    prof="$scratch/preflight.sb"
+    if bash "$SPAWN" render-profile --rw "$scratch" "${ex_args[@]}" --out "$prof" >/dev/null 2>&1; then
+      if sandbox-exec -f "$prof" /usr/bin/env bash -c 'exit 0' >/dev/null 2>&1; then
+        echo "PREFLIGHT SMOKE_EXEC: pass (sed/git/env bash exec through the jail succeeds)"
+      else
+        echo "PREFLIGHT SMOKE_EXEC: FAIL"
+        blockers+=("confinement smoke: exec through the rendered toolchain profile failed — the exec wall is broken, not just narrow")
+      fi
+
+      home_probe="$HOME/.preflight-smoke-$$"
+      rm -f "$home_probe"
+      if sandbox-exec -f "$prof" /usr/bin/touch "$home_probe" >/dev/null 2>&1; then
+        rm -f "$home_probe"
+        echo "PREFLIGHT SMOKE_HOME_WRITE: FAIL (write to \$HOME succeeded through the jail)"
+        blockers+=("confinement smoke: a write to \$HOME succeeded through the rendered profile — the filesystem wall is broken")
+      else
+        echo "PREFLIGHT SMOKE_HOME_WRITE: pass (write to \$HOME denied, as expected)"
+      fi
+
+      settings="$scratch/preflight-settings.json"
+      if bash "$SPAWN" render-settings --source "$source_arg" --out "$settings" >/dev/null 2>&1 \
+        && grep -q '"allowedDomains"' "$settings" && grep -q '"enabled":true' "$settings"; then
+        echo "PREFLIGHT SMOKE_EGRESS: pass (layer-2 allowlist renders enabled + deny-by-default)"
+      else
+        echo "PREFLIGHT SMOKE_EGRESS: FAIL"
+        blockers+=("confinement smoke: layer-2 egress allowlist did not render as an enabled, deny-by-default allowlist")
+      fi
+    else
+      echo "PREFLIGHT SMOKE: skip (render-profile failed for this environment's fingerprint)"
+      skip_notes+=("confinement smoke skipped: render-profile failed")
+    fi
+    rm -rf "$scratch"
+  fi
+fi
+
+# --- 5. Verdict --------------------------------------------------------------
+
+for n in ${skip_notes[@]+"${skip_notes[@]}"}; do
+  echo "PREFLIGHT SKIP_NOTE: $n"
+done
+
+if [ "${#blockers[@]}" -gt 0 ]; then
+  for b in "${blockers[@]}"; do
+    echo "PREFLIGHT BLOCKER: $b"
+  done
+  echo "PREFLIGHT VERDICT: no-go — ${blockers[0]}"
+  exit 1
+fi
+echo "PREFLIGHT VERDICT: go"
+exit 0
