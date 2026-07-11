@@ -1233,6 +1233,14 @@ GHEOF
   git -C "$C_WORK" fetch -q origin
   zdiff="$(git -C "$C_WORK" diff --name-only origin/br-y origin/br-z)"
   [ "$zdiff" = "z.txt" ] && ok "restack resumable: Z's PR diff (br-y..br-z) is ONLY z.txt" || bad "restack resumable: Z's PR diff is ONLY z.txt" "got: $zdiff"
+  # idempotent: a cascaded child re-run is a no-op — no re-cascade, no REPORT churn.
+  p2report_before="$(wc -c <"$P2_RUN/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
+  p3out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  lack "restack resumable: re-run does NOT re-cascade Z" 'restack t_z done (cascade)' "$p3out"
+  have "restack resumable: re-run reports the cascaded child a no-op" 'already cascaded' "$p3out"
+  p2report_after="$(wc -c <"$P2_RUN/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
+  [ "$p2report_before" = "$p2report_after" ] && ok "restack resumable: re-run does not churn REPORT.md" \
+    || bad "restack resumable: re-run does not churn REPORT.md" "before=$p2report_before after=$p2report_after"
 
   # retarget-failure (fix 2): push succeeds, `gh pr edit` rejected -> DEFECT, the
   # child is NOT marked done, and the run exits non-zero. Fresh single stack.

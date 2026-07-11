@@ -1384,6 +1384,15 @@ restack() {
           parent_remote_tip="$(git -C "$repo" rev-parse "$remote/$base" 2>/dev/null)"
           if [ "$parent_live_base" = "$base_branch" ] && ! _restack_empty "$base_sha" \
              && [ -n "$parent_remote_tip" ] && [ "$parent_remote_tip" != "$base_sha" ]; then
+            # Idempotent: a cascade-mode child keeps its PR base on the parent
+            # branch, so the top-of-loop live-base no-op check can't catch an
+            # already-cascaded child. If it already sits on the parent's current
+            # tip, there is nothing to do — skip, rather than re-run a no-op
+            # rebase that churns REPORT.md and re-flags a child nothing touched.
+            if git -C "$repo" merge-base --is-ancestor "$parent_remote_tip" "$remote/$branch" 2>/dev/null; then
+              echo "spawn-orchestrator: restack $task already cascaded onto $base's tip (no-op)"
+              continue
+            fi
             mode="cascade"; onto_ref="$parent_remote_tip"
           else
             # A human reviewing/merging the parent is the EXPECTED trigger; an
