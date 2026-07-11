@@ -17,6 +17,7 @@
 #   spawn-orchestrator.sh render-profile \
 #       --rw <path> [--rw <path> ...] \
 #       --ro <path> [--ro <path> ...] \
+#       --cred-ro <file> [--cred-ro <file> ...] \
 #       --exec <path> [--exec <path> ...] \
 #       --exec-dir <dir> [--exec-dir <dir> ...] [--toolchain] \
 #       --out <file> [--template <file>]
@@ -37,6 +38,11 @@
 #                   missing path fails closed and no file is written.
 #     --rw    A read-write scope (run/worker worktrees, $TMPDIR). Repeatable.
 #     --ro    A read-only scope (rest of repo, credential stores). Repeatable.
+#     --cred-ro  A credential FILE kept read-only even when it lives inside an
+#                --rw state dir (a tool's own token under ~/.codex/~/.claude). The
+#                state dir stays writable; only the token is denied writes, via a
+#                specific (deny file-write* (literal …)) emitted after the RW block.
+#                Must be an existing file. Repeatable.
 #     --exec  A binary permitted to exec (resolved coder + base toolchain).
 #             Repeatable.
 #     --exec-dir  A directory permitted to exec (subpath, coarser than --exec).
@@ -119,6 +125,24 @@ emit_allow() {
   printf ')\n'
 }
 
+# Emit a (deny file-write* (literal …)) form over credential files, or a
+# placeholder comment when the list is empty. This is emitted AFTER the RW block
+# so it overrides the state-dir write allow (Seatbelt = last matching rule wins),
+# keeping a token read-only while its enclosing state dir stays writable. Args:
+# <cred-path>...
+emit_deny_write() {
+  if [ "$#" -eq 0 ]; then
+    printf ';; (no isolated credential files)\n'
+    return
+  fi
+  printf '(deny file-write*\n'
+  local p
+  for p in "$@"; do
+    printf '  (literal "%s")\n' "$(sbpl_escape "$p")"
+  done
+  printf ')\n'
+}
+
 # Emit the process-exec allow form: literal binaries (--exec) and subpath bin
 # dirs (--exec-dir/--toolchain). Args: <literal>... -- <subpath>...
 emit_exec() {
@@ -142,11 +166,12 @@ emit_exec() {
 
 render_profile() {
   local out="" template="$TEMPLATE_DEFAULT" toolchain=0
-  local -a rw=() ro=() ex=() exd=() confine=()
+  local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
+      --cred-ro) [ $# -ge 2 ] || die "missing value for --cred-ro"; cred+=("$2"); shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
       --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
       --toolchain) toolchain=1; shift ;;
@@ -173,11 +198,24 @@ render_profile() {
 
   # Canonicalize ALL inputs first — any bad path aborts before we write, so a
   # partial profile is never emitted.
-  local -a rw_c=() ro_c=() ex_c=() exd_c=() confine_c=()
+  local -a rw_c=() ro_c=() cred_c=() ex_c=() exd_c=() confine_c=()
   local p c
   for p in ${confine[@]+"${confine[@]}"}; do c="$(canonicalize "$p")" || exit 2; confine_c+=("$c"); done
   for p in ${rw[@]+"${rw[@]}"}; do c="$(canonicalize "$p")" || exit 2; rw_c+=("$c"); done
   for p in ${ro[@]+"${ro[@]}"}; do c="$(canonicalize "$p")" || exit 2; ro_c+=("$c"); done
+  # Credential files: must be an existing FILE (a token, not a dir). The literal
+  # deny is emitted after the RW block so it overrides a co-located state-dir
+  # write allow; a cred file outside every RW scope is harmless (already unwritable).
+  # KNOWN LIMITATION (documented, not fail-closed): Seatbelt matches on the path,
+  # not the inode, so a second HARD LINK to the same credential inode inside an RW
+  # scope stays writable and would mutate the token through the alias. We do NOT
+  # reject nlink>1 here — a benign multiply-linked file must not fail a launch
+  # closed at 3am — but tool credential files are not hard-linked in practice.
+  for p in ${cred[@]+"${cred[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    [ -f "$c" ] || die "cred-ro path is not a file (fail-closed): $c"
+    cred_c+=("$c")
+  done
   for p in ${ex[@]+"${ex[@]}"}; do
     c="$(canonicalize "$p")" || exit 2
     { [ -f "$c" ] && [ -x "$c" ]; } || die "exec path is not an executable file (fail-closed): $c"
@@ -221,12 +259,13 @@ render_profile() {
     done
   fi
 
-  # Build the three token blocks.
-  local ro_block rw_block ex_block
+  # Build the token blocks.
+  local ro_block rw_block cred_block ex_block
   ro_block="$(emit_allow "file-read*" ${ro_c[@]+"${ro_c[@]}"})"
   # RW scopes need both read and write.
   rw_block="$(emit_allow "file-read*" ${rw_c[@]+"${rw_c[@]}"})
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
+  cred_block="$(emit_deny_write ${cred_c[@]+"${cred_c[@]}"})"
   ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
@@ -238,6 +277,7 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
     case "$line" in
       *@@RO_PATHS@@*) printf '%s\n' "$ro_block" ;;
       *@@RW_PATHS@@*) printf '%s\n' "$rw_block" ;;
+      *@@CRED_DENY@@*) printf '%s\n' "$cred_block" ;;
       *@@EXEC_PATHS@@*) printf '%s\n' "$ex_block" ;;
       *) printf '%s\n' "$line" ;;
     esac

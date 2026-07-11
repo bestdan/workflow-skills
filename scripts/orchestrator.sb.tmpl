@@ -63,6 +63,14 @@
 ;;     $TMPDIR / scratchpad. Writes are worktree-confined by construction. [§1 rows 1–3]
 @@RW_PATHS@@
 
+;; --- credential files kept READ-ONLY even inside a read-write state dir. A tool
+;;     state dir (~/.codex, ~/.claude) is write-granted above, but its own token
+;;     must stay unwritable — and the subpath write allow silently covers it.
+;;     Seatbelt honors the LAST matching rule, so the per-file write denials below
+;;     MUST come after the RW block to override it per co-located credential. Reads
+;;     are untouched (the tool still reads its token). [§3: file-RO vs state-RW]
+@@CRED_DENY@@
+
 ;; --- exec: the resolved coder binaries (literal) plus, when --toolchain or
 ;;     --exec-dir is used, whole bin dirs (subpath) so the orchestrator can
 ;;     shell out to the dozens of coreutils/git-core/uv/node/etc. helpers a

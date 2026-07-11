@@ -259,6 +259,78 @@ sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/w
 [ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
   && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
 
+# --- cred-ro: a credential file stays RO inside an RW state dir (task 3, P1 #5) --
+# A tool state dir is --rw (its sessions/caches must be writable), but its own
+# token must not be — the (subpath) write allow would otherwise cover it.
+STATE="$BASE/state"; mkdir -p "$STATE"
+CREDF="$STATE/auth.json"; printf '{"token":"secret"}\n' >"$CREDF"
+crprof="$BASE/cred.sb"
+"$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BIN" --out "$crprof" >/dev/null 2>&1
+crbody="$(cat "$crprof" 2>/dev/null)"
+have "cred-ro: emits a deny file-write* block"  '(deny file-write*'      "$crbody"
+have "cred-ro: denies the credential literal"   "(literal \"$CREDF\")"   "$crbody"
+lack "cred-ro: no @@tokens@@ remain"            '@@'                     "$crbody"
+# Ordering is load-bearing AND must be proved precisely: Seatbelt takes the LAST
+# matching rule, so the cred deny must follow the state dir's *file-write* allow*
+# specifically — not merely some earlier write rule (the static /dev/null allow),
+# and not the state path's *read* allow. Walk the profile: confirm the STATE
+# subpath appears inside a `(allow file-write* …)` block, then a `(deny
+# file-write* …)` block carrying the cred literal comes AFTER it. This is the only
+# in-jail proof when the behavioral sandbox checks below are skipped.
+order_ok="$(awk -v st="(subpath \"$STATE\")" -v cr="(literal \"$CREDF\")" '
+  /\(allow file-write\*/ { mode="w" }
+  /\(deny file-write\*/  { mode="d" }
+  mode=="w" && index($0, st) { wl=NR }
+  mode=="d" && wl && index($0, cr) { print "yes"; exit }
+' "$crprof")"
+if [ "$order_ok" = yes ]; then
+  ok "cred-ro: cred deny follows the state-dir write allow (precise)"
+else
+  bad "cred-ro: cred deny follows the state-dir write allow (precise)"
+fi
+# no --cred-ro → placeholder comment, no stray deny form
+"$SCRIPT" render-profile --rw "$STATE" --exec "$BIN" --out "$BASE/nocred.sb" >/dev/null 2>&1
+lack "cred-ro: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nocred.sb" 2>/dev/null)"
+# fail-closed: a missing file / a directory writes nothing and exits 2
+fc "cred-ro missing file" "does not exist" --cred-ro "$BASE/nope-cred"
+fc "cred-ro is a dir"     "not a file"     --cred-ro "$STATE"
+
+# behavioral proof (macOS only): the state dir is writable, the token is not,
+# and the token is still READABLE (the deny is write-only).
+if command -v sandbox-exec >/dev/null 2>&1; then
+  if o="$("$SCRIPT" check-profile "$crprof" 2>&1)"; then
+    ok "check-profile: cred-ro profile compiles"
+  else
+    bad "check-profile: cred-ro profile compiles" "$o"
+  fi
+  BASHBIN="$(command -v bash)"
+  crxprof="$BASE/credx.sb"
+  "$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BASHBIN" --out "$crxprof" >/dev/null 2>&1
+  # Use only bash builtins (echo / redirection / read) inside the jailed shell:
+  # the profile permits exec of bash ONLY, so shelling out to `cat` etc. would be
+  # denied regardless of file permissions and false-fail the assertion. Paths are
+  # passed as quoted positionals so a space/metachar path can't reparse.
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'echo x > "$1/session"' _ "$STATE" >/dev/null 2>&1; then
+    ok "cred-ro: write to the state dir is allowed"
+  else
+    bad "cred-ro: write to the state dir is allowed"
+  fi
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'echo y > "$1"' _ "$CREDF" >/dev/null 2>&1; then
+    bad "cred-ro: write to the credential file is denied"
+  else
+    ok "cred-ro: write to the credential file is denied"
+  fi
+  # readability via a pure builtin (`read` + input redirection) — no external exec.
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'read -r _ < "$1"' _ "$CREDF" >/dev/null 2>&1; then
+    ok "cred-ro: the credential file is still readable"
+  else
+    bad "cred-ro: the credential file is still readable"
+  fi
+  rm -f "$STATE/session" 2>/dev/null
+else
+  echo "skip - cred-ro: behavioral checks (sandbox-exec not available)"
+fi
+
 # allowLocalBinding flag flips to true (task 3, Fable #6)
 "$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1
 have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(cat "$BASE/lb.json" 2>/dev/null)"

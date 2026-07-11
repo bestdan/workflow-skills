@@ -176,8 +176,25 @@ anything that would prompt (a biometric `op signin`, a browser OAuth) is a
 | Anthropic (`claude -p`) | The launching user's `~/.claude` credentials, reused by the detached process (smoke-tested at launch).                                  |
 | Coder CLIs              | Each CLI's own credential file (`~/.codex`, `~/.local/share/devin/credentials.toml`, `~/.gemini/antigravity-cli/…`), mounted read-only. |
 
-Credential files are mounted **read-only**: the orchestrator reads tokens, never
-rewrites them.
+**File-RO vs state-RW — the credential file and its state dir are different
+scopes.** A long orchestrator (and its coders) must **write** their own tool
+**state**: `~/.claude` (sessions/todos/statsig), `~/.codex` (rollouts/sessions),
+`~/.cache` (uv/dprint), `~/.config`. Mounting those read-only breaks a real run,
+so the launch flow grants the **state dirs** `--rw`. But a state dir often
+**contains** the tool's own **credential file** (a token) — and a
+`(subpath)` write allow on the dir silently un-protects that token too. So the
+distinction is per-file, not per-tree: the **credential file** is read-only, the
+**state dir** around it is read-write.
+
+`render-profile` makes this explicit with `--cred-ro <file>`: it emits a specific
+`(deny file-write* (literal <cred-file>))` **after** the state dir's write allow.
+Seatbelt honors the **last matching rule**, so the deny overrides the broader
+subpath allow for exactly that token while leaving the dir writable (and the token
+still readable). The naive split — put the dir in `--rw` and "the creds" in
+`--ro` — is **wrong**: the `--ro` read grant does nothing to a write already
+allowed by the enclosing `--rw` subpath. The test harness asserts both halves: a
+write to the state dir succeeds and a write to the isolated credential file is
+denied.
 
 **Not every CLI is file-only.** On macOS some tools reach credentials through the
 **Keychain** or a helper process (e.g. `gh` can use the keychain; `op` uses its
@@ -210,3 +227,10 @@ any credential in its jail. So the shared process-tree profile is credential-
 coder's** credential file (a codex worker sees only its OpenAI credential, never
 `gh`/`op`/`~/.claude`) and that coder's network hosts. Least privilege per §3
 holds down into the workers, not just at the orchestrator.
+
+> **Status — tracked follow-up, not yet implemented.** The file-RO/state-RW split
+> in §3 (`--cred-ro`) protects the _orchestrator's own_ tokens, but the per-worker
+> credential **subtraction** described here is a separate, larger change (a worker's
+> `exec` needs a distinct, narrower profile than the orchestrator's) and is **out of
+> scope** for the §3 write-scopes work. Until it lands, a worker inherits the
+> orchestrator's credential surface — the residual exposure to keep on the backlog.
