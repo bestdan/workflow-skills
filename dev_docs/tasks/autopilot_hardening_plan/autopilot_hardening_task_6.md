@@ -2,7 +2,7 @@
 title: "docs: reference + SKILL corrections from run #1 (phase, paths, adapter, merge order)"
 priority: 3
 size: 3
-status: new
+status: done # merged as PR #174 (detached run #2, 2026-07-11)
 created: 2026-07-10
 source_branch: main
 related_files:

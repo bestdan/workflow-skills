@@ -2,7 +2,7 @@
 title: "cleanup: graduate hardening design to dev_docs/ + delete plan scaffolding"
 priority: 4
 size: 1
-status: new
+status: done # merged as PR #178 (detached run #2, 2026-07-11)
 created: 2026-07-10
 source_branch: main
 related_files:

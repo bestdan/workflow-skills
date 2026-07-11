@@ -8,6 +8,32 @@ created: 2026-07-10
 
 # Auto-pilot hardening
 
+## STATUS — read this first (2026-07-11)
+
+**Tasks 1–9: `done`, all merged** (PRs #169, #170, #177, #172, #173, #174, #175,
+#176, #178). Delivered by **detached run #2** — auto-pilot executing this plan on
+itself. Do **not** re-run them.
+
+**Tasks 10–20: `new`, none started.** These are the *output* of run #2: eleven new
+findings (#19–#28) it produced by **breaking in ways nobody had predicted while
+executing tasks 1–9**. Seven are P1.
+
+**Ready now** (no blockers): **t18**, **t13**. Everything else unblocks immediately —
+their blockers (t1/t3/t5/t6/t8) are all merged — leaving **t10, t12, t13, t15, t17,
+t18, t19** ready in parallel, then **t11, t14, t16, t20** behind them. The graph is
+wide, not deep: at most 2 levels.
+
+**Recommended sequencing.** Do **not** auto-pilot 10–20 straight away. Four P1s
+(**10, 12, 14, 16**) exist precisely *because the jail and supervisor are thinner than
+the docs claim* — exit codes are poisoned to 1 (#20), a stalled run is silent (#22),
+run invariants are unchecked (#23). Running an unattended run **on the broken
+substrate is how run #2 got into trouble**. Land **10, 12, 13, 18** first (attended),
+*then* auto-pilot the rest with a working alarm channel and heartbeat.
+
+**Loose end:** the plan scaffolding (`dev_docs/tasks/autopilot_hardening_plan/`) still
+exists. task_9 correctly declined to delete it from a `main`-based PR (finding #13).
+Delete it only once 10–20 land — they live here.
+
 ## Goal
 
 Turn the 18 ranked findings from the first fully-detached auto-pilot run
@@ -76,15 +102,15 @@ must be the **same** file as the launchd relaunch sentinel.
 
 ## Tasks
 
-1. [[autopilot_hardening_task_1]] — P0: `write-launch` emits `--verbose` + injects `PATH`; smoke-test uses the real flag set; the atomic `launch` works end-to-end.
-2. [[autopilot_hardening_task_2]] — P0: `render-profile` toolchain-exec mode (subpath bin dirs; symlink/version-drift-proof) so the real verify/coder toolchain can exec.
-3. [[autopilot_hardening_task_3]] — P1: profile write-scopes — split credential *files* (RO) from tool *state dirs* (RW) so a long run's tools can write their own state.
-4. [[autopilot_hardening_task_4]] — P1: resolve the sandbox↔verify conflict — run the verify command outside the jail (recommended) so `check.sh` reaches "done".
-5. [[autopilot_hardening_task_5]] — P2: `scripts/preflight.sh` — one end-to-end read-only pre-flight (probes + base-freshness) emitting go/no-go + the resolved paths the generators consume.
-6. [[autopilot_hardening_task_6]] — P2/P3: reference + SKILL corrections (pending phase, helper-script paths, reservation-PR note, scaffolding-cleanup teardown, merge-bottom-up guidance).
-7. [[autopilot_hardening_task_7]] — P4: route a deferred **cross-cutting** co-review finding to a tracked follow-up task, not just a `QUESTIONS.md` entry.
-8. [[autopilot_hardening_task_8]] — P5: observability — a `status --label` subcommand + a done-sentinel, and neutralize jail-incompatible `Stop` hooks in the detached run.
-9. [[autopilot_hardening_task_9]] — Cleanup: graduate the durable design to `dev_docs/auto-pilot-hardening.md` and delete this plan scaffolding.
+1. ✅ **DONE (#169)** — [[autopilot_hardening_task_1]] — P0: `write-launch` emits `--verbose` + injects `PATH`; smoke-test uses the real flag set; the atomic `launch` works end-to-end.
+2. ✅ **DONE (#170)** — [[autopilot_hardening_task_2]] — P0: `render-profile` toolchain-exec mode (subpath bin dirs; symlink/version-drift-proof) so the real verify/coder toolchain can exec.
+3. ✅ **DONE (#177)** — [[autopilot_hardening_task_3]] — P1: profile write-scopes — split credential *files* (RO) from tool *state dirs* (RW) so a long run's tools can write their own state.
+4. ✅ **DONE (#172)** — [[autopilot_hardening_task_4]] — P1: resolve the sandbox↔verify conflict — run the verify command outside the jail (recommended) so `check.sh` reaches "done".
+5. ✅ **DONE (#173)** — [[autopilot_hardening_task_5]] — P2: `scripts/preflight.sh` — one end-to-end read-only pre-flight (probes + base-freshness) emitting go/no-go + the resolved paths the generators consume.
+6. ✅ **DONE (#174)** — [[autopilot_hardening_task_6]] — P2/P3: reference + SKILL corrections (pending phase, helper-script paths, reservation-PR note, scaffolding-cleanup teardown, merge-bottom-up guidance).
+7. ✅ **DONE (#175)** — [[autopilot_hardening_task_7]] — P4: route a deferred **cross-cutting** co-review finding to a tracked follow-up task, not just a `QUESTIONS.md` entry.
+8. ✅ **DONE (#176)** — [[autopilot_hardening_task_8]] — P5: observability — a `status --label` subcommand + a done-sentinel, and neutralize jail-incompatible `Stop` hooks in the detached run.
+9. ✅ **DONE (#178)** — [[autopilot_hardening_task_9]] — Cleanup: graduate the durable design to `dev_docs/auto-pilot-hardening.md` and delete this plan scaffolding.
 
 ### Added from detached run #2 (findings 19–23)
 
