@@ -19,6 +19,18 @@
 (allow sysctl-read)
 (allow mach-lookup)
 
+;; --- deny the launchd / LaunchServices job-submission brokers. The exec block
+;;     below (toolchain bin dirs) makes /bin/launchctl and /usr/bin/open
+;;     reachable; with an unrestricted mach-lookup a permitted binary could ask
+;;     launchd (or LaunchServices) to spawn a job OUTSIDE this jail — the spawned
+;;     process does NOT inherit the sandbox, so writes/network confinement can't
+;;     contain it (a confused-deputy escape). Seatbelt is last-match-wins, so
+;;     these denies override the blanket allow above for exactly the control
+;;     services that broker an out-of-jail launch, leaving normal mach use intact.
+(deny mach-lookup
+  (global-name "com.apple.xpc.launchd")
+  (global-name "com.apple.coreservices.launchservicesd"))
+
 ;; --- network CLASS only (launch-runtime §"Sandbox profile"): Seatbelt gates
 ;;     network by socket/class, NOT by hostname. Allow outbound as a class and
 ;;     permit loopback bind so the layer-2 egress proxy (which DOES filter by
@@ -58,3 +70,12 @@
 ;;     wall — WRITES (RW_PATHS, above) and NETWORK (layer 2) are what actually
 ;;     bound what a permitted binary can do once it runs. [§4]
 @@EXEC_PATHS@@
+
+;; --- defense-in-depth on top of the mach-lookup denies above: refuse to exec
+;;     the job-submission binaries outright (last-match-wins over the exec allow
+;;     block). They live only in non-writable system bin dirs and RW scopes are
+;;     never exec-allowed, so a copy can't be staged into an exec-permitted dir —
+;;     this deny is therefore complete for the launchctl/open escape vectors.
+(deny process-exec
+  (literal "/bin/launchctl")
+  (literal "/usr/bin/open"))

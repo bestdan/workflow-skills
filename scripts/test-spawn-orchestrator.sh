@@ -170,6 +170,29 @@ else
   echo "skip - exec-dir: confinement checks (sandbox-exec not available)"
 fi
 
+# --- out-of-jail launch escape is closed (toolchain exec + mach brokers) -------
+# Broadening exec to whole bin dirs puts /bin/launchctl and /usr/bin/open in
+# reach; a job they broker to launchd/LaunchServices runs OUTSIDE the jail. The
+# template must deny both the submission mach services and exec of the binaries.
+escprof="$BASE/escape.sb"
+"$SCRIPT" render-profile --exec-dir /bin --rw "$RUN_WT" --out "$escprof" >/dev/null 2>&1
+escbody="$(cat "$escprof" 2>/dev/null)"
+have "escape: denies mach-lookup to launchd"       'com.apple.xpc.launchd'          "$escbody"
+have "escape: denies mach-lookup to launchservices" 'com.apple.coreservices.launchservicesd' "$escbody"
+have "escape: denies exec of launchctl"            '(literal "/bin/launchctl")'     "$escbody"
+have "escape: denies exec of open"                 '(literal "/usr/bin/open")'      "$escbody"
+if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
+  # /bin is exec-allowed here, so only the explicit process-exec deny can block
+  # launchctl — a clean signal the escape binary is walled off, not merely absent.
+  if sandbox-exec -f "$escprof" /bin/launchctl help >/dev/null 2>&1; then
+    bad "escape: launchctl exec denied even with /bin allowed"
+  else
+    ok "escape: launchctl exec denied even with /bin allowed"
+  fi
+else
+  echo "skip - escape: launchctl runtime deny (sandbox-exec or launchctl absent)"
+fi
+
 # --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
 sj="$BASE/settings.json"
 "$SCRIPT" render-settings --source linear --coder codex --out "$sj" >/dev/null 2>&1
