@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.46.0] - 2026-07-11
+
+### Features
+
+- status subcommand + done-sentinel; Stop-hook mitigation (task_8, P5) (#176) (45cdd95)
+
 ## [1.45.0] - 2026-07-11
 
 ### Features
