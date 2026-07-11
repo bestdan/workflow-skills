@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.41.0] - 2026-07-11
+
+### Features
+
+- wire .task-config.local.yml override so api_key_ref resolves (PRE-500) (#168) (bd047a5)
+
 ## [1.40.0] - 2026-07-11
 
 ### Features
