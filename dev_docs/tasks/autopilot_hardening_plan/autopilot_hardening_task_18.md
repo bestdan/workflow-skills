@@ -56,6 +56,30 @@ reliably at review time is the same "rule with no enforcement" pattern that prod
 Every input this needs is already known: `RUN.md` records the stack (`base`,
 `base_sha`), and GitHub records which parents merged. It is fully mechanizable.
 
+## Human review moves the parent — that is the process, not an anomaly
+
+Confirmed with the human during run #2: *"there is always my review in between hand-off
+and merging. Files being changed should be an expected part of the process."* This is
+load-bearing and corrects two assumptions:
+
+- **The `base_sha` freeze rule models the wrong actor.** `run-state.md`'s stacked-PR
+  rule parks a child when the parent's tip moves — it exists to catch the
+  **orchestrator** moving a base. But a **human reviewer** moves the parent *every
+  time*, by design. Applied to human review, the rule would park every stacked child on
+  every run. The restack must therefore **expect** the parent's merged content to differ
+  from the frozen `base_sha`, and rebase onto the **merged, reviewed** parent — never
+  treat the divergence as an error.
+- **A restacked child's review is STALE, and that is the real risk.** The child was
+  co-reviewed against the **pre-review** parent. In run #2, task_2 gained two security
+  fixes *during human review* (`close out-of-jail launch escape opened by toolchain
+  exec`, `deny osascript exec`) — and task_3, which edits the same files, was reviewed
+  against a version of `render_profile` that predated them. A `git rebase` that applies
+  **cleanly** proves nothing here: the child's approval refers to code that no longer
+  exists, and a clean auto-merge can silently drop or contradict a fix the reviewer just
+  added. (Checked by hand this run: the fixes survived. That check must not be manual.)
+
+So the restack is not just a git operation — it is a **re-verification trigger**.
+
 ## Task
 
 - Add a **restack** operation (e.g. `scripts/spawn-orchestrator.sh restack`, or a
@@ -74,6 +98,21 @@ Every input this needs is already known: `RUN.md` records the stack (`base`,
   run's `base_branch` after its parent merged, is a **defect**. Surface it in
   `REPORT.md` and via the alarm channel — do not wait for a human to diff the PR list
   by hand, which is the only reason #172 was caught at all.
+- **Re-verify every restacked child — a clean rebase is not evidence of correctness.**
+  After rebasing onto the merged parent, the child must:
+  1. **Re-run the verify command** against the new base (its previous green was against
+     the old one).
+  2. **Diff-audit against the parent's review changes**: assert that no line added by the
+     parent's post-hand-off review commits is removed or contradicted by the child. In
+     run #2 this was the difference between shipping and silently reverting a
+     sandbox-escape fix, and it was caught only by a human reading all 6 deleted lines.
+  3. **Flag the child's co-review as stale** in `REPORT.md` when the parent changed
+     during review, so the human knows the child's approval predates the parent's current
+     content — and re-run co-review on the child if the parent's review touched the same
+     files.
+- **Fix the freeze rule's actor confusion** in `run-state.md`: state that `base_sha`
+  guards the **orchestrator** moving a base (→ park), while a **human merging/reviewing**
+  a parent is expected and routes to **restack + re-verify**, never to a park.
 - **Emit the exact restack commands in `REPORT.md`**, per child, copy-pasteable — so
   even without running the automation the human is one paste from correct, rather than
   reconstructing a rebase from prose.
