@@ -114,6 +114,15 @@ checks reads green, and the only thing that actually caught both was a human ask
 
 19. [[autopilot_hardening_task_19]] — P2: **de-anchor from "overnight."** The load-bearing property is **unattended** (no human *attached*), not nocturnal — and the nocturnal framing directly produced the missing alarm channel (16) and the batch-digest `REPORT.md` (15). Run #2 did 8 of its 9 tasks between 06:00 and 11:35, with the human at their desk. Name the three attendance modes — attended / **partially attended** (the common case) / unattended. (#27)
 
+20. [[autopilot_hardening_task_20]] — **P1**: ship the **periodic status report** the operator had to hand-roll. An **alarm** (16) fires on a *predicted* condition; the heartbeat catches the failures **nobody anticipated** — #23 was found in 7 minutes by a routine check noticing reality ≠ `RUN.md`, and **no alarm rule for it could have existed**. On by default, supervisor-side, and its payload is the **delta** (incl. "no forward progress"). (#28)
+
+**Silence is not health.** Run #2's decisive lesson: every failure exited `0`,
+`is_error: false`, `terminal_reason: completed`. In a system where failure is
+indistinguishable from success, "no news is good news" is **actively false** — which is
+why a *positive* periodic signal (task 20) is not redundant with alarms (task 16). The
+alarm covers what we predicted; the heartbeat is what makes the *absence* of a report
+mean something.
+
 **A rule with no enforcement is a comment.** Tasks 17 and 18 are the third and fourth instances of one
 structural pattern, and the plan should say it plainly: `launch-runtime.md` §3 already
 declares "a tool that can only authenticate via an interactive Keychain/helper prompt
