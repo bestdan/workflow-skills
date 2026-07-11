@@ -235,6 +235,65 @@ sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/w
 [ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
   && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
 
+# --- cred-ro: a credential file stays RO inside an RW state dir (task 3, P1 #5) --
+# A tool state dir is --rw (its sessions/caches must be writable), but its own
+# token must not be — the (subpath) write allow would otherwise cover it.
+STATE="$BASE/state"; mkdir -p "$STATE"
+CREDF="$STATE/auth.json"; printf '{"token":"secret"}\n' >"$CREDF"
+crprof="$BASE/cred.sb"
+"$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BIN" --out "$crprof" >/dev/null 2>&1
+crbody="$(cat "$crprof" 2>/dev/null)"
+have "cred-ro: emits a deny file-write* block"  '(deny file-write*'      "$crbody"
+have "cred-ro: denies the credential literal"   "(literal \"$CREDF\")"   "$crbody"
+have "cred-ro: state dir still write-granted"   "(subpath \"$STATE\")"   "$crbody"
+lack "cred-ro: no @@tokens@@ remain"            '@@'                     "$crbody"
+# ordering is load-bearing: Seatbelt takes the LAST matching rule, so the cred
+# deny MUST appear after the state-dir file-write* allow to override it.
+awln="$(printf '%s\n' "$crbody" | grep -n 'allow file-write\*' | head -1 | cut -d: -f1)"
+dnln="$(printf '%s\n' "$crbody" | grep -n 'deny file-write\*'  | head -1 | cut -d: -f1)"
+if [ -n "$awln" ] && [ -n "$dnln" ] && [ "$dnln" -gt "$awln" ]; then
+  ok "cred-ro: deny ordered after the write allow"
+else
+  bad "cred-ro: deny ordered after the write allow" "allow@$awln deny@$dnln"
+fi
+# no --cred-ro → placeholder comment, no stray deny form
+"$SCRIPT" render-profile --rw "$STATE" --exec "$BIN" --out "$BASE/nocred.sb" >/dev/null 2>&1
+lack "cred-ro: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nocred.sb" 2>/dev/null)"
+# fail-closed: a missing file / a directory writes nothing and exits 2
+fc "cred-ro missing file" "does not exist" --cred-ro "$BASE/nope-cred"
+fc "cred-ro is a dir"     "not a file"     --cred-ro "$STATE"
+
+# behavioral proof (macOS only): the state dir is writable, the token is not,
+# and the token is still READABLE (the deny is write-only).
+if command -v sandbox-exec >/dev/null 2>&1; then
+  if o="$("$SCRIPT" check-profile "$crprof" 2>&1)"; then
+    ok "check-profile: cred-ro profile compiles"
+  else
+    bad "check-profile: cred-ro profile compiles" "$o"
+  fi
+  BASHBIN="$(command -v bash)"
+  crxprof="$BASE/credx.sb"
+  "$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BASHBIN" --out "$crxprof" >/dev/null 2>&1
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "echo x > $STATE/session" >/dev/null 2>&1; then
+    ok "cred-ro: write to the state dir is allowed"
+  else
+    bad "cred-ro: write to the state dir is allowed"
+  fi
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "echo y > $CREDF" >/dev/null 2>&1; then
+    bad "cred-ro: write to the credential file is denied"
+  else
+    ok "cred-ro: write to the credential file is denied"
+  fi
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "cat $CREDF" >/dev/null 2>&1; then
+    ok "cred-ro: the credential file is still readable"
+  else
+    bad "cred-ro: the credential file is still readable"
+  fi
+  rm -f "$STATE/session" 2>/dev/null
+else
+  echo "skip - cred-ro: behavioral checks (sandbox-exec not available)"
+fi
+
 # allowLocalBinding flag flips to true (task 3, Fable #6)
 "$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1
 have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(cat "$BASE/lb.json" 2>/dev/null)"
