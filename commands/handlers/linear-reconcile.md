@@ -160,11 +160,14 @@ per scope.
    (`projectId` omitted, keep only issues outside the configured projects),
    exactly as `linear-claim.md` "Find candidates" does.
 
-2. **Resolve each issue's PR.** Use the **same priority order** as
+2. **Resolve each issue's PR(s).** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`
-   title match → `branchName`) — reference that step, do not duplicate it. No
-   PR resolves → **not a row-2 candidate**; skip silently (a backlog issue
-   with no PR at all is just normal backlog, not drift).
+   title match → `branchName`) — reference that step, do not duplicate it —
+   **including its multi-PR rule**: keep **every** PR the resolving source
+   yields, not just the first, so an issue's full PR set reaches "Both paths"
+   step 3 below (an issue can carry a stale closed PR **and** a newer open
+   one). No PR resolves at all → **not a row-2 candidate**; skip silently (a
+   backlog issue with no PR is just normal backlog, not drift).
 
 ### Both paths
 
