@@ -183,9 +183,10 @@ have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(c
 # Pass --claude-bin "$BIN" (a fixture) so the harness needs no real claude on PATH.
 printf 'run the graph\n' >"$BASE/prompt.txt"
 "$SCRIPT" render-settings --source plan --coder codex --out "$BASE/wl.json" >/dev/null 2>&1
+LAUNCH_PATH='/opt/homebrew/bin:/usr/bin:/bin'
 wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
-  --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
+  --path "$LAUNCH_PATH" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
 lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
 have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
@@ -193,13 +194,28 @@ have "launch: -p reads prompt from file"       '-p "$(cat'                      
 have "launch: bypassPermissions flag"          '--permission-mode bypassPermissions' "$lbody"
 have "launch: passes --settings"               '--settings'                         "$lbody"
 have "launch: redirects to log"                ">>$BASE/o.log"                       "$lbody"
+have "launch: emits --verbose"                 '--verbose'                           "$lbody"
+have "launch: exports resolved PATH"           "export PATH=$LAUNCH_PATH"            "$lbody"
+verbose_ln="$(printf '%s\n' "$lbody" | grep -n -- '--verbose' | head -1 | cut -d: -f1)"
+sjson_ln="$(printf '%s\n' "$lbody" | grep -n -- '--output-format stream-json' | head -1 | cut -d: -f1)"
+if [ -n "$verbose_ln" ] && [ -n "$sjson_ln" ] && [ "$verbose_ln" -lt "$sjson_ln" ]; then
+  ok "launch: --verbose precedes --output-format stream-json"
+else
+  bad "launch: --verbose precedes --output-format stream-json" "verbose@$verbose_ln sjson@$sjson_ln"
+fi
+# fail-closed: --path is required
+wlnopath="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.nopath --claude-bin "$BIN" \
+  --out-script "$BASE/nopath.sh" --out-plist "$BASE/nopath.plist" 2>&1)"
+[ $? = 2 ] && [ ! -e "$BASE/nopath.sh" ] && printf '%s' "$wlnopath" | grep -qF 'requires --path' \
+  && ok "launch: missing --path fails closed" || bad "launch: missing --path fails closed" "$wlnopath"
 if command -v plutil >/dev/null 2>&1; then
   if plutil -lint "$BASE/job.plist" >/dev/null 2>&1; then ok "launch: plist lints"; else bad "launch: plist lints"; fi
   # plist injection: an XML-metachar path must still yield a VALID plist (escaped).
   mkdir -p "$BASE/a&b<x"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
     --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
-    --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+    --path "$LAUNCH_PATH" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
   if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
 else
   echo "skip - launch: plist lint (plutil absent)"
@@ -207,11 +223,11 @@ fi
 # label injection rejected at the source (defense-in-depth on top of xml_escape)
 "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label 'a</string><key>x' --claude-bin "$BIN" \
-  --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
+  --path "$LAUNCH_PATH" --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
   && bad "launch: injecting label rejected" || ok "launch: injecting label rejected"
 # write-launch fail-closed on a missing input file
 wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
@@ -228,6 +244,13 @@ if [ -n "$smoke_ln" ] && [ -n "$detach_ln" ] && [ "$smoke_ln" -lt "$detach_ln" ]
 else
   bad "launch: smoke-test ordered before detach" "smoke@$smoke_ln detach@$detach_ln"
 fi
+
+# --- smoke_test invariant: must use the REAL flag set (--verbose + stream-json) -
+# so it can't green-light an invocation the real launch rejects. Grepped from
+# source since smoke-test execs claude for real and can't run offline here.
+smoke_src="$(sed -n '/^smoke_test()/,/^}/p' "$SCRIPT")"
+have "smoke-test: uses --verbose"              '--verbose'                 "$smoke_src"
+have "smoke-test: uses --output-format stream-json" '--output-format stream-json' "$smoke_src"
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]
