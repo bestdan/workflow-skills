@@ -274,8 +274,13 @@ Still open as **draft PRs** — the code on `main` will not match these sections
 until they land: the verify broker (task_4 / PR #172), `scripts/preflight.sh`
 (task_5 / PR #173), the adapter and SKILL corrections (task_6 / PR #174), the
 cross-cutting follow-up routing and `--add-task-host` (task_7 / PR #175), and
-`status --label` plus the done-sentinel (task_8 / PR #176). They are stacked in
-task order; merge bottom-up.
+`status --label` plus the done-sentinel (task_8 / PR #176).
+
+All five now target `main` and are **independent of each other** — nothing is
+left stacked, so they may merge in any order. (The one chain among them, task_4
+on task_1, dissolved when task_1 merged and GitHub retargeted #172 onto `main`.)
+The bottom-up merge rule above still holds in general; it simply has no live
+chain to constrain here.
 
 ## See also
 
