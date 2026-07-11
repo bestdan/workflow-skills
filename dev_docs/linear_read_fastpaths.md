@@ -59,7 +59,8 @@ picked" — they're defined to be the same selection.
 ## The shared read specs (`linear-common.md`)
 
 Two blocks in [`commands/handlers/linear-common.md`](../commands/handlers/linear-common.md)
-are the single source of truth for a read shared by 2+ consumers:
+are the single source of truth for a read that has **more than one
+implementation to keep in lockstep**:
 
 - **"Ready-candidate selection"** — the state scope (`unstarted`-type only),
   the gate table (estimate, three exclusion labels, assignee), and the rank
@@ -81,11 +82,17 @@ scripts and the MCP floors are both required to satisfy, so a single spec
 edit is the only way to change the read without the two paths silently
 diverging.
 
-A read used by exactly **one** consumer (find-candidates has one consumer,
-relations load has one) doesn't need a `linear-common.md` block — the
-script's own docstring and the consumer's `.md` file are close enough
-together to stay in sync without it. Add a shared block only once a second
-consumer needs the identical read.
+What triggers a block is **more than one implementation of the same read that
+must stay in lockstep — not a consumer count.** That happens two ways: (a)
+2+ consumer commands share the identical read (the "In-flight scan" case —
+sweep and reconcile row 2), or (b) a **single** consumer has both a fast-path
+script and an MCP floor whose selection rules are subtle enough to drift apart
+(the "Ready-candidate selection" case — one consumer, `/do-tasks`, but the
+gate + rank rules must match exactly between `linear-ready.py` and the
+`linear-claim.md` floor, so the spec pins both). A read whose script and its
+single consumer's prose are simple enough to eyeball together — relations load
+— can skip the block; add one the moment a second consumer, or a
+subtle-enough script/floor split, makes silent drift a real risk.
 
 ## The key / security boundary
 
@@ -176,11 +183,14 @@ harness, so they are opt-in rather than always-on:
    way relations-load does for dedup judgment; document that choice in the
    script's docstring the way `linear-scan.py` calls out its _absence_ of
    `description`.
-3. **If 2+ consumers will share this exact read**, add a block to
-   `linear-common.md` (state scope, field list, scope-resolution rule) as the
-   single source of truth, and have the script's docstring and every
-   consuming `.md` file point at it. If there's only one consumer, skip this
-   — don't pre-abstract for a hypothetical second caller.
+3. **If the read will have more than one implementation to keep in lockstep**
+   — 2+ consumers sharing it, or a single consumer whose fast-path script and
+   MCP floor have subtle selection rules that could drift (as with
+   Ready-candidate selection's gate + rank) — add a block to `linear-common.md`
+   (state scope, field list, scope-resolution rule) as the single source of
+   truth, and have the script's docstring and every consuming `.md` file point
+   at it. If a single consumer's script and prose are simple enough to eyeball
+   together, skip it — don't pre-abstract for a hypothetical second caller.
 4. **Wire the consumer's `.md` file** with the try-script-then-floor pattern:
    attempt the script when `Bash` is available, treat any non-zero exit or
    unparseable stdout as the fallback trigger (one debug line, then run the
