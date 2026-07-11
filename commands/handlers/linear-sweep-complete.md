@@ -50,7 +50,89 @@ pattern.
 
 These are the only issues that can possibly be "merged but not yet
 completed" — anything not in a started-type state either hasn't begun or is
-already terminal.
+already terminal. See `linear-common.md` "In-flight scan" for the read this
+section implements (state scope, skinny fields, per-scope resolution) — that
+block is the single source of truth; it is not restated here.
+
+**One mechanism: try the fast path, fall back to the floor.** At the top of
+this step, if `Bash` is available, attempt the **GraphQL fast-path** first —
+`commands/handlers/assets/linear-scan.py`, the same script `linear-common.md`
+"In-flight scan" names as one of the read's consumers. On **any** non-zero
+exit, or stdout that doesn't parse as the expected `{ meta, issues }` object,
+log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP
+floor.`) and run the **MCP floor** below instead. There is no separate
+`[ -n "$LINEAR_API_KEY" ]` pre-check gating this — `linear-scan.py` itself
+exits fast and non-zero when no key is resolvable, so the fallback **is** the
+gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
+`Bash` tool falls to the floor by construction.
+
+> **This gate is also the security boundary.** A Linear personal API key
+> (what `linear.api_key_ref` points at) is a full-account bearer token —
+> anyone holding it can read and write everything the key's owner can in
+> Linear. It must **never** be injected into a `claude.ai`/Claude Code
+> **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/
+> `$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and
+> attempts `linear-scan.py`, the script exits non-zero before any GraphQL
+> request (no key resolvable) and the run falls to the MCP floor
+> (OAuth-scoped, no raw key) by design — the guarantee is that the key is
+> never present, not that the script is never invoked. Do not "fix" this by
+> wiring the key into cloud config.
+
+### Fast path (GraphQL, via `linear-scan.py`)
+
+1. **Resolve scope, unchanged.** Run "1. Preflight + resolve scope" above as
+   normal — `--all` vs. the configured-projects-plus-Unassigned scope list is
+   the same either way. The script's own prelude resolves the team itself, so
+   this **replaces** the floor's `list_workflow_states` call below — do not
+   also call it on this path.
+
+2. **Call the script**, passing every resolved concrete project scope's `id`
+   as a repeated `--project` (omit entirely for the whole-team scope, i.e.
+   `--all` or the no-projects-configured case; **never** serialize the
+   `__unassigned__` sentinel as a `--project` value — same guard as
+   `linear-claim.md` "Find candidates") and `--state-type started` (the
+   state-type set this sweep needs, per `linear-common.md` "In-flight scan"):
+
+   ```bash
+   python3 commands/handlers/assets/linear-scan.py --team "<linear.team>" \
+     --project "<scope-1-id>" --project "<scope-2-id>" ... \
+     --state-type started
+   ```
+
+   If the relative path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
+   Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
+   identifier, title, url, state, attachments, project } ] }` object described
+   in the script's header comment; a parse failure is itself a fallback
+   trigger (see above). The **Unassigned bucket's exclusion pass** has no
+   equivalent in the script (it has no null-project filter, same limitation
+   `linear-claim.md` "Find candidates" step 1 documents for `linear-ready.py`)
+   — when the Unassigned bucket applies (1+ projects configured, no `--all`),
+   **fall back to the MCP floor** for that scope's pass so unassigned
+   in-flight work isn't missed; the configured-project scopes can still run
+   fast.
+
+3. **Consume `meta` in place of the equivalent MCP reads.** `meta.states` (an
+   array of `{ id, name, type }`) replaces the state-id → type map the floor
+   builds via `list_workflow_states` in step 1 of the MCP floor below — cache it the same
+   way and resolve the `started`-type ids from it. `meta.viewer` is present in
+   the payload for parity with the fast-path pattern `linear-claim.md` uses,
+   though this scan performs no assignee/viewer check and so doesn't need it.
+   On the fast path, **no** `list_workflow_states` read should run — only the
+   script's GraphQL call(s).
+
+4. **Skip the per-issue attachment read.** Each returned issue already carries
+   its own PR attachment URL(s) in `attachments` (a plain list of URLs, per
+   the script's skinny-fields contract), so **skip "3. Resolve each issue's
+   PR" step 1** (the `get_issue` call that reads `attachments` off the live
+   issue) for every fast-path issue — feed `issue.attachments` directly into
+   that step's GitHub-PR-URL match instead. Steps 3.2–3.3 (the title-search
+   and branch-name fallbacks) still apply if no attachment resolves a PR, and
+   step 4's `gh pr view` merge-check runs unchanged for every issue regardless
+   of which path found it.
+
+### MCP floor (fallback)
+
+Runs whenever the fast path isn't attempted or falls back per the gate above.
 
 1. Call `<linear-mcp>__list_workflow_states` with the team `id` (cache the
    state-id → type map, same cache `linear-claim.md` and `linear-complete.md`
@@ -61,20 +143,23 @@ already terminal.
    the same way: any started-type issue can be the case where a PR opened,
    got reviewed, and merged, but nothing moved the Linear issue.
 2. Call `<linear-mcp>__list_issues` once per resolved scope from step 1
-   above **per started-type state id from step 2.1** — the tool's `state`
+   above **per started-type state id from step 1 of the MCP floor** — the tool's `state`
    filter takes a **single** value, so a scope with two started states means
    two calls; union the results per scope:
    - `teamId`: resolved team id
    - `projectId`: the scope's `id` (omit for the whole-team scope and for
      `--all`); **never** pass the Unassigned sentinel as a `projectId` — use
      the same exclusion-pass technique as `linear-claim.md`.
-   - `state`: one `started`-type state id from step 2.1 per call
+   - `state`: one `started`-type state id from step 1 of the MCP floor per call
    - `includeArchived`: `false`
    - Limit: 50 per scope × state. If a query truncates, note it in the
      report — do not paginate.
 3. Union the results across scopes (tag each with its source scope for the
    report; no dedup needed — the Unassigned exclusion pass is disjoint by
    construction, same as `linear-claim.md`).
+
+On the **MCP floor**, "3. Resolve each issue's PR" step 1 (the per-issue
+`get_issue` attachment read) runs as written below, unchanged.
 
 ## 3. Resolve each issue's PR
 
