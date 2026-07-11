@@ -711,6 +711,101 @@ rm -f "$HEAD_REPO/QREL.md"
 [ -f "$HEAD_REPO/QREL.md" ] && grep -q 'HEAD was parked' "$HEAD_REPO/QREL.md" \
   && ok "assert-run-head: relative --questions resolves against --dir" \
   || bad "assert-run-head: relative --questions resolves against --dir" "$(ls "$HEAD_REPO" 2>&1)"
+# --- classify-exit: supervisor-side exit classification (task 10, #22) -------
+CX="$BASE/cx"; mkdir -p "$CX"
+printf 'ok\n' >"$CX/clean.log"
+printf 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}\n' >"$CX/auth.log"
+printf 'API Error: 429 rate_limit_error: overloaded\n' >"$CX/rate.log"
+printf 'some other unrelated crash\n' >"$CX/weird.log"
+
+ceo="$("$SCRIPT" classify-exit --exit-code 0 --output "$CX/clean.log" 2>&1)"; cec=$?
+[ "$cec" = 0 ] && [ "$ceo" = "done" ] && ok "classify-exit: clean exit -> done" || bad "classify-exit: clean exit -> done" "$ceo"
+
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" 2>&1)"
+have "classify-exit: 401 -> fatal" 'fatal:' "$ceo"
+have "classify-exit: 401 -> fatal (reason names 401)" '401' "$ceo"
+
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/rate.log" 2>&1)"
+have "classify-exit: rate-limit signal -> retry" 'retry:' "$ceo"
+lack "classify-exit: rate-limit is not fatal" 'fatal:' "$ceo"
+
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/weird.log" 2>&1)"
+have "classify-exit: unclassified non-zero -> retry" 'retry:' "$ceo"
+
+# fail-closed: required args
+o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --exit-code' \
+  && ok "classify-exit fail-closed: missing --exit-code" || bad "classify-exit fail-closed: missing --exit-code" "$o"
+o="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/nope.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'not found' \
+  && ok "classify-exit fail-closed: missing --output file" || bad "classify-exit fail-closed: missing --output file" "$o"
+
+# --- supervisor-check: fatal halt writes systemic status + REPORT alarm + teardown
+# (task 10) — fixture is a real git checkout so the run-state commit is observable.
+if command -v git >/dev/null 2>&1; then
+  SC="$BASE/sc-fatal"; mkdir -p "$SC/.auto-pilot"
+  ( cd "$SC" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  scout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/auth.log" --dir "$SC" \
+    --label com.autopilot.test.fatal --state "$SC/.auto-pilot/supervisor-state" 2>&1)"
+  have "supervisor-check: fatal halt reports itself" 'supervisor halt' "$scout"
+  have "supervisor-check: fatal writes status: systemic" 'status: systemic' "$(cat "$SC/.auto-pilot/RUN.md")"
+  have "supervisor-check: fatal writes a pause_reason"  'pause_reason: non-retryable auth failure' "$(cat "$SC/.auto-pilot/RUN.md")"
+  have "supervisor-check: fatal appends a REPORT.md alarm" 'ALARM' "$(cat "$SC/.auto-pilot/REPORT.md")"
+  scommits="$(git -C "$SC" log --oneline | wc -l | tr -d ' ')"
+  [ "$scommits" = 2 ] && ok "supervisor-check: fatal halt commits the run-state change" \
+    || bad "supervisor-check: fatal halt commits the run-state change" "commits=$scommits"
+
+  # --- no-progress guard: N (default 3) consecutive non-zero, no-commit wakes halts
+  SC2="$BASE/sc-noprogress"; mkdir -p "$SC2/.auto-pilot"
+  ( cd "$SC2" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  STATE2="$SC2/.auto-pilot/supervisor-state"
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
+  npout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" 2>&1)"
+  have "supervisor-check: no-progress guard halts after N consecutive failures" 'no forward progress' "$npout"
+  have "supervisor-check: no-progress halt also writes status: systemic" 'status: systemic' "$(cat "$SC2/.auto-pilot/RUN.md")"
+
+  # --- a legitimate paused_until wait never trips the guard, even repeated ------
+  SC3="$BASE/sc-paused"; mkdir -p "$SC3/.auto-pilot"
+  ( cd "$SC3" && git init -q \
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  STATE3="$SC3/.auto-pilot/supervisor-state"
+  i=0
+  while [ "$i" -lt 5 ]; do
+    "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC3" --label com.autopilot.test.paused --state "$STATE3" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  lack "supervisor-check: a paused wake never halts, however many repeats" 'systemic' "$(cat "$SC3/.auto-pilot/RUN.md")"
+
+  # --- forward progress (a fresh run-state commit) resets the guard's counter ---
+  SC4="$BASE/sc-progress"; mkdir -p "$SC4/.auto-pilot"
+  ( cd "$SC4" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  STATE4="$SC4/.auto-pilot/supervisor-state"
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
+  # a task did real work between wakes: a new run-state commit lands
+  ( cd "$SC4" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "task progressed" )
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
+  pgout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" 2>&1)"
+  have "supervisor-check: a run-state commit resets the no-progress counter" '2/3 consecutive' "$pgout"
+  lack "supervisor-check: progress in between never halts" 'systemic' "$(cat "$SC4/.auto-pilot/RUN.md")"
+else
+  echo "skip - supervisor-check: fatal/no-progress halt (git not available)"
+fi
+
+# --- write-launch: the generated script classifies its own exit (task 10) -----
+lbody10="$(cat "$BASE/launch.sh" 2>/dev/null)"
+have "launch: calls supervisor-check after claude exits" 'supervisor-check' "$lbody10"
+have "launch: no longer execs claude directly"           'set +e'          "$lbody10"
+lack "launch: exec sandbox-exec no longer used"          'exec sandbox-exec' "$lbody10"
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

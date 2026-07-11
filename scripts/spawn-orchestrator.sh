@@ -46,6 +46,35 @@
 #           QUESTIONS.md entry recording the deviation (which then reaches
 #           REPORT.md via the existing rolling rewrite). Fail-closed only if
 #           the restore itself fails (e.g. uncommitted changes block checkout).
+#   spawn-orchestrator.sh classify-exit --exit-code <n> --output <file>
+#   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
+#       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>]
+#
+#   classify-exit  Read-only, no model call (task 10 / finding #22): classify
+#                  an orchestrator exit from its exit code + captured
+#                  stdout+stderr. Prints exactly one of `done` (exit 0),
+#                  `fatal: <reason>` (a non-retryable auth failure — 401 /
+#                  authentication_failed / an expired-OAuth message), or
+#                  `retry: <reason>` (a rate-limit signal, or any other
+#                  non-zero exit). Always exits 0 — the classification is the
+#                  payload, not a pass/fail signal.
+#   supervisor-check  The per-wake decision the generated launch script calls
+#                  AFTER `claude -p` exits. Classifies the exit (above); a
+#                  `fatal` classification halts immediately. A `retry`
+#                  classification is checked against the no-progress guard:
+#                  if the run-state branch HEAD (under --dir) hasn't moved
+#                  across --no-progress-limit (default 3) consecutive
+#                  non-zero wakes, it halts too — the general backstop that
+#                  would have caught #22 even without matching the 401 string.
+#                  A wake that lands while RUN.md's `status:` is `paused`
+#                  never counts against the guard (a paused wake makes no
+#                  progress by design — see run-budget.md "Two pause kinds").
+#                  A halt writes run-level `status: systemic` + `pause_reason`
+#                  to RUN.md, appends one alarm entry to REPORT.md, commits
+#                  both to the run-state branch, and tears the supervisor job
+#                  down (`launchctl bootout`) so it never relaunches into the
+#                  same condition. Exits with the classified exit code (0 for
+#                  `done`) so the launch script's own exit is meaningful.
 #
 #   status  Read-only: report the run's live state in one shot — the RUN.md
 #           run-level `status:`, the per-task phase table, the last
@@ -109,6 +138,11 @@ TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.sb.tmpl"
 # completion mechanism, never a second independent marker (launch-runtime.md
 # "Logs / observability").
 DONE_SENTINEL_NAME="orchestrator.done"
+# Local supervisor bookkeeping for the no-progress guard (task 10) — the
+# consecutive-failure counter + last-seen run-state HEAD. Lives beside RUN.md
+# but is NEVER committed to the run-state branch itself (it's wake-to-wake
+# scratch state, not part of the run's durable record).
+SUPERVISOR_STATE_NAME="supervisor-state"
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
 
@@ -587,7 +621,8 @@ render_plist() {
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path=""
+        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" \
+        self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3"
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -604,6 +639,8 @@ write_launch() {
       --out-script) out_script="$2"; shift 2 ;;
       --out-plist) out_plist="$2"; shift 2 ;;
       --plist-template) plist_template="$2"; shift 2 ;;
+      --self) self="$2"; shift 2 ;;
+      --no-progress-limit) no_progress_limit="$2"; shift 2 ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -621,6 +658,9 @@ write_launch() {
   [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-launch requires an existing --workdir"
   [ -n "$log" ] || die "write-launch requires --log"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
+  case "$no_progress_limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer" ;; esac
+  [ "$no_progress_limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
+  [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
 
   local settings_json; settings_json="$(cat "$settings")"
   # Resolve claude to an ABSOLUTE path: a detached launchd job runs with a minimal
@@ -632,6 +672,7 @@ write_launch() {
   [ -n "$claude_bin" ] || die "claude not found (fail-closed): pass --claude-bin or put claude on PATH"
   case "$claude_bin" in /*) ;; *) die "--claude-bin must be absolute (fail-closed): $claude_bin" ;; esac
 
+  local state_file="$workdir/.auto-pilot/$SUPERVISOR_STATE_NAME"
   local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
   {
     printf '#!/usr/bin/env bash\n'
@@ -640,14 +681,28 @@ write_launch() {
     printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
     printf 'export PATH=%q\n' "$path"
     printf 'cd %q\n' "$workdir"
-    # exec so the launchd-tracked PID is claude itself, not a wrapper shell.
-    printf 'exec sandbox-exec -f %q \\\n' "$profile"
+    # NOT `exec`'d (task 10): the wrapper must observe claude's exit to
+    # classify it, so the launchd-tracked PID is this wrapper, not claude
+    # itself. `set +e`/`set -e` bracket the one command allowed to fail.
+    printf 'set +e\n'
+    printf 'sandbox-exec -f %q \\\n' "$profile"
     printf '  %q -p "$(cat %q)" \\\n' "$claude_bin" "$prompt"
     printf '  --permission-mode bypassPermissions \\\n'
     printf '  --settings %q \\\n' "$settings_json"
     printf '  --verbose \\\n'
     printf '  --output-format stream-json \\\n'
     printf '  >>%q 2>&1\n' "$log"
+    printf 'code=$?\n'
+    printf 'set -e\n'
+    # Supervisor-side classification (no model call, task 10 / finding #22):
+    # a non-retryable auth failure halts the run instead of relaunching into
+    # the same 401 forever; an unclassified repeated failure with no
+    # run-state progress also halts (the general backstop). A retryable exit
+    # (or a legitimate paused_until wait) just exits non-zero, and the
+    # plist's StartInterval relaunches as before.
+    printf '%q supervisor-check --exit-code "$code" --log %q --dir %q --label %q --state %q --no-progress-limit %q\n' \
+      "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit"
+    printf 'exit $?\n'
   } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
   mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write launch script: $out_script"; }
   chmod +x "$out_script"
@@ -765,6 +820,227 @@ teardown() {
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
   fi
   echo "spawn-orchestrator: torn down $label"
+}
+
+# ---------------------------------------------------------------------------
+# Task 10 — supervisor exit classification (finding #22): an expired OAuth
+# credential made the supervisor relaunch into the same 401 ~52 times over
+# 4.3 hours, doing zero work and raising zero signal. The supervisor already
+# knew "retry later" (the rate-limit backstop, run-budget.md); it needs a
+# third bucket — "stop, a human must act" — plus a general backstop for any
+# OTHER unclassified repeated failure. All of this is SHELL-level, no model
+# call: a rate-limited or auth-dead agent cannot run its own bookkeeping.
+# ---------------------------------------------------------------------------
+
+# Literal substrings, not regexes — the exact signals named in finding #22
+# and run-budget.md's rate-limit backstop. Plain `grep -F` avoids any
+# metacharacter surprise in these fixed strings and keeps the match exact.
+_AUTH_FAIL_SIGNALS=('401' 'authentication_failed' 'Invalid authentication credentials' 'OAuth token has expired')
+_RATE_LIMIT_SIGNALS=('429' 'rate_limit_error' 'overloaded')
+
+# Classify an exit from its code + the process's captured stdout+stderr, with
+# no model call. Prints exactly one of `done` / `fatal: <reason>` /
+# `retry: <reason>` and always exits 0 (the classification is the payload).
+# Auth is checked BEFORE rate-limit: it is the non-retryable case, and a
+# transcript that happens to mention both must still halt, not retry.
+classify_exit() {
+  local code="" outfile=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
+      --output) [ $# -ge 2 ] || die "missing value for --output"; outfile="$2"; shift 2 ;;
+      *) die "unknown classify-exit argument: $1" ;;
+    esac
+  done
+  [ -n "$code" ] || die "classify-exit requires --exit-code"
+  case "$code" in *[!0-9]*) die "--exit-code must be a non-negative integer: $code" ;; esac
+  [ -n "$outfile" ] || die "classify-exit requires --output <file>"
+  [ -f "$outfile" ] || die "classify-exit --output not found: $outfile"
+
+  if [ "$code" = 0 ]; then
+    echo "done"
+    return 0
+  fi
+
+  local p
+  for p in "${_AUTH_FAIL_SIGNALS[@]}"; do
+    if grep -qF -- "$p" "$outfile"; then
+      echo "fatal: non-retryable auth failure ($p)"
+      return 0
+    fi
+  done
+  for p in "${_RATE_LIMIT_SIGNALS[@]}"; do
+    if grep -qF -- "$p" "$outfile"; then
+      echo "retry: rate-limit signal ($p)"
+      return 0
+    fi
+  done
+  echo "retry: unclassified non-zero exit ($code)"
+}
+
+# Pull a bare "key: value" line out of the small supervisor-state file (below).
+_supervisor_state_field() {
+  local f="$1" key="$2"
+  [ -f "$f" ] || return 0
+  grep -E "^${key}:" "$f" | head -1 | sed -e "s/^${key}: *//"
+}
+
+# Atomically persist the no-progress counter + last-seen run-state HEAD.
+_write_supervisor_state() {
+  local f="$1" count="$2" head="$3" d; d="$(dirname "$f")"
+  mkdir -p "$d" || die "cannot create supervisor-state directory: $d"
+  local tmp; tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
+  { printf 'count: %s\n' "$count"; printf 'head: %s\n' "$head"; } >"$tmp" \
+    || { rm -f "$tmp"; die "failed to write supervisor state"; }
+  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write supervisor state: $f"; }
+}
+
+# The run-state branch's current tip, or empty if --dir isn't (yet) a git
+# checkout — best-effort, never fail-closed (a missing HEAD just means every
+# wake looks like "no progress," which is the safe direction for the guard).
+_run_head() {
+  ( cd "$1" 2>/dev/null && git rev-parse HEAD 2>/dev/null ) || true
+}
+
+# True (exit 0) iff RUN.md's own run-level `status:` is `paused` — a wake
+# that lands mid-pause makes no progress BY DESIGN (task 11: the orchestrator
+# gates on `paused_until` before invoking claude and exits early), so it must
+# never count against the no-progress guard.
+_run_is_paused() {
+  local run_md="$1/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || return 1
+  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local st; st="$(printf '%s\n' "$front" | grep -E '^status:' | head -1 \
+    | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+  [ "$st" = "paused" ]
+}
+
+# Set a single front-matter key's value in RUN.md (between the first two
+# `---` lines). Fail-closed if the key isn't already declared — every field
+# this is used for (`status`, `pause_reason`) is always present per
+# run-state.md's `RUN.md` template, so a missing key means the file is not
+# the shape this expects, and silently no-op-ing would hide that.
+_set_front_field() {
+  local f="$1" key="$2" value="$3" d; d="$(dirname "$f")"
+  local tmp; tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
+  awk -v key="$key" -v val="$value" '
+    /^---$/ { dashes++; print; next }
+    dashes==1 && $0 ~ "^" key ":" { print key ": " val; next }
+    { print }
+  ' "$f" >"$tmp" || { rm -f "$tmp"; die "failed to render $key update for $f"; }
+  grep -qE "^${key}: " "$tmp" || { rm -f "$tmp"; die "front-matter key not found (fail-closed): $key in $f"; }
+  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+}
+
+# The halt itself: write run-level `status: systemic` + `pause_reason` to
+# RUN.md, append one alarm entry to REPORT.md, commit both to the run-state
+# branch (best-effort — a broken git checkout must not block tearing the
+# supervisor down, which is the one thing that MUST happen), then boot the
+# launchd job out so it never relaunches into the same condition.
+_supervisor_halt() {
+  local dir="" label="" reason=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      --label) label="$2"; shift 2 ;;
+      --reason) reason="$2"; shift 2 ;;
+      *) die "unknown supervisor-halt argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$label" ] && [ -n "$reason" ] \
+    || die "supervisor-halt requires --dir, --label, and --reason"
+
+  local run_md="$dir/.auto-pilot/RUN.md" report_md="$dir/.auto-pilot/REPORT.md" ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  if [ -f "$run_md" ]; then
+    _set_front_field "$run_md" status systemic
+    _set_front_field "$run_md" pause_reason "$reason"
+  else
+    echo "spawn-orchestrator: supervisor halt: no RUN.md at $run_md, skipping run-state write" >&2
+  fi
+
+  {
+    printf '\n## ALARM — supervisor halt (%s)\n\n' "$ts"
+    printf -- '- **Reason:** %s\n' "$reason"
+    printf -- '- **Action required:** a human must resolve this before the run can continue; the supervisor has torn itself down and will NOT relaunch on its own. Re-authenticate (or fix the underlying condition), then `--resume`.\n'
+  } >>"$report_md" 2>/dev/null || echo "spawn-orchestrator: supervisor halt: failed to append $report_md" >&2
+
+  if [ -f "$run_md" ] || [ -f "$report_md" ]; then
+    ( cd "$dir" \
+      && git add -- .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
+      && git -c user.name="auto-pilot-supervisor" -c user.email="auto-pilot@localhost" \
+             commit -q -m "auto-pilot: supervisor halt — $reason" \
+    ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+  fi
+
+  teardown --label "$label" >/dev/null 2>&1
+  echo "spawn-orchestrator: supervisor halt ($label): $reason"
+}
+
+# The per-wake entry point the generated launch script calls after `claude -p`
+# exits. See the file-header comment above for the full decision.
+supervisor_check() {
+  local code="" log="" dir="" label="" state="" limit=3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
+      --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --state) [ $# -ge 2 ] || die "missing value for --state"; state="$2"; shift 2 ;;
+      --no-progress-limit) [ $# -ge 2 ] || die "missing value for --no-progress-limit"; limit="$2"; shift 2 ;;
+      *) die "unknown supervisor-check argument: $1" ;;
+    esac
+  done
+  [ -n "$code" ] && [ -n "$log" ] && [ -n "$dir" ] && [ -n "$label" ] && [ -n "$state" ] \
+    || die "supervisor-check requires --exit-code, --log, --dir, --label, and --state"
+  case "$code" in *[!0-9]*) die "--exit-code must be a non-negative integer: $code" ;; esac
+  [ -f "$log" ] || die "supervisor-check --log not found: $log"
+  [ -d "$dir" ] || die "supervisor-check --dir not found: $dir"
+  case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
+
+  local class; class="$(classify_exit --exit-code "$code" --output "$log")"
+
+  case "$class" in
+    done)
+      _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+      echo "spawn-orchestrator: supervisor-check done"
+      return 0
+      ;;
+    fatal:*)
+      _supervisor_halt --dir "$dir" --label "$label" --reason "${class#fatal: }"
+      return "$code"
+      ;;
+  esac
+
+  # retry: a legitimate paused wake never counts against the guard.
+  if _run_is_paused "$dir"; then
+    _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+    echo "spawn-orchestrator: supervisor-check retry (paused wake, no-progress guard skipped): ${class#retry: }"
+    return "$code"
+  fi
+
+  local prev_head prev_count head count
+  prev_head="$(_supervisor_state_field "$state" head)"
+  prev_count="$(_supervisor_state_field "$state" count)"
+  [ -n "$prev_count" ] || prev_count=0
+  head="$(_run_head "$dir")"
+
+  if [ -n "$prev_head" ] && [ "$prev_head" = "$head" ]; then
+    count=$((prev_count + 1))
+  else
+    count=1
+  fi
+  _write_supervisor_state "$state" "$count" "$head"
+
+  if [ "$count" -ge "$limit" ]; then
+    _supervisor_halt --dir "$dir" --label "$label" \
+      --reason "no forward progress after $count consecutive supervisor wakes (${class#retry: })"
+  else
+    echo "spawn-orchestrator: supervisor-check retry ($count/$limit consecutive, no progress): ${class#retry: }"
+  fi
+  return "$code"
 }
 
 # Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
@@ -1262,6 +1538,8 @@ case "$sub" in
   check-profile) check_profile "$@" ;;
   status) status "$@" ;;
   assert-run-head) assert_run_head "$@" ;;
+  classify-exit) classify_exit "$@" ;;
+  supervisor-check) supervisor_check "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac

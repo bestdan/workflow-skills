@@ -128,6 +128,52 @@ exponentially keyed on the marker's `attempt` (e.g. 30 min → 1 h → 2 h, capp
 rate-limit reason, and surfaces the alarm in `REPORT.md` — the same stalled-run
 terminal the circuit breaker reaches, arrived at from the resource side.
 
+## A third terminal kind — the supervisor halt (finding #22)
+
+The two pause kinds above are not the whole story: both assume the failure is
+**retryable** — waiting (or a token bucket resetting) fixes it. An expired
+OAuth credential is not retryable. In detached run #2, the launching user's
+Anthropic OAuth credential expired mid-run; every subsequent `claude -p` turn
+died on `401 Invalid authentication credentials`, and the supervisor —
+knowing only "retry later" — relaunched into the **same** 401 on every one of
+its ~52 wakes, over **4.3 hours**, doing zero work and raising zero signal.
+The circuit breaker above didn't catch it (the process died before it could
+dispatch a task, so it never counted as a _delivery_ failure), and the
+rate-limit backstop's premise — "back off, the window resets" — is simply
+**false** for a dead credential.
+
+So the supervisor carries a **third** kind, neither an agent pause nor a
+supervisor pause: a **supervisor halt**. It is implemented entirely in shell,
+before or on `claude -p`'s exit — a rate-limited or auth-dead agent cannot run
+its own bookkeeping, so the supervisor decides in shell what it can decide in
+shell (`scripts/spawn-orchestrator.sh classify-exit` / `supervisor-check`,
+called by the generated launch script after every wake):
+
+- **Fatal, non-retryable** — the exit's captured stdout+stderr names an auth
+  failure (`401`, `authentication_failed`, `Invalid authentication
+  credentials`, `OAuth token has expired`): halt **immediately**, on the
+  first occurrence.
+- **Unknown/unclassified repeated failure — the no-progress guard.** Even
+  without a string match, N consecutive supervisor wakes (default 3) that
+  exit non-zero with **no run-state commit** between them (the run-state
+  branch's HEAD hasn't moved) halt too. This is the general backstop that
+  would have caught #22 even if its 401 text had never matched — the run
+  making no forward progress is the actual signal, the 401 string is just the
+  fast path to the same conclusion. A wake that lands while RUN.md's own
+  `status:` is `paused` never counts against this guard — a paused wake makes
+  no progress **by design** (the orchestrator is deliberately waiting out
+  `paused_until`; see task 11's shell-level pause gate), not a stall.
+
+A supervisor halt writes run-level `status: systemic` + a `pause_reason`
+naming the failure to `RUN.md`, appends one alarm entry to `REPORT.md`,
+commits both to the run-state branch, and **tears the supervisor job down**
+(`launchctl bootout`) — the same `status: systemic` terminal the circuit
+breaker and the rate-limit crash-loop guard above reach, arrived at from a
+third direction. Unlike those two, nothing about a supervisor halt is
+resumable by a timer: only a human fixing the underlying condition (typically
+re-authenticating) and then an explicit `--resume` moves the run forward
+again.
+
 ## Hard-stop before paid/overflow credits
 
 The absolute stop, distinct from the pause above. "Paid/overflow" means
