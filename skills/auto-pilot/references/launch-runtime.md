@@ -118,6 +118,29 @@ Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
 
+**Residual confidentiality cost.** Reads are broad (§ above) and exec is now
+allowed over whole toolchain bin dirs, not just a literal per-binary list — so
+neither reads nor exec meaningfully bound what a running process can _see_.
+Confidentiality therefore rests entirely on §2's egress allowlist, and that
+allowlist includes `github.com`, which is an effectively unbounded
+exfiltration channel (a push to any repo the launching user's token can reach).
+This isn't new with toolchain exec — a literal `--exec` list has the identical
+exposure once any allowed binary can read broadly and reach `github.com` —
+toolchain mode just makes the coarseness of the exec wall explicit rather than
+incidental.
+
+**Integrity: no out-of-jail launch.** Broadening exec to whole bin dirs does put
+`/bin/launchctl` and `/usr/bin/open` within reach, and a job those brokers hand
+to `launchd` / LaunchServices runs OUTSIDE this sandbox (it doesn't inherit the
+profile) — a straight escape that writes/network confinement can't contain. The
+template closes it on two axes: it denies `mach-lookup` to the launchd and
+LaunchServices control services (last-match-wins over the blanket allow), and
+denies `process-exec` of `launchctl`/`open` outright. Those binaries live only
+in non-writable system dirs and RW scopes are never exec-allowed, so an attacker
+can't stage a replacement — the deny is complete for these vectors. So while the
+exec wall is deliberately coarse for _confidentiality_, it is not a hole in
+_integrity_: the jail still can't spawn an unconfined process.
+
 ### 2. Network egress allowlist
 
 Default-deny; the launch pre-flight **narrows the allowlist to the tools this

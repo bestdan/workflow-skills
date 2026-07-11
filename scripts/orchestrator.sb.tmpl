@@ -19,6 +19,18 @@
 (allow sysctl-read)
 (allow mach-lookup)
 
+;; --- deny the launchd / LaunchServices job-submission brokers. The exec block
+;;     below (toolchain bin dirs) makes /bin/launchctl and /usr/bin/open
+;;     reachable; with an unrestricted mach-lookup a permitted binary could ask
+;;     launchd (or LaunchServices) to spawn a job OUTSIDE this jail — the spawned
+;;     process does NOT inherit the sandbox, so writes/network confinement can't
+;;     contain it (a confused-deputy escape). Seatbelt is last-match-wins, so
+;;     these denies override the blanket allow above for exactly the control
+;;     services that broker an out-of-jail launch, leaving normal mach use intact.
+(deny mach-lookup
+  (global-name "com.apple.xpc.launchd")
+  (global-name "com.apple.coreservices.launchservicesd"))
+
 ;; --- network CLASS only (launch-runtime §"Sandbox profile"): Seatbelt gates
 ;;     network by socket/class, NOT by hostname. Allow outbound as a class and
 ;;     permit loopback bind so the layer-2 egress proxy (which DOES filter by
@@ -32,7 +44,8 @@
 ;;     metadata, to traverse to a writable target, and that traversal crosses
 ;;     ancestors above any repo/worktree (/Users, /private/var/folders, …). So v1
 ;;     allows all reads and enforces confinement on the axes that matter: WRITES
-;;     (worktrees only, below), EXEC (@@EXEC_PATHS@@ only), and NETWORK (layer 2).
+;;     (worktrees only, below), EXEC (the allow-listed block below only), and
+;;     NETWORK (layer 2).
 ;;     Reads are still Unix-perm-bounded (a non-root sandboxed process can't read
 ;;     root/other-user secrets). Narrowing reads (traverse-allow the ancestor chain
 ;;     of each RO/RW path instead of allow-all) is a tracked follow-up; it must be
@@ -50,6 +63,24 @@
 ;;     $TMPDIR / scratchpad. Writes are worktree-confined by construction. [§1 rows 1–3]
 @@RW_PATHS@@
 
-;; --- exec: only the resolved coder binaries + the base toolchain the
-;;     orchestrator drives (git, gh, claude, bash, uv, verify tooling). [§4]
+;; --- exec: the resolved coder binaries (literal) plus, when --toolchain or
+;;     --exec-dir is used, whole bin dirs (subpath) so the orchestrator can
+;;     shell out to the dozens of coreutils/git-core/uv/node/etc. helpers a
+;;     real run needs. Exec breadth here is a COARSE guard, not the enforced
+;;     wall — WRITES (RW_PATHS, above) and NETWORK (layer 2) are what actually
+;;     bound what a permitted binary can do once it runs. [§4]
 @@EXEC_PATHS@@
+
+;; --- defense-in-depth on top of the mach-lookup denies above: refuse to exec
+;;     the job-submission binaries outright (last-match-wins over the exec allow
+;;     block). They live only in non-writable system bin dirs and RW scopes are
+;;     never exec-allowed, so a copy can't be staged into an exec-permitted dir —
+;;     this deny is therefore complete for the launchctl/open escape vectors.
+;;     osascript is denied too: it can't send AppleEvents here anyway (there is
+;;     no `(allow appleevent-send)`, so `deny default` blocks the tell-app-to-run
+;;     escape — verified empirically), but denying its exec keeps the guard
+;;     robust if an appleevent-send allow is ever added.
+(deny process-exec
+  (literal "/bin/launchctl")
+  (literal "/usr/bin/open")
+  (literal "/usr/bin/osascript"))

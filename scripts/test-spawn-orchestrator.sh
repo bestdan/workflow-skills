@@ -110,6 +110,90 @@ else
   echo "skip - check-profile: sandbox-exec not available on this host (non-macOS)"
 fi
 
+# --- exec-dir: toolchain-exec mode (subpath, coarser than --exec) -------------
+edprof="$BASE/execdir.sb"
+"$SCRIPT" render-profile --rw "$RUN_WT" --exec-dir /usr/bin --out "$edprof" >/dev/null 2>&1
+edbody="$(cat "$edprof" 2>/dev/null)"
+have "exec-dir: emits subpath for /usr/bin" '(subpath "/usr/bin")' "$edbody"
+
+if command -v sandbox-exec >/dev/null 2>&1; then
+  if o="$("$SCRIPT" check-profile "$edprof" 2>&1)"; then
+    ok "check-profile: --exec-dir profile compiles"
+  else
+    bad "check-profile: --exec-dir profile compiles" "$o"
+  fi
+else
+  echo "skip - check-profile: --exec-dir profile compiles (sandbox-exec not available)"
+fi
+
+fc "exec-dir /"           "refusing --exec-dir /"     --exec-dir /
+fc "exec-dir plain file"  "not a directory"           --exec-dir "$PLAIN"
+
+if command -v sandbox-exec >/dev/null 2>&1; then
+  EDBIN=""
+  # Prefer no-arg zero-exit binaries so the success check is portable — BSD/macOS
+  # `sed --version` exits non-zero (unknown flag), which would false-fail even when
+  # exec-dir confinement is working.
+  for cand in /usr/bin/true /bin/echo /usr/bin/env; do
+    if command -v "$cand" >/dev/null 2>&1; then EDBIN="$cand"; break; fi
+  done
+  if [ -n "$EDBIN" ]; then
+    EDDIR="$(dirname "$EDBIN")"
+    edcprof="$BASE/execdir-confine.sb"
+    "$SCRIPT" render-profile --exec-dir "$EDDIR" --rw "$RUN_WT" --out "$edcprof" >/dev/null 2>&1
+    if sandbox-exec -f "$edcprof" "$EDBIN" >/dev/null 2>&1; then
+      ok "exec-dir: exec inside allowed dir succeeds"
+    else
+      bad "exec-dir: exec inside allowed dir succeeds"
+    fi
+    # Write outside the RW scope is denied — target the test's own temp tree
+    # ($BASE is outside --rw "$RUN_WT"), never the real $HOME.
+    if sandbox-exec -f "$edcprof" bash -c "echo x > $BASE/exec-dir-denied" >/dev/null 2>&1; then
+      bad "exec-dir: write outside rw scope still denied"
+    else
+      ok "exec-dir: write outside rw scope still denied"
+    fi
+    rm -f "$BASE/exec-dir-denied" 2>/dev/null
+    if [ -x "$BIN" ] && [ "$(dirname "$BIN")" != "$EDDIR" ]; then
+      if sandbox-exec -f "$edcprof" "$BIN" >/dev/null 2>&1; then
+        bad "exec-dir: exec outside allowed dirs still denied"
+      else
+        ok "exec-dir: exec outside allowed dirs still denied"
+      fi
+    else
+      echo "skip - exec-dir: exec outside allowed dirs still denied (no distinct fixture binary)"
+    fi
+  else
+    echo "skip - exec-dir: confinement checks (no sed/env fixture found)"
+  fi
+else
+  echo "skip - exec-dir: confinement checks (sandbox-exec not available)"
+fi
+
+# --- out-of-jail launch escape is closed (toolchain exec + mach brokers) -------
+# Broadening exec to whole bin dirs puts /bin/launchctl and /usr/bin/open in
+# reach; a job they broker to launchd/LaunchServices runs OUTSIDE the jail. The
+# template must deny both the submission mach services and exec of the binaries.
+escprof="$BASE/escape.sb"
+"$SCRIPT" render-profile --exec-dir /bin --rw "$RUN_WT" --out "$escprof" >/dev/null 2>&1
+escbody="$(cat "$escprof" 2>/dev/null)"
+have "escape: denies mach-lookup to launchd"       'com.apple.xpc.launchd'          "$escbody"
+have "escape: denies mach-lookup to launchservices" 'com.apple.coreservices.launchservicesd' "$escbody"
+have "escape: denies exec of launchctl"            '(literal "/bin/launchctl")'     "$escbody"
+have "escape: denies exec of open"                 '(literal "/usr/bin/open")'      "$escbody"
+have "escape: denies exec of osascript"            '(literal "/usr/bin/osascript")' "$escbody"
+if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
+  # /bin is exec-allowed here, so only the explicit process-exec deny can block
+  # launchctl — a clean signal the escape binary is walled off, not merely absent.
+  if sandbox-exec -f "$escprof" /bin/launchctl help >/dev/null 2>&1; then
+    bad "escape: launchctl exec denied even with /bin allowed"
+  else
+    ok "escape: launchctl exec denied even with /bin allowed"
+  fi
+else
+  echo "skip - escape: launchctl runtime deny (sandbox-exec or launchctl absent)"
+fi
+
 # --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
 sj="$BASE/settings.json"
 "$SCRIPT" render-settings --source linear --coder codex --out "$sj" >/dev/null 2>&1
