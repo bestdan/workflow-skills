@@ -15,7 +15,7 @@ Linear is accessed via the official MCP server connected from `https://mcp.linea
 
 ## Config block
 
-The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. The config keys (top-level `wip_limit` plus the `linear:` block):
+The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. Commands read the **merged view** — `.task-config.yml` overlaid with the optional gitignored `.task-config.local.yml` (mappings merge recursively — a local `linear.api_key_ref` overlays just that leaf and keeps the committed `team`/`projects`; see `task-config.md` → "Local override"). The config keys (top-level `wip_limit` plus the `linear:` block):
 
 ```yaml
 handler: linear
@@ -60,7 +60,7 @@ linear:
 
 - `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
-- Per-project override keys are **only** `wip_limit` and `max_estimate`. `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global.
+- Per-project override keys are **only** `wip_limit` and `max_estimate`. `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global. `api_key_ref` is a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
 - `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).

@@ -45,11 +45,17 @@ safe mechanical repairs. Both reference the single migration procedure in
 Note whether `$ARGUMENTS` contains `--fix` (default: report-only). Then read the config:
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
 
-A missing file is not an error — it means the default `repo-pr` handler. Hold the
-parsed `handler:` value (default `repo-pr`) for checks 1 and 2.
+A missing file is not an error — it means the default `repo-pr` handler. **Overlay
+the local override on the committed config** — mappings merge recursively, local
+leaf values win (see `task-config.md` → "Local override") — and use this **merged**
+view for every check below (the linear `api_key_ref` resolution check in particular
+depends on it). Hold the parsed `handler:` value (default `repo-pr`) for checks 1
+and 2.
 
 ### 2. Run the checks
 
@@ -187,12 +193,25 @@ auto-archive, store an API key). Report against the resolved handler:
   pointing at the gap.
 - **`linear` specifics** — assume **native team auto-archive** is the primary
   mechanism and the GraphQL script is the backstop (state this, since `/doctor`
-  can't read Linear's team settings). If `linear.api_key_ref` is set, note the
-  backstop is wired; if unset, `WARN`: "no `linear.api_key_ref` — the GraphQL
-  archive backstop is unavailable; rely on native auto-archive or add a key (see
-  `linear-config.md` → 'Archive key')." The same key, when set, also enables the
-  `/do-tasks` read-only GraphQL fast-path for find-candidates (see
-  `linear-claim.md` "Find candidates") — informational only, no separate check.
+  can't read Linear's team settings). Read `linear.api_key_ref` from the **merged
+  config** (`.task-config.yml` overlaid with the gitignored
+  `.task-config.local.yml`, its canonical home). Then:
+  - **Unset** (in neither file) → `WARN`: "no `linear.api_key_ref` — the GraphQL
+    archive backstop is unavailable; rely on native auto-archive or add a key to
+    `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
+  - **Set** → confirm it actually **resolves**, don't just accept the string.
+    Test resolution without revealing the secret: if `$LINEAR_API_KEY` is already
+    exported, `PASS` (the script will use it directly). Else probe the ref with
+    `op read "<ref>" >/dev/null 2>&1` (redirect — never print the key). Exit 0 →
+    `PASS` "backstop wired; key resolves." Non-zero → `WARN`: "`api_key_ref` is
+    set but did not resolve from this shell. This may be the `op`-in-agent-shell
+    gotcha (1Password desktop-app integration) rather than a bad ref — verify with
+    `! op read <ref>` in your own terminal, or set `OP_SERVICE_ACCOUNT_TOKEN`. If
+    it fails there too, fix the `op://vault/item/field` reference." (Still a
+    `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
+    The same key, when set, also enables the `/do-tasks` read-only GraphQL fast-path
+    for find-candidates (see `linear-claim.md` "Find candidates") — informational
+    only, no separate check.
 - **`jira` specifics** — if `jira.archive_status` is unset, note `/archive-tasks`
   is a no-op for jira (native archival is Premium) — informational `WARN`.
 - **`gh-issue`** — informational `PASS`: GitHub has no cap; archiving is hygiene
