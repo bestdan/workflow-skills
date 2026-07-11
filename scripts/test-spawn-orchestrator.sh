@@ -775,6 +775,23 @@ o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"; [ $? = 2 ] && prin
 o="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/nope.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'not found' \
   && ok "classify-exit fail-closed: missing --output file" || bad "classify-exit fail-closed: missing --output file" "$o"
 
+# co-review: an auth signal that is CONTENT (transcript prose, a diff, or the
+# run's own REPORT.md re-read after --resume), not the orchestrator's own error
+# line, must NOT classify fatal — else a task ABOUT auth, or the halt's own
+# REPORT.md reason on the next wake, revives finding #22's loop via durable files.
+printf '{"type":"assistant","text":"wrote tests asserting authentication_failed and 401 Unauthorized are surfaced"}\n' >"$CX/content-auth.log"
+ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/content-auth.log" 2>&1)"
+lack "classify-exit: auth string in transcript CONTENT is not fatal" 'fatal:' "$ceo"
+# the exact REPORT.md re-poison shape: a tool_result event carrying the halt's
+# own reason text back into a later wake's slice.
+printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"## ALARM\\n- Reason: non-retryable auth failure (OAuth token has expired)"}]}}\n' >"$CX/report-echo.log"
+lack "classify-exit: REPORT.md alarm echoed as a tool_result is not fatal" 'fatal:' \
+  "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/report-echo.log" 2>&1)"
+# boundary: 401 as a PREFIX of a larger number in a status field is not a 401.
+printf '{"error":{"message":"x"},"status":4013}\n' >"$CX/status4013.log"
+lack "classify-exit: '\"status\":4013' does not match 401" 'fatal:' \
+  "$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/status4013.log" 2>&1)"
+
 # --- supervisor-check: fatal halt writes systemic status + REPORT alarm + teardown
 # (task 10) — fixture is a real git checkout so the run-state commit is observable.
 if command -v git >/dev/null 2>&1; then
@@ -805,6 +822,20 @@ if command -v git >/dev/null 2>&1; then
   npout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" 2>&1)"
   have "supervisor-check: no-progress guard halts after N consecutive failures" 'no forward progress' "$npout"
   have "supervisor-check: no-progress halt also writes status: systemic" 'status: systemic' "$(cat "$SC2/.auto-pilot/RUN.md")"
+
+  # co-review (finding #1): the guard must still fire when _run_head returns
+  # EMPTY (a non-git run dir, or git missing from the launchd PATH) — an empty
+  # head is sentineled so consecutive wakes still count as no progress instead of
+  # resetting the counter to 1 forever and never halting.
+  SC_EH="$BASE/sc-emptyhead"; mkdir -p "$SC_EH/.auto-pilot"   # deliberately NOT a git repo
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >"$SC_EH/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SC_EH/.auto-pilot/REPORT.md"
+  STATE_EH="$SC_EH/.auto-pilot/supervisor-state"
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
+  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
+  ehout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" 2>&1)"
+  have "supervisor-check: no-progress guard halts even with an empty run HEAD" 'no forward progress' "$ehout"
+  have "supervisor-check: empty-HEAD halt still writes status: systemic" 'status: systemic' "$(cat "$SC_EH/.auto-pilot/RUN.md")"
 
   # --- a legitimate paused_until wait never trips the guard, even repeated ------
   SC3="$BASE/sc-paused"; mkdir -p "$SC3/.auto-pilot"

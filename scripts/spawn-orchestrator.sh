@@ -856,7 +856,7 @@ _AUTH_FAIL_SIGNALS=('authentication_failed' 'Invalid authentication credentials'
 # CONTEXT — an HTTP status field or a status line. The motivating run-#2 failure
 # line (`401 Invalid authentication credentials`) still matches, via both the
 # literal above and the status-line alternative here.
-_AUTH_401_RE='("status"[[:space:]]*:[[:space:]]*401|[Ss]tatus[[:space:]]*:[[:space:]]*401|[Ee]rror[[:space:]]*:[[:space:]]*401|401[[:space:]]+(Invalid authentication credentials|Unauthorized))'
+_AUTH_401_RE='("status"[[:space:]]*:[[:space:]]*401([^0-9]|$)|[Ss]tatus[[:space:]]*:[[:space:]]*401([^0-9]|$)|[Ee]rror[[:space:]]*:[[:space:]]*401([^0-9]|$)|(^|[^0-9])401[[:space:]]+(Invalid authentication credentials|Unauthorized))'
 _RATE_LIMIT_SIGNALS=('429' 'rate_limit_error' 'overloaded')
 
 # Classify an exit from its code + the bytes the process wrote THIS WAKE, with
@@ -903,14 +903,25 @@ classify_exit() {
     *) content="$(tail -c "+$((offset + 1))" "$outfile" 2>/dev/null)" || content="$(cat "$outfile")" ;;
   esac
 
+  # Fatal auth signals are matched ONLY on the orchestrator's own error surface —
+  # a stream-json `"type":"error"` event, an `API Error:` line, or a structural
+  # JSON `"status":<code>` field — never the raw slice. Transcript prose, diffs,
+  # test logs, and the run's own REPORT.md (re-read after --resume) can all carry
+  # "401"/"authentication_failed" as CONTENT; matching those would halt a healthy
+  # run with a wrong diagnosis and re-poison every post-resume wake — reviving
+  # finding #22's loop via the durable files rather than the log. The `"status":`
+  # alternative is structural (a quoted JSON key + numeric value) so it catches a
+  # bare `{"error":…,"status":401}` error object without matching bare prose.
+  local err_lines
+  err_lines="$(grep -E '"type"[[:space:]]*:[[:space:]]*"error"|API Error:|"status"[[:space:]]*:[[:space:]]*[0-9]' <<<"$content" 2>/dev/null)"
   local p
   for p in "${_AUTH_FAIL_SIGNALS[@]}"; do
-    if grep -qF -- "$p" <<<"$content"; then
+    if grep -qF -- "$p" <<<"$err_lines"; then
       echo "fatal: non-retryable auth failure ($p)"
       return 0
     fi
   done
-  if grep -Eq -- "$_AUTH_401_RE" <<<"$content"; then
+  if grep -Eq -- "$_AUTH_401_RE" <<<"$err_lines"; then
     echo "fatal: non-retryable auth failure (401 in an auth context)"
     return 0
   fi
@@ -1020,6 +1031,17 @@ _supervisor_halt() {
   fi
 
   teardown --label "$label" >/dev/null 2>&1
+  # Verify the bootout actually took: a failed teardown leaves the job loaded and
+  # StartInterval relaunches straight back into this condition (finding #22's
+  # loop, masked by the halt message). Retry once, then make a still-loaded job
+  # LOUD rather than let the systemic status quietly contradict a live job.
+  if command -v launchctl >/dev/null 2>&1 \
+     && launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    teardown --label "$label" >/dev/null 2>&1
+    if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+      echo "spawn-orchestrator: supervisor halt ($label): WARNING — bootout failed, job still loaded and will keep relaunching; remove it by hand: launchctl bootout gui/$(id -u)/$label" >&2
+    fi
+  fi
   echo "spawn-orchestrator: supervisor halt ($label): $reason"
 }
 
@@ -1070,8 +1092,14 @@ supervisor_check() {
   local prev_head prev_count head count
   prev_head="$(_supervisor_state_field "$state" head)"
   prev_count="$(_supervisor_state_field "$state" count)"
-  [ -n "$prev_count" ] || prev_count=0
-  head="$(_run_head "$dir")"
+  # A corrupt (non-numeric) count must not brick the guard via an arithmetic
+  # error under `set -u` — treat it as a fresh start.
+  case "$prev_count" in ''|*[!0-9]*) prev_count=0 ;; esac
+  # An empty HEAD (non-git dir, git absent from the launchd PATH, an unborn
+  # branch) must count AS no-progress, not silently reset the guard to 1 every
+  # wake — a broken environment is exactly when the relaunch loop this guard
+  # backstops is most likely. Sentinel it so empty == empty advances the counter.
+  head="$(_run_head "$dir")"; head="${head:-unknown}"
 
   if [ -n "$prev_head" ] && [ "$prev_head" = "$head" ]; then
     count=$((prev_count + 1))

@@ -189,16 +189,22 @@ the diagnosis is the instruction the operator acts on.
   reads only from there. A missing or malformed offset degrades to reading the
   whole file — **fail-safe, not fail-closed**: over-halting is recoverable,
   silently relaunching forever is the bug this whole section exists to fix.
-- **A bare `401` is not a signal.** The classified bytes are a full
-  stream-json transcript — model output, tool results, diffs — where `401`
-  turns up in line numbers (`foo.py:401`), byte counts, SHAs, and hunk
-  headers. Matching it as a bare substring would halt healthy runs and tell
-  the human to re-authenticate a working credential. `401` therefore only
-  counts in an **auth context** (an HTTP status field or status line, e.g.
-  `"status": 401`, `API Error: 401`, `401 Unauthorized`); the other three
-  phrases are distinctive enough to match literally. Run #2's actual failure
-  line — `401 Invalid authentication credentials` — still matches, and the
-  no-progress guard remains the catch-all for anything the string match misses.
+- **Auth signals only count on the error surface, never as content.** The
+  classified bytes are a full stream-json transcript — model output, tool
+  results, diffs — where both `401` (line numbers `foo.py:401`, byte counts,
+  hunk headers) and the auth _phrases_ (`authentication_failed`, `OAuth token
+  has expired`) appear as ordinary content: in a task _about_ auth, in a test
+  log, or — most dangerously — in the run's **own** `REPORT.md` halt reason,
+  which a later wake re-reads after `--resume` and folds back into the log.
+  Matching any of these as a raw substring would halt a healthy run with a wrong
+  diagnosis and revive the sticky loop via the durable files. So every auth
+  signal (the three phrases _and_ the `401`) is matched **only on the
+  orchestrator's own error surface** — a stream-json `"type":"error"` event, an
+  `API Error:` line, or a structural JSON `"status":<code>` field — and the
+  `401` additionally needs a digit boundary so `4013` isn't a `401`. Run #2's
+  actual failure line — `API Error: 401 Invalid authentication credentials` —
+  still matches; the no-progress guard remains the catch-all for anything the
+  string match misses.
 
 ## Hard-stop before paid/overflow credits
 
