@@ -37,6 +37,15 @@
 #   spawn-orchestrator.sh check-profile <file>
 #   spawn-orchestrator.sh status --label <label> [--dir <run-dir>]
 #   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>]
+#   spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id <run_id> \
+#       [--questions <QUESTIONS.md path>]
+#
+#   assert-run-head  The run-loop / --resume HEAD guard (PRE-hardening task 13):
+#           asserts the run worktree's HEAD is `auto-pilot/<run_id>`; if not,
+#           restores it (`git checkout`) and, with --questions, appends a
+#           QUESTIONS.md entry recording the deviation (which then reaches
+#           REPORT.md via the existing rolling rewrite). Fail-closed only if
+#           the restore itself fails (e.g. uncommitted changes block checkout).
 #
 #   status  Read-only: report the run's live state in one shot — the RUN.md
 #           run-level `status:`, the per-task phase table, the last
@@ -1050,6 +1059,61 @@ status() {
   echo "STATUS: $run_status_display pid=$pid_state tasks=$task_count until=${until_val:-none}"
 }
 
+# ---------------------------------------------------------------------------
+# Task 13 — HEAD guard: the run worktree's HEAD must stay on the run-state
+# branch `auto-pilot/<run_id>` for the entire run (skills/auto-pilot/references/
+# run-state.md "Run worktree HEAD invariant"). Task code belongs in a SEPARATE
+# worker worktree (owned/torn-down by /deliver-task); an orchestrator that
+# instead `git checkout`s a task branch INSIDE the run worktree wedges --resume,
+# which reads .auto-pilot/RUN.md off this exact worktree. This guard runs at
+# every run-loop iteration and at the top of --resume.
+# ---------------------------------------------------------------------------
+
+# Assert HEAD in the run worktree is `auto-pilot/<run-id>`; if not, restore it
+# and (with --questions) record the deviation as a QUESTIONS.md entry — which
+# then reaches REPORT.md via the existing rolling rewrite (no new REPORT.md
+# section invented; run-state.md owns that format). Never blocks the run: a
+# caught deviation is restored and the run proceeds, per the task's "restore
+# before proceeding" directive — only an unrestorable worktree (e.g. blocked by
+# uncommitted task-branch edits) is fail-closed.
+assert_run_head() {
+  local dir="" run_id="" questions=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --run-id) [ $# -ge 2 ] || die "missing value for --run-id"; run_id="$2"; shift 2 ;;
+      --questions) [ $# -ge 2 ] || die "missing value for --questions"; questions="$2"; shift 2 ;;
+      *) die "unknown assert-run-head argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$run_id" ] || die "assert-run-head requires --dir and --run-id"
+  [ -e "$dir/.git" ] || die "assert-run-head: not a git worktree (fail-closed): $dir"
+  local expected="auto-pilot/$run_id"
+  local actual
+  actual="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
+    || die "assert-run-head: cannot read HEAD in $dir"
+  if [ "$actual" = "$expected" ]; then
+    echo "spawn-orchestrator: HEAD OK ($expected)"
+    return 0
+  fi
+  git -C "$dir" checkout "$expected" >/dev/null 2>&1 \
+    || die "assert-run-head: HEAD is on '$actual', not '$expected', and could not be restored (fail-closed) — a task branch checkout with uncommitted changes may be wedging the run worktree"
+  if [ -n "$questions" ]; then
+    local n=0
+    [ -f "$questions" ] && n="$(grep -cE '^## Q[0-9]+' "$questions" 2>/dev/null)"
+    local qn=$((n + 1))
+    {
+      [ -s "$questions" ] && printf '\n'
+      printf '## Q%s — RUN — run worktree HEAD was parked on `%s`\n\n' "$qn" "$actual"
+      printf -- '- **Options:** restore HEAD to `%s` and continue | halt the run for a human\n' "$expected"
+      printf -- '- **Call:** restored HEAD to `%s` and continued\n' "$expected"
+      printf -- '- **Why:** the run worktree'\''s HEAD staying on the run-state branch is load-bearing for --resume (run-state.md "Run worktree HEAD invariant"); the deviation is fully repairable, so halting an otherwise-recoverable run would be worse\n'
+      printf -- '- **Reversible:** yes — HEAD is only restored, nothing is lost\n'
+    } >>"$questions"
+  fi
+  echo "spawn-orchestrator: HEAD DEVIATION restored (was $actual, now $expected)"
+}
+
 check_profile() {
   [ $# -eq 1 ] || die "check-profile takes exactly one <file>"
   local f="$1"
@@ -1086,6 +1150,7 @@ case "$sub" in
   verify-await) verify_await "$@" ;;
   check-profile) check_profile "$@" ;;
   status) status "$@" ;;
+  assert-run-head) assert_run_head "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac

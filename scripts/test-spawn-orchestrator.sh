@@ -590,5 +590,68 @@ rm -f "$sentinel"
 sout3="$("$SCRIPT" status --label com.autopilot.test --dir "$RUNDIR" 2>&1)"
 have "status: reports done once the sentinel exists" 'STATUS: done' "$sout3"
 
+# --- assert-run-head: the run-loop / --resume HEAD guard (task 13) ------------
+# Build a real git repo with a run-state branch and a task branch, so the
+# fixture matches finding #23 exactly: the run worktree's HEAD found parked on
+# a task branch instead of `auto-pilot/<run_id>`.
+HEAD_REPO="$BASE/head-repo"; mkdir -p "$HEAD_REPO"
+git -C "$HEAD_REPO" init -q -b main
+git -C "$HEAD_REPO" config user.email test@example.com
+git -C "$HEAD_REPO" config user.name test
+: >"$HEAD_REPO/seed"; git -C "$HEAD_REPO" add seed; git -C "$HEAD_REPO" commit -q -m seed
+
+RUN_ID="2026-07-11-test-run"
+git -C "$HEAD_REPO" checkout -q -b "auto-pilot/$RUN_ID"
+mkdir -p "$HEAD_REPO/.auto-pilot"
+printf -- '---\nrun_id: %s\n---\ncontent-on-run-state-branch\n' "$RUN_ID" >"$HEAD_REPO/.auto-pilot/RUN.md"
+git -C "$HEAD_REPO" add .auto-pilot/RUN.md
+git -C "$HEAD_REPO" commit -q -m "seed RUN.md"
+
+git -C "$HEAD_REPO" checkout -q main
+git -C "$HEAD_REPO" checkout -q -b "auto-pilot/hardening-task_3"
+printf 'task work\n' >"$HEAD_REPO/task-file"
+git -C "$HEAD_REPO" add task-file
+git -C "$HEAD_REPO" commit -q -m "task work committed on the wrong branch"
+# The run worktree is now parked on the TASK branch — exactly finding #23:
+# .auto-pilot/RUN.md is absent here (it only exists on the run-state branch).
+[ -f "$HEAD_REPO/.auto-pilot/RUN.md" ] && bad "fixture: RUN.md absent on task branch" \
+  || ok "fixture: RUN.md absent from working tree while parked on the task branch"
+
+# (b) --resume's belt: `git show <branch>:<path>` recovers RUN.md correctly
+# EVEN THOUGH HEAD is parked on the task branch right now.
+shown="$(git -C "$HEAD_REPO" show "auto-pilot/$RUN_ID:.auto-pilot/RUN.md" 2>&1)"
+have "git show recovers RUN.md while HEAD is parked on a task branch" \
+  'content-on-run-state-branch' "$shown"
+
+# (a) the guard fires: detects the deviation, restores HEAD, and records it.
+QFILE="$BASE/QUESTIONS.md"; : >"$QFILE"
+gout="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"; gc=$?
+[ "$gc" = 0 ] && ok "assert-run-head: exits 0 after restoring" || bad "assert-run-head: exits 0 after restoring" "$gout"
+have "assert-run-head: reports the deviation" 'HEAD DEVIATION restored' "$gout"
+restored="$(git -C "$HEAD_REPO" rev-parse --abbrev-ref HEAD)"
+[ "$restored" = "auto-pilot/$RUN_ID" ] && ok "assert-run-head: HEAD restored to the run-state branch" \
+  || bad "assert-run-head: HEAD restored to the run-state branch" "got $restored"
+qbody="$(cat "$QFILE")"
+have "assert-run-head: records the deviation in QUESTIONS.md" 'HEAD was parked on `auto-pilot/hardening-task_3`' "$qbody"
+have "assert-run-head: QUESTIONS.md entry is reversible" '**Reversible:** yes' "$qbody"
+
+# idempotent: running it again with HEAD already correct is a silent no-op.
+gout2="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"; gc2=$?
+[ "$gc2" = 0 ] && ok "assert-run-head: exits 0 when HEAD already correct" || bad "assert-run-head: exits 0 when HEAD already correct" "$gout2"
+have "assert-run-head: reports HEAD OK on a clean run" 'HEAD OK' "$gout2"
+qcount="$(grep -cE '^## Q[0-9]+' "$QFILE")"
+[ "$qcount" = 1 ] && ok "assert-run-head: no duplicate entry once HEAD is already correct" \
+  || bad "assert-run-head: no duplicate entry once HEAD is already correct" "got $qcount entries"
+
+# fail-closed: not a git worktree at all
+mkdir -p "$BASE/plain-dir-not-a-repo"
+o="$("$SCRIPT" assert-run-head --dir "$BASE/plain-dir-not-a-repo" --run-id "$RUN_ID" 2>&1)"; [ $? = 2 ] \
+  && printf '%s' "$o" | grep -q 'not a git worktree' \
+  && ok "assert-run-head fail-closed: not a git worktree" || bad "assert-run-head fail-closed: not a git worktree" "$o"
+
+# fail-closed: missing required args
+o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir and --run-id' \
+  && ok "assert-run-head fail-closed: missing --run-id" || bad "assert-run-head fail-closed: missing --run-id" "$o"
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

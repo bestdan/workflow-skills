@@ -287,6 +287,12 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   creation and task-graph materialization already exist on the branch and are
   not re-created; source normalization still runs. A hard failure **BLOCKS THE
   RESUME**, fail-closed.
+- **HEAD guard first, then read `RUN.md` from the branch** (`git show
+  auto-pilot/<run_id>:.auto-pilot/RUN.md`), never the worktree — a crash can
+  leave the run worktree's `HEAD` parked on a task branch, and this is what
+  keeps that from feeding resume a stale or absent `RUN.md`
+  ([`references/run-state.md`](references/run-state.md) "Run worktree HEAD
+  invariant").
 - **Locate exactly one resumable run-state branch** for the normalized source
   (zero or many is fail-closed), and **guard against a live orchestrator** at the
   recorded PID + start-time before starting a second one.
@@ -313,6 +319,7 @@ The loop is deliberately thin:
 
 ```
 while unblocked tasks remain and inside budget bounds:
+    assert run worktree HEAD == auto-pilot/<run_id>   # HEAD guard; restore + record if not
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
@@ -320,6 +327,14 @@ while unblocked tasks remain and inside budget bounds:
     update run state on the run-state branch
     check rate-window usage
 ```
+
+**The run worktree's `HEAD` never leaves the run-state branch.** Task code is
+written in a separate worker worktree that `/deliver-task` owns end to end
+(`commands/deliver-task.md`); the orchestrator never `git checkout`s a task
+branch in the run worktree itself. The guard above is
+`scripts/spawn-orchestrator.sh assert-run-head`
+([`references/run-state.md`](references/run-state.md) "Run worktree HEAD
+invariant") — the full rationale (finding #23) lives there.
 
 **Pre-dispatch deadline guard.** The budget-bounds condition alone can't protect
 the `--until` deadline: `--until` is otherwise only consulted at spawn (record)

@@ -148,6 +148,36 @@ The run files live on a **dedicated branch**, distinct from every task branch:
   task PRs contain only their code, and a dead orchestrator still leaves a
   complete, committed record to resume from.
 
+## Run worktree HEAD invariant
+
+**The run worktree's `HEAD` stays on the run-state branch `auto-pilot/<run_id>`
+for the entire run.** Task code is written in a **separate worker worktree**
+(`/deliver-task` creates and removes its own — `commands/deliver-task.md`); the
+orchestrator never runs `git checkout <task-branch>` in the run worktree
+itself. Finding #23: an orchestrator that instead switches the run worktree
+onto a task branch to do the work, then switches back to commit run state,
+_works_ — task_2 and task_3 both shipped that way — which is exactly why it's
+dangerous: the run loop and `--resume` both assume the run worktree **is** the
+run-state branch checkout, since that's where `.auto-pilot/RUN.md` lives ("The
+three files" above). A crash while `HEAD` is parked on a task branch —
+precisely when a crash is most likely, since that's when the real work
+happens — leaves `--resume` reading a stale or absent `RUN.md`, and
+uncommitted task-branch edits can block the checkout back, wedging recovery.
+
+**Guard.** Each run-loop iteration, and the top of `--resume`
+([`resume.md`](resume.md)), calls
+`scripts/spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id
+<run_id> --questions .auto-pilot/QUESTIONS.md`. It asserts `git rev-parse
+--abbrev-ref HEAD` in the run worktree equals `auto-pilot/<run_id>`; if not, it
+restores that branch and appends a `QUESTIONS.md` entry recording the
+deviation (format above) — a run that finds itself on the wrong branch has
+already violated its recovery contract and must not silently continue. That
+entry reaches `REPORT.md`'s **Decisions** section through the normal rolling
+rewrite; no separate `REPORT.md` format exists for it. It fails closed only if
+the restore itself fails (e.g. uncommitted task-branch edits blocking the
+checkout) — a deviation the guard can repair is never a reason to halt an
+otherwise-recoverable run.
+
 ## Task lifecycle phases
 
 `phase` spans all materialized tasks, but only the seven **in-flight/terminal**
