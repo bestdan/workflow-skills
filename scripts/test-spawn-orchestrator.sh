@@ -986,11 +986,39 @@ GHEOF
     printf '| task_child  | handed-off | child-branch | parent-branch | %s | #101 | |\n' "$PARENT_SHA"
   } >"$RUNDIR_RS/.auto-pilot/RUN.md"
 
+  # HEAD invariant (finding #23 / task 13's assert-run-head): restack must never
+  # move the caller's HEAD. `git rebase --onto X Y <branch>` CHECKS OUT <branch>,
+  # so a naive restack would park the RUN worktree's HEAD on a task branch — the
+  # exact bug task 13 guards against. Record HEAD before every restack below.
+  head_ref_0="$(git -C "$WORK" rev-parse --abbrev-ref HEAD)"
+  head_sha_0="$(git -C "$WORK" rev-parse HEAD)"
+
   rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc=$?
   [ "$rsc" = 0 ] && ok "restack: exits 0 on a clean stacked restack" || bad "restack: exits 0 on a clean stacked restack" "$rsout"
   have "restack: reports task_child done" 'restack task_child done' "$rsout"
   have "restack: prints the copy-pasteable rebase command" 'git rebase --onto origin/main' "$rsout"
   have "restack: retargets the PR base" '101 main' "$(cat "$FAKE_GH_DB/edits.log" 2>/dev/null)"
+
+  if [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "$head_ref_0" ] \
+     && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_0" ]; then
+    ok "restack: a successful restack does NOT move the caller's HEAD"
+  else
+    bad "restack: a successful restack does NOT move the caller's HEAD" \
+      "was $head_ref_0@$head_sha_0 now $(git -C "$WORK" rev-parse --abbrev-ref HEAD)@$(git -C "$WORK" rev-parse HEAD)"
+  fi
+  # …and leaves no scratch worktree registered behind it
+  if git -C "$WORK" worktree list 2>/dev/null | grep -q 'restack-wt'; then
+    bad "restack: removes its scratch worktree"
+  else
+    ok "restack: removes its scratch worktree"
+  fi
+
+  # REPORT.md is where a human actually looks — the re-verify + stale-co-review
+  # requirement is worthless on stdout alone (it only reaches orchestrator.log).
+  rsreport="$(cat "$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null)"
+  have "restack: appends a Restack section to REPORT.md"      '## Restack'        "$rsreport"
+  have "restack: REPORT.md demands re-verify for the child"   'Re-verify required' "$rsreport"
+  have "restack: REPORT.md flags the co-review as STALE"      'STALE'              "$rsreport"
 
   git -C "$WORK" fetch -q origin
   diffnames="$(git -C "$WORK" diff --name-only origin/main origin/child-branch)"
@@ -1001,40 +1029,90 @@ GHEOF
   fi
   lack "restack: child diff does not re-propose parent.txt" 'parent.txt' "$diffnames"
 
-  # idempotency: a second restack makes no additional rebase/push/gh-edit
+  # idempotency: a second restack makes no additional rebase/push/gh-edit, and
+  # does not churn REPORT.md either
   editcount_before="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
+  reportsize_before="$(wc -c <"$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
   rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc2=$?
   [ "$rsc2" = 0 ] && ok "restack: idempotent second run exits 0" || bad "restack: idempotent second run exits 0" "$rsout2"
   have "restack: idempotent second run reports no-op" 'already based on main (no-op)' "$rsout2"
   editcount_after="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
   [ "$editcount_before" = "$editcount_after" ] && ok "restack: idempotent run makes no additional gh edit" \
     || bad "restack: idempotent run makes no additional gh edit" "before=$editcount_before after=$editcount_after"
+  reportsize_after="$(wc -c <"$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
+  [ "$reportsize_before" = "$reportsize_after" ] && ok "restack: idempotent run does not churn REPORT.md" \
+    || bad "restack: idempotent run does not churn REPORT.md" "before=$reportsize_before after=$reportsize_after"
 
-  # --- fail-closed on conflict: a second stacked child edits the SAME line the
-  # parent's post-hand-off review fix touched — the exact "clean rebase proves
-  # nothing" scenario run-state.md warns about, except here it's not clean: the
-  # rebase must conflict, abort, and never force-push or retarget.
+  # --- fail-closed on conflict + the HEAD invariant under a MIXED run ---------
+  # Build two more stacked children so ONE restack run both succeeds (clean2)
+  # and conflicts (conflict-child):
+  #   conflict-child edits the SAME line the parent's post-hand-off review fix
+  #     touched — the "clean rebase proves nothing" case, except here it isn't
+  #     clean: it must conflict, abort, and never force-push or retarget.
+  #   clean2 touches only its own file and must restack normally.
+  # Asserting HEAD across THIS run is the real test: a naive `git rebase --onto
+  # … <branch>` would have checked out (and left HEAD on) a task branch.
   git -C "$WORK" checkout -q parent-branch
-  git -C "$WORK" checkout -q -b conflict-child
   PARENT_SHA2="$(git -C "$WORK" rev-parse parent-branch)"
+  git -C "$WORK" checkout -q -b conflict-child
   printf 'line1-CONFLICTING-EDIT\n' >"$WORK/parent.txt"
   git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "child edits the same line"
   git -C "$WORK" push -q origin conflict-child
   printf 'OPEN\n' >"$FAKE_GH_DB/102.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/102.base"
-  printf '| task_conflict | handed-off | conflict-child | parent-branch | %s | #102 | |\n' "$PARENT_SHA2" \
-    >>"$RUNDIR_RS/.auto-pilot/RUN.md"
+
+  git -C "$WORK" checkout -q parent-branch
+  git -C "$WORK" checkout -q -b clean2
+  echo clean2 >"$WORK/clean2.txt"; git -C "$WORK" add clean2.txt; git -C "$WORK" commit -q -m "clean2 change"
+  git -C "$WORK" push -q origin clean2
+  printf 'OPEN\n' >"$FAKE_GH_DB/103.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/103.base"
+
+  {
+    printf '| task_conflict | handed-off | conflict-child | parent-branch | %s | #102 | |\n' "$PARENT_SHA2"
+    printf '| task_clean2   | handed-off | clean2         | parent-branch | %s | #103 | |\n' "$PARENT_SHA2"
+  } >>"$RUNDIR_RS/.auto-pilot/RUN.md"
+
+  # Park HEAD somewhere deliberate (main) so a stray checkout is unmistakable.
+  git -C "$WORK" checkout -q main
+  head_ref_1="$(git -C "$WORK" rev-parse --abbrev-ref HEAD)"
+  head_sha_1="$(git -C "$WORK" rev-parse HEAD)"
 
   precommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
   rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc3=$?
   [ "$rsc3" = 2 ] && ok "restack: fail-closed conflict exits non-zero" || bad "restack: fail-closed conflict exits non-zero" "exit=$rsc3"
   have "restack: fail-closed conflict reports a conflict" 'FAILED — rebase conflict' "$rsout3"
+  have "restack: a conflict does not stop the other children" 'restack task_clean2 done' "$rsout3"
   postcommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
   [ "$precommit_tip" = "$postcommit_tip" ] && ok "restack: conflict never force-pushes the broken branch" \
     || bad "restack: conflict never force-pushes the broken branch"
   lack "restack: conflict never retargets the PR" '102 main' "$(cat "$FAKE_GH_DB/edits.log" 2>/dev/null)"
-  [ -z "$(git -C "$WORK" status --porcelain 2>/dev/null)" ] && [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "conflict-child" ] \
-    && ok "restack: conflict leaves the working tree clean (rebase --abort ran)" \
-    || bad "restack: conflict leaves the working tree clean (rebase --abort ran)"
+
+  # THE invariant: a run that both succeeded and conflicted left HEAD untouched.
+  if [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "$head_ref_1" ] \
+     && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_1" ]; then
+    ok "restack: HEAD unchanged across a mixed success+conflict run (task 13 invariant)"
+  else
+    bad "restack: HEAD unchanged across a mixed success+conflict run (task 13 invariant)" \
+      "was $head_ref_1@$head_sha_1 now $(git -C "$WORK" rev-parse --abbrev-ref HEAD)@$(git -C "$WORK" rev-parse HEAD)"
+  fi
+  [ -z "$(git -C "$WORK" status --porcelain 2>/dev/null)" ] \
+    && ok "restack: caller's worktree left clean (no half-applied rebase)" \
+    || bad "restack: caller's worktree left clean (no half-applied rebase)"
+  if git -C "$WORK" worktree list 2>/dev/null | grep -q 'restack-wt'; then
+    bad "restack: removes its scratch worktree even on the conflict path"
+  else
+    ok "restack: removes its scratch worktree even on the conflict path"
+  fi
+
+  # fail-closed: a dirty caller worktree is never touched (an automated rebase
+  # over a human's uncommitted work is how "helpful" recovery destroys state)
+  echo dirty >"$WORK/uncommitted.txt"
+  dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dirty_c=$?
+  if [ "$dirty_c" = 2 ] && printf '%s' "$dirty_out" | grep -qF 'worktree is dirty'; then
+    ok "restack: dirty caller worktree fails closed"
+  else
+    bad "restack: dirty caller worktree fails closed" "exit=$dirty_c msg=$dirty_out"
+  fi
+  rm -f "$WORK/uncommitted.txt"
 
   # --- orphaned-child detector: a merged/deleted base is a flagged defect ----
   RSD="$RS/detect-run"; mkdir -p "$RSD/.auto-pilot"
