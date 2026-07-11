@@ -86,6 +86,43 @@ must be the **same** file as the launchd relaunch sentinel.
 8. [[autopilot_hardening_task_8]] — P5: observability — a `status --label` subcommand + a done-sentinel, and neutralize jail-incompatible `Stop` hooks in the detached run.
 9. [[autopilot_hardening_task_9]] — Cleanup: graduate the durable design to `dev_docs/auto-pilot-hardening.md` and delete this plan scaffolding.
 
+### Added from detached run #2 (findings 19–23)
+
+Run #2 — the run that executed tasks 1–9 of *this* plan — surfaced five new findings
+by living through them. Four become tasks (the fifth, #21, folded into task 8):
+
+10. [[autopilot_hardening_task_10]] — **P0**: supervisor classifies a **401/auth** exit as **fatal, non-retryable** — halt + alarm, plus a no-progress guard. (#22)
+11. [[autopilot_hardening_task_11]] — P2: supervisor gates the relaunch on `paused_until` **in shell** — a pause must cost **zero** model calls. (#19)
+12. [[autopilot_hardening_task_12]] — **P1**: jail permits the harness's own `$TMPDIR` mux socket + cwd files — **stops every Bash exit code being poisoned to 1**. (#20)
+13. [[autopilot_hardening_task_13]] — P2: run loop must never check out a task branch in the run worktree; `--resume` reads run state from the **branch**, not the working tree. (#23)
+
+## What run #2 taught us (findings 19–23)
+
+Tasks 10–13 come from a different source than tasks 1–9: not a review of run #1's
+log, but **run #2 breaking in new ways while executing this very plan**. Two are
+serious enough to restate:
+
+- **#22 (task 10) is the most valuable thing either run produced.** An expired OAuth
+  credential killed run #2 mid-flight; the supervisor then relaunched into the same
+  non-retryable `401` **~52 times over 4.3 hours**, doing nothing, raising nothing.
+  No launch-time probe could have caught it (auth was live and smoke-tested at
+  launch — it expired *hours later*). The circuit breaker counts *delivery*
+  failures, so a process dying *before* it dispatches never trips it; and the
+  rate-limit backstop's premise — "back off, the window resets" — is simply **false**
+  for an expired credential. The gap is structural: the supervisor can classify
+  "retry later" but has no bucket for **"stop, a human must act."**
+- **#20 (task 12) silently corrupts verification.** The jail denies the harness's own
+  cwd-tracking write, which makes **every Bash call return exit 1 regardless of what
+  actually happened**. An agent verifying by exit code is reading noise. Note this is
+  *not* fixed by task 4 (which addresses `execve` of repo scripts) — both must land
+  before in-jail verify can be trusted, and the confinement smoke needs an assertion
+  that the jail can even *report an exit code correctly*.
+
+The through-line for #19/#22 (tasks 10, 11): **the supervisor should decide in shell
+what it can decide in shell.** A timestamp comparison and an exit-code
+classification need no model — and an agent that is rate-limited or auth-dead cannot
+run its own bookkeeping anyway, so it must not be the thing deciding whether to stop.
+
 ## Open questions
 
 Q1 (verify posture), Q2 (exec breadth), Q3 (follow-up sink) are **settled** — see
