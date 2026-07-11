@@ -101,7 +101,10 @@ env_class="claude-web"
 [ -n "$codex_path" ] && env_class="local-full"
 echo "PREFLIGHT ENV_CLASS: $env_class"
 
-coder_out="$(bash "$PROBE_CODERS" 2>&1)"
+coder_out="$(bash "$PROBE_CODERS" 2>&1)"; coder_status=$?
+if [ "$coder_status" != 0 ]; then
+  blockers+=("coder probe failed (exit $coder_status) — cannot confirm coder availability/auth; rerun: $PROBE_CODERS")
+fi
 yaml_field() { # <section> <key>
   printf '%s\n' "$coder_out" | awk -v s="  $1:" -v k="$2:" '
     $0==s {insec=1; next}
