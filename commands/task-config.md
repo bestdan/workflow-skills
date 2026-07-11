@@ -129,6 +129,16 @@ linear:
 
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 
+### Local override (`.task-config.local.yml`)
+
+Alongside the committed `.task-config.yml`, commands also read an **optional, gitignored** `dev_docs/tasks/.task-config.local.yml`. It uses the **same schema** and is **deep-merged over** the committed file: for any key present in both, the local value wins; keys only in the committed file are kept. Every command that reads the task config reads this **merged view** — `.task-config.yml` overlaid with `.task-config.local.yml`.
+
+Its purpose is **personal, machine-specific, or secret** keys that must not be committed — chiefly `linear.api_key_ref` (a pointer to a full-account Linear bearer token). Put those there, not in the shared `.task-config.yml`. It is never written by `/task-config`'s setup flow (which only writes the committed file); the user maintains it by hand. When `handler: linear` and the repo excludes `dev_docs/tasks/` entirely (the non-`repo-pr` default), `api_key_ref` can live in either file since neither is committed — but the local override is the canonical home so the shared file stays portable. Ensure `.task-config.local.yml` is git-ignored:
+
+```bash
+git check-ignore -q dev_docs/tasks/.task-config.local.yml || echo 'dev_docs/tasks/.task-config.local.yml' >> "$(git rev-parse --git-dir)/info/exclude"
+```
+
 ### 5. Confirm
 
 Tell the user:
