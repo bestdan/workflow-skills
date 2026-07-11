@@ -25,7 +25,9 @@ Derivation:
   blocks      = relations,        type == "blocks"   -> relatedIssue
   blockedBy   = inverseRelations, type == "blocks"    -> issue
   relatedTo   = either connection, type == "related"  -> relatedIssue / issue
-  duplicateOf = either connection, type == "duplicate" -> relatedIssue / issue
+  duplicateOf = relations,         type == "duplicate" -> relatedIssue
+                (inverse duplicates are "duplicated by" THIS issue, not the
+                other way round — directional like blocks, so dropped here)
 
 `description` IS included in the per-issue payload here — unlike
 linear-scan.py / linear-ready.py, which omit it to keep their frequent,
@@ -103,8 +105,8 @@ query($cursor: String, $first: Int!, $team: ID!%s) {
       state { type }
       project { id }
       labels { nodes { name } }
-      relations { nodes { type relatedIssue { id identifier } } }
-      inverseRelations { nodes { type issue { id identifier } } }
+      relations(first: 250) { nodes { type relatedIssue { id identifier } } pageInfo { hasNextPage } }
+      inverseRelations(first: 250) { nodes { type issue { id identifier } } pageInfo { hasNextPage } }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -122,7 +124,21 @@ def get_key():
             "full op://vault/item/field reference. (op must run in an authorized "
             "shell — see this file's header.)"
         )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
+    try:
+        out = subprocess.run(
+            ["op", "read", ref], capture_output=True, text=True, timeout=15
+        )
+    except FileNotFoundError:
+        sys.exit(
+            "1Password CLI 'op' not found. Install it, or set $LINEAR_API_KEY "
+            "directly (see this file's header)."
+        )
+    except subprocess.TimeoutExpired:
+        # A locked 1Password desktop session can block `op read` on a biometric
+        # prompt this non-interactive subshell can't answer. Exit non-zero (not
+        # a hang) so the caller falls back to the MCP floor per this script's
+        # contract.
+        sys.exit(f"Timed out reading key from 1Password ({ref}).")
     key = out.stdout.strip()
     if not key:
         sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
@@ -214,9 +230,11 @@ def derive_edges(issue):
         elif edge.get("type") == "related":
             if ref not in related_to:
                 related_to.append(ref)
-        elif edge.get("type") == "duplicate":
-            if ref not in duplicate_of:
-                duplicate_of.append(ref)
+        # An inverse `duplicate` means the OTHER issue is a duplicate of THIS
+        # (canonical) one — i.e. this issue is "duplicated by" it, NOT a
+        # duplicate of it. `duplicate` is directional like `blocks`, so (unlike
+        # symmetric `related`) inverse duplicates are intentionally dropped from
+        # `duplicateOf`; only outgoing `relations` populate it above.
 
     return blocks, blocked_by, related_to, duplicate_of
 
@@ -262,6 +280,19 @@ def main():
 
     issues_out = []
     for issue in all_issues:
+        # The nested relation connections are fetched with first: 250 (Linear's
+        # max page size) but NOT paginated. If either reports hasNextPage, this
+        # issue has >250 relations and its edge lists would be silently
+        # truncated — breaking the "exhaustive graph" contract. Exit non-zero so
+        # the caller falls back to the MCP floor for a complete graph.
+        for conn in ("relations", "inverseRelations"):
+            page_info = (issue.get(conn) or {}).get("pageInfo") or {}
+            if page_info.get("hasNextPage"):
+                sys.exit(
+                    f"Issue {issue.get('identifier')} has >250 {conn}; the "
+                    "nested relation connection is truncated. Fall back to the "
+                    "MCP floor for a complete graph."
+                )
         blocks, blocked_by, related_to, duplicate_of = derive_edges(issue)
         issues_out.append(
             {

@@ -37,10 +37,15 @@ On the fast path, the script's own prelude resolves the team itself, so this
 **replaces** the MCP-floor "Preflight" step below — do not also call
 `list_teams` on this path.
 
-1. **Resolve project scopes.** Call the **"Resolve configured projects"**
-   helper from `linear-common.md` (same as the floor; for an initiative, union
-   the resolved scopes of each of its projects) to get each scope's real `id`,
-   and pass it as `--project` (omit for the whole-team `id: null` scope).
+1. **Resolve project scopes.** Use the **scope already resolved by
+   `reoptimize-tasks.md` §2** (the `project`/`initiative`/`team` from
+   `$ARGUMENTS`) — exactly the scope the floor's "Collect the scope's issues"
+   loads, so the two paths analyze the same issue set. For a single project,
+   pass its real `id` as `--project`; for an initiative, union its projects and
+   pass each as `--project`; for the whole-team scope, omit `--project` (the
+   whole-team `id: null` scope). Do **not** re-resolve from `linear.projects`
+   config here — that would make the fast path analyze the configured projects
+   instead of the requested scope, diverging from the floor.
 2. **Call the script.**
 
    ```bash

@@ -1,6 +1,6 @@
 ---
 description: Re-optimize an existing tracker backlog — across a project, initiative, or team — by reconciling prose dependencies against native relations, surfacing hidden cross-project blockers, detecting cycles/stale links/priority inversions and overlap, then applying the approved fixes. v1 supports the linear handler only; jira and gh-issue are planned; repo-pr is unsupported (re-optimize the plan files directly).
-allowed-tools: Bash(git *), Bash(cat *), Glob, Read, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_initiatives, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_initiatives, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
+allowed-tools: Bash(git *), Bash(cat *), Bash(python3 *), Glob, Read, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__list_initiatives, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_initiatives, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue
 argument-hint: "[project|initiative|team] [name]"
 ---
 
