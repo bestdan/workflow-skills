@@ -85,6 +85,11 @@
 #                  exist on this host) to the exec-dir set.
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
+#     Every render ALSO emits a fixed (non-caller-supplied) write scope for
+#     Claude Code's own runtime files under $TMPDIR/tmp — the srt-mux-*.sock
+#     mux socket and the claude-*-cwd tracking file — so the harness's own
+#     inner sandbox can initialize and Bash exit codes stay trustworthy
+#     (task 12 / finding #20; see orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@).
 #   check-profile  Confirm a rendered profile COMPILES via `sandbox-exec -f`,
 #                  surfacing the Seatbelt parser error verbatim on failure.
 #
@@ -147,6 +152,48 @@ sbpl_escape() {
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   printf '%s' "$s"
+}
+
+# Escape a canonicalized path for embedding inside an SBPL "(regex #\"…\")"
+# string: backslash-prefix backslash/quote AND any literal regex metacharacter
+# the path might contain (host temp-dir components are normally plain
+# alnum/._-, but this must not silently mismatch if that's ever not true).
+# Verified empirically against sandbox-exec: a SINGLE backslash in the profile
+# source is enough for both the SBPL string reader and the regex engine to see
+# a literal char — do NOT double it (that breaks the match).
+sbpl_regex_escape() {
+  local s="$1" out="" c i
+  for (( i=0; i<${#s}; i++ )); do
+    c="${s:$i:1}"
+    case "$c" in
+      '\'|'"'|'.'|'*'|'+'|'?'|'('|')'|'['|']'|'{'|'}'|'|'|'^'|'$') out+="\\$c" ;;
+      *) out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# Emit the FIXED (never caller-supplied) write scopes for Claude Code's own
+# runtime files — the srt-mux-*.sock mux socket the harness's inner sandbox
+# binds/listens on under $TMPDIR, and the claude-*-cwd cwd-tracking file it
+# rewrites under /tmp after every Bash call (see orchestrator.sb.tmpl's
+# @@HARNESS_RUNTIME@@ comment for why denying either poisons the harness
+# itself — task 12 / finding #20). Args: <tmpdir-canonical> <tmp-canonical>.
+emit_harness_runtime() {
+  local tmpdir_c="$1" tmp_c="$2"
+  local sock_pattern cwd_pattern
+  sock_pattern="^$(sbpl_regex_escape "$tmpdir_c")"'/srt-mux-[0-9]+-[0-9]+\.sock$'
+  cwd_pattern="^$(sbpl_regex_escape "$tmp_c")"'/claude-.*-cwd$'
+  printf '(allow file-write*\n'
+  printf '  (regex #"%s")\n' "$sock_pattern"
+  printf '  (regex #"%s")\n' "$cwd_pattern"
+  printf ')\n'
+  # network-bind: a unix-domain socket bind/listen is gated on the socket's own
+  # path (like Apple's own rpcbind.sb), not a free network class — this grant is
+  # required IN ADDITION to the file-write* above, not instead of it.
+  printf '(allow network-bind\n'
+  printf '  (regex #"%s")\n' "$sock_pattern"
+  printf ')\n'
 }
 
 # Emit an s-expression allowing `op` over the given canonical paths, or a
@@ -300,13 +347,21 @@ render_profile() {
   fi
 
   # Build the token blocks.
-  local ro_block rw_block cred_block ex_block
+  local ro_block rw_block cred_block ex_block harness_block
   ro_block="$(emit_allow "file-read*" ${ro_c[@]+"${ro_c[@]}"})"
   # RW scopes need both read and write.
   rw_block="$(emit_allow "file-read*" ${rw_c[@]+"${rw_c[@]}"})
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   cred_block="$(emit_deny_write ${cred_c[@]+"${cred_c[@]}"})"
   ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
+  # Harness's OWN runtime files (task 12 / finding #20) — fixed, host-resolved
+  # paths, never caller-supplied. $TMPDIR and /tmp must both already exist on
+  # any host that can run this renderer, so canonicalize fail-closed like every
+  # other path here.
+  local tmpdir_c tmp_c
+  tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
+  tmp_c="$(canonicalize "/tmp")" || exit 2
+  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_c")"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.
@@ -318,6 +373,7 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
       *@@RO_PATHS@@*) printf '%s\n' "$ro_block" ;;
       *@@RW_PATHS@@*) printf '%s\n' "$rw_block" ;;
       *@@CRED_DENY@@*) printf '%s\n' "$cred_block" ;;
+      *@@HARNESS_RUNTIME@@*) printf '%s\n' "$harness_block" ;;
       *@@EXEC_PATHS@@*) printf '%s\n' "$ex_block" ;;
       *) printf '%s\n' "$line" ;;
     esac

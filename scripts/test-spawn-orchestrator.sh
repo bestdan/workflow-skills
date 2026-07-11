@@ -56,6 +56,24 @@ count_is "profile: RO path is read-only"  1 "$REPO_RO"  "$body"
 # no unrendered template tokens remain
 lack "profile: no @@tokens@@ remain"      '@@'                     "$body"
 
+# --- task 12 / finding #20: the harness's OWN runtime files (srt-mux socket +
+# cwd-tracking file) must be permitted, narrowly patterned — never a blanket
+# $TMPDIR/tmp write. Every render emits this fixed scope regardless of --rw/--ro.
+tmpdir_c="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+tmp_c="$(cd /tmp && pwd -P)"
+# The srt-mux pattern must appear TWICE: once under (allow file-write* …) (to
+# create the socket special file) and once under (allow network-bind …) (to
+# actually bind/listen on it) — neither alone suffices (verified empirically
+# against sandbox-exec).
+count_is "profile: srt-mux socket pattern present in file-write* AND network-bind" \
+  2 "(regex #\"^$tmpdir_c/srt-mux-[0-9]+-[0-9]+\\.sock\$\")" "$body"
+have "profile: network-bind block present for the srt-mux socket" \
+  '(allow network-bind' "$body"
+have "profile: cwd-tracking file write is regex-scoped, not blanket /tmp" \
+  "(regex #\"^$tmp_c/claude-.*-cwd\$\")" "$body"
+lack "profile: harness runtime grant does not widen to a blanket TMPDIR subpath" \
+  "(subpath \"$tmpdir_c\")" "$body"
+
 # --- A1 regression: an exec symlink must resolve to its real target -----------
 # (Seatbelt matches process-exec against the resolved vnode path, not the link;
 # `command -v` on Homebrew binaries returns the symlink, so the renderer must

@@ -71,6 +71,27 @@
 ;;     are untouched (the tool still reads its token). [§3: file-RO vs state-RW]
 @@CRED_DENY@@
 
+;; --- Claude Code's OWN runtime files under $TMPDIR / /tmp — narrowly patterned
+;;     (never a blanket TMPDIR/tmp write). Two files, two failure modes if denied
+;;     (finding #20 / task 12), distinct from the execve-of-repo-scripts finding
+;;     (#4 — fixed separately) even though both land as jail-poisoned verify:
+;;       - srt-mux-*.sock: the harness's OWN inner sandbox binds/listens on this
+;;         unix socket to mediate its own permission checks. A denied bind/listen
+;;         makes the inner sandbox silently disable itself for the session — the
+;;         two-layer posture this file documents (outer sandbox-exec here, plus
+;;         the harness's own inner sandbox) quietly degrades to one layer.
+;;       - claude-*-cwd: the harness's cwd-tracking file, rewritten after every
+;;         Bash tool call. A denied write does not just fail quietly — it makes
+;;         EVERY Bash call report exit 1 regardless of the command's real
+;;         outcome, so an agent (or orchestrator) verifying by `$?` is reading
+;;         pure noise. This is the exit-code integrity check in
+;;         smoke-confinement.sh: run `true`/`false` in-jail and assert 0/1.
+;;     A unix-domain socket bind/listen is gated on the socket's OWN path, not a
+;;     free network class, so both grants are needed: file-write* (create the
+;;     socket special file) and network-bind (actually bind/listen on it) —
+;;     verified empirically against sandbox-exec that neither alone suffices.
+@@HARNESS_RUNTIME@@
+
 ;; --- exec: the resolved coder binaries (literal) plus, when --toolchain or
 ;;     --exec-dir is used, whole bin dirs (subpath) so the orchestrator can
 ;;     shell out to the dozens of coreutils/git-core/uv/node/etc. helpers a

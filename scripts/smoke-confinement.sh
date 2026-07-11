@@ -46,8 +46,31 @@ denied  "read /etc/sudoers"           bash -c "cat /etc/sudoers"
 denied  "exec unlisted /usr/bin/python3" /usr/bin/python3 -c "print(1)"
 rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" 2>/dev/null
 
-echo "== 2. Layer 2 — network egress (through claude --settings) =="
+# --- exit-code integrity (task 12 / finding #20) --------------------------
+# A jail that can't report a correct exit code is a BROKEN jail: the denied
+# cwd-tracking write (claude-*-cwd) made every Bash tool call report exit 1
+# regardless of the command's real result, so an agent verifying by `$?` was
+# reading pure noise. This is the real regression guard for task 12 — it must
+# FAIL against the pre-fix profile (no @@HARNESS_RUNTIME@@ grant) and PASS once
+# the harness's own runtime files are permitted. Run THROUGH claude -p itself
+# (not bare sandbox-exec) so this actually exercises the harness's cwd-tracking
+# write, matching how the real orchestrator observes `$?`.
+echo "== 1b. Exit-code integrity through the harness (claude -p) =="
 JSON="$(cat "$D/settings.json")"
+exit_code_check(){ # <desc> <expect-rc> <shell-command>
+  local desc="$1" expect="$2" cmd="$3" name="rc_ec_$4"
+  local rcf="$D/run/wt/$name"; rm -f "$rcf"
+  sandbox-exec -f "$D/profile.sb" "$CLAUDE" -p \
+    "Run exactly this one bash command and then stop, nothing else: { $cmd ; } ; printf '%s' \$? > $rcf" \
+    --permission-mode bypassPermissions --settings "$JSON" --max-turns 4 >/dev/null 2>&1
+  if [ ! -s "$rcf" ]; then INDET "$desc (claude didn't record an rc — check manually)"; return; fi
+  local rc; rc="$(cat "$rcf")"
+  [ "$rc" = "$expect" ] && PASS "$desc (rc=$rc)" || FAIL "$desc (rc=$rc, expected $expect — the jail is lying about exit codes)"
+}
+exit_code_check "true reports exit 0"  0 true  true
+exit_code_check "false reports exit 1" 1 false false
+
+echo "== 2. Layer 2 — network egress (through claude --settings) =="
 # egress_check writes the curl/socket exit code to a file in the RW worktree from
 # INSIDE the jailed claude, so we read a deterministic rc instead of parsing prose.
 egress_check(){ # <desc> <expect: reach|block> <rcfile-name> <shell-command>

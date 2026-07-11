@@ -118,6 +118,36 @@ Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
 
+**The harness's own `$TMPDIR`/`/tmp` runtime files are part of this write
+surface too — narrowly patterned, not a blanket `$TMPDIR` grant.** Two files,
+two failure modes if either is denied (finding #20 / task 12):
+
+- `srt-mux-*.sock` under `$TMPDIR` — the unix socket the harness's **own inner
+  sandbox** binds/listens on to mediate its own permission checks. A denied
+  bind/listen doesn't error loudly; it makes the inner sandbox **silently
+  disable itself for the session**, so the two-layer posture this section
+  describes (outer `sandbox-exec` here, plus the harness's own inner sandbox)
+  quietly degrades to one layer.
+- `claude-*-cwd` under `/tmp` — the cwd-tracking file the harness rewrites
+  after **every** Bash tool call. A denied write is worse than silent: it makes
+  **every Bash call report exit 1 regardless of the command's real outcome**,
+  so an agent (or the orchestrator) verifying by `$?` is reading pure noise — a
+  passing command looks failed, and nothing distinguishes a real failure from
+  the jail lying about it.
+
+`render-profile` therefore emits a fixed, regex-scoped grant for exactly these
+two file patterns on every render — never a blanket `$TMPDIR`/`/tmp` write,
+which would swallow every other process's temp files too. A unix-domain socket
+bind/listen is gated on the socket's own path, not a free network class, so the
+srt-mux grant needs **both** a `file-write*` (create the socket special file)
+**and** a `network-bind` rule (actually bind/listen on it) — neither alone
+suffices. This is distinct from the `execve`-of-repo-scripts finding (#4,
+already fixed): that one is about executing the _repo's_ scripts inside the
+jail; this one is about the _harness's own_ socket and cwd files. Both must
+hold for in-jail verify to be trustworthy — see `smoke-confinement.sh`'s
+exit-code integrity check (`true` → 0, `false` → 1, in-jail), the regression
+guard for this class of bug.
+
 **Residual confidentiality cost.** Reads are broad (§ above) and exec is now
 allowed over whole toolchain bin dirs, not just a literal per-binary list — so
 neither reads nor exec meaningfully bound what a running process can _see_.
