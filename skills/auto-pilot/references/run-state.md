@@ -173,9 +173,10 @@ restores that branch and appends a `QUESTIONS.md` entry recording the
 deviation (format above) — a run that finds itself on the wrong branch has
 already violated its recovery contract and must not silently continue. That
 entry reaches `REPORT.md`'s **Decisions** section through the normal rolling
-rewrite; no separate `REPORT.md` format exists for it. It fails closed only if
-the restore itself fails (e.g. uncommitted task-branch edits blocking the
-checkout) — a deviation the guard can repair is never a reason to halt an
+rewrite; no separate `REPORT.md` format exists for it. It fails closed when the
+run worktree is **dirty** at the deviation (restoring would silently carry or
+lose the uncommitted task-branch edits) or when git itself refuses the restore —
+a **clean** deviation the guard can repair is never a reason to halt an
 otherwise-recoverable run.
 
 ## Task lifecycle phases

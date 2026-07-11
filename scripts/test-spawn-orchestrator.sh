@@ -653,5 +653,34 @@ o="$("$SCRIPT" assert-run-head --dir "$BASE/plain-dir-not-a-repo" --run-id "$RUN
 o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir and --run-id' \
   && ok "assert-run-head fail-closed: missing --run-id" || bad "assert-run-head fail-closed: missing --run-id" "$o"
 
+# fail-closed: a DIRTY deviation must NOT restore (a non-conflicting checkout
+# would silently carry the uncommitted task-branch edits onto the run-state branch).
+git -C "$HEAD_REPO" checkout -q "auto-pilot/hardening-task_3"
+printf 'uncommitted edit\n' >>"$HEAD_REPO/task-file"
+o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" 2>&1)"; drc=$?
+dhead="$(git -C "$HEAD_REPO" rev-parse --abbrev-ref HEAD)"
+[ "$drc" = 2 ] && printf '%s' "$o" | grep -q 'uncommitted changes' && [ "$dhead" = "auto-pilot/hardening-task_3" ] \
+  && ok "assert-run-head fail-closed: dirty deviation is not restored" \
+  || bad "assert-run-head fail-closed: dirty deviation is not restored" "rc=$drc head=$dhead msg=$o"
+git -C "$HEAD_REPO" checkout -q -- task-file   # drop the dirty edit for later checks
+
+# numbering uses the MAX existing index, not a count — a non-contiguous
+# QUESTIONS.md (Q9, Q10) yields Q11, never a colliding low number.
+git -C "$HEAD_REPO" checkout -q "auto-pilot/hardening-task_3"
+QFILE2="$BASE/Q-noncontig.md"; printf '## Q9 — X — a\n\n## Q10 — X — b\n' >"$QFILE2"
+"$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE2" >/dev/null 2>&1
+grep -q '^## Q11 — RUN —' "$QFILE2" \
+  && ok "assert-run-head: numbers from the max index (Q11 after Q9/Q10)" \
+  || bad "assert-run-head: numbers from the max index" "$(cat "$QFILE2")"
+
+# a relative --questions resolves against --dir (the run worktree), matching the
+# documented `.auto-pilot/QUESTIONS.md` invocation — not the caller's cwd.
+git -C "$HEAD_REPO" checkout -q "auto-pilot/hardening-task_3"
+rm -f "$HEAD_REPO/QREL.md"
+"$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions QREL.md >/dev/null 2>&1
+[ -f "$HEAD_REPO/QREL.md" ] && grep -q 'HEAD was parked' "$HEAD_REPO/QREL.md" \
+  && ok "assert-run-head: relative --questions resolves against --dir" \
+  || bad "assert-run-head: relative --questions resolves against --dir" "$(ls "$HEAD_REPO" 2>&1)"
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]

@@ -1072,10 +1072,10 @@ status() {
 # Assert HEAD in the run worktree is `auto-pilot/<run-id>`; if not, restore it
 # and (with --questions) record the deviation as a QUESTIONS.md entry — which
 # then reaches REPORT.md via the existing rolling rewrite (no new REPORT.md
-# section invented; run-state.md owns that format). Never blocks the run: a
-# caught deviation is restored and the run proceeds, per the task's "restore
-# before proceeding" directive — only an unrestorable worktree (e.g. blocked by
-# uncommitted task-branch edits) is fail-closed.
+# section invented; run-state.md owns that format). A CLEAN deviation is
+# restored and the run proceeds, per the task's "restore before proceeding"
+# directive; a deviation with a dirty run worktree is fail-closed (restoring
+# would carry or lose the uncommitted edits), as is a restore git itself refuses.
 assert_run_head() {
   local dir="" run_id="" questions=""
   while [ $# -gt 0 ]; do
@@ -1096,20 +1096,37 @@ assert_run_head() {
     echo "spawn-orchestrator: HEAD OK ($expected)"
     return 0
   fi
-  git -C "$dir" checkout "$expected" >/dev/null 2>&1 \
-    || die "assert-run-head: HEAD is on '$actual', not '$expected', and could not be restored (fail-closed) — a task branch checkout with uncommitted changes may be wedging the run worktree"
+  # A deviation with a DIRTY run worktree is the wedge case: a non-conflicting
+  # `git checkout` would silently carry those uncommitted (task-branch) edits onto
+  # the run-state branch, and a conflicting one blocks the restore. Either way,
+  # fail closed rather than restore — the guard only repairs a CLEAN deviation.
+  if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
+    die "assert-run-head: HEAD is on '$actual', not '$expected', and the run worktree has uncommitted changes (fail-closed) — restoring would carry or lose them; resolve by hand"
+  fi
+  # A detached HEAD reads back as the literal "HEAD"; record its SHA so the
+  # parked ref (and any commit made there) stays findable after the restore.
+  case "$actual" in HEAD) actual="detached@$(git -C "$dir" rev-parse --short HEAD 2>/dev/null)" ;; esac
+  local giterr
+  giterr="$(git -C "$dir" checkout "$expected" 2>&1 >/dev/null)" \
+    || die "assert-run-head: HEAD is on '$actual', not '$expected', and could not be restored (fail-closed): ${giterr:-git checkout failed}"
   if [ -n "$questions" ]; then
-    local n=0
-    [ -f "$questions" ] && n="$(grep -cE '^## Q[0-9]+' "$questions" 2>/dev/null)"
+    # Resolve a relative --questions against the run worktree (--dir), not the
+    # caller's cwd — the documented invocation passes `.auto-pilot/QUESTIONS.md`.
+    case "$questions" in /*) ;; *) questions="$dir/$questions" ;; esac
+    # Number from the MAX existing index, not the count — QUESTIONS.md is not
+    # guaranteed contiguously numbered from Q1 (other writers append too).
+    local n; n="$(grep -oE '^## Q[0-9]+' "$questions" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
+    [ -n "$n" ] || n=0
     local qn=$((n + 1))
     {
       [ -s "$questions" ] && printf '\n'
       printf '## Q%s — RUN — run worktree HEAD was parked on `%s`\n\n' "$qn" "$actual"
       printf -- '- **Options:** restore HEAD to `%s` and continue | halt the run for a human\n' "$expected"
       printf -- '- **Call:** restored HEAD to `%s` and continued\n' "$expected"
-      printf -- '- **Why:** the run worktree'\''s HEAD staying on the run-state branch is load-bearing for --resume (run-state.md "Run worktree HEAD invariant"); the deviation is fully repairable, so halting an otherwise-recoverable run would be worse\n'
-      printf -- '- **Reversible:** yes — HEAD is only restored, nothing is lost\n'
-    } >>"$questions"
+      printf -- '- **Why:** the run worktree'\''s HEAD staying on the run-state branch is load-bearing for --resume (run-state.md "Run worktree HEAD invariant"); the run worktree was clean, so the deviation is fully repairable and halting an otherwise-recoverable run would be worse\n'
+      printf -- '- **Reversible:** yes — the run worktree was clean, so HEAD is only restored and nothing is lost\n'
+    } >>"$questions" \
+      || die "assert-run-head: restored HEAD to '$expected' but could not write the QUESTIONS.md entry (fail-closed): $questions"
   fi
   echo "spawn-orchestrator: HEAD DEVIATION restored (was $actual, now $expected)"
 }
