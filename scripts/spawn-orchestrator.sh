@@ -701,7 +701,7 @@ _write_verify_result() {
   local tmp; tmp="$(mktemp "$d/.res.XXXXXX")" || return 1
   { printf 'code: %s\n' "$code"; printf -- '--- output ---\n'; printf '%s\n' "$out"; } >"$tmp" \
     || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$f"
+  mv "$tmp" "$f" || { rm -f "$tmp"; return 1; }
 }
 
 # (jailed side) Drop a verify request the un-jailed broker will pick up. The
@@ -806,6 +806,7 @@ verify_await() {
   done
   [ -n "$dir" ] && [ -n "$id" ] || die "verify-await requires --sentinel-dir and --id"
   case "$timeout$interval" in *[!0-9]*) die "--timeout/--interval must be integers" ;; esac
+  [ "$interval" -gt 0 ] || die "--interval must be > 0 (else the wait loop never advances)"
   local d; d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
   local resultf="$d/$id.result" waited=0
   while [ ! -e "$resultf" ]; do
@@ -829,19 +830,19 @@ write_verify_broker() {
         out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --sentinel-dir) sentinel="$2"; shift 2 ;;
-      --verify-cmd) verify_cmd="$2"; shift 2 ;;
-      --confine-under) root="$2"; shift 2 ;;
-      --label) label="$2"; shift 2 ;;
-      --workdir) workdir="$2"; shift 2 ;;
-      --log) log="$2"; shift 2 ;;
-      --path) path="$2"; shift 2 ;;
-      --self) self="$2"; shift 2 ;;
-      --interval) interval="$2"; shift 2 ;;
-      --throttle) throttle="$2"; shift 2 ;;
-      --out-script) out_script="$2"; shift 2 ;;
-      --out-plist) out_plist="$2"; shift 2 ;;
-      --plist-template) plist_template="$2"; shift 2 ;;
+      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; sentinel="$2"; shift 2 ;;
+      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; verify_cmd="$2"; shift 2 ;;
+      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; root="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --workdir) [ $# -ge 2 ] || die "missing value for --workdir"; workdir="$2"; shift 2 ;;
+      --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
+      --path) [ $# -ge 2 ] || die "missing value for --path"; path="$2"; shift 2 ;;
+      --self) [ $# -ge 2 ] || die "missing value for --self"; self="$2"; shift 2 ;;
+      --interval) [ $# -ge 2 ] || die "missing value for --interval"; interval="$2"; shift 2 ;;
+      --throttle) [ $# -ge 2 ] || die "missing value for --throttle"; throttle="$2"; shift 2 ;;
+      --out-script) [ $# -ge 2 ] || die "missing value for --out-script"; out_script="$2"; shift 2 ;;
+      --out-plist) [ $# -ge 2 ] || die "missing value for --out-plist"; out_plist="$2"; shift 2 ;;
+      --plist-template) [ $# -ge 2 ] || die "missing value for --plist-template"; plist_template="$2"; shift 2 ;;
       *) die "unknown write-verify-broker argument: $1" ;;
     esac
   done
