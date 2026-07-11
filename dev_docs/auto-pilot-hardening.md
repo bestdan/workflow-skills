@@ -97,18 +97,25 @@ write. A jailed agent that edits `check.sh` therefore gets its code run by the
 **un-jailed** broker, outside both walls. Command hashing and path confinement do
 not close this; nothing in the current design does.
 
-That is an **accepted** trust boundary, not an eliminated one — the same posture
-as the credential hard-link gap above, and it is recorded here rather than
-papered over. It is accepted because the jail's threat model is bounding
-_accidents and prompt injection_ in an agent running the repo's own code, not
-defending against an attacker who already holds repo write access (such an
-attacker can simply commit to `main`). The trust is close to what a human extends
-by re-running `check.sh` before merging — but not identical, and the difference is
-the point: the human runs it on content they chose, at a moment they chose, while
-the broker runs it unattended on content the agent may have just rewritten.
-Narrowing it (hashing the verify _script tree_, or running the check from a
-read-only mirror rather than the live worktree) is a live follow-up on the broker,
-not a solved problem.
+**This is an open gap, not an accepted one.** It is tempting to wave it through
+the way the credential hard-link limitation is waved through above, but the two
+are not alike, and the difference is worth being precise about. The jail's threat
+model explicitly includes **prompt injection** — an agent induced to run code its
+operator never intended. The hard-link alias does not really serve that model (an
+attacker who can hard-link inside the tool-state dir has already lost you the
+machine). The broker gap **does**: a prompt-injected agent needs only to edit
+`check.sh`, a file it is _supposed_ to be able to edit, and its code runs
+un-jailed. So the broker, as designed, **partially defeats the very containment
+it sits inside** — for the one threat the jail most exists to stop.
+
+The honest position is therefore: the broker buys real ergonomics (the project's
+own definition of done becomes runnable at all), and it is **not** a finished
+security design. Closing it means pinning the _content_, not just the invocation
+— hashing the verify script tree at install time, or running the check from a
+read-only checkout of a trusted ref rather than the live, agent-writable worktree,
+and refusing mutable dependencies. Until then, treat a brokered `check.sh` result
+as convenience, not as containment, and keep the human's own out-of-jail re-run as
+the real gate. This is tracked, not settled.
 
 **The degradation protocol (what runs did before the broker existed).** Every
 hardening task in this very plan shipped under it, and it remains the fallback
@@ -123,8 +130,16 @@ whenever the broker is unavailable:
 4. Flag "**re-run `scripts/check.sh` outside the jail before merging**" in the PR
    body, every time.
 
-That protocol is correct but relies on a human remembering step 4 — which is why
-the broker, not the protocol, is the design.
+**The protocol yields provisional evidence, not a green check.** Steps 2 and 3
+establish that a harness failure is _environmental_; they do not establish that
+the change is _good_. A diff can perfectly well alter behavior that a failing
+harness would have caught, and "no failing harness names a changed file" does not
+rule that out — the coupling can be indirect, and the environmental failure masks
+the result either way. So the out-of-jail re-run in step 4 is the **actual gate**,
+not a courtesy reminder: until it runs, the task's own definition of done is
+unproven, and the content gates in step 1 are the only thing genuinely green. That
+the protocol leans on a human remembering step 4 is precisely why the broker, not
+the protocol, is the design.
 
 ## The spawn contract
 
