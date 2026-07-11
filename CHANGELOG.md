@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.49.0] - 2026-07-11
+
+### Features
+
+- automate the post-merge restack of stacked PRs (task 18) (#184) (c0ce0ed)
+
 ## [1.48.0] - 2026-07-11
 
 ### Features
