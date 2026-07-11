@@ -132,11 +132,15 @@ echo "PREFLIGHT CODER devin: installed=${devin_installed:-unknown} logged_in=${d
 # available and would silently fail auth mid-flight. codex has no logged_in
 # field in probe-coders.sh (its config-file check doesn't imply auth), so it's
 # excluded from this check.
-if [ "$agy_installed" = "true" ] && [ "$agy_logged_in" = "false" ]; then
-  blockers+=("coder 'agy' is installed but not logged in — run: agy login (or refresh the SSH file-store token)")
+# Fail closed on anything that isn't an explicit logged_in=true: an installed
+# coder whose logged_in we couldn't parse as true (probe format drift, empty
+# field) is treated as NOT logged in, so a parse-miss can't silently reintroduce
+# the mid-flight auth failure this check exists to catch.
+if [ "$agy_installed" = "true" ] && [ "$agy_logged_in" != "true" ]; then
+  blockers+=("coder 'agy' is installed but not confirmed logged in (logged_in=${agy_logged_in:-unknown}) — run: agy login (or refresh the SSH file-store token)")
 fi
-if [ "$devin_installed" = "true" ] && [ "$devin_logged_in" = "false" ]; then
-  blockers+=("coder 'devin' is installed but not logged in — run: devin auth login")
+if [ "$devin_installed" = "true" ] && [ "$devin_logged_in" != "true" ]; then
+  blockers+=("coder 'devin' is installed but not confirmed logged in (logged_in=${devin_logged_in:-unknown}) — run: devin auth login")
 fi
 
 # --- 2. Base freshness ----------------------------------------------------
@@ -226,8 +230,12 @@ else
     skip_notes+=("confinement smoke skipped: scratch dir creation failed")
   else
     scratch_done=false
-    smoke_cleanup() { $scratch_done || rm -rf "$scratch"; scratch_done=true; }
-    trap smoke_cleanup EXIT INT TERM
+    home_probe=""
+    smoke_cleanup() { $scratch_done || { rm -rf "$scratch"; rm -f "${home_probe:-}"; }; scratch_done=true; }
+    # On a signal, clean up and DIE — don't let bash resume past the trap and run
+    # the rest of the smoke against a just-deleted scratch dir (a spurious blocker).
+    trap smoke_cleanup EXIT
+    trap 'smoke_cleanup; trap - EXIT INT TERM; exit 130' INT TERM
 
     ex_args=()
     for bin in $FINGERPRINT_BINS; do
