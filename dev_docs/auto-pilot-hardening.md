@@ -7,8 +7,9 @@ that mode actually survive a **detached, sandboxed, unattended** run — the
 contract of the spawn helper, the posture on verification, the pre-flight, and
 the handful of invariants the loop must not violate.
 
-It exists because the first fully detached run
-([`autopilot-detached-run-1-findings.md`](./autopilot-detached-run-1-findings.md))
+It exists because the first fully detached run (findings recorded in
+`dev_docs/autopilot-detached-run-1-findings.md` on the run-state branch
+`auto-pilot/2026-07-10-autopilot-hardening`, not on `main` — see "See also")
 succeeded only after three fatal spawn bugs were hand-patched at launch and five
 judgment calls were made live. Everything below is the graduated form of that
 backlog: the design a new dev should be able to follow without reading the run
@@ -43,7 +44,13 @@ under `~/.local/share/claude/versions/…` that breaks on the next update). So
 `/bin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec`, `/opt/homebrew/bin`,
 `~/.local/bin`, `~/.local/share/claude`, `~/.codex`, `~/.nvm`). Broadening exec
 was verified not to widen the two real walls — writes to `$HOME`, `/etc`, and
-sibling repos stay denied, and off-allowlist egress stays denied.
+sibling repos stay denied, and off-allowlist egress stays denied. The one place
+broad exec _could_ have widened a wall — `launchctl`/`open` brokering an
+out-of-jail launch via `launchd`/LaunchServices — is closed at layer 1 by
+targeted `(deny mach-lookup (global-name "com.apple.xpc.launchd") (global-name
+"com.apple.coreservices.launchservicesd"))` plus a `process-exec` deny of those
+submission binaries, so the coarse exec grant never becomes a confused-deputy
+escape.
 
 **Credential stores cannot be read-only (#5).** The design originally mounted
 `~/.claude`, `~/.config/gh`, and `~/.codex` read-only. That breaks a real run:
@@ -97,6 +104,15 @@ write. A jailed agent that edits `check.sh` therefore gets its code run by the
 **un-jailed** broker, outside both walls. Command hashing and path confinement do
 not close this; nothing in the current design does.
 
+There is a second, distinct non-defense: **result authority is not protected.**
+The sentinel dir lives in the run worktree the jailed orchestrator can write, so
+a compromised orchestrator can forge its own `<id>.result` (`code: 0`) and skip
+the broker entirely. This is deliberately out of scope — the broker exists to
+make verify _execute_ and to keep an un-jailed execution pinned + confined, not
+to make the verdict unforgeable by the trusted loop driver (a forged result is
+equivalent to the orchestrator simply skipping its own gate). See
+`skills/auto-pilot/references/launch-runtime.md` §5 for the rationale.
+
 **This is an open gap, not an accepted one.** It is tempting to wave it through
 the way the credential hard-link limitation is waved through above, but the two
 are not alike, and the difference is worth being precise about. The jail's threat
@@ -122,7 +138,7 @@ hardening task in this very plan shipped under it, and it remains the fallback
 whenever the broker is unavailable:
 
 1. Run the content gates that _do_ execute in-jail: `dprint check`,
-   `claude plugin validate --strict`, `uv run validate.py`.
+   `claude plugin validate . --strict`, `uv run scripts/validate.py`.
 2. Confirm each harness failure **reproduces on pristine `main`** — that is what
    classifies it as environmental rather than a defect.
 3. Confirm **no failing harness touches the changed files**; if one does, the
@@ -250,7 +266,7 @@ resolutions outright rather than making each run re-derive them (task_6 / PR
   no race to arbitrate. **The run-state branch is the lock.** Still do the
   pre-claim `gh` PR scan, for `--resume` idempotency.
 - **The code PR carries only code** (a seam the attended dry-run surfaced; see
-  [`autopilot-dry-run.md`](./autopilot-dry-run.md)). Task files live on the
+  `autopilot-dry-run.md` on the run-state branch). Task files live on the
   run-state branch, so the `ready → in_progress → needs_review` status flips are
   committed **on the run-state branch**, never in the code PR's diff. repo-pr's
   "task file on `main`, deleted on merge" model does not apply.
@@ -298,30 +314,32 @@ those.
 
 ## Status of the work
 
-At the time of writing, the hardening is split across merged and open work.
+All of this hardening has **merged into `main`**, across eight code/doc tasks:
 
-Merged into `main`: `write-launch` `--verbose` + PATH propagation and the atomic
-`launch` (task_1 / PR #169); `render-profile` `--exec-dir` / `--toolchain`
-(task_2 / PR #170); `render-profile --cred-ro` write-scopes (task_3 / PR #177).
+- `write-launch` `--verbose` + PATH propagation and the atomic `launch`
+  (task_1 / PR #169)
+- `render-profile` `--exec-dir` / `--toolchain` (task_2 / PR #170)
+- `render-profile --cred-ro` write-scopes (task_3 / PR #177)
+- the verify broker (task_4 / PR #172)
+- `scripts/preflight.sh` (task_5 / PR #173)
+- the adapter and SKILL corrections (task_6 / PR #174)
+- the cross-cutting follow-up routing and `--add-task-host` (task_7 / PR #175)
+- `status --label` plus the done-sentinel (task_8 / PR #176)
 
-Still open as **draft PRs** — the code on `main` will not match these sections
-until they land: the verify broker (task_4 / PR #172), `scripts/preflight.sh`
-(task_5 / PR #173), the adapter and SKILL corrections (task_6 / PR #174), the
-cross-cutting follow-up routing and `--add-task-host` (task_7 / PR #175), and
-`status --label` plus the done-sentinel (task_8 / PR #176).
-
-All five now target `main` and are **independent of each other** — nothing is
-left stacked, so they may merge in any order. (The one chain among them, task_4
-on task_1, dissolved when task_1 merged and GitHub retargeted #172 onto `main`.)
-The bottom-up merge rule above still holds in general; it simply has no live
-chain to constrain here.
+This doc — graduating the design into `dev_docs/` — is task_9. The tasks landed
+**independently**: the one chain among them (task_4 on task_1) dissolved when
+task_1 merged and GitHub retargeted #172 onto `main`, so the bottom-up merge
+rule above had no live chain left to constrain.
 
 ## See also
 
-- [`autopilot-detached-run-1-findings.md`](./autopilot-detached-run-1-findings.md)
-  — the ranked findings this doc graduates. Cited inline as `#N`.
-- [`autopilot-dry-run.md`](./autopilot-dry-run.md) — the earlier attended
-  dry-run, which surfaced the plan-source seams (handler resolution, task files
-  off `main`, `--until` sizing) before the detached run hit the jail.
+- `dev_docs/autopilot-detached-run-1-findings.md` — the ranked findings this doc
+  graduates; the inline `#N` citations resolve to it. It lives on the run-state
+  branch `auto-pilot/2026-07-10-autopilot-hardening`, not on `main` (run
+  scaffolding stays on that branch — see "Scaffolding deletion is run-level
+  teardown" above).
+- `dev_docs/autopilot-dry-run.md` — the earlier attended dry-run, which surfaced
+  the plan-source seams (handler resolution, task files off `main`, `--until`
+  sizing) before the detached run hit the jail. Same run-state branch as above.
 - [`auto-pilot.md`](./auto-pilot.md) — the mode's own design decisions, and the
   map to the authoritative skill references.
