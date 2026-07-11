@@ -10,7 +10,10 @@ related_files:
   - skills/auto-pilot/references/launch-runtime.md
   - skills/auto-pilot/references/run-state.md
   - skills/auto-pilot/references/run-budget.md
+  - skills/auto-pilot/references/resume.md
+  - skills/auto-pilot/references/adapters.md
   - dev_docs/auto-pilot.md
+  - dev_docs/auto-pilot-hardening.md
 is_blocked_by: autopilot_hardening_task_6
 parent: autopilot_hardening
 tags: [auto-pilot, docs, framing, p2]
@@ -92,12 +95,33 @@ nightfall.
 Blocked by task 6 (it owns the reference/SKILL corrections pass) so the two doc edits do
 not collide.
 
+## ALIGNMENT (2026-07-11) — the surface grew; the sweep must cover it
+
+Two files landed **after** this task was written, and a sweep scoped to the original
+list would miss them (and the grep guard would then let the anchor creep straight
+back in through the gap):
+
+- **`skills/auto-pilot/references/resume.md`** — new (PR #180 extracted the Resume
+  phase out of `SKILL.md` for headroom). It is now in `related_files`.
+- **`dev_docs/auto-pilot-hardening.md`** — the graduated design doc (task 9), which
+  currently carries **2** anchors. Also in `related_files` now.
+
+**Where the anchors actually live on `main` today** (measured, so the sweep can be
+checked): `SKILL.md` **8**, `references/launch-runtime.md` **4**,
+`dev_docs/auto-pilot-hardening.md` **2**, `references/run-state.md` **1**,
+`references/run-budget.md` **1**. Two of `SKILL.md`'s are in the **skill
+`description:` front matter and its opening line** — the most load-bearing prose in
+the whole surface, since the description is what the harness matches on.
+
 ## Acceptance Criteria
 
 **Code-enforced:**
 - `rg -i '\bovernight\b|\btonight\b|\b3am\b|goes to bed|user wakes to|whole night'` over
-  `skills/auto-pilot/` and `dev_docs/auto-pilot.md` returns **no hits** (a grep guard in
-  the test suite, so the anchor cannot creep back).
+  `skills/auto-pilot/` (**including `references/resume.md`**), `commands/auto-pilot.md`,
+  `dev_docs/auto-pilot.md`, and `dev_docs/auto-pilot-hardening.md` returns **no hits**
+  (a grep guard in the test suite, so the anchor cannot creep back). Scope the guard to
+  a **directory**, not a file list, so a future reference file is covered the day it is
+  added — a file-list guard is exactly how `resume.md` slipped through this spec.
 - `bash scripts/check.sh` green (outside the jail).
 
 **User-run:**

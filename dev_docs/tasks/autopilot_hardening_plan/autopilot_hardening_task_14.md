@@ -36,6 +36,27 @@ noticing, which is exactly what happened (twice).
 The check is cheap, deterministic, and needs no model reasoning. It should be
 impossible for the loop to advance while an invariant is violated.
 
+## ALIGNMENT (2026-07-11) — two invariants are already implemented; compose, don't reimplement
+
+The substrate batch landed. Before writing anything, read what exists on `main`:
+
+- **Invariant 1 (HEAD on the run-state branch) is already built** — task 13 shipped
+  `spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id <run_id>
+  [--questions <path>]`, which asserts, restores, and records the deviation. The
+  doctor must **call it**, not re-derive it.
+- **Invariant 2's "read from the branch" is already the rule** — `--resume` now reads
+  `RUN.md` via `git show auto-pilot/<run_id>:.auto-pilot/RUN.md`
+  (`references/resume.md`). Reuse that read; a second, working-tree-based reader would
+  reintroduce finding #23.
+- **Invariant 7 (forward progress) already has a supervisor-side implementation** —
+  task 10 shipped a consecutive-no-progress guard in `supervisor-check` (keyed on the
+  run-state HEAD not moving across wakes, skipped during a legitimate pause). This
+  task's agent-side guard must **complement, not duplicate** it: the two must not
+  both halt the same run for the same reason, and the doctor must not fire while the
+  run is legitimately paused. State which one owns the halt.
+
+The remaining invariants (3, 4, 5, 6) are genuinely unbuilt.
+
 ## Task
 
 Add a **run doctor** — an invariant audit run at the **top of every run-loop

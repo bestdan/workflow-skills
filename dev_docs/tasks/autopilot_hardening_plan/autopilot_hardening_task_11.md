@@ -38,6 +38,26 @@ This composes with task 10, which puts exit **classification** in that same
 supervisor wrapper; both are instances of "the supervisor should decide in shell
 what it can decide in shell." Blocked by task 10 because they edit the same wrapper.
 
+## ALIGNMENT (2026-07-11) — task 10 landed; the wrapper and its helpers now exist
+
+Task 10 is **merged** (PR #183), so the seam this task was waiting on is real. On
+`main`:
+
+- The generated launch script no longer `exec`s `claude` — it runs it in the
+  foreground, captures the exit code, and calls `spawn-orchestrator.sh
+  supervisor-check` **after** it exits. This task adds the **pre-invoke** gate: the
+  same shell, before `sandbox-exec` runs at all.
+- Helpers to reuse rather than re-derive: `_front_field` (reads a `RUN.md`
+  front-matter key), `_run_is_paused` (already reads run-level `status: paused`),
+  `_supervisor_halt` (writes `status: systemic` + `pause_reason`, appends to
+  `REPORT.md`, tears the job down via `launchctl bootout`).
+- The **`status: systemic` teardown path already exists** (task 10's fatal bucket).
+  This task's "a `done`/`systemic` run must not relaunch" requirement should route
+  through `_supervisor_halt`'s teardown, not a second implementation.
+- Note the distinction task 10 left open: it gates on run-level **`status`**, while
+  this task gates on the **`paused_until` timestamp**. Both are needed — a run can be
+  `paused` with its reset time already past.
+
 ## Task
 
 - In the supervisor wrapper (emitted by `write_launch`), **before** invoking

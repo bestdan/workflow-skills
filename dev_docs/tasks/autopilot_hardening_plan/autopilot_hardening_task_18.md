@@ -2,7 +2,7 @@
 title: "stacked PRs: automate the post-merge restack — a human must never hand-rebase a stack under squash-merge"
 priority: urgent
 size: 3
-status: new
+status: done # merged as PR #184 (attended substrate batch, 2026-07-11)
 created: 2026-07-11
 source_branch: main
 related_files:

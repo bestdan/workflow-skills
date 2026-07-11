@@ -2,7 +2,7 @@
 title: "run loop: never check out a task branch in the run worktree — isolate task work, keep run state on HEAD"
 priority: high
 size: 3
-status: new
+status: done # merged as PR #181 (attended substrate batch, 2026-07-11)
 created: 2026-07-11
 source_branch: main
 related_files:

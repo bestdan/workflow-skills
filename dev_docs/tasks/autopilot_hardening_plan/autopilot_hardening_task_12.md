@@ -2,7 +2,7 @@
 title: "jail: permit the harness's own $TMPDIR mux socket + cwd files — stop poisoning every Bash exit code"
 priority: urgent
 size: 3
-status: new
+status: done # merged as PR #182 (attended substrate batch, 2026-07-11)
 created: 2026-07-11
 source_branch: main
 related_files:
