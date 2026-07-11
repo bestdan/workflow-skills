@@ -298,17 +298,22 @@ if command -v sandbox-exec >/dev/null 2>&1; then
   BASHBIN="$(command -v bash)"
   crxprof="$BASE/credx.sb"
   "$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BASHBIN" --out "$crxprof" >/dev/null 2>&1
-  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "echo x > $STATE/session" >/dev/null 2>&1; then
+  # Use only bash builtins (echo / redirection / read) inside the jailed shell:
+  # the profile permits exec of bash ONLY, so shelling out to `cat` etc. would be
+  # denied regardless of file permissions and false-fail the assertion. Paths are
+  # passed as quoted positionals so a space/metachar path can't reparse.
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'echo x > "$1/session"' _ "$STATE" >/dev/null 2>&1; then
     ok "cred-ro: write to the state dir is allowed"
   else
     bad "cred-ro: write to the state dir is allowed"
   fi
-  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "echo y > $CREDF" >/dev/null 2>&1; then
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'echo y > "$1"' _ "$CREDF" >/dev/null 2>&1; then
     bad "cred-ro: write to the credential file is denied"
   else
     ok "cred-ro: write to the credential file is denied"
   fi
-  if sandbox-exec -f "$crxprof" "$BASHBIN" -c "cat $CREDF" >/dev/null 2>&1; then
+  # readability via a pure builtin (`read` + input redirection) — no external exec.
+  if sandbox-exec -f "$crxprof" "$BASHBIN" -c 'read -r _ < "$1"' _ "$CREDF" >/dev/null 2>&1; then
     ok "cred-ro: the credential file is still readable"
   else
     bad "cred-ro: the credential file is still readable"
