@@ -112,6 +112,8 @@ checks reads green, and the only thing that actually caught both was a human ask
 
 18. [[autopilot_hardening_task_18]] — **P1**: **automate the post-merge restack** of stacked PRs. Merging a parent under squash-merge orphans its children — loudly (base deleted → PR auto-closed, as happened to the P1 #172) or **quietly** (child still targets the parent's *branch*, so merging it never reaches `main`). Closes run-#1's finding #14. (#25)
 
+19. [[autopilot_hardening_task_19]] — P2: **de-anchor from "overnight."** The load-bearing property is **unattended** (no human *attached*), not nocturnal — and the nocturnal framing directly produced the missing alarm channel (16) and the batch-digest `REPORT.md` (15). Run #2 did 8 of its 9 tasks between 06:00 and 11:35, with the human at their desk. Name the three attendance modes — attended / **partially attended** (the common case) / unattended. (#27)
+
 **A rule with no enforcement is a comment.** Tasks 17 and 18 are the third and fourth instances of one
 structural pattern, and the plan should say it plainly: `launch-runtime.md` §3 already
 declares "a tool that can only authenticate via an interactive Keychain/helper prompt
