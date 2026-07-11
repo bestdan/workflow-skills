@@ -38,6 +38,7 @@ run bash scripts/test-preflight-freshness.sh
 run bash scripts/test-claude-usage.sh
 run bash scripts/test-spawn-orchestrator.sh
 run bash scripts/test-linear-ready-live.sh
+run bash scripts/test-linear-scan-live.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then
