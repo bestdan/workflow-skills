@@ -634,7 +634,11 @@ teardown() {
     case "$done_sentinel" in /*) ;; *) die "--done-sentinel must be absolute (fail-closed): $done_sentinel" ;; esac
     local sdir; sdir="$(dirname "$done_sentinel")"
     mkdir -p "$sdir" || die "failed to create sentinel directory: $sdir"
-    local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-done.XXXXXX")" || die "mktemp failed"
+    # Create the temp file IN the sentinel's own directory so the `mv` below is a
+    # same-filesystem atomic rename — a temp under $TMPDIR could be on another
+    # filesystem, making `mv` a non-atomic copy that can fail with EXDEV or leave
+    # a watcher observing a partial sentinel.
+    local tmp; tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" || die "mktemp failed"
     printf '%s done %s\n' "$label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp" \
       || { rm -f "$tmp"; die "failed to write done sentinel"; }
     mv "$tmp" "$done_sentinel" || { rm -f "$tmp"; die "failed to write done sentinel: $done_sentinel"; }
@@ -937,11 +941,13 @@ _norm_ws() { printf '%s' "$1" | awk '{$1=$1; print}'; }
 # Pull a single top-level "key: value" field out of a captured front-matter
 # block (global $front, set by status() before calling this). Anchors on
 # `^key:` so e.g. "until:" never matches "paused_until:". Strips a trailing
-# ` # comment`, then a wrapping pair of double quotes.
+# ` # comment`, trailing whitespace, then a wrapping pair of single or double
+# quotes.
 _front_field() {
   local key="$1"
   printf '%s\n' "$front" | grep -E "^${key}:" | head -1 \
-    | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/^"\(.*\)"$/\1/'
+    | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
+          -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
 }
 
 # Read-only: report the run's live state in one shot. Never writes anything.

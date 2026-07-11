@@ -544,6 +544,25 @@ sout2="$("$SCRIPT" status --label com.autopilot.test2 --dir "$BASE/run2" 2>&1)"
 lack "status: mismatched start-time never reports live" 'pid=live' "$sout2"
 have "status: mismatched start-time reports mismatch" 'pid=mismatch' "$sout2"
 
+# front-matter parser: a double-quoted `until` with a trailing comment, and a
+# `paused_until` line that precedes `until`, must yield the BARE until value
+# (no quotes, no comment, not the paused_until value — anchored on `^until:`).
+RUNMD3="$BASE/run3/.auto-pilot"; mkdir -p "$RUNMD3"
+{
+  printf -- '---\n'
+  printf 'status: paused\n'
+  printf 'paused_until: 2020-01-01T00:00:00\n'
+  printf 'until: "2026-12-31T00:00:00"   # hard deadline\n'
+  printf -- '---\n'
+  printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+  printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+  printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+} >"$RUNMD3/RUN.md"
+sout4="$("$SCRIPT" status --label com.autopilot.test3 --dir "$BASE/run3" 2>&1)"
+have "status: quoted+commented until parsed bare"  'until=2026-12-31T00:00:00' "$sout4"
+lack "status: until does not match paused_until"   'until=2020-01-01T00:00:00' "$sout4"
+lack "status: until value keeps no quotes"         'until="2026'               "$sout4"
+
 # fail-closed: missing --label / missing RUN.md
 o="$("$SCRIPT" status --dir "$RUNDIR" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --label' \
   && ok "status fail-closed: missing --label" || bad "status fail-closed: missing --label" "$o"
