@@ -35,6 +35,23 @@
 #       [--mcp-host <host> ...] [--npm] \
 #       --out <file>
 #   spawn-orchestrator.sh check-profile <file>
+#   spawn-orchestrator.sh status --label <label> [--dir <run-dir>]
+#   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>]
+#
+#   status  Read-only: report the run's live state in one shot — the RUN.md
+#           run-level `status:`, the per-task phase table, the last
+#           meaningful event from `orchestrator.log`, whether the recorded
+#           orchestrator PID is actually live (guarding against a recycled
+#           PID), the `--until` deadline, and whether the done-sentinel
+#           (written by `teardown --done-sentinel`, see below) is present.
+#           Never mutates anything. `--dir` defaults to $PWD; state is read
+#           from <dir>/.auto-pilot/{RUN.md,orchestrator.log,orchestrator.done}.
+#   teardown  Boot the launchd job out (`launchctl bootout`). With
+#             `--done-sentinel <path>`, first atomically writes that file as
+#             the durable completion marker, THEN boots the job out — so a
+#             watcher polling the sentinel never observes "job gone, no
+#             done-marker yet". This is the ONE completion mechanism `status`
+#             also reads (see launch-runtime.md "Logs / observability").
 #
 #   render-settings  Emit the ephemeral `claude -p --settings` JSON: layer-2
 #                    network egress (sandbox.network.allowedDomains) narrowed to
@@ -69,6 +86,12 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.sb.tmpl"
+# The done-sentinel filename `status` looks for under <dir>/.auto-pilot/. Callers
+# pass the matching absolute path (<dir>/.auto-pilot/orchestrator.done) to
+# `teardown --done-sentinel`; the two agree on this one name so it's a single
+# completion mechanism, never a second independent marker (launch-runtime.md
+# "Logs / observability").
+DONE_SENTINEL_NAME="orchestrator.done"
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
 
@@ -594,13 +617,40 @@ detach() {
 }
 
 teardown() {
-  local label=""
+  local label="" done_sentinel=""
   while [ $# -gt 0 ]; do
-    case "$1" in --label) label="$2"; shift 2 ;; *) die "unknown teardown argument: $1" ;; esac
+    case "$1" in
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --done-sentinel) [ $# -ge 2 ] || die "missing value for --done-sentinel"; done_sentinel="$2"; shift 2 ;;
+      *) die "unknown teardown argument: $1" ;;
+    esac
   done
   [ -n "$label" ] || die "teardown requires --label"
-  command -v launchctl >/dev/null 2>&1 || die "launchctl not available (macOS only)"
-  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+
+  # Write the done-sentinel FIRST (atomically: tmp + mv), THEN boot the job
+  # out — so a watcher polling the sentinel never sees "gone but no
+  # done-marker" (the ordering is load-bearing, same reasoning as launch()'s
+  # smoke-test-before-detach). This is the single completion mechanism;
+  # `status` reads the same file.
+  if [ -n "$done_sentinel" ]; then
+    case "$done_sentinel" in /*) ;; *) die "--done-sentinel must be absolute (fail-closed): $done_sentinel" ;; esac
+    local sdir; sdir="$(dirname "$done_sentinel")"
+    mkdir -p "$sdir" || die "failed to create sentinel directory: $sdir"
+    # Create the temp file IN the sentinel's own directory so the `mv` below is a
+    # same-filesystem atomic rename — a temp under $TMPDIR could be on another
+    # filesystem, making `mv` a non-atomic copy that can fail with EXDEV or leave
+    # a watcher observing a partial sentinel.
+    local tmp; tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" || die "mktemp failed"
+    printf '%s done %s\n' "$label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp" \
+      || { rm -f "$tmp"; die "failed to write done sentinel"; }
+    mv "$tmp" "$done_sentinel" || { rm -f "$tmp"; die "failed to write done sentinel: $done_sentinel"; }
+  fi
+
+  # launchctl may genuinely be absent (non-macOS, or the in-jail test harness) —
+  # that must not skip the sentinel write above; the sentinel is authoritative.
+  if command -v launchctl >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  fi
   echo "spawn-orchestrator: torn down $label"
 }
 
@@ -886,6 +936,110 @@ write_verify_broker() {
   echo "spawn-orchestrator: verify-broker written $out_script $out_plist (pin $pin)"
 }
 
+# Normalize whitespace (collapse runs, trim ends) so a recorded lstart string
+# and a freshly-read one compare equal regardless of incidental spacing.
+_norm_ws() { printf '%s' "$1" | awk '{$1=$1; print}'; }
+
+# Pull a single top-level "key: value" field out of a captured front-matter
+# block (global $front, set by status() before calling this). Anchors on
+# `^key:` so e.g. "until:" never matches "paused_until:". Strips a trailing
+# ` # comment`, trailing whitespace, then a wrapping pair of single or double
+# quotes.
+_front_field() {
+  local key="$1"
+  printf '%s\n' "$front" | grep -E "^${key}:" | head -1 \
+    | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
+          -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
+}
+
+# Read-only: report the run's live state in one shot. Never writes anything.
+status() {
+  local label="" dir="$PWD"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      *) die "unknown status argument: $1" ;;
+    esac
+  done
+  [ -n "$label" ] || die "status requires --label"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+
+  local run_md="$dir/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+  local log="$dir/.auto-pilot/orchestrator.log"
+  local sentinel="$dir/.auto-pilot/$DONE_SENTINEL_NAME"
+
+  # Front matter is the block between the first two `---` lines. No YAML tool
+  # required — plain awk/sed line matching.
+  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+
+  local run_status until_val orch_pid orch_started
+  run_status="$(_front_field status)"; [ -n "$run_status" ] || run_status="unknown"
+  until_val="$(_front_field until)"
+  orch_pid="$(_front_field orchestrator_pid)"
+  orch_started="$(_front_field orchestrator_started_at)"
+
+  # Per-task phase table: every `| ... |` line after the front matter.
+  local table; table="$(awk '/^\|/{print}' "$run_md")"
+  local task_rows task_count
+  task_rows="$(printf '%s\n' "$table" | grep -Ev '^\| *:?-+:? *(\| *:?-+:? *)*\|?$' || true)"
+  if [ -n "$task_rows" ]; then
+    task_count=$(( $(printf '%s\n' "$task_rows" | wc -l | tr -d ' ') - 1 )) # minus header row
+    [ "$task_count" -ge 0 ] || task_count=0
+  else
+    task_count=0
+  fi
+
+  # Last meaningful event from the stream-json orchestrator.log: the last line
+  # that looks like an assistant or tool event, else just the last line.
+  # Degrades gracefully if the log is absent/empty.
+  local last_event=""
+  if [ -s "$log" ]; then
+    last_event="$(grep -E '"type":"(assistant|tool_use|tool_result)"' "$log" 2>/dev/null | tail -1)"
+    [ -n "$last_event" ] || last_event="$(tail -1 "$log")"
+    last_event="$(printf '%s' "$last_event" | cut -c1-240)"
+  fi
+
+  # PID liveness: live only if the PID is alive AND its process start-time
+  # matches the recorded one (guards a recycled PID) — dead / mismatch / none.
+  local pid_state="none"
+  if [ -n "$orch_pid" ]; then
+    if kill -0 "$orch_pid" 2>/dev/null; then
+      local actual_started; actual_started="$(ps -o lstart= -p "$orch_pid" 2>/dev/null)"
+      if [ -n "$actual_started" ] && [ "$(_norm_ws "$actual_started")" = "$(_norm_ws "$orch_started")" ]; then
+        pid_state="live"
+      else
+        pid_state="mismatch"
+      fi
+    else
+      pid_state="dead"
+    fi
+  fi
+
+  # Done-sentinel (written by `teardown --done-sentinel`) is the single source
+  # of "run is done" — it can mark the run done even before RUN.md's own
+  # `status:` field is committed as `done`.
+  local sentinel_done="no" run_status_display="$run_status"
+  [ -f "$sentinel" ] && { sentinel_done="yes"; run_status_display="done"; }
+
+  echo "run: $label"
+  echo "dir: $dir"
+  echo "status: $run_status_display (front-matter: $run_status; done-sentinel: $sentinel_done)"
+  echo
+  echo "tasks:"
+  if [ -n "$table" ]; then
+    printf '%s\n' "$table"
+  else
+    echo "  (no task table found in RUN.md)"
+  fi
+  echo
+  echo "log: ${last_event:-(orchestrator.log absent, empty, or no assistant/tool events found)}"
+  echo "pid: $pid_state (pid=${orch_pid:-none} started=\"${orch_started:-none}\")"
+  echo "until: ${until_val:-(none)}"
+  echo "STATUS: $run_status_display pid=$pid_state tasks=$task_count until=${until_val:-none}"
+}
+
 check_profile() {
   [ $# -eq 1 ] || die "check-profile takes exactly one <file>"
   local f="$1"
@@ -921,6 +1075,7 @@ case "$sub" in
   verify-broker) verify_broker "$@" ;;
   verify-await) verify_await "$@" ;;
   check-profile) check_profile "$@" ;;
+  status) status "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac
