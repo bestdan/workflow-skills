@@ -495,5 +495,71 @@ else
   echo "skip - verify broker: shasum not available (needed for the command pin)"
 fi
 
+# --- status: read-only run inspection (task 8) ---------------------------------
+RUNDIR="$BASE/run"; mkdir -p "$RUNDIR/.auto-pilot"
+RUNMD="$RUNDIR/.auto-pilot/RUN.md"
+{
+  printf -- '---\n'
+  printf 'run_id: test-run\n'
+  printf 'status: active\n'
+  printf 'orchestrator_pid: 999999\n'
+  printf 'orchestrator_started_at: "Wed Jul  9 20:00:00 2026"\n'
+  printf 'until: 2026-07-10T06:00:00\n'
+  printf -- '---\n'
+  printf '\n'
+  printf '| task | phase        | branch | base | base_sha | pr  | notes |\n'
+  printf '| ---- | ------------ | ------ | ---- | -------- | --- | ----- |\n'
+  printf '| T-1  | handed-off   | b1     | main | -        | #1  | ok    |\n'
+  printf '| T-2  | implementing | b2     | main | -        | -   | wip   |\n'
+} >"$RUNMD"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working on T-2"}]}}\n' >"$RUNDIR/.auto-pilot/orchestrator.log"
+
+sout="$("$SCRIPT" status --label com.autopilot.test --dir "$RUNDIR" 2>&1)"; sc=$?
+[ "$sc" = 0 ] && ok "status: exits 0 on a well-formed run dir" || bad "status: exits 0 on a well-formed run dir" "$sout"
+have "status: prints the phase table"   'implementing'          "$sout"
+have "status: prints a STATUS: line"    'STATUS: active'        "$sout"
+have "status: STATUS line has tasks=2"  'tasks=2'               "$sout"
+have "status: STATUS line has until"    'until=2026-07-10T06:00:00' "$sout"
+
+# a bogus/dead recorded PID (999999 — never a real live process) reports not-live
+have "status: dead pid reports pid=dead" 'pid=dead' "$sout"
+
+# a live pid (this test process's own $$) with a WRONG recorded start-time must
+# still report not-live: kill -0 succeeds, but the start-time can't match a
+# fabricated value (and ps is unavailable in some jails, which also falls to
+# the not-live branch) — either way this must never read "pid=live".
+RUNMD2="$BASE/run2/.auto-pilot"; mkdir -p "$RUNMD2"
+{
+  printf -- '---\n'
+  printf 'status: active\n'
+  printf 'orchestrator_pid: %s\n' "$$"
+  printf 'orchestrator_started_at: "not-a-real-timestamp"\n'
+  printf 'until: 2026-07-10T06:00:00\n'
+  printf -- '---\n'
+  printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+  printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+  printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+} >"$RUNMD2/RUN.md"
+sout2="$("$SCRIPT" status --label com.autopilot.test2 --dir "$BASE/run2" 2>&1)"
+lack "status: mismatched start-time never reports live" 'pid=live' "$sout2"
+have "status: mismatched start-time reports mismatch" 'pid=mismatch' "$sout2"
+
+# fail-closed: missing --label / missing RUN.md
+o="$("$SCRIPT" status --dir "$RUNDIR" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --label' \
+  && ok "status fail-closed: missing --label" || bad "status fail-closed: missing --label" "$o"
+o="$("$SCRIPT" status --label x --dir "$BASE/no-such-dir" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'no run state found' \
+  && ok "status fail-closed: missing RUN.md" || bad "status fail-closed: missing RUN.md" "$o"
+
+# --- teardown --done-sentinel: the single completion mechanism (task 8) --------
+sentinel="$RUNDIR/.auto-pilot/orchestrator.done"
+rm -f "$sentinel"
+# launchctl bootout will fail/no-op off-macOS or in-jail — that must not stop the
+# sentinel write, so don't assert on teardown's own exit code here.
+"$SCRIPT" teardown --label com.autopilot.test --done-sentinel "$sentinel" >/dev/null 2>&1
+[ -f "$sentinel" ] && ok "teardown: writes the done-sentinel file" || bad "teardown: writes the done-sentinel file"
+
+sout3="$("$SCRIPT" status --label com.autopilot.test --dir "$RUNDIR" 2>&1)"
+have "status: reports done once the sentinel exists" 'STATUS: done' "$sout3"
+
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
 [ "$fail" = 0 ]
