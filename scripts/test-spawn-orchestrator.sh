@@ -110,6 +110,61 @@ else
   echo "skip - check-profile: sandbox-exec not available on this host (non-macOS)"
 fi
 
+# --- exec-dir: toolchain-exec mode (subpath, coarser than --exec) -------------
+edprof="$BASE/execdir.sb"
+"$SCRIPT" render-profile --rw "$RUN_WT" --exec-dir /usr/bin --out "$edprof" >/dev/null 2>&1
+edbody="$(cat "$edprof" 2>/dev/null)"
+have "exec-dir: emits subpath for /usr/bin" '(subpath "/usr/bin")' "$edbody"
+
+if command -v sandbox-exec >/dev/null 2>&1; then
+  if o="$("$SCRIPT" check-profile "$edprof" 2>&1)"; then
+    ok "check-profile: --exec-dir profile compiles"
+  else
+    bad "check-profile: --exec-dir profile compiles" "$o"
+  fi
+else
+  echo "skip - check-profile: --exec-dir profile compiles (sandbox-exec not available)"
+fi
+
+fc "exec-dir /"           "refusing --exec-dir /"     --exec-dir /
+fc "exec-dir plain file"  "not a directory"           --exec-dir "$PLAIN"
+
+if command -v sandbox-exec >/dev/null 2>&1; then
+  EDBIN=""
+  for cand in /usr/bin/sed /bin/sed /usr/bin/env; do
+    if command -v "$cand" >/dev/null 2>&1; then EDBIN="$cand"; break; fi
+  done
+  if [ -n "$EDBIN" ]; then
+    EDDIR="$(dirname "$EDBIN")"
+    edcprof="$BASE/execdir-confine.sb"
+    "$SCRIPT" render-profile --exec-dir "$EDDIR" --rw "$RUN_WT" --out "$edcprof" >/dev/null 2>&1
+    if sandbox-exec -f "$edcprof" "$EDBIN" --version >/dev/null 2>&1; then
+      ok "exec-dir: exec inside allowed dir succeeds"
+    else
+      bad "exec-dir: exec inside allowed dir succeeds"
+    fi
+    if sandbox-exec -f "$edcprof" bash -c "echo x > $HOME/outside" >/dev/null 2>&1; then
+      bad "exec-dir: write outside rw scope still denied"
+    else
+      ok "exec-dir: write outside rw scope still denied"
+    fi
+    rm -f "$HOME/outside" 2>/dev/null
+    if [ -x "$BIN" ] && [ "$(dirname "$BIN")" != "$EDDIR" ]; then
+      if sandbox-exec -f "$edcprof" "$BIN" >/dev/null 2>&1; then
+        bad "exec-dir: exec outside allowed dirs still denied"
+      else
+        ok "exec-dir: exec outside allowed dirs still denied"
+      fi
+    else
+      echo "skip - exec-dir: exec outside allowed dirs still denied (no distinct fixture binary)"
+    fi
+  else
+    echo "skip - exec-dir: confinement checks (no sed/env fixture found)"
+  fi
+else
+  echo "skip - exec-dir: confinement checks (sandbox-exec not available)"
+fi
+
 # --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
 sj="$BASE/settings.json"
 "$SCRIPT" render-settings --source linear --coder codex --out "$sj" >/dev/null 2>&1

@@ -18,6 +18,7 @@
 #       --rw <path> [--rw <path> ...] \
 #       --ro <path> [--ro <path> ...] \
 #       --exec <path> [--exec <path> ...] \
+#       --exec-dir <dir> [--exec-dir <dir> ...] [--toolchain] \
 #       --out <file> [--template <file>]
 #   spawn-orchestrator.sh render-settings \
 #       --source <linear|plan> \
@@ -38,6 +39,10 @@
 #     --ro    A read-only scope (rest of repo, credential stores). Repeatable.
 #     --exec  A binary permitted to exec (resolved coder + base toolchain).
 #             Repeatable.
+#     --exec-dir  A directory permitted to exec (subpath, coarser than --exec).
+#                 Must exist and must not be "/". Repeatable.
+#     --toolchain  Convenience: add each of a standard set of bin dirs (that
+#                  exist on this host) to the exec-dir set.
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
 #   check-profile  Confirm a rendered profile COMPILES via `sandbox-exec -f`,
@@ -114,27 +119,37 @@ emit_allow() {
   printf ')\n'
 }
 
+# Emit the process-exec allow form: literal binaries (--exec) and subpath bin
+# dirs (--exec-dir/--toolchain). Args: <literal>... -- <subpath>...
 emit_exec() {
-  if [ "$#" -eq 0 ]; then
+  local -a lits=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do lits+=("$1"); shift; done
+  shift || true   # drop the -- separator
+  if [ "${#lits[@]}" -eq 0 ] && [ "$#" -eq 0 ]; then
     printf ';; (no coder/toolchain binaries resolved)\n'
     return
   fi
   printf '(allow process-exec\n'
   local p
-  for p in "$@"; do
+  for p in ${lits[@]+"${lits[@]}"}; do
     printf '  (literal "%s")\n' "$(sbpl_escape "$p")"
+  done
+  for p in "$@"; do
+    printf '  (subpath "%s")\n' "$(sbpl_escape "$p")"
   done
   printf ')\n'
 }
 
 render_profile() {
-  local out="" template="$TEMPLATE_DEFAULT"
-  local -a rw=() ro=() ex=() confine=()
+  local out="" template="$TEMPLATE_DEFAULT" toolchain=0
+  local -a rw=() ro=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
+      --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
+      --toolchain) toolchain=1; shift ;;
       --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; confine+=("$2"); shift 2 ;;
       --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
       --template) [ $# -ge 2 ] || die "missing value for --template"; template="$2"; shift 2 ;;
@@ -146,9 +161,19 @@ render_profile() {
   [ -f "$template" ] || die "profile template not found: $template"
   case "$out" in /*) ;; *) die "--out must be absolute (fail-closed): $out" ;; esac
 
+  # --toolchain: expand to the standard bin dirs, skipping any that don't exist
+  # on this host (a missing standard dir is not fail-closed — it's just omitted).
+  if [ "$toolchain" = 1 ]; then
+    local d
+    for d in /bin /usr/bin /usr/sbin /usr/libexec /opt/homebrew/bin \
+      "$HOME/.local/bin" "$HOME/.local/share/claude" "$HOME/.codex" "$HOME/.nvm"; do
+      [ -d "$d" ] && exd+=("$d")
+    done
+  fi
+
   # Canonicalize ALL inputs first — any bad path aborts before we write, so a
   # partial profile is never emitted.
-  local -a rw_c=() ro_c=() ex_c=() confine_c=()
+  local -a rw_c=() ro_c=() ex_c=() exd_c=() confine_c=()
   local p c
   for p in ${confine[@]+"${confine[@]}"}; do c="$(canonicalize "$p")" || exit 2; confine_c+=("$c"); done
   for p in ${rw[@]+"${rw[@]}"}; do c="$(canonicalize "$p")" || exit 2; rw_c+=("$c"); done
@@ -158,6 +183,14 @@ render_profile() {
     { [ -f "$c" ] && [ -x "$c" ]; } || die "exec path is not an executable file (fail-closed): $c"
     ex_c+=("$c")
   done
+  for p in ${exd[@]+"${exd[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    [ -d "$c" ] || die "exec-dir is not a directory (fail-closed): $c"
+    # Dedupe against what's already resolved (explicit --exec-dir + --toolchain
+    # can overlap, e.g. /opt/homebrew/bin listed twice).
+    case " ${exd_c[@]+"${exd_c[@]}"} " in *" $c "*) continue ;; esac
+    exd_c+=("$c")
+  done
 
   # Floor (ALWAYS, even without --confine-under): a write scope of "/" emits a
   # whole-filesystem write rule that defeats the jail. Refuse it unconditionally —
@@ -166,6 +199,11 @@ render_profile() {
   local w r under
   for w in ${rw_c[@]+"${rw_c[@]}"}; do
     [ "$w" = "/" ] && die "refusing --rw / (whole-filesystem write, fail-closed)"
+  done
+  # Same floor for exec breadth: an exec-dir of "/" would allow-list exec of
+  # every binary on the filesystem, defeating the exec wall entirely.
+  for w in ${exd_c[@]+"${exd_c[@]}"}; do
+    [ "$w" = "/" ] && die "refusing --exec-dir / (whole-filesystem exec, fail-closed)"
   done
   # Containment: when --confine-under roots are given, every WRITE scope must
   # canonicalize inside one of them (so a worktree symlinked to /$HOME can't slip
@@ -189,7 +227,7 @@ render_profile() {
   # RW scopes need both read and write.
   rw_block="$(emit_allow "file-read*" ${rw_c[@]+"${rw_c[@]}"})
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
-  ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"})"
+  ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.

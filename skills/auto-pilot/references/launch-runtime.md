@@ -118,6 +118,17 @@ Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
 
+**Residual confidentiality cost.** Reads are broad (§ above) and exec is now
+allowed over whole toolchain bin dirs, not just a literal per-binary list — so
+neither reads nor exec meaningfully bound what a running process can _see_.
+Confidentiality therefore rests entirely on §2's egress allowlist, and that
+allowlist includes `github.com`, which is an effectively unbounded
+exfiltration channel (a push to any repo the launching user's token can reach).
+This isn't new with toolchain exec — a literal `--exec` list has the identical
+exposure once any allowed binary can read broadly and reach `github.com` —
+toolchain mode just makes the coarseness of the exec wall explicit rather than
+incidental.
+
 ### 2. Network egress allowlist
 
 Default-deny; the launch pre-flight **narrows the allowlist to the tools this
