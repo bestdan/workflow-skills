@@ -108,10 +108,22 @@ fi
 
 HAPPY_OUT="$(mktemp)"; HAPPY_ERR="$(mktemp)"
 BAD_OUT="$(mktemp)"; BAD_ERR="$(mktemp)"
-trap 'rm -f "$HAPPY_OUT" "$HAPPY_ERR" "$BAD_OUT" "$BAD_ERR"' EXIT
+ENUM_OUT="$(mktemp)"
+trap 'rm -f "$HAPPY_OUT" "$HAPPY_ERR" "$BAD_OUT" "$BAD_ERR" "$ENUM_OUT"' EXIT
 
 # Happy path: the real inherited key.
 python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$HAPPY_OUT" 2>"$HAPPY_ERR"; HAPPY_RC=$?
+
+# Enum-drift guard: introspect the IssueRelationType enum and confirm every value
+# is one derive_edges() actually handles ({blocks, related, duplicate}). Without
+# this, a renamed/added enum value is silently dropped to empty edge lists and
+# slips past the list-shape checks below — the exact drift the header claims to
+# surface. Field-NAME drift already fails via the happy-path rc!=0 (GraphQL 400);
+# this closes the enum-VALUE gap.
+curl -s -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" -H 'Content-Type: application/json' \
+  --data '{"query":"query{__type(name:\"IssueRelationType\"){enumValues{name}}}"}' \
+  >"$ENUM_OUT" 2>/dev/null || true
 
 # Bad-key path: a bogus key with the op:// ref unset so it can't fall back and
 # accidentally succeed. Exercises the fail-closed exit `linear-reoptimize.md`
@@ -119,9 +131,9 @@ python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$HAPPY_OUT" 2>"$HAPPY_ERR"; HAPPY_
 env -u LINEAR_API_KEY_REF LINEAR_API_KEY="lin_api_BOGUS_000000000000000000000000" \
   python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$BAD_OUT" 2>"$BAD_ERR"; BAD_RC=$?
 
-python3 - "$HAPPY_OUT" "$HAPPY_ERR" "$HAPPY_RC" "$BAD_OUT" "$BAD_ERR" "$BAD_RC" <<'PY'
+python3 - "$HAPPY_OUT" "$HAPPY_ERR" "$HAPPY_RC" "$BAD_OUT" "$BAD_ERR" "$BAD_RC" "$ENUM_OUT" <<'PY'
 import json, sys
-happy_out, happy_err, happy_rc, bad_out, bad_err, bad_rc = sys.argv[1:7]
+happy_out, happy_err, happy_rc, bad_out, bad_err, bad_rc, enum_out = sys.argv[1:8]
 happy_rc, bad_rc = int(happy_rc), int(bad_rc)
 fails = 0
 def ok(m):  print("ok   - " + m)
@@ -177,6 +189,24 @@ else:
 
 if not issues and d is not None:
     print("note - happy-path scope returned 0 issues; edge-shape assertions above still ran on an empty set")
+
+# --- enum-drift guard ---------------------------------------------------------
+# derive_edges() in linear-relations.py only recognizes these IssueRelationType
+# values; anything else it silently drops. Fail loud if the live schema carries a
+# value we don't handle (renamed/added enum), which is exactly the drift the
+# script header claims this test surfaces.
+KNOWN_TYPES = {"blocks", "related", "duplicate"}
+try:
+    enum_vals = {e["name"] for e in json.load(open(enum_out))["data"]["__type"]["enumValues"]}
+except Exception as e:
+    bad("IssueRelationType enum introspected", str(e))
+else:
+    unknown = enum_vals - KNOWN_TYPES
+    if unknown:
+        bad("IssueRelationType enum fully handled by derive_edges",
+            "unrecognized value(s) silently dropped: %s" % sorted(unknown))
+    else:
+        ok("IssueRelationType enum fully handled by derive_edges (%s)" % sorted(enum_vals))
 
 # --- bad-key fallback contract ------------------------------------------------
 ok("bad key: exits non-zero") if bad_rc != 0 else bad("bad key: exits non-zero", "rc=0")
