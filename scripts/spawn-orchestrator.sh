@@ -82,6 +82,27 @@
 #                  down (`launchctl bootout`) so it never relaunches into the
 #                  same condition. Exits with the classified exit code (0 for
 #                  `done`) so the launch script's own exit is meaningful.
+#   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
+#       [--gh <path>] [--dry-run]
+#
+#   restack  Post-merge restack of stacked PRs (finding #25): reads RUN.md's
+#            task table (base/base_sha/pr per task), and for every chained task
+#            whose parent PR has merged, does the four-command incantation a
+#            human must otherwise remember at the right moment — fetch,
+#            `rebase --onto <remote>/<base_branch> <base_sha> <branch>`,
+#            `push --force-with-lease`, `gh pr edit --base <base_branch>` —
+#            in dependency order, idempotent (a PR already based on
+#            base_branch is a no-op), fail-closed on a rebase conflict (aborts,
+#            reports, never force-pushes). Also flags orphaned children (a PR
+#            whose live base is a deleted or already-merged branch) as a
+#            defect, whether or not this pass could fix them, and appends every
+#            outcome — including the mandatory re-verify / stale-co-review
+#            warning per restacked child — to the run's REPORT.md.
+#            Every rebase runs in a THROWAWAY worktree: restack never moves the
+#            caller's HEAD (finding #23 / task 13's run-HEAD invariant), and
+#            asserts that on exit. `--gh` is mockable — pass a local stub so
+#            the offline test suite never calls GitHub while the git mechanics
+#            run against a real repo.
 #
 #   status  Read-only: report the run's live state in one shot — the RUN.md
 #           run-level `status:`, the per-task phase table, the last
@@ -1120,6 +1141,390 @@ supervisor_check() {
   return "$code"
 }
 
+# ---------------------------------------------------------------------------
+# Task 18 — post-merge restack of stacked PRs (finding #25). Squash-merging a
+# parent orphans a child two ways: LOUD (GitHub deletes the parent's branch,
+# closing a child still based on it) and QUIET (the child still targets the
+# parent's *branch*, so merging it lands on that branch, never on
+# base_branch, and the PR looks perfectly healthy while doing nothing — worse
+# than the loud failure because nothing alarms). `restack` mechanizes the
+# four-command incantation a human would otherwise have to remember at the
+# right moment, per child, in dependency order.
+#
+# IMPORTANT actor distinction (skills/auto-pilot/references/run-state.md
+# "base_sha"): a HUMAN merging/reviewing a parent is the EXPECTED trigger for
+# restack, never an error — the frozen `base_sha` diverging from the parent's
+# post-review tip is exactly what review is supposed to do. The existing
+# base_sha freeze/park guard exists to catch the ORCHESTRATOR moving a base
+# mid-run; it does not apply here.
+#
+# `gh` is mockable: --gh <path> (default: resolved `gh` on PATH) lets the test
+# suite point at a local stub script, so the git mechanics (rebase/push)
+# exercise a real temp repo while every GitHub call is fully offline.
+# ---------------------------------------------------------------------------
+
+# Parse RUN.md's front matter + task table into the globals _RS_BASE_BRANCH and
+# the index-aligned arrays _RS_TASK/_RS_BRANCH/_RS_BASE/_RS_BASE_SHA/_RS_PR.
+# Reuses status()'s front-matter/table extraction (RUN.md's format is defined
+# once in run-state.md; both readers walk the same `| ... |` rows).
+_restack_read_run_md() {
+  local run_md="$1"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  _RS_BASE_BRANCH="$(printf '%s\n' "$front" | grep -E '^base_branch:' | head -1 \
+    | sed -e 's/^base_branch: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+  [ -n "$_RS_BASE_BRANCH" ] || _RS_BASE_BRANCH="main"
+
+  # _RS_NEWTIP[i] is filled in only by restack(): the rewritten tip a branch got
+  # when THIS pass force-pushed it. A child of a branch we just rewrote must be
+  # cascaded onto that new tip (see restack's "cascade" mode), or force-pushing
+  # a parent silently orphans its own child inside the same run.
+  _RS_TASK=(); _RS_BRANCH=(); _RS_BASE=(); _RS_BASE_SHA=(); _RS_PR=(); _RS_NEWTIP=()
+  local line
+  while IFS= read -r line; do
+    # skip the header separator row (only pipes/colons/dashes/spaces)
+    case "$line" in *[!'|'' ':-]*) ;; *) continue ;; esac
+    local cols t b base bsha pr
+    IFS='|' read -ra cols <<<"$line"
+    [ "${#cols[@]}" -ge 7 ] || continue
+    t="$(printf '%s' "${cols[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [ "$t" != "task" ] || continue   # header row
+    b="$(printf '%s' "${cols[3]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    base="$(printf '%s' "${cols[4]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    bsha="$(printf '%s' "${cols[5]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    pr="$(printf '%s' "${cols[6]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    _RS_TASK+=("$t"); _RS_BRANCH+=("$b"); _RS_BASE+=("$base"); _RS_BASE_SHA+=("$bsha"); _RS_PR+=("$pr")
+    _RS_NEWTIP+=("")
+  done < <(awk '/^\|/{print}' "$run_md")
+}
+
+# True (0) when a RUN.md cell is one of its "empty" spellings (the table uses
+# both a bare hyphen and an em-dash depending on which doc wrote it).
+_restack_empty() { case "$1" in ''|-|'—') return 0 ;; *) return 1 ;; esac; }
+
+# Rebase <branch>'s commits (those after <base_sha>) onto <onto_ref> in a
+# DEDICATED SCRATCH WORKTREE, never in the caller's tree, and print the
+# resulting tip SHA on success.
+#
+# Why a scratch worktree is load-bearing (not just tidy): `git rebase --onto X
+# Y <branch>` CHECKS OUT <branch> and leaves HEAD there. Run against the run
+# worktree, restack would park the orchestrator's HEAD on a task branch — which
+# is finding #23 exactly, the invariant task 13's `assert-run-head` guard
+# exists to enforce — and a mid-rebase crash would strand the run worktree on a
+# task branch, so `--resume` would read RUN.md from the wrong tree. The scratch
+# worktree is created DETACHED at the branch's REMOTE tip (authoritative, and a
+# detached checkout can't collide with the branch being checked out elsewhere),
+# and is removed on every exit path: success, conflict, and push rejection.
+#
+# Args: <repo> <remote> <branch> <base_sha> <onto_ref> <lease_sha>
+# Exit: 0 rebased+pushed (tip on stdout) | 3 rebase conflict | 4 push rejected
+_restack_rebase_push() {
+  local repo="$1" remote="$2" branch="$3" base_sha="$4" onto_ref="$5" lease_sha="$6"
+  local sw; sw="$(mktemp -d "${TMPDIR:-/tmp}/restack-wt.XXXXXX")" || return 4
+  rm -rf "$sw"   # `git worktree add` requires the path NOT to exist yet
+
+  git -C "$repo" worktree add --detach "$sw" "$remote/$branch" >/dev/null 2>&1 || {
+    rm -rf "$sw"; return 4
+  }
+  # Cleanup is unconditional from here on — every `return` below goes through it.
+  local rc=0 tip=""
+  if git -C "$sw" rebase --onto "$onto_ref" "$base_sha" >/dev/null 2>&1; then
+    tip="$(git -C "$sw" rev-parse HEAD)"
+    # Explicit lease (branch:sha we actually fetched), not the bare
+    # --force-with-lease default: the bare form trusts the remote-tracking ref,
+    # which a concurrent fetch could have already advanced — silently turning
+    # the lease into a plain --force.
+    git -C "$sw" push --force-with-lease="$branch:$lease_sha" "$remote" "HEAD:$branch" >/dev/null 2>&1 \
+      || rc=4
+  else
+    git -C "$sw" rebase --abort >/dev/null 2>&1
+    rc=3
+  fi
+  git -C "$repo" worktree remove --force "$sw" >/dev/null 2>&1
+  rm -rf "$sw"
+  [ "$rc" = 0 ] || return "$rc"
+  printf '%s' "$tip"
+}
+
+restack() {
+  local run_dir="" repo="" remote="origin" gh_bin="" dry=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --run-dir) [ $# -ge 2 ] || die "missing value for --run-dir"; run_dir="$2"; shift 2 ;;
+      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
+      --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
+      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      *) die "unknown restack argument: $1" ;;
+    esac
+  done
+  [ -n "$run_dir" ] || die "restack requires --run-dir <dir containing .auto-pilot/RUN.md>"
+  case "$run_dir" in /*) ;; *) die "--run-dir must be absolute (fail-closed): $run_dir" ;; esac
+  [ -n "$repo" ] || repo="$run_dir"
+  case "$repo" in /*) ;; *) die "--repo must be absolute (fail-closed): $repo" ;; esac
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "--repo is not a git worktree (fail-closed): $repo"
+  [ -n "$gh_bin" ] || gh_bin="$(command -v gh 2>/dev/null)" || true
+  [ -n "$gh_bin" ] || die "gh not found (fail-closed): pass --gh <path> (mockable in tests) or put gh on PATH"
+
+  _restack_read_run_md "$run_dir/.auto-pilot/RUN.md"
+  local base_branch="$_RS_BASE_BRANCH"
+
+  # HEAD-invariant guard (finding #23 / task 13's `assert-run-head`): restack
+  # must NEVER move the caller's HEAD. The rebases below run in throwaway
+  # worktrees, so this records HEAD to ASSERT it at every exit path rather than
+  # to restore it — a restack that somehow moved the run worktree's HEAD is a
+  # bug, not something to paper over.
+  _RS_HEAD_BEFORE="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"
+  _RS_REF_BEFORE="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  [ -n "$_RS_HEAD_BEFORE" ] || die "cannot read HEAD (fail-closed): $repo"
+  # Fail closed on a dirty or mid-operation tree: `git worktree add` off a repo
+  # that is itself mid-rebase/mid-merge, or carrying uncommitted work, is how a
+  # "helpful" automated recovery destroys a human's in-progress state.
+  [ -z "$(git -C "$repo" status --porcelain 2>/dev/null)" ] \
+    || die "--repo worktree is dirty (fail-closed): commit or stash before restacking: $repo"
+  local gitdir; gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
+  case "$gitdir" in /*) ;; *) gitdir="$repo/$gitdir" ;; esac
+  { [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -e "$gitdir/MERGE_HEAD" ]; } \
+    && die "--repo worktree is mid-rebase/mid-merge (fail-closed): finish or abort it first: $repo"
+
+  # Fetch ALL refs once, up front: every rebase below must see the SAME remote
+  # view. A stale local <remote>/<base_branch> is exactly how a "clean" rebase
+  # could silently miss the parent's post-hand-off review commits
+  # (run-state.md's "restacked child is stale" note), and the per-branch
+  # remote-tracking refs are what the push leases are computed against.
+  git -C "$repo" fetch "$remote" >/dev/null 2>&1 \
+    || die "fetch failed (fail-closed): $remote"
+
+  local n="${#_RS_TASK[@]}" pass=0 progressed=1 restacked=0 failed=0 flagged=0
+  local -a report=()
+  # Fixed-point over the table, because a chain resolves one link per pass: a
+  # grandchild only becomes actionable once its own parent has been rewritten
+  # (cascade) or retargeted (onto-base) by an earlier pass.
+  while [ "$progressed" = 1 ] && [ "$pass" -le "$n" ]; do
+    progressed=0; pass=$((pass + 1))
+    local i
+    for ((i = 0; i < n; i++)); do
+      local task="${_RS_TASK[$i]}" branch="${_RS_BRANCH[$i]}" base="${_RS_BASE[$i]}" \
+            base_sha="${_RS_BASE_SHA[$i]}" pr="${_RS_PR[$i]}"
+      [ "$base" != "$base_branch" ] || continue   # independent task — nothing to restack
+      _restack_empty "$pr" && continue            # no PR yet — nothing to retarget
+      local pr_num="${pr#\#}"
+
+      # Idempotent: trust the PR's OWN live base over our (possibly stale)
+      # RUN.md column — a child already retargeted to base_branch is a no-op,
+      # never a re-rebase/re-push/re-edit.
+      local live_base
+      live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>/dev/null)"
+      if [ "$live_base" = "$base_branch" ]; then
+        echo "spawn-orchestrator: restack $task already based on $base_branch (no-op)"
+        continue
+      fi
+
+      # Never force-push a child whose OWN PR is no longer open: `gh pr edit
+      # --base` only works on an open PR, so a MERGED child is already done and a
+      # CLOSED one (LOUD-orphaned when its parent branch was deleted) needs a
+      # human to reopen/recreate it — rewriting either's branch here would be a
+      # destructive no-win. Check state BEFORE any rebase/push.
+      local child_state
+      child_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+      if [ "$child_state" = "MERGED" ]; then
+        echo "spawn-orchestrator: restack $task PR #$pr_num already MERGED (no-op)"
+        continue
+      fi
+      if [ "$child_state" = "CLOSED" ]; then
+        echo "spawn-orchestrator: restack $task DEFECT — PR #$pr_num is CLOSED (LOUD-orphaned by a deleted parent branch); a human must reopen or recreate it — NOT force-pushing"
+        report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): the PR is CLOSED — LOUD-orphaned when its parent branch was deleted on merge. A human must reopen or recreate it; restack will not force-push a closed PR's branch (finding #25, LOUD case).")
+        flagged=$((flagged + 1))
+        continue
+      fi
+
+      local parent_pr="" j pidx=-1
+      for ((j = 0; j < n; j++)); do
+        if [ "${_RS_BRANCH[$j]}" = "$base" ]; then pidx=$j; parent_pr="${_RS_PR[$j]#\#}"; break; fi
+      done
+      [ "$pidx" -ge 0 ] || continue   # parent not tracked in this run
+
+      # Two distinct reasons a child needs rewriting, and they are NOT the same op:
+      #
+      #   onto-base  the parent's PR MERGED (squashed onto base_branch) → drop the
+      #              parent's now-squashed commits and retarget the PR to base_branch.
+      #   cascade    the parent was itself force-pushed by THIS run (onto-base or an
+      #              earlier cascade) → the child still carries the parent's OLD,
+      #              rewritten commits. Rebase it onto the parent's NEW tip. Its PR
+      #              base stays the parent branch (still a live branch, now correctly
+      #              targeting base_branch) — retargeting it to base_branch here would
+      #              re-propose the parent's whole changeset.
+      #
+      # Without cascade, force-pushing a parent silently orphans its own child inside
+      # the very run that was supposed to fix orphaned children.
+      local newtip="${_RS_NEWTIP[$pidx]}" mode="" onto_ref="" retarget=""
+      if [ -n "$newtip" ] && ! _restack_empty "$base_sha" && [ "$base_sha" != "$newtip" ]; then
+        mode="cascade"; onto_ref="$newtip"
+      else
+        _restack_empty "$parent_pr" && continue   # parent has no PR — can't know if it merged
+        local parent_state
+        parent_state="$("$gh_bin" pr view "$parent_pr" --json state --jq .state 2>/dev/null)"
+        if [ "$parent_state" = "MERGED" ]; then
+          if _restack_empty "$base_sha"; then
+            echo "spawn-orchestrator: restack $task FAILED — parent PR #$parent_pr merged but no recorded base_sha (fail-closed, needs a human)"
+            failed=$((failed + 1))
+            continue
+          fi
+          mode="onto-base"; onto_ref="$remote/$base_branch"; retarget="$base_branch"
+        else
+          # RESUMABLE cascade: the parent's PR is still OPEN, but a PRIOR restack
+          # run may have already rewritten it (retargeted to base_branch and
+          # force-pushed). This run's in-memory _RS_NEWTIP is empty for it, so
+          # detect the rewrite from the REMOTE: if the parent is already based on
+          # base_branch and its remote tip has moved off this child's recorded
+          # base_sha, cascade the child onto that tip. Without this, a partial
+          # earlier run silently strands the grandchild while reporting success.
+          local parent_live_base parent_remote_tip
+          parent_live_base="$("$gh_bin" pr view "$parent_pr" --json baseRefName --jq .baseRefName 2>/dev/null)"
+          parent_remote_tip="$(git -C "$repo" rev-parse "$remote/$base" 2>/dev/null)"
+          if [ "$parent_live_base" = "$base_branch" ] && ! _restack_empty "$base_sha" \
+             && [ -n "$parent_remote_tip" ] && [ "$parent_remote_tip" != "$base_sha" ]; then
+            # Idempotent: a cascade-mode child keeps its PR base on the parent
+            # branch, so the top-of-loop live-base no-op check can't catch an
+            # already-cascaded child. If it already sits on the parent's current
+            # tip, there is nothing to do — skip, rather than re-run a no-op
+            # rebase that churns REPORT.md and re-flags a child nothing touched.
+            if git -C "$repo" merge-base --is-ancestor "$parent_remote_tip" "$remote/$branch" 2>/dev/null; then
+              echo "spawn-orchestrator: restack $task already cascaded onto $base's tip (no-op)"
+              continue
+            fi
+            mode="cascade"; onto_ref="$parent_remote_tip"
+          else
+            # A human reviewing/merging the parent is the EXPECTED trigger; an
+            # unmerged, un-rewritten parent just means this child isn't ready yet.
+            continue
+          fi
+        fi
+      fi
+
+      # The exact incantation, copy-pasteable — printed BEFORE execution, so it
+      # reaches the log (and REPORT.md below) even if restack never runs: without
+      # the automation the human is still one paste from correct.
+      echo "spawn-orchestrator: restack $task ($mode) commands:"
+      echo "  git fetch $remote"
+      echo "  git rebase --onto $onto_ref $base_sha $branch"
+      echo "  git push --force-with-lease $remote $branch"
+      [ -n "$retarget" ] && echo "  gh pr edit $pr_num --base $retarget"
+      [ "$dry" = 1 ] && continue
+
+      local lease_sha; lease_sha="$(git -C "$repo" rev-parse "$remote/$branch" 2>/dev/null)"
+      if [ -z "$lease_sha" ]; then
+        echo "spawn-orchestrator: restack $task FAILED — no $remote/$branch to lease against (fail-closed; branch never pushed?)"
+        failed=$((failed + 1))
+        continue
+      fi
+
+      local tip rc
+      tip="$(_restack_rebase_push "$repo" "$remote" "$branch" "$base_sha" "$onto_ref" "$lease_sha")"; rc=$?
+      case "$rc" in
+        3)
+          echo "spawn-orchestrator: restack $task FAILED — rebase conflict (fail-closed, NOT force-pushing; a human must resolve)"
+          failed=$((failed + 1)); continue ;;
+        4)
+          echo "spawn-orchestrator: restack $task FAILED — force-with-lease push rejected (fail-closed, remote moved since fetch; re-run restack)"
+          failed=$((failed + 1)); continue ;;
+      esac
+
+      # The rebase + force-push already happened, so a child's downstream cascade
+      # must see the new tip regardless of what the retarget does below.
+      _RS_BASE_SHA[$i]="$onto_ref"   # this child's parent-tip is now the ref it sits on
+      _RS_NEWTIP[$i]="$tip"          # so ITS children cascade onto the tip we just pushed
+      restacked=$((restacked + 1)); progressed=1
+
+      local retarget_ok=1
+      if [ -n "$retarget" ]; then
+        if "$gh_bin" pr edit "$pr_num" --base "$retarget" >/dev/null 2>&1; then
+          _RS_BASE[$i]="$base_branch"
+        else
+          # Pushed but NOT retargeted: the PR still points at the merged parent
+          # branch and reaches nothing — the exact QUIET orphan restack exists to
+          # catch. Do NOT mark _RS_BASE as base_branch (that would hide it from
+          # the orphan detector) and record it as a DEFECT, not a success.
+          retarget_ok=0
+          echo "spawn-orchestrator: restack $task DEFECT — rebased and force-pushed $branch, but 'gh pr edit --base $retarget' failed; PR #$pr_num still targets the merged parent branch (retarget by hand: gh pr edit $pr_num --base $retarget)"
+          report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): rebased and force-pushed onto \`$onto_ref\`, but retargeting its PR base to \`$retarget\` FAILED — it still points at the merged parent branch and reaches nothing until a human runs \`gh pr edit $pr_num --base $retarget\` (finding #25, QUIET case).")
+          flagged=$((flagged + 1))
+        fi
+      fi
+      [ "$retarget_ok" = 1 ] || continue
+
+      echo "spawn-orchestrator: restack $task done ($mode) — force-pushed $branch, PR #$pr_num${retarget:+ retargeted to $retarget}"
+      # The re-verification requirement travels with the child into REPORT.md —
+      # a clean rebase proves nothing about whether the child still honors the
+      # parent's post-hand-off review commits (run-state.md "Restack").
+      report+=("- **$task** (PR #$pr_num, \`$branch\`) restacked ($mode) onto \`$onto_ref\`. **Re-verify required:** its previous green ran against the OLD base, and its co-review is **STALE** — it approved code relative to the pre-review parent. Re-run verify against the new base, diff-audit the child against the parent's post-hand-off review commits, and re-run co-review if the parent's review touched files this child also touches.")
+    done
+  done
+
+  # Orphan detection (ties to task 16's alarm channel): a chained PR reaching
+  # here still pointed somewhere other than base_branch after this pass — flag
+  # it as a defect rather than waiting for a human to notice by diffing the
+  # open-PR list against RUN.md by hand (the only reason finding #25 was
+  # caught at all).
+  local i
+  for ((i = 0; i < n; i++)); do
+    local task="${_RS_TASK[$i]}" base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
+    [ "$base" != "$base_branch" ] || continue
+    _restack_empty "$pr" && continue
+    local pr_num="${pr#\#}"
+    local live_base live_state
+    live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>/dev/null)"
+    live_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+    if [ -z "$live_base" ]; then
+      echo "spawn-orchestrator: DEFECT $task PR #$pr_num — base ref deleted or unreadable (orphaned by a merged/closed parent, finding #25 LOUD case)"
+      report+=("- **DEFECT — $task** (PR #$pr_num): base ref deleted or unreadable — orphaned by a merged/closed parent (finding #25, LOUD case). Needs a human.")
+      flagged=$((flagged + 1))
+      continue
+    fi
+    [ "$live_base" != "$base_branch" ] || continue
+    local base_pr="" k
+    for ((k = 0; k < n; k++)); do
+      if [ "${_RS_BRANCH[$k]}" = "$live_base" ]; then base_pr="${_RS_PR[$k]#\#}"; break; fi
+    done
+    local base_state=""
+    [ -n "$base_pr" ] && ! _restack_empty "$base_pr" \
+      && base_state="$("$gh_bin" pr view "$base_pr" --json state --jq .state 2>/dev/null)"
+    if [ "$live_state" = "CLOSED" ] || [ "$base_state" = "MERGED" ]; then
+      echo "spawn-orchestrator: DEFECT $task PR #$pr_num — base=$live_base is a merged/closed branch; this PR never reaches $base_branch (finding #25 QUIET case)"
+      report+=("- **DEFECT — $task** (PR #$pr_num): base \`$live_base\` is a merged/closed branch, so this PR never reaches \`$base_branch\` — it looks healthy while doing nothing (finding #25, QUIET case). Needs a human.")
+      flagged=$((flagged + 1))
+    fi
+  done
+
+  # Surface the restack outcome where a HUMAN actually reads it. stdout only
+  # reaches orchestrator.log; REPORT.md is the file the human wakes up to, and
+  # the stale-co-review warning is worthless if it lands somewhere they never
+  # look. Append-only (never rewrites the report), and skipped entirely when
+  # there is nothing to say — so an idempotent no-op restack does not churn it.
+  if [ "${#report[@]}" -gt 0 ]; then
+    local report_md="$run_dir/.auto-pilot/REPORT.md"
+    {
+      printf '\n## Restack — %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '%s\n' "${report[@]}"
+    } >>"$report_md" 2>/dev/null \
+      || echo "spawn-orchestrator: restack WARNING — could not append to $report_md (findings are on stdout only)"
+  fi
+
+  # Assert the HEAD invariant on EVERY exit path (finding #23 / task 13): the
+  # run worktree's HEAD must be exactly where restack found it.
+  local head_after ref_after
+  head_after="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"
+  ref_after="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  { [ "$head_after" = "$_RS_HEAD_BEFORE" ] && [ "$ref_after" = "$_RS_REF_BEFORE" ]; } \
+    || die "restack moved the caller's HEAD ($_RS_REF_BEFORE@$_RS_HEAD_BEFORE -> $ref_after@$head_after) — this is a bug, not a recoverable state"
+
+  echo "spawn-orchestrator: restack summary — restacked=$restacked failed=$failed defects=$flagged"
+  # Non-zero on EITHER a hard failure or a flagged defect (a LOUD/QUIET orphan, a
+  # failed retarget): a supervisor checking `$?` must see that a human is needed,
+  # not read a defects run as a clean success.
+  { [ "$failed" -eq 0 ] && [ "$flagged" -eq 0 ]; } || return 2
+}
+
 # Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
 # smoke-test auth THROUGH the wrapper, and only if that passes, detach + record.
 # The ordering is load-bearing — detaching before auth is verified is exactly the
@@ -1617,6 +2022,7 @@ case "$sub" in
   assert-run-head) assert_run_head "$@" ;;
   classify-exit) classify_exit "$@" ;;
   supervisor-check) supervisor_check "$@" ;;
+  restack) restack "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac

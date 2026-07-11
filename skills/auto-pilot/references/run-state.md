@@ -59,13 +59,16 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
 - `base_sha` is the parent branch's **frozen-tip SHA**, recorded when the parent
   reaches `handed-off`. A chained child's stacked-PR check compares the parent
   branch's _current_ tip against this recorded SHA to detect a moved base (→ park);
-  empty (`—`) for an independent task, whose `base` is `main`. This guard only
-  catches the **orchestrator** moving a base mid-run — it says nothing about a
-  **human** merging a stacked PR out of order while the run is live. A child
-  PR's diff is only correct relative to its parent's branch, so a human merge
-  out of dependency order corrupts the stack or produces a confusing diff; the
-  run's summary should tell the human to **merge bottom-up, in dependency
-  order** (each chain's root PR first, then its children in order).
+  empty (`—`) for an independent task, whose `base` is `main`. **This guard
+  models one specific actor: the ORCHESTRATOR moving a base mid-run** — it is
+  never meant to fire on a **human** reviewing/merging a parent PR, which moves
+  the parent's tip by design every time (finding #25's clarification: _"there is
+  always my review in between hand-off and merging. Files being changed should
+  be an expected part of the process."_). Do not park on that divergence — see
+  "Restack" below, which is the actual remedy: a human merge is the trigger,
+  never the error, and out-of-order/orphaned stacks are fixed mechanically
+  rather than by asking a human to merge bottom-up from memory (run #1's
+  finding #14, closed by automation, not by prose).
 - `status` / `paused_until` / `pause_reason` are the **run-level** fields the run
   loop writes: `paused_until` (+ reason) at a rate-window pause, `status: systemic`
   (+ reason) when the circuit breaker halts, `status: paused` (+ reason,
@@ -86,6 +89,84 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   `pending` marker (see "Task lifecycle phases"); of those, only the seven
   in-flight/terminal values are what `--resume` reconciles (a `pending` task has
   no in-flight transaction to reconcile).
+
+### Restack (post-merge stacked-PR repair)
+
+Squash-merging a parent orphans a chained child two ways: **loudly** (GitHub
+deletes the parent's branch → the child, still based on it, gets closed) or
+**quietly** (the child still targets the parent's _branch_, so merging it lands
+on that branch, never on `base_branch` — the PR looks healthy while doing
+nothing). Finding #25 hit the loud case for real, on a P1 PR. `restack`
+(`scripts/spawn-orchestrator.sh restack --run-dir <dir> --repo <path>`) reads
+this table's `base`/`base_sha`/`pr` columns and, for every chained task whose
+parent PR has merged, runs the incantation a human would otherwise have to
+remember at the exact right moment: fetch, `rebase --onto <base_branch>
+<base_sha> <branch>` (dropping the parent's now-squashed commits), `push
+--force-with-lease`, `gh pr edit --base <base_branch>` — in dependency order,
+idempotent, and fail-closed on a conflict (aborts, reports, never
+force-pushes). It also flags — as a defect for `REPORT.md`, and with a **non-zero
+exit** so a supervisor sees it — an orphaned child (a PR whose live base is a
+merged or deleted branch), a **closed** child (LOUD-orphaned; never force-pushed,
+left for a human to reopen), and a child that was rebased and pushed but whose
+`gh pr edit --base` **failed** (the QUIET case: it still points at the dead
+branch). Cascades are **resumable across runs**: when a parent was rewritten by
+an earlier run, a later run rebases the grandchild onto the parent's current
+**remote** tip rather than relying on in-memory state — a partial run never
+silently strands a deeper child. All of this rather than waiting for a human to
+notice by diffing the open-PR list by hand.
+
+Two invariants the implementation holds, both worth stating because they are
+easy to get wrong:
+
+- **Restack never moves the run worktree's HEAD.** `git rebase --onto X Y
+  <branch>` _checks out_ `<branch>`, so a restack run in the run worktree would
+  park the orchestrator's HEAD on a task branch — finding #23 exactly, the thing
+  the run-HEAD guard exists to prevent. Every rebase therefore happens in a
+  throwaway worktree, removed on success, conflict, and push-rejection alike,
+  and the caller's HEAD is asserted unchanged on exit. Restack also fails closed
+  on a dirty or mid-rebase caller worktree rather than rebasing over it.
+- **Force-pushing a parent rewrites it, so its own children must cascade.** When
+  a chain is deeper than one link, restacking a parent onto `base_branch` leaves
+  the _grandchild_ carrying the parent's old, now-rewritten commits. The
+  grandchild is rebased onto the parent's **new tip** (its PR base stays the
+  parent branch — retargeting it to `base_branch` would re-propose the parent's
+  whole changeset). Without this, the run that fixes orphaned children orphans
+  one itself.
+
+**A human merging the parent is restack's normal trigger, never an error** —
+see the `base_sha` note above. What restack must NOT treat as proof of
+correctness: **a clean rebase**. The child was co-reviewed against the
+**pre-review** parent; if the parent's post-hand-off review commits touched a
+file the child also touches, a clean auto-merge can silently drop or
+contradict a fix the reviewer just added. So every restacked child is a
+**re-verification trigger**, not just a git operation:
+
+1. **Re-run verify** against the new base — the child's previous green ran
+   against the old one.
+2. **Diff-audit the child against the parent's post-hand-off review commits**:
+   confirm no line those commits added is removed or contradicted by the
+   child's own changes.
+3. **Flag the child's co-review as stale** whenever the parent changed during
+   human review, and re-run co-review on the child if the parent's review
+   touched files the child also touches — the child's existing approval refers
+   to code that no longer exists.
+
+**Status: the mechanism is enforced; the re-verification is not (yet).** The
+git/GitHub mechanics above — rebase, force-push, retarget, orphan-detect,
+fail-closed, HEAD invariant — are implemented and covered by tests.
+`restack` **announces** the three requirements above into `REPORT.md` per
+restacked child (so a human cannot miss that a child's green and its co-review
+are both stale), and emits the exact commands copy-pasteably. But **nothing
+executes them**: re-running verify, diff-auditing the child against the
+parent's review commits, and re-running co-review are orchestrator-layer
+actions the run loop must take, and today they are a documented contract, not
+an enforced one — the same "a rule with no enforcement is a comment" pattern
+this reference warns about elsewhere. Wiring them into the run loop /
+`/deliver-task` is the follow-up that closes it.
+
+The pre-flight should also warn when a stacked run's repo has
+`delete_branch_on_merge: true` — that setting is what turns a recoverable
+restack into an already-closed PR.
 
 ### `QUESTIONS.md`
 
