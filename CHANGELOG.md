@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.39.0] - 2026-07-11
+
+### Features
+
+- linear-scan.py GraphQL fast-path for the in-flight scan + smoke test (#163) (29b29e3)
+
 ## [1.38.1] - 2026-07-11
 
 ### Fixes
