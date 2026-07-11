@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.40.0] - 2026-07-11
+
+### Features
+
+- linear-relations.py GraphQL fast-path for reoptimize + smoke test (#166) (3521632)
+
 ## [1.39.0] - 2026-07-11
 
 ### Features
