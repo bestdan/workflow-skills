@@ -86,10 +86,12 @@ gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
    this **replaces** the floor's `list_workflow_states` call below — do not
    also call it on this path.
 
-2. **Call the script**, passing every resolved scope's `id` as a repeated
-   `--project` (omit entirely for the whole-team scope, i.e. `--all` or the
-   no-projects-configured case) and `--state-type started` (the state-type
-   set this sweep needs, per `linear-common.md` "In-flight scan"):
+2. **Call the script**, passing every resolved concrete project scope's `id`
+   as a repeated `--project` (omit entirely for the whole-team scope, i.e.
+   `--all` or the no-projects-configured case; **never** serialize the
+   `__unassigned__` sentinel as a `--project` value — same guard as
+   `linear-claim.md` "Find candidates") and `--state-type started` (the
+   state-type set this sweep needs, per `linear-common.md` "In-flight scan"):
 
    ```bash
    python3 commands/handlers/assets/linear-scan.py --team "<linear.team>" \
@@ -111,7 +113,7 @@ gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
 
 3. **Consume `meta` in place of the equivalent MCP reads.** `meta.states` (an
    array of `{ id, name, type }`) replaces the state-id → type map the floor
-   builds via `list_workflow_states` in step 2.1 below — cache it the same
+   builds via `list_workflow_states` in step 1 of the MCP floor below — cache it the same
    way and resolve the `started`-type ids from it. `meta.viewer` is present in
    the payload for parity with the fast-path pattern `linear-claim.md` uses,
    though this scan performs no assignee/viewer check and so doesn't need it.
@@ -141,14 +143,14 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
    the same way: any started-type issue can be the case where a PR opened,
    got reviewed, and merged, but nothing moved the Linear issue.
 2. Call `<linear-mcp>__list_issues` once per resolved scope from step 1
-   above **per started-type state id from step 2.1** — the tool's `state`
+   above **per started-type state id from step 1 of the MCP floor** — the tool's `state`
    filter takes a **single** value, so a scope with two started states means
    two calls; union the results per scope:
    - `teamId`: resolved team id
    - `projectId`: the scope's `id` (omit for the whole-team scope and for
      `--all`); **never** pass the Unassigned sentinel as a `projectId` — use
      the same exclusion-pass technique as `linear-claim.md`.
-   - `state`: one `started`-type state id from step 2.1 per call
+   - `state`: one `started`-type state id from step 1 of the MCP floor per call
    - `includeArchived`: `false`
    - Limit: 50 per scope × state. If a query truncates, note it in the
      report — do not paginate.
