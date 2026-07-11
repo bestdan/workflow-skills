@@ -201,6 +201,16 @@ end-to-end **exercise path** (how a task's feature is driven, not just its tests
 [`references/run-state.md`](references/run-state.md) "`RUN.md`"), so every task's
 `/deliver-task` verifies the same way.
 
+Because the orchestrator runs **jailed** and `verify_command` (e.g. `bash
+scripts/check.sh`) can't pass inside the jail (its harnesses execve-deny, exit
+126), install the **verify broker** here so verify runs **outside** the jail:
+`scripts/spawn-orchestrator.sh write-verify-broker` registers a second, un-jailed
+launchd job that runs the **pinned** `verify_command` (resolved here, never
+agent-composed) in a **run-root-confined** worktree, and each task's verify becomes
+a `verify-request` → `verify-await` handshake
+([`references/launch-runtime.md`](references/launch-runtime.md) §5). Tear the broker
+job down alongside the orchestrator supervisor at loop termination.
+
 ### Step 6 — Materialize the task graph into run state
 
 Run the adapter's `list_ready` and `dependency_graph`

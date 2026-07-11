@@ -13,6 +13,14 @@
 # check-profile) and the layer-2 egress-allowlist emitter (render-settings).
 # Subcommands added by sibling tasks: write-launch, detach, teardown.
 #
+# Verify broker (task 4 — run the run's verify_command OUTSIDE the jail): the
+# jailed orchestrator can't spawn an un-jailed verifier (children inherit the
+# seatbelt profile) and `bash scripts/check.sh` execve-denies in-jail (finding
+# #4). So write-verify-broker installs a SEPARATE, un-jailed launchd job that
+# polls a sentinel dir; the orchestrator hands off with verify-request and reads
+# the outcome with verify-await. The broker runs a COMMAND-PINNED verify only,
+# in a worktree confined to the run root — see the "Task 4" block below.
+#
 # Usage:
 #   spawn-orchestrator.sh render-profile \
 #       --rw <path> [--rw <path> ...] \
@@ -650,6 +658,234 @@ launch() {
   echo "spawn-orchestrator: launched pid=$pid label=$label"
 }
 
+# ---------------------------------------------------------------------------
+# Task 4 — verify broker: run the run's verify_command OUTSIDE the jail.
+#
+# A sandbox-exec-confined process's children INHERIT the profile, so the jailed
+# orchestrator cannot spawn an un-jailed verifier — and the run's verify
+# (`bash scripts/check.sh`, which runs `bash scripts/test-*.sh`) execve-denies
+# in-jail (finding #4: `bad interpreter: Operation not permitted`, exit 126,
+# regardless of the diff). Verify therefore runs in a SEPARATE, UN-JAILED launchd
+# job (write-verify-broker) that polls a sentinel dir and runs a COMMAND-PINNED
+# verify in the requested worktree:
+#
+#   jailed orchestrator             un-jailed broker (launchd, NO sandbox-exec)
+#   -------------------             ------------------------------------------
+#   verify-request  ── writes ──▶   <dir>/<id>.request {worktree, cmd_hash}
+#                                   verify-broker: refuse unless the request's
+#                                   cmd_hash == the broker's OWN pinned hash AND
+#                                   the worktree is under the run root, then run
+#                                   its OWN pinned command there and write
+#   verify-await   ◀── reads ───    <dir>/<id>.result  {code, output}
+#
+# Trust boundary (launch-runtime.md "Sandbox profile"): verify runs un-jailed, so
+# it executes the diff-under-test with full privilege + network — the SAME trust
+# the human extends re-running check.sh before merge, moved earlier. It is bounded
+# by (a) command PINNING — the broker runs a FIXED string baked in at install,
+# NEVER a command from the request; the request carries only a hash both sides must
+# agree on — and (b) worktree-only execution — the broker refuses a worktree
+# outside the run root. Neither the request nor an agent ever supplies the command.
+# ---------------------------------------------------------------------------
+
+# Pin hash of a verify command string (sha256 hex). Request and broker compute it
+# identically, so a stale request or a re-pinned broker is caught before any run.
+verify_hash() {
+  command -v shasum >/dev/null 2>&1 || die "shasum not available (needed for verify pin)"
+  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+}
+
+# Atomically write a result file: `code:` on line 1, then the raw output after a
+# fixed marker so verify-await can split it back out losslessly.
+_write_verify_result() {
+  local f="$1" code="$2" out="$3" d; d="$(dirname "$f")"
+  local tmp; tmp="$(mktemp "$d/.res.XXXXXX")" || return 1
+  { printf 'code: %s\n' "$code"; printf -- '--- output ---\n'; printf '%s\n' "$out"; } >"$tmp" \
+    || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+}
+
+# (jailed side) Drop a verify request the un-jailed broker will pick up. The
+# request names the worktree + a hash of the pinned command — never the command.
+verify_request() {
+  local dir="" worktree="" cmd_hash="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
+      --worktree) [ $# -ge 2 ] || die "missing value for --worktree"; worktree="$2"; shift 2 ;;
+      --cmd-hash) [ $# -ge 2 ] || die "missing value for --cmd-hash"; cmd_hash="$2"; shift 2 ;;
+      --id) [ $# -ge 2 ] || die "missing value for --id"; id="$2"; shift 2 ;;
+      *) die "unknown verify-request argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$worktree" ] && [ -n "$cmd_hash" ] \
+    || die "verify-request requires --sentinel-dir, --worktree, and --cmd-hash"
+  case "$cmd_hash" in *[!0-9a-f]*|"") die "--cmd-hash must be lowercase hex (fail-closed): $cmd_hash" ;; esac
+  local wt; wt="$(canonicalize "$worktree")" || exit 2
+  [ -d "$wt" ] || die "verify-request --worktree is not a directory (fail-closed): $wt"
+  mkdir -p "$dir" || die "cannot create sentinel dir: $dir"
+  local d; d="$(cd "$dir" && pwd -P)" || die "cannot resolve sentinel dir: $dir"
+  if [ -n "$id" ]; then
+    case "$id" in *[!A-Za-z0-9._-]*) die "--id must be [A-Za-z0-9._-] (fail-closed): $id" ;; esac
+  else
+    local t; t="$(mktemp "$d/req.XXXXXX")" || die "mktemp failed"; id="$(basename "$t")"; rm -f "$t"
+  fi
+  local reqfile="$d/$id.request" tmp
+  tmp="$(mktemp "$d/.req.XXXXXX")" || die "mktemp failed"
+  { printf 'worktree: %s\n' "$wt"; printf 'cmd_hash: %s\n' "$cmd_hash"; } >"$tmp" \
+    || { rm -f "$tmp"; die "cannot write request"; }
+  mv "$tmp" "$reqfile" || { rm -f "$tmp"; die "cannot place request: $reqfile"; }
+  echo "spawn-orchestrator: verify-request $id"
+}
+
+# (UN-JAILED side, run by the broker launchd job) One scan: for each pending
+# request, refuse unless its cmd_hash matches the broker's OWN pinned hash and the
+# worktree is under the run root, then run the PINNED command there and write the
+# result. Scans once and exits — the launchd StartInterval drives the cadence.
+verify_broker() {
+  local dir="" cmd="" cmd_hash="" root=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
+      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; cmd="$2"; shift 2 ;;
+      --cmd-hash) [ $# -ge 2 ] || die "missing value for --cmd-hash"; cmd_hash="$2"; shift 2 ;;
+      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; root="$2"; shift 2 ;;
+      *) die "unknown verify-broker argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$cmd" ] && [ -n "$root" ] \
+    || die "verify-broker requires --sentinel-dir, --verify-cmd, and --confine-under"
+  # The broker runs its OWN pinned command; --cmd-hash (if given) must match it —
+  # this catches an install/args mismatch, never authorizes a request's command.
+  local pin; pin="$(verify_hash "$cmd")"
+  if [ -n "$cmd_hash" ] && [ "$cmd_hash" != "$pin" ]; then
+    die "verify-broker --cmd-hash does not match --verify-cmd (fail-closed)"
+  fi
+  local rootc; rootc="$(canonicalize "$root")" || exit 2
+  local d; d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
+
+  local req handled=0
+  for req in "$d"/*.request; do
+    [ -e "$req" ] || continue
+    handled=$((handled + 1))
+    local id; id="$(basename "$req" .request)"
+    local resultf="$d/$id.result"
+    local wt rh
+    wt="$(sed -n 's/^worktree: //p' "$req" | head -1)"
+    rh="$(sed -n 's/^cmd_hash: //p' "$req" | head -1)"
+    rm -f "$req"    # claim it — a handled request never re-runs
+    if [ "$rh" != "$pin" ]; then
+      _write_verify_result "$resultf" 2 "verify-broker: request cmd_hash mismatch (pinned=$pin request=$rh) — refused"
+      continue
+    fi
+    local wtc; wtc="$(cd "$wt" 2>/dev/null && pwd -P)"
+    if [ -z "$wtc" ] || { [ "$wtc" != "$rootc" ] && [ "${wtc#"$rootc"/}" = "$wtc" ]; }; then
+      _write_verify_result "$resultf" 2 "verify-broker: worktree escapes --confine-under (worktree=$wt root=$rootc) — refused"
+      continue
+    fi
+    # Run the PINNED command in the worktree. `bash -c "$cmd"` on a trusted, pinned
+    # string is the same execution the human runs re-invoking check.sh pre-merge.
+    local out code
+    out="$(cd "$wtc" && bash -c "$cmd" 2>&1)"; code=$?
+    _write_verify_result "$resultf" "$code" "$out"
+  done
+  echo "spawn-orchestrator: verify-broker scanned $d (handled=$handled, pin=$pin)"
+}
+
+# (jailed side) Block until the broker writes the result for <id>, then print its
+# code + output and exit with the verify command's code (0 = verify passed).
+verify_await() {
+  local dir="" id="" timeout=600 interval=2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
+      --id) [ $# -ge 2 ] || die "missing value for --id"; id="$2"; shift 2 ;;
+      --timeout) [ $# -ge 2 ] || die "missing value for --timeout"; timeout="$2"; shift 2 ;;
+      --interval) [ $# -ge 2 ] || die "missing value for --interval"; interval="$2"; shift 2 ;;
+      *) die "unknown verify-await argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$id" ] || die "verify-await requires --sentinel-dir and --id"
+  case "$timeout$interval" in *[!0-9]*) die "--timeout/--interval must be integers" ;; esac
+  [ "$interval" -gt 0 ] || die "--interval must be > 0 (else the wait loop never advances)"
+  local d; d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
+  local resultf="$d/$id.result" waited=0
+  while [ ! -e "$resultf" ]; do
+    [ "$waited" -lt "$timeout" ] || die "verify-await timed out after ${timeout}s waiting for $id (broker down?)"
+    sleep "$interval"; waited=$((waited + interval))
+  done
+  local code; code="$(sed -n 's/^code: //p' "$resultf" | head -1)"
+  echo "spawn-orchestrator: verify-await $id code=$code"
+  sed -n '/^--- output ---$/,$p' "$resultf" | sed '1d'
+  case "$code" in ''|*[!0-9]*) return 2 ;; *) return "$code" ;; esac
+}
+
+# Render an UN-JAILED broker launch script + its launchd plist. The verify command
+# is PINNED here (baked into the script from the run's resolved verify_command), so
+# the broker never runs anything a request or an agent supplies. The broker job runs
+# `/bin/bash <script>` directly — NO sandbox-exec — which is exactly how it escapes
+# the orchestrator's jail to reach a working execve.
+write_verify_broker() {
+  local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
+        self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
+        out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; sentinel="$2"; shift 2 ;;
+      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; verify_cmd="$2"; shift 2 ;;
+      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; root="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --workdir) [ $# -ge 2 ] || die "missing value for --workdir"; workdir="$2"; shift 2 ;;
+      --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
+      --path) [ $# -ge 2 ] || die "missing value for --path"; path="$2"; shift 2 ;;
+      --self) [ $# -ge 2 ] || die "missing value for --self"; self="$2"; shift 2 ;;
+      --interval) [ $# -ge 2 ] || die "missing value for --interval"; interval="$2"; shift 2 ;;
+      --throttle) [ $# -ge 2 ] || die "missing value for --throttle"; throttle="$2"; shift 2 ;;
+      --out-script) [ $# -ge 2 ] || die "missing value for --out-script"; out_script="$2"; shift 2 ;;
+      --out-plist) [ $# -ge 2 ] || die "missing value for --out-plist"; out_plist="$2"; shift 2 ;;
+      --plist-template) [ $# -ge 2 ] || die "missing value for --plist-template"; plist_template="$2"; shift 2 ;;
+      *) die "unknown write-verify-broker argument: $1" ;;
+    esac
+  done
+  [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-verify-broker requires --out-script and --out-plist"
+  [ -n "$sentinel" ] && [ -n "$verify_cmd" ] && [ -n "$root" ] \
+    || die "write-verify-broker requires --sentinel-dir, --verify-cmd, and --confine-under"
+  [ -n "$label" ] || die "write-verify-broker requires --label"
+  case "$label" in *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
+  [ -n "$path" ] || die "write-verify-broker requires --path <PATH> (a launchd job has a minimal PATH)"
+  [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-verify-broker requires an existing --workdir"
+  [ -n "$log" ] || die "write-verify-broker requires --log"
+  [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
+  [ -f "$plist_template" ] || die "plist template not found: $plist_template"
+  case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
+
+  local pin; pin="$(verify_hash "$verify_cmd")"
+  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-launch.XXXXXX")" || die "mktemp failed"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Auto-pilot verify BROKER (generated — do not edit). Runs UN-JAILED so\n'
+    printf '# the run verify (bash scripts/check.sh) reaches a working execve. The\n'
+    printf '# verify command below is PINNED (pin=%s); the broker never runs a\n' "$pin"
+    printf '# command supplied by a request or an agent.\n'
+    printf 'set -uo pipefail\n'
+    printf 'export PATH=%q\n' "$path"
+    printf 'cd %q\n' "$workdir"
+    printf 'exec /bin/bash %q verify-broker \\\n' "$self"
+    printf '  --sentinel-dir %q \\\n' "$sentinel"
+    printf '  --verify-cmd %q \\\n' "$verify_cmd"
+    printf '  --cmd-hash %q \\\n' "$pin"
+    printf '  --confine-under %q \\\n' "$root"
+    printf '  >>%q 2>&1\n' "$log"
+  } >"$tmp" || { rm -f "$tmp"; die "failed to write broker launch script"; }
+  mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write broker launch script: $out_script"; }
+  chmod +x "$out_script"
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-plist.XXXXXX")" || die "mktemp failed"
+  render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
+    || { rm -f "$tmp"; die "failed to render broker plist"; }
+  mv "$tmp" "$out_plist" || { rm -f "$tmp"; die "failed to write broker plist: $out_plist"; }
+  echo "spawn-orchestrator: verify-broker written $out_script $out_plist (pin $pin)"
+}
+
 check_profile() {
   [ $# -eq 1 ] || die "check-profile takes exactly one <file>"
   local f="$1"
@@ -680,6 +916,10 @@ case "$sub" in
   detach) detach "$@" ;;
   teardown) teardown "$@" ;;
   launch) launch "$@" ;;
+  write-verify-broker) write_verify_broker "$@" ;;
+  verify-request) verify_request "$@" ;;
+  verify-broker) verify_broker "$@" ;;
+  verify-await) verify_await "$@" ;;
   check-profile) check_profile "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

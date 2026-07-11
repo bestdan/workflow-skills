@@ -234,3 +234,63 @@ holds down into the workers, not just at the orchestrator.
 > `exec` needs a distinct, narrower profile than the orchestrator's) and is **out of
 > scope** for the §3 write-scopes work. Until it lands, a worker inherits the
 > orchestrator's credential surface — the residual exposure to keep on the backlog.
+
+**Codex's own sandbox is off inside the jail.** `codex --sandbox workspace-write`
+nests a second seatbelt inside the orchestrator's jail — and nested `sandbox-exec`
+fails to apply (`sandbox_apply: Operation not permitted`), so a coder dispatched
+with its own sandbox on can't even start. Inside the jail, invoke codex with its
+**own sandbox disabled**: the outer jail already confines it and is strictly
+stronger (write-confinement + egress-allowlist + exec-wall), so codex's inner
+sandbox is redundant, not additive. This is a one-line policy so it isn't
+re-derived at 3am — set it wherever coders are invoked (`SKILL.md` verify/route
+step, `commands/deliver-task.md`).
+
+### 5. Verify broker — running the run's verify OUTSIDE the jail
+
+The run's declared verify (`bash scripts/check.sh`, which runs `bash
+scripts/test-*.sh`) **cannot pass inside the jail**: those harnesses execve
+`#!/usr/bin/env bash` scripts-under-test, which the jail denies (`bad interpreter:
+Operation not permitted`, exit 126) **regardless of the diff** — they fail
+identically on pristine `main`. And a `sandbox-exec`-confined process's **children
+inherit the profile**, so the jailed orchestrator **cannot** simply spawn an
+un-jailed verifier. So verify runs in a **separate, un-jailed launchd job** — the
+**verify broker** (`scripts/spawn-orchestrator.sh write-verify-broker` installs it;
+`verify-request` / `verify-broker` / `verify-await` are the handshake):
+
+1. The jailed orchestrator drops a **request sentinel** (`verify-request`) into a
+   sentinel dir in the run worktree — the **worktree path + a hash** of the pinned
+   verify command, **never the command itself**.
+2. The **un-jailed broker job** (a launchd job that runs `/bin/bash <script>`
+   directly — **no `sandbox-exec`**, so it reaches a working execve) polls the
+   sentinel dir, and for each request runs its **own pinned command** in the
+   requested worktree, writing a **result** file (`verify-broker`).
+3. The orchestrator reads the result (`verify-await`) and treats _that_ as the
+   authoritative gate; the in-jail content gates (`dprint`, `validate.py`, `bash
+   -n`) become a fast pre-check, not the definition of done.
+
+**Trust boundary (stated, not hidden).** Verify runs **un-jailed**, so it executes
+the diff-under-test with **full privilege + network** — the _same_ trust the human
+already extends re-running `check.sh` before merge, moved earlier in time. Two
+mitigations bound it: **(a) command pinning** — the broker runs a **fixed** command
+string baked into its launch script at install (from the run's resolved
+`verify_command`); a request carries only a hash both sides must agree on, and the
+broker **never** runs a command supplied by a request or an agent; **(b)
+worktree-only execution** — the broker refuses any worktree that doesn't
+canonicalize **under the run root**. A stronger **third option** (wrap verify in
+its own fresh single-layer profile — repo RO, worktree+tmp RW, no network) is a
+tracked follow-up, but the two `test-*.sh` harnesses that themselves call
+`sandbox-exec` still won't nest under it, so v1 ships the **un-jailed** broker.
+
+**What the broker does _not_ defend: result authority.** The sentinel dir lives in
+the run worktree, which the jailed orchestrator can write — so it could forge its
+own `<id>.result` (`code: 0`) and skip the broker entirely. This is **deliberately
+out of scope**: the boundary the broker enforces is that an un-jailed process only
+ever runs the **pinned** command in a **contained** worktree — it stops the
+orchestrator from _laundering arbitrary code into an un-jailed exec_ (the actual
+jailbreak). It does **not** try to make the pass/fail verdict unforgeable, because
+the orchestrator is `claude -p --permission-mode bypassPermissions` — the trusted
+loop driver, gating on the result itself. An orchestrator that forges a result is
+equivalent to one that lies about its own gate or skips verify, which no in-jail
+mechanism can prevent. Defending _that_ (a signed result the orchestrator can't
+mint, written where it can't reach) is a separate, larger change tied to the
+per-worker least-privilege follow-up in §4.

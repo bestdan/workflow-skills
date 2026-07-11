@@ -134,6 +134,22 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    and any screenshots / command output / artifact paths. Record those paths —
    step 4 puts them in the PR body.
 
+   **Under a jailed `/auto-pilot` run, verify goes through the un-jailed verify
+   broker.** A `sandbox-exec`-jailed orchestrator can't run `bash scripts/check.sh`
+   directly — the harnesses execve-deny (`bad interpreter`, exit 126) and children
+   inherit the jail — so when the run installed a verify broker
+   (`scripts/spawn-orchestrator.sh write-verify-broker`,
+   [`launch-runtime.md`](../auto-pilot/references/launch-runtime.md) §5), verify is:
+   drop a request (`verify-request --worktree <task worktree> --cmd-hash <hash of
+   the pinned verify_command>`), then block on `verify-await` and gate on the
+   broker's result — the authoritative check. The in-jail content gates (`dprint`,
+   `validate.py`, `bash -n`) are a fast pre-check, not the definition of done. The
+   broker runs a **pinned** command only, in a worktree **confined to the run
+   root** — never a command this step composes. Also, **inside the jail invoke any
+   coder with its own sandbox disabled** (e.g. codex without `--sandbox
+   workspace-write`): the outer jail is strictly stronger and a nested
+   `sandbox-exec` can't even apply.
+
 Definition of done for the work (from the design's anti-superficiality rule):
 fewer tasks genuinely finished beats all tasks superficially touched; you
 exercised the feature itself, not just its tests.
