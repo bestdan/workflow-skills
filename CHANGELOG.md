@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.43.0] - 2026-07-11
+
+### Features
+
+- profile write-scopes — credential files RO vs tool state dirs RW (task_3, P1 #5) (#177) (f1b6fb6)
+
 ## [1.42.0] - 2026-07-11
 
 ### Features
