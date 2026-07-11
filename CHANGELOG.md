@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.45.0] - 2026-07-11
+
+### Features
+
+- scripts/preflight.sh — one read-only launch pre-flight (task_5, P2 #7/#10) (#173) (d25f4f6)
+
 ## [1.44.0] - 2026-07-11
 
 ### Features
