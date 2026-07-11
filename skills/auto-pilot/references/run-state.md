@@ -104,9 +104,16 @@ remember at the exact right moment: fetch, `rebase --onto <base_branch>
 <base_sha> <branch>` (dropping the parent's now-squashed commits), `push
 --force-with-lease`, `gh pr edit --base <base_branch>` — in dependency order,
 idempotent, and fail-closed on a conflict (aborts, reports, never
-force-pushes). It also flags an orphaned child (a PR whose live base is a
-merged or deleted branch) as a defect for `REPORT.md`, rather than waiting for
-a human to notice by diffing the open-PR list by hand.
+force-pushes). It also flags — as a defect for `REPORT.md`, and with a **non-zero
+exit** so a supervisor sees it — an orphaned child (a PR whose live base is a
+merged or deleted branch), a **closed** child (LOUD-orphaned; never force-pushed,
+left for a human to reopen), and a child that was rebased and pushed but whose
+`gh pr edit --base` **failed** (the QUIET case: it still points at the dead
+branch). Cascades are **resumable across runs**: when a parent was rewritten by
+an earlier run, a later run rebases the grandchild onto the parent's current
+**remote** tip rather than relying on in-memory state — a partial run never
+silently strands a deeper child. All of this rather than waiting for a human to
+notice by diffing the open-PR list by hand.
 
 Two invariants the implementation holds, both worth stating because they are
 easy to get wrong:

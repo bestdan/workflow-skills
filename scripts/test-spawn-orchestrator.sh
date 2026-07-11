@@ -964,6 +964,7 @@ case "$sub" in
     esac
     ;;
   edit)
+    [ -f "$db/$num.editfail" ] && exit 1   # simulate a rejected `gh pr edit`
     while [ $# -gt 0 ]; do
       case "$1" in --base) printf '%s\n' "$2" >"$db/$num.base"; echo "$num $2" >>"$db/edits.log"; shift 2 ;; *) shift ;; esac
     done
@@ -1139,6 +1140,141 @@ GHEOF
   have "restack: flags a deleted/unreadable base as a defect" 'DEFECT task_deleted' "$dsout"
   have "restack: flags a PR still targeting a merged branch as a defect" 'DEFECT task_quiet' "$dsout"
   have "restack: defect summary count is non-zero" 'defects=2' "$dsout"
+
+  # === co-review scenarios: cascade (3-deep), retarget-failure, closed child ===
+  # A fresh bare origin + clone so prior mutations don't bleed in.
+  C_ORIGIN="$RS/c-origin.git"; C_WORK="$RS/c-work"
+  git init --bare -q "$C_ORIGIN"
+  git init -q "$C_WORK"
+  git -C "$C_WORK" remote add origin "$C_ORIGIN"
+  git -C "$C_WORK" config user.email t@e; git -C "$C_WORK" config user.name T
+  git -C "$C_WORK" checkout -q -b main
+  echo r >"$C_WORK/r.txt"; git -C "$C_WORK" add r.txt; git -C "$C_WORK" commit -q -m r; git -C "$C_WORK" push -q origin main
+  # chain A <- B <- C (each touches only its own file).
+  git -C "$C_WORK" checkout -q -b br-a; echo a >"$C_WORK/a.txt"; git -C "$C_WORK" add a.txt; git -C "$C_WORK" commit -q -m a; git -C "$C_WORK" push -q origin br-a
+  A_SHA="$(git -C "$C_WORK" rev-parse br-a)"
+  git -C "$C_WORK" checkout -q -b br-b; echo b >"$C_WORK/b.txt"; git -C "$C_WORK" add b.txt; git -C "$C_WORK" commit -q -m b; git -C "$C_WORK" push -q origin br-b
+  B_SHA="$(git -C "$C_WORK" rev-parse br-b)"
+  git -C "$C_WORK" checkout -q -b br-c; echo c >"$C_WORK/c.txt"; git -C "$C_WORK" add c.txt; git -C "$C_WORK" commit -q -m c; git -C "$C_WORK" push -q origin br-c
+  # A squash-merges to main.
+  git -C "$C_WORK" checkout -q main; git -C "$C_WORK" merge -q --squash br-a >/dev/null; git -C "$C_WORK" commit -q -m "a squashed"; git -C "$C_WORK" push -q origin main
+  git -C "$C_WORK" checkout -q main
+  C_DB="$RS/c-ghdb"; mkdir -p "$C_DB"
+  printf 'MERGED\n' >"$C_DB/1.state"; printf 'main\n' >"$C_DB/1.base"        # A merged
+  printf 'OPEN\n'   >"$C_DB/2.state"; printf 'br-a\n' >"$C_DB/2.base"        # B on parent branch
+  printf 'OPEN\n'   >"$C_DB/3.state"; printf 'br-b\n' >"$C_DB/3.base"        # C on B's branch
+  C_RUN="$RS/c-run"; mkdir -p "$C_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_a | handed-off | br-a | main | - | #1 | |\n'
+    printf '| t_b | handed-off | br-b | br-a | %s | #2 | |\n' "$A_SHA"
+    printf '| t_c | handed-off | br-c | br-b | %s | #3 | |\n' "$B_SHA"
+  } >"$C_RUN/.auto-pilot/RUN.md"
+  export FAKE_GH_DB="$C_DB"
+  cout="$("$SCRIPT" restack --run-dir "$C_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; ccode=$?
+  # B restacks onto-base (main); C CASCADEs onto B's new tip in a later pass —
+  # its PR base stays br-b, never re-proposing B's changeset.
+  have "restack cascade: B retargeted to main" '2 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
+  have "restack cascade: C restacked in cascade mode" 'restack t_c done (cascade)' "$cout"
+  lack "restack cascade: C is NOT retargeted to main" '3 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
+  [ "$(cat "$C_DB/3.base")" = "br-b" ] && ok "restack cascade: C's PR base stays br-b" || bad "restack cascade: C's PR base stays br-b" "$(cat "$C_DB/3.base")"
+  git -C "$C_WORK" fetch -q origin
+  # C's PR targets br-b (cascade keeps the parent base), so its PR diff is br-b..br-c
+  # — must be ONLY c.txt, i.e. C sits cleanly on B's NEW tip with no orphaned
+  # duplicate of B's pre-rewrite commits.
+  cdiff="$(git -C "$C_WORK" diff --name-only origin/br-b origin/br-c)"
+  [ "$cdiff" = "c.txt" ] && ok "restack cascade: C's PR diff (br-b..br-c) is ONLY c.txt (cascaded onto B's new tip)" \
+    || bad "restack cascade: C's PR diff is ONLY c.txt" "got: $cdiff"
+  [ "$ccode" = 0 ] && ok "restack cascade: clean 3-deep run exits 0" || bad "restack cascade: clean 3-deep run exits 0" "exit=$ccode"
+
+  # RESUMABLE cascade (fix 1): a PARTIAL earlier run rewrote the parent (B) but
+  # never cascaded the grandchild (C) — a fresh process has an empty in-memory
+  # _RS_NEWTIP, so C must be detected from the REMOTE (parent OPEN + already on
+  # base_branch + its remote tip moved off C's base_sha) and cascaded, not
+  # silently stranded. Fresh chain X<-Y<-Z; X merged.
+  git -C "$C_WORK" checkout -q main
+  git -C "$C_WORK" checkout -q -b br-x; echo x >"$C_WORK/x.txt"; git -C "$C_WORK" add x.txt; git -C "$C_WORK" commit -q -m x; git -C "$C_WORK" push -q origin br-x
+  X_SHA="$(git -C "$C_WORK" rev-parse br-x)"
+  git -C "$C_WORK" checkout -q -b br-y; echo y >"$C_WORK/y.txt"; git -C "$C_WORK" add y.txt; git -C "$C_WORK" commit -q -m y; git -C "$C_WORK" push -q origin br-y
+  Y_SHA="$(git -C "$C_WORK" rev-parse br-y)"
+  git -C "$C_WORK" checkout -q -b br-z; echo z >"$C_WORK/z.txt"; git -C "$C_WORK" add z.txt; git -C "$C_WORK" commit -q -m z; git -C "$C_WORK" push -q origin br-z
+  git -C "$C_WORK" checkout -q main; git -C "$C_WORK" merge -q --squash br-x >/dev/null; git -C "$C_WORK" commit -q -m "x squashed"; git -C "$C_WORK" push -q origin main
+  git -C "$C_WORK" checkout -q main
+  printf 'MERGED\n' >"$C_DB/30.state"; printf 'main\n' >"$C_DB/30.base"
+  printf 'OPEN\n'   >"$C_DB/31.state"; printf 'br-x\n' >"$C_DB/31.base"
+  printf 'OPEN\n'   >"$C_DB/32.state"; printf 'br-y\n' >"$C_DB/32.base"
+  # Phase 1: RUN.md WITHOUT Z, so only Y restacks (Z is never seen this run).
+  P1_RUN="$RS/p1-run"; mkdir -p "$P1_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_x | handed-off | br-x | main | - | #30 | |\n'
+    printf '| t_y | handed-off | br-y | br-x | %s | #31 | |\n' "$X_SHA"
+  } >"$P1_RUN/.auto-pilot/RUN.md"
+  "$SCRIPT" restack --run-dir "$P1_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" >/dev/null 2>&1
+  [ "$(cat "$C_DB/31.base")" = "main" ] && ok "restack resumable: phase-1 restacks Y to main" || bad "restack resumable: phase-1 restacks Y to main" "$(cat "$C_DB/31.base")"
+  # Phase 2: a FRESH process (empty _RS_NEWTIP) with Z now in the table. Z's
+  # recorded base_sha is Y's OLD tip; Y's remote tip has moved — Z must cascade.
+  P2_RUN="$RS/p2-run"; mkdir -p "$P2_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_x | handed-off | br-x | main | - | #30 | |\n'
+    printf '| t_y | handed-off | br-y | br-x | %s | #31 | |\n' "$X_SHA"
+    printf '| t_z | handed-off | br-z | br-y | %s | #32 | |\n' "$Y_SHA"
+  } >"$P2_RUN/.auto-pilot/RUN.md"
+  p2out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  have "restack resumable: Z cascaded from the REMOTE parent tip (not stranded)" 'restack t_z done (cascade)' "$p2out"
+  lack "restack resumable: Z not retargeted to main (base stays br-y)" '32 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
+  git -C "$C_WORK" fetch -q origin
+  zdiff="$(git -C "$C_WORK" diff --name-only origin/br-y origin/br-z)"
+  [ "$zdiff" = "z.txt" ] && ok "restack resumable: Z's PR diff (br-y..br-z) is ONLY z.txt" || bad "restack resumable: Z's PR diff is ONLY z.txt" "got: $zdiff"
+
+  # retarget-failure (fix 2): push succeeds, `gh pr edit` rejected -> DEFECT, the
+  # child is NOT marked done, and the run exits non-zero. Fresh single stack.
+  printf 'MERGED\n' >"$C_DB/10.state"; printf 'main\n' >"$C_DB/10.base"
+  printf 'OPEN\n'   >"$C_DB/11.state"; printf 'br-a\n' >"$C_DB/11.base"; : >"$C_DB/11.editfail"
+  git -C "$C_WORK" checkout -q br-a; git -C "$C_WORK" checkout -q -b br-rt; echo rt >"$C_WORK/rt.txt"; git -C "$C_WORK" add rt.txt; git -C "$C_WORK" commit -q -m rt; git -C "$C_WORK" push -q origin br-rt
+  git -C "$C_WORK" checkout -q main
+  RT_RUN="$RS/rt-run"; mkdir -p "$RT_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_p | handed-off | br-a | main | - | #10 | |\n'
+    printf '| t_rt | handed-off | br-rt | br-a | %s | #11 | |\n' "$A_SHA"
+  } >"$RT_RUN/.auto-pilot/RUN.md"
+  rtout="$("$SCRIPT" restack --run-dir "$RT_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rtcode=$?
+  have "restack retarget-fail: reports a DEFECT" 'DEFECT — rebased and force-pushed' "$rtout"
+  lack "restack retarget-fail: does NOT report the child done" 'restack t_rt done' "$rtout"
+  [ "$rtcode" = 2 ] && ok "restack retarget-fail: exits non-zero" || bad "restack retarget-fail: exits non-zero" "exit=$rtcode"
+
+  # closed child (fix 3): a CLOSED child PR is a LOUD orphan — flag it, and NEVER
+  # force-push its branch.
+  printf 'MERGED\n' >"$C_DB/20.state"; printf 'main\n' >"$C_DB/20.base"
+  printf 'CLOSED\n' >"$C_DB/21.state"; printf 'br-a\n' >"$C_DB/21.base"
+  git -C "$C_WORK" checkout -q br-a; git -C "$C_WORK" checkout -q -b br-closed; echo cl >"$C_WORK/cl.txt"; git -C "$C_WORK" add cl.txt; git -C "$C_WORK" commit -q -m cl; git -C "$C_WORK" push -q origin br-closed
+  git -C "$C_WORK" checkout -q main
+  CLOSED_TIP_BEFORE="$(git -C "$C_WORK" rev-parse origin/br-closed)"
+  CL_RUN="$RS/cl-run"; mkdir -p "$CL_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_p2 | handed-off | br-a | main | - | #20 | |\n'
+    printf '| t_cl | handed-off | br-closed | br-a | %s | #21 | |\n' "$A_SHA"
+  } >"$CL_RUN/.auto-pilot/RUN.md"
+  clout="$("$SCRIPT" restack --run-dir "$CL_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; clcode=$?
+  have "restack closed-child: flagged as a DEFECT" 'DEFECT — PR #21 is CLOSED' "$clout"
+  git -C "$C_WORK" fetch -q origin
+  [ "$(git -C "$C_WORK" rev-parse origin/br-closed)" = "$CLOSED_TIP_BEFORE" ] \
+    && ok "restack closed-child: branch was NOT force-pushed" \
+    || bad "restack closed-child: branch was NOT force-pushed"
+  [ "$clcode" = 2 ] && ok "restack closed-child: exits non-zero" || bad "restack closed-child: exits non-zero" "exit=$clcode"
 
   unset FAKE_GH_DB
 else

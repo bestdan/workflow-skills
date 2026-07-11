@@ -1320,6 +1320,24 @@ restack() {
         continue
       fi
 
+      # Never force-push a child whose OWN PR is no longer open: `gh pr edit
+      # --base` only works on an open PR, so a MERGED child is already done and a
+      # CLOSED one (LOUD-orphaned when its parent branch was deleted) needs a
+      # human to reopen/recreate it — rewriting either's branch here would be a
+      # destructive no-win. Check state BEFORE any rebase/push.
+      local child_state
+      child_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+      if [ "$child_state" = "MERGED" ]; then
+        echo "spawn-orchestrator: restack $task PR #$pr_num already MERGED (no-op)"
+        continue
+      fi
+      if [ "$child_state" = "CLOSED" ]; then
+        echo "spawn-orchestrator: restack $task DEFECT — PR #$pr_num is CLOSED (LOUD-orphaned by a deleted parent branch); a human must reopen or recreate it — NOT force-pushing"
+        report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): the PR is CLOSED — LOUD-orphaned when its parent branch was deleted on merge. A human must reopen or recreate it; restack will not force-push a closed PR's branch (finding #25, LOUD case).")
+        flagged=$((flagged + 1))
+        continue
+      fi
+
       local parent_pr="" j pidx=-1
       for ((j = 0; j < n; j++)); do
         if [ "${_RS_BRANCH[$j]}" = "$base" ]; then pidx=$j; parent_pr="${_RS_PR[$j]#\#}"; break; fi
@@ -1346,15 +1364,33 @@ restack() {
         _restack_empty "$parent_pr" && continue   # parent has no PR — can't know if it merged
         local parent_state
         parent_state="$("$gh_bin" pr view "$parent_pr" --json state --jq .state 2>/dev/null)"
-        # A human reviewing/merging the parent is the EXPECTED trigger, not an
-        # anomaly — an unmerged parent just means this child isn't ready yet.
-        [ "$parent_state" = "MERGED" ] || continue
-        if _restack_empty "$base_sha"; then
-          echo "spawn-orchestrator: restack $task FAILED — parent PR #$parent_pr merged but no recorded base_sha (fail-closed, needs a human)"
-          failed=$((failed + 1))
-          continue
+        if [ "$parent_state" = "MERGED" ]; then
+          if _restack_empty "$base_sha"; then
+            echo "spawn-orchestrator: restack $task FAILED — parent PR #$parent_pr merged but no recorded base_sha (fail-closed, needs a human)"
+            failed=$((failed + 1))
+            continue
+          fi
+          mode="onto-base"; onto_ref="$remote/$base_branch"; retarget="$base_branch"
+        else
+          # RESUMABLE cascade: the parent's PR is still OPEN, but a PRIOR restack
+          # run may have already rewritten it (retargeted to base_branch and
+          # force-pushed). This run's in-memory _RS_NEWTIP is empty for it, so
+          # detect the rewrite from the REMOTE: if the parent is already based on
+          # base_branch and its remote tip has moved off this child's recorded
+          # base_sha, cascade the child onto that tip. Without this, a partial
+          # earlier run silently strands the grandchild while reporting success.
+          local parent_live_base parent_remote_tip
+          parent_live_base="$("$gh_bin" pr view "$parent_pr" --json baseRefName --jq .baseRefName 2>/dev/null)"
+          parent_remote_tip="$(git -C "$repo" rev-parse "$remote/$base" 2>/dev/null)"
+          if [ "$parent_live_base" = "$base_branch" ] && ! _restack_empty "$base_sha" \
+             && [ -n "$parent_remote_tip" ] && [ "$parent_remote_tip" != "$base_sha" ]; then
+            mode="cascade"; onto_ref="$parent_remote_tip"
+          else
+            # A human reviewing/merging the parent is the EXPECTED trigger; an
+            # unmerged, un-rewritten parent just means this child isn't ready yet.
+            continue
+          fi
         fi
-        mode="onto-base"; onto_ref="$remote/$base_branch"; retarget="$base_branch"
       fi
 
       # The exact incantation, copy-pasteable — printed BEFORE execution, so it
@@ -1385,14 +1421,29 @@ restack() {
           failed=$((failed + 1)); continue ;;
       esac
 
-      if [ -n "$retarget" ]; then
-        "$gh_bin" pr edit "$pr_num" --base "$retarget" >/dev/null 2>&1 \
-          || echo "spawn-orchestrator: restack $task WARNING — rebased and pushed, but 'gh pr edit --base $retarget' failed; retarget PR #$pr_num by hand"
-        _RS_BASE[$i]="$base_branch"
-      fi
+      # The rebase + force-push already happened, so a child's downstream cascade
+      # must see the new tip regardless of what the retarget does below.
       _RS_BASE_SHA[$i]="$onto_ref"   # this child's parent-tip is now the ref it sits on
       _RS_NEWTIP[$i]="$tip"          # so ITS children cascade onto the tip we just pushed
       restacked=$((restacked + 1)); progressed=1
+
+      local retarget_ok=1
+      if [ -n "$retarget" ]; then
+        if "$gh_bin" pr edit "$pr_num" --base "$retarget" >/dev/null 2>&1; then
+          _RS_BASE[$i]="$base_branch"
+        else
+          # Pushed but NOT retargeted: the PR still points at the merged parent
+          # branch and reaches nothing — the exact QUIET orphan restack exists to
+          # catch. Do NOT mark _RS_BASE as base_branch (that would hide it from
+          # the orphan detector) and record it as a DEFECT, not a success.
+          retarget_ok=0
+          echo "spawn-orchestrator: restack $task DEFECT — rebased and force-pushed $branch, but 'gh pr edit --base $retarget' failed; PR #$pr_num still targets the merged parent branch (retarget by hand: gh pr edit $pr_num --base $retarget)"
+          report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): rebased and force-pushed onto \`$onto_ref\`, but retargeting its PR base to \`$retarget\` FAILED — it still points at the merged parent branch and reaches nothing until a human runs \`gh pr edit $pr_num --base $retarget\` (finding #25, QUIET case).")
+          flagged=$((flagged + 1))
+        fi
+      fi
+      [ "$retarget_ok" = 1 ] || continue
+
       echo "spawn-orchestrator: restack $task done ($mode) — force-pushed $branch, PR #$pr_num${retarget:+ retargeted to $retarget}"
       # The re-verification requirement travels with the child into REPORT.md —
       # a clean rebase proves nothing about whether the child still honors the
@@ -1459,7 +1510,10 @@ restack() {
     || die "restack moved the caller's HEAD ($_RS_REF_BEFORE@$_RS_HEAD_BEFORE -> $ref_after@$head_after) — this is a bug, not a recoverable state"
 
   echo "spawn-orchestrator: restack summary — restacked=$restacked failed=$failed defects=$flagged"
-  [ "$failed" -eq 0 ] || return 2
+  # Non-zero on EITHER a hard failure or a flagged defect (a LOUD/QUIET orphan, a
+  # failed retarget): a supervisor checking `$?` must see that a human is needed,
+  # not read a defects run as a clean success.
+  { [ "$failed" -eq 0 ] && [ "$flagged" -eq 0 ]; } || return 2
 }
 
 # Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
