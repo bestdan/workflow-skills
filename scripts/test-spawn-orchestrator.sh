@@ -239,6 +239,13 @@ sfc "mcp bad chars"         "invalid egress host"  --source plan --coder codex -
 have "settings: valid mcp host accepted" 'mcp.example.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
 have "settings: github wildcard kept"    '*.githubusercontent.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
 
+# --add-task-host: a plan-source run's add-task destination is allowed regardless
+# of --source (a plan run whose add-task handler routes to Linear still needs egress)
+"$SCRIPT" render-settings --source plan --add-task-host api.linear.app --out "$BASE/addtask.json" >/dev/null 2>&1
+have "settings: plan source + add-task-host allows linear" 'api.linear.app' "$(cat "$BASE/addtask.json" 2>/dev/null)"
+sfc "add-task-host bare wildcard" "invalid egress host" --source plan --add-task-host '*'
+sfc "add-task-host bad chars"     "invalid egress host" --source plan --add-task-host 'evil*'
+
 # --- hardening: --confine-under bounds write scopes (task 3, Fable #3) ---------
 mkdir -p "$BASE/root/wt"
 "$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --exec "$BIN" --out "$BASE/cf.sb" >/dev/null 2>&1 \

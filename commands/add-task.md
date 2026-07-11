@@ -10,6 +10,8 @@ Capture follow-up work with full context, then deliver it to the destination con
 
 > **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists (older versions stored tasks there), run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
 
+> **Auto-pilot caller.** The `/auto-pilot` orchestrator (via `/deliver-task`'s iterate step) calls this command unattended to file a co-review finding that is cross-cutting or still open at the 2-round bound, tagged `auto-pilot`, with `status: new` (never `ready` — `/promote-tasks`' human-confidence gate still applies). See `skills/auto-pilot/references/run-state.md` "`REPORT.md`" for the full rule.
+
 ## Steps
 
 ### 1. Gather context

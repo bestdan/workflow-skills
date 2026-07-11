@@ -148,17 +148,18 @@ run actually uses** (resolved coder config + the work source), so a linear+codex
 run never opens devin's or agy's endpoints. The full set of allowable
 purposes → hosts:
 
-| Purpose                          | Hosts                                                                                                                                                                           |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Orchestrator model (`claude -p`) | `api.anthropic.com`                                                                                                                                                             |
-| GitHub (PRs, git over HTTPS)     | `api.github.com`, `github.com`, `codeload.github.com`, `*.githubusercontent.com`                                                                                                |
-| Linear API (key via `op`)        | `api.linear.app`                                                                                                                                                                |
-| npm (verify/build installs)      | `registry.npmjs.org`                                                                                                                                                            |
-| Coder CLI — codex                | `api.openai.com`                                                                                                                                                                |
-| Coder CLI — devin                | `api.devin.ai`, `server.codeium.com`                                                                                                                                            |
-| Coder CLI — agy                  | The concrete Antigravity endpoint host(s), **resolved and recorded at pre-flight** — never a `*.googleapis.com` wildcard (too broad); fail closed if the host can't be resolved |
-| MCP endpoints the tasks touch    | resolved per-run at pre-flight; added explicitly, never wildcarded                                                                                                              |
-| Local tooling                    | loopback `127.0.0.1` / `localhost` only                                                                                                                                         |
+| Purpose                          | Hosts                                                                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestrator model (`claude -p`) | `api.anthropic.com`                                                                                                                                                                                     |
+| GitHub (PRs, git over HTTPS)     | `api.github.com`, `github.com`, `codeload.github.com`, `*.githubusercontent.com`                                                                                                                        |
+| Linear API (key via `op`)        | `api.linear.app`                                                                                                                                                                                        |
+| `/add-task` follow-up filing     | the pre-flight-resolved add-task destination host, passed to `render-settings` via `--add-task-host` regardless of work source — a plan-source run's `/add-task` handler may still route to Linear/Jira |
+| npm (verify/build installs)      | `registry.npmjs.org`                                                                                                                                                                                    |
+| Coder CLI — codex                | `api.openai.com`                                                                                                                                                                                        |
+| Coder CLI — devin                | `api.devin.ai`, `server.codeium.com`                                                                                                                                                                    |
+| Coder CLI — agy                  | The concrete Antigravity endpoint host(s), **resolved and recorded at pre-flight** — never a `*.googleapis.com` wildcard (too broad); fail closed if the host can't be resolved                         |
+| MCP endpoints the tasks touch    | resolved per-run at pre-flight; added explicitly, never wildcarded                                                                                                                                      |
+| Local tooling                    | loopback `127.0.0.1` / `localhost` only                                                                                                                                                                 |
 
 Anything not on the narrowed list is denied — an unexpected egress attempt is a
 signal, not a silent allow.

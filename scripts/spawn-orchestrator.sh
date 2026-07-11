@@ -32,7 +32,7 @@
 #   spawn-orchestrator.sh render-settings \
 #       --source <linear|plan> \
 #       [--coder <codex|devin|agy> ...] [--agy-host <host>] \
-#       [--mcp-host <host> ...] [--npm] \
+#       [--mcp-host <host> ...] [--add-task-host <host> ...] [--npm] \
 #       --out <file>
 #   spawn-orchestrator.sh check-profile <file>
 #   spawn-orchestrator.sh status --label <label> [--dir <run-dir>]
@@ -325,13 +325,14 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
 # opens devin's or agy's endpoints. Args are parsed by render_settings below.
 render_network_allowlist() {
   local source="" agy_host="" npm=0
-  local -a coders=() mcp=()
+  local -a coders=() mcp=() add_task=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --coder) [ $# -ge 2 ] || die "missing value for --coder"; coders+=("$2"); shift 2 ;;
       --source) [ $# -ge 2 ] || die "missing value for --source"; source="$2"; shift 2 ;;
       --agy-host) [ $# -ge 2 ] || die "missing value for --agy-host"; agy_host="$2"; shift 2 ;;
       --mcp-host) [ $# -ge 2 ] || die "missing value for --mcp-host"; mcp+=("$2"); shift 2 ;;
+      --add-task-host) [ $# -ge 2 ] || die "missing value for --add-task-host"; add_task+=("$2"); shift 2 ;;
       --npm) npm=1; shift ;;
       *) die "unknown allowlist argument: $1" ;;
     esac
@@ -362,12 +363,16 @@ render_network_allowlist() {
     esac
   done
   hosts+=(${mcp[@]+"${mcp[@]}"})
+  # The add-task destination host is added regardless of --source: a plan-source
+  # run whose /add-task handler routes to Linear/Jira still needs egress there, or
+  # the run's own settings would deny its own tracked-follow-up filing.
+  hosts+=(${add_task[@]+"${add_task[@]}"})
 
-  # Validate EVERY host, fail-closed. Host values from --mcp-host / --agy-host are
-  # resolved per-run from the (possibly adversary-influenced) work source, so an
-  # unvalidated value could smuggle a bare `*` (nullifying the allowlist) or inject
-  # JSON in hosts_to_json_array. Require a real hostname — labels of [A-Za-z0-9-]
-  # separated by dots, with at most a single leading `*.` subdomain wildcard (which
+  # Validate EVERY host, fail-closed. Host values from --mcp-host / --agy-host /
+  # --add-task-host are resolved per-run from the (possibly adversary-influenced)
+  # work source, so an unvalidated value could smuggle a bare `*` (nullifying the
+  # allowlist) or inject JSON in hosts_to_json_array. Require a real hostname —
+  # labels of [A-Za-z0-9-] separated by dots, with at most a single leading `*.` subdomain wildcard (which
   # `*.githubusercontent.com` legitimately uses; a bare `*` has no labels and is
   # rejected). The agy-specific guard above additionally bans ANY wildcard for agy.
   local h

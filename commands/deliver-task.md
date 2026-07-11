@@ -19,7 +19,9 @@ routing; do not re-derive or restate the workflow here.
 - `--base <branch>` — the branch the work branch is based on (default `main`); the
   `/auto-pilot` orchestrator passes a parent's frozen tip for a stacked task.
 - `--questions <path>` — a `QUESTIONS.md` decision log to append deferred judgment
-  calls to; omit standalone (they ride out in the hand-off summary).
+  calls to; omit standalone (they ride out in the hand-off summary). When passed,
+  a deferred finding that is cross-cutting or still open at the 2-round bound is
+  also filed via `/add-task` (see the skill's "Iterate (bounded)").
 - `--handler <h>` — override handler resolution (`repo-pr | linear | gh-issue |
   jira`); omit to resolve from `.task-config.yml` as today. The `/auto-pilot`
   orchestrator passes its run's effective handler.
