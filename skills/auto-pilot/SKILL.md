@@ -467,6 +467,14 @@ recorded `base_sha` — the parent's frozen tip captured at its hand-off (per
 parent has moved since the base was frozen and the child would build on a stale
 base — **park** the task instead, record it, and continue to the next ready task.
 
+This guard catches only the orchestrator moving a base; it does not protect
+against a **human** merging a stacked PR out of order while the run is live —
+a child PR's diff is only correct relative to its parent's branch, so merging
+out of dependency order corrupts the stack or leaves a confusing diff.
+`REPORT.md` should tell the human to **merge bottom-up, in dependency order**:
+each chain's root PR first, then its children in order, never a child ahead of
+its parent.
+
 **State update after each task.** After `/deliver-task` returns, update
 `RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
 the run-state branch, following the fixed **write order** in
@@ -502,3 +510,10 @@ see REPORT.md`. Nothing is merged or tracker-completed by this exit: every
 task sits at whatever phase it reached (`handed-off` on the tracker as
 `needs_review`, or `started` for a `parked` task), ready for
 `/sweep-for-complete` once a human has reviewed and merged.
+
+For a **plan** source, the run's exit also does **not** delete the plan's
+`<name>_plan/` scaffolding — that graduate-then-delete cleanup
+(`skills/plan-with-docs/SKILL.md` "A `<name>_plan/` folder…") is a **run-level
+teardown** on the run-state/working branch, and ultimately a human follow-up,
+never a graph task the loop dispatches (see
+[`references/adapters.md`](references/adapters.md) "plan adapter").
