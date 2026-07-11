@@ -206,6 +206,11 @@ render_profile() {
   # Credential files: must be an existing FILE (a token, not a dir). The literal
   # deny is emitted after the RW block so it overrides a co-located state-dir
   # write allow; a cred file outside every RW scope is harmless (already unwritable).
+  # KNOWN LIMITATION (documented, not fail-closed): Seatbelt matches on the path,
+  # not the inode, so a second HARD LINK to the same credential inode inside an RW
+  # scope stays writable and would mutate the token through the alias. We do NOT
+  # reject nlink>1 here — a benign multiply-linked file must not fail a launch
+  # closed at 3am — but tool credential files are not hard-linked in practice.
   for p in ${cred[@]+"${cred[@]}"}; do
     c="$(canonicalize "$p")" || exit 2
     [ -f "$c" ] || die "cred-ro path is not a file (fail-closed): $c"

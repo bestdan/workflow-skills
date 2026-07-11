@@ -245,16 +245,24 @@ crprof="$BASE/cred.sb"
 crbody="$(cat "$crprof" 2>/dev/null)"
 have "cred-ro: emits a deny file-write* block"  '(deny file-write*'      "$crbody"
 have "cred-ro: denies the credential literal"   "(literal \"$CREDF\")"   "$crbody"
-have "cred-ro: state dir still write-granted"   "(subpath \"$STATE\")"   "$crbody"
 lack "cred-ro: no @@tokens@@ remain"            '@@'                     "$crbody"
-# ordering is load-bearing: Seatbelt takes the LAST matching rule, so the cred
-# deny MUST appear after the state-dir file-write* allow to override it.
-awln="$(printf '%s\n' "$crbody" | grep -n 'allow file-write\*' | head -1 | cut -d: -f1)"
-dnln="$(printf '%s\n' "$crbody" | grep -n 'deny file-write\*'  | head -1 | cut -d: -f1)"
-if [ -n "$awln" ] && [ -n "$dnln" ] && [ "$dnln" -gt "$awln" ]; then
-  ok "cred-ro: deny ordered after the write allow"
+# Ordering is load-bearing AND must be proved precisely: Seatbelt takes the LAST
+# matching rule, so the cred deny must follow the state dir's *file-write* allow*
+# specifically — not merely some earlier write rule (the static /dev/null allow),
+# and not the state path's *read* allow. Walk the profile: confirm the STATE
+# subpath appears inside a `(allow file-write* …)` block, then a `(deny
+# file-write* …)` block carrying the cred literal comes AFTER it. This is the only
+# in-jail proof when the behavioral sandbox checks below are skipped.
+order_ok="$(awk -v st="(subpath \"$STATE\")" -v cr="(literal \"$CREDF\")" '
+  /\(allow file-write\*/ { mode="w" }
+  /\(deny file-write\*/  { mode="d" }
+  mode=="w" && index($0, st) { wl=NR }
+  mode=="d" && wl && index($0, cr) { print "yes"; exit }
+' "$crprof")"
+if [ "$order_ok" = yes ]; then
+  ok "cred-ro: cred deny follows the state-dir write allow (precise)"
 else
-  bad "cred-ro: deny ordered after the write allow" "allow@$awln deny@$dnln"
+  bad "cred-ro: cred deny follows the state-dir write allow (precise)"
 fi
 # no --cred-ro → placeholder comment, no stray deny form
 "$SCRIPT" render-profile --rw "$STATE" --exec "$BIN" --out "$BASE/nocred.sb" >/dev/null 2>&1
