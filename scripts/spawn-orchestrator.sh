@@ -85,10 +85,13 @@
 #                  exist on this host) to the exec-dir set.
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
-#     Every render ALSO emits a fixed (non-caller-supplied) write scope for
-#     Claude Code's own runtime files under $TMPDIR/tmp — the srt-mux-*.sock
-#     mux socket and the claude-*-cwd tracking file — so the harness's own
-#     inner sandbox can initialize and Bash exit codes stay trustworthy
+#     Every render ALSO emits fixed, RENDERER-OWNED (never caller-supplied) write
+#     scopes for Claude Code's own runtime surface: the $TMPDIR srt-mux-*.sock mux
+#     socket (file-write* + network-bind), the /tmp/claude-<uid> scratch/cwd tree,
+#     and ~/.claude/session-env. Without them the harness's inner sandbox can't
+#     initialize and the Bash tool EPERMs on its own mkdir BEFORE running anything
+#     — poisoning every exit code to 1. Renderer-owned because two of the three
+#     live outside the run root and would otherwise trip --confine-under
 #     (task 12 / finding #20; see orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@).
 #   check-profile  Confirm a rendered profile COMPILES via `sandbox-exec -f`,
 #                  surfacing the Seatbelt parser error verbatim on failure.
@@ -173,24 +176,56 @@ sbpl_regex_escape() {
   printf '%s' "$out"
 }
 
-# Emit the FIXED (never caller-supplied) write scopes for Claude Code's own
-# runtime files — the srt-mux-*.sock mux socket the harness's inner sandbox
-# binds/listens on under $TMPDIR, and the claude-*-cwd cwd-tracking file it
-# rewrites under /tmp after every Bash call (see orchestrator.sb.tmpl's
-# @@HARNESS_RUNTIME@@ comment for why denying either poisons the harness
-# itself — task 12 / finding #20). Args: <tmpdir-canonical> <tmp-canonical>.
+# Resolve a path whose LEAF may not exist yet. The harness creates its runtime
+# dirs LAZILY (on first session), so canonicalize()'s existence check would
+# fail-close a launch just because a dir hasn't been made yet — which is the
+# wrong trade at 3am. Canonicalize the deepest EXISTING ancestor (so /tmp →
+# /private/tmp still resolves through the symlink) and re-append the missing
+# tail verbatim. Prints the resolved path; returns non-zero only if even the
+# ancestor chain can't be resolved.
+resolve_lazy() {
+  local p="$1" tail=""
+  case "$p" in /*) ;; *) echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2; return 1 ;; esac
+  while [ ! -e "$p" ] && [ "$p" != "/" ]; do
+    tail="/$(basename "$p")$tail"
+    p="$(dirname "$p")"
+  done
+  local c; c="$(canonicalize "$p")" || return 1
+  printf '%s%s' "$c" "$tail"
+}
+
+# Emit the FIXED (never caller-supplied) write scopes for Claude Code's OWN
+# runtime surface. These are host-resolved by the renderer, NOT passed as --rw,
+# and that is load-bearing: two of the three live OUTSIDE the run root, so a
+# caller-supplied --rw would either trip the --confine-under guard or force the
+# launch path to weaken it. Renderer-owned means the containment guard keeps
+# covering every caller scope while the harness still gets exactly what it needs.
+# See orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@ comment for why denying any of
+# these poisons the harness itself (task 12 / finding #20).
+# Args: <tmpdir-canonical> <claude-tmp-tree> <session-env-dir>.
 emit_harness_runtime() {
-  local tmpdir_c="$1" tmp_c="$2"
-  local sock_pattern cwd_pattern
+  local tmpdir_c="$1" claude_tmp="$2" session_env="$3"
+  local sock_pattern
   sock_pattern="^$(sbpl_regex_escape "$tmpdir_c")"'/srt-mux-[0-9]+-[0-9]+\.sock$'
-  cwd_pattern="^$(sbpl_regex_escape "$tmp_c")"'/claude-.*-cwd$'
   printf '(allow file-write*\n'
   printf '  (regex #"%s")\n' "$sock_pattern"
-  printf '  (regex #"%s")\n' "$cwd_pattern"
+  # The harness's per-project/per-session scratch + cwd tree under /tmp. This is
+  # a DIRECTORY TREE it mkdir's into, not a single file — a file-only grant
+  # (e.g. just the claude-*-cwd literal) does not permit the enclosing mkdir, so
+  # the Bash tool dies before it ever runs the command. Subpath, scoped to this
+  # uid's own tree only.
+  printf '  (subpath "%s")\n' "$(sbpl_escape "$claude_tmp")"
+  # The harness mkdir's a per-session dir under ~/.claude/session-env. Scoped to
+  # session-env SPECIFICALLY — never a blanket ~/.claude write, which would put
+  # the credential file inside a writable scope and undo the cred-RO/state-RW
+  # split (§3) that --cred-ro exists to enforce.
+  printf '  (subpath "%s")\n' "$(sbpl_escape "$session_env")"
   printf ')\n'
   # network-bind: a unix-domain socket bind/listen is gated on the socket's own
   # path (like Apple's own rpcbind.sb), not a free network class — this grant is
-  # required IN ADDITION to the file-write* above, not instead of it.
+  # required IN ADDITION to the file-write* above, not instead of it. Without it
+  # the harness's inner sandbox can't listen on its mux socket and silently
+  # disables itself for the session.
   printf '(allow network-bind\n'
   printf '  (regex #"%s")\n' "$sock_pattern"
   printf ')\n'
@@ -354,14 +389,17 @@ render_profile() {
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   cred_block="$(emit_deny_write ${cred_c[@]+"${cred_c[@]}"})"
   ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
-  # Harness's OWN runtime files (task 12 / finding #20) — fixed, host-resolved
-  # paths, never caller-supplied. $TMPDIR and /tmp must both already exist on
-  # any host that can run this renderer, so canonicalize fail-closed like every
-  # other path here.
-  local tmpdir_c tmp_c
+  # Harness's OWN runtime surface (task 12 / finding #20) — fixed, host-resolved
+  # paths, never caller-supplied (and so never subject to the caller-scope
+  # --confine-under check above; two of these legitimately live outside the run
+  # root). $TMPDIR must exist; the two harness dirs are created lazily on first
+  # session, so resolve_lazy tolerates their absence rather than fail-closing a
+  # launch over a dir the harness is about to make itself.
+  local tmpdir_c claude_tmp session_env
   tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
-  tmp_c="$(canonicalize "/tmp")" || exit 2
-  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_c")"
+  claude_tmp="$(resolve_lazy "/tmp/claude-$(id -u)")" || exit 2
+  session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
+  harness_block="$(emit_harness_runtime "$tmpdir_c" "$claude_tmp" "$session_env")"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.
