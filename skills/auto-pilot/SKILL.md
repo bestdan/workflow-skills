@@ -265,7 +265,10 @@ Per [`references/launch-runtime.md`](references/launch-runtime.md):
 1. Write the self-contained **launch script** — env, the sandbox wrapper (the
    two-layer profile: seatbelt/bwrap for filesystem+process, the harness network
    allowlist narrowed to this run's tools for host egress), and log redirection
-   to `.auto-pilot/orchestrator.log`.
+   to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
+   pre-flight's resolved `/add-task` destination host via `render-settings
+   --add-task-host`, so the run's own settings never deny its own follow-up
+   filing regardless of work source.
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).
@@ -429,6 +432,16 @@ reversible call, the orchestrator (or `/deliver-task` beneath it) picks the
 path above) and orchestrator-level decisions made in this loop itself — e.g.
 skip vs park, a stacked-PR base-reconciliation choice.
 
+**Deferred co-review findings that are cross-cutting or round-bound also get a
+task.** When `/deliver-task`'s iterate step (its "Iterate (bounded)" section)
+defers a co-review finding that is **cross-cutting** (its faithful fix would
+touch a file outside the task's `related_files`, or change a spec/section
+another consumer cites) or is **still open at the hard 2-round bound**, it
+files a tracked follow-up via `/add-task` — tagged `auto-pilot` — in addition
+to the `QUESTIONS.md` entry, which then references the created task id.
+Dedupe/cap rules and the `REPORT.md` **Follow-ups** index live in
+[`references/run-state.md`](references/run-state.md) "`REPORT.md`".
+
 **Human checkpoints produce artifacts, then proceed.** When a task hits
 something that genuinely needs human judgment, the run still does not block:
 `/deliver-task` ensures the PR carries a working end-to-end state plus a
@@ -436,7 +449,7 @@ how-to-evaluate note, the orchestrator records the same entry in `REPORT.md`'s
 _How-to-evaluate queue_, and the loop moves on. Nothing waits for a reply.
 
 **Rolling `REPORT.md` update.** After every task's state update above, rewrite
-`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the six
+`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the seven
 sections in [`references/run-state.md`](references/run-state.md)'s "`REPORT.md`"
 order. Commit it on the run-state branch as part of that state update's commit,
 under the write order's last step. Its _Spend_ section stays a one-line

@@ -202,6 +202,20 @@ are never applied silently:
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
 
+**Cross-cutting or round-bound deferrals also get filed.** When `--questions`
+is passed (running under `/auto-pilot`) and a deferred finding is
+**cross-cutting** — its faithful fix would touch a file outside this task's
+`related_files`, or change a spec/section another consumer cites — or is
+**still deferred after the second iterate round**, also file it as a tracked
+follow-up via `/add-task` tagged `auto-pilot`, and record the created task id
+in the `QUESTIONS.md` entry. Dedupe within the run (one follow-up per
+underlying finding/spec) and respect the run's cap on auto-filed follow-ups;
+excess and any `/add-task` failure go to `REPORT.md`'s **Follow-ups** section
+instead — never fatal, the run continues. Full rule and the cap value live in
+[`../auto-pilot/references/run-state.md`](../auto-pilot/references/run-state.md)
+"`REPORT.md`". Standalone (no `--questions`), skip this — findings ride out in
+the hand-off summary as above.
+
 **Hard bound: 2 rounds** (two review→fix passes total). Stop early when a round
 surfaces no new high-confidence fixes; after the second round, record any
 remaining findings and proceed — don't loop.

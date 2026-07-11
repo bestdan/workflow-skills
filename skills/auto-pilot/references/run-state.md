@@ -94,6 +94,8 @@ Append-only, indexed. One entry per reversible decision the run made on its own
 
 Every entry carries: the question, the options considered, the call made, the
 reasoning, and the reversibility. Prefer the reversible option when uncertain.
+A deferred co-review finding that was also filed as a tracked follow-up (see
+`REPORT.md` "Follow-ups" below) references the created task id in its entry.
 
 ### `REPORT.md`
 
@@ -108,6 +110,22 @@ The report, rewritten after every unit of work. Sections:
 5. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
    for each PR (the summary `/co-review --non-interactive` emits).
 6. **Spend** — usage against the rate window and any per-task bounds hit.
+7. **Follow-ups** — the index of every co-review finding filed as a tracked
+   task this run: task id, source PR, and the one-line finding. A finding is
+   auto-filed via `/add-task` (tagged `auto-pilot`) when it is deferred **and**
+   either **cross-cutting** (its faithful fix would touch a file outside the
+   task's `related_files`, or change a spec/section another consumer cites) or
+   **still open at the hard 2-round co-review bound** — this is the index of
+   what got filed, not an alternative to filing it: every entry here was both
+   listed and delivered to the tracker. Guardrails against unattended spam:
+   dedupe within the run (one follow-up per underlying finding/spec, not one
+   per occurrence), and cap auto-filed follow-ups at **5 per run** — excess
+   findings are recorded here as a plain bullet (task id `none`) instead of
+   filed. Auto-filed tasks land in the tracker's triage/new state, never
+   `ready`: `/promote-tasks`' human-confidence gate still has to clear them
+   before they enter work, so a hallucinated finding is caught before it costs
+   anything. If `/add-task` itself fails, the run does not fail — the finding
+   is recorded here as a plain bullet (task id `none`) instead.
 
 ## Run-state branch
 
