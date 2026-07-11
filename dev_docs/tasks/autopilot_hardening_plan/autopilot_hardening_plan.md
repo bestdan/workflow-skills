@@ -96,6 +96,19 @@ by living through them. Four become tasks (the fifth, #21, folded into task 8):
 12. [[autopilot_hardening_task_12]] — **P1**: jail permits the harness's own `$TMPDIR` mux socket + cwd files — **stops every Bash exit code being poisoned to 1**. (#20)
 13. [[autopilot_hardening_task_13]] — P2: run loop must never check out a task branch in the run worktree; `--resume` reads run state from the **branch**, not the working tree. (#23)
 
+### The class, not the instances — "failure modes look like success"
+
+Tasks 10–13 fix the four specific bugs run #2 hit. Tasks 14–16 fix the **property**
+that let all of them run unchecked. Both production failures exited `0`,
+`is_error: false`, `terminal_reason: completed` — and neither tripped a single
+existing safeguard, because the circuit breaker only counts *delivery* failures and
+neither failure was one. A run can be thoroughly broken while every signal the system
+checks reads green, and the only thing that actually caught both was a human asking.
+
+14. [[autopilot_hardening_task_14]] — **P1**: a **run doctor** — assert the run's own invariants every iteration (HEAD, run state readable from the branch, phases match git/PR reality, no orphan worktrees, forward progress); repair or halt, never drift. Generalizes #22/#23.
+15. [[autopilot_hardening_task_15]] — P2: an **exit contract** — `continuing` / `paused` / `done` / `systemic` / `deadline`, plus a **heartbeat**, so "finished" and "wedged mid-task" stop being the same observable event (`exit 0`). Makes task 8's done-sentinel load-bearing.
+16. [[autopilot_hardening_task_16]] — **P1**: an **alarm channel** — a halted *or merely stalled* run must actively notify a human, from the **supervisor in shell** (a dead agent can't alert anyone), saying what to *do*. #22 cost 4h14m of pure silence.
+
 ## What run #2 taught us (findings 19–23)
 
 Tasks 10–13 come from a different source than tasks 1–9: not a review of run #1's
@@ -118,10 +131,28 @@ serious enough to restate:
   before in-jail verify can be trusted, and the confinement smoke needs an assertion
   that the jail can even *report an exit code correctly*.
 
-The through-line for #19/#22 (tasks 10, 11): **the supervisor should decide in shell
-what it can decide in shell.** A timestamp comparison and an exit-code
-classification need no model — and an agent that is rate-limited or auth-dead cannot
-run its own bookkeeping anyway, so it must not be the thing deciding whether to stop.
+The through-line for #19/#22 (tasks 10, 11, and the supervisor half of 15/16): **the
+supervisor should decide in shell what it can decide in shell.** A timestamp
+comparison, an exit-code classification, and firing an alarm need no model — and an
+agent that is rate-limited or auth-dead cannot run its own bookkeeping anyway, so it
+must not be the thing deciding whether to stop, or the thing responsible for saying
+so.
+
+**The deeper lesson (tasks 14–16): auto-pilot's failure modes look like success.**
+Every production failure so far — the 401 relaunch loop, the vanished run state, an
+orchestrator exiting mid-task — presented as `exit 0`, `is_error: false`,
+`terminal_reason: completed`. None tripped a safeguard, because the circuit breaker
+counts *delivery* failures and none of these was one. Two consequences the plan now
+carries:
+
+- **Green is not evidence of health** (task 14). The run must continuously assert its
+  own invariants, because "nothing reported an error" demonstrably does not mean
+  nothing is wrong.
+- **An unattended run that fails silently has no failure mode at all** (task 16). The
+  breaker, the fatal-auth halt, and the doctor are each worthless if their output is
+  a file on a branch nobody reads at 3am. #23 was caught within 7 minutes only
+  because a human had just set up a heartbeat; #22 went unnoticed for 4h14m because
+  no one had.
 
 ## Open questions
 
