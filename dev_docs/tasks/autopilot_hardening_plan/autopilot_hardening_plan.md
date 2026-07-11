@@ -110,7 +110,9 @@ checks reads green, and the only thing that actually caught both was a human ask
 16. [[autopilot_hardening_task_16]] — **P1**: an **alarm channel** — a halted *or merely stalled* run must actively notify a human, from the **supervisor in shell** (a dead agent can't alert anyone), saying what to *do*. #22 cost 4h14m of pure silence.
 17. [[autopilot_hardening_task_17]] — **P1**: **enforce** the no-interactive-prompt rule — **detaching via launchd re-triggers macOS consent gates**, because TCC grants belong to your *terminal*, not to a launchd-spawned binary. Probe under the real (detached, no-TTY) attribution; any consent gate **blocks launch**. (#24)
 
-**A rule with no enforcement is a comment.** Task 17 is the third instance of one
+18. [[autopilot_hardening_task_18]] — **P1**: **automate the post-merge restack** of stacked PRs. Merging a parent under squash-merge orphans its children — loudly (base deleted → PR auto-closed, as happened to the P1 #172) or **quietly** (child still targets the parent's *branch*, so merging it never reaches `main`). Closes run-#1's finding #14. (#25)
+
+**A rule with no enforcement is a comment.** Tasks 17 and 18 are the third and fourth instances of one
 structural pattern, and the plan should say it plainly: `launch-runtime.md` §3 already
 declares "a tool that can only authenticate via an interactive Keychain/helper prompt
 is a **launch blocker**" — and nothing checks it, so run #2 launched straight into
