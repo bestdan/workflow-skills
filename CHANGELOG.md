@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.47.1] - 2026-07-11
+
+### Fixes
+
+- the run worktree's HEAD never leaves the run-state branch (task 13) (#181) (85bb0d9)
+
 ## [1.47.0] - 2026-07-11
 
 ### Features
