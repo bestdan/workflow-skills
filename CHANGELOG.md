@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.47.2] - 2026-07-11
+
+### Fixes
+
+- permit the harness's own $TMPDIR runtime files — stop poisoning every Bash exit code (task 12) (#182) (65e4008)
+
 ## [1.47.1] - 2026-07-11
 
 ### Fixes
