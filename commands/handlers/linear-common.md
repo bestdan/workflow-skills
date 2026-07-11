@@ -15,7 +15,7 @@ Linear is accessed via the official MCP server connected from `https://mcp.linea
 
 ## Config block
 
-The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. Commands read the **merged view** — `.task-config.yml` overlaid with the optional gitignored `.task-config.local.yml` (per-key: local wins; see `task-config.md` → "Local override"). The config keys (top-level `wip_limit` plus the `linear:` block):
+The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. Commands read the **merged view** — `.task-config.yml` overlaid with the optional gitignored `.task-config.local.yml` (mappings merge recursively — a local `linear.api_key_ref` overlays just that leaf and keeps the committed `team`/`projects`; see `task-config.md` → "Local override"). The config keys (top-level `wip_limit` plus the `linear:` block):
 
 ```yaml
 handler: linear

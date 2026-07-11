@@ -45,11 +45,17 @@ safe mechanical repairs. Both reference the single migration procedure in
 Note whether `$ARGUMENTS` contains `--fix` (default: report-only). Then read the config:
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
 
-A missing file is not an error — it means the default `repo-pr` handler. Hold the
-parsed `handler:` value (default `repo-pr`) for checks 1 and 2.
+A missing file is not an error — it means the default `repo-pr` handler. **Overlay
+the local override on the committed config** — mappings merge recursively, local
+leaf values win (see `task-config.md` → "Local override") — and use this **merged**
+view for every check below (the linear `api_key_ref` resolution check in particular
+depends on it). Hold the parsed `handler:` value (default `repo-pr`) for checks 1
+and 2.
 
 ### 2. Run the checks
 

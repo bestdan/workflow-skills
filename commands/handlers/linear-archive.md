@@ -25,8 +25,9 @@ mapping this file reuses.
 > them, so `op read` / `op item get` there usually returns `account is not
 > signed in` even while you are signed in interactively — **but not always**: an
 > authorized environment or a `OP_SERVICE_ACCOUNT_TOKEN` in the shell can make it
-> succeed. **Test once** (`op item get … --reveal`); if it resolves, use it. If it
-> returns `account is not signed in`, fall back to one of these two paths:
+> succeed. **Test once** with a non-revealing probe (`op read "<ref>" >/dev/null
+> 2>&1`); if it resolves (exit 0), use it. If it returns `account is not signed
+> in`, fall back to one of these two paths:
 >
 > - **Interactive:** run the archive step in _your_ terminal via the session's
 >   `!` prefix (e.g. `! python3 …`), where `op` is authorized. The agent prepares
@@ -92,7 +93,7 @@ native window, or needs to drain a workspace that has already hit the cap.
    `!`, or a headless shell with `OP_SERVICE_ACCOUNT_TOKEN`) — not the agent's own
    subshell. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
    needs a personal API key. Add `linear.api_key_ref` (a 1Password `op://`
-   reference) to `dev_docs/tasks/.task-config.yml` — see
+   reference) to the gitignored `dev_docs/tasks/.task-config.local.yml` — see
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a
    pasted key and do not write one to the repo.
 
