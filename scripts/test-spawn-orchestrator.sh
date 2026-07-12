@@ -1024,7 +1024,7 @@ GT_SANDBOX="$GT/bin/sandbox-exec"
   printf 'exec "$@"\n'
 } >"$GT_SANDBOX"
 chmod +x "$GT_SANDBOX"
-GT_PATH="$GT/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+GT_PATH="$GT/bin:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # epoch -> RUN.md's ISO-8601 UTC form, portable across BSD/GNU `date`.
 _gate_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
@@ -1524,7 +1524,7 @@ if command -v git >/dev/null 2>&1; then
   # (the wrapper's sandbox-exec composition itself is asserted above).
   printf '#!/bin/sh\n[ "$1" = -f ] && shift 2\nexec "$@"\n' >"$ALSTUB/sandbox-exec"
   chmod +x "$ALSTUB/osascript" "$ALSTUB/launchctl" "$ALSTUB/claude" "$ALSTUB/sandbox-exec"
-  ALPATH="$ALSTUB:/usr/bin:/bin"
+  ALPATH="$ALSTUB:$GUARD:/usr/bin:/bin"
 
   # <dir> <status> <until> <n-parked>: a real git run worktree, so the halt's
   # run-state commit and the no-progress guard's HEAD read both work for real.
@@ -1711,7 +1711,7 @@ if command -v git >/dev/null 2>&1; then
   chmod +x "$ALFAIL/osascript" "$ALFAIL/terminal-notifier"
   A9="$AL/nonotify"; mkrun "$A9" active 2099-01-01T00:00:00 0
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A9/.auto-pilot/orchestrator.log"
-  n9="$(PATH="$ALFAIL:/usr/bin:/bin" "$SCRIPT" supervisor-check --exit-code 1 \
+  n9="$(PATH="$ALFAIL:$GUARD:/usr/bin:/bin" "$SCRIPT" supervisor-check --exit-code 1 \
     --log "$A9/.auto-pilot/orchestrator.log" --dir "$A9" --label com.autopilot.test.nonotify \
     --state "$A9/.auto-pilot/supervisor-state" 2>&1)"
   have "alarm/no-notifier: says the notification failed" 'NOTIFY FAILED' "$n9"
@@ -1899,7 +1899,7 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"stub wa
 exit "${STUB_EXIT_CODE:-0}"
 CLEOF
   chmod +x "$STUB/sandbox-exec" "$STUB/launchctl" "$STUB/claude"
-  STUB_PATH="$STUB:/usr/bin:/bin"
+  STUB_PATH="$STUB:$GUARD:/usr/bin:/bin"
 
   # Drive one full wake through the REAL generated launch script.
   # ec_wake <name> <declared-reason|""> <claude-exit-code>
@@ -2267,7 +2267,7 @@ LCFEOF
   printf '# report\n' >"$BF/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$BF/log"
   : >"$BF/launchctl.log"
-  bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF:/usr/bin:/bin" \
+  bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$BF/log" --dir "$BF" \
     --label com.autopilot.ec.bf --state "$BF/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
   bfboots="$(grep -c 'bootout' "$BF/launchctl.log" 2>/dev/null)"; bfboots="${bfboots:-0}"
@@ -2279,6 +2279,130 @@ LCFEOF
   fi
   have "exit contract [bootout fails]: a still-loaded job is reported LOUDLY, never swallowed" \
     'STILL LOADED' "$bferr"
+
+  # --- `die` is `exit`, and an `exit` inside a same-shell function escapes ------
+  # `|| true` (task 26 / sweep after #191). `teardown` `die`s if
+  # `_write_done_sentinel` fails (an unwritable run dir); `_write_supervisor_state`
+  # `die`s the same way. Both sit on the halt/teardown path, right before
+  # `_verify_bootout` — the ONE check that turns a still-loaded job into a LOUD
+  # warning instead of a silent relaunch loop (finding #22). An unguarded `die`
+  # there aborts the whole supervisor process before that warning ever prints.
+  #
+  # Both fixtures below BREAK the side channel (chmod the run dir read-only, so
+  # every mktemp under .auto-pilot/ fails) and assert the halt/teardown still
+  # completes: exit 0 (never the bare `die` exit 2), and the STILL-LOADED warning
+  # still fires. Driven through the REAL `supervisor-check` entry point — the same
+  # one the generated launch script's last line invokes as a separate process.
+
+  # --- the SYSTEMIC HALT path survives a die-capable teardown ---------------
+  HB="$EC/halt-unwritable-sentinel"; mkdir -p "$HB/.auto-pilot"
+  ( cd "$HB" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason_detail: task-26 repro — unwritable sentinel dir\n'
+    printf -- '---\n'; } >"$HB/.auto-pilot/RUN.md"
+  printf '# report\n' >"$HB/.auto-pilot/REPORT.md"
+  ( cd "$HB" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  printf 'ok\n' >"$HB/log"
+  : >"$HB/launchctl.log"
+  # Break the side channel: every mktemp under .auto-pilot/ (the done-sentinel,
+  # the RUN.md rewrite, the ALARM sentinel) now fails with EACCES.
+  chmod -w "$HB/.auto-pilot"
+  hbout="$(STUB_LAUNCHCTL_LOG="$HB/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$HB/log" --dir "$HB" \
+    --label com.autopilot.ec.hb --state "$HB/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
+  hbrc=$?
+  chmod +w "$HB/.auto-pilot"   # restore: the trap's rm -rf must be able to clean up
+  [ "$hbrc" = 0 ] \
+    && ok "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" \
+    || bad "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" "exit=$hbrc"
+  have "halt survives unwritable sentinel: _verify_bootout STILL runs and reports the job STILL LOADED" \
+    'STILL LOADED' "$hbout"
+
+  # --- the DECLARED-DONE teardown path survives a die-capable state write AND --
+  # a die-capable teardown (same shape, different caller — supervisor_check's own
+  # done|deadline branch, not the halt).
+  DS="$EC/done-unwritable-sentinel"; mkdir -p "$DS/.auto-pilot"
+  ( cd "$DS" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$DS/.auto-pilot/RUN.md"
+  printf '# report\n' >"$DS/.auto-pilot/REPORT.md"
+  ( cd "$DS" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  printf 'ok\n' >"$DS/log"
+  : >"$DS/launchctl.log"
+  chmod -w "$DS/.auto-pilot"
+  dsout="$(STUB_LAUNCHCTL_LOG="$DS/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$DS/log" --dir "$DS" \
+    --label com.autopilot.ec.ds --state "$DS/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
+  dsrc=$?
+  chmod +w "$DS/.auto-pilot"
+  [ "$dsrc" = 0 ] \
+    && ok "declared-done teardown survives unwritable sentinel: exits 0, never the bare die (2)" \
+    || bad "declared-done teardown survives unwritable sentinel: exits 0, never the bare die (2)" "exit=$dsrc"
+  have "declared-done teardown survives unwritable sentinel: _verify_bootout STILL runs and reports the job STILL LOADED" \
+    'STILL LOADED' "$dsout"
+
+  # --- the NO-PROGRESS halt survives a die-capable bookkeeping write -------------
+  # The halt paths above are reached because the run DECLARED an exit reason. This
+  # one is the backstop for a run that declares NOTHING and just keeps crashing —
+  # and it is the more important of the two, because it is the only thing standing
+  # between a wedged run and an infinite relaunch loop.
+  #
+  # `_write_supervisor_state` (the no-progress COUNTER) `die`s on a write failure,
+  # and it runs immediately BEFORE the halt. Unguarded, an unwritable run dir means
+  # every wake exits 2 at `mktemp failed` before the halt is ever evaluated: no
+  # halt, no alarm, no teardown, job still loaded, StartInterval relaunching
+  # forever. Zero work, zero alarm — finding #22's loop, reached THROUGH the guard
+  # that exists to backstop it. Same shape the declared-done branch above already
+  # fixed for the same function; this is the call site that was missed.
+  NP26="$EC/noprogress-unwritable"; mkdir -p "$NP26/.auto-pilot"
+  ( cd "$NP26" && git init -q )
+  # status active, and NO exit_reason: an agent that crashed without declaring.
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >"$NP26/.auto-pilot/RUN.md"
+  printf '# report\n' >"$NP26/.auto-pilot/REPORT.md"
+  ( cd "$NP26" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  printf 'crash\n' >"$NP26/log"
+  : >"$NP26/launchctl.log"
+  chmod -w "$NP26/.auto-pilot"
+  # BOTH streams: the halt's own line and the STILL-LOADED warning go to stderr, but
+  # the `ALARM no-progress` announcement goes to stdout — an stderr-only capture
+  # would silently miss the very signal this test exists to prove.
+  npout="$(STUB_LAUNCHCTL_LOG="$NP26/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$NP26/log" --dir "$NP26" \
+    --label com.autopilot.ec.np26 --no-progress-limit 1 \
+    --state "$NP26/.auto-pilot/supervisor-state" 2>&1)"
+  nprc=$?
+  chmod +w "$NP26/.auto-pilot"
+  [ "$nprc" != 2 ] \
+    && ok "no-progress halt survives unwritable run dir: never the bare _write_supervisor_state die (2)" \
+    || bad "no-progress halt survives unwritable run dir: never the bare _write_supervisor_state die (2)" "exit=$nprc (died at 'mktemp failed' before the halt)"
+  have "no-progress halt survives unwritable run dir: the halt STILL fires" \
+    'supervisor halt' "$npout"
+  have "no-progress halt survives unwritable run dir: the ALARM is STILL raised" \
+    'ALARM no-progress' "$npout"
+  have "no-progress halt survives unwritable run dir: _verify_bootout STILL reports the job STILL LOADED" \
+    'STILL LOADED' "$npout"
+
+  # --- regression guard: the specific subshells stay in place -------------------
+  # A grep, not a functional re-run: pins the EXACT fix shape (subshelled `die`
+  # is `exit`" callers, task 26) so a future edit that unwraps one of these three
+  # calls back to a bare `fn ... || true` fails FAST, before anyone has to
+  # rediscover the unwritable-sentinel repro above to explain a red suite.
+  guardbody="$(cat "$SCRIPT")"
+  have "regression guard: _verify_bootout subshells its internal teardown call" \
+    '( teardown --label "$label" >/dev/null ) || true' "$guardbody"
+  have "regression guard: _supervisor_halt subshells its teardown call" \
+    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null ); then' \
+    "$guardbody"
+  have "regression guard: supervisor-check's declared-done/deadline branch subshells _write_supervisor_state" \
+    '( _write_supervisor_state "$state" 0 "$(_run_head "$dir")" ) \' "$guardbody"
+  have "regression guard: supervisor-check's declared-done/deadline branch subshells teardown" \
+    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null ); then' \
+    "$guardbody"
+  have "regression guard: the no-progress guard subshells its supervisor-state write" \
+    '( _write_supervisor_state "$state" "$count" "$head" ) \' "$guardbody"
+  have "regression guard: doctor's invariant-7 guard subshells its supervisor-state write" \
+    '( _write_supervisor_state "$dstate" "$count" "$head" ) \' "$guardbody"
 
   # --- a declared `systemic` PRESERVES the orchestrator's own diagnosis -----------
   # The supervisor used to pass a fixed string ("…see RUN.md pause_reason…") which
@@ -3294,6 +3418,33 @@ GHWEOF
   have "doctor I7: the halt files an alarm-request naming invariant 7" \
     'invariant 7' "$(cat "$D7/run/.auto-pilot/alarm-requests/invariant.alarm" 2>/dev/null)"
 
+  # I7 with the side channel BROKEN (task 26). `_write_supervisor_state` — the
+  # no-progress COUNTER — `die`s (an `exit`) on a write failure and runs immediately
+  # BEFORE this halt, so an unwritable run dir would abort the whole doctor process
+  # at `mktemp failed` before invariant 7 ever halts, and before doctor's own exit-30
+  # (HALT) contract could be honoured: the caller sees a bare `2`, reads it as
+  # "doctor errored" rather than "the run must stop", and a wedged run keeps being
+  # dispatched. The counter itself cannot advance while the dir is unwritable — but
+  # the halt for THIS iteration must still fire, and must still be an exit 30.
+  D7U="$DOC/i7-unwritable"; RUN_ID7U="doctor-i7u"
+  _doctor_new_run "$D7U" "$RUN_ID7U"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\npause_reason: \n---\n\n' "$RUN_ID7U"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t1 | pending | - | main | - | - | |\n'
+  } >"$D7U/run/.auto-pilot/RUN.md"
+  : >"$D7U/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D7U/run/.auto-pilot/REPORT.md"
+  git -C "$D7U/run" add .auto-pilot; git -C "$D7U/run" commit -q -m "seed run state"
+  chmod -w "$D7U/run/.auto-pilot"
+  d7uout="$("$SCRIPT" doctor --dir "$D7U/run" --run-id "$RUN_ID7U" --no-progress-limit 1 2>&1)"; d7urc=$?
+  chmod +w "$D7U/run/.auto-pilot"
+  [ "$d7urc" = 30 ] \
+    && ok "doctor I7 (unwritable run dir): still HALTS with exit 30, never the bare die (2)" \
+    || bad "doctor I7 (unwritable run dir): still HALTS with exit 30, never the bare die (2)" "exit=$d7urc out=$d7uout"
+  have "doctor I7 (unwritable run dir): the halt still names invariant 7" 'invariant 7' "$d7uout"
+
   # THE gate: a caller checking doctor's exit code cannot reach a dispatch.
   would_dispatch=1
   [ "$d7rc" = 30 ] && would_dispatch=0
@@ -3385,6 +3536,36 @@ case "$guard_tn" in
   "$GUARD"/*) ok "notifier guard: terminal-notifier resolves INSIDE the guard dir" ;;
   *) bad "notifier guard: terminal-notifier resolves INSIDE the guard dir" "resolved to: ${guard_tn:-(not found)}" ;;
 esac
+#   3. STRUCTURAL — the checks above only see the INHERITED PATH. Every fixture
+#      that OVERRIDES PATH (`PATH="$STUB_PATH" "$SCRIPT" …`) escapes them entirely:
+#      if that PATH omits $GUARD and the stub dir has no osascript of its own, the
+#      alarm resolves /usr/bin/osascript and pops a REAL notification on the
+#      developer's desktop. Check (2) cannot see it — an escaped call never reaches
+#      the guard log, so the count stays plausible and the suite stays green while
+#      leaking. That is exactly how this leak survived: a test that asserts only
+#      what it catches can never report what got away. So assert it at the source:
+#      under EVERY composite PATH this suite builds, osascript must resolve to
+#      something inside $BASE (a stub, or the guard) — never a real system binary.
+for _pv in GT_PATH ALPATH STUB_PATH; do
+  eval "_pval=\"\${$_pv:-}\""
+  [ -n "$_pval" ] || continue
+  _osa="$(PATH="$_pval" command -v osascript 2>/dev/null || true)"
+  case "$_osa" in
+    "$BASE"/*) ok "notifier guard: \$$_pv routes osascript inside the test tree, never a real binary" ;;
+    *) bad "notifier guard: \$$_pv routes osascript to a REAL binary (a suite run would pop a desktop notification)" "resolved to: ${_osa:-(not found)}" ;;
+  esac
+done
+# The two PATHs built inline rather than stored in a var (the failing-bootout and
+# task-26 unwritable-sentinel fixtures) get the same assertion.
+for _pv in "${STUBF:-}" "${ALFAIL:-}"; do
+  [ -n "$_pv" ] || continue
+  _osa="$(PATH="$_pv:$GUARD:/usr/bin:/bin" command -v osascript 2>/dev/null || true)"
+  case "$_osa" in
+    "$BASE"/*) ok "notifier guard: the inline stub PATH ${_pv##*/} routes osascript inside the test tree" ;;
+    *) bad "notifier guard: the inline stub PATH ${_pv##*/} routes osascript to a REAL binary" "resolved to: ${_osa:-(not found)}" ;;
+  esac
+done
+
 guard_hits="$(grep -c '^osascript: ' "$NOTIFY_GUARD_LOG" 2>/dev/null | tr -d ' ')"
 case "$guard_hits" in ''|*[!0-9]*) guard_hits=0 ;; esac
 if [ "$guard_hits" -gt 0 ]; then
