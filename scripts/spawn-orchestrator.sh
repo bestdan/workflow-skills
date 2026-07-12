@@ -266,17 +266,22 @@ resolve_lazy() {
 # these poisons the harness itself (task 12 / finding #20).
 # Args: <tmpdir-canonical> <claude-tmp-tree> <session-env-dir>.
 emit_harness_runtime() {
-  local tmpdir_c="$1" claude_tmp="$2" session_env="$3"
-  local sock_pattern
+  local tmpdir_c="$1" tmp_root="$2" session_env="$3"
+  local sock_pattern claude_tmp_pattern
   sock_pattern="^$(sbpl_regex_escape "$tmpdir_c")"'/srt-mux-[0-9]+-[0-9]+\.sock$'
-  printf '(allow file-write*\n'
-  printf '  (regex #"%s")\n' "$sock_pattern"
   # The harness's per-project/per-session scratch + cwd tree under /tmp. This is
   # a DIRECTORY TREE it mkdir's into, not a single file — a file-only grant
   # (e.g. just the claude-*-cwd literal) does not permit the enclosing mkdir, so
-  # the Bash tool dies before it ever runs the command. Subpath, scoped to this
-  # uid's own tree only.
-  printf '  (subpath "%s")\n' "$(sbpl_escape "$claude_tmp")"
+  # the Bash tool dies before it ever runs the command.
+  #
+  # Matched by PATTERN, not by a uid-resolved path: the <N> in claude-<N> is not
+  # the uid (see render_profile) and a resolved path silently misses, restoring
+  # the exit-code poisoning. Still narrow — only /tmp/claude-<digits> trees, and
+  # never a blanket /tmp write.
+  claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[0-9]+(/|$)'
+  printf '(allow file-write*\n'
+  printf '  (regex #"%s")\n' "$sock_pattern"
+  printf '  (regex #"%s")\n' "$claude_tmp_pattern"
   # The harness mkdir's a per-session dir under ~/.claude/session-env. Scoped to
   # session-env SPECIFICALLY — never a blanket ~/.claude write, which would put
   # the credential file inside a writable scope and undo the cred-RO/state-RW
@@ -454,14 +459,23 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # Harness's OWN runtime surface (task 12 / finding #20) — fixed, host-resolved
   # paths, never caller-supplied (and so never subject to the caller-scope
   # --confine-under check above; two of these legitimately live outside the run
-  # root). $TMPDIR must exist; the two harness dirs are created lazily on first
-  # session, so resolve_lazy tolerates their absence rather than fail-closing a
-  # launch over a dir the harness is about to make itself.
-  local tmpdir_c claude_tmp session_env
+  # root). $TMPDIR must exist; session-env is created lazily on first session, so
+  # resolve_lazy tolerates its absence rather than fail-closing a launch over a
+  # dir the harness is about to make itself.
+  #
+  # The harness's tmp tree is /tmp/claude-<N>, and N is NOT the uid — it varies
+  # per harness instance. A detached launchd orchestrator was observed using
+  # /tmp/claude-522 on a uid-501 host while the interactive session on the same
+  # host used /tmp/claude-501. A uid-derived path therefore matches only by
+  # coincidence: when it misses, the harness's mkdir is denied, the Bash tool
+  # dies before running anything, and EVERY exit code is poisoned to 1 — finding
+  # #20, the exact failure this grant exists to prevent, silently restored. So
+  # match the tree by PATTERN over /tmp, never by a uid-resolved path.
+  local tmpdir_c tmp_root session_env
   tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
-  claude_tmp="$(resolve_lazy "/tmp/claude-$(id -u)")" || exit 2
+  tmp_root="$(canonicalize "/tmp")" || exit 2
   session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
-  harness_block="$(emit_harness_runtime "$tmpdir_c" "$claude_tmp" "$session_env")"
+  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.

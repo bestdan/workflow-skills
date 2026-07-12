@@ -71,9 +71,16 @@ count_is "profile: srt-mux socket pattern present in file-write* AND network-bin
   2 "(regex #\"^$tmpdir_c/srt-mux-[0-9]+-[0-9]+\\.sock\$\")" "$body"
 have "profile: network-bind block present for the srt-mux socket" \
   '(allow network-bind' "$body"
-# The harness mkdir's a TREE under /tmp/claude-<uid> — a file-only grant would not
-# permit the enclosing mkdir, so this must be a subpath.
-have "profile: harness /tmp scratch tree granted as a subpath" \
+# The harness mkdir's a TREE under /tmp/claude-<N> — a file-only grant would not
+# permit the enclosing mkdir, so this must cover the tree, not just a file.
+#
+# Matched by PATTERN, never by a uid-resolved path: <N> is NOT the uid (a detached
+# launchd run used /tmp/claude-522 on a uid-501 host). A uid-derived grant misses,
+# the harness's mkdir is denied, and every exit code is re-poisoned to 1 — finding
+# #20 restored silently. This assertion is what pins that down.
+have "profile: harness /tmp scratch tree granted by uid-independent pattern" \
+  "(regex #\"^$tmp_c/claude-[0-9]+(/|\$)\")" "$body"
+lack "profile: harness /tmp grant is NOT a uid-resolved path (it would miss)" \
   "(subpath \"$tmp_c/claude-$(id -u)\")" "$body"
 have "profile: ~/.claude/session-env granted as a subpath" \
   "(subpath \"$HOME/.claude/session-env\")" "$body"
