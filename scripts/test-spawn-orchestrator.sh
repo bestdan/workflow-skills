@@ -465,8 +465,16 @@ fi
 # --park-limit defaults to 3 in the generated wrapper when omitted (the flag was
 # parsed by supervisor-check/-scan but never emitted by write-launch, so every
 # production wake silently used the default — asserted against the real wrapper).
-have "launch: supervisor-scan defaults --park-limit to 3"  '--park-limit 3'                     "$lbody"
-have "launch: supervisor-check defaults --park-limit to 3" '--no-progress-limit 3 --park-limit 3' "$lbody"
+# Asserted PER LINE, never against the whole wrapper body: `--park-limit 7` also
+# appears on the supervisor-CHECK line, so a body-wide substring match cannot tell
+# the two emissions apart — drop the flag from the supervisor-SCAN printf alone and
+# a body-wide assertion still passes, blessing exactly half of the bug this task
+# exists to fix (and the half that matters most: supervisor-scan runs ABOVE the
+# gate, so it is the only park-storm alarm path on a gated wake).
+lscan="$(printf '%s\n' "$lbody"  | grep 'supervisor-scan'  || true)"
+lchk="$(printf  '%s\n' "$lbody"  | grep 'supervisor-check' || true)"
+have "launch: supervisor-scan defaults --park-limit to 3"  '--park-limit 3' "$lscan"
+have "launch: supervisor-check defaults --park-limit to 3" '--park-limit 3' "$lchk"
 # an explicit --park-limit is threaded into BOTH the supervisor-scan and
 # supervisor-check invocations in the generated wrapper.
 "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
@@ -474,8 +482,10 @@ have "launch: supervisor-check defaults --park-limit to 3" '--no-progress-limit 
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --park-limit 7 \
   --out-script "$BASE/pl.sh" --out-plist "$BASE/pl.plist" >/dev/null 2>&1
 plbody="$(cat "$BASE/pl.sh" 2>/dev/null)"
-have "launch: --park-limit threaded into supervisor-scan"  '--park-limit 7'                     "$plbody"
-have "launch: --park-limit threaded into supervisor-check" '--no-progress-limit 3 --park-limit 7' "$plbody"
+pscan="$(printf '%s\n' "$plbody" | grep 'supervisor-scan'  || true)"
+pchk="$(printf  '%s\n' "$plbody" | grep 'supervisor-check' || true)"
+have "launch: --park-limit threaded into supervisor-scan"  '--park-limit 7' "$pscan"
+have "launch: --park-limit threaded into supervisor-check" '--park-limit 7' "$pchk"
 # both supervisor thresholds must survive the `launch` passthrough, which is the
 # path production uses. A flag write-launch parses but launch rejects is the same
 # lie this task exists to remove.
