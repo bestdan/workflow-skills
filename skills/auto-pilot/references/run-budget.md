@@ -106,7 +106,7 @@ always safe to kill — crash mid-wait just means the relaunch timer still
 fires. An in-process `sleep` holding hours of accumulated context is not
 safe to kill, and buys nothing a relaunch doesn't already give for free.
 
-**A pause costs zero model calls.** Step 3's wake guard used to be the *only*
+**A pause costs zero model calls.** Step 3's wake guard used to be the _only_
 check: every `StartInterval` wake booted a full `claude -p` orchestrator just
 to read `paused_until` and conclude "not yet time" — a model call spent
 precisely when the pause exists because tokens are scarce. The supervisor now
