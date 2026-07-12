@@ -42,6 +42,9 @@ exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end
 status: active # run-level: active | paused | systemic | done
 paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused
 pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
+exit_reason: continuing # why the orchestrator last exited: continuing | paused | done | systemic | deadline (see "Exit contract" below)
+exit_reason_at: 1783823504 # epoch seconds the reason was declared — how the supervisor tells THIS wake's declaration from a stale one
+exit_reason_detail: "context exhausted mid-task T-3" # optional one-line human note
 orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
 orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
 until: 2026-07-10T06:00:00 # the run's --until deadline
@@ -75,6 +78,8 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   `paused_until` empty) when the pre-dispatch deadline guard stops with ready
   tasks left — resumable only by an explicit `--resume`, never a timer — and
   `status: done` at a clean end-of-run (no ready tasks or a budget hard-stop).
+- `exit_reason` / `exit_reason_at` / `exit_reason_detail` are the **exit
+  contract** the supervisor reads to decide relaunch-vs-teardown — see below.
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
   record launch writes at spawn (launch-runtime.md "Orphan / stale detection");
   `--resume` and a fresh launch read them to detect a stale orchestrator.
@@ -89,6 +94,77 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   `pending` marker (see "Task lifecycle phases"); of those, only the seven
   in-flight/terminal values are what `--resume` reconciles (a `pending` task has
   no in-flight transaction to reconcile).
+
+### Exit contract — why the orchestrator stopped
+
+A single `claude -p` orchestrator does **not** finish a whole run. It works until
+it runs out of turn/context, then exits **cleanly** with tasks still pending, and
+a fresh one picks up from this branch. That is fine — but it made the system's
+most important distinction invisible:
+
+> **"I exited because I finished the run"** and
+> **"I exited because I ran out of context mid-task"**
+> were the _same observable event_: `exit 0`.
+
+Everything downstream was guessing: the supervisor relaunched on a **blind timer**
+because it could not tell them apart, and a human reading `exit code = 0` could not
+tell whether the run was done or dead. So the orchestrator **declares** its reason —
+`spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r> [--detail …]` —
+**before** it exits, on **every** termination path. The reason is written to
+`RUN.md`'s front matter and committed to the run-state branch (it must outlive the
+process; a local file would be invisible to `--resume` and to a human reading the
+branch).
+
+| reason       | means                                             | supervisor does                |
+| ------------ | ------------------------------------------------- | ------------------------------ |
+| `continuing` | work remains, context exhausted                   | **relaunch**                   |
+| `paused`     | rate window / `paused_until` set                  | **relaunch** past the reset    |
+| `done`       | no ready tasks remain                             | **tear down**                  |
+| `systemic`   | circuit breaker / fatal auth / failed invariant   | **tear down + alarm**          |
+| `deadline`   | pre-dispatch guard stopped with tasks still ready | **tear down**; `--resume` only |
+
+The supervisor reads that reason **in shell, with no model call**
+(`supervisor-check`, launch-runtime.md "Relaunchable, not one-shot") and acts on
+it instead of relaunching on a timer. Three rules keep it honest:
+
+- **Declaring beats inferring.** The agent knows why it stopped; `classify-exit`'s
+  exit-code+log inference is the **fallback** for a wake that declared nothing (a
+  hard-killed agent, an older prompt).
+- **Only THIS wake's declaration counts.** The reason lives on the branch, so it
+  outlives the wake that wrote it — `exit_reason_at` is compared against the wake's
+  start. Without that, a wake that declared `continuing` and was then killed by a
+  dead credential would have its stale reason out-vote the fatal classification,
+  reviving finding #22's 52-relaunch loop through a durable file.
+- **Fail safe.** An unknown, missing, or garbage reason never tears a live run
+  down — it falls back to inference. And a `fatal` auth classification halts
+  regardless of what was declared: over-halting is the safe direction.
+
+The three terminal reasons also drop the **done-sentinel**
+(`.auto-pilot/orchestrator.done`) — the **same single file** that `teardown
+--done-sentinel` writes and `status` reads (launch-runtime.md "Logs /
+observability"), never a second marker. It carries `reason: <r>`, which is what
+keeps `done` and `systemic` distinguishable inside one file. The orchestrator never
+boots the `launchd` job out itself: it is jailed, and exec of `launchctl` is denied
+by construction. Writing the sentinel is its half; the supervisor, outside the jail,
+does the bootout.
+
+### Heartbeat — telling _slow_ from _wedged_
+
+`.auto-pilot/heartbeat` is a timestamp the orchestrator touches
+(`spawn-orchestrator.sh heartbeat --dir <run worktree> --note <where>`) at **each
+loop iteration** and **each `/deliver-task` sub-step boundary**; the launch wrapper
+also beats it at the top of every wake, so a `claude` that wedges before its first
+iteration still leaves an ageable timestamp. `status` ages it against the per-task
+ceiling (`--task-ceiling`, default 2700s = 45m) and reports `healthy` or a
+**STALL** — "last heartbeat 40 minutes ago, per-task ceiling is 45m" is a
+distinction **no other signal in the system can make**: to an exit code, a PID, and
+a log tail, a slow task and a hung one are identical.
+
+It is deliberately **not committed** to the run-state branch: it beats many times
+per task and would drown the run's durable record in churn. Like `supervisor-state`
+(the supervisor's own no-progress counter) it is wake-local liveness, not part of
+the run's record — which is exactly why the **exit reason**, which _is_ part of the
+record, goes in `RUN.md` instead.
 
 ### Restack (post-merge stacked-PR repair)
 
@@ -273,9 +349,9 @@ tasks are **eligible to claim next** — graph readiness — is not encoded in a
 blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
+| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |   |
+| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- | - |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |   |
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
