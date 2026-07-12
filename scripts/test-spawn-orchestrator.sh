@@ -2640,6 +2640,40 @@ GHFAILEOF
   # --label was NOT passed: the halt still fires (no teardown to attempt).
   have "doctor I2 halt: --label-less halt still reports itself" 'supervisor halt' "$d2out"
 
+  # --- doctor halt -> a HUMAN is actually told (task 16's jailed seam) -------
+  # Doctor runs INSIDE the jail, where osascript is exec-denied, so it must NOT
+  # call `alarm` itself: `alarm` writes the ALARM SENTINEL, and the supervisor's
+  # `status: systemic` scan goes SILENT whenever that sentinel exists ("already
+  # screamed about this run") — an in-jail alarm would gag the one channel that
+  # can actually reach a human. So doctor drops an `alarm-request` (the seam
+  # task 16 built for jailed detectors) and the UN-JAILED supervisor delivers it,
+  # carrying WHICH invariant failed — a diagnosis the generic systemic scan
+  # cannot state. Observed end to end, not by source shape.
+  [ -f "$D2/run/.auto-pilot/alarm-requests/invariant.alarm" ] \
+    && ok "doctor halt: files an alarm-request the un-jailed supervisor can deliver" \
+    || bad "doctor halt: files an alarm-request the un-jailed supervisor can deliver"
+  have "doctor halt: the request names the failing invariant, not just 'systemic'" \
+    'invariant 2' "$(cat "$D2/run/.auto-pilot/alarm-requests/invariant.alarm" 2>/dev/null)"
+  # The sentinel must NOT exist yet: doctor writing it in-jail is exactly what
+  # would suppress the supervisor's delivery below.
+  [ ! -f "$D2/run/.auto-pilot/ALARM" ] \
+    && ok "doctor halt: does NOT write the ALARM sentinel in-jail (which would gag the supervisor)" \
+    || bad "doctor halt: does NOT write the ALARM sentinel in-jail"
+  # Now the un-jailed side runs (as it does above the gate on every wake, and
+  # from supervisor-check right after the agent exits — the SAME wake).
+  scanout="$("$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  have "doctor halt: the supervisor DELIVERS the doctor's alarm on its next scan" 'ALARM invariant' "$scanout"
+  have "doctor halt: the delivered alarm names the invariant" 'invariant 2' "$scanout"
+  have "doctor halt: the alarm reaches REPORT.md's very first line" 'ALARM (' "$(head -1 "$D2/run/.auto-pilot/REPORT.md")"
+  [ -f "$D2/run/.auto-pilot/ALARM" ] \
+    && ok "doctor halt: the supervisor's delivery writes the ALARM sentinel (idempotency key)" \
+    || bad "doctor halt: the supervisor's delivery writes the ALARM sentinel"
+  # And it is delivered ONCE: a second scan (the run is still `systemic`) must
+  # not re-notify under a second name — that per-wake noise is what makes the
+  # next real alarm ignorable.
+  scanout2="$("$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  lack "doctor halt: a second scan never re-alarms the run it already announced" 'ALARM systemic' "$scanout2"
+
   # --- I2 (repair): RUN.md fine on the branch, missing from the WORKING TREE
   D2R="$DOC/i2-repair"; RUN_ID2R="doctor-i2-repair"
   _doctor_new_run "$D2R" "$RUN_ID2R"
@@ -3196,6 +3230,9 @@ GHWEOF
     || bad "doctor I7: halts after N consecutive no-progress iterations" "exit=$d7rc out=$d7out"
   have "doctor I7: reason names invariant 7" 'invariant 7' "$d7out"
   have "doctor I7: halt is observable in REPORT.md" 'ALARM' "$(cat "$D7/run/.auto-pilot/REPORT.md")"
+  # Every doctor halt goes through the same jailed alarm seam, not just I2's.
+  have "doctor I7: the halt files an alarm-request naming invariant 7" \
+    'invariant 7' "$(cat "$D7/run/.auto-pilot/alarm-requests/invariant.alarm" 2>/dev/null)"
 
   # THE gate: a caller checking doctor's exit code cannot reach a dispatch.
   would_dispatch=1

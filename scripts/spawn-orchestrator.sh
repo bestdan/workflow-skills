@@ -3458,7 +3458,47 @@ assert_run_head() {
 #       (own state file, doctor-state — task 10's supervisor-state is a
 #       DIFFERENT file with a DIFFERENT scope; see the I7 block).
 #   Halt reuses _supervisor_halt (now --label-optional, above).
+#   A halt NOTIFIES a human through task 16's JAILED seam (alarm-request), never
+#       `alarm` directly — see _doctor_halt below, where the reason why is the
+#       whole point.
 # ---------------------------------------------------------------------------
+
+# Halt the run, and make sure a HUMAN is actually told WHICH invariant failed.
+#
+# Doctor runs INSIDE the jail. `alarm` (task 16) cannot work from in here — the
+# sandbox profile DENIES exec of /usr/bin/osascript, so the notification is
+# silently denied — and calling it anyway is WORSE than not calling it: `alarm`
+# writes the ALARM SENTINEL, which is the per-condition idempotency key, and
+# `_supervisor_alarm_scan`'s `status: systemic` branch skips its own notification
+# whenever `_alarm_raised` finds that sentinel ("we already screamed about this
+# run"). So an in-jail `alarm` would leave the sentinel as a gag: the doctor's
+# notification is denied by the jail, and the supervisor's — the one that CAN
+# reach a human — is then suppressed by the very sentinel the denied attempt
+# wrote. A halt that tells nobody is finding #22's silence, restored.
+#
+# `alarm-request` is the seam task 16 built for exactly this ("(JAILED side) Drop
+# an alarm the agent cannot deliver itself"): doctor writes a request FILE, and
+# the UN-JAILED supervisor delivers it — `_supervisor_alarm_scan` drains requests
+# FIRST, before its own scan, and it runs both above the gate (every wake) and
+# from `supervisor-check` (right after the agent exits, i.e. the SAME wake this
+# halt happens in). So the request is delivered promptly, under a condition id
+# whose action text task 16 already wrote (`invariant`), carrying doctor's own
+# diagnosis — WHICH invariant failed — which the generic systemic scan could
+# never state. Once delivered, the sentinel it writes is what makes the
+# supervisor's follow-on systemic halt correctly SILENT: one alarm, named right.
+#
+# The halt itself therefore passes an EMPTY --condition (suppressing the in-jail
+# `alarm`), and the request goes first — the notification is the point of the
+# halt, and neither a broken git checkout nor a wedged teardown may cost us it.
+# A subshell around alarm-request, `_alarm_safe`-style: its argument validation
+# is `die` (an `exit`), which would take the halt down before RUN.md, REPORT.md
+# and the teardown.
+_doctor_halt() {
+  local dir="$1" label="$2" reason="$3"
+  ( alarm_request --dir "$dir" --condition invariant --reason "doctor: $reason" ) \
+    || echo "spawn-orchestrator: doctor: could not file the alarm-request (the halt continues; the supervisor's systemic scan is the remaining channel)" >&2
+  _supervisor_halt --dir "$dir" ${label:+--label "$label"} --condition "" --reason "$reason"
+}
 
 # Set a single task row's `phase` cell (RUN.md table column 2) in place,
 # atomic tmp+mv. Matches the row by its exact `task` column text. Fail-closed
@@ -3644,8 +3684,7 @@ doctor() {
   fi
   if [ "$branch_ok" -eq 0 ]; then
     n_halt=$((n_halt + 1))
-    _supervisor_halt --dir "$dir" ${label:+--label "$label"} \
-      --reason "invariant 2: RUN.md/QUESTIONS.md/REPORT.md unreadable from $branch, or RUN.md front matter doesn't parse — the run has no memory"
+    _doctor_halt "$dir" "$label" "invariant 2: RUN.md/QUESTIONS.md/REPORT.md unreadable from $branch, or RUN.md front matter doesn't parse — the run has no memory"
     _doctor_finish
     return 30
   fi
@@ -4048,8 +4087,7 @@ doctor() {
     _write_supervisor_state "$dstate" "$count" "$head"
     if [ "$count" -ge "$limit" ]; then
       n_halt=$((n_halt + 1))
-      _supervisor_halt --dir "$dir" ${label:+--label "$label"} \
-        --reason "invariant 7: no forward progress after $count consecutive doctor iterations"
+      _doctor_halt "$dir" "$label" "invariant 7: no forward progress after $count consecutive doctor iterations"
       _doctor_finish
       return 30
     else

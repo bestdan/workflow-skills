@@ -457,6 +457,22 @@ ignored, and a **halt** exit means the loop must not dispatch.
 | `30` | **HALT** — an invariant demanded `status: systemic`; the loop must NOT dispatch |
 | `2`  | bad usage, or an unrepairable fail-closed condition (`die`)                     |
 
+**A doctor HALT tells a human — through the jailed seam, never `alarm` directly.**
+Doctor runs **inside** the jail, where `osascript` is exec-denied, so it files an
+**`alarm-request`** (condition `invariant`, reason naming _which_ invariant
+failed) and the **un-jailed supervisor delivers it** — `supervisor-scan` drains
+requests on every wake, and `supervisor-check` drains them right after the agent
+exits, i.e. in the same wake the halt happened in ("The alarm",
+[`run-budget.md`](run-budget.md)). Calling `alarm` from in-jail would be strictly
+**worse than silence**: the notification is denied by the sandbox, but `alarm`
+still writes the `ALARM` **sentinel**, and the supervisor's own `status: systemic`
+scan goes quiet whenever that sentinel exists ("already announced") — the denied
+attempt would gag the one channel that can actually reach a human. The generic
+systemic scan is the backstop, but only the request carries the **diagnosis**:
+which invariant failed. `--resume`'s `alarm-clear` therefore runs **before** the
+doctor, never after ([`resume.md`](resume.md)) — clearing afterwards would delete
+the request the doctor just filed.
+
 **The seven invariants**, each with its violation remedy:
 
 1. **Run worktree `HEAD` is on `auto-pilot/<run_id>`.** → **repair**, delegated

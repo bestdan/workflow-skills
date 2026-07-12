@@ -290,28 +290,25 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   creation and task-graph materialization already exist on the branch and are
   not re-created; source normalization still runs. A hard failure **BLOCKS THE
   RESUME**, fail-closed.
-- **HEAD guard first, then read `RUN.md` from the branch** (`git show
-  auto-pilot/<run_id>:.auto-pilot/RUN.md`), never the worktree — a crash can
-  leave the run worktree's `HEAD` parked on a task branch, and this is what
-  keeps that from feeding resume a stale or absent `RUN.md`
-  ([`references/run-state.md`](references/run-state.md) "Run worktree HEAD
-  invariant").
 - **Locate exactly one resumable run-state branch** for the normalized source
   (zero or many is fail-closed), and **guard against a live orchestrator** at the
-  recorded PID + start-time before starting a second one.
+  recorded PID + start-time — **before the doctor**, which _repairs_ and so must
+  never run against a run someone else is still driving.
+- **Clear the run's alarms** (`spawn-orchestrator.sh alarm-clear --dir
+  <run-dir>`) — after that guard, **before the doctor**: the `ALARM` sentinel is the
+  per-run idempotency key, so one that outlives the resume suppresses the next alarm
+  and the resumed run halts silently — while clearing it _after_ the doctor would
+  delete the `alarm-request` a doctor halt files. History stays.
+- **Clear the terminal exit state too** (`spawn-orchestrator.sh clear-exit-state
+  --dir <run-worktree>`): the done-sentinel and `exit_reason*` are durable, and
+  `deadline` is by definition recovered BY this resume — left in place they make a
+  live run read back as finished ([`references/resume.md`](references/resume.md)).
+- **Then run the doctor** — invariant 1 IS the HEAD guard; invariant 2 reads `RUN.md` from the branch, never the worktree. A **HALT** (exit 30) stops here.
 - **Reconcile each non-terminal task** by observing reality in the write order's
   direction (git → tracker → run files) and matching it to `run-state.md`'s
   crash-reconciliation table (rows G1–G7) — idempotent (adopts an existing PR,
   never duplicates), removes orphaned worker worktrees, and **parks** anything
   that matches no row cleanly rather than blind-retrying.
-- **Clear the run's alarms first** (`spawn-orchestrator.sh alarm-clear --dir
-  <run-dir>`): the `ALARM` sentinel is the alarm's per-run idempotency key, so one
-  that outlives the resume suppresses the alarm if the same condition recurs and
-  the resumed run halts silently. `REPORT.md`'s history stays.
-- **Clear the terminal exit state too** (`spawn-orchestrator.sh clear-exit-state
-  --dir <run-worktree>`): the done-sentinel and `exit_reason*` are durable, and
-  `deadline` is by definition recovered BY this resume — left in place they make a
-  live run read back as finished ([`references/resume.md`](references/resume.md)).
 - **Then fall into the run loop**, clearing any run-level pause markers first
   ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 
@@ -332,7 +329,6 @@ The loop is deliberately thin:
 while unblocked tasks remain and inside budget bounds:
     heartbeat (and again at every /deliver-task sub-step boundary)
     doctor   # run invariant audit; repair/park/halt — HALT (exit 30) stops here
-             # invariant 1 IS the old bare HEAD assertion, so it is not listed twice
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
@@ -357,23 +353,17 @@ fail-safe rules: [`references/run-state.md`](references/run-state.md) "Exit
 contract" and "Heartbeat".
 
 **Every iteration opens with the run doctor**, `scripts/spawn-orchestrator.sh
-doctor` — a cheap, deterministic, no-model-call audit of seven invariants
-(HEAD on the run-state branch, RUN.md readable from the branch, every in-flight
-task's PR is real, no orphan worker worktrees, chained-task bases still frozen,
-forward progress). It subsumes the old bare HEAD assertion (invariant 1 IS
-that assertion) plus the reconciliation this loop used to leave implicit. Each
-invariant repairs, parks, or halts (`status: systemic`, exit 30 — the loop must
-not dispatch); see
-[`references/run-state.md`](references/run-state.md) "Run doctor" for the full
-table and exit-code contract.
-
-**The run worktree's `HEAD` never leaves the run-state branch.** Task code is
-written in a separate worker worktree that `/deliver-task` owns end to end
-(`commands/deliver-task.md`); the orchestrator never `git checkout`s a task
-branch in the run worktree itself. The guard is the doctor's **invariant 1**,
-which delegates to `scripts/spawn-orchestrator.sh assert-run-head`
-([`references/run-state.md`](references/run-state.md) "Run worktree HEAD
-invariant") — the full rationale (finding #23) lives there.
+doctor` — a cheap, deterministic, no-model-call audit of seven invariants (HEAD
+on the run-state branch, RUN.md readable from the branch, every in-flight task's
+PR is real, no orphan worker worktrees, chained-task bases still frozen, forward
+progress). Each repairs, parks, or halts (`status: systemic`, exit 30 — the loop
+must not dispatch, and the halt files an `alarm-request` naming the failed
+invariant for the un-jailed supervisor to deliver). **Invariant 1 IS** the old
+bare HEAD assertion (`assert-run-head`): the run worktree's `HEAD` never leaves
+the run-state branch, since task code lives in a separate worker worktree
+`/deliver-task` owns end to end (`commands/deliver-task.md`). Invariants,
+remedies, exit codes, finding-#23 rationale:
+[`references/run-state.md`](references/run-state.md) "Run doctor".
 
 **Pre-dispatch deadline guard.** The budget-bounds condition alone can't protect
 the `--until` deadline: `--until` is otherwise only consulted at spawn (record)
