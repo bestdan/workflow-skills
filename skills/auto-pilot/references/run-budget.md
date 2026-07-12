@@ -171,9 +171,13 @@ called by the generated launch script after every wake):
   would have caught #22 even if its 401 text had never matched — the run
   making no forward progress is the actual signal, the 401 string is just the
   fast path to the same conclusion. A wake that lands while RUN.md's own
-  `status:` is `paused` never counts against this guard — a paused wake makes
-  no progress **by design** (the orchestrator is deliberately waiting out
-  `paused_until`; see task 11's shell-level pause gate), not a stall.
+  `status:` is `paused` **AND `paused_until` is parseable and still live**
+  never counts against this guard — a paused wake makes no progress **by
+  design** (the orchestrator is deliberately waiting out `paused_until`; see
+  task 11's shell-level pause gate), not a stall. `status: paused` alone is
+  NOT enough (task 23): it is the same agent-written field the guard exists to
+  catch when wedged, so a missing/garbage `paused_until`, or one blown past its
+  margin, re-arms the guard instead of exempting forever.
 
 A supervisor halt writes run-level `status: systemic` + a `pause_reason`
 naming the failure to `RUN.md`, appends one alarm entry to `REPORT.md`,

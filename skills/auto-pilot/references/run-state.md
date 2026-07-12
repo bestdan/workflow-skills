@@ -78,11 +78,13 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   (+ reason, `paused_until` empty) when the pre-dispatch deadline guard stops with
   ready tasks left — resumable only by an explicit `--resume`, never a timer — and
   `status: done` at a clean end-of-run (no ready tasks or a budget hard-stop).
-  `status: paused` is **required** on every pause, not optional: it is the only
-  durable fact the supervisor's no-progress guard accepts as corroboration for a
-  declared `paused` exit (`paused_until` cannot serve — it carries an inline
-  comment in the template above, and it survives a `--resume`, so a run that paused
-  once would exempt itself from the guard forever).
+  `status: paused` is **required** on every pause, not optional — but by itself
+  it is not enough to exempt the no-progress guard (task 23): `status: paused`
+  is the agent's own write, and the guard exists to catch exactly the agent
+  that is wedged. The guard's ONE exemption rule requires `status: paused`
+  backed by a **parseable, still-live `paused_until`** — a missing, garbage, or
+  expired-past-its-margin `paused_until` does not exempt, so a wedged agent
+  that declares `paused` on every wake with no bound still trips the guard.
 - `exit_reason` / `exit_reason_at` / `exit_reason_detail` are the **exit
   contract** the supervisor reads to decide relaunch-vs-teardown — see below.
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational

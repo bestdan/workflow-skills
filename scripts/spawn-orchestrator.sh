@@ -163,9 +163,13 @@
 #                  across --no-progress-limit (default 3) consecutive
 #                  non-zero wakes, it halts too — the general backstop that
 #                  would have caught #22 even without matching the 401 string.
-#                  A wake that lands while RUN.md's `status:` is `paused`
-#                  never counts against the guard (a paused wake makes no
-#                  progress by design — see run-budget.md "Two pause kinds").
+#                  A wake that lands while RUN.md's `status:` is `paused` AND
+#                  `paused_until` is parseable and still live (task 23: not past
+#                  it by more than PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT) never
+#                  counts against the guard (a paused wake makes no progress by
+#                  design — see run-budget.md "Two pause kinds"). `status: paused`
+#                  alone does NOT exempt — it is the agent's own write, and the
+#                  guard exists to catch exactly the agent that is wedged.
 #                  A halt writes run-level `status: systemic` + `pause_reason`
 #                  to RUN.md, appends one alarm entry to REPORT.md, RAISES THE
 #                  ALARM (below), commits both to the run-state branch, and tears
@@ -1350,17 +1354,40 @@ _run_head() {
   ( cd "$1" 2>/dev/null && git rev-parse HEAD 2>/dev/null ) || true
 }
 
-# True (exit 0) iff RUN.md's own run-level `status:` is `paused` — a wake
-# that lands mid-pause makes no progress BY DESIGN (task 11: the orchestrator
-# gates on `paused_until` before invoking claude and exits early), so it must
-# never count against the no-progress guard.
-_run_is_paused() {
+# Task 23: how far past its own `paused_until` a genuine pause may run before
+# the no-progress guard re-arms. Bounds the exemption's total lifetime so a
+# rate-window wait that overruns its own reset (a hung retry, a wedged resume)
+# does not sit exempt forever.
+PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT=3600
+
+# True (exit 0) iff RUN.md's own run-level `status:` is `paused` AND that is
+# backed by a PARSEABLE, still-live `paused_until` (task 23). `status: paused`
+# ALONE is not enough: it is written by the same agent this guard exists to
+# catch when it is wedged, so a wedged agent that writes `status: paused` on
+# every wake with no bound would relaunch forever and reset the counter each
+# time — the guard defeated by exactly the failure it exists to catch. A
+# missing, empty, or unparseable `paused_until` does NOT exempt (a pause with
+# no bound is a wedge, not a pause); one that has run more than
+# PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT past its own `paused_until` also stops
+# exempting, so a stale pause re-arms the guard rather than sitting exempt
+# indefinitely. This is the ONE exemption rule the no-progress guard (and
+# doctor's invariant 7) consult — it collapses the task-15 conjunction
+# (declared `paused` + `status: paused`) and the pre-existing carve-out that
+# exempted ANY `status: paused` wake, which used to disagree with each other.
+_pause_exempt() {
   local run_md="$1/.auto-pilot/RUN.md"
   [ -f "$run_md" ] || return 1
   local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
   local st; st="$(printf '%s\n' "$front" | grep -E '^status:' | head -1 \
     | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
-  [ "$st" = "paused" ]
+  [ "$st" = "paused" ] || return 1
+  local paused_until; paused_until="$(printf '%s\n' "$front" | grep -E '^paused_until:' | head -1 \
+    | sed -e 's/^paused_until: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+  [ -n "$paused_until" ] || return 1
+  local until_epoch
+  until_epoch="$(_parse_iso8601_utc "$paused_until")" || return 1
+  local now_epoch; now_epoch="$(date -u +%s)"
+  [ "$now_epoch" -le "$((until_epoch + PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT))" ]
 }
 
 # Set a single front-matter key's value in RUN.md (between the first two
@@ -2328,23 +2355,20 @@ supervisor_check() {
     paused)
       # A rate-window pause makes no progress BY DESIGN, so it never counts against
       # the no-progress guard — but ONLY when the run state CORROBORATES the
-      # declaration. The corroborating fact is `status: paused` and nothing else
-      # (_run_is_paused, the same carve-out the retry path below already used):
-      # run-budget.md's agent pause writes it on every legitimate pause, and it is
-      # CLEARED on resume. `paused_until` is NOT usable as corroboration — it is
-      # declared with an inline `# comment` in run-state.md's own RUN.md template
-      # (so a reader that must not truncate free prose at a `#` reads the comment
-      # back as a value, and every run corroborates unconditionally), and it is
-      # durable across a resume (so a run that paused once is exempt forever).
-      # Without real corroboration a prompt/logic bug that declares `paused` on every
-      # wake while dying non-zero would reset the counter forever — infinite
-      # relaunch, zero progress, no alarm.
-      if _run_is_paused "$dir"; then
+      # declaration with an authority the agent cannot forge alone (task 23):
+      # `status: paused` backed by a PARSEABLE, still-live `paused_until`
+      # (`_pause_exempt`, the same rule the retry path below already uses — ONE
+      # exemption rule, not two that disagree). `status: paused` by itself is not
+      # enough: run-budget.md's agent pause writes both fields on every legitimate
+      # pause, so a prompt/logic bug that declares `paused` on every wake while
+      # dying non-zero, with no (or a stale/garbage) `paused_until`, must NOT reset
+      # the counter forever — infinite relaunch, zero progress, no alarm.
+      if _pause_exempt "$dir"; then
         _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
         echo "spawn-orchestrator: supervisor-check declared paused — relaunch expected past the reset"
         return "$code"
       fi
-      echo "spawn-orchestrator: supervisor-check declared paused but the run state does NOT corroborate it (RUN.md has no status: paused) — relaunching, but the no-progress guard still applies" >&2
+      echo "spawn-orchestrator: supervisor-check declared paused but the run state does NOT corroborate it (RUN.md's status is not paused, or paused_until is missing/unparseable/expired past the margin) — relaunching, but the no-progress guard still applies" >&2
       ;;
     continuing)
       if [ "$code" = 0 ]; then
@@ -2372,7 +2396,7 @@ supervisor_check() {
   esac
 
   # retry: a legitimate paused wake never counts against the guard.
-  if _run_is_paused "$dir"; then
+  if _pause_exempt "$dir"; then
     _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
     echo "spawn-orchestrator: supervisor-check retry (paused wake, no-progress guard skipped): ${class#retry: }"
     return "$code"
@@ -4178,7 +4202,7 @@ doctor() {
     # increment, in this context.
     _write_supervisor_state "$dstate" 0 "$(_run_head "$dir")"
     n_ok=$((n_ok + 1))
-  elif _run_is_paused "$dir"; then
+  elif _pause_exempt "$dir"; then
     _write_supervisor_state "$dstate" 0 "$(_run_head "$dir")"
     n_ok=$((n_ok + 1))
   else

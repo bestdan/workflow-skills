@@ -987,7 +987,7 @@ if command -v git >/dev/null 2>&1; then
   # --- a legitimate paused_until wait never trips the guard, even repeated ------
   SC3="$BASE/sc-paused"; mkdir -p "$SC3/.auto-pilot"
   ( cd "$SC3" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00Z\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
     && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
   STATE3="$SC3/.auto-pilot/supervisor-state"
@@ -2586,7 +2586,7 @@ LCFEOF
   # …while a REAL pause (RUN.md's own `status: paused` + `paused_until`) stays exempt.
   PC="$EC/paused-corroborated"; mkdir -p "$PC/.auto-pilot"
   ( cd "$PC" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00Z\n'
          printf 'pause_reason: rate window\n'
          printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
@@ -2638,6 +2638,95 @@ LCFEOF
     bad "exit contract [paused, template's commented paused_until]: the job was booted out" \
       "launchctl log: $(cat "$PT/launchctl.log" 2>/dev/null)"
   fi
+
+  # --- task 23: the pause exemption needs an authority the agent cannot forge ---
+  # (dev_docs/tasks/autopilot_hardening_plan/autopilot_hardening_task_23.md).
+  # `status: paused` ALONE used to exempt the no-progress guard — corroborated
+  # only by a second field (or nothing at all) the same agent writes. These
+  # drive the REAL generated wrapper end to end (never supervisor-check
+  # directly) precisely because a prior alarm test skipped supervisor-gate by
+  # re-implementing the call sequence and missed the bug it existed to catch.
+  #
+  # exit_reason/exit_reason_at are committed ONCE, up front, with an
+  # exit_reason_at far in the future (9999999999, same idiom as the
+  # [paused, corroborated] test above) so every real wake's `--wake-start`
+  # attributes the SAME declaration without the stub `claude` re-declaring (and
+  # re-committing, which would move the run-state HEAD every wake and mask the
+  # very no-progress condition under test).
+  t23_setup() { # <name> <status> <paused_until> -> leaves $T23_DIR, writes+commits RUN.md, real write-launch.
+    T23_DIR="$EC/t23-$1"
+    mkdir -p "$T23_DIR/.auto-pilot"
+    {
+      printf -- '---\n'; printf 'run_id: t23-%s\n' "$1"; printf 'status: %s\n' "$2"
+      printf 'paused_until: %s\n' "$3"; printf 'pause_reason: rate window\n'
+      printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    } >"$T23_DIR/.auto-pilot/RUN.md"
+    printf '# report\n' >"$T23_DIR/.auto-pilot/REPORT.md"
+    : >"$T23_DIR/.auto-pilot/orchestrator.log"
+    ( cd "$T23_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+      --workdir "$T23_DIR" --log "$T23_DIR/.auto-pilot/orchestrator.log" \
+      --prompt-file "$BASE/prompt.txt" --label "com.autopilot.t23.$1" \
+      --claude-bin "$STUB/claude" --path "$STUB_PATH" \
+      --out-script "$T23_DIR/launch.sh" --out-plist "$T23_DIR/job.plist" >/dev/null 2>&1
+    : >"$T23_DIR/launchctl.log"; rm -f "$T23_DIR/claude-ran"
+  }
+  t23_wake() { # one wake through the REAL generated wrapper (no STUB_DECLARE: see above)
+    STUB_LAUNCHCTL_LOG="$T23_DIR/launchctl.log" STUB_CLAUDE_MARKER="$T23_DIR/claude-ran" \
+      STUB_EXIT_CODE=0 bash "$T23_DIR/launch.sh" >/dev/null 2>&1
+  }
+
+  # (23a) A wedged agent that writes `status: paused` on EVERY wake with NO
+  # `paused_until` — the failure this task exists to catch. Must NOT be exempt:
+  # 3 (the default --no-progress-limit) consecutive wakes trip the guard.
+  t23_setup wedge paused ''
+  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  have "task 23 [status: paused, no paused_until]: the no-progress guard trips and halts" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  have "task 23 [status: paused, no paused_until]: the halt raises the no-progress alarm" \
+    'no forward progress' "$(cat "$T23_DIR/.auto-pilot/REPORT.md")"
+  have "task 23 [status: paused, no paused_until]: the job is torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
+  [ -f "$T23_DIR/claude-ran" ] && ok "task 23 [status: paused, no paused_until]: the agent WAS invoked each wake (gate stays open on an empty paused_until)" \
+    || bad "task 23 [status: paused, no paused_until]: the agent WAS invoked each wake"
+
+  # (23b) A genuine rate-window pause — `status: paused` + a parseable FUTURE
+  # `paused_until` — stays exempt (task 11 must not regress): the gate closes
+  # every wake and the agent is never even invoked, let alone halted.
+  T23_FUTURE="$(_gate_iso $((NOW_EPOCH + 3600)))"
+  t23_setup future paused "$T23_FUTURE"
+  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  lack "task 23 [genuine pause, future paused_until]: the guard never halts while the window is open" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  lack "task 23 [genuine pause, future paused_until]: the job is never torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
+  [ -f "$T23_DIR/claude-ran" ] && bad "task 23 [genuine pause, future paused_until]: the agent is NOT invoked (gate stays closed)" \
+    || ok "task 23 [genuine pause, future paused_until]: the agent is NOT invoked (gate stays closed)"
+
+  # (23c) …and relanches PAST the reset: `paused_until` just behind us (well
+  # within the margin) opens the gate again, and the guard still doesn't trip —
+  # the task-11 behavior this fix must not regress.
+  T23_JUSTPAST="$(_gate_iso $((NOW_EPOCH - 10)))"
+  t23_setup pastreset paused "$T23_JUSTPAST"
+  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  lack "task 23 [relaunch past the reset]: the guard does not halt just past its own paused_until" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  [ -f "$T23_DIR/claude-ran" ] && ok "task 23 [relaunch past the reset]: the agent IS invoked once the gate reopens" \
+    || bad "task 23 [relaunch past the reset]: the agent IS invoked once the gate reopens"
+
+  # (23d) A pause that overran its own `paused_until` by more than the margin
+  # (PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT, 1h) re-arms the guard: 3 more wakes
+  # (still declaring the same stale `paused`) halt.
+  T23_STALE="$(_gate_iso $((NOW_EPOCH - 3600 - 120)))"
+  t23_setup stale paused "$T23_STALE"
+  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  have "task 23 [pause overran its margin]: the guard re-arms and halts" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  have "task 23 [pause overran its margin]: the job is torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
 
   # fail-closed: an unknown reason is never written, and a RELAUNCHABLE reason can
   # never be smuggled into the terminal sentinel.
@@ -3541,7 +3630,7 @@ GHWEOF
   D7P="$DOC/i7-paused"; RUN_ID7P="doctor-i7-paused"
   _doctor_new_run "$D7P" "$RUN_ID7P"
   {
-    printf -- '---\nrun_id: %s\nstatus: paused\npaused_until: 2099-01-01T00:00:00\n---\n\n' "$RUN_ID7P"
+    printf -- '---\nrun_id: %s\nstatus: paused\npaused_until: 2099-01-01T00:00:00Z\n---\n\n' "$RUN_ID7P"
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     printf '| t1 | pending | - | main | - | - | |\n'
