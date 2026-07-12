@@ -27,6 +27,7 @@ echo "== 0. Build the jail =="
 CLAUDE="$(command -v claude || true)"; [ -n "$CLAUDE" ] || { echo "claude not on PATH"; exit 2; }
 "$SO" render-profile --confine-under "$D/run" \
   --rw "$D/run/wt" --ro "$ROOT" --ro "$HOME/.claude" \
+  --tmpdir "$D/run/wt/tmp" \
   --exec "$CLAUDE" --exec "$(command -v bash)" --exec "$(command -v git)" \
   --out "$D/profile.sb" || { echo "render-profile failed"; exit 2; }
 "$SO" check-profile "$D/profile.sb" || { echo "profile does not compile"; exit 2; }
@@ -117,7 +118,7 @@ echo "== 3. Detach + supervisor lifecycle =="
 printf 'noop\n' >"$D/run/wt/prompt.txt"
 if "$SO" write-launch --profile "$D/profile.sb" --settings "$D/settings.json" \
      --workdir "$D/run/wt" --log "$D/orch.log" --prompt-file "$D/run/wt/prompt.txt" \
-     --until T --label com.autopilot.smoke --claude-bin "$CLAUDE" --path "$PATH" \
+     --until T --label com.autopilot.smoke --claude-bin "$CLAUDE" --path "$PATH" --tmpdir "$D/run/wt/tmp" \
      --out-script "$D/launch.sh" --out-plist "$D/job.plist" >/dev/null 2>&1 \
    && plutil -lint "$D/job.plist" >/dev/null 2>&1; then
   PASS "write-launch produced a valid plist"

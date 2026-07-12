@@ -185,6 +185,11 @@ canonicalize() {
     /*) ;;
     *) echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2; return 1 ;;
   esac
+  # A newline in a path would break the line-oriented SBPL emission (`(allow …)`
+  # rules, the `;; @spawn-tmpdir:` stamp) — a crafted dir name could smuggle its
+  # own rule or a fake stamp line. No legitimate path here contains one; reject
+  # fail-closed, same posture as the egress-host newline guard.
+  case "$p" in *$'\n'*) echo "spawn-orchestrator: path contains a newline (fail-closed)" >&2; return 1 ;; esac
   [ -e "$p" ] || { echo "spawn-orchestrator: path does not exist (fail-closed): $p" >&2; return 1; }
   if [ -d "$p" ]; then
     (cd "$p" && pwd -P)
@@ -264,19 +269,40 @@ resolve_lazy() {
 # covering every caller scope while the harness still gets exactly what it needs.
 # See orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@ comment for why denying any of
 # these poisons the harness itself (task 12 / finding #20).
-# Args: <tmpdir-canonical> <claude-tmp-tree> <session-env-dir>.
+# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir>.
 emit_harness_runtime() {
-  local tmpdir_c="$1" claude_tmp="$2" session_env="$3"
-  local sock_pattern
+  local tmpdir_c="$1" tmp_root="$2" session_env="$3"
+  local sock_pattern claude_tmp_pattern
   sock_pattern="^$(sbpl_regex_escape "$tmpdir_c")"'/srt-mux-[0-9]+-[0-9]+\.sock$'
-  printf '(allow file-write*\n'
-  printf '  (regex #"%s")\n' "$sock_pattern"
   # The harness's per-project/per-session scratch + cwd tree under /tmp. This is
   # a DIRECTORY TREE it mkdir's into, not a single file — a file-only grant
   # (e.g. just the claude-*-cwd literal) does not permit the enclosing mkdir, so
-  # the Bash tool dies before it ever runs the command. Subpath, scoped to this
-  # uid's own tree only.
-  printf '  (subpath "%s")\n' "$(sbpl_escape "$claude_tmp")"
+  # the Bash tool dies before it ever runs the command.
+  #
+  # Matched by PATTERN, not by a uid-resolved path: the id in claude-<id> is not
+  # the uid (see render_profile) and a resolved path silently misses, restoring
+  # the exit-code poisoning.
+  #
+  # TWO distinct shapes live here, and granting only one still poisons exit codes:
+  #   /tmp/claude-<id>/<project>/<session>/…  the scratch TREE (mkdir'd)
+  #   /tmp/claude-<hex>-cwd                   the cwd-tracking FILE, rewritten
+  #                                           after EVERY Bash call, with a fresh
+  #                                           hex id each time
+  # The detached orchestrator uses the -cwd files; an interactive session was seen
+  # using the numeric tree. Cover both, and no more: still never a blanket /tmp write.
+  #
+  # ACCEPTED RELAXATION: this pattern is deliberately broader than the old
+  # `(subpath "/tmp/claude-$(id -u)")` — it grants any `claude-<id>` tree, not just
+  # this uid's, because <id> is not the uid and can't be resolved ahead of time.
+  # The widening is bounded by standard POSIX permissions, which SBPL grants do NOT
+  # override: another operator's `claude-<id>` tree is only reachable if it is
+  # independently writable to this uid (it isn't, under the single-operator host
+  # this harness targets). So the relaxation is a real but low-severity trade of
+  # tightness for the reliability that keeps finding #20 fixed.
+  claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[A-Za-z0-9]+(-cwd)?(/|$)'
+  printf '(allow file-write*\n'
+  printf '  (regex #"%s")\n' "$sock_pattern"
+  printf '  (regex #"%s")\n' "$claude_tmp_pattern"
   # The harness mkdir's a per-session dir under ~/.claude/session-env. Scoped to
   # session-env SPECIFICALLY — never a blanket ~/.claude write, which would put
   # the credential file inside a writable scope and undo the cred-RO/state-RW
@@ -349,13 +375,14 @@ emit_exec() {
 }
 
 render_profile() {
-  local out="" template="$TEMPLATE_DEFAULT" toolchain=0
+  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir=""
   local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
       --cred-ro) [ $# -ge 2 ] || die "missing value for --cred-ro"; cred+=("$2"); shift 2 ;;
+      --tmpdir) [ $# -ge 2 ] || die "missing value for --tmpdir"; tmpdir="$2"; shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
       --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
       --toolchain) toolchain=1; shift ;;
@@ -454,14 +481,44 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # Harness's OWN runtime surface (task 12 / finding #20) — fixed, host-resolved
   # paths, never caller-supplied (and so never subject to the caller-scope
   # --confine-under check above; two of these legitimately live outside the run
-  # root). $TMPDIR must exist; the two harness dirs are created lazily on first
-  # session, so resolve_lazy tolerates their absence rather than fail-closing a
-  # launch over a dir the harness is about to make itself.
-  local tmpdir_c claude_tmp session_env
-  tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
-  claude_tmp="$(resolve_lazy "/tmp/claude-$(id -u)")" || exit 2
+  # root). $TMPDIR must exist; session-env is created lazily on first session, so
+  # resolve_lazy tolerates its absence rather than fail-closing a launch over a
+  # dir the harness is about to make itself.
+  #
+  # The harness's tmp tree is /tmp/claude-<N>, and N is NOT the uid — it varies
+  # per harness instance. A detached launchd orchestrator was observed using
+  # /tmp/claude-522 on a uid-501 host while the interactive session on the same
+  # host used /tmp/claude-501. A uid-derived path therefore matches only by
+  # coincidence: when it misses, the harness's mkdir is denied, the Bash tool
+  # dies before running anything, and EVERY exit code is poisoned to 1 — finding
+  # #20, the exact failure this grant exists to prevent, silently restored. So
+  # match the tree by PATTERN over /tmp, never by a uid-resolved path.
+  #
+  # The detached launchd job's TMPDIR is authoritative here: the srt-mux socket
+  # grant is anchored to it, and write-launch reads it back from the @spawn-tmpdir
+  # stamp emitted below (so the two can never diverge — a divergence silently
+  # re-breaks the inner sandbox). Prefer the explicit --tmpdir (the run-owned dir
+  # the job will export); fall back to the env only when a caller renders a profile
+  # for the ambient session. When --tmpdir is given AND the render is confined,
+  # require it to sit inside a confinement root so the job's later `mkdir -p` is
+  # bounded.
+  local tmpdir_c tmp_root session_env
+  if [ -n "$tmpdir" ]; then
+    case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
+    tmpdir_c="$(resolve_lazy "$tmpdir")" || exit 2
+    if [ "${#confine_c[@]}" -gt 0 ]; then
+      local _t_ok=0 r
+      for r in "${confine_c[@]}"; do
+        [ "$tmpdir_c" = "$r" ] || [ "${tmpdir_c#"$r"/}" != "$tmpdir_c" ] && { _t_ok=1; break; }
+      done
+      [ "$_t_ok" = 1 ] || die "--tmpdir escapes --confine-under (fail-closed): $tmpdir_c"
+    fi
+  else
+    tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
+  fi
+  tmp_root="$(canonicalize "/tmp")" || exit 2
   session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
-  harness_block="$(emit_harness_runtime "$tmpdir_c" "$claude_tmp" "$session_env")"
+  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.
@@ -478,6 +535,12 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
       *) printf '%s\n' "$line" ;;
     esac
   done <"$template" >"$tmp"
+
+  # Stamp the canonical TMPDIR the srt-mux grant is anchored to, as an SBPL
+  # comment (`;;` is ignored by the compiler). write-launch reads THIS back to set
+  # the job's TMPDIR, so the socket the job creates always lands where the profile
+  # grants — the render and the launch can't drift apart. Exactly one stamp.
+  printf ';; @spawn-tmpdir: %s\n' "$tmpdir_c" >>"$tmp"
 
   mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write profile: $out"; }
   echo "spawn-orchestrator: profile OK $out"
@@ -649,7 +712,7 @@ render_plist() {
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" \
+        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
         self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -664,6 +727,7 @@ write_launch() {
       --throttle) throttle="$2"; shift 2 ;;
       --claude-bin) claude_bin="$2"; shift 2 ;;
       --path) path="$2"; shift 2 ;;
+      --tmpdir) tmpdir="$2"; shift 2 ;;
       --out-script) out_script="$2"; shift 2 ;;
       --out-plist) out_plist="$2"; shift 2 ;;
       --plist-template) plist_template="$2"; shift 2 ;;
@@ -683,6 +747,27 @@ write_launch() {
     [ -n "$f" ] || die "write-launch requires --profile, --settings, and --prompt-file"
     [ -f "$f" ] || die "not found (fail-closed): $f"
   done
+  # The launchd job's TMPDIR comes from the profile's @spawn-tmpdir stamp — the
+  # SAME canonical dir the srt-mux socket grant is anchored to (render_profile
+  # emits it). Deriving it from the profile makes a render/launch drift impossible:
+  # the job exports exactly the dir whose mux socket the profile permits. A stale
+  # profile with no stamp is fail-closed. A passed --tmpdir is an OPTIONAL
+  # cross-check: it must resolve to the stamped dir, else the caller rendered and
+  # launched with different dirs and the inner sandbox would silently degrade.
+  local stamped
+  # tail -1, NOT head -1: render_profile appends the real stamp LAST (after all
+  # template substitution), and nothing user-controlled can land after it — so
+  # the last match is authoritative. head -1 would let an earlier `;; @spawn-tmpdir:`
+  # line (e.g. one smuggled through a scope path) override the real one.
+  stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | tail -1)"
+  [ -n "$stamped" ] || die "profile has no @spawn-tmpdir stamp (fail-closed): re-render it with the current render-profile: $profile"
+  if [ -n "$tmpdir" ]; then
+    case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
+    local tmpdir_check
+    tmpdir_check="$(resolve_lazy "$tmpdir")" || exit 2
+    [ "$tmpdir_check" = "$stamped" ] || die "--tmpdir ($tmpdir_check) does not match the profile's rendered TMPDIR ($stamped) (fail-closed) — render the profile and launch with the SAME --tmpdir"
+  fi
+  tmpdir="$stamped"
   [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-launch requires an existing --workdir"
   [ -n "$log" ] || die "write-launch requires --log"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
@@ -708,6 +793,14 @@ write_launch() {
     printf 'set -uo pipefail\n'
     printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
     printf 'export PATH=%q\n' "$path"
+    # A launchd job inherits no usable TMPDIR, so without this the jailed process
+    # has nowhere writable to put temp files: zsh dies with "can't create temp file
+    # for here document" on any heredoc, and the harness's mux socket can't be
+    # created. This is the profile's own @spawn-tmpdir (read above) — the exact dir
+    # the srt-mux socket grant is anchored to — so the job's mux socket always
+    # lands where the profile permits it; render and launch cannot drift apart.
+    printf 'export TMPDIR=%q\n' "$tmpdir"
+    printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # Record the log's size BEFORE this wake writes to it. The log is appended
     # to across every wake, so classify-exit must look only at the bytes THIS
@@ -1539,7 +1632,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
