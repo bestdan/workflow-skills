@@ -40,7 +40,7 @@ base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
 status: active # run-level: active | paused | systemic | done
-paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused
+paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
 pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
 exit_reason: continuing # why the orchestrator last exited: continuing | paused | done | systemic | deadline (see "Exit contract" below)
 exit_reason_at: 1783823504 # epoch seconds the reason was declared — how the supervisor tells THIS wake's declaration from a stale one

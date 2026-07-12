@@ -987,7 +987,7 @@ if command -v git >/dev/null 2>&1; then
   # --- a legitimate paused_until wait never trips the guard, even repeated ------
   SC3="$BASE/sc-paused"; mkdir -p "$SC3/.auto-pilot"
   ( cd "$SC3" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00Z\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
     && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
   STATE3="$SC3/.auto-pilot/supervisor-state"
@@ -2058,7 +2058,7 @@ CLEOF
   # never invoked) AND the heartbeat must still be fresh.
   ec_wake gateclosed "" 0
   { printf -- '---\n'; printf 'run_id: gateclosed\n'; printf 'status: paused\n'
-    printf 'paused_until: 2099-01-01T00:00:00Z\n'; printf 'pause_reason: rate window\n'
+    printf 'paused_until: 2099-01-01T00:00:00\n'; printf 'pause_reason: rate window\n'
     printf -- '---\n'; } >"$EC/gateclosed/.auto-pilot/RUN.md"
   rm -f "$EC/gateclosed/.auto-pilot/heartbeat" "$EC/gateclosed/claude-ran"
   : >"$EC/gateclosed/launchctl.log"
@@ -2586,7 +2586,7 @@ LCFEOF
   # …while a REAL pause (RUN.md's own `status: paused` + `paused_until`) stays exempt.
   PC="$EC/paused-corroborated"; mkdir -p "$PC/.auto-pilot"
   ( cd "$PC" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00Z\n'
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'
          printf 'pause_reason: rate window\n'
          printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
@@ -3630,7 +3630,7 @@ GHWEOF
   D7P="$DOC/i7-paused"; RUN_ID7P="doctor-i7-paused"
   _doctor_new_run "$D7P" "$RUN_ID7P"
   {
-    printf -- '---\nrun_id: %s\nstatus: paused\npaused_until: 2099-01-01T00:00:00Z\n---\n\n' "$RUN_ID7P"
+    printf -- '---\nrun_id: %s\nstatus: paused\npaused_until: 2099-01-01T00:00:00\n---\n\n' "$RUN_ID7P"
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     printf '| t1 | pending | - | main | - | - | |\n'

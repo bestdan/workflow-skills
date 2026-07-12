@@ -2449,14 +2449,32 @@ supervisor_check() {
 # wake guard stays as defense in depth (load-bearing for --resume).
 # ---------------------------------------------------------------------------
 
-# Parse an ISO-8601 UTC timestamp in RUN.md's form (e.g.
+# Parse an ISO-8601 timestamp in RUN.md's form (canonically
 # 2026-07-12T07:52:04Z) to epoch seconds. Tries BSD `date` (macOS, what the
 # launchd job actually runs under) first, then GNU `date` (Linux/CI), so the
-# same script works on both. Prints nothing and returns non-zero if BOTH
-# parses fail — the caller treats that as unparseable and fails open.
+# same script works on both. Prints nothing and returns non-zero if every
+# parse fails.
+#
+# Liberal in what it accepts, because `paused_until` is written by the AGENT
+# and the spec only ever said "ISO time": a bare `+00:00` offset, an omitted
+# `Z`, a space separator, or omitted seconds are all valid ISO 8601 and all
+# mean a real pause. BSD `date` accepts exactly ONE of those shapes, and the
+# GNU fallback never fires on macOS — so without normalization a legitimate
+# rate-window pause parses as garbage. That matters now that a caller
+# (_pause_exempt) fails CLOSED on unparseable: misreading a valid timestamp
+# would re-arm the no-progress guard and halt a healthy run.
 _parse_iso8601_utc() {
-  local v="$1" epoch
-  epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$v" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+  local v="$1" epoch n
+  # normalize: space→T separator, strip the colon in a numeric offset (BSD %z
+  # wants +0000), and map a bare/absent zone to Z (RUN.md times are UTC).
+  n="${v/ /T}"
+  case "$n" in
+    *[+-][0-9][0-9]:[0-9][0-9]) n="${n%:*}${n##*:}" ;;
+  esac
+  for fmt in '%Y-%m-%dT%H:%M:%SZ' '%Y-%m-%dT%H:%M:%S%z' '%Y-%m-%dT%H:%M:%S' \
+             '%Y-%m-%dT%H:%MZ' '%Y-%m-%dT%H:%M'; do
+    epoch="$(date -j -u -f "$fmt" "$n" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+  done
   epoch="$(date -u -d "$v" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
   return 1
 }
