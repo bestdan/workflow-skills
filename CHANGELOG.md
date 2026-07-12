@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.53.3] - 2026-07-12
+
+### Fixes
+
+- doctor I5 fails closed when a worktree's git reads fail (task 24) (#195) (1d8c2b9)
+
 ## [1.53.2] - 2026-07-12
 
 ### Fixes
