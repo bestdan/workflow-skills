@@ -257,9 +257,25 @@ broke: "_re-authenticate: run `claude /login`, then `/auto-pilot <source>
 of silence; a notification that says only "the run failed" reproduces that bug at
 lower latency.
 
+**The scan sits ABOVE the pre-invoke gate.** The gate
+([`launch-runtime.md`](launch-runtime.md) §5, task 11) skips the `claude`
+invocation on a paused wake, and boots the job out on a `done`/`systemic` run — it
+short-circuits **the agent invocation, and nothing else**. The supervisor's alarm
+scan (`spawn-orchestrator.sh supervisor-scan`) therefore runs **before** the gate
+in the generated wrapper, on every wake, gate open or closed. Under the gate it
+would be silent on precisely the wakes that prove the run is stuck: an agent-written
+`status: systemic` that no wake has announced yet would be torn down forever with
+nobody told, and a blown `--until`, a park storm, or a pending in-jail
+`alarm-request` would wait out a multi-hour rate-window pause. A gate-closed wake
+is not itself a condition — the scan decides; a healthy paused run alarms nothing.
+
 **Alarm once per condition, per run** — not once per 300s wake, or the alarm
 becomes the noise that hides the next one. The sentinel file is the idempotency
-key, so it survives the supervisor being a fresh process on every wake.
+key, so it survives the supervisor being a fresh process on every wake. **`--resume`
+clears it** (`spawn-orchestrator.sh alarm-clear`, [`resume.md`](resume.md)): every
+alarm's required action ends in a `--resume`, so a sentinel that outlived one would
+suppress the alarm when the same condition recurs — and the run the human just
+repaired would halt in silence.
 
 ## Hard-stop before paid/overflow credits
 

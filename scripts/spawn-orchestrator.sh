@@ -50,14 +50,16 @@
 #       [--since-offset <bytes>]
 #   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
 #       [--since-offset <bytes>] \
-#       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>]
-#   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>] \
+#       [--park-limit <n>]
+#   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
+#   spawn-orchestrator.sh supervisor-scan --dir <run-dir> --label <label> \
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh alarm --dir <run-dir> [--label <label>] \
 #       --condition <id> --reason <text> [--action <text>]
 #   spawn-orchestrator.sh alarm-request --dir <run-dir> \
 #       --condition <id> --reason <text> [--action <text>]
+#   spawn-orchestrator.sh alarm-clear --dir <run-dir>
 #
 #   alarm      Task 16 — the run must ACTIVELY tell a human. Emits an OS-level
 #              notification (osascript, falling back to terminal-notifier),
@@ -74,6 +76,10 @@
 #   alarm-request  The JAILED side's seam: an in-agent detector (the invariant
 #              doctor) records a condition it cannot itself deliver; the
 #              supervisor drains and delivers it on its next wake.
+#   alarm-clear  Retire this run's alarms (the sentinel + any undelivered
+#              requests). `--resume` calls it first: the sentinel is the
+#              idempotency key, so one that outlives the resume would SUPPRESS
+#              the alarm when the same condition recurs. REPORT.md's history stays.
 #
 #   classify-exit  Read-only, no model call (task 10 / finding #22): classify
 #                  an orchestrator exit from its exit code + captured
@@ -121,6 +127,17 @@
 #                  relaunching. Exits 20 to mean "gate closed, do not invoke
 #                  the agent"; any other exit means proceed — fail-safe
 #                  against a missing RUN.md or an unparseable paused_until.
+#                  It gates the AGENT INVOCATION only — see supervisor-scan.
+#   supervisor-scan  The supervisor's own per-wake bookkeeping, called by the
+#                  generated launch script ABOVE the gate, so it runs on EVERY
+#                  wake — including the ones the gate closes. Runs the task-16
+#                  alarm scan (the same one supervisor-check runs after the
+#                  agent exits) and halts on a terminal condition. Without it,
+#                  the gate's `exit 0` would swallow the alarm on exactly the
+#                  wakes that prove the run is stuck: an unannounced
+#                  `status: systemic` gets torn down in silence, and a blown
+#                  `--until` or a park storm waits out a multi-hour pause.
+#                  Always exits 0 — bookkeeping, never a gate.
 #   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
 #       [--gh <path>] [--dry-run]
 #
@@ -841,6 +858,14 @@ write_launch() {
     printf 'export TMPDIR=%q\n' "$tmpdir"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
+    # The supervisor's own bookkeeping — ABOVE the gate, so it runs on EVERY wake
+    # including the ones the gate closes (task 16). The gate below short-circuits
+    # the AGENT INVOCATION only; a gate-closed wake is precisely when a halted or
+    # stalled run must still tell a human, so nothing that the supervisor owes the
+    # human may sit under the gate's `exit 0`. Per-wake supervisor bookkeeping
+    # added later goes HERE, on this side of the gate, for the same reason. Never
+    # fails the wake: bookkeeping must not be able to prevent the agent from running.
+    printf '%q supervisor-scan --dir %q --label %q >>%q 2>&1 || true\n' "$self" "$workdir" "$label" "$log"
     # Pre-invoke gate (task 11 / finding #19): a pure shell timestamp check,
     # BEFORE claude ever starts, so a wake that lands mid-pause costs no
     # model call. Exit 20 is the gate's distinct "do not invoke" signal;
@@ -1264,7 +1289,13 @@ alarm() {
   case "$condition" in *[!A-Za-z0-9._-]*) die "--condition must be [A-Za-z0-9._-] (fail-closed): $condition" ;; esac
 
   local ap="$dir/.auto-pilot"
-  mkdir -p "$ap" || die "cannot create $ap"
+  # Past argument validation, NOTHING in here may `die`: `die` is an `exit`, and
+  # an exit from the alarm would take its CALLER — the halt — down with it, before
+  # the run-state commit and before the launchd teardown (the one thing that MUST
+  # happen). A broken durable channel degrades to the remaining ones; it never
+  # aborts the halt. The call sites subshell us as well, for the validation `die`s.
+  mkdir -p "$ap" 2>/dev/null \
+    || echo "spawn-orchestrator: alarm: cannot create $ap — the notification still fires, the durable record may not" >&2
   local sentinel="$ap/$ALARM_SENTINEL_NAME"
 
   if [ -f "$sentinel" ] && grep -qxF "condition: $condition" "$sentinel"; then
@@ -1284,7 +1315,8 @@ alarm() {
     printf 'reason: %s\n' "$reason"
     printf 'action: %s\n' "$action"
     printf '\n'
-  } >>"$sentinel" || die "alarm: cannot write the ALARM sentinel: $sentinel"
+  } >>"$sentinel" 2>/dev/null \
+    || echo "spawn-orchestrator: alarm: cannot write the ALARM sentinel ($sentinel) — the REPORT.md line and the notification still fire, but this alarm is NOT idempotent without it" >&2
 
   # 2. REPORT.md's VERY FIRST LINE. The human wakes up to this file; an alarm
   #    appended at the bottom, under a night of task sections, is not an alarm.
@@ -1350,6 +1382,47 @@ alarm_request() {
   echo "spawn-orchestrator: alarm-request $condition (the supervisor will deliver it on its next wake)"
 }
 
+# Retire this run's alarms — `--resume` calls it, FIRST, before it reconciles
+# anything (SKILL.md "Resume phase"). The sentinel is the per-run idempotency key,
+# and every alarm's own ACTION text ends "…then `/auto-pilot <source> --resume`":
+# so a sentinel that survives the resume SUPPRESSES the next alarm for the same
+# condition — a token that expires again, a base that breaks again — and the
+# resumed run halts in exactly the silence this whole mechanism exists to end.
+# The alarms describe the run the human just repaired; they do not carry forward.
+# Undelivered in-jail requests go with them, for the same reason.
+alarm_clear() {
+  local dir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      *) die "unknown alarm-clear argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] || die "alarm-clear requires --dir"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  [ -d "$dir" ] || die "alarm-clear --dir not found: $dir"
+
+  local ap="$dir/.auto-pilot"
+  rm -f "$ap/$ALARM_SENTINEL_NAME"
+  rm -rf "${ap:?}/$ALARM_REQUEST_DIR_NAME"
+  # The REPORT.md alarm lines STAY: they are the history of what went wrong, which
+  # is exactly what a human reads after a resume. Only the idempotency key resets.
+  echo "spawn-orchestrator: alarms cleared for $dir (REPORT.md history kept)"
+}
+
+# EVERY internal caller raises the alarm through this, never `alarm` directly.
+# `alarm`'s argument validation is `die`, i.e. an `exit`, and `alarm foo || true`
+# does NOT contain an `exit` — it would take the whole supervisor process down
+# mid-halt, before the run-state commit and before the launchd teardown, leaving a
+# `systemic` RUN.md next to a still-loaded job (finding #22's relaunch loop, with
+# the halt message as camouflage). The subshell contains it: a malformed alarm
+# costs us the notification, never the halt. Callers that WANT the exit (the CLI
+# subcommand, a fail-closed operator invocation) still call `alarm` directly.
+_alarm_safe() {
+  ( alarm "$@" ) || echo "spawn-orchestrator: alarm failed (the halt/teardown continues regardless)" >&2
+  return 0
+}
+
 # (UN-JAILED side) Deliver every pending in-jail alarm request. Each delivered
 # request is removed; `alarm` itself is idempotent, so a request re-dropped after
 # delivery re-notifies nothing.
@@ -1366,10 +1439,13 @@ _alarm_drain_requests() {
     action="$(sed -n 's/^action: //p' "$f" | head -1)"
     rm -f "$f"
     [ -n "$condition" ] && [ -n "$reason" ] || continue
+    # _alarm_safe, not `alarm`: the request's fields come from INSIDE the jail, so
+    # a malformed condition id is an agent-side bug, not a reason for the
+    # supervisor to exit mid-wake.
     if [ -n "$action" ]; then
-      alarm --dir "$dir" --label "$label" --condition "$condition" --reason "$reason" --action "$action"
+      _alarm_safe --dir "$dir" --label "$label" --condition "$condition" --reason "$reason" --action "$action"
     else
-      alarm --dir "$dir" --label "$label" --condition "$condition" --reason "$reason"
+      _alarm_safe --dir "$dir" --label "$label" --condition "$condition" --reason "$reason"
     fi
   done
 }
@@ -1467,7 +1543,7 @@ _supervisor_alarm_scan() {
       _ALARM_HALT_REASON="${reason:-status: systemic}"
       return 0
     fi
-    alarm --dir "$dir" --label "$label" --condition systemic \
+    _alarm_safe --dir "$dir" --label "$label" --condition systemic \
       --reason "the run's circuit breaker halted it (${reason:-status: systemic})"
     _ALARM_HALT_CONDITION="systemic"
     _ALARM_HALT_REASON="circuit breaker halt (${reason:-status: systemic})"
@@ -1475,7 +1551,7 @@ _supervisor_alarm_scan() {
   fi
 
   if [ -n "$until_val" ] && _deadline_blown "$until_val"; then
-    alarm --dir "$dir" --label "$label" --condition deadline \
+    _alarm_safe --dir "$dir" --label "$label" --condition deadline \
       --reason "the run blew its --until deadline ($until_val) without finishing"
     _ALARM_HALT_CONDITION="deadline"
     _ALARM_HALT_REASON="blew the --until deadline ($until_val) without finishing"
@@ -1484,7 +1560,7 @@ _supervisor_alarm_scan() {
 
   local parked; parked="$(_run_md_parked_count "$run_md")"
   if [ "$parked" -ge "$park_limit" ]; then
-    alarm --dir "$dir" --label "$label" --condition park-storm \
+    _alarm_safe --dir "$dir" --label "$label" --condition park-storm \
       --reason "$parked tasks are parked (limit $park_limit) — the run is filling a graveyard, not landing PRs"
   fi
 }
@@ -1535,8 +1611,10 @@ _supervisor_halt() {
   # (a bootout that didn't take) re-halts silently instead of re-notifying.
   # An EMPTY --condition means "this halt was already announced under its real
   # name" (see _supervisor_alarm_scan's systemic branch) — halt, don't re-notify.
+  # _alarm_safe, never `alarm`: an alarm that cannot write its own sentinel must
+  # not be the reason the job is left loaded and relaunching (see _alarm_safe).
   if [ -n "$condition" ]; then
-    alarm --dir "$dir" --label "$label" --condition "$condition" --reason "$reason" || true
+    _alarm_safe --dir "$dir" --label "$label" --condition "$condition" --reason "$reason"
   fi
 
   if [ -f "$run_md" ] || [ -f "$report_md" ]; then
@@ -1560,6 +1638,52 @@ _supervisor_halt() {
     fi
   fi
   echo "spawn-orchestrator: supervisor halt ($label): $reason"
+}
+
+# The supervisor's OWN per-wake bookkeeping, run from the generated launch script
+# ABOVE the pre-invoke gate — and this placement is the whole point. The gate
+# (task 11) short-circuits THE AGENT INVOCATION, i.e. a model call it would be a
+# waste to make; it must never short-circuit the supervisor, because a
+# gate-closed wake is exactly when a halted or stalled run most needs to tell a
+# human. Both of the gate's closed paths would otherwise be silent:
+#   status: done|systemic  the gate boots the job out and exits 0 — so an agent's
+#                          circuit-breaker `systemic` that was written but not yet
+#                          announced (the wake that would have announced it was
+#                          cut short: sleep, reboot, power loss) is torn down
+#                          FOREVER, unnotified. Finding #22's silence, restored.
+#   paused_until in future the gate skips the wake — so a blown --until, a park
+#                          storm, or a pending in-jail alarm-request sits
+#                          undelivered for the whole (multi-hour) pause.
+# The scan decides the conditions; a gate-closed wake is NOT itself a condition,
+# so a healthy paused run still raises nothing. Any future work the supervisor
+# must do on EVERY wake regardless of the gate belongs on THIS side of it.
+supervisor_scan() {
+  local dir="" label="" park_limit="$PARK_STORM_LIMIT_DEFAULT"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --park-limit) [ $# -ge 2 ] || die "missing value for --park-limit"; park_limit="$2"; shift 2 ;;
+      *) die "unknown supervisor-scan argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$label" ] || die "supervisor-scan requires --dir and --label"
+  [ -d "$dir" ] || die "supervisor-scan --dir not found: $dir"
+  case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer: $park_limit" ;; esac
+  [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"
+
+  _supervisor_alarm_scan "$dir" "$label" "$park_limit"
+  if [ -n "$_ALARM_HALT_REASON" ]; then
+    # A terminal condition found BEFORE the agent runs: halt (which writes
+    # `status: systemic` and tears the job down) rather than spend a model call
+    # relaunching into it. The gate, next, then finds `systemic` and skips the
+    # invocation — the alarm is already delivered by the time it does.
+    _supervisor_halt --dir "$dir" --label "$label" \
+      --condition "$_ALARM_HALT_CONDITION" --reason "$_ALARM_HALT_REASON"
+  fi
+  # Always 0: this is bookkeeping, not a gate. The wrapper falls through to the
+  # real gate, which owns the decision to invoke the agent or not.
+  return 0
 }
 
 # The per-wake entry point the generated launch script calls after `claude -p`
@@ -2631,8 +2755,10 @@ case "$sub" in
   classify-exit) classify_exit "$@" ;;
   supervisor-check) supervisor_check "$@" ;;
   supervisor-gate) supervisor_gate "$@" ;;
+  supervisor-scan) supervisor_scan "$@" ;;
   alarm) alarm "$@" ;;
   alarm-request) alarm_request "$@" ;;
+  alarm-clear) alarm_clear "$@" ;;
   restack) restack "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

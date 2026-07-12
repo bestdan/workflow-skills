@@ -86,6 +86,18 @@ reconciliation row cleanly is set to `parked` and gets a `REPORT.md` entry
 describing what was found ([`run-state.md`](run-state.md) "`REPORT.md`") — resume
 never guesses or retries blindly.
 
+**Clear the run's alarms — first, before reconciling anything.** Run
+`spawn-orchestrator.sh alarm-clear --dir <run-dir>`, which removes the
+`.auto-pilot/ALARM` sentinel and any undelivered `alarm-requests/`. That sentinel
+is the alarm's **per-run idempotency key**
+([`run-budget.md`](run-budget.md) "The alarm"), and every alarm's own required
+action ends "…then `/auto-pilot <source> --resume`" — so a sentinel that outlives
+the resume would **suppress** the next alarm for the same condition (a token that
+expires again, a base that breaks again), and the resumed run would halt in the
+silence the alarm exists to end. The alarms describe the run the human just
+repaired; they do not carry forward. `REPORT.md`'s alarm history **stays** — that
+is what the human reads.
+
 **Then fall into the run loop.** Once reconciliation leaves `RUN.md` accurate,
 resume continues into the **Run phase** loop ([`../SKILL.md`](../SKILL.md) "Run
 phase") for the remaining ready tasks; it does not re-derive that loop. If the

@@ -1691,6 +1691,122 @@ if command -v git >/dev/null 2>&1; then
   st10b="$("$SCRIPT" status --label com.autopilot.test.alarm --dir "$A5B" 2>&1)"
   have "alarm/status: a healthy run reports no alarm" 'alarm: none' "$st10b"
 
+  # (11) THE GATE MUST NOT SWALLOW THE ALARM. Tests (1)-(10) call supervisor-check
+  # directly, which is exactly how the bug hid: the REAL wrapper runs the
+  # pre-invoke gate (task 11) FIRST, and the gate's `exit 0` used to short-circuit
+  # the whole supervisor — alarm scan included — on precisely the wakes that prove
+  # a run is stuck. These drive the GENERATED WRAPPER, gate and all.
+  printf 'run the graph\n' >"$AL/prompt.txt"
+  mkwrapper() { # <run-dir> <label> <out-script>
+    "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$1" \
+      --log "$1/.auto-pilot/orchestrator.log" --prompt-file "$AL/prompt.txt" \
+      --until '2099-01-01T00:00:00' --label "$2" --claude-bin "$ALSTUB/claude" \
+      --path "$ALPATH" --out-script "$3" --out-plist "$3.plist" >/dev/null 2>&1
+  }
+  # <dir> <status> <paused_until> <until>: a run the GATE will close on — either
+  # paused (a future paused_until) or terminal (done/systemic).
+  mkgaterun() {
+    local d="$1"
+    mkdir -p "$d/.auto-pilot"
+    ( cd "$d" && git init -q && git config user.email t@e && git config user.name t )
+    {
+      printf -- '---\n'
+      printf 'status: %s\n' "$2"
+      printf 'pause_reason: \n'
+      printf 'paused_until: %s\n' "$3"
+      printf 'until: %s\n' "$4"
+      printf -- '---\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    } >"$d/.auto-pilot/RUN.md"
+    printf '# report\n' >"$d/.auto-pilot/REPORT.md"
+    : >"$d/.auto-pilot/orchestrator.log"
+    ( cd "$d" && git add -A && git -c user.name=t -c user.email=t@e commit -q -m init )
+  }
+
+  # (11a) The agent's circuit breaker wrote `status: systemic`, and the wake that
+  # would have announced it never finished (sleep / reboot / power loss — the
+  # overnight runs this is FOR). The gate now sees `systemic`, boots the job out,
+  # and exits 0: the LAST wake this run will ever get. If the scan sits under that
+  # exit, the run is torn down forever with nobody told — finding #22's silence,
+  # restored by the very mechanism meant to end it.
+  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"; : >"$LC_CALLS"
+  G1="$AL/gate-systemic"; mkgaterun "$G1" systemic '' 2099-01-01T00:00:00
+  mkwrapper "$G1" com.autopilot.test.gsys "$AL/gsys.sh"
+  bash "$AL/gsys.sh" >/dev/null 2>&1
+  have "alarm/gate-systemic: a gate-CLOSED wake still alarms (the gate skips the AGENT, not the supervisor)" \
+    'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  alarm_asserts "gate-systemic" "$G1" "systemic" 'REPORT.md'
+  [ -s "$CLAUDE_CALLS" ] && bad "alarm/gate-systemic: the agent is NOT invoked (the gate still gates)" \
+    || ok "alarm/gate-systemic: the agent is NOT invoked (the gate still gates)"
+  have "alarm/gate-systemic: the job is torn down" 'bootout' "$(cat "$LC_CALLS" 2>/dev/null)"
+
+  # (11b) A run parked behind a multi-hour rate-window pause that blew its --until.
+  # The gate closes on paused_until and exits 0 — for the whole pause. A deadline
+  # (or a park storm, or a pending in-jail alarm-request) under that exit is a
+  # stalled run staying silent for hours: the exact #22 shape.
+  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"; : >"$LC_CALLS"
+  G2="$AL/gate-paused"; mkgaterun "$G2" paused 2099-01-01T00:00:00Z 2020-01-01T00:00:00
+  mkwrapper "$G2" com.autopilot.test.gpause "$AL/gpause.sh"
+  bash "$AL/gpause.sh" >/dev/null 2>&1
+  have "alarm/gate-paused: a blown --until alarms even though the gate closed the wake" \
+    'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  alarm_asserts "gate-paused" "$G2" "deadline" '--until'
+  [ -s "$CLAUDE_CALLS" ] && bad "alarm/gate-paused: the agent is NOT invoked (no model call in a pause)" \
+    || ok "alarm/gate-paused: the agent is NOT invoked (no model call in a pause)"
+
+  # (11c) …and a HEALTHY paused run alarms NOTHING. A closed gate is not itself a
+  # condition — the scan decides. Get this wrong and every paused wake screams.
+  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"
+  G3="$AL/gate-healthy"; mkgaterun "$G3" paused 2099-01-01T00:00:00Z 2099-01-01T00:00:00
+  mkwrapper "$G3" com.autopilot.test.ghealthy "$AL/ghealthy.sh"
+  bash "$AL/ghealthy.sh" >/dev/null 2>&1
+  lack "alarm/gate-healthy: a healthy paused wake raises NO notification" \
+    'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  [ -e "$G3/.auto-pilot/ALARM" ] && bad "alarm/gate-healthy: a healthy paused wake writes no sentinel" \
+    || ok "alarm/gate-healthy: a healthy paused wake writes no sentinel"
+
+  # (12) A BROKEN ALARM MUST NOT BREAK THE HALT. `die` is an `exit`, so an alarm
+  # that dies takes the supervisor down mid-halt — before the teardown — leaving a
+  # `systemic` RUN.md next to a still-loaded job that relaunches into the same
+  # condition every 300s: #22's loop, wearing the halt message as camouflage. The
+  # sentinel path is made unwritable (a directory) to force the failure.
+  : >"$LC_CALLS"; : >"$OSA_CALLS"
+  A11="$AL/badsentinel"; mkrun "$A11" active 2099-01-01T00:00:00 0
+  mkdir -p "$A11/.auto-pilot/ALARM"
+  printf 'API Error: 401 Invalid authentication credentials\n' >"$A11/.auto-pilot/orchestrator.log"
+  alwake "$A11" 1 "$A11/.auto-pilot/orchestrator.log" >/dev/null 2>&1
+  have "alarm/broken-sentinel: the job is STILL torn down (a dead alarm cannot strand a live job)" \
+    'bootout' "$(cat "$LC_CALLS" 2>/dev/null)"
+  have "alarm/broken-sentinel: the halt still records systemic" \
+    'status: systemic' "$(cat "$A11/.auto-pilot/RUN.md" 2>/dev/null)"
+  have "alarm/broken-sentinel: the human is still notified" \
+    'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  have "alarm/broken-sentinel: REPORT.md still leads with the alarm" \
+    '**ALARM' "$(head -1 "$A11/.auto-pilot/REPORT.md" 2>/dev/null)"
+
+  # (13) `--resume` clears the alarms. Every alarm's required action ends in a
+  # `--resume`, so a sentinel that outlives one would suppress the NEXT alarm for
+  # the same condition (a token that expires again) and the repaired run would halt
+  # in silence. REPORT.md's history is not cleared — that is what the human reads.
+  "$SCRIPT" alarm-request --dir "$A1" --condition invariant --reason 'pending' >/dev/null 2>&1
+  "$SCRIPT" alarm-clear --dir "$A1" >/dev/null 2>&1
+  [ -e "$A1/.auto-pilot/ALARM" ] && bad "alarm/clear: --resume drops the sentinel" \
+    || ok "alarm/clear: --resume drops the sentinel"
+  [ -e "$A1/.auto-pilot/alarm-requests" ] && bad "alarm/clear: --resume drops undelivered requests" \
+    || ok "alarm/clear: --resume drops undelivered requests"
+  have "alarm/clear: REPORT.md's alarm history SURVIVES the clear" \
+    '**ALARM' "$(head -1 "$A1/.auto-pilot/REPORT.md" 2>/dev/null)"
+  have "alarm/clear: status reports no alarm on the resumed run" \
+    'alarm: none' "$("$SCRIPT" status --label com.autopilot.test.alarm --dir "$A1" 2>&1)"
+  # …and the SAME condition can alarm again — the key is per run, and a resumed run
+  # is a run that can fail again.
+  : >"$OSA_CALLS"
+  PATH="$ALPATH" "$SCRIPT" alarm --dir "$A1" --label com.autopilot.test.alarm \
+    --condition fatal-auth --reason 're-expired after the resume' >/dev/null 2>&1
+  have "alarm/clear: the same condition alarms AGAIN after a resume" \
+    'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+
   # fail-closed: the condition id is an idempotency key and a grep anchor; the
   # request's fields are read back line-wise, so a newline could forge them.
   afc() { local name="$1" want="$2"; shift 2; local o c; o="$("$SCRIPT" "$@" 2>&1)"; c=$?

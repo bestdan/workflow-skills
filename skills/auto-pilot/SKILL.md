@@ -304,6 +304,10 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   crash-reconciliation table (rows G1–G7) — idempotent (adopts an existing PR,
   never duplicates), removes orphaned worker worktrees, and **parks** anything
   that matches no row cleanly rather than blind-retrying.
+- **Clear the run's alarms first** (`spawn-orchestrator.sh alarm-clear --dir
+  <run-dir>`): the `ALARM` sentinel is the alarm's per-run idempotency key, so one
+  that outlives the resume suppresses the alarm if the same condition recurs and
+  the resumed run halts silently. `REPORT.md`'s history stays.
 - **Then fall into the run loop**, clearing any run-level pause markers first
   ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 
