@@ -58,7 +58,24 @@
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
 #   spawn-orchestrator.sh supervisor-scan --dir <run-dir> --label <label> \
-#       [--park-limit <n>] [--pause-exempt-max <seconds>]
+#       [--park-limit <n>] [--pause-exempt-max <seconds>] [--report-every <dur>]
+#   spawn-orchestrator.sh status-report --dir <run-dir> --label <label> \
+#       [--report-every <dur>] [--task-ceiling <s>] [--repo <path>] \
+#       [--remote <name>] [--gh <path>] [--usage-bin <path>] [--force]
+#
+#   status-report  Task 20 — the periodic status report (finding #28): a
+#                  delta-aware rendering of `status --label`, on by default
+#                  (`--report-every`, default 900s = 15m; `off` disables), run
+#                  from the SUPERVISOR in shell — NO MODEL CALL. Overwrites
+#                  <dir>/.auto-pilot/STATUS.md every interval with the phase
+#                  table, the in-flight task's elapsed vs the per-task ceiling,
+#                  heartbeat age, open PRs + mergeable state, the rate window,
+#                  `--until` remaining vs `min_task_budget`, and — the payload —
+#                  what changed since the last report, stating plainly when
+#                  nothing did. Cross-checks live git/GitHub state via the SAME
+#                  orphan detector `restack` uses (`_restack_orphan_scan`), so a
+#                  stale RUN.md phase can never read back as healthy. `--force`
+#                  bypasses the interval gate (testing/manual use).
 #   spawn-orchestrator.sh alarm --dir <run-dir> [--label <label>] \
 #       --condition <id> --reason <text> [--action <text>]
 #   spawn-orchestrator.sh alarm-request --dir <run-dir> \
@@ -378,6 +395,14 @@ HEARTBEAT_NAME="heartbeat"
 # (run-budget.md "Per-task wall-clock bound"): 45 minutes. Older than this with
 # no beat means WEDGED, not merely slow.
 DEFAULT_TASK_CEILING=2700
+# Task 20 — the periodic status report. STATUS.md is overwritten every interval
+# (it is a rendering of current state, never a durable record — RUN.md/
+# REPORT.md/QUESTIONS.md stay the run's memory). Its companion state file is
+# wake-local scratch (like supervisor-state/heartbeat): NOT committed to the
+# run-state branch. Default interval matches finding #28's "every 15 minutes".
+STATUS_REPORT_NAME="STATUS.md"
+STATUS_REPORT_STATE_NAME="status-report-state"
+DEFAULT_REPORT_INTERVAL=900
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
 
@@ -995,7 +1020,8 @@ write_launch() {
         plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
         self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
         park_limit="$PARK_STORM_LIMIT_DEFAULT" \
-        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT"
+        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
+        report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -1017,9 +1043,31 @@ write_launch() {
       --no-progress-limit) no_progress_limit="$2"; shift 2 ;;
       --park-limit) park_limit="$2"; shift 2 ;;
       --pause-exempt-max) pause_exempt_max="$2"; shift 2 ;;
+      --report-every) report_every="$2"; shift 2 ;;
+      --report-gh) report_gh="$2"; shift 2 ;;
+      --report-usage-bin) report_usage_bin="$2"; shift 2 ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
+  # Task 20: on by default (15m), `off` disables, `<n>s|m|h` overrides. Baked
+  # into the generated wrapper at launch time — same convention as
+  # --no-progress-limit — rather than re-read from RUN.md every wake.
+  _parse_duration_or_off "$report_every" >/dev/null \
+    || die "--report-every must be off, an integer (seconds), or <n>s|m|h: $report_every"
+  # --report-gh is EXPLICIT-ONLY, no `command -v gh` fallback (unlike
+  # --claude-bin): this value gets baked into the GENERATED wrapper's
+  # supervisor-scan call, which then runs unattended, on every wake, for the
+  # life of the run. Auto-resolving it here would mean any test (or future
+  # caller) that renders a launch script without thinking about gh — this
+  # file's own pre-task-20 write-launch test suite included — would silently
+  # start making REAL `gh pr view` calls against fixture PR numbers the moment
+  # it actually executes the generated launch.sh. Absent --report-gh is NOT
+  # fail-closed: the report simply skips its PR/reconciliation sections at
+  # runtime (status_report's own degrade) — the caller that WANTS the
+  # reconciliation live must pass `--report-gh "$(command -v gh)"` itself.
+  # --report-usage-bin is the identical story for the rate-window query
+  # (scripts/claude-usage.sh — a real network call + Keychain read): explicit-
+  # only, absent means the report just shows "unavailable".
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
   [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
   [ -n "$label" ] || die "write-launch requires --label"
@@ -1097,8 +1145,18 @@ write_launch() {
     # human may sit under the gate's `exit 0`. Per-wake supervisor bookkeeping
     # added later goes HERE, on this side of the gate, for the same reason. Never
     # fails the wake: bookkeeping must not be able to prevent the agent from running.
-    printf '%q supervisor-scan --dir %q --label %q --park-limit %q --pause-exempt-max %q >>%q 2>&1 || true\n' \
-      "$self" "$workdir" "$label" "$park_limit" "$pause_exempt_max" "$log"
+    # Every supervisor threshold is emitted here, on ONE line: the park-storm
+    # limit and the pause-exempt cap (which bounds the no-progress exemption an
+    # agent would otherwise forge) as well as task 20's report interval. Dropping
+    # any of them silently reverts it to its default in production while the
+    # source still parses the flag — the exact "dead flag" bug task 25 existed to
+    # remove. The suite asserts each one against THIS generated line.
+    local scan_line
+    scan_line="$(printf '%q supervisor-scan --dir %q --label %q --park-limit %q --pause-exempt-max %q --report-every %q' \
+      "$self" "$workdir" "$label" "$park_limit" "$pause_exempt_max" "$report_every")"
+    [ -n "$report_gh" ] && scan_line="$scan_line $(printf -- '--gh %q' "$report_gh")"
+    [ -n "$report_usage_bin" ] && scan_line="$scan_line $(printf -- '--usage-bin %q' "$report_usage_bin")"
+    printf '%s >>%q 2>&1 || true\n' "$scan_line" "$log"
     # Beat the heartbeat — ALSO above the gate, and for the same reason (task 15 +
     # task 16's seam). It is the wake's liveness signal, not the agent's: a claude
     # that wedges before its first loop iteration must still leave "this wake
@@ -2362,13 +2420,25 @@ _supervisor_pause_exempt_ledger() {
 # must do on EVERY wake regardless of the gate belongs on THIS side of it.
 supervisor_scan() {
   local dir="" label="" park_limit="$PARK_STORM_LIMIT_DEFAULT" \
-        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT"
+        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
+        report_every="$DEFAULT_REPORT_INTERVAL" gh_bin="" usage_bin=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --park-limit) [ $# -ge 2 ] || die "missing value for --park-limit"; park_limit="$2"; shift 2 ;;
       --pause-exempt-max) [ $# -ge 2 ] || die "missing value for --pause-exempt-max"; pause_exempt_max="$2"; shift 2 ;;
+      --report-every) [ $# -ge 2 ] || die "missing value for --report-every"; report_every="$2"; shift 2 ;;
+      # Explicit opt-in only (task 20): NOT auto-resolved via `command -v gh`
+      # here. `status_report`'s own gh-dependent reconciliation is skipped
+      # unless a resolved gh path is threaded in — see write_launch, which
+      # bakes this the same way it bakes --claude-bin. Without this, every
+      # existing supervisor-scan call site (this file's own test suite
+      # included) would silently start invoking a REAL gh over the network on
+      # whatever PR numbers its fixture RUN.md happens to contain.
+      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      # Same reasoning, for the rate-window query (real network + Keychain).
+      --usage-bin) [ $# -ge 2 ] || die "missing value for --usage-bin"; usage_bin="$2"; shift 2 ;;
       *) die "unknown supervisor-scan argument: $1" ;;
     esac
   done
@@ -2398,8 +2468,27 @@ supervisor_scan() {
   # thing that bounds the no-progress guard's pause exemption regardless of what
   # the agent declares in RUN.md. Runs on every wake this far, gate open or
   # closed, which is the whole reason it lives here rather than in
-  # supervisor-check.
+  # supervisor-check. It runs BEFORE the status report below: the report is
+  # observability, the ledger is a halt, and a report write that fails must never
+  # be the reason a forged pause survives another wake.
   _supervisor_pause_exempt_ledger "$dir" "$label" "$pause_exempt_max"
+
+  # Task 20 — the periodic status report. Runs HERE, above the pre-invoke gate,
+  # for the exact same reason as the alarm scan and the heartbeat above it: a
+  # gate-closed wake (a rate-window pause, a torn-down done/systemic run) is
+  # precisely when a human most needs to see it, and it costs no model call
+  # either way. Subshelled per this file's die/exit convention (see the "task
+  # 26" comment near supervisor_check): `status_report` can `die` on a runtime
+  # write failure, and an un-subshelled `exit` here would take this whole scan
+  # down — including the alarm halt above it — which a bare `|| true` would NOT
+  # contain (`|| true` only sees a nonzero RETURN, never an `exit`).
+  local -a rpt_extra_args=()
+  [ -n "$gh_bin" ] && rpt_extra_args+=(--gh "$gh_bin")
+  [ -n "$usage_bin" ] && rpt_extra_args+=(--usage-bin "$usage_bin")
+  ( status_report --dir "$dir" --label "$label" --report-every "$report_every" \
+      ${rpt_extra_args[@]+"${rpt_extra_args[@]}"} ) \
+    || echo "spawn-orchestrator: supervisor-scan: status-report failed (non-fatal, see above)" >&2
+
   # Always 0: this is bookkeeping, not a gate. The wrapper falls through to the
   # real gate, which owns the decision to invoke the agent or not.
   return 0
@@ -2868,6 +2957,53 @@ _restack_rebase_push() {
   printf '%s' "$tip"
 }
 
+# Shared reality cross-check (task 18's orphan detector, task 20 / finding #23:
+# "reconcile against reality, don't just echo RUN.md"): for every CHAINED task
+# whose live PR base no longer resolves to base_branch, flag it as a defect.
+# Requires the _RS_* arrays already populated (_restack_read_run_md) — ONE
+# implementation, so restack() (which also FIXES what it can) and
+# status-report (task 20, read-only) can never drift apart on this question.
+# Sets (never appends — callers get a fresh scan every call):
+#   _ORPHAN_FLAGGED  count of defects found
+#   _ORPHAN_LINES    one log-facing line per defect (`DEFECT …`, unprefixed)
+#   _ORPHAN_REPORT   one REPORT.md-style bullet per defect — the CALLER decides
+#                    whether/where to persist it; this function never writes a file.
+_restack_orphan_scan() {
+  local base_branch="$1" gh_bin="$2"
+  _ORPHAN_FLAGGED=0
+  _ORPHAN_LINES=()
+  _ORPHAN_REPORT=()
+  local n="${#_RS_TASK[@]}" i
+  for ((i = 0; i < n; i++)); do
+    local task="${_RS_TASK[$i]}" base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
+    [ "$base" != "$base_branch" ] || continue
+    _restack_empty "$pr" && continue
+    local pr_num; pr_num="$(_pr_number "$pr")"
+    local live_base live_state
+    live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>/dev/null)"
+    live_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+    if [ -z "$live_base" ]; then
+      _ORPHAN_LINES+=("DEFECT $task PR #$pr_num — base ref deleted or unreadable (orphaned by a merged/closed parent, finding #25 LOUD case)")
+      _ORPHAN_REPORT+=("- **DEFECT — $task** (PR #$pr_num): base ref deleted or unreadable — orphaned by a merged/closed parent (finding #25, LOUD case). Needs a human.")
+      _ORPHAN_FLAGGED=$((_ORPHAN_FLAGGED + 1))
+      continue
+    fi
+    [ "$live_base" != "$base_branch" ] || continue
+    local base_pr="" k
+    for ((k = 0; k < n; k++)); do
+      if [ "${_RS_BRANCH[$k]}" = "$live_base" ]; then base_pr="$(_pr_number "${_RS_PR[$k]}")"; break; fi
+    done
+    local base_state=""
+    [ -n "$base_pr" ] && ! _restack_empty "$base_pr" \
+      && base_state="$("$gh_bin" pr view "$base_pr" --json state --jq .state 2>/dev/null)"
+    if [ "$live_state" = "CLOSED" ] || [ "$base_state" = "MERGED" ]; then
+      _ORPHAN_LINES+=("DEFECT $task PR #$pr_num — base=$live_base is a merged/closed branch; this PR never reaches $base_branch (finding #25 QUIET case)")
+      _ORPHAN_REPORT+=("- **DEFECT — $task** (PR #$pr_num): base \`$live_base\` is a merged/closed branch, so this PR never reaches \`$base_branch\` — it looks healthy while doing nothing (finding #25, QUIET case). Needs a human.")
+      _ORPHAN_FLAGGED=$((_ORPHAN_FLAGGED + 1))
+    fi
+  done
+}
+
 restack() {
   local run_dir="" repo="" remote="origin" gh_bin="" dry=0
   while [ $# -gt 0 ]; do
@@ -3083,40 +3219,22 @@ restack() {
     done
   done
 
-  # Orphan detection (ties to task 16's alarm channel): a chained PR reaching
-  # here still pointed somewhere other than base_branch after this pass — flag
-  # it as a defect rather than waiting for a human to notice by diffing the
-  # open-PR list against RUN.md by hand (the only reason finding #25 was
-  # caught at all).
-  local i
-  for ((i = 0; i < n; i++)); do
-    local task="${_RS_TASK[$i]}" base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
-    [ "$base" != "$base_branch" ] || continue
-    _restack_empty "$pr" && continue
-    local pr_num; pr_num="$(_pr_number "$pr")"
-    local live_base live_state
-    live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>/dev/null)"
-    live_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
-    if [ -z "$live_base" ]; then
-      echo "spawn-orchestrator: DEFECT $task PR #$pr_num — base ref deleted or unreadable (orphaned by a merged/closed parent, finding #25 LOUD case)"
-      report+=("- **DEFECT — $task** (PR #$pr_num): base ref deleted or unreadable — orphaned by a merged/closed parent (finding #25, LOUD case). Needs a human.")
-      flagged=$((flagged + 1))
-      continue
-    fi
-    [ "$live_base" != "$base_branch" ] || continue
-    local base_pr="" k
-    for ((k = 0; k < n; k++)); do
-      if [ "${_RS_BRANCH[$k]}" = "$live_base" ]; then base_pr="$(_pr_number "${_RS_PR[$k]}")"; break; fi
-    done
-    local base_state=""
-    [ -n "$base_pr" ] && ! _restack_empty "$base_pr" \
-      && base_state="$("$gh_bin" pr view "$base_pr" --json state --jq .state 2>/dev/null)"
-    if [ "$live_state" = "CLOSED" ] || [ "$base_state" = "MERGED" ]; then
-      echo "spawn-orchestrator: DEFECT $task PR #$pr_num — base=$live_base is a merged/closed branch; this PR never reaches $base_branch (finding #25 QUIET case)"
-      report+=("- **DEFECT — $task** (PR #$pr_num): base \`$live_base\` is a merged/closed branch, so this PR never reaches \`$base_branch\` — it looks healthy while doing nothing (finding #25, QUIET case). Needs a human.")
-      flagged=$((flagged + 1))
-    fi
-  done
+  # Orphan detection (ties to task 16's alarm channel; task 20's status-report
+  # reuses this SAME scan for its own reality cross-check): a chained PR
+  # reaching here still pointed somewhere other than base_branch after this
+  # pass — flag it as a defect rather than waiting for a human to notice by
+  # diffing the open-PR list against RUN.md by hand (the only reason finding
+  # #25 was caught at all).
+  _restack_orphan_scan "$base_branch" "$gh_bin"
+  if [ "${#_ORPHAN_LINES[@]}" -gt 0 ]; then
+    local dline
+    for dline in "${_ORPHAN_LINES[@]}"; do echo "spawn-orchestrator: $dline"; done
+  fi
+  if [ "${#_ORPHAN_REPORT[@]}" -gt 0 ]; then
+    local dline
+    for dline in "${_ORPHAN_REPORT[@]}"; do report+=("$dline"); done
+  fi
+  flagged=$((flagged + _ORPHAN_FLAGGED))
 
   # Surface the restack outcome where a HUMAN actually reads it. stdout only
   # reaches orchestrator.log; REPORT.md is the file the human wakes up to, and
@@ -3145,6 +3263,364 @@ restack() {
   # failed retarget): a supervisor checking `$?` must see that a human is needed,
   # not read a defects run as a clean success.
   { [ "$failed" -eq 0 ] && [ "$flagged" -eq 0 ]; } || return 2
+}
+
+# ---------------------------------------------------------------------------
+# Task 20 — periodic status report: the heartbeat an operator had to hand-roll
+# during a live run (finding #28). Emitted from the SUPERVISOR, in shell, with
+# NO MODEL CALL — a wedged/rate-limited/auth-dead agent cannot report on
+# itself, and the report is most valuable exactly when the agent is unhealthy.
+# Built on the EXISTING surfaces (skills/auto-pilot/references/run-state.md
+# "ALIGNMENT"): `status --label` for the run-level facts, `_restack_read_run_md`
+# for the phase table (the one shared table parser), and `_restack_orphan_scan`
+# for the reality cross-check — never a second state reader or reconciler.
+# ---------------------------------------------------------------------------
+
+# Parse a `--report-every` / `min_task_budget` value: `off`, a bare integer
+# (seconds), or `<n>s|m|h`. Prints seconds (or the literal `off`) on stdout;
+# returns 1 (nothing printed) on anything unparseable — fail CLOSED to the
+# caller, which `die`s rather than silently picking a default duration.
+_parse_duration_or_off() {
+  local v="$1"
+  case "$v" in
+    off) printf 'off'; return 0 ;;
+    *[0-9]s) printf '%s' "${v%s}"; return 0 ;;
+    *[0-9]m) printf '%s' "$(( ${v%m} * 60 ))"; return 0 ;;
+    *[0-9]h) printf '%s' "$(( ${v%h} * 3600 ))"; return 0 ;;
+    ''|*[!0-9]*) return 1 ;;
+    *) printf '%s' "$v"; return 0 ;;
+  esac
+}
+
+# Render "Ns" as "XhYmZs" (dropping zero leading units) for a human-facing line.
+_fmt_duration() {
+  local s="$1"
+  case "$s" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+  local h=$((s / 3600)) m=$(((s % 3600) / 60)) sec=$((s % 60))
+  if [ "$h" -gt 0 ]; then printf '%dh%dm' "$h" "$m"
+  elif [ "$m" -gt 0 ]; then printf '%dm%ds' "$m" "$sec"
+  else printf '%ds' "$sec"
+  fi
+}
+
+# Best-effort elapsed wall-clock for a task's branch: the oldest commit unique
+# to <branch> relative to <base> (or <base>'s remote-tracking ref, since a
+# freshly-claimed branch's base may only exist on the remote in the run
+# worktree). Prints nothing (never dies) when the branch/base can't be
+# resolved — "elapsed unknown" is a fine degrade; guessing is not.
+_report_task_elapsed() {
+  local repo="$1" base="$2" branch="$3" remote="${4:-origin}"
+  _restack_empty "$branch" && return 0
+  local first_ct
+  first_ct="$(git -C "$repo" log --reverse --format=%ct "${base}..${branch}" -- 2>/dev/null | head -1)"
+  [ -n "$first_ct" ] || first_ct="$(git -C "$repo" log --reverse --format=%ct "${remote}/${base}..${remote}/${branch}" -- 2>/dev/null | head -1)"
+  [ -n "$first_ct" ] || first_ct="$(git -C "$repo" log --reverse --format=%ct "$branch" -- 2>/dev/null | head -1)"
+  case "$first_ct" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s' "$(( $(date +%s) - first_ct ))"
+}
+
+# Read one RUN.md front-matter field directly (the established ad hoc idiom
+# used throughout this file — supervisor-gate, _run_front_field,
+# _declared_exit_reason — rather than a new parser).
+_report_front_field() {
+  local run_md="$1" key="$2"
+  [ -f "$run_md" ] || return 0
+  awk '/^---$/{c++; next} c==1{print}' "$run_md" | grep -E "^${key}:" | head -1 \
+    | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//'
+}
+
+# The seven in-flight/terminal phases (run-state.md "Task lifecycle phases"),
+# bucketed for the report's summary line.
+_report_bucket() {
+  case "$1" in
+    ''|pending) printf 'pending' ;;
+    claimed|implementing|pr-open|in-review|iterating) printf 'in-flight' ;;
+    handed-off) printf 'handed-off' ;;
+    parked) printf 'parked' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+# The `--report-every` gate + emit, called from `supervisor_scan` — ABOVE the
+# pre-invoke gate (launch-runtime.md §6), same seam as the alarm scan and the
+# heartbeat: a gate-closed wake (a rate-window pause, a done/systemic teardown)
+# is precisely when this report is most valuable, and it makes NO model call
+# either way. `--force` bypasses the interval gate (test/manual convenience).
+status_report() {
+  local dir="" label="" report_every="$DEFAULT_REPORT_INTERVAL" ceiling="$DEFAULT_TASK_CEILING" \
+        repo="" gh_bin="" usage_bin="" remote="origin" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --report-every) [ $# -ge 2 ] || die "missing value for --report-every"; report_every="$2"; shift 2 ;;
+      --task-ceiling) [ $# -ge 2 ] || die "missing value for --task-ceiling"; ceiling="$2"; shift 2 ;;
+      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
+      --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
+      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      --usage-bin) [ $# -ge 2 ] || die "missing value for --usage-bin"; usage_bin="$2"; shift 2 ;;
+      --force) force=1; shift ;;
+      *) die "unknown status-report argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$label" ] || die "status-report requires --dir and --label"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  [ -n "$repo" ] || repo="$dir"
+
+  local interval; interval="$(_parse_duration_or_off "$report_every")" \
+    || die "--report-every must be off, an integer (seconds), or <n>s|m|h: $report_every"
+
+  local run_md="$dir/.auto-pilot/RUN.md"
+  local state_dir="$dir/.auto-pilot"
+  local state_file="$state_dir/$STATUS_REPORT_STATE_NAME"
+  local out="$state_dir/$STATUS_REPORT_NAME"
+
+  if [ "$interval" = off ]; then
+    echo "spawn-orchestrator: status-report disabled (--report-every off)"
+    return 0
+  fi
+  [ -f "$run_md" ] || { echo "spawn-orchestrator: status-report: no run state found, skipping: $run_md" >&2; return 0; }
+
+  # --- interval gate: skip quietly if the last report is still fresh --------
+  local prev_at="" prev_head=""
+  if [ -f "$state_file" ]; then
+    prev_at="$(sed -n 's/^last_emitted_at: //p' "$state_file" | head -1)"
+    prev_head="$(sed -n 's/^last_run_head: //p' "$state_file" | head -1)"
+  fi
+  local now; now="$(date +%s)"
+  if [ "$force" != 1 ] && [ -n "$prev_at" ]; then
+    case "$prev_at" in *[!0-9]*) prev_at="" ;; esac
+  fi
+  if [ "$force" != 1 ] && [ -n "$prev_at" ] && [ $((now - prev_at)) -lt "$interval" ]; then
+    return 0
+  fi
+
+  # NO auto-resolve to a live `gh` here (unlike restack's own default): this
+  # function runs from an automated per-wake bookkeeping call
+  # (supervisor_scan), and `command -v gh` would silently start making REAL
+  # network calls against whatever PR numbers a fixture/test RUN.md happens to
+  # contain. `--gh` must be threaded in explicitly — write_launch bakes it the
+  # same way it bakes --claude-bin; without it the PR/reconciliation sections
+  # below are skipped (reported as such), never silently defaulted.
+
+  # --- build on `status --label`: the run-level facts, not a second reader --
+  local status_out; status_out="$(status --dir "$dir" --label "$label" --task-ceiling "$ceiling" 2>&1)"
+
+  # --- the phase table: the ONE shared RUN.md table parser -------------------
+  _restack_read_run_md "$run_md"
+  local base_branch="$_RS_BASE_BRANCH" n="${#_RS_TASK[@]}" i
+  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0
+  local -a phase_lines=() cur_map=()
+  for ((i = 0; i < n; i++)); do
+    local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" \
+          base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
+    local bucket; bucket="$(_report_bucket "$phase")"
+    case "$bucket" in
+      pending) counts_pending=$((counts_pending + 1)) ;;
+      in-flight) counts_inflight=$((counts_inflight + 1)) ;;
+      handed-off) counts_handed=$((counts_handed + 1)) ;;
+      parked) counts_parked=$((counts_parked + 1)) ;;
+    esac
+    phase_lines+=("| $task | ${phase:-pending} | ${branch:--} | ${pr:--} |")
+    cur_map+=("$task: ${phase:-pending}")
+  done
+
+  # --- in-flight elapsed vs the per-task ceiling: the working-vs-wedged signal
+  local -a inflight_lines=()
+  for ((i = 0; i < n; i++)); do
+    local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" base="${_RS_BASE[$i]}"
+    [ "$(_report_bucket "$phase")" = in-flight ] || continue
+    local elapsed; elapsed="$(_report_task_elapsed "$repo" "$base" "$branch" "$remote")"
+    if [ -n "$elapsed" ]; then
+      local over=""
+      [ "$elapsed" -gt "$ceiling" ] && over=" — OVER the per-task ceiling"
+      inflight_lines+=("- $task ($phase): elapsed $(_fmt_duration "$elapsed") of $(_fmt_duration "$ceiling") ceiling$over")
+    else
+      inflight_lines+=("- $task ($phase): elapsed unknown (no resolvable branch history yet)")
+    fi
+  done
+
+  # --- open PRs + mergeable state ---------------------------------------------
+  local -a pr_lines=()
+  if [ -n "$gh_bin" ]; then
+    for ((i = 0; i < n; i++)); do
+      local task="${_RS_TASK[$i]}" pr="${_RS_PR[$i]}"
+      _restack_empty "$pr" && continue
+      local pr_num; pr_num="$(_pr_number "$pr")"
+      [ -n "$pr_num" ] || continue
+      local st mg
+      st="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+      mg="$("$gh_bin" pr view "$pr_num" --json mergeable --jq .mergeable 2>/dev/null)"
+      pr_lines+=("| $task | #$pr_num | ${st:-unknown} | ${mg:-unknown} |")
+    done
+  fi
+
+  # --- reconciliation: reuse restack's orphan detector, never a second one ---
+  local -a reality_lines=()
+  if [ -n "$gh_bin" ]; then
+    _restack_orphan_scan "$base_branch" "$gh_bin"
+    if [ "${#_ORPHAN_LINES[@]}" -gt 0 ]; then
+      local dline
+      for dline in "${_ORPHAN_LINES[@]}"; do reality_lines+=("- $dline"); done
+    fi
+    # The #23 shape: RUN.md still reads pre-PR (claimed/implementing) for a
+    # branch that ALREADY has an open PR — RUN.md lagging reality, the exact
+    # divergence a stale phase table must not read as healthy.
+    for ((i = 0; i < n; i++)); do
+      local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}"
+      case "$phase" in claimed|implementing) ;; *) continue ;; esac
+      _restack_empty "$branch" && continue
+      local live_num live_state
+      live_num="$("$gh_bin" pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
+      [ -n "$live_num" ] && [ "$live_num" != "null" ] || continue
+      live_state="$("$gh_bin" pr view "$live_num" --json state --jq .state 2>/dev/null)"
+      reality_lines+=("- DIVERGENCE $task — RUN.md phase is \`$phase\` (no PR recorded) but branch \`$branch\` already has PR #$live_num (${live_state:-unknown}) open; RUN.md is lagging reality (finding #23's shape)")
+    done
+  fi
+  if [ "${#reality_lines[@]}" -eq 0 ]; then
+    if [ -n "$gh_bin" ]; then
+      reality_lines=("- clean: no divergence between RUN.md and live git/GitHub state")
+    else
+      reality_lines=("- skipped: no --gh resolved for this report — RUN.md was NOT cross-checked against live PR state")
+    fi
+  fi
+
+  # --- rate window (best-effort; never fails the report) ---------------------
+  # --usage-bin is EXPLICIT-ONLY, same reasoning as --gh above: no default
+  # resolution to the real scripts/claude-usage.sh, which would otherwise make
+  # a REAL network call (and touch the macOS Keychain) from an automated,
+  # unattended, per-wake call the instant a caller renders a launch script
+  # without thinking about it.
+  local rate_line="rate window: unavailable (no --usage-bin provided)"
+  if [ -n "$usage_bin" ] && { [ -x "$usage_bin" ] || command -v "$usage_bin" >/dev/null 2>&1; }; then
+    rate_line="rate window: unavailable"
+    local usage_json; usage_json="$("$usage_bin" 2>/dev/null)"
+    if [ -n "$usage_json" ]; then
+      local pct rst
+      pct="$(printf '%s' "$usage_json" | grep -oE '"session":\{"percent":[0-9]+' | grep -oE '[0-9]+$')"
+      rst="$(printf '%s' "$usage_json" | grep -oE '"session":\{[^}]*"resets_at":"[^"]*"' \
+        | grep -oE '"resets_at":"[^"]*"' | sed -e 's/"resets_at":"//' -e 's/"$//')"
+      [ -n "$pct" ] && rate_line="rate window: session ${pct}% consumed, resets ${rst:-unknown}"
+    fi
+  fi
+
+  # --- --until remaining vs min_task_budget -----------------------------------
+  local until_val; until_val="$(_report_front_field "$run_md" until)"
+  local min_budget_raw; min_budget_raw="$(_report_front_field "$run_md" min_task_budget)"
+  local until_line="until: (none)"
+  if [ -n "$until_val" ]; then
+    local until_epoch remaining_line="" min_secs=""
+    if until_epoch="$(_parse_iso8601_utc "$until_val")"; then
+      local remaining=$((until_epoch - now))
+      remaining_line="remaining $(_fmt_duration "${remaining#-}")$([ "$remaining" -lt 0 ] && printf ' (PAST DUE)')"
+    else
+      remaining_line="remaining unknown (unparseable until)"
+    fi
+    local budget_note=""
+    if [ -n "$min_budget_raw" ] && min_secs="$(_parse_duration_or_off "$min_budget_raw" 2>/dev/null)" && [ "$min_secs" != off ]; then
+      if [ -n "${until_epoch:-}" ]; then
+        if [ $((until_epoch - now)) -gt "$min_secs" ]; then
+          budget_note=" vs min_task_budget ${min_budget_raw} — OK, at least one more task likely fits"
+        else
+          budget_note=" vs min_task_budget ${min_budget_raw} — AT RISK, may not fit another task"
+        fi
+      fi
+    fi
+    until_line="until: $until_val ($remaining_line)$budget_note"
+  fi
+
+  # --- the delta: THE PAYLOAD --------------------------------------------------
+  local cur_head; cur_head="$(_run_head "$dir")"; cur_head="${cur_head:-unknown}"
+  local -a delta_lines=()
+  if [ -z "$prev_at" ]; then
+    delta_lines=("- first report for this run")
+  elif [ -n "$prev_head" ] && [ "$prev_head" = "$cur_head" ]; then
+    local since; since=$((now - prev_at))
+    local nf="no forward progress in $(_fmt_duration "$since")"
+    if [ "${#inflight_lines[@]}" -gt 0 ]; then
+      nf="$nf; ${inflight_lines[0]#- }"
+    else
+      nf="$nf; nothing in flight"
+    fi
+    delta_lines=("- $nf")
+  else
+    # Diff the previous phase-map (from the state file) against the current
+    # one to name exactly what changed, rather than just "something happened".
+    local -a prev_map=()
+    if [ -f "$state_file" ]; then
+      while IFS= read -r pl; do prev_map+=("$pl"); done \
+        < <(awk '/^--- phases ---$/{f=1; next} f' "$state_file")
+    fi
+    local task_line found old_phase new_phase changed=0
+    for task_line in "${cur_map[@]}"; do
+      local t="${task_line%%:*}"
+      old_phase=""
+      local pm
+      for pm in "${prev_map[@]:-}"; do
+        [ -n "$pm" ] || continue
+        [ "${pm%%:*}" = "$t" ] && old_phase="${pm#*: }"
+      done
+      new_phase="${task_line#*: }"
+      if [ -n "$old_phase" ] && [ "$old_phase" != "$new_phase" ]; then
+        delta_lines+=("- changed: $t $old_phase -> $new_phase")
+        changed=$((changed + 1))
+      elif [ -z "$old_phase" ]; then
+        delta_lines+=("- new: $t ($new_phase)")
+        changed=$((changed + 1))
+      fi
+    done
+    [ "$changed" -gt 0 ] || delta_lines=("- run-state advanced (new commits) but no task's own phase changed")
+  fi
+
+  # --- render STATUS.md (overwritten each interval) ---------------------------
+  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/status-report.XXXXXX")" || die "mktemp failed"
+  {
+    printf '# Auto-pilot status report — %s\n\n' "$ts"
+    printf 'Run: %s   Report interval: every %s\n\n' "$label" "$(_fmt_duration "$interval")"
+    printf '## Delta since last report\n\n'
+    printf '%s\n' "${delta_lines[@]}"
+    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s)\n\n' \
+      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked"
+    printf '| task | phase | branch | pr |\n| ---- | ----- | ------ | -- |\n'
+    if [ "${#phase_lines[@]}" -gt 0 ]; then printf '%s\n' "${phase_lines[@]}"; else printf '| (no tasks materialized yet) | | | |\n'; fi
+    printf '\n## In-flight (elapsed vs per-task ceiling)\n\n'
+    if [ "${#inflight_lines[@]}" -gt 0 ]; then printf '%s\n' "${inflight_lines[@]}"; else printf '%s\n' "- nothing in flight"; fi
+    printf '\n## Live state (from `status --label %s`)\n\n```\n%s\n```\n' "$label" "$status_out"
+    printf '\n## Open PRs (mergeable state)\n\n'
+    if [ "${#pr_lines[@]}" -gt 0 ]; then
+      printf '| task | pr | state | mergeable |\n| ---- | -- | ----- | --------- |\n%s\n' "${pr_lines[@]}"
+    elif [ -z "$gh_bin" ]; then
+      printf '%s\n' "- skipped: no --gh resolved for this report"
+    else
+      printf '%s\n' "- no open PRs recorded"
+    fi
+    printf '\n## %s\n' "$rate_line"
+    printf '\n## %s\n' "$until_line"
+    printf '\n## Reality check (cross-checked against git/GitHub, not RUN.md alone)\n\n'
+    printf '%s\n' "${reality_lines[@]}"
+  } >"$tmp" || { rm -f "$tmp"; die "failed to render status report"; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write status report: $out"; }
+
+  # --- persist wake-local state (NOT committed — like supervisor-state/
+  # heartbeat, this is scratch for the next report, not part of the run's
+  # durable record) ---
+  tmp="$(mktemp "${TMPDIR:-/tmp}/status-report-state.XXXXXX")" || die "mktemp failed"
+  {
+    printf 'last_emitted_at: %s\n' "$now"
+    printf 'last_run_head: %s\n' "$cur_head"
+    printf -- '--- phases ---\n'
+    printf '%s\n' "${cur_map[@]:-}"
+  } >"$tmp" || { rm -f "$tmp"; die "failed to persist status-report state"; }
+  mv "$tmp" "$state_file" || { rm -f "$tmp"; die "failed to persist status-report state: $state_file"; }
+
+  local reality_flag="clean"
+  case "${reality_lines[0]}" in
+    "- clean:"*) reality_flag="clean" ;;
+    "- skipped:"*) reality_flag="skipped(no-gh)" ;;
+    *) reality_flag="DIVERGENCE(${#reality_lines[@]})" ;;
+  esac
+  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
 }
 
 # Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
@@ -4497,6 +4973,7 @@ case "$sub" in
   clear-exit-state) clear_exit_state "$@" ;;
   heartbeat) heartbeat "$@" ;;
   restack) restack "$@" ;;
+  status-report) status_report "$@" ;;
   doctor) doctor "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

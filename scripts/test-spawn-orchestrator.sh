@@ -3970,6 +3970,245 @@ for _pv in "${STUBF:-}" "${ALFAIL:-}"; do
   esac
 done
 
+# --- status-report: the periodic heartbeat report (task 20, finding #28) -----
+# Reuses this suite's existing conventions: real fixture dirs, a fake `gh`
+# (flat-file DB, same shape as restack's), and everything driven through the
+# REAL generated wrapper wherever the acceptance criteria demand it (NO model
+# call; emitted on a gate-closed wake) — never a re-implementation of the
+# wrapper's own call sequence.
+SR="$BASE/status-report"; mkdir -p "$SR"
+
+if command -v git >/dev/null 2>&1; then
+  SR_REPO="$SR/repo"
+  git init -q "$SR_REPO"
+  git -C "$SR_REPO" config user.email test@example.com
+  git -C "$SR_REPO" config user.name "Test"
+  git -C "$SR_REPO" checkout -q -b main
+  echo root >"$SR_REPO/root.txt"; git -C "$SR_REPO" add root.txt; git -C "$SR_REPO" commit -q -m root
+
+  # branch_impl: a commit made "now" — comfortably inside a generous ceiling.
+  git -C "$SR_REPO" checkout -q -b branch_impl
+  echo impl >"$SR_REPO/impl.txt"; git -C "$SR_REPO" add impl.txt; git -C "$SR_REPO" commit -q -m "impl work"
+
+  # branch_over: a commit stamped 1h ago — over a 2-minute ceiling, the
+  # working-vs-wedged signal the report exists to surface.
+  git -C "$SR_REPO" checkout -q main
+  git -C "$SR_REPO" checkout -q -b branch_over
+  echo over >"$SR_REPO/over.txt"; git -C "$SR_REPO" add over.txt
+  # An unambiguous "@<epoch> +0000" form — a bare "YYYY-MM-DDTHH:MM:SS" with no
+  # zone is read by git as LOCAL time, which silently produced a commit git
+  # thought was hours in the FUTURE on a non-UTC box (a real bug this exact
+  # fixture caught once already).
+  SR_OVER_EPOCH=$(( $(date +%s) - 3600 ))
+  GIT_AUTHOR_DATE="@$SR_OVER_EPOCH +0000" GIT_COMMITTER_DATE="@$SR_OVER_EPOCH +0000" \
+    git -C "$SR_REPO" commit -q -m "over-ceiling work"
+
+  git -C "$SR_REPO" checkout -q main
+  for b in branch_handed branch_parked branch_child branch_claimed; do
+    git -C "$SR_REPO" checkout -q -b "$b" main >/dev/null
+    echo "$b" >"$SR_REPO/$b.txt"; git -C "$SR_REPO" add "$b.txt"; git -C "$SR_REPO" commit -q -m "$b"
+  done
+  git -C "$SR_REPO" checkout -q main
+
+  # Fake gh: same flat-file-DB shape as restack's fixture, extended with
+  # `pr list --head <branch>` (the #23 divergence lookup status-report adds).
+  SR_GHDB="$SR/ghdb"; mkdir -p "$SR_GHDB"
+  printf 'MERGED\n'     >"$SR_GHDB/201.state"; printf 'main\n' >"$SR_GHDB/201.base"; printf 'UNKNOWN\n' >"$SR_GHDB/201.mergeable"
+  printf '\n'           >"$SR_GHDB/202.state"; printf ''       >"$SR_GHDB/202.base" # base ref deleted (LOUD orphan)
+  printf 'OPEN\n'       >"$SR_GHDB/203.state"
+  printf '203\n'        >"$SR_GHDB/list-branch_claimed.number"
+  SR_GH="$SR/gh"
+  cat >"$SR_GH" <<'GHEOF'
+#!/usr/bin/env bash
+set -uo pipefail
+db="${SR_GHDB:?SR_GHDB not set}"
+: >>"${SR_GH_CALLS:-/dev/null}"
+echo "$*" >>"${SR_GH_CALLS:-/dev/null}"
+[ "$1" = pr ] || exit 1
+sub="$2"; shift 2
+case "$sub" in
+  view)
+    num="$1"; shift
+    jqexpr=""
+    while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
+    case "$jqexpr" in
+      .baseRefName) cat "$db/$num.base" 2>/dev/null ;;
+      .state)       cat "$db/$num.state" 2>/dev/null ;;
+      .mergeable)   cat "$db/$num.mergeable" 2>/dev/null ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  list)
+    head=""
+    while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
+    cat "$db/list-$head.number" 2>/dev/null || printf 'null\n'
+    ;;
+  *) exit 1 ;;
+esac
+GHEOF
+  chmod +x "$SR_GH"
+  export SR_GHDB
+
+  # Fake claude-usage.sh: canned session-window JSON, no network.
+  SR_USAGE="$SR/usage.sh"
+  cat >"$SR_USAGE" <<'USEOF'
+#!/usr/bin/env bash
+printf '{"session":{"percent":42,"resets_at":"2099-01-01T00:00:00Z"},"weekly_all":{"percent":18,"resets_at":"2099-01-08T00:00:00Z"},"spend_used_minor":0}\n'
+USEOF
+  chmod +x "$SR_USAGE"
+
+  # ISO-8601 UTC N seconds from now, portable BSD/GNU.
+  _sr_iso() { date -u -v+"${1}"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+${1} seconds" +%Y-%m-%dT%H:%M:%SZ; }
+
+  SR_RUN="$SR/run"; mkdir -p "$SR_RUN/.auto-pilot"
+  _sr_write_run_md() {
+    # $1: task_claimed's phase (claimed|implementing) so the delta test can
+    # advance it; $2: task_over's branch elapsed baseline stays fixed.
+    {
+      printf -- '---\n'
+      printf 'base_branch: main\n'
+      printf 'until: %s\n' "$(_sr_iso 3600)"
+      printf 'min_task_budget: 20m\n'
+      printf -- '---\n\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+      printf '| task_pending  | pending      | -             | main         | -   | -    | |\n'
+      printf '| task_impl     | implementing | branch_impl   | main         | -   | -    | |\n'
+      printf '| task_over     | implementing | branch_over   | main         | -   | -    | |\n'
+      printf '| task_handed   | handed-off   | branch_handed | main         | -   | #201 | |\n'
+      printf '| task_parked   | parked       | branch_parked | main         | -   | -    | |\n'
+      printf '| task_child    | pr-open      | branch_child  | branch_parent| -   | #202 | |\n'
+      printf '| task_claimed  | %s | branch_claimed | main       | -   | -    | |\n' "$1"
+    } >"$SR_RUN/.auto-pilot/RUN.md"
+  }
+  _sr_write_run_md claimed
+  # A git repo of its own (status-report reads/writes .auto-pilot/ and computes
+  # `_run_head` from THIS dir, distinct from SR_REPO which supplies the task
+  # branches for elapsed-time lookups).
+  git init -q "$SR_RUN"
+  git -C "$SR_RUN" config user.email test@example.com; git -C "$SR_RUN" config user.name Test
+  git -C "$SR_RUN" checkout -q -b auto-pilot/test-run
+  git -C "$SR_RUN" add .auto-pilot/RUN.md; git -C "$SR_RUN" commit -q -m "run state v1"
+
+  # --- A: core rendering, direct call, --force (bypass the interval gate) ---
+  srAout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
+  srAmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  have "status-report: renders the phase table"          '| task_impl | implementing'     "$srAmd"
+  have "status-report: in-flight elapsed is reported"     'task_impl (implementing): elapsed' "$srAmd"
+  have "status-report: OVER-ceiling task is flagged"      'task_over (implementing): elapsed' "$srAmd"
+  have "status-report: OVER-ceiling task says OVER"       'OVER the per-task ceiling'      "$srAmd"
+  ! printf '%s\n' "$srAmd" | grep 'task_impl (implementing)' | grep -q 'OVER' \
+    && ok "status-report: within-ceiling task is not marked OVER" \
+    || bad "status-report: within-ceiling task is not marked OVER"
+  have "status-report: embeds status --label's own output"  'Live state (from `status'  "$srAmd"
+  have "status-report: heartbeat line present (from status)" 'heartbeat:'                "$srAmd"
+  have "status-report: PR state + mergeable for task_handed" '| task_handed | #201 | MERGED | UNKNOWN |' "$srAmd"
+  have "status-report: rate window rendered from --usage-bin" 'session 42% consumed'      "$srAmd"
+  have "status-report: until remaining vs min_task_budget rendered" 'min_task_budget 20m' "$srAmd"
+  have "status-report: until remaining is OK (plenty of runway)"    'OK, at least one more task likely fits' "$srAmd"
+  have "status-report: first report says so (no prior state)"      'first report for this run' "$srAmd"
+
+  # --- interval gate: a call within --report-every is a silent no-op ---------
+  # (no --force). A long interval + an immediate re-call must NOT rewrite
+  # STATUS.md — the whole point of "on by default, every 15m" is that most
+  # wakes are cheap no-ops, not a fresh render each time.
+  srA_mtime_before="$(stat -f %m "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null || stat -c %Y "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  "$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 --report-every 3600 >/dev/null 2>&1
+  srA_mtime_after="$(stat -f %m "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null || stat -c %Y "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  [ "$srA_mtime_before" = "$srA_mtime_after" ] \
+    && ok "status-report: a call inside --report-every (no --force) does not rewrite STATUS.md" \
+    || bad "status-report: the interval gate did not hold — STATUS.md was rewritten early" "before=$srA_mtime_before after=$srA_mtime_after"
+
+  # --- B: the delta — no forward progress vs a phase advance -----------------
+  srBout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
+  srBmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  have "status-report: no-forward-progress fires when the run-state HEAD hasn't moved" \
+    'no forward progress in' "$srBmd"
+  have "status-report: the no-forward-progress line names the in-flight task + ceiling" \
+    'task_impl (implementing): elapsed' "$(printf '%s\n' "$srBmd" | grep 'no forward progress')"
+
+  # Now advance task_claimed's phase and commit — the run-state HEAD moves.
+  _sr_write_run_md implementing
+  git -C "$SR_RUN" add .auto-pilot/RUN.md; git -C "$SR_RUN" commit -q -m "task_claimed -> implementing"
+  srCout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
+  srCmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  have "status-report: a phase advance is named in the delta" \
+    'changed: task_claimed claimed -> implementing' "$srCmd"
+  lack "status-report: a phase advance does NOT also claim no-forward-progress" \
+    'no forward progress' "$srCmd"
+
+  # --- D: stale RUN.md cannot read as healthy (finding #23's shape) ----------
+  have "status-report: flags RUN.md lagging reality (claimed phase, live PR already open)" \
+    'DIVERGENCE task_claimed' "$srAmd"
+  have "status-report: divergence names the live PR" 'PR #203' "$srAmd"
+
+  # --- E: reuses restack's OWN orphan detector, not a second reconciler ------
+  have "status-report: flags the orphaned chained PR (base ref deleted, finding #25 LOUD case)" \
+    'DEFECT task_child' "$srAmd"
+
+  # --- F: no live gh/usage-bin call when the caller doesn't opt in -----------
+  SR_LEAK="$SR/leak-bin"; mkdir -p "$SR_LEAK"
+  SR_GH_CALLED="$SR/gh-leak-called"
+  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_GH_CALLED" >"$SR_LEAK/gh"; chmod +x "$SR_LEAK/gh"
+  SR_USAGE_CALLED="$SR/usage-leak-called"
+  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_USAGE_CALLED" >"$SR_LEAK/claude-usage.sh"; chmod +x "$SR_LEAK/claude-usage.sh"
+  rm -f "$SR_GH_CALLED" "$SR_USAGE_CALLED"
+  PATH="$SR_LEAK:$PATH" "$SCRIPT" supervisor-scan --dir "$SR_RUN" --label com.autopilot.sr.f \
+    --report-every off >/dev/null 2>&1
+  [ ! -f "$SR_GH_CALLED" ] && ok "status-report: no --gh means NO gh call is made, even if one resolves on PATH" \
+    || bad "status-report: a real/PATH-resolved gh was invoked despite no --gh being passed"
+  # (--report-every off above also proves the disabled path never touches gh/usage
+  # at all; a second case with reporting ON but --gh/--usage-bin both omitted:)
+  PATH="$SR_LEAK:$PATH" "$SCRIPT" supervisor-scan --dir "$SR_RUN" --label com.autopilot.sr.f2 \
+    --report-every 1 >/dev/null 2>&1
+  [ ! -f "$SR_GH_CALLED" ] && ok "status-report: reporting ON but --gh omitted still makes no gh call" \
+    || bad "status-report: reporting ON but --gh omitted still called a PATH-resolved gh"
+  [ ! -f "$SR_USAGE_CALLED" ] && ok "status-report: --usage-bin omitted never calls a PATH-resolved claude-usage.sh" \
+    || bad "status-report: --usage-bin omitted called a PATH-resolved claude-usage.sh"
+
+  # --- G: a status-report failure can't take supervisor-scan down with it ----
+  # (die/exit containment — see the "task 26" convention comment). A garbage
+  # --report-every makes status_report `die`; supervisor-scan must still exit 0.
+  "$SCRIPT" supervisor-scan --dir "$SR_RUN" --label com.autopilot.sr.g --report-every 'garbage' >/dev/null 2>&1
+  [ $? = 0 ] && ok "status-report: a die inside status_report does not propagate out of supervisor-scan" \
+    || bad "status-report: supervisor-scan's exit code leaked status_report's die"
+
+  # --- C: NO MODEL CALL, and still emitted on a GATE-CLOSED wake --------------
+  # Driven through the REAL generated wrapper (write-launch), never a
+  # reimplementation of its call sequence — same discipline as the gate tests
+  # above. paused_until is an hour in the future, so the gate closes and
+  # `claude` must never run; the report must still be written.
+  SRW="$SR/wrapper"; mkdir -p "$SRW/.auto-pilot" "$SRW/bin"
+  cp "$SR_RUN/.auto-pilot/RUN.md" "$SRW/.auto-pilot/RUN.md"
+  # RUN.md needs its own paused_until for the gate; append it to the front matter.
+  SRW_FUTURE="$(_sr_iso 3600)"
+  awk -v p="$SRW_FUTURE" '
+    /^---$/ { c++; if (c==2 && !done) { print "paused_until: " p; done=1 } }
+    { print }
+  ' "$SRW/.auto-pilot/RUN.md" >"$SRW/.auto-pilot/RUN.md.tmp" && mv "$SRW/.auto-pilot/RUN.md.tmp" "$SRW/.auto-pilot/RUN.md"
+  SRW_CLAUDE="$SRW/bin/claude-stub"
+  printf '#!/bin/sh\n: >"%s/claude-called"\nexit 0\n' "$SRW" >"$SRW_CLAUDE"; chmod +x "$SRW_CLAUDE"
+  SRW_SANDBOX="$SRW/bin/sandbox-exec"
+  printf '#!/bin/sh\n: >"%s/sandbox-exec-called"\nshift 2\nexec "$@"\n' "$SRW" >"$SRW_SANDBOX"; chmod +x "$SRW_SANDBOX"
+  SRW_PATH="$SRW/bin:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRW" \
+    --log "$SRW/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.sr.wrap \
+    --claude-bin "$SRW_CLAUDE" --path "$SRW_PATH" --report-every 1 --report-gh "$SR_GH" \
+    --out-script "$SRW/launch.sh" --out-plist "$SRW/job.plist" >/dev/null 2>&1
+  "$SRW/launch.sh" >/dev/null 2>&1
+  [ ! -f "$SRW/claude-called" ] && ok "status-report: gate-closed wake never invokes claude (no model call)" \
+    || bad "status-report: gate-closed wake invoked claude"
+  [ -f "$SRW/.auto-pilot/STATUS.md" ] && ok "status-report: STILL emitted on a gate-closed wake" \
+    || bad "status-report: STATUS.md missing after a gate-closed wake"
+  have "status-report: the digest reaches the wake's log too" 'status-report:' "$(cat "$SRW/o.log" 2>/dev/null)"
+else
+  echo "skip - status-report suite (no git available)"
+fi
+
 guard_hits="$(grep -c '^osascript: ' "$NOTIFY_GUARD_LOG" 2>/dev/null | tr -d ' ')"
 case "$guard_hits" in ''|*[!0-9]*) guard_hits=0 ;; esac
 if [ "$guard_hits" -gt 0 ]; then
