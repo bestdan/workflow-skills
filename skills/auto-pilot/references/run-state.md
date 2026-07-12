@@ -539,6 +539,15 @@ the request the doctor just filed.
    distinguish "never dispatched" from "dispatched moments ago," so it is never
    safe to prune on its own.
 
+   Each of those git reads (branch, uncommitted changes, pushed-ness) must
+   itself **succeed** — a non-zero exit is **undetermined**, not the safe
+   value an empty result would otherwise read as (a failed `status
+   --porcelain` is not "clean"; a failed `rev-parse HEAD` is not "no
+   commits"; a failed `rev-parse --abbrev-ref HEAD` is not "unmatched"). An
+   undetermined read fails this invariant closed to `skipped (undetermined)`,
+   same D2 posture as the liveness check below — "provably safe" means the
+   reads came back positive, not merely that git didn't error.
+
    **An UNMATCHED worktree is not self-evidently abandoned either** — and
    treating it as such was a data-loss bug. The orchestrator writes a task's
    `branch` / `phase` / `pr` cells back only **after** `/deliver-task` returns

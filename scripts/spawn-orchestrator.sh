@@ -3963,21 +3963,31 @@ doctor() {
     front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
     orch_state="$(_pid_state "$(_front_field orchestrator_pid)" "$(_front_field orchestrator_started_at)")"
     case "$orch_state" in dead|mismatch) orch_dead=1 ;; esac
-    local wt_line wt any_pruned=0
+    local wt_line wt any_pruned=0 i5_skipped=0
     while IFS= read -r wt_line; do
       case "$wt_line" in "worktree "*) wt="${wt_line#worktree }" ;; *) continue ;; esac
       case "$wt" in "$workers_root"/*) ;; *) continue ;; esac
       [ -d "$wt" ] || continue
-      local wtbranch matched=0 matched_phase="" matched_pr="" matched_base="" j
-      wtbranch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-      for ((j = 0; j < n_rows; j++)); do
-        if [ "${_RS_BRANCH[$j]}" = "$wtbranch" ]; then
-          matched=1; matched_phase="${_RS_PHASE[$j]}"; matched_pr="${_RS_PR[$j]}"; matched_base="${_RS_BASE[$j]}"
-          break
-        fi
-      done
+      local wtbranch wtbranch_rc matched=0 matched_phase="" matched_pr="" matched_base="" j
+      wtbranch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"; wtbranch_rc=$?
+      local undetermined=0
+      if [ "$wtbranch_rc" -ne 0 ]; then
+        # Could not even read the worktree's current branch — its git state is
+        # unreadable. Undetermined, not "unmatched": same D2 posture as I3/I6,
+        # fails every downstream condition shut rather than defaulting safe.
+        undetermined=1
+      else
+        for ((j = 0; j < n_rows; j++)); do
+          if [ "${_RS_BRANCH[$j]}" = "$wtbranch" ]; then
+            matched=1; matched_phase="${_RS_PHASE[$j]}"; matched_pr="${_RS_PR[$j]}"; matched_base="${_RS_BASE[$j]}"
+            break
+          fi
+        done
+      fi
       local safe_phase=0 unmatched_live=0
-      if [ "$matched" -eq 0 ]; then
+      if [ "$undetermined" -eq 1 ]; then
+        :
+      elif [ "$matched" -eq 0 ]; then
         # No RUN.md row names this branch — could be a dead dispatch's orphan,
         # or a LIVE dispatch whose row hasn't been written back yet. Only the
         # orchestrator being provably dead tells the two apart.
@@ -3986,10 +3996,19 @@ doctor() {
         case "$matched_phase" in parked|handed-off) safe_phase=1 ;; esac
       fi
 
-      local dirty local_tip pushed=0
-      dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
-      local_tip="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
-      if [ -z "$local_tip" ]; then
+      local dirty dirty_rc local_tip local_tip_rc pushed=0 clean_ok=0
+      dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"; dirty_rc=$?
+      if [ "$dirty_rc" -ne 0 ]; then
+        # Could not determine cleanliness at all — not the same as "clean".
+        undetermined=1
+      elif [ -z "$dirty" ]; then
+        clean_ok=1
+      fi
+      local_tip="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"; local_tip_rc=$?
+      if [ "$local_tip_rc" -ne 0 ]; then
+        # Could not read HEAD at all — not the same as "no commits".
+        undetermined=1
+      elif [ -z "$local_tip" ]; then
         pushed=1   # no commits at all — a truly dead dispatch
       else
         local remote_tip; remote_tip="$(git -C "$wt" rev-parse "origin/$wtbranch" 2>/dev/null)"
@@ -4026,7 +4045,19 @@ doctor() {
         fi
       fi
 
-      if [ "$safe_phase" -eq 1 ] && [ -z "$dirty" ] && [ "$pushed" -eq 1 ] && [ "$no_open_pr" -eq 1 ]; then
+      if [ "$undetermined" -eq 1 ]; then
+        # The SUMMARY must say so too, not just stdout and REPORT.md. I3 and I6
+        # already fold their undetermined cases into n_skipped/skipped_notes; I5
+        # did not, so a worktree whose state could NOT be established still landed
+        # in `ok=N ... skipped=0` — a clean bill of health for a DESTRUCTIVE
+        # invariant that never got to evaluate. That summary line is the
+        # machine-readable one a wrapper (or a human triaging fast) greps, which
+        # makes it exactly the silent lie doctor exists to eliminate.
+        i5_skipped=1
+        skipped_notes+=("I5: $(basename "$wt") (git unreadable)")
+        echo "spawn-orchestrator: doctor I5: skipped (undetermined — a git read failed, so cleanliness/HEAD/branch could not be established): $wt"
+        report_bullets+=("- **I5 skipped — undetermined** — a git read failed for \`$wt\` (could not determine cleanliness, HEAD, or branch); not attempted, not reported as repaired.")
+      elif [ "$safe_phase" -eq 1 ] && [ "$clean_ok" -eq 1 ] && [ "$pushed" -eq 1 ] && [ "$no_open_pr" -eq 1 ]; then
         if git -C "$dir" worktree remove --force "$wt" 2>/dev/null; then
           any_pruned=1
           repaired_notes+=("I5: removed $(basename "$wt")")
@@ -4045,11 +4076,15 @@ doctor() {
       fi
     done < <(git -C "$dir" worktree list --porcelain 2>/dev/null)
     git -C "$dir" worktree prune >/dev/null 2>&1
+    # An undetermined worktree must never be counted `ok` — same independent
+    # n_skipped accounting I3/I6 already use, so the summary a wrapper greps can
+    # never report a clean bill for a destructive invariant that could not run.
     if [ "$any_pruned" -eq 1 ]; then
       n_repaired=$((n_repaired + 1))
-    else
+    elif [ "$i5_skipped" -eq 0 ]; then
       n_ok=$((n_ok + 1))
     fi
+    [ "$i5_skipped" -eq 1 ] && n_skipped=$((n_skipped + 1))
   else
     n_ok=$((n_ok + 1))
   fi

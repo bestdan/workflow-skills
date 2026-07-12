@@ -3332,6 +3332,58 @@ GHWEOF
     || bad "doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES"
   have "doctor I5 (undetermined liveness): reported as skipped" 'skipped (unsafe to prune)' "$d5uout"
 
+  # --- I5 (CORRUPT git state): a failed git read must skip, not fail-open ---
+  # The bug this task exists to fix: `status --porcelain`, `rev-parse HEAD`,
+  # and `rev-parse --abbrev-ref HEAD` were all read with `2>/dev/null`, and an
+  # EMPTY result from a FAILED read was indistinguishable from a genuinely
+  # clean/unborn/detached worktree — every guard passed and a worktree with
+  # true state UNKNOWN was fed straight to `git worktree remove --force`. Here
+  # the worktree's `.git` link is corrupted over real uncommitted work, so
+  # every one of those reads fails outright (non-zero exit, not just empty
+  # stdout). The dispatch's recorded orchestrator is also provably DEAD, so
+  # the ONLY thing standing between this worktree and destruction is the rc
+  # check itself — this is not the liveness gate saving it. The removal must
+  # never be ATTEMPTED (no "I5: removed", no "FAILED to remove" for it) —
+  # distinguishing "skipped" from "attempted and failed by luck", which is
+  # all that saved the WIP on unpatched main.
+  D5C="$DOC/i5-corrupt"; RUN_ID5C="doctor-i5-corrupt"
+  _doctor_new_run "$D5C" "$RUN_ID5C"
+  D5C_DEAD_PID="$(_dead_pid)"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5C"
+    printf 'orchestrator_pid: %s\norchestrator_started_at: "Wed Jul  9 20:00:00 2026"\n---\n\n' "$D5C_DEAD_PID"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_corrupt | pending | - | main | - | - | |\n'
+  } >"$D5C/run/.auto-pilot/RUN.md"
+  : >"$D5C/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D5C/run/.auto-pilot/REPORT.md"
+  git -C "$D5C/run" add .auto-pilot; git -C "$D5C/run" commit -q -m "seed run state"
+  mkdir -p "$D5C/workers"
+  git -C "$D5C/run" worktree add -q -b bestdan/t-corrupt-work "$D5C/workers/w-corrupt" main
+  echo "uncommitted WIP" >"$D5C/workers/w-corrupt/wip.txt"
+  # Corrupt the worktree's `.git` link so every read INSIDE it fails outright.
+  echo "gitdir: /nonexistent/gitdir/for/w-corrupt" >"$D5C/workers/w-corrupt/.git"
+
+  d5cout="$("$SCRIPT" doctor --dir "$D5C/run" --run-id "$RUN_ID5C" 2>&1)"; d5crc=$?
+  [ "$d5crc" = 0 ] && ok "doctor I5 (corrupt git state): exits 0" || bad "doctor I5 (corrupt git state): exits 0" "$d5cout"
+  [ -d "$D5C/workers/w-corrupt" ] && ok "doctor I5 (corrupt git state): the corrupted worktree SURVIVES" \
+    || bad "doctor I5 (corrupt git state): the corrupted worktree SURVIVES — it was destroyed"
+  [ -f "$D5C/workers/w-corrupt/wip.txt" ] && ok "doctor I5 (corrupt git state): the uncommitted WIP file is still there" \
+    || bad "doctor I5 (corrupt git state): the uncommitted WIP file is still there"
+  have "doctor I5 (corrupt git state): reported as skipped — undetermined, not attempted" 'skipped (undetermined' "$d5cout"
+  lack "doctor I5 (corrupt git state): removal of the corrupt worktree was never ATTEMPTED (not reported removed)" 'I5: removed w-corrupt' "$d5cout"
+  lack "doctor I5 (corrupt git state): removal of the corrupt worktree was never ATTEMPTED (not reported failed)" 'FAILED to remove' "$d5cout"
+  # The SUMMARY must say skipped too, not just stdout. The summary line is the
+  # machine-readable one — a wrapper (or a human triaging fast) greps THAT, and
+  # `ok=N ... skipped=0` is a clean bill of health for a DESTRUCTIVE invariant
+  # that could not evaluate the worktree at all. I3/I6 already fold undetermined
+  # into n_skipped; I5 counted it as `ok`.
+  lack "doctor I5 (corrupt git state): an undetermined worktree is NOT summarised as skipped=0" \
+    'skipped=0' "$d5cout"
+  have "doctor I5 (corrupt git state): the summary counts it as skipped, naming the worktree" \
+    'skipped=1 (I5: w-corrupt (git unreadable))' "$d5cout"
+
   # --- I6: a chained task's parent tip moved off its frozen base_sha --------
   # (a) the orchestrator moved the base mid-run, no merge -> park the child.
   D6="$DOC/i6"; RUN_ID6="doctor-i6"
