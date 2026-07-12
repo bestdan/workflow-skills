@@ -3963,7 +3963,7 @@ doctor() {
     front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
     orch_state="$(_pid_state "$(_front_field orchestrator_pid)" "$(_front_field orchestrator_started_at)")"
     case "$orch_state" in dead|mismatch) orch_dead=1 ;; esac
-    local wt_line wt any_pruned=0
+    local wt_line wt any_pruned=0 i5_skipped=0
     while IFS= read -r wt_line; do
       case "$wt_line" in "worktree "*) wt="${wt_line#worktree }" ;; *) continue ;; esac
       case "$wt" in "$workers_root"/*) ;; *) continue ;; esac
@@ -4046,6 +4046,15 @@ doctor() {
       fi
 
       if [ "$undetermined" -eq 1 ]; then
+        # The SUMMARY must say so too, not just stdout and REPORT.md. I3 and I6
+        # already fold their undetermined cases into n_skipped/skipped_notes; I5
+        # did not, so a worktree whose state could NOT be established still landed
+        # in `ok=N ... skipped=0` — a clean bill of health for a DESTRUCTIVE
+        # invariant that never got to evaluate. That summary line is the
+        # machine-readable one a wrapper (or a human triaging fast) greps, which
+        # makes it exactly the silent lie doctor exists to eliminate.
+        i5_skipped=1
+        skipped_notes+=("I5: $(basename "$wt") (git unreadable)")
         echo "spawn-orchestrator: doctor I5: skipped (undetermined — a git read failed, so cleanliness/HEAD/branch could not be established): $wt"
         report_bullets+=("- **I5 skipped — undetermined** — a git read failed for \`$wt\` (could not determine cleanliness, HEAD, or branch); not attempted, not reported as repaired.")
       elif [ "$safe_phase" -eq 1 ] && [ "$clean_ok" -eq 1 ] && [ "$pushed" -eq 1 ] && [ "$no_open_pr" -eq 1 ]; then
@@ -4067,11 +4076,15 @@ doctor() {
       fi
     done < <(git -C "$dir" worktree list --porcelain 2>/dev/null)
     git -C "$dir" worktree prune >/dev/null 2>&1
+    # An undetermined worktree must never be counted `ok` — same independent
+    # n_skipped accounting I3/I6 already use, so the summary a wrapper greps can
+    # never report a clean bill for a destructive invariant that could not run.
     if [ "$any_pruned" -eq 1 ]; then
       n_repaired=$((n_repaired + 1))
-    else
+    elif [ "$i5_skipped" -eq 0 ]; then
       n_ok=$((n_ok + 1))
     fi
+    [ "$i5_skipped" -eq 1 ] && n_skipped=$((n_skipped + 1))
   else
     n_ok=$((n_ok + 1))
   fi

@@ -3374,6 +3374,15 @@ GHWEOF
   have "doctor I5 (corrupt git state): reported as skipped — undetermined, not attempted" 'skipped (undetermined' "$d5cout"
   lack "doctor I5 (corrupt git state): removal of the corrupt worktree was never ATTEMPTED (not reported removed)" 'I5: removed w-corrupt' "$d5cout"
   lack "doctor I5 (corrupt git state): removal of the corrupt worktree was never ATTEMPTED (not reported failed)" 'FAILED to remove' "$d5cout"
+  # The SUMMARY must say skipped too, not just stdout. The summary line is the
+  # machine-readable one — a wrapper (or a human triaging fast) greps THAT, and
+  # `ok=N ... skipped=0` is a clean bill of health for a DESTRUCTIVE invariant
+  # that could not evaluate the worktree at all. I3/I6 already fold undetermined
+  # into n_skipped; I5 counted it as `ok`.
+  lack "doctor I5 (corrupt git state): an undetermined worktree is NOT summarised as skipped=0" \
+    'skipped=0' "$d5cout"
+  have "doctor I5 (corrupt git state): the summary counts it as skipped, naming the worktree" \
+    'skipped=1 (I5: w-corrupt (git unreadable))' "$d5cout"
 
   # --- I6: a chained task's parent tip moved off its frozen base_sha --------
   # (a) the orchestrator moved the base mid-run, no merge -> park the child.
