@@ -441,12 +441,13 @@ breaker, because the circuit breaker counts _delivery_ failures and neither of
 these was one. The run never asked "am I still a valid run?" — `doctor`
 (`scripts/spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id>
 [--label <launchd label>] [--questions <path>] [--handler repo-pr|linear]
-[--gh <path>] [--no-progress-limit N]`) is that question, asked seven ways,
-run at the **top of every run-loop iteration** and at the **top of
-`--resume`** (a run's world can drift between wakes just as easily as within
-one). It is cheap, deterministic, and needs no model call. Every invariant
-below has a stated **repair** or a **halt** — none may be silently ignored,
-and a **halt** exit means the loop must not dispatch.
+[--gh <path>] [--no-progress-limit N] [--context loop|resume]`) is that
+question, asked seven ways, run at the **top of every run-loop iteration**
+(`--context loop`, the default) and at the **top of `--resume`**
+(`--context resume`) — a run's world can drift between wakes just as easily
+as within one. It is cheap, deterministic, and needs no model call. Every
+invariant below has a stated **repair** or a **halt** — none may be silently
+ignored, and a **halt** exit means the loop must not dispatch.
 
 **Exit codes**, a caller gates the run loop on these:
 
@@ -463,10 +464,17 @@ and a **halt** exit means the loop must not dispatch.
    deviation itself. Before delegating, doctor checks whether a HEAD deviation's
    dirt is confined to `.auto-pilot/`: that content is never authoritative on a
    task branch (the run-state branch is the run's single memory), so doctor
-   discards it and lets `assert-run-head` restore HEAD normally, recording the
-   discard as its own repair. Dirt outside `.auto-pilot/` still fails closed,
-   verbatim — this is what stops invariants 1 and 2 from deadlocking on exactly
-   the state they exist to repair (a parked HEAD with a deleted `RUN.md`).
+   discards TRACKED `.auto-pilot/` changes there and lets `assert-run-head`
+   restore HEAD normally, recording the discard as its own repair. UNTRACKED
+   `.auto-pilot/` content — a real run's own `orchestrator.log`,
+   `verify-broker.log`, and doctor's own `doctor-state` — is **never**
+   `git clean`ed away (that would destroy the run's only forensic record); it
+   is instead tolerated via `assert-run-head --ignore-untracked-run-state`
+   rather than treated as blocking dirt, since `git reset`/`git checkout`
+   cannot discard untracked files in the first place. Dirt outside
+   `.auto-pilot/` still fails closed, verbatim — this is what stops invariants
+   1 and 2 from deadlocking on exactly the state they exist to repair (a
+   parked HEAD with a deleted `RUN.md`).
 2. **`RUN.md` / `QUESTIONS.md` / `REPORT.md` are readable _from the branch_**
    (`git show <branch>:<path>`) **and `RUN.md`'s front matter parses** (`run_id` +
    `status`). → A failed branch read, or front matter that doesn't parse, is a
@@ -478,8 +486,16 @@ and a **halt** exit means the loop must not dispatch.
    that actually exists.** → An **open** PR holds. A **merged** PR also holds — a
    human merging post-hand-off is the expected, healthy end state, never a
    violation, and a doctor that "repaired" it would be fighting the human. A
-   **closed** (unmerged) PR, an unreadable one, or a phase claiming a PR with no
-   number recorded → **repair**: phase → `parked`, never a silent re-dispatch.
+   **positively read** closed (unmerged) PR, or a phase claiming a PR with no
+   number/unparseable cell recorded → **repair**: phase → `parked`, never a
+   silent re-dispatch. A gh call that returns a **non-zero exit code**
+   (401, rate limit, network blip) is **undetermined**, never a positive
+   "the PR is gone" signal — parking on it would park every in-flight task on
+   one transient gh hiccup (the same 401 shape as finding #22). An
+   undetermined read is left alone and counted `skipped` in the summary, not
+   `parked`; the PR cell may be a bare number, a `#`-prefixed number, or the
+   markdown-link form RUN.md itself writes (`[#188](https://…/pull/188)`) — one
+   shared parser (`_pr_number`, also used by `restack`) handles all three.
 4. **Every `handed-off` task carries its handler's review signal.** → For
    `repo-pr` that signal is the PR itself: labeled `task-loop` (not `task-claim`)
    and not a draft, because deliver-task's step 7 makes the ready `task-loop` PR
@@ -489,21 +505,42 @@ and a **halt** exit means the loop must not dispatch.
    longer matter). Other handlers stay behind `--handler` as future work.
 5. **No orphan worker worktrees from a dead dispatch** (G2). → **repair**, remove
    them — but only when removal is provably safe: the worktree is under
-   `<run root>/workers/`, its `RUN.md` row (if it has one) is at a phase with no
-   dispatch in flight (`pending` / `parked` / `handed-off`, or no matching row at
-   all), it has no uncommitted changes, and its branch tip is already pushed to
-   `origin`. Anything failing one of those is left alone and reported
-   `skipped (unsafe to prune)` — deleting a live dispatch's worktree would destroy
-   work.
+   `<run root>/workers/`; its `RUN.md` row is at a phase that is unambiguously
+   TERMINAL for that worktree (`parked` / `handed-off`), or no row matches the
+   worktree's branch at all; it has no uncommitted changes; its branch tip is
+   already pushed to `origin` **or** carries no commits beyond its base; and no
+   **OPEN** PR is recorded for it. `pending` is deliberately **not** on the
+   safe list: RUN.md's phase cell is written by a commit the orchestrator makes
+   **after** it dispatches, so there is a window — right after each RUN.md
+   commit+push — where a worker worktree is genuinely live (dispatched,
+   possibly with an open PR already) while its row still reads `pending`.
+   `pending` therefore can't distinguish "never dispatched" from "dispatched
+   moments ago," so it is never safe to prune on its own. Anything failing one
+   of those conditions is left alone and reported `skipped (unsafe to prune)`;
+   a `git worktree remove` that itself fails is reported as a **failed** prune,
+   never as a completed repair — leaving an orphan worktree behind is harmless,
+   deleting a live one destroys work, so every condition must hold, not most
+   of them.
 6. **A chained task's parent tip still equals its frozen `base_sha`.** → **park**
-   the child — but only when the parent's own PR is _not_ merged. The `base_sha`
-   freeze guard models the **orchestrator** moving a base mid-run (see "`base_sha`"
-   above), never a **human** merging the parent; that case's remedy is `restack`,
-   and doctor says so instead of parking.
+   the child — but only when the parent's own PR is _positively read_ as _not_
+   merged. The `base_sha` freeze guard models the **orchestrator** moving a base
+   mid-run (see "`base_sha`" above), never a **human** merging the parent; that
+   case's remedy is `restack`, and doctor says so instead of parking. When the
+   parent's merge state **can't be determined** — `gh` isn't resolvable at all,
+   or a `gh` call fails — doctor fails closed toward **not** parking (same
+   posture as invariant 3): a guess is no better than a stale read, and parking
+   a child whose parent actually merged is exactly the violation this invariant
+   exists to avoid. Reported `skipped (parent state unreadable)`, not parked.
 7. **The run made forward progress since the last doctor iteration.** → After
    `--no-progress-limit` (default 3) consecutive no-progress iterations, **halt**
    (`systemic`). Skipped entirely while the run is legitimately paused
-   (`_run_is_paused`) — a paused iteration makes no progress by design.
+   (`_run_is_paused`). Also **reset** (never incremented) when doctor is called
+   with `--context resume`: doctor runs once at the top of `--resume` and again
+   at the top of the first loop iteration, with the run HEAD necessarily
+   unchanged between the two calls — incrementing on the resume call would put
+   the counter at 2 before any work is even attempted, one strike from a
+   spurious halt. A resume is a fresh start by definition, not a stalled
+   iteration.
 
 **Ownership split with task 10's supervisor guard** (say it here because it is
 easy to conflate): `supervisor-check`'s no-progress guard owns no-progress
@@ -527,8 +564,16 @@ boot out).
 
 **Reporting.** One line to stdout per run, e.g. `spawn-orchestrator: doctor: 7
 invariants — ok=5 repaired=1 (I1: HEAD restored) parked=1 (I6: task_20)
-halt=0` — a stall is visible in the log without parsing stream-json. Every
-**repair** and **park** also appends a dated bullet to `REPORT.md` (a run that
-had to repair itself is a signal even when it recovers) and, when
-`--questions` is passed, an entry in that decision log in the same format as
-`assert-run-head`'s.
+halt=0 skipped=0` — a stall is visible in the log without parsing stream-json.
+The five counters (`ok`/`repaired`/`parked`/`halt`/`skipped`) are **per
+invariant**, not per task row or per worktree: each of the seven invariants
+contributes at most one bucket increment, so the total across all five never
+exceeds 7, however many task rows or worktrees an invariant happened to touch.
+Per-row/per-worktree detail (which task, which worktree) still appears
+parenthetically, sourced from the same repair/park/skip notes. `skipped`
+covers the two **undetermined** cases above (invariants 3 and 6, a `gh` call
+that could not be positively read) — neither a pass nor a violation, just
+unknown this pass. Every **repair** and **park** also appends a dated bullet
+to `REPORT.md` (a run that had to repair itself is a signal even when it
+recovers) and, when `--questions` is passed, an entry in that decision log in
+the same format as `assert-run-head`'s.

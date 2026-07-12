@@ -2520,6 +2520,14 @@ if command -v git >/dev/null 2>&1; then
   # A fake `gh` for I3/I4/I6: PR state/draft/labels live in flat files under
   # $DOCTOR_GH_DB, same shape as restack's fake gh above but extended with
   # isDraft/labels reads and the edit/ready writes I4's repair needs.
+  #
+  # `.state`/`.labels` reads always exit 0 (`; true` after the `cat`), even
+  # when the backing file is missing — that models a POSITIVE gh read that
+  # simply found nothing (D2's "PR number gh positively reports as
+  # nonexistent" case: rc 0, empty field), which is what earns the I3/I6
+  # "park" verdict. A TRANSIENT gh failure (401, rate limit, network) is a
+  # different, non-zero-rc shape — see $DOCTOR_GH_FAIL below — and must never
+  # be confused with this one.
   DOCTOR_GH="$DOC/gh"
   cat >"$DOCTOR_GH" <<'GHEOF'
 #!/usr/bin/env bash
@@ -2532,9 +2540,9 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .state) cat "$db/$num.state" 2>/dev/null ;;
+      .state) cat "$db/$num.state" 2>/dev/null; true ;;
       .isDraft) cat "$db/$num.draft" 2>/dev/null || echo false ;;
-      '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null ;;
+      '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null; true ;;
       *) exit 1 ;;
     esac
     ;;
@@ -2552,6 +2560,16 @@ case "$sub" in
 esac
 GHEOF
   chmod +x "$DOCTOR_GH"
+
+  # A `gh` that ALWAYS fails (simulating a transient 401/rate-limit/network
+  # blip, D2): every `pr view` exits non-zero with no output, regardless of
+  # which PR is asked about. Used to prove a bad gh moment never parks a task.
+  DOCTOR_GH_FAIL="$DOC/gh-fail"
+  cat >"$DOCTOR_GH_FAIL" <<'GHFAILEOF'
+#!/usr/bin/env bash
+exit 1
+GHFAILEOF
+  chmod +x "$DOCTOR_GH_FAIL"
 
   # Build a real "run root" layout: <root>/run (the run worktree) + a bare
   # origin, matching I5's "lives under the run root's workers/ directory"
@@ -2654,6 +2672,12 @@ GHEOF
   git -C "$D1D/run" checkout -q -b bestdan/task-x
   echo work >"$D1D/run/task-file"; git -C "$D1D/run" add task-file; git -C "$D1D/run" commit -q -m "task work on the wrong branch"
   rm -f "$D1D/run/.auto-pilot/RUN.md"   # the literal acceptance-criterion scenario
+  # D1: a real run worktree ALWAYS carries UNTRACKED .auto-pilot/ content (the
+  # live run's own orchestrator.log/verify-broker.log). `git reset`/`checkout`
+  # cannot discard untracked files, so without --ignore-untracked-run-state
+  # this alone would keep assert_run_head fail-closed and I1 could never fire
+  # in a real run — reproduce that here.
+  printf 'orchestrator log line\n' >"$D1D/run/.auto-pilot/orchestrator.log"
 
   d1dout="$("$SCRIPT" doctor --dir "$D1D/run" --run-id "$RUN_ID1D" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1drc=$?
   [ "$d1drc" = 0 ] && ok "doctor I1+I2 deadlock: exits 0 (recovers instead of bailing to a human)" \
@@ -2664,6 +2688,46 @@ GHEOF
   [ -f "$D1D/run/.auto-pilot/RUN.md" ] && ok "doctor I1+I2 deadlock: RUN.md is observably back in the working tree" \
     || bad "doctor I1+I2 deadlock: RUN.md is observably back in the working tree"
   have "doctor I1+I2 deadlock: REPORT.md gained the repair bullet" 'I1 repaired' "$(cat "$D1D/run/.auto-pilot/REPORT.md")"
+  # D1: the success line reports the DISCARD path (not a bare restore), and
+  # the untracked run log survives — it must never be `git clean`ed away.
+  have "doctor I1+I2 deadlock: reports the discard path, not a bare restore" \
+    'I1: discarded stale .auto-pilot/ dirt' "$d1dout"
+  [ -f "$D1D/run/.auto-pilot/orchestrator.log" ] && grep -q 'orchestrator log line' "$D1D/run/.auto-pilot/orchestrator.log" \
+    && ok "doctor I1+I2 deadlock: the untracked run log survives the repair (D1 — never git-clean'd)" \
+    || bad "doctor I1+I2 deadlock: the untracked run log survives the repair"
+
+  # --- I1 untracked-only: HEAD parked off-branch, the ONLY .auto-pilot/ -----
+  # dirt is UNTRACKED (a real run's orchestrator.log/verify-broker.log; no
+  # tracked change at all) — this is the literal #23-repro scenario D1 fixes:
+  # before, `git reset`/`checkout` no-op on untracked files, so the discard
+  # never actually unblocked assert_run_head. Assert the repair still fires
+  # and the log is left in place untouched.
+  D1U="$DOC/i1-untracked-only"; RUN_ID1U="doctor-i1-untracked-only"
+  _doctor_new_run "$D1U" "$RUN_ID1U"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1U"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t1 | pending | - | main | - | - | |\n'
+  } >"$D1U/run/.auto-pilot/RUN.md"
+  : >"$D1U/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D1U/run/.auto-pilot/REPORT.md"
+  git -C "$D1U/run" add .auto-pilot; git -C "$D1U/run" commit -q -m "seed run state"
+  git -C "$D1U/run" checkout -q main
+  git -C "$D1U/run" checkout -q -b bestdan/task-z
+  echo work >"$D1U/run/task-file"; git -C "$D1U/run" add task-file; git -C "$D1U/run" commit -q -m "task work on the wrong branch"
+  printf 'orchestrator log line\n' >"$D1U/run/.auto-pilot/orchestrator.log"
+  printf 'verify broker log line\n' >"$D1U/run/.auto-pilot/verify-broker.log"
+
+  d1uout="$("$SCRIPT" doctor --dir "$D1U/run" --run-id "$RUN_ID1U" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1urc=$?
+  [ "$d1urc" = 0 ] && ok "doctor I1 untracked-only: exits 0" || bad "doctor I1 untracked-only: exits 0" "$d1uout"
+  d1uhead="$(git -C "$D1U/run" rev-parse --abbrev-ref HEAD)"
+  [ "$d1uhead" = "auto-pilot/$RUN_ID1U" ] && ok "doctor I1 untracked-only: HEAD is observably back on the run-state branch" \
+    || bad "doctor I1 untracked-only: HEAD is observably back on the run-state branch" "got $d1uhead"
+  have "doctor I1 untracked-only: reports the discard path" 'I1: discarded stale .auto-pilot/ dirt' "$d1uout"
+  [ -f "$D1U/run/.auto-pilot/orchestrator.log" ] && [ -f "$D1U/run/.auto-pilot/verify-broker.log" ] \
+    && ok "doctor I1 untracked-only: both untracked run logs survive (never git-clean'd)" \
+    || bad "doctor I1 untracked-only: both untracked run logs survive"
 
   # --- I1 negative: HEAD off-branch with dirt OUTSIDE .auto-pilot/ still -----
   # fails closed. Someone's real work is never silently discarded.
@@ -2707,15 +2771,20 @@ GHEOF
     printf '| t_gone   | pr-open   | br-gone   | main | - | #302 | |\n'
     printf '| t_open   | pr-open   | br-open   | main | - | #303 | |\n'
     printf '| t_merged | handed-off | br-merged | main | - | #304 | |\n'
+    # D3: the markdown-link cell shape RUN.md's own writer actually emits —
+    # must parse to a bare PR number and hold (be left alone), not park.
+    printf '| t_mdlink | pr-open   | br-mdlink | main | - | [#305](https://github.com/bestdan/workflow-skills/pull/305) | |\n'
   } >"$D3/run/.auto-pilot/RUN.md"
   : >"$D3/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D3/run/.auto-pilot/REPORT.md"
   git -C "$D3/run" add .auto-pilot; git -C "$D3/run" commit -q -m "seed run state"
   I3DB="$D3/ghdb"; mkdir -p "$I3DB"
   printf 'CLOSED\n' >"$I3DB/301.state"
-  # 302: no state file at all -> the fake gh prints nothing -> "does not exist"
+  # 302: no state file at all -> the fake gh's `.state` read still exits 0
+  # (positively reports "nonexistent") -> "does not exist"
   printf 'OPEN\n' >"$I3DB/303.state"; printf 'false\n' >"$I3DB/303.draft"; printf '\n' >"$I3DB/303.labels"
   printf 'MERGED\n' >"$I3DB/304.state"
+  printf 'OPEN\n' >"$I3DB/305.state"
   export DOCTOR_GH_DB="$I3DB"
   d3out="$("$SCRIPT" doctor --dir "$D3/run" --run-id "$RUN_ID3" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d3rc=$?
   [ "$d3rc" = 0 ] && ok "doctor I3: exits 0 (park is a repair, not a halt)" || bad "doctor I3: exits 0" "$d3out"
@@ -2727,6 +2796,31 @@ GHEOF
   have "doctor I3: MERGED PR row left alone (a human merge is healthy, not a violation)" $'t_merged | handed-off' "$d3run"
   lack "doctor I3: a merged row is never parked" $'t_merged | parked' "$d3run"
   have "doctor I3: REPORT.md records why each park happened" 'I3 parked' "$(cat "$D3/run/.auto-pilot/REPORT.md")"
+  have "doctor I3 (D3): the markdown-link PR cell parses and holds (left alone)" $'t_mdlink | pr-open' "$d3run"
+  lack "doctor I3 (D3): the markdown-link row is never parked" $'t_mdlink | parked' "$d3run"
+
+  # --- I3 (D2): a transient gh failure must never park an in-flight task ----
+  D3G="$DOC/i3-gh-fail"; RUN_ID3G="doctor-i3-gh-fail"
+  _doctor_new_run "$D3G" "$RUN_ID3G"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID3G"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_a | pr-open    | br-a | main | - | #401 | |\n'
+    printf '| t_b | handed-off | br-b | main | - | #402 | |\n'
+  } >"$D3G/run/.auto-pilot/RUN.md"
+  : >"$D3G/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D3G/run/.auto-pilot/REPORT.md"
+  git -C "$D3G/run" add .auto-pilot; git -C "$D3G/run" commit -q -m "seed run state"
+  d3gout="$("$SCRIPT" doctor --dir "$D3G/run" --run-id "$RUN_ID3G" --gh "$DOCTOR_GH_FAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d3grc=$?
+  [ "$d3grc" = 0 ] && ok "doctor I3 (D2): a failing gh still exits 0 (undetermined, not a halt)" \
+    || bad "doctor I3 (D2): a failing gh still exits 0" "exit=$d3grc out=$d3gout"
+  d3grun="$(cat "$D3G/run/.auto-pilot/RUN.md")"
+  have "doctor I3 (D2): pr-open row is NOT parked on a gh failure" $'t_a | pr-open' "$d3grun"
+  lack "doctor I3 (D2): pr-open row is not parked" $'t_a | parked' "$d3grun"
+  have "doctor I3 (D2): handed-off row is NOT parked on a gh failure" $'t_b | handed-off' "$d3grun"
+  lack "doctor I3 (D2): handed-off row is not parked" $'t_b | parked' "$d3grun"
+  have "doctor I3 (D2): summary counts the gh failure as skipped, not parked" 'skipped=' "$d3gout"
 
   # --- I4: a handed-off repo-pr task's review signal (label + not-draft) ----
   D4="$DOC/i4"; RUN_ID4="doctor-i4"
@@ -2760,42 +2854,70 @@ GHEOF
     || bad "doctor I4: already-correct PR's labels are untouched" "$(cat "$I4DB/402.labels")"
 
   # --- I5: orphan worker worktrees under <run root>/workers/ (G2) -----------
+  # D4: `pending` is deliberately NOT on the safe list any more — the phase
+  # cell lags a live dispatch (it flips AFTER the orchestrator's RUN.md
+  # commit+push), so a `pending` row cannot tell "never dispatched" from
+  # "dispatched moments ago". Cover: a terminal (`parked`) row -> pruned; an
+  # in-flight (`implementing`) row -> left alone; a `pending` row -> left
+  # alone (the literal live-run reproduction: `task_14 | pending` with an
+  # open PR, from this very run); a `parked` row that STILL has an OPEN PR
+  # recorded -> left alone (the open-PR guard); a branch with NO RUN.md row
+  # at all -> pruned (nothing claims it is live).
   D5="$DOC/i5"; RUN_ID5="doctor-i5"
   _doctor_new_run "$D5" "$RUN_ID5"
-  git -C "$D5/run" checkout -q main
-  git -C "$D5/run" checkout -q -b br-safe
-  echo s >"$D5/run/s.txt"; git -C "$D5/run" add s.txt; git -C "$D5/run" commit -q -m s
-  git -C "$D5/run" push -q origin br-safe
-  git -C "$D5/run" checkout -q main
-  git -C "$D5/run" checkout -q -b br-unsafe
-  echo u >"$D5/run/u.txt"; git -C "$D5/run" add u.txt; git -C "$D5/run" commit -q -m u
-  git -C "$D5/run" push -q origin br-unsafe
+  for br in br-terminal br-unsafe br-pending br-openpr br-nomatch; do
+    git -C "$D5/run" checkout -q main
+    git -C "$D5/run" checkout -q -b "$br"
+    echo "$br" >"$D5/run/$br.txt"; git -C "$D5/run" add "$br.txt"; git -C "$D5/run" commit -q -m "$br"
+    git -C "$D5/run" push -q origin "$br"
+  done
   # _doctor_new_run already created+checked-out auto-pilot/$RUN_ID5 — switch
-  # BACK to it (no -b: it already exists) now that br-safe/br-unsafe exist.
+  # BACK to it (no -b: it already exists) now that the branches above exist.
   git -C "$D5/run" checkout -q "auto-pilot/$RUN_ID5"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID5"
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
-    printf '| t_safe   | pending      | br-safe   | main | - | - | |\n'
-    printf '| t_unsafe | implementing | br-unsafe | main | - | - | |\n'
+    printf '| t_terminal | parked       | br-terminal | main | - | -    | |\n'
+    printf '| t_unsafe   | implementing | br-unsafe   | main | - | -    | |\n'
+    printf '| t_pending  | pending      | br-pending  | main | - | -    | |\n'
+    printf '| t_openpr   | parked       | br-openpr   | main | - | #601 | |\n'
   } >"$D5/run/.auto-pilot/RUN.md"
   : >"$D5/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5/run/.auto-pilot/REPORT.md"
   git -C "$D5/run" add .auto-pilot; git -C "$D5/run" commit -q -m "seed run state"
   git -C "$D5/run" push -q origin "auto-pilot/$RUN_ID5"
   mkdir -p "$D5/workers"
-  git -C "$D5/run" worktree add -q "$D5/workers/w-safe" br-safe
+  git -C "$D5/run" worktree add -q "$D5/workers/w-terminal" br-terminal
   git -C "$D5/run" worktree add -q "$D5/workers/w-unsafe" br-unsafe
+  git -C "$D5/run" worktree add -q "$D5/workers/w-pending" br-pending
+  git -C "$D5/run" worktree add -q "$D5/workers/w-openpr" br-openpr
+  git -C "$D5/run" worktree add -q "$D5/workers/w-nomatch" br-nomatch
+  I5DB="$D5/ghdb"; mkdir -p "$I5DB"
+  printf 'OPEN\n' >"$I5DB/601.state"
+  export DOCTOR_GH_DB="$I5DB"
 
-  d5out="$("$SCRIPT" doctor --dir "$D5/run" --run-id "$RUN_ID5" 2>&1)"; d5rc=$?
+  d5out="$("$SCRIPT" doctor --dir "$D5/run" --run-id "$RUN_ID5" --gh "$DOCTOR_GH" 2>&1)"; d5rc=$?
   [ "$d5rc" = 0 ] && ok "doctor I5: exits 0" || bad "doctor I5: exits 0" "$d5out"
-  have "doctor I5: reports the prune" 'I5: removed w-safe' "$d5out"
-  [ ! -d "$D5/workers/w-safe" ] && ok "doctor I5: the safe orphan worktree is observably gone" \
-    || bad "doctor I5: the safe orphan worktree is observably gone"
+  have "doctor I5: reports the prune of the terminal-phase worktree" 'I5: removed w-terminal' "$d5out"
+  [ ! -d "$D5/workers/w-terminal" ] && ok "doctor I5: the terminal-phase orphan worktree is observably gone" \
+    || bad "doctor I5: the terminal-phase orphan worktree is observably gone"
   [ -d "$D5/workers/w-unsafe" ] && ok "doctor I5: the in-flight worktree is left alone (unsafe to prune)" \
     || bad "doctor I5: the in-flight worktree is left alone"
+  # D4: `pending` no longer green-lights a prune — the exact live-run shape
+  # (`task_14 | pending` with an open PR) must survive.
+  [ -d "$D5/workers/w-pending" ] && ok "doctor I5 (D4): a pending-phase worktree is left alone (phase lags a live dispatch)" \
+    || bad "doctor I5 (D4): a pending-phase worktree is left alone"
+  # D4: an OPEN PR still recorded blocks the prune even though the phase is
+  # otherwise terminal.
+  [ -d "$D5/workers/w-openpr" ] && ok "doctor I5 (D4): a parked row with an OPEN PR is left alone" \
+    || bad "doctor I5 (D4): a parked row with an OPEN PR is left alone"
   have "doctor I5: an in-flight worktree is reported as skipped" 'skipped (unsafe to prune)' "$d5out"
+  have "doctor I5: a branch with no RUN.md row at all is pruned" 'I5: removed w-nomatch' "$d5out"
+  [ ! -d "$D5/workers/w-nomatch" ] && ok "doctor I5: the no-row orphan worktree is observably gone" \
+    || bad "doctor I5: the no-row orphan worktree is observably gone"
+
+  unset DOCTOR_GH_DB
 
   # --- I6: a chained task's parent tip moved off its frozen base_sha --------
   # (a) the orchestrator moved the base mid-run, no merge -> park the child.
@@ -2843,7 +2965,9 @@ GHEOF
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID6M"
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
-    printf '| t_parent | handed-off   | br-parent | main      | -  | #501 | |\n'
+    # D3: the parent's pr cell is the markdown-link form RUN.md's own writer
+    # emits — must parse to a bare PR number, same as the bare-`#501` shape.
+    printf '| t_parent | handed-off   | br-parent | main      | -  | [#501](https://github.com/bestdan/workflow-skills/pull/501) | |\n'
     printf '| t_child  | implementing | br-child  | br-parent | %s | -    | |\n' "$PARENT_SHA6M"
   } >"$D6M/run/.auto-pilot/RUN.md"
   : >"$D6M/run/.auto-pilot/QUESTIONS.md"
@@ -2854,10 +2978,42 @@ GHEOF
   export DOCTOR_GH_DB="$I6MDB"
   d6mout="$("$SCRIPT" doctor --dir "$D6M/run" --run-id "$RUN_ID6M" --gh "$DOCTOR_GH" 2>&1)"; d6mrc=$?
   [ "$d6mrc" = 0 ] && ok "doctor I6 (merged parent): exits 0" || bad "doctor I6 (merged parent): exits 0" "$d6mout"
-  have "doctor I6 (merged parent): says the remedy is restack, not park" 'remedy is restack, not park' "$d6mout"
-  lack "doctor I6 (merged parent): the child is NOT parked" $'t_child  | parked' "$(cat "$D6M/run/.auto-pilot/RUN.md")"
+  have "doctor I6 (merged parent, D3 markdown-link pr cell): says the remedy is restack, not park" 'remedy is restack, not park' "$d6mout"
+  lack "doctor I6 (merged parent, D3 markdown-link pr cell): the child is NOT parked" $'t_child  | parked' "$(cat "$D6M/run/.auto-pilot/RUN.md")"
 
   unset DOCTOR_GH_DB
+
+  # (c) the SAME divergence, but the parent's PR state is UNREADABLE (a
+  # failing gh, D2/D7) — must NOT park. Parking here would be the exact
+  # violation the invariant's own comment warns against: a parent that
+  # actually merged, parked anyway because its state could not be read.
+  D6U="$DOC/i6-gh-unreadable"; RUN_ID6U="doctor-i6-gh-unreadable"
+  _doctor_new_run "$D6U" "$RUN_ID6U"
+  git -C "$D6U/run" checkout -q main
+  git -C "$D6U/run" checkout -q -b br-parent
+  echo p >"$D6U/run/p.txt"; git -C "$D6U/run" add p.txt; git -C "$D6U/run" commit -q -m p
+  git -C "$D6U/run" push -q origin br-parent
+  PARENT_SHA6U="$(git -C "$D6U/run" rev-parse br-parent)"
+  echo p2 >"$D6U/run/p2.txt"; git -C "$D6U/run" add p2.txt; git -C "$D6U/run" commit -q -m "parent moved"
+  git -C "$D6U/run" push -q origin br-parent
+  git -C "$D6U/run" checkout -q "auto-pilot/$RUN_ID6U"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID6U"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_parent | handed-off   | br-parent | main      | -  | #601 | |\n'
+    printf '| t_child  | implementing | br-child  | br-parent | %s | -    | |\n' "$PARENT_SHA6U"
+  } >"$D6U/run/.auto-pilot/RUN.md"
+  : >"$D6U/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D6U/run/.auto-pilot/REPORT.md"
+  git -C "$D6U/run" add .auto-pilot; git -C "$D6U/run" commit -q -m "seed run state"
+  d6uout="$("$SCRIPT" doctor --dir "$D6U/run" --run-id "$RUN_ID6U" --gh "$DOCTOR_GH_FAIL" 2>&1)"; d6urc=$?
+  [ "$d6urc" = 0 ] && ok "doctor I6 (D2/D7, gh unreadable): exits 0 (undetermined, not a halt)" \
+    || bad "doctor I6 (D2/D7, gh unreadable): exits 0" "exit=$d6urc out=$d6uout"
+  lack "doctor I6 (D2/D7, gh unreadable): the child is NOT parked on an unreadable parent state" \
+    $'t_child  | parked' "$(cat "$D6U/run/.auto-pilot/RUN.md")"
+  have "doctor I6 (D2/D7, gh unreadable): reports it as skipped/unreadable, not a park" \
+    'parent PR state unreadable' "$d6uout"
 
   # --- I7: forward progress across ITERATIONS within one live process ------
   D7="$DOC/i7"; RUN_ID7="doctor-i7"
@@ -2905,11 +3061,47 @@ GHEOF
   done
   lack "doctor I7: a paused run never halts, however many repeats" 'systemic' "$(cat "$D7P/run/.auto-pilot/RUN.md")"
 
+  # --- I7 (D6): --context resume RESETS the no-progress counter instead of --
+  # incrementing it. Doctor runs once at the top of --resume and again at the
+  # top of the first loop iteration, with HEAD necessarily unchanged between
+  # the two — without D6's fix that pair alone would put the counter at 2,
+  # one strike from a spurious halt before any work runs. Drive it right up
+  # to the limit under `loop` context, then prove a `resume` call resets
+  # instead of tipping it over.
+  D7R="$DOC/i7-resume-context"; RUN_ID7R="doctor-i7-resume-context"
+  _doctor_new_run "$D7R" "$RUN_ID7R"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\npause_reason: \n---\n\n' "$RUN_ID7R"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t1 | pending | - | main | - | - | |\n'
+  } >"$D7R/run/.auto-pilot/RUN.md"
+  : >"$D7R/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D7R/run/.auto-pilot/REPORT.md"
+  git -C "$D7R/run" add .auto-pilot; git -C "$D7R/run" commit -q -m "seed run state"
+  # Two no-progress `loop` iterations (count -> 2, one shy of the limit=3),
+  # then a `resume` call: if resume incremented, this would halt (count=3).
+  "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
+  "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
+  d7rout="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context resume 2>&1)"; d7rrc=$?
+  [ "$d7rrc" = 0 ] && ok "doctor I7 (D6): a resume call never halts, even after 2 prior no-progress loop iterations" \
+    || bad "doctor I7 (D6): a resume call never halts" "exit=$d7rrc out=$d7rout"
+  # Follow it with TWO more `loop` iterations: if resume had reset the
+  # counter as intended, this is only iterations 1-2 post-reset and must NOT
+  # halt; if resume had (wrongly) incremented, the limit would already have
+  # been blown past.
+  "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
+  d7rout2="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop 2>&1)"; d7rrc2=$?
+  [ "$d7rrc2" != 30 ] && ok "doctor I7 (D6): resume genuinely reset the counter (2 more loop iterations still don't halt)" \
+    || bad "doctor I7 (D6): resume genuinely reset the counter" "exit=$d7rrc2 out=$d7rout2"
+
   # --- fail-closed: bad usage --------------------------------------------
   o="$("$SCRIPT" doctor --run-id x 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir' \
     && ok "doctor fail-closed: missing --dir" || bad "doctor fail-closed: missing --dir" "$o"
   o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --handler bogus 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --handler' \
     && ok "doctor fail-closed: unknown --handler" || bad "doctor fail-closed: unknown --handler" "$o"
+  o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --context bogus 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --context' \
+    && ok "doctor fail-closed: unknown --context" || bad "doctor fail-closed: unknown --context" "$o"
 else
   echo "skip - doctor: git not available"
 fi
