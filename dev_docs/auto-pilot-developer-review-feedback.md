@@ -128,13 +128,29 @@ The suite re-runs for free. The acceptance criterion is the one that must be re-
 
 If task 21 is going to enforce re-verification after a restack, it should enforce **re-running the PR's own stated user-run criterion against the rebased head** — not line survival, which passed cleanly on both broken branches.
 
+## A guard that counts what it catches can never report what got away
+
+Added after co-reviewing #193 (task 26). This one is worth internalizing, because the guard in question was written **specifically** to stop the leak it then failed to stop.
+
+The suite shadows `osascript`/`terminal-notifier`/`open` in a `$GUARD` dir prepended to `PATH`, and asserts two things: the notifiers resolve inside `$GUARD`, and the guard log is non-empty (alarms really did route through it). Both passed. The suite was still firing **15 real desktop notifications per run**.
+
+The reason is structural. Both assertions inspect the **inherited** `PATH`. Every fixture that _overrides_ `PATH` — `PATH="$STUB_PATH" "$SCRIPT" supervisor-check …` — escapes them completely, and those stub dirs carry no `osascript`, so `alarm` resolved `/usr/bin/osascript` and popped a real notification. The guard could not see it: **an escaped call never reaches the guard log**, so the count stayed plausible and the suite stayed green while leaking.
+
+The general form:
+
+> **A detector that measures only its own successes cannot detect its own bypass.** "The guard caught N" is evidence the guard is _reachable_, never evidence it is _unbypassable_.
+
+The fix is to assert the property at its source rather than at the point of capture: for every composite `PATH` the suite constructs, `osascript` must resolve to something inside the test tree. That is checkable without catching anything, and it fails when a new fixture forgets the guard — which is the case the counter is blind to.
+
+Ask of any guard, harness, or invariant check: **what would a bypass look like, and would this assertion still pass?** If it would, the assertion is measuring the happy path.
+
 ## Checklist
 
 Before opening a PR:
 
 - [ ] Every stub's contract checked against the real binary at least once (exit codes, not just stdout).
 - [ ] Generated artifacts are driven **as generated** — the test does not re-implement the call sequence.
-- [ ] No side effect can escape the suite: every external side-effecting binary shadowed **globally**, with an assertion that the escape count is zero.
+- [ ] No side effect can escape the suite: every external side-effecting binary shadowed **globally**, with an assertion that the escape count is zero — and check that no fixture **overrides `PATH`** past the shadow (a guard that counts what it catches cannot see what got away).
 - [ ] Fixtures include the **in-flight** state between each pair of consecutive writes, not only the settled one.
 - [ ] Any new early return: everything downstream classified _must-run_ vs _skip_, and the seam made explicit in code.
 - [ ] Every load-bearing claim in the PR body names a test that fails if the claim goes false.
