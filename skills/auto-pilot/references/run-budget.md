@@ -106,6 +106,17 @@ always safe to kill — crash mid-wait just means the relaunch timer still
 fires. An in-process `sleep` holding hours of accumulated context is not
 safe to kill, and buys nothing a relaunch doesn't already give for free.
 
+**A pause costs zero model calls.** Step 3's wake guard used to be the _only_
+check: every `StartInterval` wake booted a full `claude -p` orchestrator just
+to read `paused_until` and conclude "not yet time" — a model call spent
+precisely when the pause exists because tokens are scarce. The supervisor now
+gates on `paused_until` **in shell, before invoking the agent at all**
+(`spawn-orchestrator.sh supervisor-gate`, [`launch-runtime.md`](launch-runtime.md)
+"Spawn mechanics"): a pure timestamp comparison, no model, no context load.
+That's what makes a long pause — a multi-hour rate-window reset — actually
+cheap rather than dozens of no-op wakes. The agent-side wake guard stays as
+defense in depth (it's what `--resume` relies on), now rarely reached.
+
 **Two pause kinds — who writes the checkpoint.** The proxy pause above is an
 **agent pause**: the orchestrator still has headroom, so it writes both
 `paused_until` and `status: paused` itself and exits 0, and the supervisor
