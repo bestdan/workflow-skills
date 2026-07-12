@@ -264,7 +264,7 @@ resolve_lazy() {
 # covering every caller scope while the harness still gets exactly what it needs.
 # See orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@ comment for why denying any of
 # these poisons the harness itself (task 12 / finding #20).
-# Args: <tmpdir-canonical> <claude-tmp-tree> <session-env-dir>.
+# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir>.
 emit_harness_runtime() {
   local tmpdir_c="$1" tmp_root="$2" session_env="$3"
   local sock_pattern claude_tmp_pattern
@@ -285,6 +285,15 @@ emit_harness_runtime() {
   #                                           hex id each time
   # The detached orchestrator uses the -cwd files; an interactive session was seen
   # using the numeric tree. Cover both, and no more: still never a blanket /tmp write.
+  #
+  # ACCEPTED RELAXATION: this pattern is deliberately broader than the old
+  # `(subpath "/tmp/claude-$(id -u)")` — it grants any `claude-<id>` tree, not just
+  # this uid's, because <id> is not the uid and can't be resolved ahead of time.
+  # The widening is bounded by standard POSIX permissions, which SBPL grants do NOT
+  # override: another operator's `claude-<id>` tree is only reachable if it is
+  # independently writable to this uid (it isn't, under the single-operator host
+  # this harness targets). So the relaxation is a real but low-severity trade of
+  # tightness for the reliability that keeps finding #20 fixed.
   claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[A-Za-z0-9]+(-cwd)?(/|$)'
   printf '(allow file-write*\n'
   printf '  (regex #"%s")\n' "$sock_pattern"

@@ -437,6 +437,19 @@ wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.js
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
+# --tmpdir is a fail-closed requirement (a launchd job inherits no usable TMPDIR):
+# a missing --tmpdir must die, and a relative one must be rejected.
+wltm="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --out-script "$BASE/tm.sh" --out-plist "$BASE/tm.plist" 2>&1)"
+[ $? = 2 ] && printf '%s' "$wltm" | grep -qF 'requires --tmpdir' \
+  && ok "launch: missing --tmpdir fails closed" || bad "launch: missing --tmpdir fails closed" "$wltm"
+wltr="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --tmpdir "relative/tmp" --out-script "$BASE/tr.sh" --out-plist "$BASE/tr.plist" 2>&1)"
+[ $? = 2 ] && printf '%s' "$wltr" | grep -qF 'must be absolute' \
+  && ok "launch: relative --tmpdir fails closed" || bad "launch: relative --tmpdir fails closed" "$wltr"
+
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
 rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"
 [ $? = 2 ] && [ ! -e "$BASE/h.txt" ] && printf '%s' "$rho" | grep -qF 'no live process' && ok "record-handle: dead pid fails closed" || bad "record-handle: dead pid fails closed"
