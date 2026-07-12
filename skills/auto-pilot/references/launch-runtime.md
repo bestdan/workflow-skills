@@ -92,6 +92,23 @@ wake is expected to make no progress). Full mechanics in
 [`run-budget.md`](run-budget.md) "A third terminal kind — the supervisor
 halt (finding #22)".
 
+**The wrapper gates the relaunch BEFORE invoking `claude` at all (finding
+#19).** `StartInterval` wakes every 5 minutes regardless of run state, so a
+run sitting through a `paused_until` pause used to boot a full agent on every
+wake just to re-read `RUN.md` and conclude "not yet time" — a model call
+spent at the exact moment a pause exists because tokens are scarce.
+`spawn-orchestrator.sh supervisor-gate` runs immediately after `cd
+<workdir>`, before the log-offset capture or `sandbox-exec` — a pure
+`date`/string comparison against `RUN.md`'s `paused_until`, no model, no
+context load. It exits 20 to mean "skip this wake," which the generated
+script checks for and `exit 0`s without ever starting `claude`; a run whose
+`status:` is `done` or `systemic` gates the same way but tears the `launchd`
+job down (reusing `teardown`) instead of relaunching at all. Any other gate
+outcome — including a missing `RUN.md` or an unparseable `paused_until` —
+falls through to invoking the agent, so a gate bug can only over-run, never
+strand a run that can no longer wake. See [`run-budget.md`](run-budget.md)
+"A pause costs zero model calls."
+
 **Why.**
 
 - **It must outlive the launch session.** The human runs launch interactively,

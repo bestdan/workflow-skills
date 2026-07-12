@@ -51,6 +51,7 @@
 #   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
 #       [--since-offset <bytes>] \
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>]
+#   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
 #
 #   classify-exit  Read-only, no model call (task 10 / finding #22): classify
 #                  an orchestrator exit from its exit code + captured
@@ -82,6 +83,15 @@
 #                  down (`launchctl bootout`) so it never relaunches into the
 #                  same condition. Exits with the classified exit code (0 for
 #                  `done`) so the launch script's own exit is meaningful.
+#   supervisor-gate  The pre-invoke gate the generated launch script calls
+#                  BEFORE `claude -p` runs at all (task 11 / finding #19): a
+#                  pure `date`/string comparison against RUN.md's
+#                  `paused_until`, so a wake that lands mid-pause costs no
+#                  model call. A run-level `status: done`/`systemic` tears
+#                  the launchd job down (reusing `teardown`) instead of
+#                  relaunching. Exits 20 to mean "gate closed, do not invoke
+#                  the agent"; any other exit means proceed — fail-safe
+#                  against a missing RUN.md or an unparseable paused_until.
 #   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
 #       [--gh <path>] [--dry-run]
 #
@@ -802,6 +812,14 @@ write_launch() {
     printf 'export TMPDIR=%q\n' "$tmpdir"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
+    # Pre-invoke gate (task 11 / finding #19): a pure shell timestamp check,
+    # BEFORE claude ever starts, so a wake that lands mid-pause costs no
+    # model call. Exit 20 is the gate's distinct "do not invoke" signal;
+    # anything else (including a gate error) falls through to claude —
+    # fail-safe, matching the gate's own posture.
+    printf '%q supervisor-gate --dir %q --label %q >>%q 2>&1\n' "$self" "$workdir" "$label" "$log"
+    printf 'gate=$?\n'
+    printf 'if [ "$gate" -eq 20 ]; then exit 0; fi\n'
     # Record the log's size BEFORE this wake writes to it. The log is appended
     # to across every wake, so classify-exit must look only at the bytes THIS
     # process wrote — otherwise an old wake's 401 stays in the file forever and
@@ -1232,6 +1250,88 @@ supervisor_check() {
     echo "spawn-orchestrator: supervisor-check retry ($count/$limit consecutive, no progress): ${class#retry: }"
   fi
   return "$code"
+}
+
+# ---------------------------------------------------------------------------
+# Task 11 — gate the relaunch on paused_until in shell (finding #19): a
+# launchd StartInterval wake during a rate-window pause used to boot a full
+# `claude -p` orchestrator just to re-read RUN.md and conclude "not yet
+# time" — a model call spent at the exact moment tokens are scarcest (a
+# multi-hour rate-window pause could wake, and pay for, dozens of times).
+# The check is a pure timestamp comparison; supervisor_gate runs it in the
+# generated launch script BEFORE claude is invoked at all. The agent-side
+# wake guard stays as defense in depth (load-bearing for --resume).
+# ---------------------------------------------------------------------------
+
+# Parse an ISO-8601 UTC timestamp in RUN.md's form (e.g.
+# 2026-07-12T07:52:04Z) to epoch seconds. Tries BSD `date` (macOS, what the
+# launchd job actually runs under) first, then GNU `date` (Linux/CI), so the
+# same script works on both. Prints nothing and returns non-zero if BOTH
+# parses fail — the caller treats that as unparseable and fails open.
+_parse_iso8601_utc() {
+  local v="$1" epoch
+  epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$v" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+  epoch="$(date -u -d "$v" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+  return 1
+}
+
+# The pre-invoke gate the generated launch script calls BEFORE `claude -p`
+# runs at all. Exit 20 is the distinct "gate closed, do not invoke the
+# agent" signal the launch script checks for; any other exit (including 0)
+# means "proceed as normal." This is FAIL-SAFE, not fail-closed: a missing
+# RUN.md, an unparseable/garbage paused_until, or an empty paused_until all
+# proceed to invoke the agent rather than risk silently skipping every wake
+# forever — over-running the agent once is recoverable, a run permanently
+# stuck unable to relaunch is not. The agent-side wake guard is the second
+# line of defense for anything this gate lets slip through.
+supervisor_gate() {
+  local dir="" label=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      *) die "unknown supervisor-gate argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$label" ] || die "supervisor-gate requires --dir and --label"
+
+  local run_md="$dir/.auto-pilot/RUN.md"
+  if [ ! -f "$run_md" ]; then
+    echo "spawn-orchestrator: supervisor-gate: no RUN.md at $run_md, proceeding (fail-safe)"
+    return 0
+  fi
+
+  # _front_field (above) reads the global $front — same convention status()
+  # uses, reused here rather than re-deriving a front-matter parser.
+  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+
+  local run_status; run_status="$(_front_field status)"
+  case "$run_status" in
+    done|systemic)
+      # A done/systemic run must never relaunch (task 10's fatal-halt
+      # teardown path, reused rather than reimplemented — see
+      # _supervisor_halt's identical `teardown --label` call).
+      echo "spawn-orchestrator: supervisor-gate: run status is '$run_status', tearing down $label instead of relaunching"
+      teardown --label "$label"
+      return 20
+      ;;
+  esac
+
+  local paused_until; paused_until="$(_front_field paused_until)"
+  [ -n "$paused_until" ] || return 0
+
+  local until_epoch
+  if ! until_epoch="$(_parse_iso8601_utc "$paused_until")"; then
+    echo "spawn-orchestrator: supervisor-gate: unparseable paused_until '$paused_until', proceeding (fail-safe)"
+    return 0
+  fi
+
+  local now_epoch; now_epoch="$(date -u +%s)"
+  if [ "$now_epoch" -lt "$until_epoch" ]; then
+    echo "spawn-orchestrator: supervisor-gate: paused until $paused_until, skipping this wake without invoking the agent"
+    return 20
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -2115,6 +2215,7 @@ case "$sub" in
   assert-run-head) assert_run_head "$@" ;;
   classify-exit) classify_exit "$@" ;;
   supervisor-check) supervisor_check "$@" ;;
+  supervisor-gate) supervisor_gate "$@" ;;
   restack) restack "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

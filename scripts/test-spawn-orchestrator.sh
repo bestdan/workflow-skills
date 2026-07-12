@@ -960,6 +960,107 @@ else
   bad "launch: log offset is captured before sandbox-exec runs" "off@$off_ln sandbox@$sbx_ln"
 fi
 
+# --- supervisor-gate: pre-invoke pause gate in shell (task 11, finding #19) ---
+# Behavioral, on the GENERATED wrapper itself, not a string grep: run the real
+# launch.sh with a stub claude (--claude-bin) and a stub sandbox-exec on PATH,
+# each recording their own invocation via a marker file. "claude was never
+# invoked" is then observable as "marker file absent" — no real jail involved.
+GT="$BASE/gate"; mkdir -p "$GT/bin"
+GT_CLAUDE="$GT/bin/claude-stub"
+{
+  printf '#!/bin/sh\n'
+  printf ': >"%s/claude-called"\n' "$GT"
+  printf 'exit 0\n'
+} >"$GT_CLAUDE"
+chmod +x "$GT_CLAUDE"
+# The generated wrapper invokes `sandbox-exec -f <profile> <claude_bin> ...`
+# bare (resolved via the script's own exported PATH) — a stub here both lets
+# the test run fully offline (no real Seatbelt jail) and, by exec-ing through
+# to the rest of argv, still reaches the claude stub above.
+GT_SANDBOX="$GT/bin/sandbox-exec"
+{
+  printf '#!/bin/sh\n'
+  printf ': >"%s/sandbox-exec-called"\n' "$GT"
+  printf 'shift 2\n'  # drop "-f <profile>"
+  printf 'exec "$@"\n'
+} >"$GT_SANDBOX"
+chmod +x "$GT_SANDBOX"
+GT_PATH="$GT/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# epoch -> RUN.md's ISO-8601 UTC form, portable across BSD/GNU `date`.
+_gate_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+NOW_EPOCH="$(date -u +%s)"
+FUTURE_TS="$(_gate_iso $((NOW_EPOCH + 3600)))"
+PAST_TS="$(_gate_iso $((NOW_EPOCH - 3600)))"
+
+# Build one run dir + generate its wrapper via write-launch, given a RUN.md
+# front-matter body; returns (via echo) whether the claude stub ran.
+_gate_case() {
+  local name="$1" front="$2"
+  local d="$GT/$name"; mkdir -p "$d/.auto-pilot"
+  { printf -- '---\n%s\n---\n' "$front"; } >"$d/.auto-pilot/RUN.md"
+  rm -f "$GT/claude-called" "$GT/sandbox-exec-called"
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$d" \
+    --log "$d/o.log" --prompt-file "$BASE/prompt.txt" --label "com.autopilot.gate.$name" \
+    --claude-bin "$GT_CLAUDE" --path "$GT_PATH" \
+    --out-script "$d/launch.sh" --out-plist "$d/job.plist" >/dev/null 2>&1
+  "$d/launch.sh" >/dev/null 2>&1
+  echo "rc=$? log=$d/o.log"
+}
+
+# Test A: paused_until an hour in the future -> exit 0, claude never invoked.
+gaA="$(_gate_case gate-future "status: active
+paused_until: $FUTURE_TS")"
+rcA="${gaA#rc=}"; rcA="${rcA%% *}"
+[ "$rcA" = 0 ] && ok "gate: future paused_until exits 0" || bad "gate: future paused_until exits 0" "$gaA"
+[ ! -f "$GT/claude-called" ] && ok "gate: future paused_until never invokes claude" \
+  || bad "gate: future paused_until never invokes claude"
+have "gate: future paused_until logs the skip" "skipping this wake" "$(cat "$GT/gate-future/o.log" 2>/dev/null)"
+
+# Test B: paused_until in the past -> claude IS invoked.
+_gate_case gate-past "status: active
+paused_until: $PAST_TS" >/dev/null
+[ -f "$GT/claude-called" ] && ok "gate: past paused_until invokes claude" \
+  || bad "gate: past paused_until invokes claude"
+
+# Test C: paused_until empty -> claude IS invoked.
+_gate_case gate-empty "status: active
+paused_until:" >/dev/null
+[ -f "$GT/claude-called" ] && ok "gate: empty paused_until invokes claude" \
+  || bad "gate: empty paused_until invokes claude"
+
+# Test D: status: done -> claude never invoked, the gate tears the job down.
+gaD="$(_gate_case gate-done "status: done
+paused_until:")"
+[ ! -f "$GT/claude-called" ] && ok "gate: status done never invokes claude" \
+  || bad "gate: status done never invokes claude"
+have "gate: status done reports a teardown" "torn down" "$(cat "$GT/gate-done/o.log" 2>/dev/null)"
+
+# Test E: status: systemic -> claude never invoked, teardown reported too.
+gaE="$(_gate_case gate-systemic "status: systemic
+paused_until:")"
+[ ! -f "$GT/claude-called" ] && ok "gate: status systemic never invokes claude" \
+  || bad "gate: status systemic never invokes claude"
+have "gate: status systemic reports a teardown" "torn down" "$(cat "$GT/gate-systemic/o.log" 2>/dev/null)"
+
+# Fail-safe: an unparseable paused_until proceeds rather than skipping forever.
+_gate_case gate-garbage "status: active
+paused_until: not-a-timestamp" >/dev/null
+[ -f "$GT/claude-called" ] && ok "gate: garbage paused_until fails safe (proceeds)" \
+  || bad "gate: garbage paused_until fails safe (proceeds)"
+have "gate: garbage paused_until logs unparseable+proceeding" "unparseable" \
+  "$(cat "$GT/gate-garbage/o.log" 2>/dev/null)"
+
+# supervisor-gate itself (unit-level, not through the wrapper): --dir with no
+# RUN.md at all is the other fail-safe path — proceed, don't die.
+sgo="$("$SCRIPT" supervisor-gate --dir "$GT/no-such-run" --label com.autopilot.gate.norun 2>&1)"; sgc=$?
+[ "$sgc" = 0 ] && ok "supervisor-gate: missing RUN.md fails safe (exit 0)" \
+  || bad "supervisor-gate: missing RUN.md fails safe (exit 0)" "rc=$sgc out=$sgo"
+
+# fail-closed: required args
+o="$("$SCRIPT" supervisor-gate --label x 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --dir and --label' \
+  && ok "supervisor-gate fail-closed: missing --dir" || bad "supervisor-gate fail-closed: missing --dir" "$o"
+
 # --- restack: post-merge restack of stacked PRs (task 18, finding #25) -------
 # Builds a REAL git repo (a bare "origin" + a working clone) with a
 # squash-merged parent + a stacked child, and a FAKE `gh` (offline — no
