@@ -2391,7 +2391,15 @@ supervisor_check() {
   else
     count=1
   fi
-  _write_supervisor_state "$state" "$count" "$head"
+  # Subshelled, for the same reason as the declared-done branch above: this is
+  # BOOKKEEPING, and the halt below is the POINT. `_write_supervisor_state` `die`s
+  # (an `exit`) on a write failure — an unwritable run dir, a full disk — and an
+  # unguarded `exit` here aborts the whole wake BEFORE the no-progress halt, so a
+  # crashing agent under a wedged run dir never halts, never alarms and never tears
+  # down: StartInterval relaunches it forever. Zero work, zero alarm — finding #22's
+  # loop, reached through the very guard that exists to backstop it.
+  ( _write_supervisor_state "$state" "$count" "$head" ) \
+    || echo "spawn-orchestrator: supervisor-check: could not persist supervisor-state (the no-progress counter cannot advance across wakes while this is broken — the halt below still fires if THIS wake already reached the limit)" >&2
 
   if [ "$count" -ge "$limit" ]; then
     _supervisor_halt --dir "$dir" --label "$label" --condition no-progress \
@@ -4145,7 +4153,12 @@ doctor() {
     else
       count=1
     fi
-    _write_supervisor_state "$dstate" "$count" "$head"
+    # Subshelled — same shape, same reason as supervisor-check's no-progress guard:
+    # a `die` from this bookkeeping write would `exit` before invariant 7's halt and
+    # before doctor's own exit-30 (HALT) contract, turning a wedged run dir into a
+    # silent relaunch loop instead of the alarm it is supposed to raise.
+    ( _write_supervisor_state "$dstate" "$count" "$head" ) \
+      || echo "spawn-orchestrator: doctor WARNING — could not persist doctor no-progress state (the counter cannot advance across iterations while this is broken — the halt below still fires if THIS iteration already reached the limit)" >&2
     if [ "$count" -ge "$limit" ]; then
       n_halt=$((n_halt + 1))
       _doctor_halt "$dir" "$label" "invariant 7: no forward progress after $count consecutive doctor iterations"
