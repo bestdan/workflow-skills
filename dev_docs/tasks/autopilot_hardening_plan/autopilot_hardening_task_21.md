@@ -47,6 +47,19 @@ Make the restack's re-verification an **enforced** step, not a `REPORT.md` note:
   previous green was against the old one and does not carry over. A failing
   re-verify **parks** the child and alarms (task 16) — it never silently keeps a
   PR that no longer builds on `main`.
+- **Re-run the PR's own stated acceptance criterion** — the "How to evaluate" /
+  user-run criterion the PR body declares, the one phrased as *"a 'no' here
+  invalidates the change."* **The suite is not this.** Amended 2026-07-12 after
+  co-reviewing #188–#191: the suite re-runs for free and was **green on both
+  branches that carried merge blockers**, because in each case the harness diverged
+  from production at exactly the point the invariant was about (a test bypassing the
+  gate the real wrapper runs first; a fixture pre-baking a cell production leaves
+  empty). Task 16's own criterion — *"confirm that within one supervisor interval
+  you get a notification instead of silence"* — would have caught its blocker
+  immediately, and was not re-run after the rebase that broke it. **The author wrote
+  the exact check that would have found the bug and did not re-run it.** A criterion
+  that cannot be automated must at minimum be *surfaced as an unchecked box that
+  blocks hand-off*, not silently assumed to still hold.
 - **Diff-audit against the parent's post-hand-off review commits.** Compute the
   parent's review delta — the commits added between hand-off and merge — from its
   two endpoints: the hand-off tip is the child's recorded `base_sha`, but the
