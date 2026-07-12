@@ -301,6 +301,12 @@ have "render: profile carries the @spawn-tmpdir stamp" ";; @spawn-tmpdir: $BASE/
 tdesc="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/elsewhere/tmp" --out "$BASE/td.sb" 2>&1)"; tdc=$?
 [ "$tdc" = 2 ] && printf '%s' "$tdesc" | grep -qF 'escapes --confine-under' \
   && ok "render: --tmpdir outside confine root fails closed" || bad "render: --tmpdir outside confine root fails closed" "$tdesc"
+# SBPL line-injection: a scope path containing a newline (which could smuggle a
+# fake `;; @spawn-tmpdir:` line or its own allow rule) is rejected fail-closed.
+nlpath="$(printf '/x\n;; @spawn-tmpdir: /evil')"
+nlo="$("$SCRIPT" render-profile --rw "$nlpath" --tmpdir "$BASE/root/wt/tmp" --out "$BASE/nl.sb" 2>&1)"; nlc=$?
+[ "$nlc" = 2 ] && [ ! -e "$BASE/nl.sb" ] && printf '%s' "$nlo" | grep -qF 'newline' \
+  && ok "render: a scope path with a newline fails closed" || bad "render: a scope path with a newline fails closed" "exit=$nlc"
 cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"; cfc=$?
 if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
   ok "confine-under: rw / fails closed"
@@ -473,6 +479,15 @@ wltn="$("$SCRIPT" write-launch --profile "$BASE/nostamp.sb" --settings "$BASE/wl
   --out-script "$BASE/tn.sh" --out-plist "$BASE/tn.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wltn" | grep -qF 'no @spawn-tmpdir stamp' \
   && ok "launch: profile with no stamp fails closed" || bad "launch: profile with no stamp fails closed" "$wltn"
+# Belt to the braces (canonicalize's newline guard blocks the injection at the
+# source): even if an earlier `;; @spawn-tmpdir:` line were present, the REAL
+# stamp is appended LAST, so write-launch (tail -1) must pick it, not the forgery.
+{ printf ';; @spawn-tmpdir: /evil/tmp\n'; cat "$BASE/cf.sb"; } >"$BASE/forged.sb"
+"$SCRIPT" write-launch --profile "$BASE/forged.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.fg --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --out-script "$BASE/fg.sh" --out-plist "$BASE/fg.plist" >/dev/null 2>&1
+have "launch: a forged earlier stamp loses to the real (last) one" "export TMPDIR=$BASE/root/wt/tmp" "$(cat "$BASE/fg.sh" 2>/dev/null)"
+lack "launch: the forged stamp is NOT used" "export TMPDIR=/evil/tmp" "$(cat "$BASE/fg.sh" 2>/dev/null)"
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
 rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"

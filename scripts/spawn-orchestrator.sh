@@ -185,6 +185,11 @@ canonicalize() {
     /*) ;;
     *) echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2; return 1 ;;
   esac
+  # A newline in a path would break the line-oriented SBPL emission (`(allow …)`
+  # rules, the `;; @spawn-tmpdir:` stamp) — a crafted dir name could smuggle its
+  # own rule or a fake stamp line. No legitimate path here contains one; reject
+  # fail-closed, same posture as the egress-host newline guard.
+  case "$p" in *$'\n'*) echo "spawn-orchestrator: path contains a newline (fail-closed)" >&2; return 1 ;; esac
   [ -e "$p" ] || { echo "spawn-orchestrator: path does not exist (fail-closed): $p" >&2; return 1; }
   if [ -d "$p" ]; then
     (cd "$p" && pwd -P)
@@ -750,7 +755,11 @@ write_launch() {
   # cross-check: it must resolve to the stamped dir, else the caller rendered and
   # launched with different dirs and the inner sandbox would silently degrade.
   local stamped
-  stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | head -1)"
+  # tail -1, NOT head -1: render_profile appends the real stamp LAST (after all
+  # template substitution), and nothing user-controlled can land after it — so
+  # the last match is authoritative. head -1 would let an earlier `;; @spawn-tmpdir:`
+  # line (e.g. one smuggled through a scope path) override the real one.
+  stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | tail -1)"
   [ -n "$stamped" ] || die "profile has no @spawn-tmpdir stamp (fail-closed): re-render it with the current render-profile: $profile"
   if [ -n "$tmpdir" ]; then
     case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
