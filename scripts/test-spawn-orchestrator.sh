@@ -682,6 +682,42 @@ for lim in --report-every --report-gh --report-usage-bin --park-limit --no-progr
   esac
 done
 
+# --- a REAL (non-dry-run) launch reaches write_launch with the forwarded flags -
+# `launch --dry-run` RETURNS BEFORE write_launch is ever called, so the
+# passthrough loop above can only prove launch PARSES a flag — not that
+# write_launch ACCEPTS what launch forwards. That gap shipped a real bug once
+# (launch forwarded --park-limit in `wl`, write_launch had no parser: every
+# real launch died with "unknown write-launch argument" while the dry-run
+# tests stayed green). Drive the real path: stub claude + sandbox-exec so the
+# smoke test passes, let the GUARD's launchctl stub stop the detach (print
+# exits 1 → no pid → launch fails AFTER the artifacts are written). launchctl
+# is already shadowed suite-wide, so nothing reaches the real launchd.
+RL="$BASE/real-launch"; mkdir -p "$RL/bin"
+printf '#!/bin/sh\nprintf %s\n' "'{\"type\":\"result\"}\\n'" >"$RL/bin/claude"; chmod +x "$RL/bin/claude"
+printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$RL/bin/sandbox-exec"; chmod +x "$RL/bin/sandbox-exec"
+rlout="$(PATH="$RL/bin:$PATH" "$SCRIPT" launch \
+  --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/rl.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.rl \
+  --claude-bin "$RL/bin/claude" --path "$RL/bin:$LAUNCH_PATH" \
+  --park-limit 9 --pause-exempt-max 77 --no-progress-limit 4 --report-every 1m \
+  --report-gh "$RL/bin/claude" --report-usage-bin "$RL/bin/claude" \
+  --out-script "$RL/launch.sh" --out-plist "$RL/job.plist" --handle "$RL/handle" 2>&1)"; rlc=$?
+lack "real launch: write_launch accepts every flag launch forwards (no unknown-argument die)" \
+  'unknown write-launch argument' "$rlout"
+have "real launch: got past write-launch AND the smoke test (the real order ran)" \
+  'smoke-test OK' "$rlout"
+rlbody="$(cat "$RL/launch.sh" 2>/dev/null)"
+rlscan="$(printf '%s\n' "$rlbody" | grep 'supervisor-scan'  || true)"
+rlchk="$(printf  '%s\n' "$rlbody" | grep 'supervisor-check' || true)"
+have "real launch: --park-limit lands on the generated supervisor-scan line"  '--park-limit 9' "$rlscan"
+have "real launch: --park-limit lands on the generated supervisor-check line" '--park-limit 9' "$rlchk"
+have "real launch: --report-every lands on the generated supervisor-scan line" '--report-every 1m' "$rlscan"
+# the failure it DOES hit is the stubbed launchctl's missing pid — i.e. the
+# launch got all the way to detach, not an argument death anywhere before it.
+[ "$rlc" != 0 ] && printf '%s' "$rlout" | grep -qF 'could not read the orchestrator PID' \
+  && ok "real launch: fails only at the (stubbed) detach, nowhere earlier" \
+  || bad "real launch: fails only at the (stubbed) detach, nowhere earlier" "exit=$rlc $rlout"
+
 # --- launch --dry-run: the safety-critical ordering (smoke BEFORE detach) ------
 dro="$("$SCRIPT" launch --dry-run --out-script "$BASE/l.sh" --out-plist "$BASE/l.plist" --label com.x --handle "$BASE/h2.txt" 2>&1)"
 smoke_ln="$(printf '%s\n' "$dro" | grep -n smoke-test | cut -d: -f1)"
@@ -1310,10 +1346,17 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .baseRefName) cat "$db/$num.base" 2>/dev/null ;;
-      .state)       cat "$db/$num.state" 2>/dev/null ;;
+      .baseRefName) f="$db/$num.base" ;;
+      .state)       f="$db/$num.state" ;;
       *) exit 1 ;;
     esac
+    # Real `gh` contract (measured): a PR that does not exist exits 1 with a
+    # GraphQL "Could not resolve" line on STDERR — never exit 0 with empty
+    # output (the invariant-3 stub bug from the review-feedback doc).
+    if [ -f "$f" ]; then cat "$f"; else
+      echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2
+      exit 1
+    fi
     ;;
   edit)
     [ -f "$db/$num.editfail" ] && exit 1   # simulate a rejected `gh pr edit`
@@ -1492,6 +1535,31 @@ GHEOF
   have "restack: flags a deleted/unreadable base as a defect" 'DEFECT task_deleted' "$dsout"
   have "restack: flags a PR still targeting a merged branch as a defect" 'DEFECT task_quiet' "$dsout"
   have "restack: defect summary count is non-zero" 'defects=2' "$dsout"
+
+  # --- transient gh failure is UNDETERMINED, never a DEFECT ------------------
+  # Real gh contract: a missing PR exits 1 with "Could not resolve to a
+  # PullRequest" (a positive "it's gone", flagged above); an expired auth /
+  # rate limit / network error also exits 1 but says something ELSE — that
+  # proves nothing about the PR, so it must neither fail the restack (exit 2)
+  # nor mint a false DEFECT during a GitHub blip.
+  RSU="$RS/undetermined-run"; mkdir -p "$RSU/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_t | handed-off | t-branch | untracked-parent | - | #301 | |\n'
+  } >"$RSU/.auto-pilot/RUN.md"
+  TRANSIENT_GH="$RS/gh-transient"
+  printf '#!/bin/sh\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' >"$TRANSIENT_GH"
+  chmod +x "$TRANSIENT_GH"
+  udout="$("$SCRIPT" restack --run-dir "$RSU" --repo "$WORK" --remote origin --gh "$TRANSIENT_GH" 2>&1)"; udc=$?
+  [ "$udc" = 0 ] && ok "restack: a transient gh failure does NOT fail the restack (exit 0, fail-safe)" \
+    || bad "restack: a transient gh failure does NOT fail the restack (exit 0, fail-safe)" "exit=$udc $udout"
+  lack "restack: a transient gh failure is never flagged as a DEFECT" 'DEFECT' "$udout"
+  have "restack: a transient gh failure is announced as UNDETERMINED (not silent)" 'UNDETERMINED task_t' "$udout"
+  have "restack: the undetermined summary still reads defects=0" 'defects=0' "$udout"
 
   # === co-review scenarios: cascade (3-deep), retarget-failure, closed child ===
   # A fresh bare origin + clone so prior mutations don't bleed in.
@@ -4022,6 +4090,10 @@ if command -v git >/dev/null 2>&1; then
     git -C "$SR_REPO" checkout -q -b "$b" main >/dev/null
     echo "$b" >"$SR_REPO/$b.txt"; git -C "$SR_REPO" add "$b.txt"; git -C "$SR_REPO" commit -q -m "$b"
   done
+  # branch_fresh: claimed but NO commits beyond its base yet — every base..branch
+  # range is empty, the shape whose old whole-history fallback selected the
+  # repository's oldest commit ("running since repo genesis").
+  git -C "$SR_REPO" branch branch_fresh main
   git -C "$SR_REPO" checkout -q main
 
   # Fake gh: same flat-file-DB shape as restack's fixture, extended with
@@ -4046,11 +4118,17 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .baseRefName) cat "$db/$num.base" 2>/dev/null ;;
-      .state)       cat "$db/$num.state" 2>/dev/null ;;
-      .mergeable)   cat "$db/$num.mergeable" 2>/dev/null ;;
+      .baseRefName) f="$db/$num.base" ;;
+      .state)       f="$db/$num.state" ;;
+      .mergeable)   f="$db/$num.mergeable" ;;
       *) exit 1 ;;
     esac
+    # Real `gh` contract (measured): a missing PR exits 1 with a GraphQL
+    # "Could not resolve" line on STDERR — never exit 0 with empty output.
+    if [ -f "$f" ]; then cat "$f"; else
+      echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2
+      exit 1
+    fi
     ;;
   list)
     head=""
@@ -4093,6 +4171,7 @@ USEOF
       printf '| task_parked   | parked       | branch_parked | main         | -   | -    | |\n'
       printf '| task_child    | pr-open      | branch_child  | branch_parent| -   | #202 | |\n'
       printf '| task_claimed  | %s | branch_claimed | main       | -   | -    | |\n' "$1"
+      printf '| task_fresh    | implementing | branch_fresh  | main         | -   | -    | |\n'
     } >"$SR_RUN/.auto-pilot/RUN.md"
   }
   _sr_write_run_md claimed
@@ -4115,6 +4194,14 @@ USEOF
   ! printf '%s\n' "$srAmd" | grep 'task_impl (implementing)' | grep -q 'OVER' \
     && ok "status-report: within-ceiling task is not marked OVER" \
     || bad "status-report: within-ceiling task is not marked OVER"
+  # A freshly-claimed branch with NO commits beyond its base must degrade to
+  # "elapsed unknown" — the old whole-history fallback selected the repo's
+  # OLDEST commit and reported the task as running since repository genesis.
+  have "status-report: a branch with no commits beyond base reads elapsed unknown, never repo genesis" \
+    'task_fresh (implementing): elapsed unknown' "$srAmd"
+  ! printf '%s\n' "$srAmd" | grep 'task_fresh (implementing)' | grep -q 'OVER' \
+    && ok "status-report: the fresh branch is never marked OVER off the repo's first commit" \
+    || bad "status-report: the fresh branch is never marked OVER off the repo's first commit"
   have "status-report: embeds status --label's own output"  'Live state (from `status'  "$srAmd"
   have "status-report: heartbeat line present (from status)" 'heartbeat:'                "$srAmd"
   have "status-report: PR state + mergeable for task_handed" '| task_handed | #201 | MERGED | UNKNOWN |' "$srAmd"
@@ -4155,6 +4242,30 @@ USEOF
   lack "status-report: a phase advance does NOT also claim no-forward-progress" \
     'no forward progress' "$srCmd"
 
+  # --- B2: task-branch commits ARE forward progress (no false stall) ---------
+  # RUN.md is committed only when /deliver-task returns; `implementing` means
+  # local task-branch commits with the run-state HEAD parked. A task actively
+  # producing commits must NOT be reported as stalled — compare the persisted
+  # branch tips, not just the run-state HEAD.
+  git -C "$SR_REPO" checkout -q branch_impl
+  echo more >>"$SR_REPO/impl.txt"
+  git -C "$SR_REPO" commit -q -am "impl keeps working"
+  git -C "$SR_REPO" checkout -q main
+  "$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 >/dev/null 2>&1
+  srDmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  lack "status-report: run-state HEAD parked + task-branch commits is NOT a stall" \
+    'no forward progress' "$srDmd"
+  have "status-report: the branch progress is named (which task advanced)" \
+    'task branch(es) advanced — new commits on: task_impl' "$srDmd"
+  # ...and a genuinely idle interval right after IS still a stall (the tip
+  # comparison must not have destroyed the true-positive).
+  "$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
+    --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 >/dev/null 2>&1
+  srEmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  have "status-report: a genuinely idle interval still reads no-forward-progress" \
+    'no forward progress' "$srEmd"
+
   # --- D: stale RUN.md cannot read as healthy (finding #23's shape) ----------
   have "status-report: flags RUN.md lagging reality (claimed phase, live PR already open)" \
     'DIVERGENCE task_claimed' "$srAmd"
@@ -4163,6 +4274,115 @@ USEOF
   # --- E: reuses restack's OWN orphan detector, not a second reconciler ------
   have "status-report: flags the orphaned chained PR (base ref deleted, finding #25 LOUD case)" \
     'DEFECT task_child' "$srAmd"
+
+  # --- E2: a FAILING gh must read DEGRADED, never clean ----------------------
+  # Expired auth / rate limit / network: `gh` exits non-zero with empty
+  # stdout. With no chained PRs the orphan scan finds nothing and the #23
+  # lookup comes back empty — the old code then rendered "clean", blessing a
+  # stale RUN.md it never actually cross-checked.
+  SR_FAILGH="$SR/gh-failing"
+  printf '#!/bin/sh\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' >"$SR_FAILGH"
+  chmod +x "$SR_FAILGH"
+  SR_BRUN="$SR/degraded-run"; mkdir -p "$SR_BRUN/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_claimed | claimed | branch_claimed | main | - | - | |\n'
+  } >"$SR_BRUN/.auto-pilot/RUN.md"
+  git init -q "$SR_BRUN"
+  git -C "$SR_BRUN" config user.email t@e; git -C "$SR_BRUN" config user.name T
+  git -C "$SR_BRUN" checkout -q -b auto-pilot/degraded-run
+  git -C "$SR_BRUN" add .auto-pilot/RUN.md; git -C "$SR_BRUN" commit -q -m "run state"
+  srXout="$("$SCRIPT" status-report --dir "$SR_BRUN" --label com.autopilot.sr.deg --force \
+    --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 2>&1)"
+  srXmd="$(cat "$SR_BRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  lack "status-report: a failing gh never renders the reality check as clean" \
+    'clean: no divergence' "$srXmd"
+  have "status-report: a failing gh renders the reality check as DEGRADED" \
+    'DEGRADED:' "$srXmd"
+  have "status-report: the DEGRADED result reaches the one-line digest too" \
+    'reality=DEGRADED' "$srXout"
+  # ...and a transient failure against a CHAINED PR is also degraded — never a
+  # false DEFECT (the restack scan's UNDETERMINED path, seen from the report).
+  SR_CRUN="$SR/degraded-chained"; mkdir -p "$SR_CRUN/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_chained | pr-open | branch_child | branch_parent | - | #299 | |\n'
+  } >"$SR_CRUN/.auto-pilot/RUN.md"
+  git init -q "$SR_CRUN"
+  git -C "$SR_CRUN" config user.email t@e; git -C "$SR_CRUN" config user.name T
+  git -C "$SR_CRUN" checkout -q -b auto-pilot/degraded-chained
+  git -C "$SR_CRUN" add .auto-pilot/RUN.md; git -C "$SR_CRUN" commit -q -m "run state"
+  "$SCRIPT" status-report --dir "$SR_CRUN" --label com.autopilot.sr.degc --force \
+    --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 >/dev/null 2>&1
+  srYmd="$(cat "$SR_CRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  lack "status-report: a transient gh failure on a chained PR is never a DEFECT" \
+    'DEFECT' "$srYmd"
+  have "status-report: the chained transient failure reads DEGRADED instead" \
+    'DEGRADED:' "$srYmd"
+
+  # --- E3: duration parsing accepts digits only, never arithmetic ------------
+  # `--report-every '1+1m'` used to reach bash arithmetic and be ACCEPTED —
+  # the contract is off | integer seconds | <n>s|m|h, nothing else.
+  for badv in '1+1m' '+5s' '2 2h'; do
+    bdout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.bad \
+      --report-every "$badv" 2>&1)"; bdc=$?
+    [ "$bdc" = 2 ] && printf '%s' "$bdout" | grep -qF 'must be off' \
+      && ok "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" \
+      || bad "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" "exit=$bdc $bdout"
+  done
+
+  # --- E4: a QUOTED front-matter `until:` still parses ------------------------
+  # The other front-matter readers strip wrapping quotes; the report's reader
+  # must too, or `until: "2026-…"` renders as "unparseable until".
+  SR_QRUN="$SR/quoted-run"; mkdir -p "$SR_QRUN/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf 'until: "%s"\n' "$(_sr_iso 7200)"
+    printf "min_task_budget: '20m'\n"
+    printf -- '---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_pending | pending | - | main | - | - | |\n'
+  } >"$SR_QRUN/.auto-pilot/RUN.md"
+  git init -q "$SR_QRUN"
+  git -C "$SR_QRUN" config user.email t@e; git -C "$SR_QRUN" config user.name T
+  git -C "$SR_QRUN" checkout -q -b auto-pilot/quoted-run
+  git -C "$SR_QRUN" add .auto-pilot/RUN.md; git -C "$SR_QRUN" commit -q -m "run state"
+  "$SCRIPT" status-report --dir "$SR_QRUN" --label com.autopilot.sr.q --force \
+    --repo "$SR_REPO" --task-ceiling 120 >/dev/null 2>&1
+  srQmd="$(cat "$SR_QRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  lack "status-report: a quoted until: does not read as unparseable" \
+    'unparseable until' "$srQmd"
+  # The budget note only renders when until_epoch actually PARSED — so this is
+  # the effect assertion that the quotes were stripped (2h runway vs 20m).
+  have "status-report: a quoted until:+min_task_budget still yields the runway verdict" \
+    'OK, at least one more task likely fits' "$srQmd"
+
+  # --- E5: writes are atomic IN the destination dir ---------------------------
+  # Temp files must be created in .auto-pilot/ and renamed (the
+  # _write_done_sentinel pattern) — a TMPDIR temp + cross-filesystem `mv` is a
+  # copy+delete a watcher can observe half-written. Effect asserted: with an
+  # UNUSABLE TMPDIR the report must still succeed, because nothing on its
+  # write path may depend on TMPDIR at all.
+  SR_ARUN="$SR/atomic-run"; rm -rf "$SR_ARUN"; cp -R "$SR_BRUN" "$SR_ARUN"
+  rm -f "$SR_ARUN/.auto-pilot/status-report-state" "$SR_ARUN/.auto-pilot/STATUS.md"
+  atout="$(TMPDIR="$SR/definitely-nonexistent-tmp" "$SCRIPT" status-report --dir "$SR_ARUN" \
+    --label com.autopilot.sr.atomic --force --repo "$SR_REPO" --task-ceiling 120 2>&1)"; atc=$?
+  [ "$atc" = 0 ] && [ -f "$SR_ARUN/.auto-pilot/STATUS.md" ] \
+    && ok "status-report: succeeds with an unusable TMPDIR (temp files live in .auto-pilot/, renamed in place)" \
+    || bad "status-report: succeeds with an unusable TMPDIR (temp files live in .auto-pilot/, renamed in place)" "exit=$atc $atout"
+  leftover="$(find "$SR_ARUN/.auto-pilot" -name '.status-report*' 2>/dev/null)"
+  [ -z "$leftover" ] && ok "status-report: no temp-file droppings left beside the report" \
+    || bad "status-report: no temp-file droppings left beside the report" "$leftover"
 
   # --- F: no live gh/usage-bin call when the caller doesn't opt in -----------
   SR_LEAK="$SR/leak-bin"; mkdir -p "$SR_LEAK"
@@ -4258,6 +4478,65 @@ USEOF
   [ -f "$SRW/.auto-pilot/STATUS.md" ] && ok "status-report: STILL emitted on a gate-closed wake" \
     || bad "status-report: STATUS.md missing after a gate-closed wake"
   have "status-report: the digest reaches the wake's log too" 'status-report:' "$(cat "$SRW/o.log" 2>/dev/null)"
+
+  # --- H: reports keep firing WHILE claude runs (review [A]) ------------------
+  # launchd does NOT fire StartInterval while an instance is still running
+  # (verified empirically: StartInterval=2s + a 12s job → starts only every
+  # ~14s, no concurrency, no queued firings). So the wake-start emission alone
+  # goes silent for the whole duration of a model call — a wedged claude means
+  # ZERO reports, on exactly the runs the report exists to monitor. The
+  # generated wrapper must therefore run an in-wake background reporter while
+  # claude runs, and reap it when claude exits. Driven through the REAL
+  # generated wrapper, gate OPEN, with a claude that takes 3s and a 1s
+  # interval: more than one report digest must land in the log.
+  SRL="$SR/loop-wrapper"; mkdir -p "$SRL/.auto-pilot" "$SRL/bin"
+  cp "$SR_RUN/.auto-pilot/RUN.md" "$SRL/.auto-pilot/RUN.md"   # no paused_until: gate OPEN
+  SRL_CLAUDE="$SRL/bin/claude-slow"
+  printf '#!/bin/sh\n: >"%s/claude-called"\nsleep 3\nexit 0\n' "$SRL" >"$SRL_CLAUDE"; chmod +x "$SRL_CLAUDE"
+  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SRL/bin/sandbox-exec"; chmod +x "$SRL/bin/sandbox-exec"
+  SRL_PATH="$SRL/bin:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRL" \
+    --log "$SRL/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.sr.loop \
+    --claude-bin "$SRL_CLAUDE" --path "$SRL_PATH" --report-every 1 \
+    --out-script "$SRL/launch.sh" --out-plist "$SRL/job.plist" >/dev/null 2>&1
+  # The seam, pinned by position: the reporter starts BELOW the gate (a
+  # gate-closed wake exits in seconds; launchd's own cadence covers it) and
+  # BEFORE the claude invocation; the reap follows the claude invocation.
+  srl_gate_ln="$(grep -n 'supervisor-gate' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
+  srl_loop_ln="$(grep -n 'report-tick' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
+  srl_claude_ln="$(grep -n 'sandbox-exec -f' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
+  srl_kill_ln="$(grep -n 'kill -TERM -"$rpt"' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
+  if [ -n "$srl_gate_ln" ] && [ -n "$srl_loop_ln" ] && [ -n "$srl_claude_ln" ] && [ -n "$srl_kill_ln" ] \
+     && [ "$srl_gate_ln" -lt "$srl_loop_ln" ] && [ "$srl_loop_ln" -lt "$srl_claude_ln" ] \
+     && [ "$srl_claude_ln" -lt "$srl_kill_ln" ]; then
+    ok "status-report [in-wake]: reporter sits below the gate, brackets the claude invocation, reap follows it"
+  else
+    bad "status-report [in-wake]: reporter sits below the gate, brackets the claude invocation, reap follows it" \
+      "gate@$srl_gate_ln loop@$srl_loop_ln claude@$srl_claude_ln kill@$srl_kill_ln"
+  fi
+  "$SRL/launch.sh" >/dev/null 2>&1
+  [ -f "$SRL/claude-called" ] && ok "status-report [in-wake]: gate was OPEN — claude really ran (3s)" \
+    || bad "status-report [in-wake]: gate was OPEN — claude really ran (3s)"
+  srl_digests="$(grep -c 'status-report: tasks=' "$SRL/o.log" 2>/dev/null | tr -d ' ')"
+  case "$srl_digests" in ''|*[!0-9]*) srl_digests=0 ;; esac
+  if [ "$srl_digests" -ge 2 ]; then
+    ok "status-report [in-wake]: reports kept firing DURING the model call ($srl_digests digests, wake-start alone would be 1)"
+  else
+    bad "status-report [in-wake]: reports kept firing DURING the model call" "digests=$srl_digests (only the wake-start emission fired — the [A] cadence hole)"
+  fi
+  sleep 1
+  if pgrep -f "report-tick --dir $SRL" >/dev/null 2>&1; then
+    bad "status-report [in-wake]: the reporter loop is reaped when claude exits" "pgrep matched"
+  else
+    ok "status-report [in-wake]: the reporter loop is reaped when claude exits"
+  fi
+  # --report-every off must emit NO reporter loop at all.
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRL" \
+    --log "$SRL/off.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.sr.loopoff \
+    --claude-bin "$SRL_CLAUDE" --path "$SRL_PATH" --report-every off \
+    --out-script "$SRL/launch-off.sh" --out-plist "$SRL/job-off.plist" >/dev/null 2>&1
+  lack "status-report [in-wake]: --report-every off emits no reporter loop" \
+    'report-tick' "$(cat "$SRL/launch-off.sh" 2>/dev/null)"
 else
   echo "skip - status-report suite (no git available)"
 fi
