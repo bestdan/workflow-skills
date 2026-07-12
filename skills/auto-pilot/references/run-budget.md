@@ -312,6 +312,12 @@ cleanly rather than starting work a hard `--until` kill would sever mid-delivery
 leaving a half-built `claimed`/`implementing` task to `--resume` — the worst wake
 state.
 
+This guard is **the only thing enforcing the deadline mid-run**, which is why it
+is not optional: `--until` is otherwise **only consulted at spawn** (where it is
+recorded) **and at a paused resume's wake**. Nothing else checks it between
+dispatches. A future change that "fixes" or removes this guard on the assumption
+that the deadline is enforced somewhere else is removing the enforcement.
+
 `min_task_budget` is **not a constant**. A single delivery is coder dispatch +
 independent verify + PR + co-review (bounded **per reviewer**) + up to 2 iterate
 rounds, and the co-review term is dominated by the **resolved reviewer set's**
@@ -337,12 +343,22 @@ enough that short windows can still fit a task.
 
 ## Per-task retry limit — 1 re-dispatch → park
 
-A failed delivery gets **one** re-dispatch; a second failure parks the task.
-This is distinct from `/deliver-task`'s own co-review **iterate** bound
-(≤ 2 rounds, per [`run-state.md`](run-state.md) "Task lifecycle phases"
-`iterating`): iterate rounds are re-work on a delivery that is still making
-progress through review, while this retry bound covers a delivery that
-**failed outright** and is being re-dispatched from scratch.
+**Failed outright** means the `/deliver-task` call **crashed or exited
+non-zero** — _not_ a clean hand-off, and _not_ a park. The distinction is
+operative, not pedantic: a park is a **deliberate, successful** outcome (the
+task is blocked on a human decision), so a parked task must never be counted
+as a failure and re-dispatched. Reading a park as a failure would re-dispatch
+the very task that is waiting on an answer, burn the retry bound on it, and
+then park it a second time — defeating the park and the bound together.
+
+A failed delivery gets **one** re-dispatch; a second failure parks the task,
+and the run loop continues to the next ready task rather than aborting — a
+failed delivery never leaves run state half-written. This is distinct from
+`/deliver-task`'s own co-review **iterate** bound (≤ 2 rounds, per
+[`run-state.md`](run-state.md) "Task lifecycle phases" `iterating`): iterate
+rounds are re-work on a delivery that is still making progress through
+review, while this retry bound covers a delivery that **failed outright** and
+is being re-dispatched from scratch.
 
 ## Paid-agent dispatch cap per run
 

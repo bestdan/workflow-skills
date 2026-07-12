@@ -31,6 +31,7 @@ NAME_RE = re.compile(r"^[a-z0-9-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
+BODY_WARN_LINES = 450
 FIBONACCI = {1, 2, 3, 5}
 TASK_PRIORITIES = {"low", "medium", "high", "urgent"}
 EPIC_STATUSES = {"active", "done", "abandoned"}
@@ -45,10 +46,15 @@ TASK_STATUSES = {
 }
 
 errors: list[str] = []
+warnings: list[str] = []
 
 
 def err(path, msg: str) -> None:
     errors.append(f"{path}: {msg}")
+
+
+def warn(path, msg: str) -> None:
+    warnings.append(f"{path}: {msg}")
 
 
 def split_frontmatter(path: Path):
@@ -110,6 +116,12 @@ for d in skill_dirs:
     n_lines = body.count("\n") + 1
     if n_lines > BODY_MAX_LINES:
         err(rel(sk), f"body is {n_lines} lines (max {BODY_MAX_LINES})")
+    elif n_lines > BODY_WARN_LINES:
+        warn(
+            rel(sk),
+            f"body is {n_lines} lines (warn above {BODY_WARN_LINES}, "
+            f"hard cap {BODY_MAX_LINES}) — move content to references/ before it's full",
+        )
 
 # --- commands (top-level only) ---
 # commands/handlers/*.md are reference procedures bundled into the task skill,
@@ -266,6 +278,9 @@ else:
             "README.md",
             f"claims (skills,commands,subagents)={claimed} but actual={actual}",
         )
+
+for w in warnings:
+    print(f"  ⚠ {w}")
 
 if errors:
     print("validate.py: FAIL")
