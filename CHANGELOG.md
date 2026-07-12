@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.53.1] - 2026-07-12
+
+### Fixes
+
+- subshell the die-capable teardown calls the halt path swallows with `|| true` (task 26) (#193) (3dc471d)
+
 ## [1.53.0] - 2026-07-12
 
 ### Features
