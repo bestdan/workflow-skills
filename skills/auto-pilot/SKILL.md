@@ -331,7 +331,8 @@ The loop is deliberately thin:
 ```
 while unblocked tasks remain and inside budget bounds:
     heartbeat (and again at every /deliver-task sub-step boundary)
-    assert run worktree HEAD == auto-pilot/<run_id>   # HEAD guard; restore + record if not
+    doctor   # run invariant audit; repair/park/halt — HALT (exit 30) stops here
+             # invariant 1 IS the old bare HEAD assertion, so it is not listed twice
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
@@ -355,11 +356,22 @@ so a watcher can tell _slow_ from _wedged_. Vocabulary, precedence, and the
 fail-safe rules: [`references/run-state.md`](references/run-state.md) "Exit
 contract" and "Heartbeat".
 
+**Every iteration opens with the run doctor**, `scripts/spawn-orchestrator.sh
+doctor` — a cheap, deterministic, no-model-call audit of seven invariants
+(HEAD on the run-state branch, RUN.md readable from the branch, every in-flight
+task's PR is real, no orphan worker worktrees, chained-task bases still frozen,
+forward progress). It subsumes the old bare HEAD assertion (invariant 1 IS
+that assertion) plus the reconciliation this loop used to leave implicit. Each
+invariant repairs, parks, or halts (`status: systemic`, exit 30 — the loop must
+not dispatch); see
+[`references/run-state.md`](references/run-state.md) "Run doctor" for the full
+table and exit-code contract.
+
 **The run worktree's `HEAD` never leaves the run-state branch.** Task code is
 written in a separate worker worktree that `/deliver-task` owns end to end
 (`commands/deliver-task.md`); the orchestrator never `git checkout`s a task
-branch in the run worktree itself. The guard above is
-`scripts/spawn-orchestrator.sh assert-run-head`
+branch in the run worktree itself. The guard is the doctor's **invariant 1**,
+which delegates to `scripts/spawn-orchestrator.sh assert-run-head`
 ([`references/run-state.md`](references/run-state.md) "Run worktree HEAD
 invariant") — the full rationale (finding #23) lives there.
 

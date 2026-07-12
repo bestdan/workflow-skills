@@ -10,20 +10,21 @@ this leans on live in [`run-state.md`](run-state.md); pause semantics live in
 Resume's job is to reconcile a crashed or paused run's durable state against
 reality, then fall into the normal **Run phase** loop for whatever remains ready.
 
-**HEAD guard, first — before anything else reads the worktree.** Run
-`scripts/spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id
-<run_id> --questions .auto-pilot/QUESTIONS.md`
-([`run-state.md`](run-state.md) "Run worktree HEAD invariant"). A run that
-crashed mid-task can leave the run worktree's `HEAD` parked on a task branch
-(finding #23); this restores it to `auto-pilot/<run_id>` and records the
-deviation before resume trusts anything else it reads off that worktree.
-
-**Read `RUN.md` from the branch, not the working tree.** Even with the guard
-above, resume's every read of `RUN.md` uses `git show
-auto-pilot/<run_id>:.auto-pilot/RUN.md` rather than the worktree's
-`.auto-pilot/RUN.md` file — the belt to the guard's braces. A mis-parked
-`HEAD` (or a not-yet-restored one) then can't feed resume a stale or absent
-`RUN.md` in the first place, whatever state the working tree happens to be in.
+**Run the doctor, first — before anything else reads the worktree.** Run
+`scripts/spawn-orchestrator.sh doctor --dir <run-worktree> --run-id <run_id>
+--questions .auto-pilot/QUESTIONS.md [--handler <h>]`
+([`run-state.md`](run-state.md) "Run doctor"). `--resume`'s reconciliation pass
+**is** the doctor, run once at the top of resume — the same seven-invariant
+audit the run loop runs every iteration, not a second, divergent
+reconciliation. Its first two invariants are exactly the two belts a crashed
+resume used to hand-roll: invariant 1 restores the run worktree's `HEAD` when a
+crash left it parked on a task branch (finding #23), and invariant 2 reads
+`RUN.md`/`QUESTIONS.md`/`REPORT.md` via `git show
+auto-pilot/<run_id>:.auto-pilot/<file>` rather than the worktree's copy —
+halting `systemic` if even the BRANCH read fails or the front matter doesn't
+parse (the run has no memory), repairing a working-tree-only loss by
+restoring `.auto-pilot/` from the branch. A doctor **HALT** (exit 30) means
+resume stops here, before it trusts anything else it reads off that worktree.
 
 **Re-run only the pre-flight that can rot; skip the launch-only steps.**
 Worktree + run-state-branch creation (Launch step 1) and the **task-graph
@@ -71,7 +72,13 @@ that row's action, in the same fixed write order — reconcile by that table, do
 restate it here. The load-bearing invariant that makes this decidable:
 `needs_review` is only ever written at the hand-off tracker write, never the
 pr-open one, so a task that crashed at `pr-open` always reconciles to `started`
-plus a linked PR (G5), never to hand-off.
+plus a linked PR (G5), never to hand-off. The doctor call above already
+**mechanizes** the two rows a G6/G7 gap most often leaves stale: its
+invariant 3 catches a `pr-open`/`in-review`/`iterating`/`handed-off` task
+whose PR vanished or was never linked, and its invariant 4 catches a
+`handed-off` PR still carrying `task-claim` or still draft (the review-signal
+half of G6) — this section's own reconciliation covers the OTHER rows (G1–G5),
+not a re-derivation of what doctor already checked.
 
 **Idempotency.** Resume must be safe to run repeatedly. It leans on G4's
 idempotency check — an existing PR for a task's head branch is detected and
@@ -79,7 +86,9 @@ adopted, never duplicated — so re-resuming never opens a duplicate PR or
 re-claims a task already in flight.
 
 **Orphaned worker worktrees.** A crash mid-`implementing`/`iterating` (G2) can
-leave a worker worktree behind; resume removes it before any re-dispatch.
+leave a worker worktree behind; the doctor call above already removes any that
+are safe to prune (invariant 5) before resume does anything else with the
+worktree tree.
 
 **Never blind-retry.** A task whose observed reality doesn't match any
 reconciliation row cleanly is set to `parked` and gets a `REPORT.md` entry

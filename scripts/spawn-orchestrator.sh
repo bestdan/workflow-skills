@@ -221,6 +221,25 @@
 #            the offline test suite never calls GitHub while the git mechanics
 #            run against a real repo.
 #
+#   spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id> \
+#       [--label <launchd label>] [--questions <path>] \
+#       [--handler repo-pr|linear] [--gh <path>] [--no-progress-limit <n>]
+#
+#   doctor  The run doctor (task 14, generalizing findings #22/#23): a cheap,
+#           deterministic, no-model-call invariant audit run at the top of
+#           every run-loop iteration and at the top of --resume. Seven
+#           invariants, each with a stated repair or a halt — see the
+#           "Task 14" block above doctor()'s definition, and
+#           skills/auto-pilot/references/run-state.md ("Run doctor") for the
+#           full table. Exit codes a caller GATES the run loop on: 0 = every
+#           invariant holds or was repaired/parked (the loop may proceed);
+#           30 = HALT — an invariant demanded `status: systemic` (the loop
+#           must NOT dispatch); 2 = bad usage / an unrepairable fail-closed
+#           condition. `--label` is optional (a bare --resume may have no
+#           launchd job registered yet); omitting it still halts (writes
+#           `status: systemic` + the REPORT.md alarm) but skips teardown.
+#           `--gh` is mockable like restack's, for a fully offline test suite.
+#
 #   status  Read-only: report the run's live state in one shot — the RUN.md
 #           run-level `status:`, the per-task phase table, the last
 #           meaningful event from `orchestrator.log`, whether the recorded
@@ -1943,6 +1962,12 @@ _run_front_field() {
 # branch (best-effort — a broken git checkout must not block tearing the
 # supervisor down, which is the one thing that MUST happen), then boot the
 # launchd job out so it never relaunches into the same condition.
+#
+# `--label` is OPTIONAL (task 14 / doctor): `doctor` can run from a bare
+# `--resume` before any launchd job is registered (no label to tear down yet).
+# When `--label` is absent, every other halt step still runs — RUN.md +
+# REPORT.md are still written and committed, the run is still `systemic` — the
+# teardown step is simply skipped, since there is nothing loaded to boot out.
 _supervisor_halt() {
   local dir="" label="" reason="" condition="halt" preserve=0
   while [ $# -gt 0 ]; do
@@ -1959,14 +1984,26 @@ _supervisor_halt() {
       *) die "unknown supervisor-halt argument: $1" ;;
     esac
   done
-  [ -n "$dir" ] && [ -n "$label" ] && [ -n "$reason" ] \
-    || die "supervisor-halt requires --dir, --label, and --reason"
+  [ -n "$dir" ] && [ -n "$reason" ] \
+    || die "supervisor-halt requires --dir and --reason"
 
   local run_md="$dir/.auto-pilot/RUN.md" report_md="$dir/.auto-pilot/REPORT.md" ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   if [ -f "$run_md" ]; then
-    _set_front_field "$run_md" status systemic
+    # Every front-matter write below runs in a SUBSHELL so a `die` from a MISSING
+    # or malformed front matter only aborts that ONE write (canonicalize()'s
+    # $()-subshell pattern) — best-effort, matching this function's own "a broken
+    # … must not block tearing the supervisor down" comment below. This is
+    # load-bearing for doctor's invariant 2 (task 14): that halt fires PRECISELY
+    # when RUN.md's front matter doesn't parse, so `status`/`pause_reason`/
+    # `exit_reason` may not even be declared keys to write — and _set_front_field /
+    # _upsert_front_field both `die` (i.e. `exit`) in that case, which would take
+    # the halt down with them, before the ALARM and before the teardown. The
+    # REPORT.md alarm + the notification below are then the records that must not
+    # be lost.
+    ( _set_front_field "$run_md" status systemic ) \
+      || echo "spawn-orchestrator: supervisor halt: could not write status: systemic (RUN.md front matter missing/malformed) — relying on the REPORT.md alarm" >&2
     # `pause_reason` must name the TRUE cause of THIS halt. On the declared-`systemic`
     # path only, the orchestrator has already recorded its OWN concrete diagnosis
     # there (and the halt reason is derived FROM it), so overwriting it with the
@@ -1990,12 +2027,15 @@ _supervisor_halt() {
     if [ -n "$existing_pause" ]; then
       echo "spawn-orchestrator: supervisor halt: preserving the run's own pause_reason: $existing_pause" >&2
     else
-      _set_front_field "$run_md" pause_reason "$reason"
+      ( _set_front_field "$run_md" pause_reason "$reason" ) \
+        || echo "spawn-orchestrator: supervisor halt: could not write pause_reason (RUN.md front matter missing/malformed)" >&2
     fi
     # The halt IS an exit reason (task 15): a run that halted must read back as
     # `systemic`, not as a run whose last declaration happened to be `continuing`.
-    _upsert_front_field "$run_md" exit_reason systemic
-    _upsert_front_field "$run_md" exit_reason_at "$(date +%s)"
+    ( _upsert_front_field "$run_md" exit_reason systemic ) \
+      || echo "spawn-orchestrator: supervisor halt: could not write exit_reason: systemic (RUN.md front matter missing/malformed)" >&2
+    ( _upsert_front_field "$run_md" exit_reason_at "$(date +%s)" ) \
+      || echo "spawn-orchestrator: supervisor halt: could not write exit_reason_at (RUN.md front matter missing/malformed)" >&2
   else
     echo "spawn-orchestrator: supervisor halt: no RUN.md at $run_md, skipping run-state write" >&2
   fi
@@ -2033,13 +2073,23 @@ _supervisor_halt() {
   # straight back into the condition we just halted for.
   # stderr is NOT suppressed: a sentinel write that fails here is the difference
   # between a halted run and a run that only LOOKS halted.
-  teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null
-  # Verify the bootout actually took (shared with the declared done/deadline
-  # teardown): a failed teardown leaves the job loaded and StartInterval relaunches
-  # straight back into this condition (finding #22's loop, masked by the halt
-  # message).
-  _verify_bootout "$label" || true
-  echo "spawn-orchestrator: supervisor halt ($label): $reason"
+  #
+  # `--label` is OPTIONAL (task 14 / doctor), and the guard is load-bearing:
+  # `teardown` REQUIRES --label and `die`s (i.e. `exit`s) without one, so calling
+  # it unconditionally would take a label-less doctor halt down with exit 2 —
+  # losing doctor's own exit 30 (HALT) contract — right after we told the human.
+  # A label-less halt has no launchd job registered yet (a bare `--resume`), so
+  # there is nothing loaded to boot out and no relaunch to sentinel against; every
+  # other halt step above (RUN.md, REPORT.md, the ALARM, the commit) already ran.
+  if [ -n "$label" ]; then
+    teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null
+    # Verify the bootout actually took (shared with the declared done/deadline
+    # teardown): a failed teardown leaves the job loaded and StartInterval relaunches
+    # straight back into this condition (finding #22's loop, masked by the halt
+    # message).
+    _verify_bootout "$label" || true
+  fi
+  echo "spawn-orchestrator: supervisor halt${label:+ ($label)}: $reason"
 }
 
 # The supervisor's OWN per-wake bookkeeping, run from the generated launch script
@@ -2389,9 +2439,12 @@ supervisor_gate() {
 # ---------------------------------------------------------------------------
 
 # Parse RUN.md's front matter + task table into the globals _RS_BASE_BRANCH and
-# the index-aligned arrays _RS_TASK/_RS_BRANCH/_RS_BASE/_RS_BASE_SHA/_RS_PR.
+# the index-aligned arrays _RS_TASK/_RS_PHASE/_RS_BRANCH/_RS_BASE/_RS_BASE_SHA/_RS_PR.
 # Reuses status()'s front-matter/table extraction (RUN.md's format is defined
-# once in run-state.md; both readers walk the same `| ... |` rows).
+# once in run-state.md; both readers walk the same `| ... |` rows). _RS_PHASE
+# (the `phase` column) is captured for `doctor` (task 14) — restack itself never
+# reads it, but this stays the ONE parser for RUN.md's table rather than a
+# second, divergent reader.
 _restack_read_run_md() {
   local run_md="$1"
   [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
@@ -2404,21 +2457,22 @@ _restack_read_run_md() {
   # when THIS pass force-pushed it. A child of a branch we just rewrote must be
   # cascaded onto that new tip (see restack's "cascade" mode), or force-pushing
   # a parent silently orphans its own child inside the same run.
-  _RS_TASK=(); _RS_BRANCH=(); _RS_BASE=(); _RS_BASE_SHA=(); _RS_PR=(); _RS_NEWTIP=()
+  _RS_TASK=(); _RS_PHASE=(); _RS_BRANCH=(); _RS_BASE=(); _RS_BASE_SHA=(); _RS_PR=(); _RS_NEWTIP=()
   local line
   while IFS= read -r line; do
     # skip the header separator row (only pipes/colons/dashes/spaces)
     case "$line" in *[!'|'' ':-]*) ;; *) continue ;; esac
-    local cols t b base bsha pr
+    local cols t ph b base bsha pr
     IFS='|' read -ra cols <<<"$line"
     [ "${#cols[@]}" -ge 7 ] || continue
     t="$(printf '%s' "${cols[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [ "$t" != "task" ] || continue   # header row
+    ph="$(printf '%s' "${cols[2]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     b="$(printf '%s' "${cols[3]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     base="$(printf '%s' "${cols[4]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     bsha="$(printf '%s' "${cols[5]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     pr="$(printf '%s' "${cols[6]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    _RS_TASK+=("$t"); _RS_BRANCH+=("$b"); _RS_BASE+=("$base"); _RS_BASE_SHA+=("$bsha"); _RS_PR+=("$pr")
+    _RS_TASK+=("$t"); _RS_PHASE+=("$ph"); _RS_BRANCH+=("$b"); _RS_BASE+=("$base"); _RS_BASE_SHA+=("$bsha"); _RS_PR+=("$pr")
     _RS_NEWTIP+=("")
   done < <(awk '/^\|/{print}' "$run_md")
 }
@@ -3314,6 +3368,423 @@ assert_run_head() {
   echo "spawn-orchestrator: HEAD DEVIATION restored (was $actual, now $expected)"
 }
 
+# ---------------------------------------------------------------------------
+# Task 14 — run doctor (generalizes findings #22/#23): a cheap, deterministic,
+# no-model-call invariant audit run at the top of every run-loop iteration and
+# at the top of `--resume`. Both #22 (the 401 loop) and #23 (the vanished
+# run-state) shipped as a clean `exit 0` — nothing ever asked "am I still a
+# valid run?" `doctor` is that question, asked seven ways, each with a stated
+# repair or a halt; none may be silently ignored.
+#
+# Exit codes (a caller GATES the run loop on these):
+#   0   every invariant holds, or was repaired/parked — the loop may proceed
+#   30  HALT — an invariant demanded `status: systemic`; the loop must NOT
+#       dispatch (a caller checking `$?` before its next /deliver-task call
+#       therefore cannot reach it)
+#   2   bad usage / an unrepairable fail-closed condition (`die`)
+#
+# Composition, not reimplementation (per the task's ALIGNMENT note):
+#   I1  calls the existing assert_run_head (task 13) — it already asserts,
+#       restores, and records the deviation.
+#   I2  reads RUN.md/QUESTIONS.md/REPORT.md via `git show <branch>:<path>`,
+#       the same belt --resume already uses (resume.md).
+#   I3/I4 read/write RUN.md's table via _restack_read_run_md (extended above
+#       with _RS_PHASE) and _set_task_phase (below).
+#   I7  reuses _write_supervisor_state/_supervisor_state_field's file shape
+#       (own state file, doctor-state — task 10's supervisor-state is a
+#       DIFFERENT file with a DIFFERENT scope; see the I7 block).
+#   Halt reuses _supervisor_halt (now --label-optional, above).
+# ---------------------------------------------------------------------------
+
+# Set a single task row's `phase` cell (RUN.md table column 2) in place,
+# atomic tmp+mv. Matches the row by its exact `task` column text. Fail-closed
+# if the task isn't found — a doctor repair silently rewriting the wrong row
+# (or no row at all) must never happen.
+_set_task_phase() {
+  local f="$1" task="$2" new_phase="$3" d; d="$(dirname "$f")"
+  local tmp; tmp="$(mktemp "$d/.taskphase.XXXXXX")" || die "mktemp failed"
+  awk -v task="$task" -v phase="$new_phase" 'BEGIN { FS = OFS = "|" }
+    /^\|/ {
+      t = $2; gsub(/^[ \t]+|[ \t]+$/, "", t)
+      if (t == task) { $3 = " " phase " "; done = 1 }
+    }
+    { print }
+    END { if (!done) exit 1 }
+  ' "$f" >"$tmp"
+  if [ $? -ne 0 ]; then
+    rm -f "$tmp"
+    die "doctor: task row not found (fail-closed): $task in $f"
+  fi
+  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+}
+
+# Append a QUESTIONS.md entry in run-state.md's format, numbering from the MAX
+# existing index (matching assert_run_head's convention) so QUESTIONS.md stays
+# one continuously-numbered log regardless of which guard wrote which entry.
+# A no-op (not fail-closed) when --questions was not passed.
+_doctor_questions_entry() {
+  local qfile="$1" title="$2" options="$3" call="$4" why="$5" reversible="$6"
+  [ -n "$qfile" ] || return 0
+  local n; n="$(grep -oE '^## Q[0-9]+' "$qfile" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
+  [ -n "$n" ] || n=0
+  local qn=$((n + 1))
+  {
+    [ -s "$qfile" ] && printf '\n'
+    printf '## Q%s — DOCTOR — %s\n\n' "$qn" "$title"
+    printf -- '- **Options:** %s\n' "$options"
+    printf -- '- **Call:** %s\n' "$call"
+    printf -- '- **Why:** %s\n' "$why"
+    printf -- '- **Reversible:** %s\n' "$reversible"
+  } >>"$qfile" 2>/dev/null \
+    || echo "spawn-orchestrator: doctor WARNING — could not append QUESTIONS.md entry: $qfile" >&2
+}
+
+# gh field readers (mirrors restack's `gh pr view <n> --json X --jq .X`
+# pattern — one call per field, so gh does the JSON extraction and neither
+# side depends on `jq` being installed).
+_doctor_pr_state()  { "$1" pr view "$2" --json state   --jq .state   2>/dev/null; }
+_doctor_pr_draft()  { "$1" pr view "$2" --json isDraft --jq .isDraft 2>/dev/null; }
+_doctor_pr_labels() { "$1" pr view "$2" --json labels  --jq '[.labels[].name] | join(",")' 2>/dev/null; }
+
+doctor() {
+  local dir="" run_id="" label="" questions="" handler="repo-pr" gh_bin="" limit="3"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --run-id) [ $# -ge 2 ] || die "missing value for --run-id"; run_id="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --questions) [ $# -ge 2 ] || die "missing value for --questions"; questions="$2"; shift 2 ;;
+      --handler) [ $# -ge 2 ] || die "missing value for --handler"; handler="$2"; shift 2 ;;
+      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      --no-progress-limit) [ $# -ge 2 ] || die "missing value for --no-progress-limit"; limit="$2"; shift 2 ;;
+      *) die "unknown doctor argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$run_id" ] || die "doctor requires --dir and --run-id"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  case "$handler" in repo-pr|linear) ;; *) die "unknown --handler (fail-closed): $handler" ;; esac
+  case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
+  [ "$limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
+  if [ -n "$questions" ]; then
+    case "$questions" in /*) ;; *) questions="$dir/$questions" ;; esac
+  fi
+
+  local branch="auto-pilot/$run_id"
+  local run_md="$dir/.auto-pilot/RUN.md" report_md="$dir/.auto-pilot/REPORT.md"
+  local n_ok=0 n_repaired=0 n_parked=0 n_halt=0
+  local -a repaired_notes=() parked_notes=() report_bullets=()
+
+  # Append the accumulated report_bullets (if any) as ONE dated "## Doctor"
+  # section, then print the one-line summary. Called on EVERY exit path (ok,
+  # parked-but-continuing, and halt) so a halt that happened after some earlier
+  # invariant already repaired something never loses that record.
+  _doctor_finish() {
+    if [ "${#report_bullets[@]}" -gt 0 ]; then
+      {
+        printf '\n## Doctor — %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '%s\n' "${report_bullets[@]}"
+      } >>"$report_md" 2>/dev/null \
+        || echo "spawn-orchestrator: doctor WARNING — could not append to $report_md (findings are on stdout only)" >&2
+    fi
+    local total=7 summary
+    summary="spawn-orchestrator: doctor: $total invariants — ok=$n_ok repaired=$n_repaired"
+    [ "${#repaired_notes[@]}" -gt 0 ] && summary+=" ($(IFS=', '; printf '%s' "${repaired_notes[*]}"))"
+    summary+=" parked=$n_parked"
+    [ "${#parked_notes[@]}" -gt 0 ] && summary+=" ($(IFS=', '; printf '%s' "${parked_notes[*]}"))"
+    summary+=" halt=$n_halt"
+    echo "$summary"
+  }
+
+  # --- Invariant 1: run worktree HEAD is on the run-state branch -----------
+  # Delegate entirely to assert_run_head (task 13): it asserts, restores, and
+  # records the deviation itself. Run in a $(...) so a `die` inside only kills
+  # the subshell (canonicalize()'s pattern above) — an unrepairable deviation
+  # (a dirty run worktree) is doctor's own fail-closed exit, not a systemic
+  # halt (there is nothing wrong with the RUN STATE itself in that case).
+  local i1_out i1_rc
+  i1_out="$(assert_run_head --dir "$dir" --run-id "$run_id" ${questions:+--questions "$questions"} 2>&1)"; i1_rc=$?
+  [ "$i1_rc" -eq 0 ] || die "doctor: invariant 1 (HEAD) could not be repaired: $i1_out"
+  if printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
+    n_repaired=$((n_repaired + 1)); repaired_notes+=("I1: HEAD restored")
+    report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\`; restored (see QUESTIONS.md for the deviation record).")
+  else
+    n_ok=$((n_ok + 1))
+  fi
+
+  # --- Invariant 2: RUN.md/QUESTIONS.md/REPORT.md readable FROM THE BRANCH -
+  # Finding #23 exactly: reading the WORKING TREE instead of the branch is
+  # what let a run continue into a stateless void. A branch-read failure, or a
+  # RUN.md whose front matter doesn't parse (no run_id/status), means the run
+  # has no memory — HALT, do not guess, and stop auditing further invariants
+  # (there is nothing reliable left to check them against).
+  local run_branch questions_branch report_branch
+  run_branch="$(git -C "$dir" show "$branch:.auto-pilot/RUN.md" 2>/dev/null)"
+  questions_branch="$(git -C "$dir" show "$branch:.auto-pilot/QUESTIONS.md" 2>/dev/null)"
+  report_branch="$(git -C "$dir" show "$branch:.auto-pilot/REPORT.md" 2>/dev/null)"
+  local branch_ok=1 fm_run_id="" fm_status=""
+  if [ -z "$run_branch" ] || ! git -C "$dir" cat-file -e "$branch:.auto-pilot/QUESTIONS.md" 2>/dev/null \
+     || ! git -C "$dir" cat-file -e "$branch:.auto-pilot/REPORT.md" 2>/dev/null; then
+    branch_ok=0
+  else
+    local front2; front2="$(printf '%s\n' "$run_branch" | awk '/^---$/{c++; next} c==1{print}')"
+    fm_run_id="$(printf '%s\n' "$front2" | grep -E '^run_id:' | head -1 | sed -e 's/^run_id: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+    fm_status="$(printf '%s\n' "$front2" | grep -E '^status:' | head -1 | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+    { [ -n "$fm_run_id" ] && [ -n "$fm_status" ]; } || branch_ok=0
+  fi
+  if [ "$branch_ok" -eq 0 ]; then
+    n_halt=$((n_halt + 1))
+    _supervisor_halt --dir "$dir" ${label:+--label "$label"} \
+      --reason "invariant 2: RUN.md/QUESTIONS.md/REPORT.md unreadable from $branch, or RUN.md front matter doesn't parse — the run has no memory"
+    _doctor_finish
+    return 30
+  fi
+  # Branch reads are good — now check the WORKING TREE copy (the belt: a
+  # working-tree RUN.md missing/unparseable while the BRANCH is fine is a
+  # *repair*, not a halt — restore .auto-pilot/ from the branch.
+  local wt_ok=1
+  if [ ! -f "$run_md" ]; then
+    wt_ok=0
+  else
+    local front_wt fm_run_id_wt fm_status_wt
+    front_wt="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+    fm_run_id_wt="$(printf '%s\n' "$front_wt" | grep -E '^run_id:' | head -1 | sed -e 's/^run_id: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+    fm_status_wt="$(printf '%s\n' "$front_wt" | grep -E '^status:' | head -1 | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+    { [ -n "$fm_run_id_wt" ] && [ -n "$fm_status_wt" ]; } || wt_ok=0
+  fi
+  if [ "$wt_ok" -eq 0 ]; then
+    git -C "$dir" checkout "$branch" -- .auto-pilot/ 2>/dev/null \
+      || die "doctor: invariant 2 repair failed — could not restore .auto-pilot/ from $branch (fail-closed)"
+    n_repaired=$((n_repaired + 1)); repaired_notes+=("I2: RUN.md restored from branch")
+    report_bullets+=("- **I2 repaired** — RUN.md was missing/unparseable in the run worktree though it was readable on \`$branch\`; restored \`.auto-pilot/\` from the branch.")
+  else
+    n_ok=$((n_ok + 1))
+  fi
+
+  # From here on, RUN.md's table is the source of truth for I3/I4/I5/I6.
+  _restack_read_run_md "$run_md"
+  local base_branch="$_RS_BASE_BRANCH"
+  local n_rows="${#_RS_TASK[@]}"
+
+  # --- Invariants 3 & 4: every in-flight-with-a-PR task has a real PR; a ----
+  # `handed-off` repo-pr task carries its review signal (one gh call covers
+  # both — state, isDraft, labels).
+  local need_gh=0 i
+  for ((i = 0; i < n_rows; i++)); do
+    case "${_RS_PHASE[$i]}" in pr-open|in-review|iterating|handed-off) need_gh=1 ;; esac
+  done
+  if [ "$need_gh" -eq 1 ]; then
+    [ -n "$gh_bin" ] || gh_bin="$(command -v gh 2>/dev/null)" || true
+    [ -n "$gh_bin" ] || die "doctor: gh not found (fail-closed): pass --gh <path> (mockable in tests) or put gh on PATH — needed for invariants 3/4"
+  fi
+  for ((i = 0; i < n_rows; i++)); do
+    local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" pr="${_RS_PR[$i]}"
+    case "$phase" in pr-open|in-review|iterating|handed-off) ;; *) continue ;; esac
+    if _restack_empty "$pr"; then
+      _set_task_phase "$run_md" "$task" "parked"
+      n_parked=$((n_parked + 1)); parked_notes+=("I3: $task")
+      report_bullets+=("- **I3 parked — $task**: phase was \`$phase\` with no PR number recorded — a human must look.")
+      _doctor_questions_entry "$questions" "$task — phase $phase with no recorded PR" \
+        "park the task | leave it as-is" "parked" \
+        "phase $phase claims a delivery in flight, but RUN.md has no PR number to verify against — never re-dispatch on a guess" \
+        "yes — re-claim or re-link the PR by hand, then flip the phase back"
+      continue
+    fi
+    local pr_num="${pr#\#}" state
+    state="$(_doctor_pr_state "$gh_bin" "$pr_num")"
+    case "$state" in
+      OPEN) ;;
+      MERGED)
+        # A human merged it post-hand-off — the expected, healthy end state,
+        # NOT a violation. Doctor must not "repair" a merge.
+        n_ok=$((n_ok + 1))
+        continue
+        ;;
+      CLOSED|"")
+        _set_task_phase "$run_md" "$task" "parked"
+        n_parked=$((n_parked + 1)); parked_notes+=("I3: $task")
+        local why="PR #$pr_num is CLOSED (unmerged)"
+        [ -z "$state" ] && why="PR #$pr_num does not exist or is unreadable"
+        report_bullets+=("- **I3 parked — $task**: $why — the delivery's PR is gone; a human must look.")
+        _doctor_questions_entry "$questions" "$task — $why" \
+          "park the task | leave it as-is" "parked" \
+          "$why; never silently re-dispatch a task whose PR vanished" \
+          "yes — recreate the PR or re-link a new one, then flip the phase back"
+        continue
+        ;;
+      *)
+        _set_task_phase "$run_md" "$task" "parked"
+        n_parked=$((n_parked + 1)); parked_notes+=("I3: $task")
+        report_bullets+=("- **I3 parked — $task**: PR #$pr_num has unexpected state '$state' — a human must look.")
+        continue
+        ;;
+    esac
+    n_ok=$((n_ok + 1))   # I3 holds for this row (PR is OPEN)
+
+    # Invariant 4: repo-pr's review signal is the PR itself — labeled
+    # `task-loop` (not `task-claim`) and NOT a draft (deliver-task step 7: the
+    # task file is deleted in the PR rather than flipped to needs_review, so
+    # the ready task-loop PR IS the review signal). Only repo-pr is wired;
+    # a future `linear` handler's own signal is kept behind --handler.
+    if [ "$phase" = "handed-off" ] && [ "$handler" = "repo-pr" ]; then
+      local draft labels fixes=""
+      draft="$(_doctor_pr_draft "$gh_bin" "$pr_num")"
+      labels="$(_doctor_pr_labels "$gh_bin" "$pr_num")"
+      case ",$labels," in *,task-claim,*)
+        "$gh_bin" pr edit "$pr_num" --remove-label task-claim --add-label task-loop >/dev/null 2>&1
+        fixes="label task-claim->task-loop" ;;
+      esac
+      if [ "$draft" = "true" ]; then
+        "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1
+        fixes="${fixes:+$fixes, }marked ready (was draft)"
+      fi
+      if [ -n "$fixes" ]; then
+        n_repaired=$((n_repaired + 1)); repaired_notes+=("I4: $task PR #$pr_num")
+        report_bullets+=("- **I4 repaired — $task** (PR #$pr_num): $fixes — a G6/G7 crash gap left the repo-pr review signal stale.")
+        _doctor_questions_entry "$questions" "$task — PR #$pr_num missing its repo-pr review signal" \
+          "apply the missing label/ready swap | leave it as-is" "applied ($fixes)" \
+          "deliver-task step 7: a ready, task-loop-labeled PR IS the review signal for repo-pr; a G6/G7 crash can leave it labeled task-claim or still draft" \
+          "yes — re-label/re-draft by hand if this was wrong"
+      else
+        n_ok=$((n_ok + 1))
+      fi
+    fi
+  done
+
+  # --- Invariant 5: no orphan worker worktrees from a dead dispatch (G2) ----
+  # Conservative: prune ONLY when every condition holds (see run-state.md /
+  # the task spec) — under <run-root>/workers/, no dispatch in flight per
+  # RUN.md (or no matching row at all), no uncommitted changes, and its
+  # branch tip already pushed to origin. Anything else is left alone.
+  local run_root="$(dirname "$dir")" workers_root
+  workers_root="$run_root/workers"
+  if [ -d "$workers_root" ]; then
+    local wt_line wt any_pruned=0
+    while IFS= read -r wt_line; do
+      case "$wt_line" in "worktree "*) wt="${wt_line#worktree }" ;; *) continue ;; esac
+      case "$wt" in "$workers_root"/*) ;; *) continue ;; esac
+      [ -d "$wt" ] || continue
+      local wtbranch matched_phase="" j
+      wtbranch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      for ((j = 0; j < n_rows; j++)); do
+        if [ "${_RS_BRANCH[$j]}" = "$wtbranch" ]; then matched_phase="${_RS_PHASE[$j]}"; break; fi
+      done
+      local safe_phase=0
+      case "$matched_phase" in pending|parked|handed-off|"") safe_phase=1 ;; esac
+      local dirty local_tip remote_tip pushed=0
+      dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
+      local_tip="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+      if [ -z "$local_tip" ]; then
+        pushed=1   # no commits at all — a truly dead dispatch
+      else
+        remote_tip="$(git -C "$wt" rev-parse "origin/$wtbranch" 2>/dev/null)"
+        [ -n "$remote_tip" ] && [ "$local_tip" = "$remote_tip" ] && pushed=1
+      fi
+      if [ "$safe_phase" -eq 1 ] && [ -z "$dirty" ] && [ "$pushed" -eq 1 ]; then
+        git -C "$dir" worktree remove --force "$wt" 2>/dev/null
+        any_pruned=1
+        n_repaired=$((n_repaired + 1)); repaired_notes+=("I5: removed $(basename "$wt")")
+        report_bullets+=("- **I5 repaired** — removed orphan worker worktree \`$wt\` (G2): non-dispatch phase, clean, already pushed.")
+      else
+        echo "spawn-orchestrator: doctor I5: skipped (unsafe to prune): $wt"
+      fi
+    done < <(git -C "$dir" worktree list --porcelain 2>/dev/null)
+    git -C "$dir" worktree prune >/dev/null 2>&1
+    [ "$any_pruned" -eq 1 ] || n_ok=$((n_ok + 1))
+  else
+    n_ok=$((n_ok + 1))
+  fi
+
+  # --- Invariant 6: a chained task's parent tip still equals its frozen -----
+  # base_sha — this guard models the ORCHESTRATOR moving a base mid-run, never
+  # a human merging/reviewing the parent (run-state.md's `base_sha` note): only
+  # park when the parent's own PR is NOT merged; a merged parent's remedy is
+  # `restack`, not a park, and doctor says so rather than parking the child.
+  for ((i = 0; i < n_rows; i++)); do
+    local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" base="${_RS_BASE[$i]}" bsha="${_RS_BASE_SHA[$i]}"
+    [ "$base" != "$base_branch" ] || continue     # independent task — nothing frozen
+    _restack_empty "$bsha" && continue            # no frozen base yet — nothing to compare
+    [ "$phase" != "handed-off" ] || continue       # terminal success — already delivered
+
+    local pidx=-1 j
+    for ((j = 0; j < n_rows; j++)); do
+      if [ "${_RS_BRANCH[$j]}" = "$base" ]; then pidx=$j; break; fi
+    done
+    [ "$pidx" -ge 0 ] || continue   # parent not tracked in this run
+
+    local parent_pr="${_RS_PR[$pidx]}" parent_merged=0
+    if ! _restack_empty "$parent_pr"; then
+      [ -n "$gh_bin" ] || gh_bin="$(command -v gh 2>/dev/null)" || true
+      if [ -n "$gh_bin" ]; then
+        local ppr_num="${parent_pr#\#}" pstate
+        pstate="$(_doctor_pr_state "$gh_bin" "$ppr_num")"
+        [ "$pstate" = "MERGED" ] && parent_merged=1
+      fi
+    fi
+    if [ "$parent_merged" -eq 1 ]; then
+      echo "spawn-orchestrator: doctor I6: $task — parent's PR merged; remedy is restack, not park (skipping)"
+      n_ok=$((n_ok + 1))
+      continue
+    fi
+
+    local current_tip
+    current_tip="$(git -C "$dir" rev-parse "$base" 2>/dev/null)"
+    [ -n "$current_tip" ] || current_tip="$(git -C "$dir" rev-parse "origin/$base" 2>/dev/null)"
+    if [ -n "$current_tip" ] && [ "$current_tip" != "$bsha" ]; then
+      if [ "$phase" = "parked" ]; then
+        n_ok=$((n_ok + 1))   # already parked — nothing new to do
+      else
+        _set_task_phase "$run_md" "$task" "parked"
+        n_parked=$((n_parked + 1)); parked_notes+=("I6: $task")
+        report_bullets+=("- **I6 parked — $task**: parent \`$base\`'s tip moved off the frozen base_sha (\`$bsha\` -> \`$current_tip\`) without the parent's PR merging.")
+        _doctor_questions_entry "$questions" "$task — parent $base's tip moved off its frozen base_sha" \
+          "park the child | ignore the divergence" "parked" \
+          "the base_sha freeze/park guard models the ORCHESTRATOR moving a base mid-run (never a human merge, which is restack's job)" \
+          "yes — re-run doctor once the base is reconciled, or restack if the parent later merges"
+      fi
+    else
+      n_ok=$((n_ok + 1))
+    fi
+  done
+
+  # --- Invariant 7: forward progress since the last DOCTOR iteration --------
+  # Ownership split (say it here AND in run-state.md): task 10's
+  # supervisor-check guard owns no-progress ACROSS WAKES (process-level — the
+  # agent died, the branch didn't move between launchd relaunches). THIS guard
+  # owns no-progress ACROSS ITERATIONS within one LIVE agent process (the
+  # agent is alive and looping but nothing advances). Different scopes,
+  # different state files (doctor-state, never supervisor-state) — the two
+  # can never both halt the same run for the same reason.
+  local dstate="$dir/.auto-pilot/doctor-state"
+  if _run_is_paused "$dir"; then
+    _write_supervisor_state "$dstate" 0 "$(_run_head "$dir")"
+    n_ok=$((n_ok + 1))
+  else
+    local prev_head prev_count head count
+    prev_head="$(_supervisor_state_field "$dstate" head)"
+    prev_count="$(_supervisor_state_field "$dstate" count)"
+    case "$prev_count" in ''|*[!0-9]*) prev_count=0 ;; esac
+    head="$(_run_head "$dir")"; head="${head:-unknown}"
+    if [ -n "$prev_head" ] && [ "$prev_head" = "$head" ]; then
+      count=$((prev_count + 1))
+    else
+      count=1
+    fi
+    _write_supervisor_state "$dstate" "$count" "$head"
+    if [ "$count" -ge "$limit" ]; then
+      n_halt=$((n_halt + 1))
+      _supervisor_halt --dir "$dir" ${label:+--label "$label"} \
+        --reason "invariant 7: no forward progress after $count consecutive doctor iterations"
+      _doctor_finish
+      return 30
+    else
+      n_ok=$((n_ok + 1))
+    fi
+  fi
+
+  _doctor_finish
+  return 0
+}
+
 check_profile() {
   [ $# -eq 1 ] || die "check-profile takes exactly one <file>"
   local f="$1"
@@ -3362,6 +3833,7 @@ case "$sub" in
   clear-exit-state) clear_exit_state "$@" ;;
   heartbeat) heartbeat "$@" ;;
   restack) restack "$@" ;;
+  doctor) doctor "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac
