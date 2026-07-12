@@ -434,6 +434,73 @@ else
   echo "skip - cred-ro: behavioral checks (sandbox-exec not available)"
 fi
 
+# --- --workdir: the pause-exempt LEDGER's own file stays RO inside an RW workdir -
+# Same shape as --cred-ro above, different file and different reason: the
+# no-progress guard's pause exemption is bounded by a cumulative-time ledger in
+# supervisor-state, and that ledger is only an authority the agent cannot forge
+# if the agent cannot write it — even though the run worktree (where it lives)
+# is otherwise --rw.
+WDROOT="$BASE/wd"; mkdir -p "$WDROOT/.auto-pilot"
+wdprof="$BASE/wd.sb"
+"$SCRIPT" render-profile --rw "$WDROOT" --workdir "$WDROOT" --exec "$BIN" --out "$wdprof" >/dev/null 2>&1
+wdbody="$(cat "$wdprof" 2>/dev/null)"
+have "--workdir: emits a deny file-write* block"        '(deny file-write*'                                   "$wdbody"
+have "--workdir: denies the supervisor-state literal"   "(literal \"$WDROOT/.auto-pilot/supervisor-state\")"   "$wdbody"
+lack "--workdir: no @@tokens@@ remain"                   '@@'                                                   "$wdbody"
+# Precise ordering, same technique as the cred-ro proof above: the RW allow for
+# $WDROOT must appear, and THEN (last-match-wins) the deny for the state file.
+wd_order_ok="$(awk -v st="(subpath \"$WDROOT\")" -v sf="(literal \"$WDROOT/.auto-pilot/supervisor-state\")" '
+  /\(allow file-write\*/ { mode="w" }
+  /\(deny file-write\*/  { mode="d" }
+  mode=="w" && index($0, st) { wl=NR }
+  mode=="d" && wl && index($0, sf) { print "yes"; exit }
+' "$wdprof")"
+if [ "$wd_order_ok" = yes ]; then
+  ok "--workdir: supervisor-state deny follows the workdir's write allow (precise)"
+else
+  bad "--workdir: supervisor-state deny follows the workdir's write allow (precise)"
+fi
+# The leaf file need not exist yet (tolerated like --tmpdir tolerates the
+# harness's lazily created dirs) — a workdir whose .auto-pilot/supervisor-state
+# hasn't been written yet must still render, not fail closed.
+WDROOT2="$BASE/wd2"; mkdir -p "$WDROOT2"   # note: no .auto-pilot/ at all yet
+if o="$("$SCRIPT" render-profile --rw "$WDROOT2" --workdir "$WDROOT2" --exec "$BIN" --out "$BASE/wd2.sb" 2>&1)"; then
+  ok "--workdir: a not-yet-existing .auto-pilot/supervisor-state does not fail closed"
+else
+  bad "--workdir: a not-yet-existing .auto-pilot/supervisor-state does not fail closed" "$o"
+fi
+have "--workdir: still denies the (not-yet-existing) literal" \
+  "(literal \"$WDROOT2/.auto-pilot/supervisor-state\")" "$(cat "$BASE/wd2.sb" 2>/dev/null)"
+# no --workdir → placeholder comment, no stray deny form (an older caller's
+# render keeps its prior, weaker shape rather than failing).
+"$SCRIPT" render-profile --rw "$WDROOT" --exec "$BIN" --out "$BASE/nowd.sb" >/dev/null 2>&1
+lack "--workdir: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nowd.sb" 2>/dev/null)"
+# fail-closed: a relative --workdir is refused.
+fc "--workdir must be absolute" "must be absolute" --rw "$WDROOT" --workdir "wd" --exec "$BIN"
+if command -v sandbox-exec >/dev/null 2>&1; then
+  if o="$("$SCRIPT" check-profile "$wdprof" 2>&1)"; then
+    ok "check-profile: --workdir profile compiles"
+  else
+    bad "check-profile: --workdir profile compiles" "$o"
+  fi
+  BASHBIN2="$(command -v bash)"
+  wdxprof="$BASE/wdx.sb"
+  "$SCRIPT" render-profile --rw "$WDROOT" --workdir "$WDROOT" --exec "$BASHBIN2" --out "$wdxprof" >/dev/null 2>&1
+  if sandbox-exec -f "$wdxprof" "$BASHBIN2" -c 'echo x > "$1/.auto-pilot/other"' _ "$WDROOT" >/dev/null 2>&1; then
+    ok "--workdir: write elsewhere in the run worktree is allowed"
+  else
+    bad "--workdir: write elsewhere in the run worktree is allowed"
+  fi
+  if sandbox-exec -f "$wdxprof" "$BASHBIN2" -c 'echo y > "$1/.auto-pilot/supervisor-state"' _ "$WDROOT" >/dev/null 2>&1; then
+    bad "--workdir: write to the supervisor-state ledger is denied"
+  else
+    ok "--workdir: write to the supervisor-state ledger is denied"
+  fi
+  rm -f "$WDROOT/.auto-pilot/other" 2>/dev/null
+else
+  echo "skip - --workdir: behavioral checks (sandbox-exec not available)"
+fi
+
 # allowLocalBinding flag flips to true (task 3, Fable #6)
 "$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1
 have "settings: --allow-local-binding sets true" '"allowLocalBinding":true' "$(cat "$BASE/lb.json" 2>/dev/null)"
@@ -486,10 +553,44 @@ pscan="$(printf '%s\n' "$plbody" | grep 'supervisor-scan'  || true)"
 pchk="$(printf  '%s\n' "$plbody" | grep 'supervisor-check' || true)"
 have "launch: --park-limit threaded into supervisor-scan"  '--park-limit 7' "$pscan"
 have "launch: --park-limit threaded into supervisor-check" '--park-limit 7' "$pchk"
+# --pause-exempt-max defaults to 21600 (6h) in the generated wrapper when
+# omitted. It belongs ONLY on the supervisor-SCAN line — the cap is enforced
+# above the gate (a far-future paused_until means supervisor-check never runs
+# at all), so it must never be threaded onto supervisor-check the way
+# --park-limit/--no-progress-limit are. Asserted per line, same reasoning as
+# the --park-limit assertion above: a body-wide substring match cannot tell
+# "present on scan" from "present on check" apart.
+have "launch: supervisor-scan defaults --pause-exempt-max to 21600"  '--pause-exempt-max 21600' "$lscan"
+lack "launch: supervisor-check never receives --pause-exempt-max"    '--pause-exempt-max'        "$lchk"
+# an explicit --pause-exempt-max is threaded into supervisor-scan, and ONLY
+# supervisor-scan.
+"$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.pem --claude-bin "$BIN" \
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --pause-exempt-max 90 \
+  --out-script "$BASE/pem.sh" --out-plist "$BASE/pem.plist" >/dev/null 2>&1
+pembody="$(cat "$BASE/pem.sh" 2>/dev/null)"
+pemscan="$(printf '%s\n' "$pembody" | grep 'supervisor-scan'  || true)"
+pemchk="$(printf  '%s\n' "$pembody" | grep 'supervisor-check' || true)"
+have "launch: --pause-exempt-max threaded into supervisor-scan"      '--pause-exempt-max 90' "$pemscan"
+lack "launch: --pause-exempt-max never threaded into supervisor-check" '--pause-exempt-max'  "$pemchk"
+# fail-closed: garbage --pause-exempt-max is refused, and nothing is written.
+pembad="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.pembad --claude-bin "$BIN" \
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --pause-exempt-max 0 \
+  --out-script "$BASE/pembad.sh" --out-plist "$BASE/pembad.plist" 2>&1)"; pembadc=$?
+[ "$pembadc" = 2 ] && [ ! -e "$BASE/pembad.sh" ] && printf '%s' "$pembad" | grep -qF 'positive integer' \
+  && ok "write-launch: --pause-exempt-max 0 fails closed" \
+  || bad "write-launch: --pause-exempt-max 0 fails closed" "exit=$pembadc $pembad"
+# fail-closed at the supervisor-scan CLI itself, not just at write-launch's
+# generation-time check — the two validate independently.
+scpe="$("$SCRIPT" supervisor-scan --dir "$BASE" --label com.autopilot.pescan --pause-exempt-max abc 2>&1)"; scpec=$?
+[ "$scpec" = 2 ] && printf '%s' "$scpe" | grep -qF 'positive integer' \
+  && ok "supervisor-scan: --pause-exempt-max abc fails closed" \
+  || bad "supervisor-scan: --pause-exempt-max abc fails closed" "exit=$scpec $scpe"
 # both supervisor thresholds must survive the `launch` passthrough, which is the
 # path production uses. A flag write-launch parses but launch rejects is the same
 # lie this task exists to remove.
-for lim in --park-limit --no-progress-limit; do
+for lim in --park-limit --no-progress-limit --pause-exempt-max; do
   lpass="$("$SCRIPT" launch "$lim" 9 --dry-run 2>&1 || true)"
   case "$lpass" in
     *"unknown launch argument: $lim"*) bad "launch: $lim survives the launch passthrough" "$lpass" ;;
@@ -2058,7 +2159,7 @@ CLEOF
   # never invoked) AND the heartbeat must still be fresh.
   ec_wake gateclosed "" 0
   { printf -- '---\n'; printf 'run_id: gateclosed\n'; printf 'status: paused\n'
-    printf 'paused_until: 2099-01-01T00:00:00Z\n'; printf 'pause_reason: rate window\n'
+    printf 'paused_until: 2099-01-01T00:00:00\n'; printf 'pause_reason: rate window\n'
     printf -- '---\n'; } >"$EC/gateclosed/.auto-pilot/RUN.md"
   rm -f "$EC/gateclosed/.auto-pilot/heartbeat" "$EC/gateclosed/claude-ran"
   : >"$EC/gateclosed/launchctl.log"
@@ -2638,6 +2739,223 @@ LCFEOF
     bad "exit contract [paused, template's commented paused_until]: the job was booted out" \
       "launchctl log: $(cat "$PT/launchctl.log" 2>/dev/null)"
   fi
+
+  # --- task 23: the pause exemption needs an authority the agent cannot forge ---
+  # (dev_docs/tasks/autopilot_hardening_plan/autopilot_hardening_task_23.md).
+  # `status: paused` ALONE used to exempt the no-progress guard — corroborated
+  # only by a second field (or nothing at all) the same agent writes. These
+  # drive the REAL generated wrapper end to end (never supervisor-check
+  # directly) precisely because a prior alarm test skipped supervisor-gate by
+  # re-implementing the call sequence and missed the bug it existed to catch.
+  #
+  # exit_reason/exit_reason_at are committed ONCE, up front, with an
+  # exit_reason_at far in the future (9999999999, same idiom as the
+  # [paused, corroborated] test above) so every real wake's `--wake-start`
+  # attributes the SAME declaration without the stub `claude` re-declaring (and
+  # re-committing, which would move the run-state HEAD every wake and mask the
+  # very no-progress condition under test).
+  t23_setup() { # <name> <status> <paused_until> -> leaves $T23_DIR, writes+commits RUN.md, real write-launch.
+    T23_DIR="$EC/t23-$1"
+    mkdir -p "$T23_DIR/.auto-pilot"
+    {
+      printf -- '---\n'; printf 'run_id: t23-%s\n' "$1"; printf 'status: %s\n' "$2"
+      printf 'paused_until: %s\n' "$3"; printf 'pause_reason: rate window\n'
+      printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    } >"$T23_DIR/.auto-pilot/RUN.md"
+    printf '# report\n' >"$T23_DIR/.auto-pilot/REPORT.md"
+    : >"$T23_DIR/.auto-pilot/orchestrator.log"
+    ( cd "$T23_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+      --workdir "$T23_DIR" --log "$T23_DIR/.auto-pilot/orchestrator.log" \
+      --prompt-file "$BASE/prompt.txt" --label "com.autopilot.t23.$1" \
+      --claude-bin "$STUB/claude" --path "$STUB_PATH" \
+      --out-script "$T23_DIR/launch.sh" --out-plist "$T23_DIR/job.plist" >/dev/null 2>&1
+    : >"$T23_DIR/launchctl.log"; rm -f "$T23_DIR/claude-ran"
+  }
+  t23_wake() { # one wake through the REAL generated wrapper (no STUB_DECLARE: see above)
+    STUB_LAUNCHCTL_LOG="$T23_DIR/launchctl.log" STUB_CLAUDE_MARKER="$T23_DIR/claude-ran" \
+      STUB_EXIT_CODE=0 bash "$T23_DIR/launch.sh" >/dev/null 2>&1
+  }
+
+  # (23a) A wedged agent that writes `status: paused` on EVERY wake with NO
+  # `paused_until` — the failure this task exists to catch. Must NOT be exempt:
+  # 3 (the default --no-progress-limit) consecutive wakes trip the guard.
+  t23_setup wedge paused ''
+  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  have "task 23 [status: paused, no paused_until]: the no-progress guard trips and halts" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  have "task 23 [status: paused, no paused_until]: the halt raises the no-progress alarm" \
+    'no forward progress' "$(cat "$T23_DIR/.auto-pilot/REPORT.md")"
+  have "task 23 [status: paused, no paused_until]: the job is torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
+  [ -f "$T23_DIR/claude-ran" ] && ok "task 23 [status: paused, no paused_until]: the agent WAS invoked each wake (gate stays open on an empty paused_until)" \
+    || bad "task 23 [status: paused, no paused_until]: the agent WAS invoked each wake"
+
+  # (23b) A genuine rate-window pause — `status: paused` + a parseable FUTURE
+  # `paused_until` — stays exempt (task 11 must not regress): the gate closes
+  # every wake and the agent is never even invoked, let alone halted.
+  T23_FUTURE="$(_gate_iso $((NOW_EPOCH + 3600)))"
+  t23_setup future paused "$T23_FUTURE"
+  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  lack "task 23 [genuine pause, future paused_until]: the guard never halts while the window is open" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  lack "task 23 [genuine pause, future paused_until]: the job is never torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
+  [ -f "$T23_DIR/claude-ran" ] && bad "task 23 [genuine pause, future paused_until]: the agent is NOT invoked (gate stays closed)" \
+    || ok "task 23 [genuine pause, future paused_until]: the agent is NOT invoked (gate stays closed)"
+
+  # (23c) …and relanches PAST the reset: `paused_until` just behind us (well
+  # within the margin) opens the gate again, and the guard still doesn't trip —
+  # the task-11 behavior this fix must not regress.
+  T23_JUSTPAST="$(_gate_iso $((NOW_EPOCH - 10)))"
+  t23_setup pastreset paused "$T23_JUSTPAST"
+  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  lack "task 23 [relaunch past the reset]: the guard does not halt just past its own paused_until" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  [ -f "$T23_DIR/claude-ran" ] && ok "task 23 [relaunch past the reset]: the agent IS invoked once the gate reopens" \
+    || bad "task 23 [relaunch past the reset]: the agent IS invoked once the gate reopens"
+
+  # (23d) A pause that overran its own `paused_until` by more than the margin
+  # (PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT, 1h) re-arms the guard: 3 more wakes
+  # (still declaring the same stale `paused`) halt.
+  T23_STALE="$(_gate_iso $((NOW_EPOCH - 3600 - 120)))"
+  t23_setup stale paused "$T23_STALE"
+  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  have "task 23 [pause overran its margin]: the guard re-arms and halts" \
+    'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
+  have "task 23 [pause overran its margin]: the job is torn down" \
+    'bootout' "$(cat "$T23_DIR/launchctl.log")"
+
+  # --- the pause-exempt LEDGER: bounds the guard's exemption regardless of what --
+  # RUN.md claims (the finding this task fixes: `status`/`paused_until` are BOTH
+  # agent-written, so `_pause_exempt` corroborating one against the other proves
+  # nothing about a forging agent — see the false-comment fix in supervisor_check's
+  # `paused` branch). These drive the REAL generated wrapper end-to-end, same
+  # posture as task 23 above, with a small --pause-exempt-max so the cap trips in
+  # a couple of wakes instead of after 6 real hours — seeding `exempt_since`
+  # directly (never sleeping) is what makes that deterministic.
+  pel_setup() { # <name> <pause_exempt_max> -> leaves $PEL_DIR, real write-launch with the cap.
+    PEL_DIR="$EC/pel-$1"
+    mkdir -p "$PEL_DIR/.auto-pilot"
+    pel_write_runmd active ''
+    printf '# report\n' >"$PEL_DIR/.auto-pilot/REPORT.md"
+    : >"$PEL_DIR/.auto-pilot/orchestrator.log"
+    ( cd "$PEL_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+      --workdir "$PEL_DIR" --log "$PEL_DIR/.auto-pilot/orchestrator.log" \
+      --prompt-file "$BASE/prompt.txt" --label "com.autopilot.pel.$1" \
+      --claude-bin "$STUB/claude" --path "$STUB_PATH" --pause-exempt-max "$2" \
+      --out-script "$PEL_DIR/launch.sh" --out-plist "$PEL_DIR/job.plist" >/dev/null 2>&1
+    : >"$PEL_DIR/launchctl.log"; rm -f "$PEL_DIR/claude-ran"
+  }
+  pel_write_runmd() { # <status> <paused_until> -> (re)writes $PEL_DIR/.auto-pilot/RUN.md
+    { printf -- '---\n'; printf 'status: %s\n' "$1"; printf 'paused_until: %s\n' "$2"
+      printf 'pause_reason: \n'; printf -- '---\n\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    } >"$PEL_DIR/.auto-pilot/RUN.md"
+  }
+  pel_wake() { # one wake through the REAL generated wrapper.
+    STUB_LAUNCHCTL_LOG="$PEL_DIR/launchctl.log" STUB_CLAUDE_MARKER="$PEL_DIR/claude-ran" \
+      STUB_EXIT_CODE=0 bash "$PEL_DIR/launch.sh" >/dev/null 2>&1
+  }
+  pel_state() { cat "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null; }
+  pel_exempt_since() { sed -n 's/^exempt_since: *//p' "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null | tail -1; }
+  pel_seed_exempt_since() { # <old-epoch> -> overwrite the ledger directly (never sleeping).
+    { printf 'count: 0\n'; printf 'head: \n'; printf 'exempt_since: %s\n' "$1"
+    } >"$PEL_DIR/.auto-pilot/supervisor-state"
+  }
+
+  # (A) FORGED REFRESH: the agent rewrites `paused_until` to a few seconds ago on
+  # EVERY wake, forever — the shape reproduced in the bug report (6 consecutive
+  # zero-progress wakes, no-progress counter pinned at 0, no halt, no alarm).
+  # `_pause_exempt` corroborates it every time (a few seconds ago is well within
+  # the 1h margin), so nothing but the ledger's own cumulative cap can stop it.
+  pel_setup forged 60
+  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 5 )))"
+  pel_wake
+  lack "pause-exempt ledger [forged refresh]: does not halt before the cap" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+  [ -n "$(pel_exempt_since)" ] \
+    && ok "pause-exempt ledger [forged refresh]: the ledger started a streak (exempt_since set)" \
+    || bad "pause-exempt ledger [forged refresh]: the ledger started a streak (exempt_since set)" "$(pel_state)"
+  # Seed the streak's start well past the 60s cap, then refresh `paused_until`
+  # again (the forging agent, on its next wake) and wake once more.
+  pel_seed_exempt_since "$(( $(date +%s) - 120 ))"
+  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 5 )))"
+  pel_wake
+  have "pause-exempt ledger [forged refresh]: the cap trips and halts" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+  have "pause-exempt ledger [forged refresh]: the halt raises the pause-exempt alarm" \
+    'pause-exempt' "$(cat "$PEL_DIR/.auto-pilot/REPORT.md")"
+  have "pause-exempt ledger [forged refresh]: REPORT.md's alarm line says a declared pause is not evidence" \
+    'not evidence' "$(cat "$PEL_DIR/.auto-pilot/REPORT.md")"
+  have "pause-exempt ledger [forged refresh]: the job is torn down" \
+    'bootout' "$(cat "$PEL_DIR/launchctl.log")"
+
+  # (B) FAR-FUTURE paused_until: closes supervisor-gate on EVERY wake, so
+  # supervisor-check never runs at all — this is the test that proves enforcement
+  # sits ABOVE the gate (in supervisor-scan), because nothing below the gate ever
+  # gets a chance to run.
+  pel_setup farfuture 60
+  pel_write_runmd paused '2099-01-01T00:00:00Z'
+  pel_wake
+  [ ! -f "$PEL_DIR/claude-ran" ] \
+    && ok "pause-exempt ledger [far-future paused_until]: the gate closes, claude is never invoked" \
+    || bad "pause-exempt ledger [far-future paused_until]: the gate closes, claude is never invoked"
+  lack "pause-exempt ledger [far-future paused_until]: does not halt before the cap" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+  pel_seed_exempt_since "$(( $(date +%s) - 120 ))"
+  pel_wake
+  have "pause-exempt ledger [far-future paused_until]: the cap STILL trips and halts (enforcement is above the gate)" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+  have "pause-exempt ledger [far-future paused_until]: the job is torn down" \
+    'bootout' "$(cat "$PEL_DIR/launchctl.log")"
+  [ ! -f "$PEL_DIR/claude-ran" ] \
+    && ok "pause-exempt ledger [far-future paused_until]: claude was NEVER invoked, the whole way through" \
+    || bad "pause-exempt ledger [far-future paused_until]: claude was NEVER invoked, the whole way through"
+
+  # (C) LEGITIMATE pause, well under the cap: must NOT regress task 11/23 — the
+  # gate stays closed while the window is open, and relaunch past the reset
+  # still invokes the agent, with no halt anywhere in the sequence.
+  pel_setup legit 3600
+  T_PEL_FUTURE="$(_gate_iso $(( $(date +%s) + 3600 )))"
+  pel_write_runmd paused "$T_PEL_FUTURE"
+  i=0; while [ "$i" -lt 3 ]; do pel_wake; i=$((i + 1)); done
+  lack "pause-exempt ledger [legitimate pause, under the cap]: no halt while the window is open" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+  [ ! -f "$PEL_DIR/claude-ran" ] \
+    && ok "pause-exempt ledger [legitimate pause, under the cap]: claude is not invoked while gated" \
+    || bad "pause-exempt ledger [legitimate pause, under the cap]: claude is not invoked while gated"
+  [ -n "$(pel_exempt_since)" ] \
+    && ok "pause-exempt ledger [legitimate pause, under the cap]: the ledger still tracks the streak" \
+    || bad "pause-exempt ledger [legitimate pause, under the cap]: the ledger still tracks the streak"
+  T_PEL_PAST="$(_gate_iso $(( $(date +%s) - 10 )))"
+  pel_write_runmd paused "$T_PEL_PAST"
+  pel_wake
+  [ -f "$PEL_DIR/claude-ran" ] \
+    && ok "pause-exempt ledger [relaunch past the reset]: claude IS invoked once the gate reopens" \
+    || bad "pause-exempt ledger [relaunch past the reset]: claude IS invoked once the gate reopens"
+  lack "pause-exempt ledger [relaunch past the reset]: still no halt (well under the cap)" \
+    'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
+
+  # (D) The ledger CLEARS when the run is observed not pause-exempt — a run that
+  # was genuinely paused and then resumed must not carry a stale streak into an
+  # unrelated future pause.
+  pel_setup clears 3600
+  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 10 )))"
+  pel_wake
+  [ -n "$(pel_exempt_since)" ] \
+    && ok "pause-exempt ledger [clears]: a pause-exempt wake starts the streak" \
+    || bad "pause-exempt ledger [clears]: a pause-exempt wake starts the streak" "$(pel_state)"
+  pel_write_runmd active ''
+  pel_wake
+  [ -z "$(pel_exempt_since)" ] \
+    && ok "pause-exempt ledger [clears]: a non-exempt wake clears exempt_since" \
+    || bad "pause-exempt ledger [clears]: a non-exempt wake clears exempt_since" "$(pel_state)"
 
   # fail-closed: an unknown reason is never written, and a RELAUNCHABLE reason can
   # never be smuggled into the terminal sentinel.

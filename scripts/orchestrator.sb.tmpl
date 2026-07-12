@@ -104,6 +104,30 @@
 ;;     reads its token). [§3: file-RO vs state-RW]
 @@CRED_DENY@@
 
+;; --- the supervisor's OWN pause-exempt ledger, kept READ-ONLY to the agent
+;;     even though it sits inside the run worktree's (writable) --rw scope.
+;;     `supervisor-scan` bounds the no-progress guard's `paused`/`paused_until`
+;;     exemption by a cumulative-time cap (a ledger in supervisor-state,
+;;     rendered here from render-profile's --workdir) rather than by trusting
+;;     RUN.md's `status`/`paused_until` — because those two fields are written
+;;     by THIS jailed agent, so a declared pause is not evidence: an agent
+;;     that rewrites `paused_until` to the recent past every wake, or sets it
+;;     once to a far-future date, would otherwise stay exempt forever. This
+;;     deny is what makes that ledger a real authority rather than one more
+;;     agent-writable file — the agent can rewrite RUN.md all it wants, but it
+;;     cannot touch the file the cap is measured against. Same last-match-wins
+;;     positioning as the credential-deny block above (MUST come after the RW
+;;     block), and for the same reason: the enclosing .auto-pilot/ dir stays
+;;     writable (RUN.md, REPORT.md, heartbeat all live there), only this one
+;;     file does not.
+;;     NB: never spell a placeholder token's literal name in this prose (not even
+;;     to explain it). The renderer dispatches on a substring match against each
+;;     line, so ANY line merely MENTIONING a token is replaced wholesale by that
+;;     token's rendered block: a comment that names one silently becomes a
+;;     rule-injection point, and a stray name survives into the rendered profile
+;;     (which the "no tokens remain" check then fails on). Describe, don't spell.
+@@SUPERVISOR_STATE_DENY@@
+
 ;; --- exec: the resolved coder binaries (literal) plus, when --toolchain or
 ;;     --exec-dir is used, whole bin dirs (subpath) so the orchestrator can
 ;;     shell out to the dozens of coreutils/git-core/uv/node/etc. helpers a

@@ -171,9 +171,50 @@ called by the generated launch script after every wake):
   would have caught #22 even if its 401 text had never matched — the run
   making no forward progress is the actual signal, the 401 string is just the
   fast path to the same conclusion. A wake that lands while RUN.md's own
-  `status:` is `paused` never counts against this guard — a paused wake makes
-  no progress **by design** (the orchestrator is deliberately waiting out
-  `paused_until`; see task 11's shell-level pause gate), not a stall.
+  `status:` is `paused` **AND `paused_until` is parseable and still live**
+  never counts against this guard — a paused wake makes no progress **by
+  design** (the orchestrator is deliberately waiting out `paused_until`; see
+  task 11's shell-level pause gate), not a stall. `status: paused` alone is
+  NOT enough (task 23): it is the same agent-written field the guard exists to
+  catch when wedged, so a missing/garbage `paused_until`, or one blown past its
+  margin, re-arms the guard instead of exempting forever.
+
+**A declared pause is not evidence — the pause-exempt LEDGER.** Task 23's
+corroboration (`status: paused` + a parseable, still-live `paused_until`)
+answers "does the agent's own bookkeeping agree with itself," not "is this
+agent telling the truth." Both fields it checks are written by the very agent
+the no-progress guard exists to catch, so they are trivially forgeable: an
+agent that rewrites `paused_until` to a few seconds in the past on **every**
+wake satisfies the corroboration forever, and an agent that sets `paused_until`
+once to a **far-future** date additionally closes `supervisor-gate` on every
+wake — so `supervisor-check`, where the corroboration lives, never runs at all.
+Both were reproduced: 6 consecutive zero-progress wakes with the no-progress
+counter pinned at 0, no halt, no alarm.
+
+What actually bounds the exemption is a **cumulative-time ledger**,
+`supervisor-scan --pause-exempt-max <seconds>` (default
+`PAUSE_EXEMPT_MAX_SECONDS_DEFAULT`, **6 hours** — comfortably past a legitimate
+~5h rate-window wait). It runs on **every** wake, above the pre-invoke gate
+(the same placement task 16's alarm scan needs, and for the same reason: the
+far-future forgery only manifests on a gated wake), and it does not trust
+either agent-written field's _content_ — only whether the run currently reads
+as exempt:
+
+- Exempt, no streak recorded yet → stamp `exempt_since = now` in
+  `supervisor-state`.
+- Exempt, streak already recorded → halt (`--condition pause-exempt`) once
+  `now - exempt_since` exceeds the cap, regardless of what RUN.md claims.
+- Not exempt → clear `exempt_since` (the streak ends).
+
+The ledger lives in `supervisor-state`, a file the rendered sandbox profile
+denies the **jailed agent** write access to (`render-profile --workdir` emits
+the deny; see [`launch-runtime.md`](launch-runtime.md) §3 for the mechanism —
+the same last-match-wins trick that keeps a credential file read-only inside
+its writable state dir). That is what makes the cap a real authority rather
+than one more agent-writable file: the agent can rewrite `RUN.md` however it
+likes, but it cannot touch the file the cap is measured against, and it cannot
+disable the check by closing the gate — `supervisor-scan` runs whether the
+gate is open or closed.
 
 A supervisor halt writes run-level `status: systemic` + a `pause_reason`
 naming the failure to `RUN.md`, appends one alarm entry to `REPORT.md`,
@@ -237,14 +278,15 @@ auth-dead agent cannot make a model call to alert anyone; see
 [`launch-runtime.md`](launch-runtime.md) §6 for why that is a hard constraint and
 not a preference.
 
-| Condition               | Detected by                                                            | Terminal?                   |
-| ----------------------- | ---------------------------------------------------------------------- | --------------------------- |
-| **Fatal auth halt**     | `supervisor-check`'s `classify-exit` (a non-retryable `401`)           | yes: halt + teardown        |
-| **Circuit breaker**     | RUN.md's run-level `status: systemic` (written by the run loop)        | yes: halt + teardown        |
-| **A failed invariant**  | an in-jail detector's `alarm-request`, drained by the supervisor       | no: reported, run continues |
-| **N no-progress wakes** | `supervisor-check`'s no-progress guard (the **stall**; default 3)      | yes: halt + teardown        |
-| **A park storm**        | >= N tasks in phase `parked` in RUN.md (`--park-limit`; default 3)     | no: reported, run continues |
-| **A blown `--until`**   | RUN.md's `until` is past and the run is neither `done` nor sentinelled | yes: halt + teardown        |
+| Condition                        | Detected by                                                               | Terminal?                   |
+| -------------------------------- | ------------------------------------------------------------------------- | --------------------------- |
+| **Fatal auth halt**              | `supervisor-check`'s `classify-exit` (a non-retryable `401`)              | yes: halt + teardown        |
+| **Circuit breaker**              | RUN.md's run-level `status: systemic` (written by the run loop)           | yes: halt + teardown        |
+| **A failed invariant**           | an in-jail detector's `alarm-request`, drained by the supervisor          | no: reported, run continues |
+| **N no-progress wakes**          | `supervisor-check`'s no-progress guard (the **stall**; default 3)         | yes: halt + teardown        |
+| **A park storm**                 | >= N tasks in phase `parked` in RUN.md (`--park-limit`; default 3)        | no: reported, run continues |
+| **A blown `--until`**            | RUN.md's `until` is past and the run is neither `done` nor sentinelled    | yes: halt + teardown        |
+| **Pause-exempt budget exceeded** | `supervisor-scan`'s ledger (`--pause-exempt-max`; default 6h, cumulative) | yes: halt + teardown        |
 
 **Escalate on a stall, not only on a halt.** Run #2 never reached a halt state at
 all: `RUN.md` looked healthy and the run did nothing. So the scan runs on **every**

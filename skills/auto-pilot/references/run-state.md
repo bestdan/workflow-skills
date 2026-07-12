@@ -40,7 +40,7 @@ base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
 status: active # run-level: active | paused | systemic | done
-paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused
+paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
 pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
 exit_reason: continuing # why the orchestrator last exited: continuing | paused | done | systemic | deadline (see "Exit contract" below)
 exit_reason_at: 1783823504 # epoch seconds the reason was declared — how the supervisor tells THIS wake's declaration from a stale one
@@ -78,11 +78,23 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   (+ reason, `paused_until` empty) when the pre-dispatch deadline guard stops with
   ready tasks left — resumable only by an explicit `--resume`, never a timer — and
   `status: done` at a clean end-of-run (no ready tasks or a budget hard-stop).
-  `status: paused` is **required** on every pause, not optional: it is the only
-  durable fact the supervisor's no-progress guard accepts as corroboration for a
-  declared `paused` exit (`paused_until` cannot serve — it carries an inline
-  comment in the template above, and it survives a `--resume`, so a run that paused
-  once would exempt itself from the guard forever).
+  `status: paused` is **required** on every pause, not optional — but by itself
+  it is not enough to exempt the no-progress guard (task 23): `status: paused`
+  is the agent's own write, and the guard exists to catch exactly the agent
+  that is wedged. The guard's ONE exemption rule requires `status: paused`
+  backed by a **parseable, still-live `paused_until`** — a missing, garbage, or
+  expired-past-its-margin `paused_until` does not exempt, so a wedged agent
+  that declares `paused` on every wake with no bound still trips the guard.
+  **This corroboration is not itself unforgeable** — `status` and
+  `paused_until` are both agent-written, so an agent that keeps `paused_until`
+  a few seconds in the past on every wake, or sets it once to a far-future
+  date, satisfies it forever (the far-future shape additionally closes
+  `supervisor-gate` every wake, so the corroboration check never even runs).
+  What actually bounds the exemption is the **pause-exempt ledger**
+  (`supervisor-scan --pause-exempt-max`, [`run-budget.md`](run-budget.md) "A
+  third terminal kind"): a cumulative-time cap recorded in `supervisor-state`,
+  a file the rendered sandbox profile denies the jailed agent write access to.
+  That file, not this front matter, is the thing the agent cannot forge.
 - `exit_reason` / `exit_reason_at` / `exit_reason_detail` are the **exit
   contract** the supervisor reads to decide relaunch-vs-teardown — see below.
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
@@ -167,9 +179,15 @@ a log tail, a slow task and a hung one are identical.
 
 It is deliberately **not committed** to the run-state branch: it beats many times
 per task and would drown the run's durable record in churn. Like `supervisor-state`
-(the supervisor's own no-progress counter) it is wake-local liveness, not part of
-the run's record — which is exactly why the **exit reason**, which _is_ part of the
+(the supervisor's own no-progress counter, and the pause-exempt ledger's
+`exempt_since` — see below) it is wake-local bookkeeping, not part of the run's
+record — which is exactly why the **exit reason**, which _is_ part of the
 record, goes in `RUN.md` instead.
+`supervisor-state` differs from the heartbeat in one load-bearing way, though:
+it is never written from inside the jail, and the rendered sandbox profile
+denies the agent write access to it (`render-profile --workdir`) — the
+heartbeat is agent-writable by design, but a counter/ledger the no-progress
+guard trusts cannot be.
 
 ### Restack (post-merge stacked-PR repair)
 
