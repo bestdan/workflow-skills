@@ -460,7 +460,13 @@ and a **halt** exit means the loop must not dispatch.
 
 1. **Run worktree `HEAD` is on `auto-pilot/<run_id>`.** → **repair**, delegated
    entirely to `assert-run-head` (task 13): it asserts, restores, and records the
-   deviation itself.
+   deviation itself. Before delegating, doctor checks whether a HEAD deviation's
+   dirt is confined to `.auto-pilot/`: that content is never authoritative on a
+   task branch (the run-state branch is the run's single memory), so doctor
+   discards it and lets `assert-run-head` restore HEAD normally, recording the
+   discard as its own repair. Dirt outside `.auto-pilot/` still fails closed,
+   verbatim — this is what stops invariants 1 and 2 from deadlocking on exactly
+   the state they exist to repair (a parked HEAD with a deleted `RUN.md`).
 2. **`RUN.md` / `QUESTIONS.md` / `REPORT.md` are readable _from the branch_**
    (`git show <branch>:<path>`) **and `RUN.md`'s front matter parses** (`run_id` +
    `status`). → A failed branch read, or front matter that doesn't parse, is a

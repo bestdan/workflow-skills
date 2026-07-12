@@ -2633,6 +2633,66 @@ GHEOF
   [ -f "$D2R/run/.auto-pilot/RUN.md" ] && ok "doctor I2 repair: RUN.md is observably back in the working tree" \
     || bad "doctor I2 repair: RUN.md is observably back in the working tree"
 
+  # --- I1+I2 deadlock: HEAD parked off-branch AND RUN.md deleted -------------
+  # (the acceptance criterion's own scenario / finding #23's shape). The
+  # deleted RUN.md IS the dirt that used to make assert_run_head fail closed
+  # before I2 ever got a chance to restore it. Assert on OBSERVED state, not
+  # log strings: exit 0, HEAD back on the run-state branch, RUN.md restored,
+  # REPORT.md carries the repair bullet.
+  D1D="$DOC/i1-i2-deadlock"; RUN_ID1D="doctor-i1-i2-deadlock"
+  _doctor_new_run "$D1D" "$RUN_ID1D"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1D"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t1 | pending | - | main | - | - | |\n'
+  } >"$D1D/run/.auto-pilot/RUN.md"
+  : >"$D1D/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D1D/run/.auto-pilot/REPORT.md"
+  git -C "$D1D/run" add .auto-pilot; git -C "$D1D/run" commit -q -m "seed run state"
+  git -C "$D1D/run" checkout -q main
+  git -C "$D1D/run" checkout -q -b bestdan/task-x
+  echo work >"$D1D/run/task-file"; git -C "$D1D/run" add task-file; git -C "$D1D/run" commit -q -m "task work on the wrong branch"
+  rm -f "$D1D/run/.auto-pilot/RUN.md"   # the literal acceptance-criterion scenario
+
+  d1dout="$("$SCRIPT" doctor --dir "$D1D/run" --run-id "$RUN_ID1D" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1drc=$?
+  [ "$d1drc" = 0 ] && ok "doctor I1+I2 deadlock: exits 0 (recovers instead of bailing to a human)" \
+    || bad "doctor I1+I2 deadlock: exits 0" "$d1dout"
+  d1dhead="$(git -C "$D1D/run" rev-parse --abbrev-ref HEAD)"
+  [ "$d1dhead" = "auto-pilot/$RUN_ID1D" ] && ok "doctor I1+I2 deadlock: HEAD is observably back on the run-state branch" \
+    || bad "doctor I1+I2 deadlock: HEAD is observably back on the run-state branch" "got $d1dhead"
+  [ -f "$D1D/run/.auto-pilot/RUN.md" ] && ok "doctor I1+I2 deadlock: RUN.md is observably back in the working tree" \
+    || bad "doctor I1+I2 deadlock: RUN.md is observably back in the working tree"
+  have "doctor I1+I2 deadlock: REPORT.md gained the repair bullet" 'I1 repaired' "$(cat "$D1D/run/.auto-pilot/REPORT.md")"
+
+  # --- I1 negative: HEAD off-branch with dirt OUTSIDE .auto-pilot/ still -----
+  # fails closed. Someone's real work is never silently discarded.
+  D1N="$DOC/i1-negative"; RUN_ID1N="doctor-i1-negative"
+  _doctor_new_run "$D1N" "$RUN_ID1N"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1N"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t1 | pending | - | main | - | - | |\n'
+  } >"$D1N/run/.auto-pilot/RUN.md"
+  : >"$D1N/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D1N/run/.auto-pilot/REPORT.md"
+  git -C "$D1N/run" add .auto-pilot; git -C "$D1N/run" commit -q -m "seed run state"
+  git -C "$D1N/run" checkout -q main
+  git -C "$D1N/run" checkout -q -b bestdan/task-y
+  echo work >"$D1N/run/task-file"; git -C "$D1N/run" add task-file; git -C "$D1N/run" commit -q -m "task work on the wrong branch"
+  printf 'uncommitted real work\n' >"$D1N/run/important-work.txt"   # dirt OUTSIDE .auto-pilot/
+  rm -f "$D1N/run/.auto-pilot/RUN.md"
+
+  d1nout="$("$SCRIPT" doctor --dir "$D1N/run" --run-id "$RUN_ID1N" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1nrc=$?
+  [ "$d1nrc" != 0 ] && ok "doctor I1 negative: real work outside .auto-pilot/ still fails closed (non-zero)" \
+    || bad "doctor I1 negative: real work outside .auto-pilot/ still fails closed" "$d1nout"
+  d1nhead="$(git -C "$D1N/run" rev-parse --abbrev-ref HEAD)"
+  [ "$d1nhead" = "bestdan/task-y" ] && ok "doctor I1 negative: HEAD is left unchanged" \
+    || bad "doctor I1 negative: HEAD is left unchanged" "got $d1nhead"
+  have "doctor I1 negative: the real-work file is left untouched" 'uncommitted real work' \
+    "$(cat "$D1N/run/important-work.txt")"
+
   # --- I3: every pr-open/in-review/iterating/handed-off task has a real, ----
   # open (or merged) PR. Covers: no PR number recorded, CLOSED, nonexistent,
   # OPEN (holds), and MERGED (holds — NOT a repair; a human merge is healthy).

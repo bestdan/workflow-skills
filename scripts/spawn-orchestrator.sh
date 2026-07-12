@@ -3501,10 +3501,32 @@ doctor() {
   # the subshell (canonicalize()'s pattern above) — an unrepairable deviation
   # (a dirty run worktree) is doctor's own fail-closed exit, not a systemic
   # halt (there is nothing wrong with the RUN STATE itself in that case).
+  #
+  # Before delegating: if HEAD is parked off-branch AND the worktree is dirty
+  # ONLY inside .auto-pilot/, that dirt is never authoritative — the run-state
+  # branch, not the task branch's working tree, is the run's single memory.
+  # A stale/half-written/deleted .auto-pilot/ copy sitting on a task branch is
+  # exactly the shape of findings #22/#23 (this is invariant 1 and 2's own
+  # deadlock scenario: RUN.md deleted + HEAD parked). assert_run_head fail-
+  # closes on ANY dirt, so without this, I1 can never repair the state I2
+  # exists to restore. Discarding .auto-pilot/ here is a repair, not data
+  # loss; dirt OUTSIDE .auto-pilot/ still fails closed below, verbatim.
+  local i1_discarded=0 i1_parked_on
+  i1_parked_on="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  if [ "$i1_parked_on" != "$branch" ] \
+     && [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] \
+     && [ -z "$(git -C "$dir" status --porcelain -- . ":(exclude).auto-pilot/" 2>/dev/null)" ]; then
+    git -C "$dir" reset -q -- .auto-pilot/ 2>/dev/null
+    git -C "$dir" checkout -q -- .auto-pilot/ 2>/dev/null
+    i1_discarded=1
+  fi
   local i1_out i1_rc
   i1_out="$(assert_run_head --dir "$dir" --run-id "$run_id" ${questions:+--questions "$questions"} 2>&1)"; i1_rc=$?
   [ "$i1_rc" -eq 0 ] || die "doctor: invariant 1 (HEAD) could not be repaired: $i1_out"
-  if printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
+  if [ "$i1_discarded" -eq 1 ]; then
+    n_repaired=$((n_repaired + 1)); repaired_notes+=("I1: discarded stale .auto-pilot/ dirt on $i1_parked_on, HEAD restored")
+    report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\` with stale/dirty \`.auto-pilot/\` content; discarded it and restored HEAD (see QUESTIONS.md for the deviation record).")
+  elif printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
     n_repaired=$((n_repaired + 1)); repaired_notes+=("I1: HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\`; restored (see QUESTIONS.md for the deviation record).")
   else
