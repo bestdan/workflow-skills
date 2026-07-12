@@ -187,10 +187,10 @@ Any decision that can't be resolved here — and would therefore prompt mid-run 
 
 Check the file types the tasks will produce (the plan's `related_files` and
 any expected build/output artifacts) against the repo's ignore rules with
-`git check-ignore`. A match does **not** block launch — an ignored directory
-is common and usually fine to force through with `git add -f` — but surface
-the list in the launch summary so the human can still catch a genuinely
-wrong ignore while awake.
+`git check-ignore`. A match does **not** block launch, but **record the matched
+paths in run state** so the run phase commits them with `git add -f` and the work
+lands despite the ignore rule. Surface the list in the launch summary too, so the
+human can still catch a genuinely wrong ignore while awake.
 
 ### Step 5 — Record verify tooling + exercise path
 
