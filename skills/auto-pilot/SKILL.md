@@ -308,6 +308,10 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   <run-dir>`): the `ALARM` sentinel is the alarm's per-run idempotency key, so one
   that outlives the resume suppresses the alarm if the same condition recurs and
   the resumed run halts silently. `REPORT.md`'s history stays.
+- **Clear the terminal exit state too** (`spawn-orchestrator.sh clear-exit-state
+  --dir <run-worktree>`): the done-sentinel and `exit_reason*` are durable, and
+  `deadline` is by definition recovered BY this resume — left in place they make a
+  live run read back as finished ([`references/resume.md`](references/resume.md)).
 - **Then fall into the run loop**, clearing any run-level pause markers first
   ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 
@@ -326,6 +330,7 @@ The loop is deliberately thin:
 
 ```
 while unblocked tasks remain and inside budget bounds:
+    heartbeat (and again at every /deliver-task sub-step boundary)
     assert run worktree HEAD == auto-pilot/<run_id>   # HEAD guard; restore + record if not
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
@@ -333,7 +338,22 @@ while unblocked tasks remain and inside budget bounds:
     /deliver-task it (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
+declare the exit reason, then exit          # every termination path, no exceptions
 ```
+
+**The exit contract (every exit, including the ones that look like success).**
+Before exiting — for _any_ reason — run
+`scripts/spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r>`, where
+`<r>` is `continuing` (work remains, context exhausted) | `paused` (rate window) |
+`done` (no ready tasks) | `systemic` (circuit breaker / failed invariant) |
+`deadline` (the pre-dispatch guard stopped with tasks ready). The supervisor reads
+it in shell and relaunches or tears down on that basis instead of on a blind timer;
+without it, a finished run and one that ran out of context mid-task are the same
+`exit 0`. Beat the heartbeat (`spawn-orchestrator.sh heartbeat --dir <run worktree>
+--note <where>`) at each loop iteration and each `/deliver-task` sub-step boundary,
+so a watcher can tell _slow_ from _wedged_. Vocabulary, precedence, and the
+fail-safe rules: [`references/run-state.md`](references/run-state.md) "Exit
+contract" and "Heartbeat".
 
 **The run worktree's `HEAD` never leaves the run-state branch.** Task code is
 written in a separate worker worktree that `/deliver-task` owns end to end
@@ -461,7 +481,9 @@ run in `--resume`'s resumable set (those tasks stay ready for a later `--resume`
 The supervisor teardown below (not the `paused_until` value, which the timer never
 reads directly) is what guarantees no timer re-wakes it.
 In every case the orchestrator writes and commits the final `REPORT.md` on the
-run-state branch, then
+run-state branch, then **declares its exit reason** (`done` for a finished run,
+`deadline` for the guard stop — the exit contract above), which drops the
+done-sentinel and is what
 **tears down its relaunch supervisor** — the recurring `launchd`/`systemd` timer,
 if one was registered ([`references/launch-runtime.md`](references/launch-runtime.md)
 "Relaunchable, not one-shot") — so no run is re-woken by a timer (a

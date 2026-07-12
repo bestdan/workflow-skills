@@ -35,8 +35,11 @@
 #       [--mcp-host <host> ...] [--add-task-host <host> ...] [--npm] \
 #       --out <file>
 #   spawn-orchestrator.sh check-profile <file>
-#   spawn-orchestrator.sh status --label <label> [--dir <run-dir>]
-#   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>]
+#   spawn-orchestrator.sh status --label <label> [--dir <run-dir>] [--task-ceiling <s>]
+#   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>] [--reason <r>]
+#   spawn-orchestrator.sh exit-reason --dir <run-dir> --reason <r> [--label <label>] [--detail <text>]
+#   spawn-orchestrator.sh clear-exit-state --dir <run-dir>
+#   spawn-orchestrator.sh heartbeat --dir <run-dir> [--note <text>]
 #   spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id <run_id> \
 #       [--questions <QUESTIONS.md path>]
 #
@@ -49,7 +52,7 @@
 #   spawn-orchestrator.sh classify-exit --exit-code <n> --output <file> \
 #       [--since-offset <bytes>]
 #   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
-#       [--since-offset <bytes>] \
+#       [--wake-start <epoch>] [--since-offset <bytes>] \
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>] \
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
@@ -94,8 +97,66 @@
 #                  wake appended to the shared log, so a past wake's auth
 #                  failure can't keep halting a run that has since been
 #                  re-authenticated.
+#   exit-reason    The EXIT CONTRACT (task 15). The orchestrator DECLARES why it
+#                  is exiting, on the run-state branch, before it exits — one of
+#                  `continuing` (work remains, context exhausted → relaunch me),
+#                  `paused` (rate window / paused_until → relaunch me past the
+#                  reset), `done` (no ready tasks → tear down), `systemic`
+#                  (circuit breaker / fatal auth / failed invariant → tear down +
+#                  alarm), `deadline` (the pre-dispatch guard stopped with tasks
+#                  still ready → tear down; resume only by an explicit --resume).
+#                  Without it, "I finished the run" and "I ran out of context
+#                  mid-task" are the SAME observable event (exit 0) and the
+#                  supervisor can only relaunch on a blind timer. Writes
+#                  `exit_reason` + `exit_reason_at` (epoch) to RUN.md's front
+#                  matter and commits them to the run-state branch; for the three
+#                  TERMINAL reasons it also writes the done-sentinel — the SAME
+#                  file `teardown --done-sentinel` writes and `status` reads,
+#                  never a second marker — carrying the reason. It never calls
+#                  launchctl: the orchestrator is jailed and cannot; the
+#                  supervisor (below), which runs outside the jail, does the
+#                  actual bootout after reading the declared reason. A NON-terminal
+#                  reason also REMOVES any pre-existing done-sentinel: a live run
+#                  declaring "relaunch me" must not leave "the run is over" on disk.
+#   clear-exit-state  The inverse, and `--resume`'s first act: remove the
+#                  done-sentinel and blank `exit_reason`/`exit_reason_at`/
+#                  `exit_reason_detail` on the run-state branch. A terminal reason is
+#                  DURABLE (committed) and `deadline` is BY DEFINITION the one whose
+#                  recovery is an explicit --resume — so without this, a resumed run
+#                  carries a "the run is over" marker into its first wake: `status`
+#                  reports `relaunch=no`, a PathState watcher treats it as complete,
+#                  and the supervisor can tear it down on its first wake.
+#   heartbeat      Touch <dir>/.auto-pilot/heartbeat (epoch + ISO + a note). The
+#                  orchestrator touches it at each loop iteration and each
+#                  /deliver-task sub-step boundary, and the launch wrapper touches
+#                  it at the top of every wake. That is the ONE signal that
+#                  separates *slow* from *wedged*: `status` compares its age to
+#                  the per-task ceiling ("last heartbeat 40m ago, ceiling 45m").
+#                  Deliberately NOT committed to the run-state branch — it beats
+#                  many times per task and would drown the run's durable record in
+#                  churn; it is wake-local liveness, like `supervisor-state`.
 #   supervisor-check  The per-wake decision the generated launch script calls
-#                  AFTER `claude -p` exits. Classifies the exit (above); a
+#                  AFTER `claude -p` exits. It READS THE DECLARED EXIT REASON (in
+#                  shell, no model call) and acts on it — relaunch on
+#                  `continuing`/`paused`, tear down on `done`/`deadline`, halt +
+#                  alarm on `systemic` — instead of relaunching on a blind timer.
+#                  The agent DECLARING beats the supervisor INFERRING; inference
+#                  (classify-exit, below) remains the fallback for a wake that
+#                  declared nothing (a hard-killed agent, a pre-task-15 prompt).
+#                  Fail-SAFE: an unknown/missing/garbage reason never tears a live
+#                  run down — it falls back to inference. A declaration is only
+#                  honored when it is THIS wake's (`exit_reason_at` >=
+#                  --wake-start), so a previous wake's `done` can't tear down a
+#                  live run and a previous wake's `continuing` can't out-vote a
+#                  fatal auth exit. And a `fatal` classification halts regardless
+#                  of what was declared (over-halting is the safe direction; that
+#                  is finding #22's whole lesson). A missing/garbage --wake-start
+#                  (a launch.sh generated before it existed, an unreachable `date`)
+#                  DEGRADES to "honor no declaration" — it never disables the
+#                  supervisor: classification, the no-progress guard, the halt and
+#                  the teardown all still run. A supervisor that silently stops
+#                  supervising is the worst outcome available to this system.
+#                  Classifies the exit (above); a
 #                  `fatal` classification halts immediately. A `retry`
 #                  classification is checked against the no-progress guard:
 #                  if the run-state branch HEAD (under --dir) hasn't moved
@@ -164,16 +225,23 @@
 #           run-level `status:`, the per-task phase table, the last
 #           meaningful event from `orchestrator.log`, whether the recorded
 #           orchestrator PID is actually live (guarding against a recycled
-#           PID), the `--until` deadline, and whether the done-sentinel
-#           (written by `teardown --done-sentinel`, see below) is present.
+#           PID), the `--until` deadline, whether the done-sentinel
+#           (written by `teardown --done-sentinel`, see below) is present, the
+#           HEARTBEAT (fresh / stale against --task-ceiling, default 2700s = the
+#           45m per-task ceiling), the declared EXIT REASON, and whether a
+#           relaunch is therefore expected.
 #           Never mutates anything. `--dir` defaults to $PWD; state is read
-#           from <dir>/.auto-pilot/{RUN.md,orchestrator.log,orchestrator.done}.
+#           from <dir>/.auto-pilot/{RUN.md,orchestrator.log,orchestrator.done,heartbeat}.
 #   teardown  Boot the launchd job out (`launchctl bootout`). With
 #             `--done-sentinel <path>`, first atomically writes that file as
 #             the durable completion marker, THEN boots the job out — so a
 #             watcher polling the sentinel never observes "job gone, no
 #             done-marker yet". This is the ONE completion mechanism `status`
 #             also reads (see launch-runtime.md "Logs / observability").
+#             `--reason <r>` records WHICH terminal exit reason the sentinel
+#             stands for (`done` by default, but also `systemic`/`deadline`) —
+#             the sentinel is the single file, so it carries the distinction
+#             rather than a sibling marker being invented for it.
 #
 #   render-settings  Emit the ephemeral `claude -p --settings` JSON: layer-2
 #                    network egress (sandbox.network.allowedDomains) narrowed to
@@ -227,8 +295,35 @@ DONE_SENTINEL_NAME="orchestrator.done"
 # but is NEVER committed to the run-state branch itself (it's wake-to-wake
 # scratch state, not part of the run's durable record).
 SUPERVISOR_STATE_NAME="supervisor-state"
+# The heartbeat the orchestrator touches per loop iteration / per /deliver-task
+# sub-step, and the launch wrapper touches at the top of each wake. Like
+# supervisor-state it is NOT committed to the run-state branch (it beats far too
+# often to belong in a durable record); unlike supervisor-state it is written by
+# the AGENT, so it lives in its own file rather than racing the supervisor's
+# rewrites of that one.
+HEARTBEAT_NAME="heartbeat"
+# The per-task wall-clock ceiling `status` measures the heartbeat's age against
+# (run-budget.md "Per-task wall-clock bound"): 45 minutes. Older than this with
+# no beat means WEDGED, not merely slow.
+DEFAULT_TASK_CEILING=2700
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
+
+# The exit-reason vocabulary (task 15). Exactly five values, and the split that
+# matters is relaunch-vs-teardown:
+#   continuing  work remains, context exhausted   → RELAUNCH
+#   paused      rate window / paused_until set    → RELAUNCH (past the reset)
+#   done        no ready tasks remain             → TEAR DOWN
+#   systemic    circuit breaker / fatal auth      → TEAR DOWN + alarm
+#   deadline    pre-dispatch guard, tasks ready   → TEAR DOWN (resume via --resume)
+_is_exit_reason() {
+  case "$1" in continuing|paused|done|systemic|deadline) return 0 ;; *) return 1 ;; esac
+}
+# The three that mean "do not relaunch me". `systemic` is terminal too, but it
+# routes through the halt path (alarm + REPORT entry), not the plain teardown.
+_is_terminal_reason() {
+  case "$1" in done|systemic|deadline) return 0 ;; *) return 1 ;; esac
+}
 
 # Canonicalize an absolute, existing path. Prints the canonical path on success;
 # on a fail-closed condition it writes the reason to stderr and RETURNS non-zero
@@ -866,6 +961,16 @@ write_launch() {
     # added later goes HERE, on this side of the gate, for the same reason. Never
     # fails the wake: bookkeeping must not be able to prevent the agent from running.
     printf '%q supervisor-scan --dir %q --label %q >>%q 2>&1 || true\n' "$self" "$workdir" "$label" "$log"
+    # Beat the heartbeat — ALSO above the gate, and for the same reason (task 15 +
+    # task 16's seam). It is the wake's liveness signal, not the agent's: a claude
+    # that wedges before its first loop iteration must still leave "this wake
+    # happened at T", and so must a wake the gate CLOSES. A rate-window pause is
+    # hours of legitimately gate-closed wakes; with the beat under the gate's
+    # `exit 0`, `status` would age the last pre-pause beat past the 45m per-task
+    # ceiling and report a healthy, paused run as a STALL — turning the one signal
+    # that separates slow from wedged into a false alarm exactly when the run is
+    # doing the right thing. Never fails the wake.
+    printf '%q heartbeat --dir %q --note wake-start >>%q 2>&1 || true\n' "$self" "$workdir" "$log"
     # Pre-invoke gate (task 11 / finding #19): a pure shell timestamp check,
     # BEFORE claude ever starts, so a wake that lands mid-pause costs no
     # model call. Exit 20 is the gate's distinct "do not invoke" signal;
@@ -880,6 +985,14 @@ write_launch() {
     # would keep halting the run long after a human re-authenticated.
     printf 'off=$(wc -c <%q 2>/dev/null | tr -d " ") || off=0\n' "$log"
     printf ': "${off:=0}"\n'
+    # Stamp this wake's start (epoch) BEFORE claude runs — and BELOW the gate, on
+    # the agent side of the seam, because that is the only side that can produce a
+    # declaration: `supervisor-check` compares this stamp against RUN.md's
+    # `exit_reason_at` so only THIS wake's declaration counts (the reason lives on
+    # the run-state branch and outlives the wake that wrote it, and a stale one must
+    # never decide a later wake's fate). A gate-closed wake never invokes the agent
+    # and never reaches supervisor-check, so it has nothing to date.
+    printf 'wake=$(date +%%s)\n'
     # NOT `exec`'d (task 10): the wrapper must observe claude's exit to
     # classify it, so the launchd-tracked PID is this wrapper, not claude
     # itself. `set +e`/`set -e` bracket the one command allowed to fail.
@@ -899,7 +1012,7 @@ write_launch() {
     # run-state progress also halts (the general backstop). A retryable exit
     # (or a legitimate paused_until wait) just exits non-zero, and the
     # plist's StartInterval relaunches as before.
-    printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --dir %q --label %q --state %q --no-progress-limit %q\n' \
+    printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --wake-start "$wake" --dir %q --label %q --state %q --no-progress-limit %q\n' \
       "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit"
     printf 'exit $?\n'
   } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
@@ -984,33 +1097,32 @@ detach() {
 }
 
 teardown() {
-  local label="" done_sentinel=""
+  local label="" done_sentinel="" reason="done"
   while [ $# -gt 0 ]; do
     case "$1" in
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --done-sentinel) [ $# -ge 2 ] || die "missing value for --done-sentinel"; done_sentinel="$2"; shift 2 ;;
+      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
       *) die "unknown teardown argument: $1" ;;
     esac
   done
   [ -n "$label" ] || die "teardown requires --label"
+  _is_terminal_reason "$reason" \
+    || die "teardown --reason must be a TERMINAL exit reason (done|systemic|deadline), never one that expects a relaunch (fail-closed): $reason"
 
   # Write the done-sentinel FIRST (atomically: tmp + mv), THEN boot the job
   # out — so a watcher polling the sentinel never sees "gone but no
   # done-marker" (the ordering is load-bearing, same reasoning as launch()'s
   # smoke-test-before-detach). This is the single completion mechanism;
-  # `status` reads the same file.
+  # `status` reads the same file, and it carries WHICH terminal reason it stands
+  # for (task 15) so `done` and `systemic` stay distinguishable in one file.
+  # A sentinel write that FAILS (disk full, read-only run dir) must be LOUD, never
+  # a silent skip: `_write_done_sentinel` reports the reason on stderr and returns
+  # non-zero, and we fail-closed here rather than boot the job out with no
+  # completion marker — the ordering above is the whole point.
   if [ -n "$done_sentinel" ]; then
-    case "$done_sentinel" in /*) ;; *) die "--done-sentinel must be absolute (fail-closed): $done_sentinel" ;; esac
-    local sdir; sdir="$(dirname "$done_sentinel")"
-    mkdir -p "$sdir" || die "failed to create sentinel directory: $sdir"
-    # Create the temp file IN the sentinel's own directory so the `mv` below is a
-    # same-filesystem atomic rename — a temp under $TMPDIR could be on another
-    # filesystem, making `mv` a non-atomic copy that can fail with EXDEV or leave
-    # a watcher observing a partial sentinel.
-    local tmp; tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" || die "mktemp failed"
-    printf '%s done %s\n' "$label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp" \
-      || { rm -f "$tmp"; die "failed to write done sentinel"; }
-    mv "$tmp" "$done_sentinel" || { rm -f "$tmp"; die "failed to write done sentinel: $done_sentinel"; }
+    _write_done_sentinel "$done_sentinel" "$label" "$reason" \
+      || die "teardown ($label): FAILED to write the done-sentinel $done_sentinel — NOT booting the job out (a torn-down job with no completion marker is exactly the 'gone but not done' state the sentinel exists to prevent); fix the run dir and re-run"
   fi
 
   # launchctl may genuinely be absent (non-macOS, or the in-jail test harness) —
@@ -1019,6 +1131,29 @@ teardown() {
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
   fi
   echo "spawn-orchestrator: torn down $label"
+}
+
+# VERIFY a teardown actually took, and make a still-loaded job LOUD.
+#
+# `teardown` swallows bootout failure (`|| true`), and it must — the sentinel is
+# authoritative and a missing launchctl is legitimate. But a bootout that FAILS on
+# a real macOS host leaves the job loaded, so StartInterval keeps waking a FINISHED
+# run: each wake exits 0, re-attempts the same failing teardown, does zero work and
+# raises zero signal, while `status` says `relaunch=no`. That is finding #22's
+# 52-relaunch loop with a different trigger. So every teardown the SUPERVISOR
+# performs (the declared done/deadline path and the halt path alike) re-checks with
+# `launchctl print`, retries once, and warns loudly if the job is still there.
+# Returns non-zero iff the job is still loaded afterwards.
+_verify_bootout() {
+  local label="$1"
+  command -v launchctl >/dev/null 2>&1 || return 0
+  launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || return 0   # gone: bootout took
+  teardown --label "$label" >/dev/null || true
+  if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    echo "spawn-orchestrator: teardown ($label): WARNING — launchctl bootout FAILED, the job is STILL LOADED and StartInterval will keep waking a finished run (zero work, zero alarm); remove it by hand: launchctl bootout gui/$(id -u)/$label" >&2
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1565,6 +1700,243 @@ _supervisor_alarm_scan() {
   fi
 }
 
+# Same, but INSERTS the key (just before the front matter's closing `---`) when
+# it isn't declared yet. The exit-reason fields are new (task 15), so a run whose
+# RUN.md was written by an older launch has no `exit_reason:` line — and refusing
+# to declare a reason there is the wrong trade: a run that cannot say why it
+# stopped is exactly the state this task exists to abolish. A file with no front
+# matter at all is still fail-closed (that is a malformed RUN.md, not an old one).
+_upsert_front_field() {
+  local f="$1" key="$2" value="$3" d; d="$(dirname "$f")"
+  local tmp; tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
+  awk -v key="$key" -v val="$value" '
+    /^---$/ {
+      dashes++
+      if (dashes == 2 && !written) { print key ": " val; written = 1 }
+      print; next
+    }
+    dashes==1 && $0 ~ "^" key ":" { print key ": " val; written = 1; next }
+    { print }
+  ' "$f" >"$tmp" || { rm -f "$tmp"; die "failed to render $key update for $f"; }
+  grep -qE "^${key}: " "$tmp" || { rm -f "$tmp"; die "no front matter to write $key into (fail-closed): $f"; }
+  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+}
+
+# ---------------------------------------------------------------------------
+# Task 15 — the exit contract. "I finished the run" and "I ran out of context
+# mid-task" were the same observable event (exit 0, terminal_reason: completed),
+# so every downstream consumer was guessing: the supervisor relaunched on a blind
+# timer because it could not tell them apart, and a human reading `exit code = 0`
+# could not tell whether the run was done or dead. The orchestrator now DECLARES
+# its reason on the run-state branch before exiting, and the supervisor reads it.
+# ---------------------------------------------------------------------------
+
+# Atomically write the done-sentinel. ONE file (`orchestrator.done`) for all three
+# terminal reasons — the plan requires the done-sentinel and the launchd relaunch
+# sentinel be the SAME file, so a `systemic` halt must drop it too, or a
+# KeepAlive/PathState supervisor would happily relaunch a halted run. The reason
+# it carries is what keeps that single file from flattening `done` and `systemic`
+# back into one indistinguishable state. Args: <path> <label> <reason>
+#
+# It RETURNS non-zero (loudly, on stderr) rather than `die`ing: it is called from
+# `teardown`, which is a plain function call inside `supervisor_check` — a `die`
+# here would `exit 2` out of the supervisor BEFORE the bootout, so a full disk or a
+# read-only run dir would silently produce no teardown at all. The caller decides.
+_write_done_sentinel() {
+  local f="$1" label="$2" reason="$3"
+  case "$f" in
+    /*) ;;
+    *) echo "spawn-orchestrator: done-sentinel path must be absolute (fail-closed): $f" >&2; return 1 ;;
+  esac
+  local sdir; sdir="$(dirname "$f")"
+  mkdir -p "$sdir" || { echo "spawn-orchestrator: failed to create sentinel directory: $sdir" >&2; return 1; }
+  # The temp file goes in the sentinel's OWN directory so the `mv` is a
+  # same-filesystem atomic rename — a $TMPDIR temp could be on another filesystem,
+  # making `mv` a non-atomic copy a watcher could observe half-written.
+  local tmp; tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" \
+    || { echo "spawn-orchestrator: mktemp failed under $sdir (disk full? read-only?)" >&2; return 1; }
+  { printf '%s %s %s\n' "$label" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'reason: %s\n' "$reason"
+  } >"$tmp" || { rm -f "$tmp"; echo "spawn-orchestrator: failed to write done sentinel" >&2; return 1; }
+  mv "$tmp" "$f" || { rm -f "$tmp"; echo "spawn-orchestrator: failed to write done sentinel: $f" >&2; return 1; }
+}
+
+# (agent side, in-jail) Declare WHY this orchestrator is exiting, before it exits.
+# Writes `exit_reason` + `exit_reason_at` (epoch) into RUN.md's front matter and
+# commits them to the run-state branch — durable, on the branch, per the task's
+# requirement that the reason outlive the process. For a TERMINAL reason it also
+# drops the done-sentinel, so a watcher polling that file sees the run stop even
+# before the supervisor's next wake.
+#
+# It never calls launchctl: the orchestrator is inside the Seatbelt jail, where
+# exec of launchctl is denied by construction (that deny is the jail's whole
+# escape wall). Booting the job out is the SUPERVISOR's job — it runs outside the
+# jail, reads this declaration, and acts (supervisor_check below).
+exit_reason() {
+  local dir="" reason="" label="auto-pilot" detail=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
+      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --detail) [ $# -ge 2 ] || die "missing value for --detail"; detail="$2"; shift 2 ;;
+      *) die "unknown exit-reason argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$reason" ] || die "exit-reason requires --dir and --reason"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  _is_exit_reason "$reason" \
+    || die "unknown exit reason (fail-closed): $reason — must be one of continuing|paused|done|systemic|deadline"
+  local run_md="$dir/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+
+  # Front matter is line-oriented: a multi-line detail would corrupt it (and could
+  # smuggle its own key). Flatten to one line rather than fail a legitimate exit.
+  detail="$(printf '%s' "$detail" | tr '\n' ' ')"
+
+  _upsert_front_field "$run_md" exit_reason "$reason"
+  _upsert_front_field "$run_md" exit_reason_at "$(date +%s)"
+  # Written UNCONDITIONALLY (empty when no --detail), so a previous exit's detail is
+  # overwritten rather than left to be read back as this one's diagnosis.
+  _upsert_front_field "$run_md" exit_reason_detail "$detail"
+
+  # Best-effort commit, same posture as the supervisor halt: a broken git checkout
+  # must not stop the orchestrator from exiting, and the on-disk RUN.md is still
+  # what the supervisor reads on this wake.
+  ( cd "$dir" \
+    && git add -- .auto-pilot/RUN.md 2>/dev/null \
+    && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
+           commit -q -m "auto-pilot: exit reason $reason" \
+  ) 2>/dev/null || echo "spawn-orchestrator: exit-reason: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+
+  local sentinel="$dir/.auto-pilot/$DONE_SENTINEL_NAME"
+  if _is_terminal_reason "$reason"; then
+    _write_done_sentinel "$sentinel" "$label" "$reason" \
+      || die "exit-reason: declared $reason but FAILED to write the done-sentinel $sentinel — the run would read back as still running; fix the run dir and re-declare"
+  else
+    # A RELAUNCHABLE reason must CLEAR any pre-existing done-sentinel. The sentinel
+    # is durable and nothing else in the run removes it, so a run that once declared
+    # `done`/`deadline` (or was torn down and then --resume'd) would otherwise carry
+    # "the run is over" on disk while actively declaring "relaunch me": `status`
+    # would report `relaunch=no` for a live run, and the PathState watcher
+    # launch-runtime.md blesses would treat it as complete.
+    rm -f "$sentinel" \
+      || die "exit-reason: declared $reason but could not remove the stale done-sentinel $sentinel — a live run must not carry a completion marker"
+  fi
+  echo "spawn-orchestrator: exit reason $reason${detail:+ ($detail)}"
+}
+
+# (resume side) Clear the terminal exit state so a resumed run does not start life
+# already marked finished. `--resume` calls this BEFORE the first wake.
+#
+# The exit contract is durable by design — the reason is committed to the run-state
+# branch and the done-sentinel is a file — and `deadline` is BY DEFINITION the
+# reason whose recovery is an explicit `--resume`. Nothing else in the repo clears
+# either, so without this a resumed run keeps reading back as `done`/`deadline`:
+# `status` says `relaunch=no`, and a supervisor wake could tear the live run down.
+clear_exit_state() {
+  local dir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      *) die "unknown clear-exit-state argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] || die "clear-exit-state requires --dir"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  local run_md="$dir/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+
+  local sentinel="$dir/.auto-pilot/$DONE_SENTINEL_NAME"
+  rm -f "$sentinel" || die "clear-exit-state: could not remove the done-sentinel (fail-closed): $sentinel"
+  _upsert_front_field "$run_md" exit_reason ""
+  _upsert_front_field "$run_md" exit_reason_at ""
+  _upsert_front_field "$run_md" exit_reason_detail ""
+
+  ( cd "$dir" \
+    && git add -- .auto-pilot/RUN.md 2>/dev/null \
+    && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
+           commit -q -m "auto-pilot: clear exit state (resume)" \
+  ) 2>/dev/null || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+
+  echo "spawn-orchestrator: exit state cleared (done-sentinel removed, exit_reason blanked) $dir"
+}
+
+# (agent side) Touch the heartbeat. Called at each loop iteration and each
+# /deliver-task sub-step boundary, and by the launch wrapper at the top of every
+# wake. This is the only signal that can separate SLOW from WEDGED: without it a
+# 40-minute silence and a hung process are the same observation.
+heartbeat() {
+  local dir="" note=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --note) [ $# -ge 2 ] || die "missing value for --note"; note="$2"; shift 2 ;;
+      *) die "unknown heartbeat argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] || die "heartbeat requires --dir"
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  local d="$dir/.auto-pilot"
+  mkdir -p "$d" || die "cannot create run-state directory: $d"
+  note="$(printf '%s' "${note:-beat}" | tr '\n' ' ')"
+  local now iso; now="$(date +%s)"; iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp; tmp="$(mktemp "$d/.heartbeat.XXXXXX")" || die "mktemp failed"
+  { printf 'at: %s\n' "$now"; printf 'iso: %s\n' "$iso"; printf 'note: %s\n' "$note"; } >"$tmp" \
+    || { rm -f "$tmp"; die "failed to write heartbeat"; }
+  mv "$tmp" "$d/$HEARTBEAT_NAME" || { rm -f "$tmp"; die "failed to write heartbeat: $d/$HEARTBEAT_NAME"; }
+  echo "spawn-orchestrator: heartbeat $iso ($note)"
+}
+
+# (supervisor side) The exit reason THIS wake declared, or empty.
+#
+# Empty is the fail-SAFE answer and it is deliberate: an unknown, missing, or
+# garbage reason must never tear a live run down, so it falls back to the existing
+# inference path (classify-exit) rather than inventing a decision.
+#
+# Freshness is load-bearing, not hygiene. The declaration lives on the run-state
+# branch, so it OUTLIVES the wake that wrote it. Without the timestamp check, a
+# wake that declared `continuing` and was then hard-killed on the next wake by a
+# dead credential would have its stale `continuing` out-vote the fatal auth
+# classification — reviving finding #22's 52-relaunch loop through a durable file.
+# So a declaration counts only if it was written at or after this wake started.
+#
+# And "I cannot tell when this wake started" is NOT a licence to trust the
+# declaration — it is the same unknowable as an undatable declaration, and it fails
+# CLOSED (honor no declaration, fall back to inference). The trigger is real: the
+# generated wrapper computes `wake=$(date +%s)` under the plist's NARROWED PATH, so
+# a `date` it cannot reach leaves `wake` empty; trusting the declaration then would
+# let a RUN.md carrying `exit_reason: done` from 1970 tear down a live run.
+# Args: <run-dir> <wake-start-epoch>
+_declared_exit_reason() {
+  local dir="$1" wake="${2:-}"
+  case "$wake" in ''|*[!0-9]*) return 0 ;; esac
+  local run_md="$dir/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || return 0
+  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local r; r="$(printf '%s\n' "$front" | grep -E '^exit_reason:' | head -1 \
+    | sed -e 's/^exit_reason: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+  _is_exit_reason "$r" || return 0
+  local at; at="$(printf '%s\n' "$front" | grep -E '^exit_reason_at:' | head -1 \
+    | sed -e 's/^exit_reason_at: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
+  # An undatable declaration can't be attributed to a wake, so it isn't trusted.
+  case "$at" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$at" -ge "$wake" ] || return 0
+  printf '%s' "$r"
+}
+
+# Read one front-matter field out of a run dir's RUN.md (supervisor side). The
+# `status` reader's own _front_field closes over a pre-extracted `front` variable;
+# this one takes the dir. Trailing whitespace is trimmed, but a `#` is NOT treated
+# as a comment: `pause_reason` / `exit_reason_detail` are free prose and may contain
+# one, and truncating an operator's diagnosis at a `#` would be its own data loss.
+_run_front_field() {
+  local run_md="$1/.auto-pilot/RUN.md" key="$2"
+  [ -f "$run_md" ] || return 0
+  awk '/^---$/{c++; next} c==1{print}' "$run_md" | grep -E "^${key}:" | head -1 \
+    | sed -e "s/^${key}: *//" -e 's/[[:space:]]*$//'
+}
+
 # The halt itself: write run-level `status: systemic` + `pause_reason` to
 # RUN.md, append one alarm entry to REPORT.md, raise the ALARM (task 16 —
 # notify a human, once per condition), commit both to the run-state
@@ -1572,7 +1944,7 @@ _supervisor_alarm_scan() {
 # supervisor down, which is the one thing that MUST happen), then boot the
 # launchd job out so it never relaunches into the same condition.
 _supervisor_halt() {
-  local dir="" label="" reason="" condition="halt"
+  local dir="" label="" reason="" condition="halt" preserve=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2 ;;
@@ -1582,6 +1954,8 @@ _supervisor_halt() {
       # passes the SAME condition, so `alarm` no-ops instead of double-notifying
       # — the idempotency is the de-dupe, no second flag needed.
       --condition) condition="$2"; shift 2 ;;
+      # ONLY the declared-`systemic` caller passes this. See below.
+      --preserve-pause-reason) preserve=1; shift ;;
       *) die "unknown supervisor-halt argument: $1" ;;
     esac
   done
@@ -1593,7 +1967,35 @@ _supervisor_halt() {
 
   if [ -f "$run_md" ]; then
     _set_front_field "$run_md" status systemic
-    _set_front_field "$run_md" pause_reason "$reason"
+    # `pause_reason` must name the TRUE cause of THIS halt. On the declared-`systemic`
+    # path only, the orchestrator has already recorded its OWN concrete diagnosis
+    # there (and the halt reason is derived FROM it), so overwriting it with the
+    # supervisor's summary would destroy the only description of the actual cause,
+    # leaving a human woken by an alarm that says "see RUN.md pause_reason" while
+    # pause_reason says the same thing back — hence --preserve-pause-reason, passed
+    # from that ONE caller.
+    #
+    # The other two halt paths (fatal auth, no-progress) must NOT preserve: they have
+    # their own, true reason, and whatever sits in `pause_reason` is someone else's —
+    # a stale rate-window pause, or a previous halt (`--resume` clears `status` and
+    # `paused_until`, but not `pause_reason`). Preserving it would make RUN.md assert
+    # a FALSE cause: "halted systemic — rate window until 03:00" on a run that
+    # actually died on a dead credential, pointing the operator at the wrong thing.
+    local existing_pause; existing_pause=""
+    [ "$preserve" = 1 ] && existing_pause="$(_run_front_field "$dir" pause_reason)"
+    # A `pause_reason` that is only the template's inline `# …` doc comment is not a
+    # diagnosis to preserve — keeping it would leave RUN.md asserting "why the run
+    # paused/halted" as the cause of the halt. Write the real reason instead.
+    case "$existing_pause" in '#'*) existing_pause="" ;; esac
+    if [ -n "$existing_pause" ]; then
+      echo "spawn-orchestrator: supervisor halt: preserving the run's own pause_reason: $existing_pause" >&2
+    else
+      _set_front_field "$run_md" pause_reason "$reason"
+    fi
+    # The halt IS an exit reason (task 15): a run that halted must read back as
+    # `systemic`, not as a run whose last declaration happened to be `continuing`.
+    _upsert_front_field "$run_md" exit_reason systemic
+    _upsert_front_field "$run_md" exit_reason_at "$(date +%s)"
   else
     echo "spawn-orchestrator: supervisor halt: no RUN.md at $run_md, skipping run-state write" >&2
   fi
@@ -1625,18 +2027,18 @@ _supervisor_halt() {
     ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
   fi
 
-  teardown --label "$label" >/dev/null 2>&1
-  # Verify the bootout actually took: a failed teardown leaves the job loaded and
-  # StartInterval relaunches straight back into this condition (finding #22's
-  # loop, masked by the halt message). Retry once, then make a still-loaded job
-  # LOUD rather than let the systemic status quietly contradict a live job.
-  if command -v launchctl >/dev/null 2>&1 \
-     && launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
-    teardown --label "$label" >/dev/null 2>&1
-    if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
-      echo "spawn-orchestrator: supervisor halt ($label): WARNING — bootout failed, job still loaded and will keep relaunching; remove it by hand: launchctl bootout gui/$(id -u)/$label" >&2
-    fi
-  fi
+  # The done-sentinel is ALSO the launchd relaunch sentinel (one file, by design —
+  # launch-runtime.md "Logs / observability"), so a halted run must drop it too:
+  # a KeepAlive/PathState supervisor gating on its absence would otherwise relaunch
+  # straight back into the condition we just halted for.
+  # stderr is NOT suppressed: a sentinel write that fails here is the difference
+  # between a halted run and a run that only LOOKS halted.
+  teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null
+  # Verify the bootout actually took (shared with the declared done/deadline
+  # teardown): a failed teardown leaves the job loaded and StartInterval relaunches
+  # straight back into this condition (finding #22's loop, masked by the halt
+  # message).
+  _verify_bootout "$label" || true
   echo "spawn-orchestrator: supervisor halt ($label): $reason"
 }
 
@@ -1689,13 +2091,14 @@ supervisor_scan() {
 # The per-wake entry point the generated launch script calls after `claude -p`
 # exits. See the file-header comment above for the full decision.
 supervisor_check() {
-  local code="" log="" dir="" label="" state="" limit=3 offset="" \
+  local code="" log="" dir="" label="" state="" limit=3 offset="" wake="" \
         park_limit="$PARK_STORM_LIMIT_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
       --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
       --since-offset) [ $# -ge 2 ] || die "missing value for --since-offset"; offset="$2"; shift 2 ;;
+      --wake-start) [ $# -ge 2 ] || die "missing value for --wake-start"; wake="$2"; shift 2 ;;
       --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --state) [ $# -ge 2 ] || die "missing value for --state"; state="$2"; shift 2 ;;
@@ -1707,6 +2110,29 @@ supervisor_check() {
   [ -n "$code" ] && [ -n "$log" ] && [ -n "$dir" ] && [ -n "$label" ] && [ -n "$state" ] \
     || die "supervisor-check requires --exit-code, --log, --dir, --label, and --state"
   case "$code" in *[!0-9]*) die "--exit-code must be a non-negative integer: $code" ;; esac
+  # --wake-start dates THIS wake, which is what makes a declaration attributable to
+  # it. A missing or garbage value DEGRADES the supervisor — it must never DISABLE
+  # it. `_declared_exit_reason` already fails CLOSED on an empty/garbage wake (it
+  # honors no declaration at all, exactly as required), so `die`ing here would buy
+  # nothing for the stale-declaration bug while throwing away every OTHER duty of
+  # this wake: the fatal-auth classification, the no-progress counter, the state
+  # write, the halt, the teardown. And the trigger is not hypothetical — `launch.sh`
+  # is generated ONCE and persisted in the run dir while `spawn-orchestrator.sh` is
+  # updated under a live run, so a wrapper predating `--wake-start` passes none, and
+  # a `date` the plist's narrowed PATH cannot reach leaves it empty. Either way the
+  # supervisor would exit 2 before classifying anything, on every wake, forever:
+  # claude keeps burning quota, launchd keeps relaunching, nothing ever alarms —
+  # finding #22's loop, restored and now unkillable because the backstop never runs.
+  # So: warn LOUDLY, drop the wake to empty (no declaration is honored), continue.
+  case "$wake" in
+    '')
+      echo "spawn-orchestrator: WARNING: supervisor-check got no --wake-start (stale launch.sh, or \`date\` unreachable on the job's PATH) — NO declared exit reason will be honored this wake (fail-closed); classification, the no-progress guard, and the halt still apply" >&2
+      ;;
+    *[!0-9]*)
+      echo "spawn-orchestrator: WARNING: --wake-start is not a non-negative integer (epoch seconds): $wake — NO declared exit reason will be honored this wake (fail-closed); classification, the no-progress guard, and the halt still apply" >&2
+      wake=""
+      ;;
+  esac
   [ -f "$log" ] || die "supervisor-check --log not found: $log"
   [ -d "$dir" ] || die "supervisor-check --dir not found: $dir"
   case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
@@ -1727,16 +2153,99 @@ supervisor_check() {
 
   local class; class="$(classify_exit --exit-code "$code" --output "$log" --since-offset "$offset")"
 
+  # A fatal classification halts BEFORE the declared reason is even read. This is
+  # the one place inference outranks declaration, and deliberately so: a
+  # non-retryable auth failure is not something the agent is in a position to
+  # contradict (it could not run at all), and over-halting is the safe direction —
+  # under-halting is finding #22, 52 relaunches into the same 401.
   case "$class" in
-    done)
-      _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
-      echo "spawn-orchestrator: supervisor-check done"
-      return 0
-      ;;
     fatal:*)
       _supervisor_halt --dir "$dir" --label "$label" \
         --condition fatal-auth --reason "${class#fatal: }"
       return "$code"
+      ;;
+  esac
+
+  # THE EXIT CONTRACT (task 15): the agent's own declaration, when this wake made
+  # one, decides relaunch-vs-teardown. This is what replaces the blind timer — the
+  # supervisor stops inferring what the agent already knew.
+  local declared; declared="$(_declared_exit_reason "$dir" "$wake")"
+  case "$declared" in
+    done|deadline)
+      _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+      # stderr NOT suppressed, and the bootout VERIFIED (the same check the halt
+      # path does): `teardown` swallows a failed `launchctl bootout`, and an
+      # unverified failure here leaves the job loaded — StartInterval then wakes a
+      # FINISHED run forever, each wake exiting 0 with `status` reporting
+      # `relaunch=no`. Zero work, zero alarm: finding #22 by another route.
+      teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null
+      _verify_bootout "$label" || true
+      echo "spawn-orchestrator: supervisor-check declared $declared — tearing down, NO relaunch"
+      return "$code"
+      ;;
+    systemic)
+      # Carry the ORCHESTRATOR'S OWN diagnosis into the alarm. A fixed string here
+      # ("see RUN.md pause_reason") is what _supervisor_halt would write INTO
+      # pause_reason — the operator wakes to an alarm pointing at itself, with the
+      # concrete cause gone. `exit_reason_detail` exists for exactly this; the
+      # already-recorded `pause_reason` is the fallback.
+      local sys_detail; sys_detail="$(_run_front_field "$dir" exit_reason_detail)"
+      [ -n "$sys_detail" ] || sys_detail="$(_run_front_field "$dir" pause_reason)"
+      # run-state.md's RUN.md TEMPLATE declares these keys with an inline `# …` doc
+      # comment, and this reader deliberately does not strip `#` (they are free prose
+      # and truncating an operator's diagnosis at a `#` would be its own data loss).
+      # A value that is ONLY that comment is documentation, not a diagnosis — putting
+      # it in the alarm tells the human "why the run paused/halted" instead of why.
+      case "$sys_detail" in '#'*) sys_detail="" ;; esac
+      [ -n "$sys_detail" ] || sys_detail="no detail recorded — see REPORT.md and orchestrator.log"
+      _supervisor_halt --dir "$dir" --label "$label" --preserve-pause-reason \
+        --condition systemic \
+        --reason "the orchestrator declared a systemic exit (circuit breaker / failed invariant): $sys_detail"
+      return "$code"
+      ;;
+    paused)
+      # A rate-window pause makes no progress BY DESIGN, so it never counts against
+      # the no-progress guard — but ONLY when the run state CORROBORATES the
+      # declaration. The corroborating fact is `status: paused` and nothing else
+      # (_run_is_paused, the same carve-out the retry path below already used):
+      # run-budget.md's agent pause writes it on every legitimate pause, and it is
+      # CLEARED on resume. `paused_until` is NOT usable as corroboration — it is
+      # declared with an inline `# comment` in run-state.md's own RUN.md template
+      # (so a reader that must not truncate free prose at a `#` reads the comment
+      # back as a value, and every run corroborates unconditionally), and it is
+      # durable across a resume (so a run that paused once is exempt forever).
+      # Without real corroboration a prompt/logic bug that declares `paused` on every
+      # wake while dying non-zero would reset the counter forever — infinite
+      # relaunch, zero progress, no alarm.
+      if _run_is_paused "$dir"; then
+        _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+        echo "spawn-orchestrator: supervisor-check declared paused — relaunch expected past the reset"
+        return "$code"
+      fi
+      echo "spawn-orchestrator: supervisor-check declared paused but the run state does NOT corroborate it (RUN.md has no status: paused) — relaunching, but the no-progress guard still applies" >&2
+      ;;
+    continuing)
+      if [ "$code" = 0 ]; then
+        _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+        echo "spawn-orchestrator: supervisor-check declared continuing — work remains, relaunch expected"
+        return 0
+      fi
+      # Declared `continuing` but exited non-zero: relaunch, yes — but this wake
+      # still fell over, so the no-progress backstop below must keep counting it.
+      # Otherwise an agent that declares `continuing` and then crashes forever is
+      # exempt from the very guard that exists for a run making no progress.
+      echo "spawn-orchestrator: supervisor-check declared continuing on a non-zero exit ($code) — relaunching, but the no-progress guard still applies"
+      ;;
+    *)
+      # No declaration THIS wake (hard-killed agent, a pre-exit-contract prompt, or
+      # a garbage value): fall back to inference. Fail-SAFE — never a teardown.
+      case "$class" in
+        done)
+          _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+          echo "spawn-orchestrator: supervisor-check done (inferred: exit 0, no declared reason)"
+          return 0
+          ;;
+      esac
       ;;
   esac
 
@@ -2527,6 +3036,19 @@ write_verify_broker() {
 # and a freshly-read one compare equal regardless of incidental spacing.
 _norm_ws() { printf '%s' "$1" | awk '{$1=$1; print}'; }
 
+# A file's mtime as an epoch, or empty. BSD (`stat -f %m`) then GNU (`stat -c %Y`)
+# so the reader works on macOS and Linux CI alike — the result is VALIDATED numeric
+# rather than trusted, because GNU `stat -f %m` does not fail: it reads `-f` as
+# "filesystem status" and happily prints a mount point. Used to age the
+# done-sentinel against RUN.md's `exit_reason_at` — a sentinel older than the live
+# declaration is a leftover, not the run's current verdict.
+_file_mtime() {
+  local m; m="$(stat -f %m "$1" 2>/dev/null)" || m=""
+  case "$m" in ''|*[!0-9]*) m="$(stat -c %Y "$1" 2>/dev/null)" || m="" ;; esac
+  case "$m" in ''|*[!0-9]*) m="" ;; esac
+  printf '%s' "$m"
+}
+
 # Pull a single top-level "key: value" field out of a captured front-matter
 # block (global $front, set by status() before calling this). Anchors on
 # `^key:` so e.g. "until:" never matches "paused_until:". Strips a trailing
@@ -2541,21 +3063,25 @@ _front_field() {
 
 # Read-only: report the run's live state in one shot. Never writes anything.
 status() {
-  local label="" dir="$PWD"
+  local label="" dir="$PWD" ceiling="$DEFAULT_TASK_CEILING"
   while [ $# -gt 0 ]; do
     case "$1" in
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --task-ceiling) [ $# -ge 2 ] || die "missing value for --task-ceiling"; ceiling="$2"; shift 2 ;;
       *) die "unknown status argument: $1" ;;
     esac
   done
   [ -n "$label" ] || die "status requires --label"
   case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
+  case "$ceiling" in ''|*[!0-9]*) die "--task-ceiling must be a positive integer (seconds): $ceiling" ;; esac
+  [ "$ceiling" -ge 1 ] || die "--task-ceiling must be a positive integer (seconds): $ceiling"
 
   local run_md="$dir/.auto-pilot/RUN.md"
   [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
   local log="$dir/.auto-pilot/orchestrator.log"
   local sentinel="$dir/.auto-pilot/$DONE_SENTINEL_NAME"
+  local hb="$dir/.auto-pilot/$HEARTBEAT_NAME"
 
   # Front matter is the block between the first two `---` lines. No YAML tool
   # required — plain awk/sed line matching.
@@ -2604,11 +3130,82 @@ status() {
     fi
   fi
 
-  # Done-sentinel (written by `teardown --done-sentinel`) is the single source
-  # of "run is done" — it can mark the run done even before RUN.md's own
-  # `status:` field is committed as `done`.
-  local sentinel_done="no" run_status_display="$run_status"
-  [ -f "$sentinel" ] && { sentinel_done="yes"; run_status_display="done"; }
+  # Done-sentinel (written by `teardown --done-sentinel` / `exit-reason` on a
+  # terminal reason) is the single source of "the run stopped for good" — it can
+  # mark the run stopped even before RUN.md's own `status:` field is committed.
+  # It carries WHICH terminal reason it stands for; only `done` displays as done
+  # (a pre-task-15 sentinel, with no `reason:` line, is a `done` sentinel), so a
+  # `systemic` halt never reads back as a clean finish.
+  local sentinel_done="no" sentinel_reason="" sentinel_at=""
+  if [ -f "$sentinel" ]; then
+    sentinel_done="yes"
+    sentinel_reason="$(sed -n 's/^reason: //p' "$sentinel" | head -1)"
+    _is_exit_reason "$sentinel_reason" || sentinel_reason="done"
+    sentinel_at="$(_file_mtime "$sentinel")"
+  fi
+
+  # The exit reason (task 15). The sentinel is written LAST on the terminal path, so
+  # it normally wins — but NOT unconditionally. The sentinel is durable and a
+  # `--resume` (the documented recovery from `deadline`) brings the run back to
+  # life; a sentinel that unconditionally out-voted RUN.md would make that resumed,
+  # RUNNING run read back as finished forever. So prefer whichever is FRESHER: a
+  # RUN.md declaration written AFTER the sentinel (a live run that has since
+  # declared `continuing`) means the sentinel is stale.
+  local exit_r declared_at
+  exit_r="$(_front_field exit_reason)"
+  _is_exit_reason "$exit_r" || exit_r=""
+  declared_at="$(_front_field exit_reason_at)"
+  case "$declared_at" in *[!0-9]*) declared_at="" ;; esac
+
+  if [ -n "$sentinel_reason" ]; then
+    if [ -n "$exit_r" ] && [ -n "$declared_at" ] && [ -n "$sentinel_at" ] \
+       && [ "$declared_at" -gt "$sentinel_at" ]; then
+      sentinel_done="stale"
+    else
+      exit_r="$sentinel_reason"
+    fi
+  fi
+
+  # Only a live `done` sentinel displays as a finished run (a pre-task-15 sentinel,
+  # with no `reason:` line, is a `done` sentinel), so a `systemic` halt or a
+  # `deadline` stop never reads back as a clean finish.
+  local run_status_display="$run_status"
+  [ "$sentinel_done" = "yes" ] && [ "$exit_r" = "done" ] && run_status_display="done"
+
+  # Is a relaunch expected? This is the question the whole exit contract exists to
+  # answer, so `status` answers it outright instead of leaving a human to infer it
+  # from an exit code that says the same thing (0) either way. A LIVE terminal
+  # reason or an un-superseded sentinel means the supervisor has torn down; anything
+  # else means the launchd timer is still expected to wake this run.
+  local relaunch="yes"
+  if [ "$sentinel_done" = "yes" ] || { [ -n "$exit_r" ] && _is_terminal_reason "$exit_r"; }; then
+    relaunch="no"
+  fi
+
+  # Heartbeat: the ONLY signal that separates slow from wedged. Aged against the
+  # per-task ceiling — a beat older than the ceiling means no /deliver-task
+  # sub-step boundary has been crossed in longer than a whole task is allowed to
+  # take, which is a stall, not slowness.
+  local hb_state="none" hb_age="" hb_at="" hb_iso="" hb_note="" hb_line
+  if [ -f "$hb" ]; then
+    hb_at="$(sed -n 's/^at: //p' "$hb" | head -1)"
+    hb_iso="$(sed -n 's/^iso: //p' "$hb" | head -1)"
+    hb_note="$(sed -n 's/^note: //p' "$hb" | head -1)"
+  fi
+  case "$hb_at" in
+    ''|*[!0-9]*) hb_line="(no heartbeat file — a pre-heartbeat run, or the orchestrator never started a loop iteration)" ;;
+    *)
+      hb_age=$(( $(date +%s) - hb_at ))
+      [ "$hb_age" -ge 0 ] || hb_age=0
+      if [ "$hb_age" -gt "$ceiling" ]; then
+        hb_state="stale"
+        hb_line="${hb_iso:-?} (${hb_age}s ago, per-task ceiling ${ceiling}s) — STALL: no heartbeat for longer than a whole task is allowed to take${hb_note:+ [last: $hb_note]}"
+      else
+        hb_state="healthy"
+        hb_line="${hb_iso:-?} (${hb_age}s ago, per-task ceiling ${ceiling}s) — healthy${hb_note:+ [last: $hb_note]}"
+      fi
+      ;;
+  esac
 
   # The ALARM sentinel (task 16): the whole point is that a halted/stalled run is
   # visible from shell with no model call, so the one-shot state reporter must
@@ -2640,7 +3237,9 @@ status() {
   else
     echo "alarm: none"
   fi
-  echo "STATUS: $run_status_display pid=$pid_state tasks=$task_count until=${until_val:-none} alarms=$alarm_count"
+  echo "heartbeat: $hb_line"
+  echo "exit_reason: ${exit_r:-(none declared — the orchestrator has not exited, or was hard-killed before it could)} (relaunch expected: $relaunch)"
+  echo "STATUS: $run_status_display pid=$pid_state tasks=$task_count until=${until_val:-none} alarms=$alarm_count heartbeat=$hb_state${hb_age:+ heartbeat_age=${hb_age}s} exit_reason=${exit_r:-none} relaunch=$relaunch"
 }
 
 # ---------------------------------------------------------------------------
@@ -2759,6 +3358,9 @@ case "$sub" in
   alarm) alarm "$@" ;;
   alarm-request) alarm_request "$@" ;;
   alarm-clear) alarm_clear "$@" ;;
+  exit-reason) exit_reason "$@" ;;
+  clear-exit-state) clear_exit_state "$@" ;;
+  heartbeat) heartbeat "$@" ;;
   restack) restack "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;

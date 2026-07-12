@@ -98,6 +98,23 @@ silence the alarm exists to end. The alarms describe the run the human just
 repaired; they do not carry forward. `REPORT.md`'s alarm history **stays** — that
 is what the human reads.
 
+**Clear the terminal exit state — before the first wake.** Run
+`scripts/spawn-orchestrator.sh clear-exit-state --dir <run-worktree>`. The exit
+contract is DURABLE by design ([`run-state.md`](run-state.md) "Exit contract"):
+the last `exit_reason` / `exit_reason_at` / `exit_reason_detail` are committed to
+the run-state branch, and a terminal reason (`done` / `systemic` / `deadline`)
+also drops the done-sentinel `.auto-pilot/orchestrator.done` — the SAME file the
+supervisor's relaunch gate and `status` read. `deadline` is by definition the
+reason whose recovery IS this `--resume`, and `systemic`'s is a human fixing the
+condition and resuming; so a resume that did not clear them would carry "the run
+is over" into a live run that is actually working: `status` would report
+`relaunch=no` (and, after a prior `done`, a finished run status), a
+`KeepAlive`/`PathState` watcher gating on the sentinel would treat it as
+complete, and the supervisor's declared-reason check could tear the resumed run
+down on its very first wake. `clear-exit-state` removes the sentinel, blanks the
+three `exit_reason*` fields, and commits — so the run's first real declaration is
+the only one on the branch.
+
 **Then fall into the run loop.** Once reconciliation leaves `RUN.md` accurate,
 resume continues into the **Run phase** loop ([`../SKILL.md`](../SKILL.md) "Run
 phase") for the remaining ready tasks; it does not re-derive that loop. If the

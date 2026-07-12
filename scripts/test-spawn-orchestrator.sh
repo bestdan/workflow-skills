@@ -874,7 +874,7 @@ if command -v git >/dev/null 2>&1; then
     && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
     && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
-  scout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/auth.log" --dir "$SC" \
+  scout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/auth.log" --dir "$SC" \
     --label com.autopilot.test.fatal --state "$SC/.auto-pilot/supervisor-state" 2>&1)"
   have "supervisor-check: fatal halt reports itself" 'supervisor halt' "$scout"
   have "supervisor-check: fatal writes status: systemic" 'status: systemic' "$(cat "$SC/.auto-pilot/RUN.md")"
@@ -891,9 +891,9 @@ if command -v git >/dev/null 2>&1; then
     && printf '# report\n' >.auto-pilot/REPORT.md \
     && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
   STATE2="$SC2/.auto-pilot/supervisor-state"
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
-  npout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" 2>&1)"
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
+  npout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" 2>&1)"
   have "supervisor-check: no-progress guard halts after N consecutive failures" 'no forward progress' "$npout"
   have "supervisor-check: no-progress halt also writes status: systemic" 'status: systemic' "$(cat "$SC2/.auto-pilot/RUN.md")"
 
@@ -905,9 +905,9 @@ if command -v git >/dev/null 2>&1; then
   { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >"$SC_EH/.auto-pilot/RUN.md"
   printf '# report\n' >"$SC_EH/.auto-pilot/REPORT.md"
   STATE_EH="$SC_EH/.auto-pilot/supervisor-state"
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
-  ehout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" 2>&1)"
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
+  ehout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" 2>&1)"
   have "supervisor-check: no-progress guard halts even with an empty run HEAD" 'no forward progress' "$ehout"
   have "supervisor-check: empty-HEAD halt still writes status: systemic" 'status: systemic' "$(cat "$SC_EH/.auto-pilot/RUN.md")"
 
@@ -920,7 +920,7 @@ if command -v git >/dev/null 2>&1; then
   STATE3="$SC3/.auto-pilot/supervisor-state"
   i=0
   while [ "$i" -lt 5 ]; do
-    "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC3" --label com.autopilot.test.paused --state "$STATE3" >/dev/null 2>&1
+    "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC3" --label com.autopilot.test.paused --state "$STATE3" >/dev/null 2>&1
     i=$((i + 1))
   done
   lack "supervisor-check: a paused wake never halts, however many repeats" 'systemic' "$(cat "$SC3/.auto-pilot/RUN.md")"
@@ -932,11 +932,11 @@ if command -v git >/dev/null 2>&1; then
     && printf '# report\n' >.auto-pilot/REPORT.md \
     && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
   STATE4="$SC4/.auto-pilot/supervisor-state"
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
   # a task did real work between wakes: a new run-state commit lands
   ( cd "$SC4" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "task progressed" )
-  "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
-  pgout="$("$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" 2>&1)"
+  "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
+  pgout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" 2>&1)"
   have "supervisor-check: a run-state commit resets the no-progress counter" '2/3 consecutive' "$pgout"
   lack "supervisor-check: progress in between never halts" 'systemic' "$(cat "$SC4/.auto-pilot/RUN.md")"
 else
@@ -1818,6 +1818,695 @@ if command -v git >/dev/null 2>&1; then
     alarm-request --dir "$A1" --condition x --reason "$(printf 'a\ncondition: forged')"
 else
   echo "skip - alarm: git not available"
+fi
+
+# --- task 15: the exit contract (declared reason) + the heartbeat -------------
+# The whole point of this task is that a green run and a wedged one used to be
+# the SAME observable event (exit 0). So these tests refuse to assert on strings
+# the script printed about itself: they drive the REAL generated launch wrapper
+# with a stub `claude` (which records that it ran, and declares its exit reason
+# exactly as the orchestrator prompt is specified to) and a stub `launchctl`
+# (which records every invocation), then assert on the MARKER FILES — did the
+# supervisor actually boot the job out, or not?
+if command -v git >/dev/null 2>&1; then
+  EC="$BASE/exitcontract"; STUB="$EC/stub"; mkdir -p "$STUB"
+
+  # sandbox-exec stub: drop `-f <profile>` and exec the rest. The real wrapper
+  # composes the jail around claude; here we want the wrapper's LOGIC exercised
+  # end-to-end without needing a loadable Seatbelt profile (or macOS at all).
+  cat >"$STUB/sandbox-exec" <<'SBEOF'
+#!/usr/bin/env bash
+[ "${1:-}" = -f ] && shift 2
+exec "$@"
+SBEOF
+  # launchctl stub: the OBSERVATION point. A teardown means a real `bootout` call
+  # reaches launchctl; a relaunch means it never does. `print` exits non-zero so
+  # the halt's post-bootout verification reads the job as gone (a successful bootout).
+  cat >"$STUB/launchctl" <<'LCEOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_LAUNCHCTL_LOG:?}"
+case "${1:-}" in print) exit 1 ;; esac
+exit 0
+LCEOF
+  # claude stub: proves the real code path ran (marker), writes a stream-json line
+  # to the log, and DECLARES its exit reason through the real `exit-reason`
+  # subcommand — the same call the orchestrator prompt makes before exiting.
+  cat >"$STUB/claude" <<'CLEOF'
+#!/usr/bin/env bash
+printf 'ran\n' >>"${STUB_CLAUDE_MARKER:?}"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"stub wake"}]}}\n'
+[ -n "${STUB_DECLARE:-}" ] \
+  && "${STUB_SELF:?}" exit-reason --dir "${STUB_RUN_DIR:?}" --reason "$STUB_DECLARE" >/dev/null 2>&1
+exit "${STUB_EXIT_CODE:-0}"
+CLEOF
+  chmod +x "$STUB/sandbox-exec" "$STUB/launchctl" "$STUB/claude"
+  STUB_PATH="$STUB:/usr/bin:/bin"
+
+  # Drive one full wake through the REAL generated launch script.
+  # ec_wake <name> <declared-reason|""> <claude-exit-code>
+  # Leaves: $EC_DIR (run dir), $EC_LC (launchctl log), $EC_MARK (claude marker).
+  ec_wake() {
+    local name="$1" declare="$2" ecode="$3"
+    EC_DIR="$EC/$name"; EC_LC="$EC_DIR/launchctl.log"; EC_MARK="$EC_DIR/claude-ran"
+    mkdir -p "$EC_DIR/.auto-pilot"
+    { printf -- '---\n'; printf 'run_id: %s\n' "$name"; printf 'status: active\n'
+      printf 'pause_reason: \n'; printf -- '---\n'; printf '\n'
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+      printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+    } >"$EC_DIR/.auto-pilot/RUN.md"
+    printf '# report\n' >"$EC_DIR/.auto-pilot/REPORT.md"
+    ( cd "$EC_DIR" && git init -q && git add -A \
+      && git -c user.name=t -c user.email=t@t commit -q -m init )
+    : >"$EC_DIR/.auto-pilot/orchestrator.log"
+    : >"$EC_LC"; rm -f "$EC_MARK"
+    "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+      --workdir "$EC_DIR" --log "$EC_DIR/.auto-pilot/orchestrator.log" \
+      --prompt-file "$BASE/prompt.txt" --label "com.autopilot.ec.$name" \
+      --claude-bin "$STUB/claude" --path "$STUB_PATH" \
+      --out-script "$EC_DIR/launch.sh" --out-plist "$EC_DIR/job.plist" >/dev/null 2>&1
+    STUB_LAUNCHCTL_LOG="$EC_LC" STUB_CLAUDE_MARKER="$EC_MARK" STUB_SELF="$SCRIPT" \
+      STUB_RUN_DIR="$EC_DIR" STUB_DECLARE="$declare" STUB_EXIT_CODE="$ecode" \
+      bash "$EC_DIR/launch.sh" >/dev/null 2>&1
+  }
+  # <name> <label-for-the-assertion> <yes|no: is a teardown expected?>
+  ec_assert() {
+    local name="$1" want_teardown="$2"
+    local lc; lc="$(cat "$EC/$name/launchctl.log" 2>/dev/null)"
+    if [ -f "$EC/$name/claude-ran" ]; then
+      ok "exit contract [$name]: the generated wrapper really invoked claude"
+    else
+      bad "exit contract [$name]: the generated wrapper really invoked claude"
+    fi
+    if [ "$want_teardown" = yes ]; then
+      if printf '%s' "$lc" | grep -q 'bootout'; then
+        ok "exit contract [$name]: supervisor TORE THE JOB DOWN (launchctl bootout observed)"
+      else
+        bad "exit contract [$name]: supervisor TORE THE JOB DOWN (launchctl bootout observed)" "launchctl log: ${lc:-<empty>}"
+      fi
+      if [ -f "$EC/$name/.auto-pilot/orchestrator.done" ]; then
+        ok "exit contract [$name]: done-sentinel written (the single relaunch/completion file)"
+      else
+        bad "exit contract [$name]: done-sentinel written (the single relaunch/completion file)"
+      fi
+    else
+      if printf '%s' "$lc" | grep -q 'bootout'; then
+        bad "exit contract [$name]: supervisor did NOT tear down (relaunch expected)" "launchctl log: $lc"
+      else
+        ok "exit contract [$name]: supervisor did NOT tear down (launchd relaunches on its timer)"
+      fi
+      if [ -f "$EC/$name/.auto-pilot/orchestrator.done" ]; then
+        bad "exit contract [$name]: no done-sentinel on a relaunchable exit"
+      else
+        ok "exit contract [$name]: no done-sentinel on a relaunchable exit"
+      fi
+    fi
+  }
+
+  # continuing — work remains, context exhausted. Exit 0, which pre-task-15 was
+  # INDISTINGUISHABLE from a finished run: the run must NOT be torn down.
+  ec_wake continuing continuing 0
+  ec_assert continuing no
+  have "exit contract [continuing]: reason committed to the run-state branch" \
+    'exit_reason: continuing' "$(git -C "$EC/continuing" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  have "exit contract [continuing]: status says a relaunch is expected" 'relaunch=yes' \
+    "$("$SCRIPT" status --label com.autopilot.ec.continuing --dir "$EC/continuing" 2>&1)"
+
+  # paused — rate window. Relaunch past the reset.
+  ec_wake paused paused 0
+  ec_assert paused no
+  have "exit contract [paused]: reason committed to the run-state branch" \
+    'exit_reason: paused' "$(git -C "$EC/paused" show HEAD:.auto-pilot/RUN.md 2>&1)"
+
+  # done — no ready tasks remain. Tear down; do not relaunch. THE distinction
+  # this task exists for: same exit code 0 as `continuing`, opposite decision.
+  ec_wake done done 0
+  ec_assert done yes
+  have "exit contract [done]: reason committed to the run-state branch" \
+    'exit_reason: done' "$(git -C "$EC/done" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  dstat="$("$SCRIPT" status --label com.autopilot.ec.done --dir "$EC/done" 2>&1)"
+  have "exit contract [done]: status reports done"           'STATUS: done' "$dstat"
+  have "exit contract [done]: status says NO relaunch"       'relaunch=no'  "$dstat"
+
+  # deadline — the pre-dispatch guard stopped with tasks still ready. Tear down;
+  # only an explicit --resume brings it back (never the timer).
+  ec_wake deadline deadline 0
+  ec_assert deadline yes
+  have "exit contract [deadline]: sentinel records the deadline reason (not a plain done)" \
+    'reason: deadline' "$(cat "$EC/deadline/.auto-pilot/orchestrator.done" 2>/dev/null)"
+  dlstat="$("$SCRIPT" status --label com.autopilot.ec.deadline --dir "$EC/deadline" 2>&1)"
+  have "exit contract [deadline]: status says NO relaunch"    'relaunch=no'       "$dlstat"
+  lack "exit contract [deadline]: a deadline stop is NOT reported as a finished run" 'STATUS: done' "$dlstat"
+
+  # systemic — circuit breaker / failed invariant. Tear down AND alarm.
+  ec_wake systemic systemic 0
+  ec_assert systemic yes
+  have "exit contract [systemic]: RUN.md carries status: systemic" 'status: systemic' \
+    "$(cat "$EC/systemic/.auto-pilot/RUN.md")"
+  have "exit contract [systemic]: REPORT.md carries the alarm" 'ALARM' \
+    "$(cat "$EC/systemic/.auto-pilot/REPORT.md")"
+  systat="$("$SCRIPT" status --label com.autopilot.ec.systemic --dir "$EC/systemic" 2>&1)"
+  have "exit contract [systemic]: status says NO relaunch" 'relaunch=no' "$systat"
+  lack "exit contract [systemic]: a halted run never reads back as done" 'STATUS: done' "$systat"
+
+  # The wrapper beats the heartbeat at the top of every wake, so even a claude
+  # that wedges before its first loop iteration leaves an ageable timestamp.
+  have "exit contract: the launch wrapper beats the heartbeat at wake start" 'note: wake-start' \
+    "$(cat "$EC/continuing/.auto-pilot/heartbeat" 2>/dev/null)"
+
+  # …and it beats it on a GATE-CLOSED wake too, which is the one that matters. The
+  # pre-invoke gate (task 11) exits 0 without invoking the agent while `paused_until`
+  # is in the future, and a rate-window pause is HOURS of such wakes. With the beat
+  # below the gate's `exit 0`, the last beat ages past the 45m per-task ceiling and
+  # `status` calls a healthy, paused run a STALL — the one signal that separates slow
+  # from wedged, firing falsely exactly when the run is doing the right thing. So the
+  # beat belongs ABOVE the gate, with the supervisor's own bookkeeping (task 16's
+  # seam). Driven through the REAL generated wrapper: the gate must close (claude is
+  # never invoked) AND the heartbeat must still be fresh.
+  ec_wake gateclosed "" 0
+  { printf -- '---\n'; printf 'run_id: gateclosed\n'; printf 'status: paused\n'
+    printf 'paused_until: 2099-01-01T00:00:00Z\n'; printf 'pause_reason: rate window\n'
+    printf -- '---\n'; } >"$EC/gateclosed/.auto-pilot/RUN.md"
+  rm -f "$EC/gateclosed/.auto-pilot/heartbeat" "$EC/gateclosed/claude-ran"
+  : >"$EC/gateclosed/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$EC/gateclosed/launchctl.log" STUB_CLAUDE_MARKER="$EC/gateclosed/claude-ran" \
+    STUB_SELF="$SCRIPT" STUB_RUN_DIR="$EC/gateclosed" STUB_DECLARE="" STUB_EXIT_CODE=0 \
+    bash "$EC/gateclosed/launch.sh" >/dev/null 2>&1
+  if [ -f "$EC/gateclosed/claude-ran" ]; then
+    bad "exit contract [gate-closed]: precondition — the gate really closed (claude NOT invoked)"
+  else
+    ok "exit contract [gate-closed]: precondition — the gate really closed (claude NOT invoked)"
+  fi
+  have "exit contract [gate-closed]: the heartbeat is STILL beaten (else a paused run reads as a STALL)" \
+    'note: wake-start' "$(cat "$EC/gateclosed/.auto-pilot/heartbeat" 2>/dev/null)"
+  have "exit contract [gate-closed]: status reports the paused run healthy, not stalled" \
+    'heartbeat=healthy' "$("$SCRIPT" status --label com.autopilot.ec.gateclosed --dir "$EC/gateclosed" 2>&1)"
+
+  # --- fail-SAFE: a stale / garbage / absent declaration never tears down ------
+  # The reason lives on the run-state branch, so it OUTLIVES its wake. A previous
+  # wake's `done` must not tear down a live run.
+  SD="$EC/stale-done"; mkdir -p "$SD/.auto-pilot"
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'; printf 'exit_reason_at: 1000\n'; printf -- '---\n'; } >"$SD/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SD/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$SD/log"
+  : >"$SD/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$SD/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 0 --log "$SD/log" --wake-start 2000 \
+    --dir "$SD" --label com.autopilot.ec.stale --state "$SD/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  if grep -q 'bootout' "$SD/launchctl.log" 2>/dev/null || [ -f "$SD/.auto-pilot/orchestrator.done" ]; then
+    bad "exit contract: a PREVIOUS wake's 'done' does not tear down a live run"
+  else
+    ok "exit contract: a PREVIOUS wake's 'done' does not tear down a live run (freshness check)"
+  fi
+
+  # A garbage reason falls back to inference (task 10's path), never to a teardown.
+  GB="$EC/garbage"; mkdir -p "$GB/.auto-pilot"
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: whatever-nonsense\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$GB/.auto-pilot/RUN.md"
+  printf '# report\n' >"$GB/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$GB/log"
+  : >"$GB/launchctl.log"
+  gbout="$(STUB_LAUNCHCTL_LOG="$GB/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 0 --log "$GB/log" --wake-start 1 \
+    --dir "$GB" --label com.autopilot.ec.garbage --state "$GB/.auto-pilot/supervisor-state" 2>&1)"
+  have "exit contract: a garbage reason falls back to inference" 'inferred' "$gbout"
+  if grep -q 'bootout' "$GB/launchctl.log" 2>/dev/null; then
+    bad "exit contract: a garbage reason never tears down (fail-safe)"
+  else
+    ok "exit contract: a garbage reason never tears down (fail-safe)"
+  fi
+
+  # A FATAL auth exit still halts even when this wake declared `continuing` —
+  # inference outranks declaration in exactly one direction (over-halting is safe;
+  # relaunching into a dead credential 52 times is finding #22).
+  FA="$EC/fatal-vs-declared"; mkdir -p "$FA/.auto-pilot"
+  ( cd "$FA" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: continuing\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$FA/.auto-pilot/RUN.md"
+  printf '# report\n' >"$FA/.auto-pilot/REPORT.md"
+  : >"$FA/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$FA/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/auth.log" --wake-start 1 \
+    --dir "$FA" --label com.autopilot.ec.fatal --state "$FA/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  have "exit contract: a fatal auth exit halts despite a fresh 'continuing' declaration" \
+    'status: systemic' "$(cat "$FA/.auto-pilot/RUN.md")"
+  if grep -q 'bootout' "$FA/launchctl.log" 2>/dev/null; then
+    ok "exit contract: the fatal halt tore the job down (bootout observed)"
+  else
+    bad "exit contract: the fatal halt tore the job down (bootout observed)" "$(cat "$FA/launchctl.log")"
+  fi
+
+  # --- an undatable --wake-start DEGRADES the supervisor; it must never DISABLE it -
+  # The wrapper computes `wake=$(date +%s)` under the plist's NARROWED PATH, so a
+  # `date` it cannot reach leaves `wake` EMPTY — and `launch.sh` is generated ONCE
+  # and persisted, while spawn-orchestrator.sh is updated under a live run, so an
+  # in-flight run's wrapper may pass no --wake-start at all. Two things must hold at
+  # once, and the second is the one that kills runs:
+  #   1. NO declaration is honored (freshness unknowable → fail-closed): a RUN.md
+  #      carrying a 1970-vintage `done` must not tear a LIVE run down.
+  #   2. EVERY OTHER supervisor duty still runs — classification, the no-progress
+  #      counter, the halt, the teardown. A `die` here would make the supervisor
+  #      exit before classifying anything, on every wake, forever: claude burns
+  #      quota, launchd relaunches, nothing alarms. Finding #22, unkillable.
+  WS="$EC/wake-start"; mkdir -p "$WS/.auto-pilot"
+  ( cd "$WS" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'; printf 'exit_reason_at: 1000\n'; printf -- '---\n'; } >"$WS/.auto-pilot/RUN.md"
+  printf '# report\n' >"$WS/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$WS/log"
+  # ws_case <name> [extra supervisor-check args…] — a LIVE run (exit 0, clean log)
+  # whose RUN.md carries a STALE terminal declaration. Observed: did `bootout` reach
+  # launchctl, and did the supervisor still do its job, rather than die on a usage error?
+  ws_case() {
+    local name="$1"; shift
+    : >"$WS/launchctl.log"; rm -f "$WS/.auto-pilot/orchestrator.done"
+    local wsc wsout
+    wsout="$(STUB_LAUNCHCTL_LOG="$WS/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 0 --log "$WS/log" "$@" \
+      --dir "$WS" --label com.autopilot.ec.ws --state "$WS/.auto-pilot/supervisor-state" 2>&1)"
+    wsc=$?
+    if grep -q 'bootout' "$WS/launchctl.log" 2>/dev/null || [ -f "$WS/.auto-pilot/orchestrator.done" ]; then
+      bad "exit contract [$name]: an undatable wake must NOT tear a live run down" \
+        "launchctl log: $(cat "$WS/launchctl.log" 2>/dev/null)"
+    else
+      ok "exit contract [$name]: an undatable wake never honors a stale declaration (no bootout, no sentinel)"
+    fi
+    # It KEPT SUPERVISING: it reached the inference fallback (the `*)` branch) and
+    # decided this wake, rather than dying on a usage error before classifying.
+    if [ "$wsc" = 2 ]; then
+      bad "exit contract [$name]: the supervisor still SUPERVISES (a bad wake stamp must not disable it)" \
+        "exit=2 (died on a usage error before classifying); output: $wsout"
+    else
+      ok "exit contract [$name]: the supervisor still SUPERVISES (classified this wake; exit=$wsc)"
+    fi
+    have "exit contract [$name]: the degraded wake stamp is warned about LOUDLY" \
+      'WARNING' "$wsout"
+  }
+  ws_case "wake-start missing"
+  ws_case "wake-start empty" --wake-start ''
+  ws_case "wake-start non-numeric" --wake-start abc
+
+  # …and the duty that MATTERS: a fatal auth log with NO --wake-start must STILL halt.
+  # This is the exact input the reviewer reproduced the regression with — the run
+  # that, with a `die` here, relaunched into the same 401 forever with zero alarm.
+  WSF="$EC/wake-start-fatal"; mkdir -p "$WSF/.auto-pilot"
+  ( cd "$WSF" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: continuing\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$WSF/.auto-pilot/RUN.md"
+  printf '# report\n' >"$WSF/.auto-pilot/REPORT.md"
+  : >"$WSF/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$WSF/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/auth.log" \
+    --dir "$WSF" --label com.autopilot.ec.wsf --state "$WSF/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  have "exit contract [no wake stamp]: a fatal auth exit STILL halts (status: systemic written)" \
+    'status: systemic' "$(git -C "$WSF" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  have "exit contract [no wake stamp]: the halt STILL alarms in REPORT.md" \
+    'ALARM' "$(git -C "$WSF" show HEAD:.auto-pilot/REPORT.md 2>&1)"
+  if grep -q 'bootout' "$WSF/launchctl.log" 2>/dev/null; then
+    ok "exit contract [no wake stamp]: the halt STILL tore the job down (bootout observed)"
+  else
+    bad "exit contract [no wake stamp]: the halt STILL tore the job down (bootout observed)" \
+      "launchctl log: $(cat "$WSF/launchctl.log" 2>/dev/null)"
+  fi
+
+  # …and the no-progress counter STILL counts across wakes with no wake stamp.
+  WSN="$EC/wake-start-noprogress"; mkdir -p "$WSN/.auto-pilot"
+  ( cd "$WSN" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  : >"$WSN/launchctl.log"
+  i=0
+  while [ "$i" -lt 3 ]; do
+    STUB_LAUNCHCTL_LOG="$WSN/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 1 --log "$CX/weird.log" \
+      --dir "$WSN" --label com.autopilot.ec.wsn --state "$WSN/.auto-pilot/supervisor-state" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  have "exit contract [no wake stamp]: the no-progress guard STILL counts and halts" \
+    'status: systemic' "$(git -C "$WSN" show HEAD:.auto-pilot/RUN.md 2>&1)"
+
+  # --- clear-exit-state: --resume's first act ------------------------------------
+  # The exit contract is DURABLE (committed reason + the done-sentinel file), and
+  # `deadline` is BY DEFINITION the reason a --resume recovers from. Nothing else in
+  # the repo clears either, so a resumed — RUNNING — run used to read back as
+  # finished forever, which a PathState watcher (and, with a stale declaration, the
+  # supervisor itself) would act on.
+  CES="$EC/clear-exit-state"; mkdir -p "$CES/.auto-pilot"
+  { printf -- '---\n'; printf 'run_id: ces\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: deadline\n'; printf 'exit_reason_at: 1000\n'
+    printf 'exit_reason_detail: the pre-dispatch guard stopped with tasks still ready\n'
+    printf -- '---\n'; printf '\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+  } >"$CES/.auto-pilot/RUN.md"
+  printf 'com.autopilot.ec.ces deadline 1970-01-01T00:00:00Z\nreason: deadline\n' \
+    >"$CES/.auto-pilot/orchestrator.done"
+  ( cd "$CES" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  have "clear-exit-state: precondition — the stale terminal state reads back as NO relaunch" \
+    'relaunch=no' "$("$SCRIPT" status --label com.autopilot.ec.ces --dir "$CES" 2>&1)"
+  "$SCRIPT" clear-exit-state --dir "$CES" >/dev/null 2>&1
+  if [ -f "$CES/.auto-pilot/orchestrator.done" ]; then
+    bad "clear-exit-state: the done-sentinel is REMOVED (the launchd relaunch gate)"
+  else
+    ok "clear-exit-state: the done-sentinel is REMOVED (the launchd relaunch gate)"
+  fi
+  cesafter="$("$SCRIPT" status --label com.autopilot.ec.ces --dir "$CES" 2>&1)"
+  have "clear-exit-state: a resumed run reads back as RUNNING (relaunch=yes)" 'relaunch=yes' "$cesafter"
+  lack "clear-exit-state: a resumed run is never reported finished" 'STATUS: done' "$cesafter"
+  cesbranch="$(git -C "$CES" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  lack "clear-exit-state: the stale reason is gone from the run-state BRANCH" 'exit_reason: deadline' "$cesbranch"
+  lack "clear-exit-state: the stale detail is gone from the branch too" \
+    'the pre-dispatch guard stopped with tasks still ready' "$cesbranch"
+
+  # --- a declared NON-terminal reason removes a pre-existing done-sentinel --------
+  # Driven through the REAL wrapper: a run whose earlier life left a `done` sentinel
+  # (a torn-down run a human --resume'd) declares `continuing` — a live run must not
+  # keep "the run is over" on disk.
+  ec_wake resurrect continuing 0
+  printf 'com.autopilot.ec.resurrect done 1970-01-01T00:00:00Z\nreason: done\n' \
+    >"$EC/resurrect/.auto-pilot/orchestrator.done"
+  : >"$EC/resurrect/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$EC/resurrect/launchctl.log" STUB_CLAUDE_MARKER="$EC/resurrect/claude-ran" \
+    STUB_SELF="$SCRIPT" STUB_RUN_DIR="$EC/resurrect" STUB_DECLARE=continuing STUB_EXIT_CODE=0 \
+    bash "$EC/resurrect/launch.sh" >/dev/null 2>&1
+  if [ -f "$EC/resurrect/.auto-pilot/orchestrator.done" ]; then
+    bad "exit contract [resurrect]: a declared 'continuing' CLEARS the stale done-sentinel"
+  else
+    ok "exit contract [resurrect]: a declared 'continuing' CLEARS the stale done-sentinel"
+  fi
+  if grep -q 'bootout' "$EC/resurrect/launchctl.log" 2>/dev/null; then
+    bad "exit contract [resurrect]: a stale sentinel never tears the live run down" \
+      "$(cat "$EC/resurrect/launchctl.log")"
+  else
+    ok "exit contract [resurrect]: a stale sentinel never tears the live run down"
+  fi
+
+  # --- the done/deadline teardown VERIFIES its bootout ---------------------------
+  # `teardown` swallows a failed `launchctl bootout` (`|| true`). Unverified, a
+  # FAILED bootout leaves the job LOADED: StartInterval keeps waking a FINISHED run,
+  # every wake exits 0 and re-attempts the same failing teardown, `status` says
+  # relaunch=no — zero work, zero alarm. Finding #22 by another route. This stub
+  # FAILS the bootout and reports the job still loaded via `print`.
+  STUBF="$EC/stub-failing-bootout"; mkdir -p "$STUBF"
+  cat >"$STUBF/launchctl" <<'LCFEOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_LAUNCHCTL_LOG:?}"
+case "${1:-}" in
+  bootout) exit 1 ;;   # the bootout FAILS…
+  print)   exit 0 ;;   # …so the job is still loaded
+esac
+exit 0
+LCFEOF
+  chmod +x "$STUBF/launchctl"
+  BF="$EC/bootout-fails"; mkdir -p "$BF/.auto-pilot"
+  ( cd "$BF" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$BF/.auto-pilot/RUN.md"
+  printf '# report\n' >"$BF/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$BF/log"
+  : >"$BF/launchctl.log"
+  bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$BF/log" --dir "$BF" \
+    --label com.autopilot.ec.bf --state "$BF/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
+  bfboots="$(grep -c 'bootout' "$BF/launchctl.log" 2>/dev/null)"; bfboots="${bfboots:-0}"
+  if [ "$bfboots" -ge 2 ] && grep -q '^print' "$BF/launchctl.log" 2>/dev/null; then
+    ok "exit contract [bootout fails]: the declared-done teardown is VERIFIED (launchctl print) and retried"
+  else
+    bad "exit contract [bootout fails]: the declared-done teardown is VERIFIED (launchctl print) and retried" \
+      "launchctl log: $(cat "$BF/launchctl.log" 2>/dev/null)"
+  fi
+  have "exit contract [bootout fails]: a still-loaded job is reported LOUDLY, never swallowed" \
+    'STILL LOADED' "$bferr"
+
+  # --- a declared `systemic` PRESERVES the orchestrator's own diagnosis -----------
+  # The supervisor used to pass a fixed string ("…see RUN.md pause_reason…") which
+  # the halt wrote INTO pause_reason — so the human woke to an alarm pointing at
+  # itself, with the concrete cause destroyed. `exit_reason_detail` exists for this.
+  # The two fields carry DIFFERENT text on purpose: with the same string in both,
+  # the assertion cannot tell "read exit_reason_detail" from "silently fell back to
+  # pause_reason", and passes even when the detail read is broken.
+  SY="$EC/systemic-detail"; mkdir -p "$SY/.auto-pilot"
+  ( cd "$SY" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'
+    printf 'pause_reason: circuit breaker: T-2 failed verify 3x on the same assertion\n'
+    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason_detail: failed invariant: base_sha moved under T-4 mid-delivery\n'
+    printf -- '---\n'; } >"$SY/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SY/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$SY/log"
+  : >"$SY/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$SY/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$SY/log" --dir "$SY" \
+    --label com.autopilot.ec.sy --state "$SY/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  have "exit contract [systemic]: the orchestrator's OWN pause_reason survives the halt" \
+    'pause_reason: circuit breaker: T-2 failed verify 3x on the same assertion' \
+    "$(cat "$SY/.auto-pilot/RUN.md")"
+  have "exit contract [systemic]: the ALARM carries exit_reason_detail's concrete cause" \
+    'failed invariant: base_sha moved under T-4 mid-delivery' "$(cat "$SY/.auto-pilot/REPORT.md")"
+  lack "exit contract [systemic]: the alarm did NOT silently fall back to pause_reason" \
+    'circuit breaker: T-2 failed verify 3x' "$(cat "$SY/.auto-pilot/REPORT.md")"
+  lack "exit contract [systemic]: the alarm never just points back at pause_reason" \
+    'see RUN.md pause_reason' "$(cat "$SY/.auto-pilot/REPORT.md")"
+
+  # …and with NO detail recorded, the fallback to the already-recorded pause_reason
+  # still carries a concrete cause into the alarm (the fallback must exist, but it
+  # must be a FALLBACK — the assertion above proves it isn't the only path taken).
+  SYF="$EC/systemic-detail-fallback"; mkdir -p "$SYF/.auto-pilot"
+  ( cd "$SYF" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'
+    printf 'pause_reason: circuit breaker: T-9 failed verify 3x on the same assertion\n'
+    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason_detail: \n'
+    printf -- '---\n'; } >"$SYF/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SYF/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$SYF/log"
+  : >"$SYF/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$SYF/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$SYF/log" --dir "$SYF" \
+    --label com.autopilot.ec.syf --state "$SYF/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  have "exit contract [systemic]: with no detail, the alarm falls back to pause_reason" \
+    'circuit breaker: T-9 failed verify 3x' "$(cat "$SYF/.auto-pilot/REPORT.md")"
+
+  # …and the TEMPLATE's inline doc comment is NOT a diagnosis. run-state.md declares
+  # `pause_reason: # why the run paused/halted…`, and the supervisor's front-matter
+  # reader deliberately does not strip `#` (these fields are free prose). A run that
+  # never wrote a real pause_reason must not have that comment preserved as the halt's
+  # cause, nor read back to the human as the alarm's concrete diagnosis.
+  SYC="$EC/systemic-template-comment"; mkdir -p "$SYC/.auto-pilot"
+  ( cd "$SYC" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'
+    printf 'pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)\n'
+    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason_detail: \n'
+    printf -- '---\n'; } >"$SYC/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SYC/.auto-pilot/REPORT.md"
+  printf 'ok\n' >"$SYC/log"
+  : >"$SYC/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$SYC/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$SYC/log" --dir "$SYC" \
+    --label com.autopilot.ec.syc --state "$SYC/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  lack "exit contract [systemic]: the template's doc comment is never preserved as pause_reason" \
+    'why the run paused/halted' "$(cat "$SYC/.auto-pilot/RUN.md")"
+  have "exit contract [systemic]: with only the template comment, pause_reason gets the halt's real reason" \
+    'pause_reason: the orchestrator declared a systemic exit' "$(cat "$SYC/.auto-pilot/RUN.md")"
+  lack "exit contract [systemic]: the alarm never quotes the template comment as the cause" \
+    'why the run paused/halted' "$(cat "$SYC/.auto-pilot/REPORT.md")"
+
+  # --- a HALT'S OWN reason is the TRUE one: never a stale pause_reason -------------
+  # The "preserve the orchestrator's diagnosis" rule belongs to the declared-`systemic`
+  # halt ALONE. The fatal-auth and no-progress halts have their own, true reason, and
+  # `pause_reason` is durable — an earlier rate-window pause leaves one behind, and
+  # `--resume` clears `status`/`paused_until` but NOT `pause_reason`. Preserving it on
+  # those paths makes RUN.md assert a FALSE cause ("halted: rate window until 03:00"
+  # on a run that actually died on a dead credential) and sends the operator to debug
+  # the wrong thing — the same "looks like an explanation, is a lie" failure mode this
+  # whole task exists to abolish.
+  SP="$EC/stale-pause-reason-fatal"; mkdir -p "$SP/.auto-pilot"
+  ( cd "$SP" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'
+    printf 'pause_reason: rate window until 03:00 (from an earlier pause, since resumed)\n'
+    printf 'paused_until: \n'
+    printf -- '---\n'; } >"$SP/.auto-pilot/RUN.md"
+  printf '# report\n' >"$SP/.auto-pilot/REPORT.md"
+  : >"$SP/launchctl.log"
+  STUB_LAUNCHCTL_LOG="$SP/launchctl.log" PATH="$STUB_PATH" \
+    "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/auth.log" --dir "$SP" \
+    --label com.autopilot.ec.sp --state "$SP/.auto-pilot/supervisor-state" >/dev/null 2>&1
+  sprun="$(git -C "$SP" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  have "exit contract [fatal auth]: the halt records its OWN true reason" \
+    'pause_reason: non-retryable auth failure' "$sprun"
+  lack "exit contract [fatal auth]: a stale pause_reason is NOT preserved as the cause" \
+    'rate window until 03:00' "$sprun"
+
+  # …same for the no-progress halt.
+  NP="$EC/stale-pause-reason-noprogress"; mkdir -p "$NP/.auto-pilot"
+  ( cd "$NP" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'
+         printf 'pause_reason: rate window until 03:00 (from an earlier pause, since resumed)\n'
+         printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  : >"$NP/launchctl.log"
+  i=0
+  while [ "$i" -lt 3 ]; do
+    STUB_LAUNCHCTL_LOG="$NP/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$NP" \
+      --label com.autopilot.ec.np2 --state "$NP/.auto-pilot/supervisor-state" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  nprun="$(git -C "$NP" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  have "exit contract [no-progress]: the halt records its OWN true reason" \
+    'pause_reason: no forward progress' "$nprun"
+  lack "exit contract [no-progress]: a stale pause_reason is NOT preserved as the cause" \
+    'rate window until 03:00' "$nprun"
+
+  # --- a declared `paused` needs CORROBORATION to skip the no-progress guard ------
+  # Resetting the counter on the declaration alone lets a prompt/logic bug that
+  # declares `paused` on every wake while dying non-zero and making no run-state
+  # progress relaunch forever: the backstop can never fire, and nothing alarms.
+  PB="$EC/paused-uncorroborated"; mkdir -p "$PB/.auto-pilot"
+  ( cd "$PB" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  : >"$PB/launchctl.log"
+  i=0
+  while [ "$i" -lt 3 ]; do
+    STUB_LAUNCHCTL_LOG="$PB/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$PB" \
+      --label com.autopilot.ec.pb --state "$PB/.auto-pilot/supervisor-state" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  have "exit contract [paused, uncorroborated]: still counts against the no-progress guard (halts)" \
+    'status: systemic' "$(cat "$PB/.auto-pilot/RUN.md")"
+  have "exit contract [paused, uncorroborated]: the halt raises the no-progress alarm" \
+    'no forward progress' "$(cat "$PB/.auto-pilot/REPORT.md")"
+
+  # …while a REAL pause (RUN.md's own `status: paused` + `paused_until`) stays exempt.
+  PC="$EC/paused-corroborated"; mkdir -p "$PC/.auto-pilot"
+  ( cd "$PC" && git init -q \
+    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'
+         printf 'pause_reason: rate window\n'
+         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  : >"$PC/launchctl.log"
+  i=0
+  while [ "$i" -lt 5 ]; do
+    STUB_LAUNCHCTL_LOG="$PC/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$PC" \
+      --label com.autopilot.ec.pc --state "$PC/.auto-pilot/supervisor-state" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  lack "exit contract [paused, corroborated]: a real rate-window pause is still exempt from the guard" \
+    'status: systemic' "$(cat "$PC/.auto-pilot/RUN.md")"
+
+  # …and the corroboration is `status: paused` and NOTHING ELSE. `paused_until` is
+  # unusable as corroboration two ways, and the RUN.md this uses is copied verbatim
+  # from run-state.md's own template: (a) the template declares the key WITH an
+  # inline `# comment`, and the supervisor's front-matter reader deliberately does
+  # not strip `#` (pause_reason / exit_reason_detail are free prose), so the comment
+  # text reads back as a non-empty VALUE and every run "corroborates" — the guard
+  # could never fire; (b) it is durable across a `--resume`, so a run that paused
+  # once would exempt itself from the guard forever. Declaring `paused` on every
+  # wake while dying non-zero must STILL reach the halt.
+  PT="$EC/paused-until-comment"; mkdir -p "$PT/.auto-pilot"
+  ( cd "$PT" && git init -q \
+    && { printf -- '---\n'; printf 'status: active\n'
+         printf 'paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused\n'
+         printf 'pause_reason: # why the run paused/halted\n'
+         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+    && printf '# report\n' >.auto-pilot/REPORT.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  : >"$PT/launchctl.log"
+  i=0
+  while [ "$i" -lt 4 ]; do
+    STUB_LAUNCHCTL_LOG="$PT/launchctl.log" PATH="$STUB_PATH" \
+      "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$PT" \
+      --label com.autopilot.ec.pt --state "$PT/.auto-pilot/supervisor-state" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+  ptrun="$(git -C "$PT" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  have "exit contract [paused, template's commented paused_until]: an EMPTY paused_until does not corroborate — the no-progress halt still fires" \
+    'status: systemic' "$ptrun"
+  have "exit contract [paused, template's commented paused_until]: the halt raises the no-progress alarm" \
+    'no forward progress' "$(git -C "$PT" show HEAD:.auto-pilot/REPORT.md 2>&1)"
+  if grep -q 'bootout' "$PT/launchctl.log" 2>/dev/null; then
+    ok "exit contract [paused, template's commented paused_until]: the job was booted out"
+  else
+    bad "exit contract [paused, template's commented paused_until]: the job was booted out" \
+      "launchctl log: $(cat "$PT/launchctl.log" 2>/dev/null)"
+  fi
+
+  # fail-closed: an unknown reason is never written, and a RELAUNCHABLE reason can
+  # never be smuggled into the terminal sentinel.
+  o="$("$SCRIPT" exit-reason --dir "$EC/continuing" --reason bogus 2>&1)"; ecc=$?
+  [ "$ecc" = 2 ] && printf '%s' "$o" | grep -qF 'unknown exit reason' \
+    && ok "exit-reason fail-closed: unknown reason" || bad "exit-reason fail-closed: unknown reason" "$o"
+  o="$("$SCRIPT" teardown --label com.autopilot.ec.x --reason continuing 2>&1)"; tdc=$?
+  [ "$tdc" = 2 ] && printf '%s' "$o" | grep -qF 'must be a TERMINAL exit reason' \
+    && ok "teardown fail-closed: a relaunchable reason can't mark a run terminal" \
+    || bad "teardown fail-closed: a relaunchable reason can't mark a run terminal" "$o"
+else
+  echo "skip - exit contract: git not available"
+fi
+
+# --- heartbeat: stale (wedged) vs fresh (working) ------------------------------
+# "Last heartbeat 40 min ago, per-task ceiling is 45m" is the distinction NO other
+# signal in the system can make: a slow task and a hung one look identical to an
+# exit code, a PID, and a log tail alike.
+HB="$BASE/hb"; mkdir -p "$HB/.auto-pilot"
+{ printf -- '---\n'; printf 'status: active\n'; printf -- '---\n'
+  printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+  printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+  printf '| T-1  | implementing | b1 | main | - | - | - |\n'
+} >"$HB/.auto-pilot/RUN.md"
+
+"$SCRIPT" heartbeat --dir "$HB" --note 'deliver-task:implement' >/dev/null 2>&1
+hbf="$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
+have "heartbeat: a fresh beat is reported healthy"        'healthy'           "$hbf"
+have "heartbeat: STATUS line carries heartbeat=healthy"   'heartbeat=healthy' "$hbf"
+lack "heartbeat: a fresh beat is not a stall"             'STALL'             "$hbf"
+have "heartbeat: the beat's sub-step note is surfaced"    'deliver-task:implement' "$hbf"
+
+# Backdate the beat past the 45m per-task ceiling (50m ago) — the wedged case. It
+# has to be backdated by hand; the alternative is a 45-minute test.
+{ printf 'at: %s\n' "$(( $(date +%s) - 3000 ))"
+  printf 'iso: 2026-07-11T00:00:00Z\n'
+  printf 'note: deliver-task:implement\n'
+} >"$HB/.auto-pilot/heartbeat"
+hbs="$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
+have "heartbeat: a beat older than the per-task ceiling is reported as a STALL" 'STALL' "$hbs"
+have "heartbeat: STATUS line carries heartbeat=stale" 'heartbeat=stale' "$hbs"
+lack "heartbeat: a stalled run is not reported healthy" 'heartbeat=healthy' "$hbs"
+
+# …and a fresh beat (through the real subcommand) clears it: the stall report
+# tracks the beat, not some sticky flag.
+"$SCRIPT" heartbeat --dir "$HB" --note 'loop-iteration' >/dev/null 2>&1
+have "heartbeat: a new beat clears the stall" 'heartbeat=healthy' \
+  "$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
+
+# a run with no heartbeat at all (a pre-heartbeat run) reports none, never a false stall
+NOHB="$BASE/nohb"; mkdir -p "$NOHB/.auto-pilot"
+{ printf -- '---\n'; printf 'status: active\n'; printf -- '---\n'; } >"$NOHB/.auto-pilot/RUN.md"
+have "heartbeat: absent heartbeat reports none (not a false stall)" 'heartbeat=none' \
+  "$("$SCRIPT" status --label com.autopilot.nohb --dir "$NOHB" 2>&1)"
+
+# --- the generated launch script wires the contract up (task 15) ---------------
+lbody15="$(cat "$BASE/launch.sh" 2>/dev/null)"
+have "launch: beats the heartbeat at the top of the wake" 'heartbeat --dir' "$lbody15"
+have "launch: stamps the wake start for the freshness check" 'wake=$(date +%s)' "$lbody15"
+have "launch: hands the wake start to supervisor-check" '--wake-start "$wake"' "$lbody15"
+wake_ln="$(printf '%s\n' "$lbody15" | grep -n 'wake=$(date' | head -1 | cut -d: -f1)"
+sbx15_ln="$(printf '%s\n' "$lbody15" | grep -n '^sandbox-exec -f' | head -1 | cut -d: -f1)"
+if [ -n "$wake_ln" ] && [ -n "$sbx15_ln" ] && [ "$wake_ln" -lt "$sbx15_ln" ]; then
+  ok "launch: the wake start is stamped BEFORE claude runs (else every declaration reads stale)"
+else
+  bad "launch: the wake start is stamped BEFORE claude runs" "wake@$wake_ln sandbox@$sbx15_ln"
 fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
