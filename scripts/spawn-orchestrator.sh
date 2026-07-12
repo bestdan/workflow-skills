@@ -52,7 +52,7 @@
 #   spawn-orchestrator.sh classify-exit --exit-code <n> --output <file> \
 #       [--since-offset <bytes>]
 #   spawn-orchestrator.sh supervisor-check --exit-code <n> --log <file> \
-#       --wake-start <epoch> [--since-offset <bytes>] \
+#       [--wake-start <epoch>] [--since-offset <bytes>] \
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>] \
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
@@ -150,7 +150,12 @@
 #                  live run and a previous wake's `continuing` can't out-vote a
 #                  fatal auth exit. And a `fatal` classification halts regardless
 #                  of what was declared (over-halting is the safe direction; that
-#                  is finding #22's whole lesson).
+#                  is finding #22's whole lesson). A missing/garbage --wake-start
+#                  (a launch.sh generated before it existed, an unreachable `date`)
+#                  DEGRADES to "honor no declaration" — it never disables the
+#                  supervisor: classification, the no-progress guard, the halt and
+#                  the teardown all still run. A supervisor that silently stops
+#                  supervising is the worst outcome available to this system.
 #                  Classifies the exit (above); a
 #                  `fatal` classification halts immediately. A `retry`
 #                  classification is checked against the no-progress guard:
@@ -1939,7 +1944,7 @@ _run_front_field() {
 # supervisor down, which is the one thing that MUST happen), then boot the
 # launchd job out so it never relaunches into the same condition.
 _supervisor_halt() {
-  local dir="" label="" reason="" condition="halt"
+  local dir="" label="" reason="" condition="halt" preserve=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2 ;;
@@ -1949,6 +1954,8 @@ _supervisor_halt() {
       # passes the SAME condition, so `alarm` no-ops instead of double-notifying
       # — the idempotency is the de-dupe, no second flag needed.
       --condition) condition="$2"; shift 2 ;;
+      # ONLY the declared-`systemic` caller passes this. See below.
+      --preserve-pause-reason) preserve=1; shift ;;
       *) die "unknown supervisor-halt argument: $1" ;;
     esac
   done
@@ -1960,13 +1967,26 @@ _supervisor_halt() {
 
   if [ -f "$run_md" ]; then
     _set_front_field "$run_md" status systemic
-    # NEVER clobber a non-empty `pause_reason`. On the declared-`systemic` path the
-    # orchestrator has already recorded its OWN concrete diagnosis there (and the
-    # halt reason is derived FROM it) — overwriting it with the supervisor's
-    # summary destroys the only description of the actual cause, leaving a human
-    # woken by an alarm that says "see RUN.md pause_reason" while pause_reason says
-    # the same thing back.
-    local existing_pause; existing_pause="$(_run_front_field "$dir" pause_reason)"
+    # `pause_reason` must name the TRUE cause of THIS halt. On the declared-`systemic`
+    # path only, the orchestrator has already recorded its OWN concrete diagnosis
+    # there (and the halt reason is derived FROM it), so overwriting it with the
+    # supervisor's summary would destroy the only description of the actual cause,
+    # leaving a human woken by an alarm that says "see RUN.md pause_reason" while
+    # pause_reason says the same thing back — hence --preserve-pause-reason, passed
+    # from that ONE caller.
+    #
+    # The other two halt paths (fatal auth, no-progress) must NOT preserve: they have
+    # their own, true reason, and whatever sits in `pause_reason` is someone else's —
+    # a stale rate-window pause, or a previous halt (`--resume` clears `status` and
+    # `paused_until`, but not `pause_reason`). Preserving it would make RUN.md assert
+    # a FALSE cause: "halted systemic — rate window until 03:00" on a run that
+    # actually died on a dead credential, pointing the operator at the wrong thing.
+    local existing_pause; existing_pause=""
+    [ "$preserve" = 1 ] && existing_pause="$(_run_front_field "$dir" pause_reason)"
+    # A `pause_reason` that is only the template's inline `# …` doc comment is not a
+    # diagnosis to preserve — keeping it would leave RUN.md asserting "why the run
+    # paused/halted" as the cause of the halt. Write the real reason instead.
+    case "$existing_pause" in '#'*) existing_pause="" ;; esac
     if [ -n "$existing_pause" ]; then
       echo "spawn-orchestrator: supervisor halt: preserving the run's own pause_reason: $existing_pause" >&2
     else
@@ -2090,13 +2110,29 @@ supervisor_check() {
   [ -n "$code" ] && [ -n "$log" ] && [ -n "$dir" ] && [ -n "$label" ] && [ -n "$state" ] \
     || die "supervisor-check requires --exit-code, --log, --dir, --label, and --state"
   case "$code" in *[!0-9]*) die "--exit-code must be a non-negative integer: $code" ;; esac
-  # --wake-start is REQUIRED and validated, exactly like --exit-code: it is the only
-  # thing that makes a declaration attributable to THIS wake, and a supervisor that
-  # cannot date the wake must not be able to act on a declaration at all. Missing or
-  # garbage is a usage error (the wrapper relaunches on its timer), never a silent
-  # "trust whatever RUN.md says" — which is how a 1970 `done` tore down a live run.
-  [ -n "$wake" ] || die "supervisor-check requires --wake-start <epoch> (fail-closed): without it a STALE declaration cannot be told from this wake's"
-  case "$wake" in *[!0-9]*) die "--wake-start must be a non-negative integer (epoch seconds): $wake" ;; esac
+  # --wake-start dates THIS wake, which is what makes a declaration attributable to
+  # it. A missing or garbage value DEGRADES the supervisor — it must never DISABLE
+  # it. `_declared_exit_reason` already fails CLOSED on an empty/garbage wake (it
+  # honors no declaration at all, exactly as required), so `die`ing here would buy
+  # nothing for the stale-declaration bug while throwing away every OTHER duty of
+  # this wake: the fatal-auth classification, the no-progress counter, the state
+  # write, the halt, the teardown. And the trigger is not hypothetical — `launch.sh`
+  # is generated ONCE and persisted in the run dir while `spawn-orchestrator.sh` is
+  # updated under a live run, so a wrapper predating `--wake-start` passes none, and
+  # a `date` the plist's narrowed PATH cannot reach leaves it empty. Either way the
+  # supervisor would exit 2 before classifying anything, on every wake, forever:
+  # claude keeps burning quota, launchd keeps relaunching, nothing ever alarms —
+  # finding #22's loop, restored and now unkillable because the backstop never runs.
+  # So: warn LOUDLY, drop the wake to empty (no declaration is honored), continue.
+  case "$wake" in
+    '')
+      echo "spawn-orchestrator: WARNING: supervisor-check got no --wake-start (stale launch.sh, or \`date\` unreachable on the job's PATH) — NO declared exit reason will be honored this wake (fail-closed); classification, the no-progress guard, and the halt still apply" >&2
+      ;;
+    *[!0-9]*)
+      echo "spawn-orchestrator: WARNING: --wake-start is not a non-negative integer (epoch seconds): $wake — NO declared exit reason will be honored this wake (fail-closed); classification, the no-progress guard, and the halt still apply" >&2
+      wake=""
+      ;;
+  esac
   [ -f "$log" ] || die "supervisor-check --log not found: $log"
   [ -d "$dir" ] || die "supervisor-check --dir not found: $dir"
   case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
@@ -2155,26 +2191,38 @@ supervisor_check() {
       # already-recorded `pause_reason` is the fallback.
       local sys_detail; sys_detail="$(_run_front_field "$dir" exit_reason_detail)"
       [ -n "$sys_detail" ] || sys_detail="$(_run_front_field "$dir" pause_reason)"
+      # run-state.md's RUN.md TEMPLATE declares these keys with an inline `# …` doc
+      # comment, and this reader deliberately does not strip `#` (they are free prose
+      # and truncating an operator's diagnosis at a `#` would be its own data loss).
+      # A value that is ONLY that comment is documentation, not a diagnosis — putting
+      # it in the alarm tells the human "why the run paused/halted" instead of why.
+      case "$sys_detail" in '#'*) sys_detail="" ;; esac
       [ -n "$sys_detail" ] || sys_detail="no detail recorded — see REPORT.md and orchestrator.log"
-      _supervisor_halt --dir "$dir" --label "$label" \
+      _supervisor_halt --dir "$dir" --label "$label" --preserve-pause-reason \
+        --condition systemic \
         --reason "the orchestrator declared a systemic exit (circuit breaker / failed invariant): $sys_detail"
       return "$code"
       ;;
     paused)
       # A rate-window pause makes no progress BY DESIGN, so it never counts against
       # the no-progress guard — but ONLY when the run state CORROBORATES the
-      # declaration. The pre-existing carve-out (_run_is_paused) required RUN.md's
-      # own `status: paused`, a durable run-state fact; trusting the declaration
-      # alone would let a prompt/logic bug that declares `paused` on every wake while
-      # dying non-zero reset the counter forever — infinite relaunch, zero progress,
-      # no alarm. A legitimate pause writes `status: paused` + `paused_until` before
-      # exiting, so corroboration always holds for the real case.
-      if _run_is_paused "$dir" || [ -n "$(_run_front_field "$dir" paused_until)" ]; then
+      # declaration. The corroborating fact is `status: paused` and nothing else
+      # (_run_is_paused, the same carve-out the retry path below already used):
+      # run-budget.md's agent pause writes it on every legitimate pause, and it is
+      # CLEARED on resume. `paused_until` is NOT usable as corroboration — it is
+      # declared with an inline `# comment` in run-state.md's own RUN.md template
+      # (so a reader that must not truncate free prose at a `#` reads the comment
+      # back as a value, and every run corroborates unconditionally), and it is
+      # durable across a resume (so a run that paused once is exempt forever).
+      # Without real corroboration a prompt/logic bug that declares `paused` on every
+      # wake while dying non-zero would reset the counter forever — infinite
+      # relaunch, zero progress, no alarm.
+      if _run_is_paused "$dir"; then
         _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
         echo "spawn-orchestrator: supervisor-check declared paused — relaunch expected past the reset"
         return "$code"
       fi
-      echo "spawn-orchestrator: supervisor-check declared paused but the run state does NOT corroborate it (no status: paused / paused_until) — relaunching, but the no-progress guard still applies" >&2
+      echo "spawn-orchestrator: supervisor-check declared paused but the run state does NOT corroborate it (RUN.md has no status: paused) — relaunching, but the no-progress guard still applies" >&2
       ;;
     continuing)
       if [ "$code" = 0 ]; then

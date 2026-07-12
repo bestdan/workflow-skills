@@ -73,11 +73,16 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   rather than by asking a human to merge bottom-up from memory (run #1's
   finding #14, closed by automation, not by prose).
 - `status` / `paused_until` / `pause_reason` are the **run-level** fields the run
-  loop writes: `paused_until` (+ reason) at a rate-window pause, `status: systemic`
-  (+ reason) when the circuit breaker halts, `status: paused` (+ reason,
-  `paused_until` empty) when the pre-dispatch deadline guard stops with ready
-  tasks left — resumable only by an explicit `--resume`, never a timer — and
+  loop writes: `status: paused` + `paused_until` (+ reason) at a rate-window pause,
+  `status: systemic` (+ reason) when the circuit breaker halts, `status: paused`
+  (+ reason, `paused_until` empty) when the pre-dispatch deadline guard stops with
+  ready tasks left — resumable only by an explicit `--resume`, never a timer — and
   `status: done` at a clean end-of-run (no ready tasks or a budget hard-stop).
+  `status: paused` is **required** on every pause, not optional: it is the only
+  durable fact the supervisor's no-progress guard accepts as corroboration for a
+  declared `paused` exit (`paused_until` cannot serve — it carries an inline
+  comment in the template above, and it survives a `--resume`, so a run that paused
+  once would exempt itself from the guard forever).
 - `exit_reason` / `exit_reason_at` / `exit_reason_detail` are the **exit
   contract** the supervisor reads to decide relaunch-vs-teardown — see below.
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
