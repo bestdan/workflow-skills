@@ -2,7 +2,7 @@
 title: "run doctor: assert the run's own invariants every iteration — repair or halt, never drift"
 priority: urgent
 size: 3
-status: new
+status: in_progress
 created: 2026-07-11
 source_branch: main
 related_files:
