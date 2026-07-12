@@ -157,11 +157,11 @@ seams [`run-state.md`](run-state.md) already relies on.
 and the jail is _broken_ without it.** Three paths, each with its own failure
 mode if denied (finding #20 / task 12):
 
-| Path                              | What it is                                                            | Denied ⇒                                                                                 |
-| --------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on  | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
-| `/tmp/claude-<uid>/…`             | its per-project/per-session scratch + cwd **tree** (dirs it `mkdir`s) | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
-| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                        | same — the Bash tool never executes the command at all                                   |
+| Path                              | What it is                                                           | Denied ⇒                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
+| `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
+| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                       | same — the Bash tool never executes the command at all                                   |
 
 The middle and last rows are the ones that **poison verification**: the Bash
 tool dies on its own `mkdir` _before_ the command ever runs, so **every Bash
@@ -178,6 +178,21 @@ load-bearing: two of the three live **outside the run root**, so passing them
 as `--rw` would trip the `--confine-under` containment guard (or force a caller
 to weaken it). Renderer-owned keeps the guard covering every caller scope while
 the harness still gets exactly what it needs.
+
+Two subtleties the renderer handles so a caller can't get them wrong. **The
+`/tmp/claude-<N>` id is not the uid** — it varies per harness instance (a
+detached launchd run was seen using `/tmp/claude-522` on a uid-501 host), so the
+tree is matched by a uid-independent **pattern** over `/tmp` covering both the
+scratch tree and the `-cwd` file, never a uid-resolved path (which misses and
+silently restores the exit-code poisoning). **The srt-mux socket grant is
+anchored to the detached job's `TMPDIR`**, which a launchd job does not inherit —
+so `render-profile` takes the run-owned `--tmpdir`, anchors the socket grant to
+it, and **stamps the canonical value into the profile** (`;; @spawn-tmpdir:`).
+`write-launch` reads that stamp back to `export TMPDIR` in the job, so the socket
+the job creates always lands where the profile permits it — render and launch
+**cannot drift apart** (a drift would silently degrade the inner sandbox). A
+passed `--tmpdir` is only an optional cross-check against the stamp; a profile
+with no stamp is fail-closed.
 
 They are also **as narrow as the real requirement and no narrower**: never a
 blanket `$TMPDIR`/`/tmp` write, and — critically — **never a blanket

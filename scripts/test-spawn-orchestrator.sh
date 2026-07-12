@@ -292,8 +292,15 @@ sfc "add-task-host embedded newline" "invalid egress host" --source plan --add-t
 
 # --- hardening: --confine-under bounds write scopes (task 3, Fable #3) ---------
 mkdir -p "$BASE/root/wt"
-"$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --exec "$BIN" --out "$BASE/cf.sb" >/dev/null 2>&1 \
+# Render with a run-owned --tmpdir inside the RW worktree: cf.sb is reused by the
+# write-launch tests below, which read TMPDIR back from its @spawn-tmpdir stamp.
+"$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/root/wt/tmp" --exec "$BIN" --out "$BASE/cf.sb" >/dev/null 2>&1 \
   && ok "confine-under: rw inside root accepted" || bad "confine-under: rw inside root accepted"
+have "render: profile carries the @spawn-tmpdir stamp" ";; @spawn-tmpdir: $BASE/root/wt/tmp" "$(cat "$BASE/cf.sb" 2>/dev/null)"
+# --tmpdir must sit inside a confinement root when confined (bounds the job's mkdir).
+tdesc="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/elsewhere/tmp" --out "$BASE/td.sb" 2>&1)"; tdc=$?
+[ "$tdc" = 2 ] && printf '%s' "$tdesc" | grep -qF 'escapes --confine-under' \
+  && ok "render: --tmpdir outside confine root fails closed" || bad "render: --tmpdir outside confine root fails closed" "$tdesc"
 cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"; cfc=$?
 if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
   ok "confine-under: rw / fails closed"
@@ -393,7 +400,7 @@ printf 'run the graph\n' >"$BASE/prompt.txt"
 LAUNCH_PATH='/opt/homebrew/bin:/usr/bin:/bin'
 wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
-  --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
 lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
 have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
@@ -422,7 +429,7 @@ if command -v plutil >/dev/null 2>&1; then
   mkdir -p "$BASE/a&b<x"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
     --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
-    --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+    --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
   if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
 else
   echo "skip - launch: plist lint (plutil absent)"
@@ -430,25 +437,42 @@ fi
 # label injection rejected at the source (defense-in-depth on top of xml_escape)
 "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label 'a</string><key>x' --claude-bin "$BIN" \
-  --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
   && bad "launch: injecting label rejected" || ok "launch: injecting label rejected"
 # write-launch fail-closed on a missing input file
 wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
-# --tmpdir is a fail-closed requirement (a launchd job inherits no usable TMPDIR):
-# a missing --tmpdir must die, and a relative one must be rejected.
-wltm="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
-  --out-script "$BASE/tm.sh" --out-plist "$BASE/tm.plist" 2>&1)"
-[ $? = 2 ] && printf '%s' "$wltm" | grep -qF 'requires --tmpdir' \
-  && ok "launch: missing --tmpdir fails closed" || bad "launch: missing --tmpdir fails closed" "$wltm"
+# TMPDIR is now derived from the profile's @spawn-tmpdir stamp, not a required
+# flag — so a missing --tmpdir SUCCEEDS and the launch script exports the stamped
+# dir (proving render and launch can't drift).
+"$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.tm --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --out-script "$BASE/tm.sh" --out-plist "$BASE/tm.plist" >/dev/null 2>&1
+have "launch: TMPDIR derived from the profile stamp (no --tmpdir needed)" \
+  "export TMPDIR=$BASE/root/wt/tmp" "$(cat "$BASE/tm.sh" 2>/dev/null)"
+have "launch: the job mkdir -p's its TMPDIR" "mkdir -p $BASE/root/wt/tmp" "$(cat "$BASE/tm.sh" 2>/dev/null)"
+# a relative --tmpdir is still rejected (absolute check runs before the cross-check)
 wltr="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
   --tmpdir "relative/tmp" --out-script "$BASE/tr.sh" --out-plist "$BASE/tr.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wltr" | grep -qF 'must be absolute' \
   && ok "launch: relative --tmpdir fails closed" || bad "launch: relative --tmpdir fails closed" "$wltr"
+# a --tmpdir that does NOT match the profile's stamp is fail-closed (the exact
+# render/launch drift that silently degraded the inner sandbox).
+wltx="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --tmpdir "$BASE/root/wt/OTHER" --out-script "$BASE/tx.sh" --out-plist "$BASE/tx.plist" 2>&1)"
+[ $? = 2 ] && printf '%s' "$wltx" | grep -qF 'does not match the profile' \
+  && ok "launch: --tmpdir mismatching the stamp fails closed" || bad "launch: --tmpdir mismatching the stamp fails closed" "$wltx"
+# a profile with no @spawn-tmpdir stamp (stale render) is fail-closed.
+grep -v '@spawn-tmpdir' "$BASE/cf.sb" >"$BASE/nostamp.sb"
+wltn="$("$SCRIPT" write-launch --profile "$BASE/nostamp.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
+  --out-script "$BASE/tn.sh" --out-plist "$BASE/tn.plist" 2>&1)"
+[ $? = 2 ] && printf '%s' "$wltn" | grep -qF 'no @spawn-tmpdir stamp' \
+  && ok "launch: profile with no stamp fails closed" || bad "launch: profile with no stamp fails closed" "$wltn"
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
 rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"

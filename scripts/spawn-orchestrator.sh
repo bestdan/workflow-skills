@@ -370,13 +370,14 @@ emit_exec() {
 }
 
 render_profile() {
-  local out="" template="$TEMPLATE_DEFAULT" toolchain=0
+  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir=""
   local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
       --cred-ro) [ $# -ge 2 ] || die "missing value for --cred-ro"; cred+=("$2"); shift 2 ;;
+      --tmpdir) [ $# -ge 2 ] || die "missing value for --tmpdir"; tmpdir="$2"; shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
       --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
       --toolchain) toolchain=1; shift ;;
@@ -487,8 +488,29 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # dies before running anything, and EVERY exit code is poisoned to 1 — finding
   # #20, the exact failure this grant exists to prevent, silently restored. So
   # match the tree by PATTERN over /tmp, never by a uid-resolved path.
+  #
+  # The detached launchd job's TMPDIR is authoritative here: the srt-mux socket
+  # grant is anchored to it, and write-launch reads it back from the @spawn-tmpdir
+  # stamp emitted below (so the two can never diverge — a divergence silently
+  # re-breaks the inner sandbox). Prefer the explicit --tmpdir (the run-owned dir
+  # the job will export); fall back to the env only when a caller renders a profile
+  # for the ambient session. When --tmpdir is given AND the render is confined,
+  # require it to sit inside a confinement root so the job's later `mkdir -p` is
+  # bounded.
   local tmpdir_c tmp_root session_env
-  tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
+  if [ -n "$tmpdir" ]; then
+    case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
+    tmpdir_c="$(resolve_lazy "$tmpdir")" || exit 2
+    if [ "${#confine_c[@]}" -gt 0 ]; then
+      local _t_ok=0 r
+      for r in "${confine_c[@]}"; do
+        [ "$tmpdir_c" = "$r" ] || [ "${tmpdir_c#"$r"/}" != "$tmpdir_c" ] && { _t_ok=1; break; }
+      done
+      [ "$_t_ok" = 1 ] || die "--tmpdir escapes --confine-under (fail-closed): $tmpdir_c"
+    fi
+  else
+    tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
+  fi
   tmp_root="$(canonicalize "/tmp")" || exit 2
   session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
   harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
@@ -508,6 +530,12 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
       *) printf '%s\n' "$line" ;;
     esac
   done <"$template" >"$tmp"
+
+  # Stamp the canonical TMPDIR the srt-mux grant is anchored to, as an SBPL
+  # comment (`;;` is ignored by the compiler). write-launch reads THIS back to set
+  # the job's TMPDIR, so the socket the job creates always lands where the profile
+  # grants — the render and the launch can't drift apart. Exactly one stamp.
+  printf ';; @spawn-tmpdir: %s\n' "$tmpdir_c" >>"$tmp"
 
   mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write profile: $out"; }
   echo "spawn-orchestrator: profile OK $out"
@@ -705,11 +733,6 @@ write_launch() {
   done
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
   [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
-  # Fail closed rather than let the job inherit no TMPDIR: without a writable temp
-  # dir the jailed shell cannot even run a heredoc, and the harness's mux socket
-  # cannot be created — both fail in ways that look like unrelated tool errors.
-  [ -n "$tmpdir" ] || die "write-launch requires --tmpdir <dir> (fail-closed): a launchd job inherits no usable TMPDIR; pass a run-owned dir INSIDE the confinement root, and render the profile with the SAME TMPDIR so the srt-mux socket grant matches"
-  case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
   [ -n "$label" ] || die "write-launch requires --label"
   # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
   # plist injection on top of xml_escape, and it's what launchd expects anyway.
@@ -719,6 +742,23 @@ write_launch() {
     [ -n "$f" ] || die "write-launch requires --profile, --settings, and --prompt-file"
     [ -f "$f" ] || die "not found (fail-closed): $f"
   done
+  # The launchd job's TMPDIR comes from the profile's @spawn-tmpdir stamp — the
+  # SAME canonical dir the srt-mux socket grant is anchored to (render_profile
+  # emits it). Deriving it from the profile makes a render/launch drift impossible:
+  # the job exports exactly the dir whose mux socket the profile permits. A stale
+  # profile with no stamp is fail-closed. A passed --tmpdir is an OPTIONAL
+  # cross-check: it must resolve to the stamped dir, else the caller rendered and
+  # launched with different dirs and the inner sandbox would silently degrade.
+  local stamped
+  stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | head -1)"
+  [ -n "$stamped" ] || die "profile has no @spawn-tmpdir stamp (fail-closed): re-render it with the current render-profile: $profile"
+  if [ -n "$tmpdir" ]; then
+    case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
+    local tmpdir_check
+    tmpdir_check="$(resolve_lazy "$tmpdir")" || exit 2
+    [ "$tmpdir_check" = "$stamped" ] || die "--tmpdir ($tmpdir_check) does not match the profile's rendered TMPDIR ($stamped) (fail-closed) — render the profile and launch with the SAME --tmpdir"
+  fi
+  tmpdir="$stamped"
   [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-launch requires an existing --workdir"
   [ -n "$log" ] || die "write-launch requires --log"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
@@ -747,10 +787,9 @@ write_launch() {
     # A launchd job inherits no usable TMPDIR, so without this the jailed process
     # has nowhere writable to put temp files: zsh dies with "can't create temp file
     # for here document" on any heredoc, and the harness's mux socket can't be
-    # created. Pin it to a run-owned dir (inside the confinement root, so temp
-    # writes stay contained) and RENDER THE PROFILE WITH THE SAME TMPDIR — the
-    # srt-mux socket grant is anchored to it, so a mismatch silently re-breaks the
-    # inner sandbox.
+    # created. This is the profile's own @spawn-tmpdir (read above) — the exact dir
+    # the srt-mux socket grant is anchored to — so the job's mux socket always
+    # lands where the profile permits it; render and launch cannot drift apart.
     printf 'export TMPDIR=%q\n' "$tmpdir"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
