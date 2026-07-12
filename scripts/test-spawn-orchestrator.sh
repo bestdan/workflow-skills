@@ -2280,6 +2280,85 @@ LCFEOF
   have "exit contract [bootout fails]: a still-loaded job is reported LOUDLY, never swallowed" \
     'STILL LOADED' "$bferr"
 
+  # --- `die` is `exit`, and an `exit` inside a same-shell function escapes ------
+  # `|| true` (task 26 / sweep after #191). `teardown` `die`s if
+  # `_write_done_sentinel` fails (an unwritable run dir); `_write_supervisor_state`
+  # `die`s the same way. Both sit on the halt/teardown path, right before
+  # `_verify_bootout` — the ONE check that turns a still-loaded job into a LOUD
+  # warning instead of a silent relaunch loop (finding #22). An unguarded `die`
+  # there aborts the whole supervisor process before that warning ever prints.
+  #
+  # Both fixtures below BREAK the side channel (chmod the run dir read-only, so
+  # every mktemp under .auto-pilot/ fails) and assert the halt/teardown still
+  # completes: exit 0 (never the bare `die` exit 2), and the STILL-LOADED warning
+  # still fires. Driven through the REAL `supervisor-check` entry point — the same
+  # one the generated launch script's last line invokes as a separate process.
+
+  # --- the SYSTEMIC HALT path survives a die-capable teardown ---------------
+  HB="$EC/halt-unwritable-sentinel"; mkdir -p "$HB/.auto-pilot"
+  ( cd "$HB" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason_detail: task-26 repro — unwritable sentinel dir\n'
+    printf -- '---\n'; } >"$HB/.auto-pilot/RUN.md"
+  printf '# report\n' >"$HB/.auto-pilot/REPORT.md"
+  ( cd "$HB" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  printf 'ok\n' >"$HB/log"
+  : >"$HB/launchctl.log"
+  # Break the side channel: every mktemp under .auto-pilot/ (the done-sentinel,
+  # the RUN.md rewrite, the ALARM sentinel) now fails with EACCES.
+  chmod -w "$HB/.auto-pilot"
+  hbout="$(STUB_LAUNCHCTL_LOG="$HB/launchctl.log" PATH="$STUBF:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$HB/log" --dir "$HB" \
+    --label com.autopilot.ec.hb --state "$HB/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
+  hbrc=$?
+  chmod +w "$HB/.auto-pilot"   # restore: the trap's rm -rf must be able to clean up
+  [ "$hbrc" = 0 ] \
+    && ok "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" \
+    || bad "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" "exit=$hbrc"
+  have "halt survives unwritable sentinel: _verify_bootout STILL runs and reports the job STILL LOADED" \
+    'STILL LOADED' "$hbout"
+
+  # --- the DECLARED-DONE teardown path survives a die-capable state write AND --
+  # a die-capable teardown (same shape, different caller — supervisor_check's own
+  # done|deadline branch, not the halt).
+  DS="$EC/done-unwritable-sentinel"; mkdir -p "$DS/.auto-pilot"
+  ( cd "$DS" && git init -q )
+  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$DS/.auto-pilot/RUN.md"
+  printf '# report\n' >"$DS/.auto-pilot/REPORT.md"
+  ( cd "$DS" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  printf 'ok\n' >"$DS/log"
+  : >"$DS/launchctl.log"
+  chmod -w "$DS/.auto-pilot"
+  dsout="$(STUB_LAUNCHCTL_LOG="$DS/launchctl.log" PATH="$STUBF:/usr/bin:/bin" \
+    "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$DS/log" --dir "$DS" \
+    --label com.autopilot.ec.ds --state "$DS/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
+  dsrc=$?
+  chmod +w "$DS/.auto-pilot"
+  [ "$dsrc" = 0 ] \
+    && ok "declared-done teardown survives unwritable sentinel: exits 0, never the bare die (2)" \
+    || bad "declared-done teardown survives unwritable sentinel: exits 0, never the bare die (2)" "exit=$dsrc"
+  have "declared-done teardown survives unwritable sentinel: _verify_bootout STILL runs and reports the job STILL LOADED" \
+    'STILL LOADED' "$dsout"
+
+  # --- regression guard: the specific subshells stay in place -------------------
+  # A grep, not a functional re-run: pins the EXACT fix shape (subshelled `die`
+  # is `exit`" callers, task 26) so a future edit that unwraps one of these three
+  # calls back to a bare `fn ... || true` fails FAST, before anyone has to
+  # rediscover the unwritable-sentinel repro above to explain a red suite.
+  guardbody="$(cat "$SCRIPT")"
+  have "regression guard: _verify_bootout subshells its internal teardown call" \
+    '( teardown --label "$label" >/dev/null ) || true' "$guardbody"
+  have "regression guard: _supervisor_halt subshells its teardown call" \
+    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null ); then' \
+    "$guardbody"
+  have "regression guard: supervisor-check's declared-done/deadline branch subshells _write_supervisor_state" \
+    '( _write_supervisor_state "$state" 0 "$(_run_head "$dir")" ) \' "$guardbody"
+  have "regression guard: supervisor-check's declared-done/deadline branch subshells teardown" \
+    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null ); then' \
+    "$guardbody"
+
   # --- a declared `systemic` PRESERVES the orchestrator's own diagnosis -----------
   # The supervisor used to pass a fixed string ("…see RUN.md pause_reason…") which
   # the halt wrote INTO pause_reason — so the human woke to an alarm pointing at

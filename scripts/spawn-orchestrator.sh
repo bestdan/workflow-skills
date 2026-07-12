@@ -335,6 +335,37 @@ DEFAULT_TASK_CEILING=2700
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
 
+# --- CONVENTION (task 26, the sweep after #191's `_alarm_safe`) ---------------
+# `die` is `exit 2`, not `return 2`. An `exit` inside a same-shell function call
+# terminates the WHOLE PROCESS regardless of `|| true` at the call site — `||
+# true` only ever sees a nonzero RETURN, never an exit, so `some_fn ... || true`
+# written to mean "best effort, never fatal" is NOT best-effort when `some_fn`
+# can `die`. On a halt/teardown/cleanup path this converts a recoverable error
+# into a silent, terminal one on exactly the paths that exist to handle errors
+# (#191's `alarm` bug; task 26's `teardown`/`_write_supervisor_state` bugs).
+#
+# So: any function that can run from a halt/teardown/cleanup path must either
+#   (a) reserve `die` for its OWN argument validation only, and `return`
+#       non-zero for every post-validation (runtime) failure — the preferred
+#       shape, used by e.g. `_verify_bootout`, `_write_done_sentinel`; or
+#   (b) if it can't be changed to (a) — e.g. it's a shared function like
+#       `teardown` whose die-on-runtime-failure IS its contract for OTHER
+#       callers — every "best effort" call site must subshell it:
+#       `( fn ... ) || warn "..."`. An `exit` inside `( ... )` only kills the
+#       subshell, so `|| true`/`|| warn` downstream of the `)` is finally
+#       telling the truth. This is the `_alarm_safe` pattern; see
+#       `_supervisor_halt`'s and `supervisor_check`'s `teardown` calls for the
+#       inline version of the same subshell.
+# A bare `fn ... || true` around a die-capable function is ALWAYS wrong; the
+# regression guard in test-spawn-orchestrator.sh pins the specific fixes down.
+#
+# NOT covered by this: a `%q ... || true` inside a `printf` that GENERATES the
+# launch script (e.g. `supervisor-scan ... || true`, `heartbeat ... || true`).
+# Those wrap a SEPARATE PROCESS invocation of this same script — an `exit`
+# there only ends that child process, so `|| true` genuinely works. This
+# convention is about same-shell function calls only.
+# -------------------------------------------------------------------------------
+
 # The exit-reason vocabulary (task 15). Exactly five values, and the split that
 # matters is relaunch-vs-teardown:
 #   continuing  work remains, context exhausted   → RELAUNCH
@@ -1174,7 +1205,14 @@ _verify_bootout() {
   local label="$1"
   command -v launchctl >/dev/null 2>&1 || return 0
   launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || return 0   # gone: bootout took
-  teardown --label "$label" >/dev/null || true
+  # Subshelled, not just `|| true`: `teardown` `die`s (an `exit`) if a future edit
+  # ever hands it a --done-sentinel here, and an `exit` from a same-shell function
+  # call escapes `|| true` — it would take the retry, and the STILL-LOADED warning
+  # below, down with it. The subshell is what makes `|| true` actually mean
+  # best-effort (the `_alarm_safe` pattern, task 16 / #191). Today this call passes
+  # no --done-sentinel, so `teardown` cannot yet die here — the subshell is the
+  # guard against that ceasing to be true without anyone noticing.
+  ( teardown --label "$label" >/dev/null ) || true
   if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
     echo "spawn-orchestrator: teardown ($label): WARNING — launchctl bootout FAILED, the job is STILL LOADED and StartInterval will keep waking a finished run (zero work, zero alarm); remove it by hand: launchctl bootout gui/$(id -u)/$label" >&2
     return 1
@@ -2089,11 +2127,22 @@ _supervisor_halt() {
   # there is nothing loaded to boot out and no relaunch to sentinel against; every
   # other halt step above (RUN.md, REPORT.md, the ALARM, the commit) already ran.
   if [ -n "$label" ]; then
-    teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null
+    # Subshelled: `teardown` `die`s (an `exit`) if `_write_done_sentinel` fails —
+    # e.g. an unwritable run dir — and that `exit` is in THIS shell, so a bare
+    # `teardown ... || true` would NOT contain it (`|| true` never sees an `exit`,
+    # it only sees a nonzero RETURN). Unguarded, that exit would abort the whole
+    # halt right here, before `_verify_bootout` below ever runs — losing the loud
+    # "bootout FAILED, job STILL LOADED" warning, which is precisely the signal
+    # that prevents finding #22's relaunch loop. Subshelling (the `_alarm_safe`
+    # pattern, task 16 / #191) confines the exit to the subshell so the halt keeps
+    # going regardless.
+    if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null ); then
+      echo "spawn-orchestrator: supervisor halt: teardown FAILED (see above) — verifying bootout anyway" >&2
+    fi
     # Verify the bootout actually took (shared with the declared done/deadline
     # teardown): a failed teardown leaves the job loaded and StartInterval relaunches
     # straight back into this condition (finding #22's loop, masked by the halt
-    # message).
+    # message). This must run EVEN IF the teardown call above died — see above.
     _verify_bootout "$label" || true
   fi
   echo "spawn-orchestrator: supervisor halt${label:+ ($label)}: $reason"
@@ -2229,13 +2278,25 @@ supervisor_check() {
   local declared; declared="$(_declared_exit_reason "$dir" "$wake")"
   case "$declared" in
     done|deadline)
-      _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
+      # Subshelled: `_write_supervisor_state` `die`s on a write failure (mktemp,
+      # disk full, read-only run dir), and the run has ALREADY declared it is
+      # finished — a wedged bookkeeping cache must not cost us the teardown below,
+      # any more than a wedged halt may (see _supervisor_halt's identical
+      # `teardown` reasoning). Same `_alarm_safe`-style subshell.
+      ( _write_supervisor_state "$state" 0 "$(_run_head "$dir")" ) \
+        || echo "spawn-orchestrator: supervisor-check: could not persist supervisor-state (tearing down regardless — the run already declared $declared)" >&2
       # stderr NOT suppressed, and the bootout VERIFIED (the same check the halt
       # path does): `teardown` swallows a failed `launchctl bootout`, and an
       # unverified failure here leaves the job loaded — StartInterval then wakes a
       # FINISHED run forever, each wake exiting 0 with `status` reporting
       # `relaunch=no`. Zero work, zero alarm: finding #22 by another route.
-      teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null
+      # `teardown` itself is subshelled for the same reason as `_supervisor_halt`'s
+      # identical call: it `die`s (an `exit`) if the done-sentinel write fails, and
+      # an unguarded exit here would abort BEFORE `_verify_bootout` below ever
+      # runs — the exact defect class this file exists to close.
+      if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null ); then
+        echo "spawn-orchestrator: supervisor-check: teardown FAILED (see above) — verifying bootout anyway" >&2
+      fi
       _verify_bootout "$label" || true
       echo "spawn-orchestrator: supervisor-check declared $declared — tearing down, NO relaunch"
       return "$code"
