@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.49.1] - 2026-07-12
+
+### Fixes
+
+- the harness's /tmp tree is claude-<N>, and N is not the uid (#187) (87a3486)
+
 ## [1.49.0] - 2026-07-11
 
 ### Features
