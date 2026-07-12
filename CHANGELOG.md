@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.50.0] - 2026-07-12
+
+### Features
+
+- gate the supervisor relaunch on paused_until in shell (task 11) (#188) (ca14c74)
+
 ## [1.49.1] - 2026-07-12
 
 ### Fixes
