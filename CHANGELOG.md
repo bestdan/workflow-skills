@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.53.0] - 2026-07-12
+
+### Features
+
+- run doctor — assert the run's own invariants every iteration (task 14) (#189) (433c0e6)
+
 ## [1.52.0] - 2026-07-12
 
 ### Features
