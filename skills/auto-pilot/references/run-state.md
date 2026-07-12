@@ -85,6 +85,16 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   backed by a **parseable, still-live `paused_until`** — a missing, garbage, or
   expired-past-its-margin `paused_until` does not exempt, so a wedged agent
   that declares `paused` on every wake with no bound still trips the guard.
+  **This corroboration is not itself unforgeable** — `status` and
+  `paused_until` are both agent-written, so an agent that keeps `paused_until`
+  a few seconds in the past on every wake, or sets it once to a far-future
+  date, satisfies it forever (the far-future shape additionally closes
+  `supervisor-gate` every wake, so the corroboration check never even runs).
+  What actually bounds the exemption is the **pause-exempt ledger**
+  (`supervisor-scan --pause-exempt-max`, [`run-budget.md`](run-budget.md) "A
+  third terminal kind"): a cumulative-time cap recorded in `supervisor-state`,
+  a file the rendered sandbox profile denies the jailed agent write access to.
+  That file, not this front matter, is the thing the agent cannot forge.
 - `exit_reason` / `exit_reason_at` / `exit_reason_detail` are the **exit
   contract** the supervisor reads to decide relaunch-vs-teardown — see below.
 - `orchestrator_pid` / `orchestrator_started_at` / `until` are the operational
@@ -169,9 +179,15 @@ a log tail, a slow task and a hung one are identical.
 
 It is deliberately **not committed** to the run-state branch: it beats many times
 per task and would drown the run's durable record in churn. Like `supervisor-state`
-(the supervisor's own no-progress counter) it is wake-local liveness, not part of
-the run's record — which is exactly why the **exit reason**, which _is_ part of the
+(the supervisor's own no-progress counter, and the pause-exempt ledger's
+`exempt_since` — see below) it is wake-local bookkeeping, not part of the run's
+record — which is exactly why the **exit reason**, which _is_ part of the
 record, goes in `RUN.md` instead.
+`supervisor-state` differs from the heartbeat in one load-bearing way, though:
+it is never written from inside the jail, and the rendered sandbox profile
+denies the agent write access to it (`render-profile --workdir`) — the
+heartbeat is agent-writable by design, but a counter/ledger the no-progress
+guard trusts cannot be.
 
 ### Restack (post-merge stacked-PR repair)
 

@@ -26,6 +26,7 @@
 #       --rw <path> [--rw <path> ...] \
 #       --ro <path> [--ro <path> ...] \
 #       --cred-ro <file> [--cred-ro <file> ...] \
+#       [--workdir <run worktree>] \
 #       --exec <path> [--exec <path> ...] \
 #       --exec-dir <dir> [--exec-dir <dir> ...] [--toolchain] \
 #       --out <file> [--template <file>]
@@ -57,7 +58,7 @@
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
 #   spawn-orchestrator.sh supervisor-scan --dir <run-dir> --label <label> \
-#       [--park-limit <n>]
+#       [--park-limit <n>] [--pause-exempt-max <seconds>]
 #   spawn-orchestrator.sh alarm --dir <run-dir> [--label <label>] \
 #       --condition <id> --reason <text> [--action <text>]
 #   spawn-orchestrator.sh alarm-request --dir <run-dir> \
@@ -170,6 +171,14 @@
 #                  design — see run-budget.md "Two pause kinds"). `status: paused`
 #                  alone does NOT exempt — it is the agent's own write, and the
 #                  guard exists to catch exactly the agent that is wedged.
+#                  IMPORTANT: `status` and `paused_until` are BOTH agent-written
+#                  RUN.md front matter — a declared pause is not evidence, and an
+#                  agent that keeps rewriting `paused_until` to the recent past (or
+#                  once, to a far-future date) can hold this exemption forever.
+#                  What actually bounds it is the pause-exempt LEDGER
+#                  (supervisor-scan, below): a cumulative cap the agent cannot
+#                  touch, because it lives in supervisor-state, outside the
+#                  jail's write scope.
 #                  A halt writes run-level `status: systemic` + `pause_reason`
 #                  to RUN.md, appends one alarm entry to REPORT.md, RAISES THE
 #                  ALARM (below), commits both to the run-state branch, and tears
@@ -202,6 +211,28 @@
 #                  wakes that prove the run is stuck: an unannounced
 #                  `status: systemic` gets torn down in silence, and a blown
 #                  `--until` or a park storm waits out a multi-hour pause.
+#                  ALSO updates the pause-exempt LEDGER: the no-progress guard's
+#                  `paused`/`paused_until` exemption is agent-written and
+#                  therefore forgeable (an agent that refreshes `paused_until`
+#                  to the recent past every wake, or sets it once to a far-future
+#                  date, would otherwise stay exempt forever — the second shape
+#                  is why this MUST run here, above the gate: `supervisor-gate`
+#                  exits 0 on that wake, so `supervisor-check` never runs at all).
+#                  This function is the one place that observes EVERY wake
+#                  regardless of the gate, so it — not supervisor-check — is
+#                  where the cap has to live. On each wake: if `_pause_exempt`
+#                  holds and the ledger has no `exempt_since` yet, stamp it with
+#                  now; if it already has one and `now - exempt_since` exceeds
+#                  `--pause-exempt-max` (default PAUSE_EXEMPT_MAX_SECONDS_DEFAULT,
+#                  6h), halt (`--condition pause-exempt`) regardless of what
+#                  RUN.md claims; if the run is NOT pause-exempt this wake, clear
+#                  `exempt_since`. The ledger lives in supervisor-state
+#                  ($SUPERVISOR_STATE_NAME under .auto-pilot/), which the rendered
+#                  sandbox profile denies the jailed agent write access to
+#                  (orchestrator.sb.tmpl's @@SUPERVISOR_STATE_DENY@@) — that
+#                  denial is what makes this cap the one thing about the pause
+#                  exemption the agent cannot forge, unlike `status`/`paused_until`
+#                  themselves, which it writes freely.
 #                  Always exits 0 — bookkeeping, never a gate.
 #   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
 #       [--gh <path>] [--dry-run]
@@ -288,6 +319,17 @@
 #                state dir stays writable; only the token is denied writes, via a
 #                specific (deny file-write* (literal …)) emitted after the RW block.
 #                Must be an existing file. Repeatable.
+#     --workdir  The run worktree. Used ONLY to compute
+#                <--workdir>/.auto-pilot/$SUPERVISOR_STATE_NAME and deny it
+#                write, the same last-match-wins trick --cred-ro uses (emitted
+#                after the RW block, via @@SUPERVISOR_STATE_DENY@@ below) — so
+#                the no-progress guard's pause-exempt ledger (task: forgeable
+#                pause exemption) lives somewhere the JAILED agent cannot
+#                rewrite, even though the run worktree itself is --rw. The leaf
+#                file need not exist yet (tolerated the same way --tmpdir
+#                tolerates the harness's lazily created dirs). Optional; when
+#                omitted no such deny is emitted (an older caller's render
+#                keeps its prior, weaker shape).
 #     --exec  A binary permitted to exec (resolved coder + base toolchain).
 #             Repeatable.
 #     --exec-dir  A directory permitted to exec (subpath, coarser than --exec).
@@ -547,14 +589,19 @@ emit_allow() {
   printf ')\n'
 }
 
-# Emit a (deny file-write* (literal …)) form over credential files, or a
+# Emit a (deny file-write* (literal …)) form over the given files, or a
 # placeholder comment when the list is empty. This is emitted AFTER the RW block
 # so it overrides the state-dir write allow (Seatbelt = last matching rule wins),
-# keeping a token read-only while its enclosing state dir stays writable. Args:
-# <cred-path>...
+# keeping a file read-only while its enclosing state dir stays writable. Shared
+# by two callers with different files and different empty-case wording: a
+# credential token (--cred-ro) and the supervisor's own pause-exempt ledger
+# (--workdir → $SUPERVISOR_STATE_NAME) — same mechanism, different reason each
+# file must stay unwritable to the jailed agent. Args: <placeholder-comment>
+# <path>...
 emit_deny_write() {
+  local placeholder="$1"; shift
   if [ "$#" -eq 0 ]; then
-    printf ';; (no isolated credential files)\n'
+    printf ';; %s\n' "$placeholder"
     return
   fi
   printf '(deny file-write*\n'
@@ -587,7 +634,7 @@ emit_exec() {
 }
 
 render_profile() {
-  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir=""
+  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir="" workdir=""
   local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -595,6 +642,7 @@ render_profile() {
       --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
       --cred-ro) [ $# -ge 2 ] || die "missing value for --cred-ro"; cred+=("$2"); shift 2 ;;
       --tmpdir) [ $# -ge 2 ] || die "missing value for --tmpdir"; tmpdir="$2"; shift 2 ;;
+      --workdir) [ $# -ge 2 ] || die "missing value for --workdir"; workdir="$2"; shift 2 ;;
       --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
       --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
       --toolchain) toolchain=1; shift ;;
@@ -639,6 +687,19 @@ render_profile() {
     [ -f "$c" ] || die "cred-ro path is not a file (fail-closed): $c"
     cred_c+=("$c")
   done
+  # The supervisor-state ledger path (pause-exempt cap): the ONE file the
+  # no-progress guard's exemption bookkeeping lives in, and the whole point is
+  # that the JAILED agent must not be able to write it. --workdir is OPTIONAL —
+  # an older caller that doesn't pass it gets no such deny, same posture as an
+  # empty --cred-ro list. resolve_lazy (not canonicalize) because the state file
+  # — and even .auto-pilot/ itself — legitimately doesn't exist yet before a
+  # run's first wake, the same tolerance --tmpdir already needs for the
+  # harness's lazily created dirs.
+  local sup_state_path=""
+  if [ -n "$workdir" ]; then
+    case "$workdir" in /*) ;; *) die "--workdir must be absolute (fail-closed): $workdir" ;; esac
+    sup_state_path="$(resolve_lazy "$workdir/.auto-pilot/$SUPERVISOR_STATE_NAME")" || exit 2
+  fi
   for p in ${ex[@]+"${ex[@]}"}; do
     c="$(canonicalize "$p")" || exit 2
     { [ -f "$c" ] && [ -x "$c" ]; } || die "exec path is not an executable file (fail-closed): $c"
@@ -683,12 +744,18 @@ render_profile() {
   fi
 
   # Build the token blocks.
-  local ro_block rw_block cred_block ex_block harness_block
+  local ro_block rw_block cred_block sup_state_block ex_block harness_block
   ro_block="$(emit_allow "file-read*" ${ro_c[@]+"${ro_c[@]}"})"
   # RW scopes need both read and write.
   rw_block="$(emit_allow "file-read*" ${rw_c[@]+"${rw_c[@]}"})
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
-  cred_block="$(emit_deny_write ${cred_c[@]+"${cred_c[@]}"})"
+  cred_block="$(emit_deny_write "(no isolated credential files)" ${cred_c[@]+"${cred_c[@]}"})"
+  # Same mechanism as cred_block, different file: this is what makes the
+  # pause-exempt ledger (supervisor-scan, task: forgeable pause exemption)
+  # genuinely unforgeable by the agent, rather than merely inconvenient to
+  # forge — see the --workdir doc above and orchestrator.sb.tmpl's
+  # @@SUPERVISOR_STATE_DENY@@ comment.
+  sup_state_block="$(emit_deny_write "(no supervisor-state deny — render without --workdir)" ${sup_state_path:+"$sup_state_path"})"
   ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
   # Harness's OWN runtime surface (task 12 / finding #20) — fixed, host-resolved
   # paths, never caller-supplied (and so never subject to the caller-scope
@@ -742,6 +809,7 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
       *@@RO_PATHS@@*) printf '%s\n' "$ro_block" ;;
       *@@RW_PATHS@@*) printf '%s\n' "$rw_block" ;;
       *@@CRED_DENY@@*) printf '%s\n' "$cred_block" ;;
+      *@@SUPERVISOR_STATE_DENY@@*) printf '%s\n' "$sup_state_block" ;;
       *@@HARNESS_RUNTIME@@*) printf '%s\n' "$harness_block" ;;
       *@@EXEC_PATHS@@*) printf '%s\n' "$ex_block" ;;
       *) printf '%s\n' "$line" ;;
@@ -926,7 +994,8 @@ write_launch() {
         label="" interval="300" throttle="30" out_script="" out_plist="" \
         plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
         self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
-        park_limit="$PARK_STORM_LIMIT_DEFAULT"
+        park_limit="$PARK_STORM_LIMIT_DEFAULT" \
+        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -947,6 +1016,7 @@ write_launch() {
       --self) self="$2"; shift 2 ;;
       --no-progress-limit) no_progress_limit="$2"; shift 2 ;;
       --park-limit) park_limit="$2"; shift 2 ;;
+      --pause-exempt-max) pause_exempt_max="$2"; shift 2 ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -989,6 +1059,8 @@ write_launch() {
   [ "$no_progress_limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
   case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer"
+  case "$pause_exempt_max" in *[!0-9]*|"") die "--pause-exempt-max must be a positive integer" ;; esac
+  [ "$pause_exempt_max" -ge 1 ] || die "--pause-exempt-max must be a positive integer"
   [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
 
   local settings_json; settings_json="$(cat "$settings")"
@@ -1025,7 +1097,8 @@ write_launch() {
     # human may sit under the gate's `exit 0`. Per-wake supervisor bookkeeping
     # added later goes HERE, on this side of the gate, for the same reason. Never
     # fails the wake: bookkeeping must not be able to prevent the agent from running.
-    printf '%q supervisor-scan --dir %q --label %q --park-limit %q >>%q 2>&1 || true\n' "$self" "$workdir" "$label" "$park_limit" "$log"
+    printf '%q supervisor-scan --dir %q --label %q --park-limit %q --pause-exempt-max %q >>%q 2>&1 || true\n' \
+      "$self" "$workdir" "$label" "$park_limit" "$pause_exempt_max" "$log"
     # Beat the heartbeat — ALSO above the gate, and for the same reason (task 15 +
     # task 16's seam). It is the wake's liveness signal, not the agent's: a claude
     # that wedges before its first loop iteration must still leave "this wake
@@ -1337,12 +1410,28 @@ _supervisor_state_field() {
   grep -E "^${key}:" "$f" | head -1 | sed -e "s/^${key}: *//"
 }
 
-# Atomically persist the no-progress counter + last-seen run-state HEAD.
+# Atomically persist the no-progress counter + last-seen run-state HEAD, plus
+# the pause-exempt ledger's `exempt_since` (the epoch of the first wake of the
+# current pause-exempt streak; empty when the run isn't currently exempt).
+#
+# `exempt_since` is a 4th, OPTIONAL positional arg — and whether it was PASSED
+# at all (not whether it's empty) is what's tested (`[ $# -lt 4 ]`), so a caller
+# can explicitly clear it with an empty 4th arg. This file has many pre-existing
+# callers (supervisor_check's bookkeeping) that only ever cared about
+# count/head and pass exactly 3 args; without this preserve-on-omit behavior
+# every one of THEIR writes would silently blank the ledger `supervisor_scan`
+# just set, defeating the cap on the very next wake's supervisor-check call.
 _write_supervisor_state() {
-  local f="$1" count="$2" head="$3" d; d="$(dirname "$f")"
+  local f="$1" count="$2" head="$3" exempt d; d="$(dirname "$f")"
+  if [ "$#" -ge 4 ]; then
+    exempt="$4"
+  else
+    exempt="$(_supervisor_state_field "$f" exempt_since)"
+  fi
   mkdir -p "$d" || die "cannot create supervisor-state directory: $d"
   local tmp; tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
-  { printf 'count: %s\n' "$count"; printf 'head: %s\n' "$head"; } >"$tmp" \
+  { printf 'count: %s\n' "$count"; printf 'head: %s\n' "$head"
+    printf 'exempt_since: %s\n' "$exempt"; } >"$tmp" \
     || { rm -f "$tmp"; die "failed to write supervisor state"; }
   mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write supervisor state: $f"; }
 }
@@ -1359,6 +1448,19 @@ _run_head() {
 # rate-window wait that overruns its own reset (a hung retry, a wedged resume)
 # does not sit exempt forever.
 PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT=3600
+
+# The pause-exempt LEDGER's cap (see supervisor-scan's file-header block and
+# _supervisor_pause_exempt_ledger below): the TOTAL cumulative time a run may
+# spend pause-exempt before the no-progress guard re-arms regardless of what
+# RUN.md claims. PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT (above) bounds how far a
+# pause may run PAST ITS OWN paused_until — but paused_until is agent-written,
+# so an agent can hold the margin's exemption open forever by refreshing
+# paused_until every wake, or defeat the margin outright with a single
+# far-future paused_until (which also closes supervisor-gate on every wake, so
+# supervisor-check — where the margin check lives — never even runs). 6 hours
+# comfortably exceeds a legitimate ~5h rate-window wait while still bounding a
+# forged exemption's blast radius to well under a day.
+PAUSE_EXEMPT_MAX_SECONDS_DEFAULT=21600
 
 # True (exit 0) iff RUN.md's own run-level `status:` is `paused` AND that is
 # backed by a PARSEABLE, still-live `paused_until` (task 23). `status: paused`
@@ -1453,6 +1555,8 @@ _alarm_action() {
       printf 're-authenticate: run `claude /login`, then `/auto-pilot <source> --resume`' ;;
     no-progress)
       printf 'the run is STALLED (no forward progress, supervisor torn down): check `.auto-pilot/REPORT.md`, fix the cause (usually re-authenticate: `claude /login`), then `/auto-pilot <source> --resume`' ;;
+    pause-exempt)
+      printf 'the run exceeded its total pause-exempt budget: a declared pause is not evidence, so check `.auto-pilot/REPORT.md` and `.auto-pilot/orchestrator.log` for whether this is a genuine, unusually long rate-window wait or a wedged agent papering over it, fix the cause, then `/auto-pilot <source> --resume`' ;;
     systemic)
       printf 'the circuit breaker halted the run: read `.auto-pilot/REPORT.md` for the failing tasks, fix the systemic cause, then `/auto-pilot <source> --resume`' ;;
     invariant)
@@ -2179,6 +2283,66 @@ _supervisor_halt() {
   echo "spawn-orchestrator: supervisor halt${label:+ ($label)}: $reason"
 }
 
+# The pause-exempt LEDGER: the cumulative-time cap on the no-progress guard's
+# `paused`/`paused_until` exemption (see supervisor-scan's file-header block
+# above, and PAUSE_EXEMPT_MAX_SECONDS_DEFAULT). Both fields `_pause_exempt`
+# consults — RUN.md's `status` and `paused_until` — are written by the JAILED
+# agent, so a declared pause is not evidence of anything: an agent that
+# rewrites `paused_until` to the recent past on every wake, or once to a
+# far-future date, satisfies `_pause_exempt` forever. This function is what
+# actually bounds it, and it works because it does NOT trust either field's
+# content — only whether `_pause_exempt` currently holds — and it persists its
+# own clock (`exempt_since`) in supervisor-state, a file the rendered sandbox
+# profile denies the jailed agent write access to (orchestrator.sb.tmpl's
+# @@SUPERVISOR_STATE_DENY@@, rendered by render-profile's --workdir). An agent
+# can rewrite RUN.md however it likes; it cannot touch this ledger.
+#
+# Called from supervisor-scan, NOT supervisor-check: a far-future `paused_until`
+# closes supervisor-gate on every wake, so supervisor-check never runs at all —
+# enforcement has to live in the one function that runs on every wake
+# regardless of the gate, or the far-future forgery defeats it outright.
+#
+#   exempt + no exempt_since yet   → stamp exempt_since = now (streak starts).
+#   exempt + exempt_since set      → halt if now - exempt_since > --cap.
+#   not exempt                     → clear exempt_since (streak ends).
+#
+# Each write is subshelled (the CONVENTION block's pattern): `_write_supervisor_state`
+# `die`s (an `exit`) on a write failure, and supervisor-scan is invoked as a
+# SEPARATE PROCESS by the generated wrapper's `... || true`, so an unguarded
+# `exit` here would only end that child process — but it would do so BEFORE the
+# cap check below ever runs on THIS wake, silently skipping the one enforcement
+# this function exists to perform. Subshelling keeps the rest of the function
+# (the halt) running even if the write itself fails.
+_supervisor_pause_exempt_ledger() {
+  local dir="$1" label="$2" cap="$3"
+  local state="$dir/.auto-pilot/$SUPERVISOR_STATE_NAME"
+  local cur_count; cur_count="$(_supervisor_state_field "$state" count)"
+  case "$cur_count" in ''|*[!0-9]*) cur_count=0 ;; esac
+  local cur_head; cur_head="$(_supervisor_state_field "$state" head)"
+
+  if ! _pause_exempt "$dir"; then
+    # Not currently exempt: the streak (if any) ends here.
+    ( _write_supervisor_state "$state" "$cur_count" "$cur_head" "" ) \
+      || echo "spawn-orchestrator: supervisor-scan: could not clear the pause-exempt ledger (a stale exempt_since could wrongly cap a FUTURE, unrelated exempt streak once the write path recovers)" >&2
+    return 0
+  fi
+
+  local exempt_since; exempt_since="$(_supervisor_state_field "$state" exempt_since)"
+  case "$exempt_since" in ''|*[!0-9]*) exempt_since="" ;; esac
+  if [ -z "$exempt_since" ]; then
+    local now; now="$(date +%s)"
+    ( _write_supervisor_state "$state" "$cur_count" "$cur_head" "$now" ) \
+      || echo "spawn-orchestrator: supervisor-scan: could not start the pause-exempt ledger (the cap cannot be enforced across wakes while this is broken — a fresh streak starts as soon as the write path recovers)" >&2
+    return 0
+  fi
+
+  local now elapsed; now="$(date +%s)"; elapsed=$((now - exempt_since))
+  if [ "$elapsed" -gt "$cap" ]; then
+    _supervisor_halt --dir "$dir" --label "$label" --condition pause-exempt \
+      --reason "the run has been pause-exempt for ${elapsed}s, exceeding its total exempted budget (--pause-exempt-max ${cap}s) — a declared pause (RUN.md's status/paused_until) is agent-written, not evidence of a real rate-window wait, and this run stayed exempt longer than any legitimate wait should take"
+  fi
+}
+
 # The supervisor's OWN per-wake bookkeeping, run from the generated launch script
 # ABOVE the pre-invoke gate — and this placement is the whole point. The gate
 # (task 11) short-circuits THE AGENT INVOCATION, i.e. a model call it would be a
@@ -2197,12 +2361,14 @@ _supervisor_halt() {
 # so a healthy paused run still raises nothing. Any future work the supervisor
 # must do on EVERY wake regardless of the gate belongs on THIS side of it.
 supervisor_scan() {
-  local dir="" label="" park_limit="$PARK_STORM_LIMIT_DEFAULT"
+  local dir="" label="" park_limit="$PARK_STORM_LIMIT_DEFAULT" \
+        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
       --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
       --park-limit) [ $# -ge 2 ] || die "missing value for --park-limit"; park_limit="$2"; shift 2 ;;
+      --pause-exempt-max) [ $# -ge 2 ] || die "missing value for --pause-exempt-max"; pause_exempt_max="$2"; shift 2 ;;
       *) die "unknown supervisor-scan argument: $1" ;;
     esac
   done
@@ -2210,6 +2376,8 @@ supervisor_scan() {
   [ -d "$dir" ] || die "supervisor-scan --dir not found: $dir"
   case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer: $park_limit" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"
+  case "$pause_exempt_max" in *[!0-9]*|"") die "--pause-exempt-max must be a positive integer: $pause_exempt_max" ;; esac
+  [ "$pause_exempt_max" -ge 1 ] || die "--pause-exempt-max must be a positive integer: $pause_exempt_max"
 
   _supervisor_alarm_scan "$dir" "$label" "$park_limit"
   if [ -n "$_ALARM_HALT_REASON" ]; then
@@ -2219,7 +2387,19 @@ supervisor_scan() {
     # invocation — the alarm is already delivered by the time it does.
     _supervisor_halt --dir "$dir" --label "$label" \
       --condition "$_ALARM_HALT_CONDITION" --reason "$_ALARM_HALT_REASON"
+    # Already halting/tearing down this wake — the pause-exempt ledger below
+    # would be moot (there is no future wake to enforce a cap against once the
+    # job is booted out), and _pause_exempt would read against a RUN.md this
+    # halt just rewrote to `status: systemic`, so skip it here.
+    return 0
   fi
+
+  # The pause-exempt ledger (see _supervisor_pause_exempt_ledger above): the ONE
+  # thing that bounds the no-progress guard's pause exemption regardless of what
+  # the agent declares in RUN.md. Runs on every wake this far, gate open or
+  # closed, which is the whole reason it lives here rather than in
+  # supervisor-check.
+  _supervisor_pause_exempt_ledger "$dir" "$label" "$pause_exempt_max"
   # Always 0: this is bookkeeping, not a gate. The wrapper falls through to the
   # real gate, which owns the decision to invoke the agent or not.
   return 0
@@ -2355,14 +2535,29 @@ supervisor_check() {
     paused)
       # A rate-window pause makes no progress BY DESIGN, so it never counts against
       # the no-progress guard — but ONLY when the run state CORROBORATES the
-      # declaration with an authority the agent cannot forge alone (task 23):
-      # `status: paused` backed by a PARSEABLE, still-live `paused_until`
-      # (`_pause_exempt`, the same rule the retry path below already uses — ONE
-      # exemption rule, not two that disagree). `status: paused` by itself is not
-      # enough: run-budget.md's agent pause writes both fields on every legitimate
-      # pause, so a prompt/logic bug that declares `paused` on every wake while
-      # dying non-zero, with no (or a stale/garbage) `paused_until`, must NOT reset
-      # the counter forever — infinite relaunch, zero progress, no alarm.
+      # declaration via `_pause_exempt` (task 23): `status: paused` backed by a
+      # PARSEABLE, still-live `paused_until` (the same rule the retry path below
+      # already uses — ONE exemption rule, not two that disagree). `status: paused`
+      # by itself is not enough: run-budget.md's agent pause writes both fields on
+      # every legitimate pause, so a prompt/logic bug that declares `paused` on
+      # every wake while dying non-zero, with no (or a stale/garbage)
+      # `paused_until`, must NOT reset the counter forever — infinite relaunch,
+      # zero progress, no alarm.
+      #
+      # NOTE what this check is NOT: `status` and `paused_until` are BOTH written
+      # by the very agent this guard exists to catch — `_pause_exempt` corroborates
+      # the DECLARATION against the run state, but neither side of that comparison
+      # is something the agent is unable to forge, and an agent that rewrites
+      # `paused_until` to the recent past every wake satisfies this check forever.
+      # The actual, unforgeable backstop is the pause-exempt LEDGER
+      # (`_supervisor_pause_exempt_ledger`, run from `supervisor-scan` on every
+      # wake, gate or no gate) — it lives in supervisor-state, which the rendered
+      # sandbox profile denies the jailed agent write access to. This corroboration
+      # check and that ledger are deliberately two different mechanisms answering
+      # two different questions: this one asks "did the agent's OWN records agree
+      # with itself this wake" (cheap, but forgeable); the ledger asks "regardless
+      # of what the agent claims, has this run been exempt too long in total"
+      # (the one the agent cannot talk its way out of).
       if _pause_exempt "$dir"; then
         _write_supervisor_state "$state" 0 "$(_run_head "$dir")"
         echo "spawn-orchestrator: supervisor-check declared paused — relaunch expected past the reset"
@@ -2966,7 +3161,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit|--pause-exempt-max) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
