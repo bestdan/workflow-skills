@@ -2676,7 +2676,10 @@ GHFAILEOF
   # live run's own orchestrator.log/verify-broker.log). `git reset`/`checkout`
   # cannot discard untracked files, so without --ignore-untracked-run-state
   # this alone would keep assert_run_head fail-closed and I1 could never fire
-  # in a real run — reproduce that here.
+  # in a real run — reproduce that here. mkdir first: the task branch was cut
+  # from main, which carries no .auto-pilot/ (the run files live only on the
+  # run-state branch), so the directory does not exist here yet.
+  mkdir -p "$D1D/run/.auto-pilot"
   printf 'orchestrator log line\n' >"$D1D/run/.auto-pilot/orchestrator.log"
 
   d1dout="$("$SCRIPT" doctor --dir "$D1D/run" --run-id "$RUN_ID1D" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1drc=$?
@@ -2716,6 +2719,7 @@ GHFAILEOF
   git -C "$D1U/run" checkout -q main
   git -C "$D1U/run" checkout -q -b bestdan/task-z
   echo work >"$D1U/run/task-file"; git -C "$D1U/run" add task-file; git -C "$D1U/run" commit -q -m "task work on the wrong branch"
+  mkdir -p "$D1U/run/.auto-pilot"   # same as above: the task branch carries no .auto-pilot/
   printf 'orchestrator log line\n' >"$D1U/run/.auto-pilot/orchestrator.log"
   printf 'verify broker log line\n' >"$D1U/run/.auto-pilot/verify-broker.log"
 
