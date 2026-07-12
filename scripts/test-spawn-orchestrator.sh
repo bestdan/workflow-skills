@@ -476,6 +476,16 @@ have "launch: supervisor-check defaults --park-limit to 3" '--no-progress-limit 
 plbody="$(cat "$BASE/pl.sh" 2>/dev/null)"
 have "launch: --park-limit threaded into supervisor-scan"  '--park-limit 7'                     "$plbody"
 have "launch: --park-limit threaded into supervisor-check" '--no-progress-limit 3 --park-limit 7' "$plbody"
+# both supervisor thresholds must survive the `launch` passthrough, which is the
+# path production uses. A flag write-launch parses but launch rejects is the same
+# lie this task exists to remove.
+for lim in --park-limit --no-progress-limit; do
+  lpass="$("$SCRIPT" launch "$lim" 9 --dry-run 2>&1 || true)"
+  case "$lpass" in
+    *"unknown launch argument: $lim"*) bad "launch: $lim survives the launch passthrough" "$lpass" ;;
+    *) ok "launch: $lim survives the launch passthrough" ;;
+  esac
+done
 # fail-closed: --path is required
 wlnopath="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.nopath --claude-bin "$BIN" \
