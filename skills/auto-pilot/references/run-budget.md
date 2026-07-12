@@ -337,12 +337,14 @@ enough that short windows can still fit a task.
 
 ## Per-task retry limit — 1 re-dispatch → park
 
-A failed delivery gets **one** re-dispatch; a second failure parks the task.
-This is distinct from `/deliver-task`'s own co-review **iterate** bound
-(≤ 2 rounds, per [`run-state.md`](run-state.md) "Task lifecycle phases"
-`iterating`): iterate rounds are re-work on a delivery that is still making
-progress through review, while this retry bound covers a delivery that
-**failed outright** and is being re-dispatched from scratch.
+A failed delivery gets **one** re-dispatch; a second failure parks the task,
+and the run loop continues to the next ready task rather than aborting — a
+failed delivery never leaves run state half-written. This is distinct from
+`/deliver-task`'s own co-review **iterate** bound (≤ 2 rounds, per
+[`run-state.md`](run-state.md) "Task lifecycle phases" `iterating`): iterate
+rounds are re-work on a delivery that is still making progress through
+review, while this retry bound covers a delivery that **failed outright** and
+is being re-dispatched from scratch.
 
 ## Paid-agent dispatch cap per run
 
