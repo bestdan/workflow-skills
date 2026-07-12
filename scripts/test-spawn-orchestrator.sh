@@ -460,6 +460,32 @@ if [ "$wd_order_ok" = yes ]; then
 else
   bad "--workdir: supervisor-state deny follows the workdir's write allow (precise)"
 fi
+# The Seatbelt deny stops the agent WRITING the ledger — but `git add` only READS
+# it and writes the index, so an agent told to "commit run state" could stage the
+# very file the deny protects. Once TRACKED, a later checkout/reset tries to
+# restore it, hits the deny, and fails the git operation. Assert the EFFECT (git
+# genuinely refuses to stage it), not merely that a .gitignore line exists — the
+# line is the mechanism, being untracked is the property.
+GIROOT="$BASE/gitignore-ledger"; mkdir -p "$GIROOT"
+git init -q "$GIROOT" 2>/dev/null
+git -C "$GIROOT" config user.email t@t; git -C "$GIROOT" config user.name t
+git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
+: >"$GIROOT/gi.log"
+( cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
+    --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1 ) || true
+if [ -f "$GIROOT/.auto-pilot/supervisor-state" ]; then
+  git -C "$GIROOT" add -A >/dev/null 2>&1 || true
+  if git -C "$GIROOT" diff --cached --name-only | grep -qx '.auto-pilot/supervisor-state'; then
+    bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
+        "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
+  else
+    ok "supervisor-state: \`git add -A\` cannot stage the supervisor ledger"
+  fi
+  git -C "$GIROOT" reset -q >/dev/null 2>&1 || true
+else
+  bad "supervisor-state: precondition — the ledger was written" "not found in $GIROOT/.auto-pilot"
+fi
+
 # The leaf file need not exist yet (tolerated like --tmpdir tolerates the
 # harness's lazily created dirs) — a workdir whose .auto-pilot/supervisor-state
 # hasn't been written yet must still render, not fail closed.
