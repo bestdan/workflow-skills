@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.53.2] - 2026-07-12
+
+### Fixes
+
+- thread the supervisor thresholds through the launch path (task 25) (#197) (a6f69e7)
+
 ## [1.53.1] - 2026-07-12
 
 ### Fixes
