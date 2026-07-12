@@ -921,7 +921,8 @@ write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
         plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
-        self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3"
+        self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
+        park_limit="$PARK_STORM_LIMIT_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
@@ -941,6 +942,7 @@ write_launch() {
       --plist-template) plist_template="$2"; shift 2 ;;
       --self) self="$2"; shift 2 ;;
       --no-progress-limit) no_progress_limit="$2"; shift 2 ;;
+      --park-limit) park_limit="$2"; shift 2 ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -981,6 +983,8 @@ write_launch() {
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
   case "$no_progress_limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer" ;; esac
   [ "$no_progress_limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
+  case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer" ;; esac
+  [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer"
   [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
 
   local settings_json; settings_json="$(cat "$settings")"
@@ -1017,7 +1021,7 @@ write_launch() {
     # human may sit under the gate's `exit 0`. Per-wake supervisor bookkeeping
     # added later goes HERE, on this side of the gate, for the same reason. Never
     # fails the wake: bookkeeping must not be able to prevent the agent from running.
-    printf '%q supervisor-scan --dir %q --label %q >>%q 2>&1 || true\n' "$self" "$workdir" "$label" "$log"
+    printf '%q supervisor-scan --dir %q --label %q --park-limit %q >>%q 2>&1 || true\n' "$self" "$workdir" "$label" "$park_limit" "$log"
     # Beat the heartbeat — ALSO above the gate, and for the same reason (task 15 +
     # task 16's seam). It is the wake's liveness signal, not the agent's: a claude
     # that wedges before its first loop iteration must still leave "this wake
@@ -1069,8 +1073,8 @@ write_launch() {
     # run-state progress also halts (the general backstop). A retryable exit
     # (or a legitimate paused_until wait) just exits non-zero, and the
     # plist's StartInterval relaunches as before.
-    printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --wake-start "$wake" --dir %q --label %q --state %q --no-progress-limit %q\n' \
-      "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit"
+    printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --wake-start "$wake" --dir %q --label %q --state %q --no-progress-limit %q --park-limit %q\n' \
+      "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit" "$park_limit"
     printf 'exit $?\n'
   } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
   mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write launch script: $out_script"; }
@@ -2920,7 +2924,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
