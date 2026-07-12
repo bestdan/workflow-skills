@@ -45,7 +45,10 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   near-cap checkpoint-then-exit-then-relaunch pause, the hard-stop before
   paid/overflow credits, per-task wall-clock and retry limits, the paid-agent
   dispatch cap, and the run-level circuit breaker. The run loop's budget
-  check reads this.
+  check reads this. It also owns **the alarm**: a halted or stalled run
+  actively notifies a human (OS notification + an `ALARM` sentinel + the top
+  line of `REPORT.md`), from the un-jailed supervisor, in shell — silence, not
+  the failure, was the expensive half of finding #22.
 - [`references/resume.md`](references/resume.md) — the `--resume` reconciliation
   procedure: which pre-flight is re-run vs skipped, locating the one resumable
   run-state branch, the stale-orchestrator guard, and the per-task reconciliation
@@ -301,6 +304,10 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   crash-reconciliation table (rows G1–G7) — idempotent (adopts an existing PR,
   never duplicates), removes orphaned worker worktrees, and **parks** anything
   that matches no row cleanly rather than blind-retrying.
+- **Clear the run's alarms first** (`spawn-orchestrator.sh alarm-clear --dir
+  <run-dir>`): the `ALARM` sentinel is the alarm's per-run idempotency key, so one
+  that outlives the resume suppresses the alarm if the same condition recurs and
+  the resumed run halts silently. `REPORT.md`'s history stays.
 - **Then fall into the run loop**, clearing any run-level pause markers first
   ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 

@@ -406,3 +406,66 @@ equivalent to one that lies about its own gate or skips verify, which no in-jail
 mechanism can prevent. Defending _that_ (a signed result the orchestrator can't
 mint, written where it can't reach) is a separate, larger change tied to the
 per-worker least-privilege follow-up in §4.
+
+### 6. The alarm — why it can only fire from the un-jailed supervisor
+
+_Which_ conditions alarm, and why silence was the actual bug, live in
+[`run-budget.md`](run-budget.md) "The alarm — a halted or stalled run must tell a
+human". This section is only about the **mechanism**: where the notification is
+emitted from, and why there is exactly one place it can be.
+
+**The jail forbids the agent from alarming.** `orchestrator.sb.tmpl` denies
+`process-exec` of `/usr/bin/osascript`, `/usr/bin/open` and `/bin/launchctl`
+outright, plus `mach-lookup` of the launchd / LaunchServices brokers — a
+deliberate **sandbox-escape fix** (a job brokered to launchd runs _outside_ the
+jail). Those denies are not relaxed to make an alarm work: an alarm fired from
+**inside** the agent would be **silently denied**, which is the exact failure the
+alarm exists to prevent, wearing a disguise.
+
+**The supervisor is outside the jail.** `write-launch` wraps only `claude` in
+`sandbox-exec`; the wrapper shell launchd runs is **not** sandboxed. So the
+supervisor — pure shell, no model call — is the **only** place a notification can
+actually reach a human. That is also the only place it _could_ work anyway: a
+rate-limited or auth-dead orchestrator cannot make a model call to alert anyone
+(the same reasoning that put `classify-exit` / `supervisor-check` in shell).
+
+| Side                       | Subcommand                                                                         | What it can do                                                                                                                                                                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
+| **Orchestrator** (jailed)  | `spawn-orchestrator.sh alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+
+**The wake's shape: bookkeeping, then the gate, then the agent.** The generated
+wrapper runs, in order:
+
+```sh
+spawn-orchestrator.sh supervisor-scan  --dir … --label …   # EVERY wake — the alarm scan
+spawn-orchestrator.sh supervisor-gate  --dir … --label …   # exit 20 → skip the agent, exit 0
+sandbox-exec -f … claude -p …                              # the jailed agent
+spawn-orchestrator.sh supervisor-check --exit-code … …     # classify + the same scan
+```
+
+The gate (§5, task 11) short-circuits **the agent invocation, and nothing else** —
+so anything the supervisor owes a human must sit **above** it. Put the scan under
+the gate's `exit 0` and the alarm goes silent on exactly the wakes that prove the
+run is stuck: a `status: systemic` the agent wrote but no wake announced yet is
+booted out **forever, unnotified**, and a blown `--until` / park storm / pending
+`alarm-request` waits out the whole multi-hour pause. Any per-wake supervisor
+bookkeeping added later belongs on the same side of the gate, for the same reason.
+
+**Failure-tolerant by construction.** The sentinel and the `REPORT.md` line are
+written **before** the notifier runs, and a missing / failing / exec-denied
+notifier never fails the caller — so a dead `osascript` costs the desktop
+notification, never the durable record, and never aborts the halt that is calling
+it. Past its argument validation the alarm cannot `die` either, and every internal
+caller raises it through a subshell: `die` is an `exit`, and an alarm that cannot
+write its own sentinel must never take the halt down with it, leaving a `systemic`
+`RUN.md` beside a still-loaded, still-relaunching job.
+`spawn-orchestrator.sh status` also reports the sentinel (`alarm: …`, `alarms=N`),
+so the alarm is visible from a shell with **no model call**.
+
+**Idempotent per condition, per run.** The sentinel file _is_ the idempotency key
+(`condition: <id>`): the supervisor is a fresh process on every 300s wake, so a
+process-local guard would re-notify every wake and turn the alarm into the new
+noise. A repeat wake in the same condition re-halts **silently**. `--resume` clears
+the sentinel (`alarm-clear`, [`resume.md`](resume.md)) — the key is per **run**,
+and a resumed run must be able to alarm again.

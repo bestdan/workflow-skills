@@ -217,6 +217,66 @@ the diagnosis is the instruction the operator acts on.
   still matches; the no-progress guard remains the catch-all for anything the
   string match misses.
 
+## The alarm — a halted or stalled run must tell a human (finding #22)
+
+Every bound on this page ends the same way: a terminal state, written to
+`REPORT.md`. That is **half a promise**. An unattended run is _defined_ by
+nobody watching it, so a run that can fail silently has no working failure mode
+at all — the circuit breaker, the supervisor halt, and the invariant checks are
+each **conditional on somebody finding out**. In detached run #2 nobody did: the
+supervisor relaunched into the same non-retryable `401` for **4 h 14 min**, and it
+surfaced only because a human happened to ask "how we doing?". **The 401 was not
+the bug. The silence was.**
+
+So the supervisor **actively notifies** — it does not merely write a file. On any
+alarm condition it emits an **OS-level notification** _and_ writes the
+`.auto-pilot/ALARM` sentinel _and_ prepends a one-line reason to the **very top**
+of `REPORT.md` (`spawn-orchestrator.sh alarm`). It runs in the **un-jailed
+supervisor**, in pure shell — the jail exec-denies `osascript`, and an
+auth-dead agent cannot make a model call to alert anyone; see
+[`launch-runtime.md`](launch-runtime.md) §6 for why that is a hard constraint and
+not a preference.
+
+| Condition               | Detected by                                                            | Terminal?                   |
+| ----------------------- | ---------------------------------------------------------------------- | --------------------------- |
+| **Fatal auth halt**     | `supervisor-check`'s `classify-exit` (a non-retryable `401`)           | yes: halt + teardown        |
+| **Circuit breaker**     | RUN.md's run-level `status: systemic` (written by the run loop)        | yes: halt + teardown        |
+| **A failed invariant**  | an in-jail detector's `alarm-request`, drained by the supervisor       | no: reported, run continues |
+| **N no-progress wakes** | `supervisor-check`'s no-progress guard (the **stall**; default 3)      | yes: halt + teardown        |
+| **A park storm**        | >= N tasks in phase `parked` in RUN.md (`--park-limit`; default 3)     | no: reported, run continues |
+| **A blown `--until`**   | RUN.md's `until` is past and the run is neither `done` nor sentinelled | yes: halt + teardown        |
+
+**Escalate on a stall, not only on a halt.** Run #2 never reached a halt state at
+all: `RUN.md` looked healthy and the run did nothing. So the scan runs on **every**
+wake, before the exit is even classified — including a wake that exited **0**,
+because a stalled run is indistinguishable from a healthy one by exit code alone.
+
+**The notification must name the human's next action**, not merely that something
+broke: "_re-authenticate: run `claude /login`, then `/auto-pilot <source>
+--resume`_". Run #2's fix was **20 seconds** of human action gated behind 4 hours
+of silence; a notification that says only "the run failed" reproduces that bug at
+lower latency.
+
+**The scan sits ABOVE the pre-invoke gate.** The gate
+([`launch-runtime.md`](launch-runtime.md) §5, task 11) skips the `claude`
+invocation on a paused wake, and boots the job out on a `done`/`systemic` run — it
+short-circuits **the agent invocation, and nothing else**. The supervisor's alarm
+scan (`spawn-orchestrator.sh supervisor-scan`) therefore runs **before** the gate
+in the generated wrapper, on every wake, gate open or closed. Under the gate it
+would be silent on precisely the wakes that prove the run is stuck: an agent-written
+`status: systemic` that no wake has announced yet would be torn down forever with
+nobody told, and a blown `--until`, a park storm, or a pending in-jail
+`alarm-request` would wait out a multi-hour rate-window pause. A gate-closed wake
+is not itself a condition — the scan decides; a healthy paused run alarms nothing.
+
+**Alarm once per condition, per run** — not once per 300s wake, or the alarm
+becomes the noise that hides the next one. The sentinel file is the idempotency
+key, so it survives the supervisor being a fresh process on every wake. **`--resume`
+clears it** (`spawn-orchestrator.sh alarm-clear`, [`resume.md`](resume.md)): every
+alarm's required action ends in a `--resume`, so a sentinel that outlived one would
+suppress the alarm when the same condition recurs — and the run the human just
+repaired would halt in silence.
+
 ## Hard-stop before paid/overflow credits
 
 The absolute stop, distinct from the pause above. "Paid/overflow" means
