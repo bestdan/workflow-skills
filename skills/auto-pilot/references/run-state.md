@@ -450,23 +450,54 @@ and a **halt** exit means the loop must not dispatch.
 
 **Exit codes**, a caller gates the run loop on these:
 
-| Exit | Meaning                                                                          |
-| ---- | --------------------------------------------------------------------------------- |
-| `0`  | every invariant holds, or was repaired/parked — the loop may proceed              |
-| `30` | **HALT** — an invariant demanded `status: systemic`; the loop must NOT dispatch   |
-| `2`  | bad usage, or an unrepairable fail-closed condition (`die`)                       |
+| Exit | Meaning                                                                         |
+| ---- | ------------------------------------------------------------------------------- |
+| `0`  | every invariant holds, or was repaired/parked — the loop may proceed            |
+| `30` | **HALT** — an invariant demanded `status: systemic`; the loop must NOT dispatch |
+| `2`  | bad usage, or an unrepairable fail-closed condition (`die`)                     |
 
-**The seven invariants:**
+**The seven invariants**, each with its violation remedy:
 
-| # | Invariant | On violation |
-| - | --------- | ------------- |
-| 1 | Run worktree `HEAD` is on `auto-pilot/<run_id>` | **repair** — delegates entirely to `assert-run-head` (task 13); it asserts, restores, and records the deviation itself |
-| 2 | `RUN.md`/`QUESTIONS.md`/`REPORT.md` readable **from the branch** (`git show <branch>:<path>`), and `RUN.md`'s front matter parses (`run_id` + `status`) | branch read fails, or front matter doesn't parse → **HALT** `systemic` — the run has no memory, do not guess. A working-tree-only loss (branch is fine) is a **repair**: `git checkout <branch> -- .auto-pilot/` |
-| 3 | Every task at `pr-open`/`in-review`/`iterating`/`handed-off` has a PR that actually exists | PR **OPEN** → holds. PR **MERGED** → holds (a human merge post-hand-off is the expected, healthy end state — never a violation). PR **CLOSED** (unmerged), unreadable, or no PR number recorded → **repair**: phase → `parked` |
-| 4 | Every `handed-off` task carries its handler's review signal | for `repo-pr`: labeled `task-loop` (not `task-claim`) and not a draft — deliver-task step 7's ready `task-loop` PR IS the signal. A G6/G7 crash gap (still `task-claim`, still draft) → **repair**: swap the label / `gh pr ready`. Skipped for a MERGED PR (labels no longer matter); other handlers are future work, kept behind `--handler` |
-| 5 | No orphan worker worktrees from a dead dispatch (G2) | **repair** — remove them, but ONLY when it is safe: under `<run root>/workers/`, RUN.md's row (if any) is at a non-dispatch phase (`pending`/`parked`/`handed-off`, or no matching row at all), no uncommitted changes, and its branch tip is already pushed to `origin`. Anything else is left alone and reported "skipped (unsafe to prune)" |
-| 6 | A chained task's parent tip still equals its frozen `base_sha` | **park** the child — but ONLY when the parent's own PR is NOT merged; the base_sha freeze/park guard models the ORCHESTRATOR moving a base mid-run (above, "`base_sha`"), never a human merging the parent — that case's remedy is `restack`, and doctor says so instead of parking |
-| 7 | Forward progress since the last **doctor** iteration | after `--no-progress-limit` (default 3) consecutive no-progress iterations → **HALT** `systemic`. Skipped entirely while the run is legitimately paused (`_run_is_paused`) |
+1. **Run worktree `HEAD` is on `auto-pilot/<run_id>`.** → **repair**, delegated
+   entirely to `assert-run-head` (task 13): it asserts, restores, and records the
+   deviation itself.
+2. **`RUN.md` / `QUESTIONS.md` / `REPORT.md` are readable _from the branch_**
+   (`git show <branch>:<path>`) **and `RUN.md`'s front matter parses** (`run_id` +
+   `status`). → A failed branch read, or front matter that doesn't parse, is a
+   **halt** (`systemic`): the run has no memory, so it must not guess. A
+   working-tree-only loss, where the branch is intact, is instead a **repair** —
+   `git checkout <branch> -- .auto-pilot/`. Reading the working tree rather than
+   the branch is precisely what let finding #23 continue into a stateless void.
+3. **Every task at `pr-open` / `in-review` / `iterating` / `handed-off` has a PR
+   that actually exists.** → An **open** PR holds. A **merged** PR also holds — a
+   human merging post-hand-off is the expected, healthy end state, never a
+   violation, and a doctor that "repaired" it would be fighting the human. A
+   **closed** (unmerged) PR, an unreadable one, or a phase claiming a PR with no
+   number recorded → **repair**: phase → `parked`, never a silent re-dispatch.
+4. **Every `handed-off` task carries its handler's review signal.** → For
+   `repo-pr` that signal is the PR itself: labeled `task-loop` (not `task-claim`)
+   and not a draft, because deliver-task's step 7 makes the ready `task-loop` PR
+   the review signal (the task file is deleted in the PR rather than flipped to
+   `needs_review`). A G6/G7 crash gap — still `task-claim`, still draft — is a
+   **repair**: swap the label, `gh pr ready`. Skipped for a merged PR (labels no
+   longer matter). Other handlers stay behind `--handler` as future work.
+5. **No orphan worker worktrees from a dead dispatch** (G2). → **repair**, remove
+   them — but only when removal is provably safe: the worktree is under
+   `<run root>/workers/`, its `RUN.md` row (if it has one) is at a phase with no
+   dispatch in flight (`pending` / `parked` / `handed-off`, or no matching row at
+   all), it has no uncommitted changes, and its branch tip is already pushed to
+   `origin`. Anything failing one of those is left alone and reported
+   `skipped (unsafe to prune)` — deleting a live dispatch's worktree would destroy
+   work.
+6. **A chained task's parent tip still equals its frozen `base_sha`.** → **park**
+   the child — but only when the parent's own PR is _not_ merged. The `base_sha`
+   freeze guard models the **orchestrator** moving a base mid-run (see "`base_sha`"
+   above), never a **human** merging the parent; that case's remedy is `restack`,
+   and doctor says so instead of parking.
+7. **The run made forward progress since the last doctor iteration.** → After
+   `--no-progress-limit` (default 3) consecutive no-progress iterations, **halt**
+   (`systemic`). Skipped entirely while the run is legitimately paused
+   (`_run_is_paused`) — a paused iteration makes no progress by design.
 
 **Ownership split with task 10's supervisor guard** (say it here because it is
 easy to conflate): `supervisor-check`'s no-progress guard owns no-progress
