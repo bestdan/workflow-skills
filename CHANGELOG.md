@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.52.0] - 2026-07-12
+
+### Features
+
+- exit contract + heartbeat — distinguish "paused mid-run" from "run complete" (task 15) (#190) (0b1c5c5)
+
 ## [1.51.0] - 2026-07-12
 
 ### Features
