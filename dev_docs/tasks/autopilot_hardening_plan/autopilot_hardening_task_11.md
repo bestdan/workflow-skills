@@ -2,7 +2,7 @@
 title: "supervisor: gate the relaunch on paused_until in shell — stop burning a model call every wake"
 priority: high
 size: 2
-status: new
+status: in_progress
 created: 2026-07-11
 source_branch: main
 related_files:
