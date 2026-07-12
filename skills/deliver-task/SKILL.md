@@ -222,6 +222,21 @@ remaining findings and proceed — don't loop.
 
 ## 7. Hand off (and freeze)
 
+- **Restack stale-co-review gate (task 21).** Before writing `needs_review`,
+  check `scripts/spawn-orchestrator.sh co-review-stale-check --run-dir <run
+  worktree> --task <task>` (only meaningful under `/auto-pilot`, which is the
+  only caller that runs `restack`). A non-zero exit means a prior restack pass
+  found the parent's post-hand-off review touching a file this child also
+  touches — its existing co-review approval predates the parent's current
+  content. Do **not** hand off: re-run `/co-review --non-interactive` on the
+  restacked PR (this is step 5 again, not a new mechanism), then call
+  `co-review-stale-clear --run-dir <dir> --task <task> [--questions <path>]`
+  once it passes — that call moves the phase `iterating → handed-off` and is
+  what makes this step's `needs_review` write legal again. See
+  [`../auto-pilot/references/run-state.md`](../auto-pilot/references/run-state.md)
+  "Restack" and "Task lifecycle phases" for the full mechanics (why a clean
+  rebase alone is never proof enough, and the `handed-off ⇄ iterating`
+  transition this gates).
 - **Tracker → `needs_review`** via the handler's own linking/state sections
   (`linear-claim.md` "Move to review on PR open"; on repo-pr the ready
   `task-loop` PR is itself the review signal). **Never `done`/`completed`** —

@@ -178,7 +178,9 @@ deletes the parent's branch → the child, still based on it, gets closed) or
 **quietly** (the child still targets the parent's _branch_, so merging it lands
 on that branch, never on `base_branch` — the PR looks healthy while doing
 nothing). Finding #25 hit the loud case for real, on a P1 PR. `restack`
-(`scripts/spawn-orchestrator.sh restack --run-dir <dir> --repo <path>`) reads
+(`scripts/spawn-orchestrator.sh restack --run-dir <dir> --repo <path>
+--verify-cmd <cmd>` — `--verify-cmd` is **required**, the run's own
+`verify_command`, since task 21) reads
 this table's `base`/`base_sha`/`pr` columns and, for every chained task whose
 parent PR has merged, runs the incantation a human would otherwise have to
 remember at the exact right moment: fetch, `rebase --onto <base_branch>
@@ -232,18 +234,46 @@ contradict a fix the reviewer just added. So every restacked child is a
    touched files the child also touches — the child's existing approval refers
    to code that no longer exists.
 
-**Status: the mechanism is enforced; the re-verification is not (yet).** The
-git/GitHub mechanics above — rebase, force-push, retarget, orphan-detect,
-fail-closed, HEAD invariant — are implemented and covered by tests.
-`restack` **announces** the three requirements above into `REPORT.md` per
-restacked child (so a human cannot miss that a child's green and its co-review
-are both stale), and emits the exact commands copy-pasteably. But **nothing
-executes them**: re-running verify, diff-auditing the child against the
-parent's review commits, and re-running co-review are orchestrator-layer
-actions the run loop must take, and today they are a documented contract, not
-an enforced one — the same "a rule with no enforcement is a comment" pattern
-this reference warns about elsewhere. Wiring them into the run loop /
-`/deliver-task` is the follow-up that closes it.
+**Status: both the mechanism and the re-verification are enforced (task 21).**
+The git/GitHub mechanics above — rebase, force-push, retarget, orphan-detect,
+fail-closed, HEAD invariant — are implemented and covered by tests. So is the
+re-verification, which is now a **code-enforced trigger**, not a `REPORT.md`
+note a human could miss:
+
+1. **Re-run verify** — `restack --verify-cmd <cmd>` is **required** (fail-closed
+   if omitted, `--dry-run` excepted): the run's `verify_command` is re-run
+   against the restacked tip, in a throwaway worktree, before the child is
+   trusted. A failure **parks** the child (`phase → parked`) and raises the
+   task-16 alarm channel (`alarm --condition restack-reverify-verify`) — it
+   never leaves an apparently-healthy PR whose build no longer passes.
+2. **Diff-audit against the parent's post-hand-off review delta.** The lower
+   end of the delta is already known (the child's own recorded `base_sha` IS
+   the parent's hand-off tip); the upper end — the parent PR's **final
+   pre-merge tip** — is fetched from GitHub, never assumed local: `gh pr view
+   <parent#> --json headRefOid`, cross-checked against `git fetch <remote>
+   refs/pull/<parent#>/head` (fetchable even after a squash-merge deletes the
+   parent branch — verified against the real GitHub API on 4 PRs in this repo,
+   one with its branch already deleted; the two must **agree**, or the read is
+   UNDETERMINED). For every line those review commits **added**, the child's
+   post-rebase tree must still contain it verbatim — a dropped line is a
+   **DEFECT** (parks + alarms), not a warning. A **positively NOT_FOUND** PR
+   read and an **UNDETERMINED** one (network/auth/gh-missing) are distinguished
+   internally (the real `gh`'s NOT_FOUND stderr text vs. any other non-zero
+   exit) but both **park** here — a rebase whose review-delta cannot be
+   audited is not trusted as if there were no delta.
+3. **Flag the child's co-review as stale** when the parent's review touched a
+   file the child also touches (computable from the two diffs): a stale marker
+   is written (`.auto-pilot/co-review-stale/<task>`), the phase moves
+   `handed-off → iterating` (see "Task lifecycle phases" below), and hand-off
+   is **gated** on `restack co-review-stale-check` until `/co-review
+   --non-interactive` has been re-run and `co-review-stale-clear` called (which
+   moves the phase back to `handed-off`).
+
+`spawn-orchestrator.sh restack`'s per-run summary and `REPORT.md` entries carry
+all of the above; the run loop / `/deliver-task` wiring is that a restack pass
+is a **re-verification trigger, not just a git operation** — a restacked child
+never reaches hand-off carrying an approval or a green that refers to code
+that no longer exists.
 
 The pre-flight should also warn when a stacked run's repo has
 `delete_branch_on_merge: true` — that setting is what turns a recoverable
@@ -362,15 +392,15 @@ Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
 it — which is what makes the reconciliation table below decidable.
 
-| Phase          | Meaning                                                                 | Tracker                    | Git / remote                              | Worker worktree |
-| -------------- | ----------------------------------------------------------------------- | -------------------------- | ----------------------------------------- | --------------- |
-| `claimed`      | Claim held via the handler protocol; base chosen; no code yet           | claimed / started          | task branch may exist locally, no commits | none            |
-| `implementing` | Worker dispatched; diff being integrated + verified                     | started                    | local commits possible, **not pushed**    | may exist       |
-| `pr-open`      | Code pushed and PR opened (draft or ready)                              | started                    | branch pushed, PR open                    | removed         |
-| `in-review`    | `/co-review --non-interactive` running                                  | started                    | PR open                                   | none            |
-| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                          | started                    | PR updated                                | may exist       |
-| `handed-off`   | **Terminal (success):** PR linked, tracker at `needs_review`, PR frozen | needs_review               | PR open, linked                           | none            |
-| `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human    | started (+ reason comment) | whatever existed at the stall             | removed         |
+| Phase          | Meaning                                                                                                          | Tracker                    | Git / remote                              | Worker worktree |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------- | --------------- |
+| `claimed`      | Claim held via the handler protocol; base chosen; no code yet                                                    | claimed / started          | task branch may exist locally, no commits | none            |
+| `implementing` | Worker dispatched; diff being integrated + verified                                                              | started                    | local commits possible, **not pushed**    | may exist       |
+| `pr-open`      | Code pushed and PR opened (draft or ready)                                                                       | started                    | branch pushed, PR open                    | removed         |
+| `in-review`    | `/co-review --non-interactive` running                                                                           | started                    | PR open                                   | none            |
+| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                                                                   | started                    | PR updated                                | may exist       |
+| `handed-off`   | **Terminal for completion; NOT terminal for restack (task 21):** PR linked, tracker at `needs_review`, PR frozen | needs_review               | PR open, linked                           | none            |
+| `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human                                             | started (+ reason comment) | whatever existed at the stall             | removed         |
 
 `handed-off` is the success terminal — completion itself is verified later by
 the source's own completion path (`/sweep-for-complete` for a `linear` source;
@@ -380,6 +410,30 @@ never by the run. In-run dependency readiness keys off
 **co-review is already complete** (it ran during `/deliver-task`); the remaining
 gate is a **human** reviewer/merger — the automated review is not what
 `needs_review` is waiting on.
+
+**The one legal transition BACK out of `handed-off`: restack's stale co-review
+(task 21).** "Restack" above describes `restack` moving a task's phase
+`handed-off → iterating` when the parent's post-hand-off review touched a file
+the child also touches — the child's existing approval refers to code that no
+longer exists, so it re-enters the in-flight lifecycle rather than staying a
+false `handed-off`. This is the **only** path that re-enters `handed-off` once
+left, and it is narrow by construction:
+
+- **Entry** (`handed-off → iterating`): written by `restack` itself
+  (`_set_task_phase`), in the SAME pass that writes the
+  `.auto-pilot/co-review-stale/<task>` marker — the two are not independent
+  writes a crash could split (see G8 below).
+- **Tracker rollback**: the run loop / `/deliver-task`, on observing the
+  `iterating` phase + a stale marker for a task whose tracker still reads
+  `needs_review`, rolls the tracker back to `started` — `needs_review` must
+  never sit on the tracker while the phase says `iterating` (see the Write
+  order note below).
+- **Exit** (`iterating → handed-off`): `restack co-review-stale-clear`, called
+  only after `/co-review --non-interactive` has been RE-RUN on the restacked
+  child and passed — it removes the marker and writes the phase back. Hand-off
+  is gated on `restack co-review-stale-check` in the interim (exit 3 while the
+  marker exists), so a stale child cannot reach a human's queue carrying a
+  co-review that predates the parent's current content.
 
 ## Write order
 
@@ -408,6 +462,20 @@ reconcile action depend on _which_ transition it interrupted:
 So `needs_review` is never written before review; a crash at pr-open reconciles
 to `started` + a linked PR, not to hand-off.
 
+**Restack's rollback (task 21) is the one write-order exception, and it is
+deliberately the SAME order run BACKWARDS.** `restack` writes its
+`.auto-pilot/co-review-stale/<task>` marker and the phase's `handed-off →
+iterating` cell **together, in the same pass**, before anything else — the
+tracker rollback (`needs_review → started`) is a **separate, later** step the
+run loop performs on observing that marker. So the freshness relation during
+this window is:
+
+> **run files (phase=iterating) ≥ tracker (still needs_review)**
+
+— the inverse of the normal order, and load-bearing for the same reason: a
+crash between the phase write and the tracker rollback must never be read as
+"hand-off happened twice" or silently discarded. See G8 below.
+
 ## Crash reconciliation
 
 One row per write-order gap (a crash landing between two steps of the order).
@@ -418,19 +486,24 @@ tracker write (G6). `--resume` matches the on-disk reality to a row and applies
 its action; anything that doesn't match cleanly is set to `parked` with a
 `REPORT.md` entry rather than blindly retried.
 
-| #  | Crash point                                                         | Observed reality                                               | Reconcile action                                                                                                  |
-| -- | ------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| G1 | After **claim**, before any implementation                          | tracker claimed; no branch, no PR                              | verify the claim is still ours; resume `implementing`, or release + `parked` if the claim was lost                |
-| G2 | Mid-`implementing`/`iterating`, worker worktree left behind         | orphan worker worktree; commits maybe unpushed                 | remove the orphan worktree; re-verify; re-dispatch from a clean base, or `parked`                                 |
-| G3 | After local commit, **before push**                                 | local commits ahead of remote; tracker `started`; no/stale PR  | push the branch, then continue to the open/refresh-PR step                                                        |
-| G4 | After **push**, before PR opened/refreshed                          | remote branch exists; **no (or stale) PR**; tracker not linked | idempotency-check for an existing PR by head branch; open/refresh it if absent; then do the pr-open tracker write |
-| G5 | pr-open transition: after PR opened, **before tracker link**        | PR open; tracker still `started`, PR not linked                | **link the PR; keep the status `started`** (review hasn't run); phase → `pr-open`; commit run state               |
-| G6 | hand-off transition: after review+iterate, **before tracker write** | PR open and reviewed; tracker still `started`                  | set `needs_review` + ensure the PR is linked; phase → `handed-off`; commit run state                              |
-| G7 | After **any tracker write**, before **run-state commit**            | tracker current (any status); `RUN.md` phase stale             | recompute the phase from tracker + git; commit run state                                                          |
+| #  | Crash point                                                                                                                                                 | Observed reality                                                                         | Reconcile action                                                                                                                                                                                                             |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1 | After **claim**, before any implementation                                                                                                                  | tracker claimed; no branch, no PR                                                        | verify the claim is still ours; resume `implementing`, or release + `parked` if the claim was lost                                                                                                                           |
+| G2 | Mid-`implementing`/`iterating`, worker worktree left behind                                                                                                 | orphan worker worktree; commits maybe unpushed                                           | remove the orphan worktree; re-verify; re-dispatch from a clean base, or `parked`                                                                                                                                            |
+| G3 | After local commit, **before push**                                                                                                                         | local commits ahead of remote; tracker `started`; no/stale PR                            | push the branch, then continue to the open/refresh-PR step                                                                                                                                                                   |
+| G4 | After **push**, before PR opened/refreshed                                                                                                                  | remote branch exists; **no (or stale) PR**; tracker not linked                           | idempotency-check for an existing PR by head branch; open/refresh it if absent; then do the pr-open tracker write                                                                                                            |
+| G5 | pr-open transition: after PR opened, **before tracker link**                                                                                                | PR open; tracker still `started`, PR not linked                                          | **link the PR; keep the status `started`** (review hasn't run); phase → `pr-open`; commit run state                                                                                                                          |
+| G6 | hand-off transition: after review+iterate, **before tracker write**                                                                                         | PR open and reviewed; tracker still `started`                                            | set `needs_review` + ensure the PR is linked; phase → `handed-off`; commit run state                                                                                                                                         |
+| G7 | After **any tracker write**, before **run-state commit**                                                                                                    | tracker current (any status); `RUN.md` phase stale                                       | recompute the phase from tracker + git; commit run state                                                                                                                                                                     |
+| G8 | Restack's stale-rollback (task 21): after `restack` writes phase `iterating` + the stale marker, **before** the tracker rollback (`needs_review → started`) | `RUN.md` phase `iterating`, stale marker present, but tracker still reads `needs_review` | tracker is stale, not wrong: roll it back to `started` (never leave `needs_review` sitting over an `iterating` phase); the stale marker and phase already agree, so nothing there needs repair — only the tracker catches up |
 
 G4's idempotency check is what makes resume safe to run repeatedly: a re-push or
 a second launch never opens a duplicate PR, because an existing PR for the head
-branch is detected and adopted.
+branch is detected and adopted. G8 is the one row where the **run files are
+ahead of the tracker** rather than behind it (see the note above) — `--resume`
+still reconciles by trusting whichever store is most authoritative for the
+fact in question: git/the stale marker for "is this child stale", the tracker
+only for "does the human's queue show it."
 
 ## Run doctor
 

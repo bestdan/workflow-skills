@@ -199,8 +199,8 @@
 #                  `status: systemic` gets torn down in silence, and a blown
 #                  `--until` or a park storm waits out a multi-hour pause.
 #                  Always exits 0 — bookkeeping, never a gate.
-#   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
-#       [--gh <path>] [--dry-run]
+#   spawn-orchestrator.sh restack --run-dir <dir> --verify-cmd <cmd> \
+#       [--repo <path>] [--remote <name>] [--gh <path>] [--dry-run]
 #
 #   restack  Post-merge restack of stacked PRs (finding #25): reads RUN.md's
 #            task table (base/base_sha/pr per task), and for every chained task
@@ -213,13 +213,49 @@
 #            reports, never force-pushes). Also flags orphaned children (a PR
 #            whose live base is a deleted or already-merged branch) as a
 #            defect, whether or not this pass could fix them, and appends every
-#            outcome — including the mandatory re-verify / stale-co-review
-#            warning per restacked child — to the run's REPORT.md.
+#            outcome to the run's REPORT.md.
 #            Every rebase runs in a THROWAWAY worktree: restack never moves the
 #            caller's HEAD (finding #23 / task 13's run-HEAD invariant), and
 #            asserts that on exit. `--gh` is mockable — pass a local stub so
 #            the offline test suite never calls GitHub while the git mechanics
 #            run against a real repo.
+#
+#            Task 21 — a clean rebase is NOT evidence of correctness, so every
+#            successfully-restacked child is now a RE-VERIFICATION TRIGGER, not
+#            just a git operation: (1) `--verify-cmd` (required — the run's own
+#            `verify_command`) is RE-RUN against the restacked tip before it is
+#            trusted; a failure PARKS the child (`_set_task_phase` → `parked`)
+#            and fires the task-16 alarm channel, never silently keeping a PR
+#            that no longer builds on the new base. (2) For an `onto-base`
+#            restack, the parent's post-hand-off review delta is fetched from
+#            GitHub — `gh pr view <parent#> --json headRefOid`, cross-checked
+#            against `refs/pull/<parent#>/head` (fetchable even after a
+#            squash-merge deletes the parent branch) — and line-audited against
+#            the child's post-rebase tree: any review-added line the rebase
+#            dropped is a DEFECT (parks + alarms), not a warning. An
+#            UNDETERMINED gh read (network/auth, distinct from a positive
+#            NOT_FOUND) also parks rather than silently skipping the audit.
+#            (3) When the parent's review touched a file the child also
+#            touches, the child's co-review is marked STALE
+#            (`.auto-pilot/co-review-stale/<task>`) and its phase moves
+#            `handed-off` → `iterating` — see `co-review-stale-check` /
+#            `co-review-stale-clear` below and run-state.md "Restack" for the
+#            legal transition back out of `handed-off`.
+#
+#   spawn-orchestrator.sh co-review-stale-check --run-dir <dir> --task <task>
+#
+#   co-review-stale-check  Read-only gate a hand-off step calls before writing
+#            `needs_review`: exit 0 (clear) when no stale marker exists for
+#            `--task`, exit 3 (BLOCKED) when `restack` marked it STALE and it
+#            has not yet been cleared. Never mutates anything.
+#
+#   spawn-orchestrator.sh co-review-stale-clear --run-dir <dir> --task <task> \
+#       [--questions <path>]
+#
+#   co-review-stale-clear  Removes `--task`'s stale marker and moves its phase
+#            back to `handed-off` — called after `/co-review --non-interactive`
+#            has been RE-RUN on the restacked child and passed. `--questions`,
+#            if passed, appends a QUESTIONS.md entry recording the re-review.
 #
 #   spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id> \
 #       [--label <launchd label>] [--questions <path>] \
@@ -2627,14 +2663,149 @@ _restack_rebase_push() {
   printf '%s' "$tip"
 }
 
+# ---------------------------------------------------------------------------
+# Task 21 — enforce the restack's re-verification. Task 18 shipped the
+# mechanism (rebase, force-push, retarget) and only ANNOUNCED the
+# re-verification into REPORT.md; nothing checked it happened. These helpers
+# make it a code-enforced re-verification TRIGGER instead.
+# ---------------------------------------------------------------------------
+
+# Look up a parent PR's FINAL pre-merge tip (its head just before the human
+# merged it) — the upper end of its post-hand-off review delta. The lower end
+# is already known: the child's own recorded `base_sha` IS the parent's
+# hand-off tip. Two things had to be verified against the REAL `gh`/GitHub
+# before this could be trusted (checked 2026-07-12, see test comments for the
+# exact commands run):
+#   1. `gh pr view <n> --json headRefOid` returns the PR's head SHA directly —
+#      it does NOT require the branch to still exist.
+#   2. `refs/pull/<n>/head` stays fetchable even after a squash-merge deletes
+#      the branch, and its SHA equals `headRefOid` — confirmed across 4 real
+#      PRs in this repo (one with its branch already deleted). So the API
+#      gives the SHA and this ref is what actually gets the OBJECTS onto disk;
+#      cross-checking one against the other is what stops a stale/wrong
+#      answer from either source alone.
+#
+# A NONEXISTENT PR is NOT the same as an UNDETERMINED read: real `gh pr view
+# 999999 --json state` EXITS NON-ZERO with stderr containing "Could not
+# resolve to a PullRequest" — a positive, mechanical "this PR is gone" signal.
+# Any OTHER non-zero (network, auth, rate limit, gh missing) is UNDETERMINED
+# and must never be treated as "no review delta" — that would silently skip
+# the very audit this task exists to enforce.
+#
+# Exit: 0 tip printed on stdout | 1 PR positively NOT_FOUND | 2 UNDETERMINED
+# (gh/network failure, empty answer, or the API/ref cross-check disagreeing —
+# callers MUST treat 1 and 2 identically: never proceed as if there were no
+# delta to audit).
+_restack_parent_final_tip() {
+  local repo="$1" remote="$2" gh_bin="$3" pr_num="$4"
+  local errf; errf="$(mktemp "${TMPDIR:-/tmp}/restack-gherr.XXXXXX")" || return 2
+  local api_tip rc
+  api_tip="$("$gh_bin" pr view "$pr_num" --json headRefOid --jq .headRefOid 2>"$errf")"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if grep -qiE 'could not resolve to a pull ?request' "$errf"; then
+      rm -f "$errf"; return 1
+    fi
+    rm -f "$errf"; return 2
+  fi
+  rm -f "$errf"
+  [ -n "$api_tip" ] || return 2
+
+  git -C "$repo" fetch "$remote" "refs/pull/$pr_num/head" >/dev/null 2>&1 || return 2
+  local ref_tip; ref_tip="$(git -C "$repo" rev-parse FETCH_HEAD 2>/dev/null)"
+  [ -n "$ref_tip" ] || return 2
+  [ "$ref_tip" = "$api_tip" ] || return 2   # disagreement: trust neither, fail closed
+
+  printf '%s' "$api_tip"
+}
+
+# The mechanizable half of "a clean rebase proves nothing" (run-state.md
+# "restacked child is stale"): for every line the parent's post-hand-off
+# review commits ADDED to a file, assert that EXACT line still exists in the
+# child's post-rebase tree. Content-based (not line-number-based), so a
+# child's own unrelated edits to the same file never trip a false positive —
+# only an actually-missing line does. Deeper semantic contradiction (a line
+# that survives textually but is negated elsewhere) is NOT decidable here by
+# design; that is delegated to the mandatory co-review re-run.
+#
+# Args: <repo> <base_sha> <parent_final_tip> <child_post_rebase_tip>
+# Prints one "DEFECT <file>: <line>" per dropped line to stdout.
+# Exit: 0 clean | 1 one or more review-added lines are missing from the child.
+_restack_diff_audit() {
+  local repo="$1" base_sha="$2" parent_tip="$3" child_tip="$4"
+  local files; files="$(git -C "$repo" diff --name-only "$base_sha" "$parent_tip" -- 2>/dev/null)"
+  local rc=0 f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    local added
+    added="$(git -C "$repo" diff "$base_sha" "$parent_tip" -- "$f" 2>/dev/null \
+      | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^\+//')"
+    [ -n "$added" ] || continue
+    local child_content; child_content="$(git -C "$repo" show "$child_tip:$f" 2>/dev/null)"
+    local line
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      if ! printf '%s\n' "$child_content" | grep -qxF "$line"; then
+        echo "DEFECT $f: $line"
+        rc=1
+      fi
+    done <<<"$added"
+  done <<<"$files"
+  return "$rc"
+}
+
+# Files the parent's post-hand-off review touched, intersected with files the
+# CHILD'S OWN commits touch. Non-empty means the child's existing co-review
+# approved code the parent's review has since changed underneath it — its
+# approval is now STALE and must be re-earned, not assumed to still hold.
+_restack_file_overlap() {
+  local repo="$1" parent_base="$2" parent_tip="$3" child_base="$4" child_tip="$5"
+  local pf cf
+  pf="$(git -C "$repo" diff --name-only "$parent_base" "$parent_tip" 2>/dev/null | sort -u)"
+  cf="$(git -C "$repo" diff --name-only "$child_base" "$child_tip" 2>/dev/null | sort -u)"
+  comm -12 <(printf '%s\n' "$pf") <(printf '%s\n' "$cf")
+}
+
+# Re-run the run's OWN verify_command against the restacked child's NEW base —
+# its previous green ran against the OLD one and carries no evidence forward.
+# Runs in a fresh throwaway worktree checked out at <tip> (already pushed, so
+# this is safe to add/remove independent of the rebase worktree above).
+# Exit: verify_cmd's own exit code (2 if the scratch worktree itself couldn't
+# be created — never silently "passes" on a setup failure).
+_restack_verify_at_tip() {
+  local repo="$1" verify_cmd="$2" tip="$3" logf="$4"
+  local sw; sw="$(mktemp -d "${TMPDIR:-/tmp}/restack-verify-wt.XXXXXX")" || return 2
+  rm -rf "$sw"
+  git -C "$repo" worktree add --detach "$sw" "$tip" >/dev/null 2>&1 || { rm -rf "$sw"; return 2; }
+  ( cd "$sw" && eval "$verify_cmd" ) >"$logf" 2>&1
+  local rc=$?
+  git -C "$repo" worktree remove --force "$sw" >/dev/null 2>&1
+  rm -rf "$sw"
+  return "$rc"
+}
+
+# Park a task (RUN.md phase -> parked) and raise the task-16 alarm channel —
+# reused, not reimplemented, per this task's explicit instruction. Subshelled
+# per the die-capable-callee convention above: `alarm`'s own argument
+# validation can still `die`, and this must never take a restack pass with it.
+_restack_park_and_alarm() {
+  local run_md="$1" run_dir="$2" task="$3" condition="$4" reason="$5"
+  _set_task_phase "$run_md" "$task" "parked" 2>/dev/null \
+    || echo "spawn-orchestrator: restack WARNING — could not set $task's phase to parked in $run_md" >&2
+  ( alarm --dir "$run_dir" --condition "$condition" --reason "$reason" \
+      --action "inspect $task, resolve by hand, then re-run restack" ) \
+    || echo "spawn-orchestrator: restack WARNING — alarm call failed for $condition (park already recorded)" >&2
+}
+
 restack() {
-  local run_dir="" repo="" remote="origin" gh_bin="" dry=0
+  local run_dir="" repo="" remote="origin" gh_bin="" dry=0 verify_cmd=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --run-dir) [ $# -ge 2 ] || die "missing value for --run-dir"; run_dir="$2"; shift 2 ;;
       --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
       --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
       --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; verify_cmd="$2"; shift 2 ;;
       --dry-run) dry=1; shift ;;
       *) die "unknown restack argument: $1" ;;
     esac
@@ -2646,8 +2817,15 @@ restack() {
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "--repo is not a git worktree (fail-closed): $repo"
   [ -n "$gh_bin" ] || gh_bin="$(command -v gh 2>/dev/null)" || true
   [ -n "$gh_bin" ] || die "gh not found (fail-closed): pass --gh <path> (mockable in tests) or put gh on PATH"
+  # Task 21: re-verification is no longer optional — a caller that omits
+  # --verify-cmd is exactly the "rule a human must remember" pattern this task
+  # exists to close. Required up front, like --run-dir/--repo/--gh, not
+  # discovered lazily mid-loop (a `--dry-run` plan is exempt: nothing executes).
+  [ -n "$verify_cmd" ] || [ "$dry" = 1 ] \
+    || die "restack requires --verify-cmd <cmd> (the run's own verify_command) — a restacked child's previous green does not carry over to its new base"
 
-  _restack_read_run_md "$run_dir/.auto-pilot/RUN.md"
+  local run_md="$run_dir/.auto-pilot/RUN.md"
+  _restack_read_run_md "$run_md"
   local base_branch="$_RS_BASE_BRANCH"
 
   # HEAD-invariant guard (finding #23 / task 13's `assert-run-head`): restack
@@ -2834,11 +3012,76 @@ restack() {
       fi
       [ "$retarget_ok" = 1 ] || continue
 
-      echo "spawn-orchestrator: restack $task done ($mode) — force-pushed $branch, PR #$pr_num${retarget:+ retargeted to $retarget}"
-      # The re-verification requirement travels with the child into REPORT.md —
-      # a clean rebase proves nothing about whether the child still honors the
-      # parent's post-hand-off review commits (run-state.md "Restack").
-      report+=("- **$task** (PR #$pr_num, \`$branch\`) restacked ($mode) onto \`$onto_ref\`. **Re-verify required:** its previous green ran against the OLD base, and its co-review is **STALE** — it approved code relative to the pre-review parent. Re-run verify against the new base, diff-audit the child against the parent's post-hand-off review commits, and re-run co-review if the parent's review touched files this child also touches.")
+      # --- Task 21: ENFORCE the re-verification — a clean rebase proves
+      # nothing (run-state.md "Restack"). Everything below can still PARK this
+      # child; only past all of it does it stay `handed-off`.
+      local reverify_failed=0
+
+      # 1. Re-run the run's OWN verify command against the new base. The
+      # child's previous green ran against the OLD base and does not carry
+      # over — this is mandatory for every restacked child, `onto-base` or
+      # `cascade` alike.
+      if [ -n "$verify_cmd" ]; then
+        local vlog="$run_dir/.auto-pilot/restack-verify-$task.log"
+        mkdir -p "$run_dir/.auto-pilot" 2>/dev/null
+        if ! _restack_verify_at_tip "$repo" "$verify_cmd" "$tip" "$vlog"; then
+          echo "spawn-orchestrator: restack $task DEFECT — re-verify FAILED against the new base $onto_ref (see $vlog); PARKING, not silently keeping a PR that no longer builds"
+          _restack_park_and_alarm "$run_md" "$run_dir" "$task" "restack-reverify-verify" \
+            "restack $task (PR #$pr_num): verify_command FAILED against the restacked base $onto_ref — its previous green ran against the OLD base and did not carry over"
+          report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): restacked ($mode) onto \`$onto_ref\`, but the **re-run verify command FAILED** — PARKED and alarmed, not silently left \`handed-off\` on a build that no longer passes.")
+          flagged=$((flagged + 1)); reverify_failed=1
+        fi
+      fi
+
+      # 2/3. For an `onto-base` restack (the parent PR actually merged — a
+      # human review happened in between), diff-audit the child against the
+      # parent's post-hand-off review delta, and stale-flag co-review on file
+      # overlap. `cascade` has no human review delta of its own to audit (the
+      # parent's rewrite is mechanical, already audited when IT restacked) —
+      # verify above is still mandatory for it, but the audit below is scoped
+      # to `onto-base` only.
+      if [ "$reverify_failed" = 0 ] && [ "$mode" = "onto-base" ] && ! _restack_empty "$parent_pr"; then
+        local parent_final_tip pft_rc=0
+        parent_final_tip="$(_restack_parent_final_tip "$repo" "$remote" "$gh_bin" "$parent_pr")"; pft_rc=$?
+        if [ "$pft_rc" != 0 ]; then
+          echo "spawn-orchestrator: restack $task DEFECT — could not determine parent PR #$parent_pr's final pre-merge tip (gh/network UNDETERMINED, rc=$pft_rc); PARKING rather than skipping the review-delta audit"
+          _restack_park_and_alarm "$run_md" "$run_dir" "$task" "restack-reverify-undetermined" \
+            "restack $task (PR #$pr_num): parent PR #$parent_pr's final pre-merge tip could not be positively determined — cannot audit its post-hand-off review delta"
+          report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): restacked ($mode), but the parent's post-hand-off review delta could not be read (gh UNDETERMINED) — PARKED rather than trusting an unaudited rebase.")
+          flagged=$((flagged + 1)); reverify_failed=1
+        else
+          local audit_out
+          if ! audit_out="$(_restack_diff_audit "$repo" "$base_sha" "$parent_final_tip" "$tip")"; then
+            echo "spawn-orchestrator: restack $task DEFECT — the rebase applied cleanly but DROPPED a line the parent's post-hand-off review added:"
+            echo "$audit_out"
+            _restack_park_and_alarm "$run_md" "$run_dir" "$task" "restack-reverify-audit" \
+              "restack $task (PR #$pr_num): the rebase applied cleanly but silently dropped a line the parent's review commits added — $(printf '%s' "$audit_out" | head -1)"
+            report+=("- **DEFECT — $task** (PR #$pr_num, \`$branch\`): restacked ($mode) — the rebase applied cleanly but **silently dropped** a line the parent's post-hand-off review added:\n\`\`\`\n$audit_out\n\`\`\`\nPARKED; a human must reconcile by hand.")
+            flagged=$((flagged + 1)); reverify_failed=1
+          else
+            local overlap; overlap="$(_restack_file_overlap "$repo" "$base_sha" "$parent_final_tip" "$base_sha" "$lease_sha")"
+            if [ -n "$overlap" ]; then
+              mkdir -p "$run_dir/.auto-pilot/co-review-stale" 2>/dev/null
+              printf '%s\n' "$overlap" >"$run_dir/.auto-pilot/co-review-stale/$task" 2>/dev/null
+              _set_task_phase "$run_md" "$task" "iterating" 2>/dev/null \
+                || echo "spawn-orchestrator: restack $task WARNING — could not move phase to iterating in $run_md" >&2
+              echo "spawn-orchestrator: restack $task co-review STALE (parent's review touched: $(printf '%s' "$overlap" | tr '\n' ' ')) — phase handed-off -> iterating, hand-off BLOCKED until co-review-stale-clear"
+              report+=("- **$task** (PR #$pr_num, \`$branch\`) co-review marked **STALE** — the parent's post-hand-off review touched files this child also touches (\`$(printf '%s' "$overlap" | tr '\n' ' ')\`). Phase moved \`handed-off\` → \`iterating\`; re-run \`/co-review --non-interactive\` and call \`co-review-stale-clear\` before hand-off (task 21).")
+            fi
+          fi
+        fi
+      fi
+      if [ "$reverify_failed" = 1 ]; then
+        # Do NOT let a grandchild cascade onto a tip that just failed its own
+        # re-verification — the rebase+push already happened at the git level
+        # (idempotency below is keyed off the PR's live base, not this), but a
+        # PARKED parent must not look like a valid rewrite point for THIS pass.
+        _RS_NEWTIP[$i]=""
+        continue
+      fi
+
+      echo "spawn-orchestrator: restack $task done ($mode) — force-pushed $branch, PR #$pr_num${retarget:+ retargeted to $retarget}, re-verified against the new base"
+      report+=("- **$task** (PR #$pr_num, \`$branch\`) restacked ($mode) onto \`$onto_ref\` and **re-verified**: verify_command passed against the new base$( [ "$mode" = "onto-base" ] && printf '%s' ", and the parent'"'"'s post-hand-off review delta was line-audited against the child'"'"'s post-rebase tree with no drop found" ).")
     done
   done
 
@@ -2904,6 +3147,65 @@ restack() {
   # failed retarget): a supervisor checking `$?` must see that a human is needed,
   # not read a defects run as a clean success.
   { [ "$failed" -eq 0 ] && [ "$flagged" -eq 0 ]; } || return 2
+}
+
+# The stale-marker path a restacked child's overlap check writes to
+# (`restack`, above) and these two verbs gate/clear.
+_restack_stale_marker() { printf '%s/.auto-pilot/co-review-stale/%s' "$1" "$2"; }
+
+# Read-only gate: a hand-off step calls this BEFORE writing `needs_review`.
+# Exit 0 (clear) when no stale marker exists for --task; exit 3 (BLOCKED) when
+# `restack` flagged it and it has not been cleared. Never mutates anything —
+# task 21's "hand-off stays blocked until the refreshed review passes" is
+# enforced by the CALLER checking this exit code, not by this verb acting.
+co_review_stale_check() {
+  local run_dir="" task=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --run-dir) [ $# -ge 2 ] || die "missing value for --run-dir"; run_dir="$2"; shift 2 ;;
+      --task) [ $# -ge 2 ] || die "missing value for --task"; task="$2"; shift 2 ;;
+      *) die "unknown co-review-stale-check argument: $1" ;;
+    esac
+  done
+  [ -n "$run_dir" ] && [ -n "$task" ] || die "co-review-stale-check requires --run-dir and --task"
+  local marker; marker="$(_restack_stale_marker "$run_dir" "$task")"
+  if [ -f "$marker" ]; then
+    echo "spawn-orchestrator: co-review-stale-check: $task is STALE — files: $(tr '\n' ' ' <"$marker")"
+    return 3
+  fi
+  echo "spawn-orchestrator: co-review-stale-check: $task is clear"
+}
+
+# Clear a task's stale marker and move its phase back to `handed-off` — called
+# AFTER `/co-review --non-interactive` has been re-run on the restacked child
+# and passed (skills/deliver-task/SKILL.md "Co-review"). This is task 21's
+# legal transition BACK OUT of `iterating`, matching the one restack put it
+# into (run-state.md "Restack" / "Task lifecycle phases").
+co_review_stale_clear() {
+  local run_dir="" task="" questions=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --run-dir) [ $# -ge 2 ] || die "missing value for --run-dir"; run_dir="$2"; shift 2 ;;
+      --task) [ $# -ge 2 ] || die "missing value for --task"; task="$2"; shift 2 ;;
+      --questions) [ $# -ge 2 ] || die "missing value for --questions"; questions="$2"; shift 2 ;;
+      *) die "unknown co-review-stale-clear argument: $1" ;;
+    esac
+  done
+  [ -n "$run_dir" ] && [ -n "$task" ] || die "co-review-stale-clear requires --run-dir and --task"
+  local marker; marker="$(_restack_stale_marker "$run_dir" "$task")"
+  [ -f "$marker" ] || die "co-review-stale-clear: $task has no stale marker (fail-closed — nothing to clear): $marker"
+  rm -f "$marker" || die "co-review-stale-clear: could not remove $marker"
+  _set_task_phase "$run_dir/.auto-pilot/RUN.md" "$task" "handed-off" \
+    || die "co-review-stale-clear: could not move $task's phase back to handed-off"
+  if [ -n "$questions" ]; then
+    case "$questions" in /*) ;; *) questions="$run_dir/$questions" ;; esac
+    _doctor_questions_entry "$questions" "$task — restacked child's co-review re-run" \
+      "re-run co-review | trust the stale approval" \
+      "re-run co-review — the parent's post-hand-off review touched files this child also touches" \
+      "the child's restacked tip was re-verified and its diff-audit against the parent's review delta found no dropped line, then /co-review --non-interactive was re-run and passed" \
+      "no — this re-review is what un-staled it"
+  fi
+  echo "spawn-orchestrator: co-review-stale-clear: $task cleared — phase iterating -> handed-off"
 }
 
 # Orchestrate the spawn in the ONE safe order: build the launch artifacts, then
@@ -4192,6 +4494,12 @@ check_profile() {
   die "profile failed to compile: $f"
 }
 
+# Guarded so the test suite can `source` this file to unit-test an internal
+# helper directly (e.g. `_restack_diff_audit`) without also running the
+# dispatcher below against whatever args the sourcing shell happens to have —
+# every `die` in this file is a real `exit`, which would kill the sourcing
+# shell too. Direct execution (the only real-world use) is unaffected.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 [ $# -ge 1 ] || die "usage: spawn-orchestrator.sh <render-profile|check-profile> …"
 sub="$1"; shift
 case "$sub" in
@@ -4221,7 +4529,10 @@ case "$sub" in
   clear-exit-state) clear_exit_state "$@" ;;
   heartbeat) heartbeat "$@" ;;
   restack) restack "$@" ;;
+  co-review-stale-check) co_review_stale_check "$@" ;;
+  co-review-stale-clear) co_review_stale_clear "$@" ;;
   doctor) doctor "$@" ;;
   -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
   *) die "unknown subcommand: $sub" ;;
 esac
+fi

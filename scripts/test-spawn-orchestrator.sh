@@ -1146,6 +1146,18 @@ if command -v git >/dev/null 2>&1; then
   # Fake gh: PR state lives in flat files under $FAKE_GH_DB; `pr edit --base`
   # rewrites the base file (so a second restack observes the retarget) and
   # appends to edits.log (so the test can assert exactly what was retargeted).
+  #
+  # `.headref` backs `--json headRefOid` (task 21's parent-final-tip lookup).
+  # Its NOT_FOUND / UNDETERMINED failure semantics are NOT invented — verified
+  # against the REAL gh/GitHub on 2026-07-12, in this repo:
+  #   `gh pr view 999999 --repo bestdan/workflow-skills --json state` -> rc=1,
+  #   stderr `GraphQL: Could not resolve to a PullRequest with the number of
+  #   999999. (repository.pullRequest)`. A `.notfound` marker reproduces that
+  #   EXACT stderr text so `_restack_parent_final_tip`'s NOT_FOUND branch is
+  #   exercised against the real wording, not a paraphrase. A `.transient`
+  #   marker reproduces the OTHER real shape (401/rate-limit/network) — some
+  #   other non-zero rc with UNRELATED stderr — which must NOT be mistaken for
+  #   NOT_FOUND.
   FAKE_GH_DB="$RS/ghdb"; mkdir -p "$FAKE_GH_DB"
   printf 'MERGED\n' >"$FAKE_GH_DB/100.state"; printf 'main\n' >"$FAKE_GH_DB/100.base"
   printf 'OPEN\n'   >"$FAKE_GH_DB/101.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/101.base"
@@ -1161,8 +1173,22 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .baseRefName) cat "$db/$num.base" 2>/dev/null ;;
-      .state)       cat "$db/$num.state" 2>/dev/null ;;
+      .baseRefName)  cat "$db/$num.base" 2>/dev/null ;;
+      .state)        cat "$db/$num.state" 2>/dev/null ;;
+      .headRefOid)
+        # Only THIS field is rigged to fail — `.state`/`.baseRefName` on the
+        # same PR number must keep working, matching the real world (a
+        # transient/NOT_FOUND gh error is per-CALL, not per-PR).
+        if [ -f "$db/$num.notfound" ]; then
+          echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2
+          exit 1
+        fi
+        if [ -f "$db/$num.transient" ]; then
+          echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+          exit 1
+        fi
+        [ -f "$db/$num.headref" ] && cat "$db/$num.headref" || exit 1
+        ;;
       *) exit 1 ;;
     esac
     ;;
@@ -1177,6 +1203,8 @@ esac
 GHEOF
   chmod +x "$FAKE_GH"
   export FAKE_GH_DB
+  printf '%s\n' "$PARENT_SHA" >"$FAKE_GH_DB/100.headref"
+  git -C "$ORIGIN" update-ref refs/pull/100/head "$PARENT_SHA"
 
   RUNDIR_RS="$RS/run"; mkdir -p "$RUNDIR_RS/.auto-pilot"
   {
@@ -1197,7 +1225,7 @@ GHEOF
   head_ref_0="$(git -C "$WORK" rev-parse --abbrev-ref HEAD)"
   head_sha_0="$(git -C "$WORK" rev-parse HEAD)"
 
-  rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc=$?
+  rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; rsc=$?
   [ "$rsc" = 0 ] && ok "restack: exits 0 on a clean stacked restack" || bad "restack: exits 0 on a clean stacked restack" "$rsout"
   have "restack: reports task_child done" 'restack task_child done' "$rsout"
   have "restack: prints the copy-pasteable rebase command" 'git rebase --onto origin/main' "$rsout"
@@ -1217,12 +1245,17 @@ GHEOF
     ok "restack: removes its scratch worktree"
   fi
 
-  # REPORT.md is where a human actually looks — the re-verify + stale-co-review
-  # requirement is worthless on stdout alone (it only reaches orchestrator.log).
+  # REPORT.md is where a human actually looks — task 21's re-verify is now
+  # ENFORCED (not just announced): the report says it actually happened.
+  # task_child touches only child.txt, and the parent's branch itself was
+  # never updated after hand-off (the "review fix" below lands on `main`,
+  # simulating an unrelated human edit) — so this child has NO file overlap
+  # with the parent's review delta and is never marked stale; that path is
+  # covered by the dedicated stale/diff-audit tests further down.
   rsreport="$(cat "$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null)"
   have "restack: appends a Restack section to REPORT.md"      '## Restack'        "$rsreport"
-  have "restack: REPORT.md demands re-verify for the child"   'Re-verify required' "$rsreport"
-  have "restack: REPORT.md flags the co-review as STALE"      'STALE'              "$rsreport"
+  have "restack: REPORT.md reports the child as re-verified"  're-verified'       "$rsreport"
+  lack "restack: no overlap means no false STALE flag"        'STALE'             "$rsreport"
 
   git -C "$WORK" fetch -q origin
   diffnames="$(git -C "$WORK" diff --name-only origin/main origin/child-branch)"
@@ -1237,7 +1270,7 @@ GHEOF
   # does not churn REPORT.md either
   editcount_before="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
   reportsize_before="$(wc -c <"$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
-  rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc2=$?
+  rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; rsc2=$?
   [ "$rsc2" = 0 ] && ok "restack: idempotent second run exits 0" || bad "restack: idempotent second run exits 0" "$rsout2"
   have "restack: idempotent second run reports no-op" 'already based on main (no-op)' "$rsout2"
   editcount_after="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
@@ -1281,7 +1314,7 @@ GHEOF
   head_sha_1="$(git -C "$WORK" rev-parse HEAD)"
 
   precommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
-  rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc3=$?
+  rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; rsc3=$?
   [ "$rsc3" = 2 ] && ok "restack: fail-closed conflict exits non-zero" || bad "restack: fail-closed conflict exits non-zero" "exit=$rsc3"
   have "restack: fail-closed conflict reports a conflict" 'FAILED — rebase conflict' "$rsout3"
   have "restack: a conflict does not stop the other children" 'restack task_clean2 done' "$rsout3"
@@ -1310,13 +1343,33 @@ GHEOF
   # fail-closed: a dirty caller worktree is never touched (an automated rebase
   # over a human's uncommitted work is how "helpful" recovery destroys state)
   echo dirty >"$WORK/uncommitted.txt"
-  dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dirty_c=$?
+  dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; dirty_c=$?
   if [ "$dirty_c" = 2 ] && printf '%s' "$dirty_out" | grep -qF 'worktree is dirty'; then
     ok "restack: dirty caller worktree fails closed"
   else
     bad "restack: dirty caller worktree fails closed" "exit=$dirty_c msg=$dirty_out"
   fi
   rm -f "$WORK/uncommitted.txt"
+
+  # fail-closed (task 21): --verify-cmd is REQUIRED, not a rule a caller can
+  # forget — the whole point of this task is that an unenforced requirement is
+  # indistinguishable from no requirement at all.
+  nvc_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; nvc_c=$?
+  if [ "$nvc_c" = 2 ] && printf '%s' "$nvc_out" | grep -qF 'requires --verify-cmd'; then
+    ok "restack fail-closed: missing --verify-cmd"
+  else
+    bad "restack fail-closed: missing --verify-cmd" "exit=$nvc_c msg=$nvc_out"
+  fi
+  # --dry-run is exempt: nothing executes, so nothing needs re-verifying.
+  # (a FRESH, EMPTY run dir, not $RUNDIR_RS: that one carries an unresolved
+  # conflict child from the earlier test above, which the ORPHAN detector
+  # legitimately flags regardless of --dry-run — unrelated to what this
+  # asserts, which is only that --dry-run itself doesn't require --verify-cmd.)
+  NVC_RUN="$RS/no-verify-cmd-dry-run"; mkdir -p "$NVC_RUN/.auto-pilot"
+  printf -- '---\nbase_branch: main\n---\n\n| task | phase | branch | base | base_sha | pr | notes |\n| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n' >"$NVC_RUN/.auto-pilot/RUN.md"
+  nvc_dry="$("$SCRIPT" restack --run-dir "$NVC_RUN" --repo "$WORK" --remote origin --gh "$FAKE_GH" --dry-run 2>&1)"; nvc_dry_c=$?
+  [ "$nvc_dry_c" = 0 ] && ok "restack: --dry-run is exempt from requiring --verify-cmd" \
+    || bad "restack: --dry-run is exempt from requiring --verify-cmd" "exit=$nvc_dry_c out=$nvc_dry"
 
   # --- orphaned-child detector: a merged/deleted base is a flagged defect ----
   RSD="$RS/detect-run"; mkdir -p "$RSD/.auto-pilot"
@@ -1337,7 +1390,7 @@ GHEOF
   printf 'OPEN\n' >"$FAKE_GH_DB/200.state"   # no 200.base file at all -> baseRefName lookup fails
   printf 'OPEN\n' >"$FAKE_GH_DB/201.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/201.base"
 
-  dsout="$("$SCRIPT" restack --run-dir "$RSD" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dsc=$?
+  dsout="$("$SCRIPT" restack --run-dir "$RSD" --repo "$WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; dsc=$?
   [ "$dsc" = 2 ] && ok "restack: orphan-detector run reports the missing-base_sha failure" \
     || bad "restack: orphan-detector run reports the missing-base_sha failure" "exit=$dsc"
   have "restack: flags a deleted/unreadable base as a defect" 'DEFECT task_deleted' "$dsout"
@@ -1366,6 +1419,11 @@ GHEOF
   printf 'MERGED\n' >"$C_DB/1.state"; printf 'main\n' >"$C_DB/1.base"        # A merged
   printf 'OPEN\n'   >"$C_DB/2.state"; printf 'br-a\n' >"$C_DB/2.base"        # B on parent branch
   printf 'OPEN\n'   >"$C_DB/3.state"; printf 'br-b\n' >"$C_DB/3.base"        # C on B's branch
+  # A's final pre-merge tip (task 21's parent-final-tip lookup, for B's
+  # onto-base re-verify) — A's branch was never updated after hand-off, so its
+  # final tip IS its hand-off tip; still exercises the real lookup path.
+  printf '%s\n' "$A_SHA" >"$C_DB/1.headref"
+  git -C "$C_ORIGIN" update-ref refs/pull/1/head "$A_SHA"
   C_RUN="$RS/c-run"; mkdir -p "$C_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
@@ -1376,7 +1434,7 @@ GHEOF
     printf '| t_c | handed-off | br-c | br-b | %s | #3 | |\n' "$B_SHA"
   } >"$C_RUN/.auto-pilot/RUN.md"
   export FAKE_GH_DB="$C_DB"
-  cout="$("$SCRIPT" restack --run-dir "$C_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; ccode=$?
+  cout="$("$SCRIPT" restack --run-dir "$C_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; ccode=$?
   # B restacks onto-base (main); C CASCADEs onto B's new tip in a later pass —
   # its PR base stays br-b, never re-proposing B's changeset.
   have "restack cascade: B retargeted to main" '2 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
@@ -1408,6 +1466,8 @@ GHEOF
   printf 'MERGED\n' >"$C_DB/30.state"; printf 'main\n' >"$C_DB/30.base"
   printf 'OPEN\n'   >"$C_DB/31.state"; printf 'br-x\n' >"$C_DB/31.base"
   printf 'OPEN\n'   >"$C_DB/32.state"; printf 'br-y\n' >"$C_DB/32.base"
+  printf '%s\n' "$X_SHA" >"$C_DB/30.headref"
+  git -C "$C_ORIGIN" update-ref refs/pull/30/head "$X_SHA"
   # Phase 1: RUN.md WITHOUT Z, so only Y restacks (Z is never seen this run).
   P1_RUN="$RS/p1-run"; mkdir -p "$P1_RUN/.auto-pilot"
   {
@@ -1417,7 +1477,7 @@ GHEOF
     printf '| t_x | handed-off | br-x | main | - | #30 | |\n'
     printf '| t_y | handed-off | br-y | br-x | %s | #31 | |\n' "$X_SHA"
   } >"$P1_RUN/.auto-pilot/RUN.md"
-  "$SCRIPT" restack --run-dir "$P1_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" >/dev/null 2>&1
+  "$SCRIPT" restack --run-dir "$P1_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true >/dev/null 2>&1
   [ "$(cat "$C_DB/31.base")" = "main" ] && ok "restack resumable: phase-1 restacks Y to main" || bad "restack resumable: phase-1 restacks Y to main" "$(cat "$C_DB/31.base")"
   # Phase 2: a FRESH process (empty _RS_NEWTIP) with Z now in the table. Z's
   # recorded base_sha is Y's OLD tip; Y's remote tip has moved — Z must cascade.
@@ -1430,7 +1490,7 @@ GHEOF
     printf '| t_y | handed-off | br-y | br-x | %s | #31 | |\n' "$X_SHA"
     printf '| t_z | handed-off | br-z | br-y | %s | #32 | |\n' "$Y_SHA"
   } >"$P2_RUN/.auto-pilot/RUN.md"
-  p2out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  p2out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"
   have "restack resumable: Z cascaded from the REMOTE parent tip (not stranded)" 'restack t_z done (cascade)' "$p2out"
   lack "restack resumable: Z not retargeted to main (base stays br-y)" '32 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
   git -C "$C_WORK" fetch -q origin
@@ -1438,7 +1498,7 @@ GHEOF
   [ "$zdiff" = "z.txt" ] && ok "restack resumable: Z's PR diff (br-y..br-z) is ONLY z.txt" || bad "restack resumable: Z's PR diff is ONLY z.txt" "got: $zdiff"
   # idempotent: a cascaded child re-run is a no-op — no re-cascade, no REPORT churn.
   p2report_before="$(wc -c <"$P2_RUN/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
-  p3out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  p3out="$("$SCRIPT" restack --run-dir "$P2_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"
   lack "restack resumable: re-run does NOT re-cascade Z" 'restack t_z done (cascade)' "$p3out"
   have "restack resumable: re-run reports the cascaded child a no-op" 'already cascaded' "$p3out"
   p2report_after="$(wc -c <"$P2_RUN/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
@@ -1459,7 +1519,7 @@ GHEOF
     printf '| t_p | handed-off | br-a | main | - | #10 | |\n'
     printf '| t_rt | handed-off | br-rt | br-a | %s | #11 | |\n' "$A_SHA"
   } >"$RT_RUN/.auto-pilot/RUN.md"
-  rtout="$("$SCRIPT" restack --run-dir "$RT_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rtcode=$?
+  rtout="$("$SCRIPT" restack --run-dir "$RT_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; rtcode=$?
   have "restack retarget-fail: reports a DEFECT" 'DEFECT — rebased and force-pushed' "$rtout"
   lack "restack retarget-fail: does NOT report the child done" 'restack t_rt done' "$rtout"
   [ "$rtcode" = 2 ] && ok "restack retarget-fail: exits non-zero" || bad "restack retarget-fail: exits non-zero" "exit=$rtcode"
@@ -1479,13 +1539,316 @@ GHEOF
     printf '| t_p2 | handed-off | br-a | main | - | #20 | |\n'
     printf '| t_cl | handed-off | br-closed | br-a | %s | #21 | |\n' "$A_SHA"
   } >"$CL_RUN/.auto-pilot/RUN.md"
-  clout="$("$SCRIPT" restack --run-dir "$CL_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; clcode=$?
+  clout="$("$SCRIPT" restack --run-dir "$CL_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd true 2>&1)"; clcode=$?
   have "restack closed-child: flagged as a DEFECT" 'DEFECT — PR #21 is CLOSED' "$clout"
   git -C "$C_WORK" fetch -q origin
   [ "$(git -C "$C_WORK" rev-parse origin/br-closed)" = "$CLOSED_TIP_BEFORE" ] \
     && ok "restack closed-child: branch was NOT force-pushed" \
     || bad "restack closed-child: branch was NOT force-pushed"
   [ "$clcode" = 2 ] && ok "restack closed-child: exits non-zero" || bad "restack closed-child: exits non-zero" "exit=$clcode"
+
+  # === task 21: ENFORCE the restack's re-verification ========================
+
+  # --- unit-level: _restack_diff_audit, sourced directly (not through a full
+  # restack pass) so the audit's own logic is exercised in isolation, per the
+  # acceptance criteria's "construct a parent whose review commit adds a line,
+  # a child that drops it on rebase, assert DEFECT". A REAL `git rebase --onto`
+  # was tried for the "drops a line" fixture and, every way constructed, either
+  # cleanly preserved the line (disjoint edit) or hit a 3-way MERGE CONFLICT on
+  # the shared line (verified by hand: same-line edits on both sides always
+  # conflict under git's default recursive/ort strategy, which restack already
+  # fails closed on) — never a clean, silent drop. So the "child drops it"
+  # tree below is constructed directly (as a plain commit), exactly modeling
+  # what the audit must catch if such a tree ever reached it (e.g. a human
+  # resolving a restack conflict by hand and discarding the review's line) —
+  # this is honest about NOT having reproduced a real silent-drop rebase; it
+  # isolates and stress-tests the mechanizable checker itself.
+  DA="$BASE/diff-audit"; mkdir -p "$DA"
+  DA_REPO="$DA/repo"; git init -q "$DA_REPO"
+  git -C "$DA_REPO" config user.email t@e; git -C "$DA_REPO" config user.name T
+  printf 'L1\nL2\nL3\n' >"$DA_REPO/shared.txt"
+  git -C "$DA_REPO" add shared.txt; git -C "$DA_REPO" commit -q -m base
+  DA_BASE="$(git -C "$DA_REPO" rev-parse HEAD)"
+  printf 'L1\nL2-FIXED\nL3\n' >"$DA_REPO/shared.txt"
+  git -C "$DA_REPO" add shared.txt; git -C "$DA_REPO" commit -q -m "parent: review fix"
+  DA_PARENT_TIP="$(git -C "$DA_REPO" rev-parse HEAD)"
+  # child_ok: kept the review's fix, added its own unrelated line — audit must
+  # NOT false-positive on this legitimate edit.
+  git -C "$DA_REPO" checkout -q "$DA_BASE" -b child-ok
+  printf 'L1\nL2-FIXED\nL3\nL4-CHILD\n' >"$DA_REPO/shared.txt"
+  git -C "$DA_REPO" add shared.txt; git -C "$DA_REPO" commit -q -m "child: legitimate edit, keeps the fix"
+  DA_CHILD_OK="$(git -C "$DA_REPO" rev-parse HEAD)"
+  # child_drop: the review's added line ("L2-FIXED") is simply absent.
+  git -C "$DA_REPO" checkout -q "$DA_BASE" -b child-drop
+  printf 'L1\nL2\nL3\n' >"$DA_REPO/shared.txt"
+  git -C "$DA_REPO" add shared.txt; git -C "$DA_REPO" commit -q -m "child: (constructed) drops the review fix"
+  DA_CHILD_DROP="$(git -C "$DA_REPO" rev-parse HEAD)"
+
+  ( source "$SCRIPT"
+    if audit_out="$(_restack_diff_audit "$DA_REPO" "$DA_BASE" "$DA_PARENT_TIP" "$DA_CHILD_OK")"; then
+      echo "PASS:$audit_out"
+    else
+      echo "FAIL:$audit_out"
+    fi
+  ) >"$DA/ok.out" 2>&1
+  have "diff-audit: no false positive on a legitimate child edit" 'PASS:' "$(cat "$DA/ok.out")"
+
+  ( source "$SCRIPT"
+    if audit_out="$(_restack_diff_audit "$DA_REPO" "$DA_BASE" "$DA_PARENT_TIP" "$DA_CHILD_DROP")"; then
+      echo "PASS:$audit_out"
+    else
+      echo "FAIL:$audit_out"
+    fi
+  ) >"$DA/drop.out" 2>&1
+  have "diff-audit: CATCHES a dropped review line" 'FAIL:' "$(cat "$DA/drop.out")"
+  have "diff-audit: names the dropped line" 'L2-FIXED' "$(cat "$DA/drop.out")"
+
+  # --- unit-level: _restack_parent_final_tip cross-checks the API's SHA
+  # against `refs/pull/<n>/head` and does NOT trust the API string alone —
+  # the objects must actually be fetchable at that SHA. A gh answer that
+  # DISAGREES with the fetched ref (a lying/stale API response) must be
+  # UNDETERMINED, not accepted at face value.
+  PFT="$BASE/parent-final-tip"; mkdir -p "$PFT"
+  PFT_ORIGIN="$PFT/o.git"; PFT_WORK="$PFT/w"
+  git init --bare -q "$PFT_ORIGIN"; git init -q "$PFT_WORK"
+  git -C "$PFT_WORK" remote add origin "$PFT_ORIGIN"
+  git -C "$PFT_WORK" config user.email t@e; git -C "$PFT_WORK" config user.name T
+  git -C "$PFT_WORK" checkout -q -b main
+  echo x >"$PFT_WORK/x.txt"; git -C "$PFT_WORK" add x.txt; git -C "$PFT_WORK" commit -q -m x; git -C "$PFT_WORK" push -q origin main
+  REAL_TIP="$(git -C "$PFT_WORK" rev-parse HEAD)"
+  git -C "$PFT_ORIGIN" update-ref refs/pull/700/head "$REAL_TIP"
+  PFT_DB="$PFT/db"; mkdir -p "$PFT_DB"
+  printf '%s\n' "$REAL_TIP" >"$PFT_DB/700.headref"
+  printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' >"$PFT_DB/701.headref"   # lies: not what refs/pull/701/head has
+  git -C "$PFT_ORIGIN" update-ref refs/pull/701/head "$REAL_TIP"              # the REAL ref disagrees with the API string above
+
+  ( export FAKE_GH_DB="$PFT_DB"; source "$SCRIPT"
+    out="$(_restack_parent_final_tip "$PFT_WORK" origin "$FAKE_GH" 700)"; rc=$?
+    echo "rc=$rc out=$out"
+  ) >"$PFT/agree.out" 2>&1
+  have "parent-final-tip: agreeing API+ref resolves the real tip" "rc=0 out=$REAL_TIP" "$(cat "$PFT/agree.out")"
+
+  ( export FAKE_GH_DB="$PFT_DB"; source "$SCRIPT"
+    out="$(_restack_parent_final_tip "$PFT_WORK" origin "$FAKE_GH" 701)"; rc=$?
+    echo "rc=$rc out=$out"
+  ) >"$PFT/disagree.out" 2>&1
+  have "parent-final-tip: a lying API (disagrees with refs/pull) is UNDETERMINED, not trusted" \
+    "rc=2" "$(cat "$PFT/disagree.out")"
+  unset FAKE_GH_DB
+
+  # --- full-integration fixture: a real parent PR whose review commits landed
+  # ON THE PARENT BRANCH before merge (unlike the $RUNDIR_RS fixture above,
+  # whose "review fix" intentionally lands on `main` to isolate an unrelated
+  # concern) — this is what lets the diff-audit / stale-overlap / re-verify
+  # paths run for real, through `restack` itself, end to end.
+  TR="$RS/task21"; mkdir -p "$TR"
+  TR_ORIGIN="$TR/origin.git"; TR_WORK="$TR/work"
+  git init --bare -q "$TR_ORIGIN"
+  git init -q "$TR_WORK"
+  git -C "$TR_WORK" remote add origin "$TR_ORIGIN"
+  git -C "$TR_WORK" config user.email t@e; git -C "$TR_WORK" config user.name T
+  git -C "$TR_WORK" checkout -q -b main
+  echo root >"$TR_WORK/root.txt"; git -C "$TR_WORK" add root.txt; git -C "$TR_WORK" commit -q -m root; git -C "$TR_WORK" push -q origin main
+
+  git -C "$TR_WORK" checkout -q -b parent-branch
+  printf 'L1\nL2\nL3\n' >"$TR_WORK/shared.txt"; git -C "$TR_WORK" add shared.txt; git -C "$TR_WORK" commit -q -m "parent: hand-off"
+  git -C "$TR_WORK" push -q origin parent-branch
+  TR_BASE_SHA="$(git -C "$TR_WORK" rev-parse parent-branch)"   # every child's frozen base_sha
+  # The review fix — made on the PARENT'S OWN BRANCH, before merge, exactly the
+  # shape run-state.md's "restacked child is stale" note describes.
+  printf 'L1\nL2-FIXED\nL3\n' >"$TR_WORK/shared.txt"; git -C "$TR_WORK" add shared.txt; git -C "$TR_WORK" commit -q -m "parent: post-hand-off review fix"
+  git -C "$TR_WORK" push -q origin parent-branch
+  TR_REVIEW_SHA="$(git -C "$TR_WORK" rev-parse parent-branch)"   # the parent PR's FINAL pre-merge tip
+
+  # child-notouch: no overlap with the parent's review file at all.
+  git -C "$TR_WORK" checkout -q "$TR_BASE_SHA" -b child-notouch
+  echo own >"$TR_WORK/own.txt"; git -C "$TR_WORK" add own.txt; git -C "$TR_WORK" commit -q -m "child: own file only"
+  git -C "$TR_WORK" push -q origin child-notouch
+
+  # child-stale: touches shared.txt too, but with a DISJOINT append (no
+  # conflict with the review's line) — a legitimate overlapping edit: the
+  # diff-audit must pass (the fix survives), but the co-review overlap check
+  # must still flag it STALE (the human approved this against the PRE-review
+  # parent, and the parent's review has since touched a file this child also
+  # touches — semantic re-review is owed regardless of whether THIS check
+  # found a textual drop).
+  git -C "$TR_WORK" checkout -q "$TR_BASE_SHA" -b child-stale
+  printf 'L1\nL2\nL3\nL4-CHILD\n' >"$TR_WORK/shared.txt"; git -C "$TR_WORK" add shared.txt; git -C "$TR_WORK" commit -q -m "child: appends to shared.txt"
+  git -C "$TR_WORK" push -q origin child-stale
+
+  # child-vfail: no file overlap, but its own new file is what the run's
+  # verify_command below is rigged to reject — the re-verify FAILURE path.
+  git -C "$TR_WORK" checkout -q "$TR_BASE_SHA" -b child-vfail
+  echo v >"$TR_WORK/vfail-marker.txt"; git -C "$TR_WORK" add vfail-marker.txt; git -C "$TR_WORK" commit -q -m "child: verify-cmd will reject this file"
+  git -C "$TR_WORK" push -q origin child-vfail
+
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" merge -q --squash parent-branch >/dev/null; git -C "$TR_WORK" commit -q -m "parent squashed"; git -C "$TR_WORK" push -q origin main
+
+  # A second, independent parent+child pair whose gh lookup is rigged
+  # TRANSIENT (401-shaped, per the real contract cited above) — must PARK, not
+  # silently proceed as if there were no review delta.
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" checkout -q -b parent-transient
+  echo pt >"$TR_WORK/pt.txt"; git -C "$TR_WORK" add pt.txt; git -C "$TR_WORK" commit -q -m "parent-transient: hand-off"
+  git -C "$TR_WORK" push -q origin parent-transient
+  TR2_BASE_SHA="$(git -C "$TR_WORK" rev-parse parent-transient)"
+  git -C "$TR_WORK" checkout -q -b child-undetermined
+  echo cu >"$TR_WORK/cu.txt"; git -C "$TR_WORK" add cu.txt; git -C "$TR_WORK" commit -q -m "child-undetermined"
+  git -C "$TR_WORK" push -q origin child-undetermined
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" merge -q --squash parent-transient >/dev/null; git -C "$TR_WORK" commit -q -m "parent-transient squashed"; git -C "$TR_WORK" push -q origin main
+
+  # A third pair whose gh lookup is rigged NOT_FOUND (the exact real-`gh`
+  # stderr text, verified against the real GitHub API — see the FAKE_GH
+  # comment above) — same PARK outcome as transient (task 21: "callers MUST
+  # treat 1 and 2 identically"), but the two are exercised via DISTINCT gh
+  # failure shapes so the NOT_FOUND-vs-transient distinction is actually
+  # tested, not merely asserted in prose.
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" checkout -q -b parent-notfound
+  echo pn >"$TR_WORK/pn.txt"; git -C "$TR_WORK" add pn.txt; git -C "$TR_WORK" commit -q -m "parent-notfound: hand-off"
+  git -C "$TR_WORK" push -q origin parent-notfound
+  TR3_BASE_SHA="$(git -C "$TR_WORK" rev-parse parent-notfound)"
+  git -C "$TR_WORK" checkout -q -b child-notfound
+  echo cn >"$TR_WORK/cn.txt"; git -C "$TR_WORK" add cn.txt; git -C "$TR_WORK" commit -q -m "child-notfound"
+  git -C "$TR_WORK" push -q origin child-notfound
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" merge -q --squash parent-notfound >/dev/null; git -C "$TR_WORK" commit -q -m "parent-notfound squashed"; git -C "$TR_WORK" push -q origin main
+
+  # A fourth pair proving the squash-merge/deleted-branch case (finding #25):
+  # the parent's OWN branch is deleted from the remote after merge, yet its
+  # final pre-merge tip is still fetchable via `refs/pull/<n>/head`.
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" checkout -q -b parent-del
+  echo pd >"$TR_WORK/pd.txt"; git -C "$TR_WORK" add pd.txt; git -C "$TR_WORK" commit -q -m "parent-del: hand-off"
+  git -C "$TR_WORK" push -q origin parent-del
+  TR4_BASE_SHA="$(git -C "$TR_WORK" rev-parse parent-del)"
+  git -C "$TR_WORK" checkout -q -b child-del
+  echo cd_ >"$TR_WORK/cd.txt"; git -C "$TR_WORK" add cd.txt; git -C "$TR_WORK" commit -q -m "child-del"
+  git -C "$TR_WORK" push -q origin child-del
+  git -C "$TR_WORK" checkout -q main
+  git -C "$TR_WORK" merge -q --squash parent-del >/dev/null; git -C "$TR_WORK" commit -q -m "parent-del squashed"; git -C "$TR_WORK" push -q origin main
+  TR4_FINAL_TIP="$(git -C "$TR_WORK" rev-parse parent-del)"   # no further review commits — final tip == hand-off tip
+  git -C "$TR_ORIGIN" update-ref refs/pull/530/head "$TR4_FINAL_TIP"   # GitHub's synthetic PR ref, set BEFORE the branch is deleted
+  git -C "$TR_WORK" push -q origin --delete parent-del                # the actual squash-merge deletion (finding #25)
+  git -C "$TR_WORK" branch -q -D parent-del                           # and gone from the local clone too — nothing but the PR ref is left
+
+  git -C "$TR_WORK" checkout -q main
+
+  TR_DB="$TR/ghdb"; mkdir -p "$TR_DB"
+  printf 'MERGED\n' >"$TR_DB/500.state"; printf 'main\n' >"$TR_DB/500.base"
+  printf '%s\n' "$TR_REVIEW_SHA" >"$TR_DB/500.headref"
+  git -C "$TR_ORIGIN" update-ref refs/pull/500/head "$TR_REVIEW_SHA"
+  printf 'OPEN\n' >"$TR_DB/501.state"; printf 'parent-branch\n' >"$TR_DB/501.base"
+  printf 'OPEN\n' >"$TR_DB/502.state"; printf 'parent-branch\n' >"$TR_DB/502.base"
+  printf 'OPEN\n' >"$TR_DB/503.state"; printf 'parent-branch\n' >"$TR_DB/503.base"
+
+  printf 'MERGED\n' >"$TR_DB/510.state"; printf 'main\n' >"$TR_DB/510.base"
+  : >"$TR_DB/510.transient"   # gh pr view 510 --json headRefOid -> non-zero, UNRELATED stderr (401-shaped)
+  printf 'OPEN\n'   >"$TR_DB/511.state"; printf 'parent-transient\n' >"$TR_DB/511.base"
+
+  printf 'MERGED\n' >"$TR_DB/520.state"; printf 'main\n' >"$TR_DB/520.base"
+  : >"$TR_DB/520.notfound"    # gh pr view 520 --json headRefOid -> non-zero, "Could not resolve…" stderr
+  printf 'OPEN\n'   >"$TR_DB/521.state"; printf 'parent-notfound\n' >"$TR_DB/521.base"
+
+  printf 'MERGED\n' >"$TR_DB/530.state"; printf 'main\n' >"$TR_DB/530.base"
+  printf '%s\n' "$TR4_FINAL_TIP" >"$TR_DB/530.headref"
+  printf 'OPEN\n'   >"$TR_DB/531.state"; printf 'parent-del\n' >"$TR_DB/531.base"
+
+  TR_RUN="$TR/run"; mkdir -p "$TR_RUN/.auto-pilot"
+  {
+    printf -- '---\nbase_branch: main\n---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_parent500 | handed-off | parent-branch      | main            | -            | #500 | |\n'
+    printf '| t_notouch   | handed-off | child-notouch       | parent-branch   | %s | #501 | |\n' "$TR_BASE_SHA"
+    printf '| t_stale     | handed-off | child-stale         | parent-branch   | %s | #502 | |\n' "$TR_BASE_SHA"
+    printf '| t_vfail     | handed-off | child-vfail         | parent-branch   | %s | #503 | |\n' "$TR_BASE_SHA"
+    printf '| t_parent510 | handed-off | parent-transient    | main            | -            | #510 | |\n'
+    printf '| t_undet     | handed-off | child-undetermined  | parent-transient | %s | #511 | |\n' "$TR2_BASE_SHA"
+    printf '| t_parent520 | handed-off | parent-notfound     | main            | -            | #520 | |\n'
+    printf '| t_notfound  | handed-off | child-notfound      | parent-notfound | %s | #521 | |\n' "$TR3_BASE_SHA"
+    printf '| t_parent530 | handed-off | parent-del          | main            | -            | #530 | |\n'
+    printf '| t_del       | handed-off | child-del           | parent-del      | %s | #531 | |\n' "$TR4_BASE_SHA"
+  } >"$TR_RUN/.auto-pilot/RUN.md"
+
+  # verify_command: rejects ONLY the tree carrying vfail-marker.txt — every
+  # other restacked child's tree must pass.
+  TR_VERIFY="$TR/verify.sh"
+  printf '#!/bin/sh\n[ -f vfail-marker.txt ] && exit 1\nexit 0\n' >"$TR_VERIFY"
+  chmod +x "$TR_VERIFY"
+
+  export FAKE_GH_DB="$TR_DB"
+  trout="$("$SCRIPT" restack --run-dir "$TR_RUN" --repo "$TR_WORK" --remote origin --gh "$FAKE_GH" --verify-cmd "$TR_VERIFY" 2>&1)"; trcode=$?
+  [ "$trcode" != 0 ] && ok "task21: a run carrying defects exits non-zero" || bad "task21: a run carrying defects exits non-zero" "$trout"
+
+  have "task21: an unaffected child is done and re-verified" 'restack t_notouch done (onto-base) — force-pushed child-notouch, PR #501 retargeted to main, re-verified' "$trout"
+
+  # --- stale co-review: overlap detected, phase moved, hand-off BLOCKED -----
+  tr_stale_phase="$(awk -F'|' '/t_stale/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_stale_phase" = "iterating" ] && ok "task21: stale child's phase moves handed-off -> iterating" \
+    || bad "task21: stale child's phase moves handed-off -> iterating" "phase=$tr_stale_phase"
+  [ -f "$TR_RUN/.auto-pilot/co-review-stale/t_stale" ] && ok "task21: stale marker written for t_stale" \
+    || bad "task21: stale marker written for t_stale"
+  # `restack`'s own git-level success (rebase+push+verify) and the co-review
+  # STALE flag are orthogonal: t_stale legitimately restacks and re-verifies
+  # cleanly (the fix survives), but hand-off is a SEPARATE, later step, gated
+  # on co-review-stale-check — asserted below, not by suppressing "done" here.
+  have "task21: STALE co-review still reports the git-level restack as done" 'restack t_stale done (onto-base)' "$trout"
+  have "task21: REPORT.md marks t_stale's co-review STALE" 'co-review marked **STALE**' "$(cat "$TR_RUN/.auto-pilot/REPORT.md")"
+  "$SCRIPT" co-review-stale-check --run-dir "$TR_RUN" --task t_stale >/dev/null 2>&1
+  [ $? = 3 ] && ok "task21: co-review-stale-check BLOCKS hand-off while stale" \
+    || bad "task21: co-review-stale-check BLOCKS hand-off while stale"
+  # Simulate /co-review --non-interactive re-run passing, then clear:
+  "$SCRIPT" co-review-stale-clear --run-dir "$TR_RUN" --task t_stale >/dev/null 2>&1
+  [ $? = 0 ] && ok "task21: co-review-stale-clear succeeds after the re-review" \
+    || bad "task21: co-review-stale-clear succeeds after the re-review"
+  [ ! -f "$TR_RUN/.auto-pilot/co-review-stale/t_stale" ] && ok "task21: clear removes the stale marker" \
+    || bad "task21: clear removes the stale marker"
+  "$SCRIPT" co-review-stale-check --run-dir "$TR_RUN" --task t_stale >/dev/null 2>&1
+  [ $? = 0 ] && ok "task21: co-review-stale-check UNBLOCKS after clear" \
+    || bad "task21: co-review-stale-check UNBLOCKS after clear"
+  tr_stale_phase2="$(awk -F'|' '/t_stale/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_stale_phase2" = "handed-off" ] && ok "task21: clear moves phase back iterating -> handed-off" \
+    || bad "task21: clear moves phase back iterating -> handed-off" "phase=$tr_stale_phase2"
+  # A no-longer-stale task can't be cleared twice (fail-closed, not a silent no-op).
+  "$SCRIPT" co-review-stale-clear --run-dir "$TR_RUN" --task t_stale >/dev/null 2>&1
+  [ $? = 2 ] && ok "task21: co-review-stale-clear fails closed on an already-clear task" \
+    || bad "task21: co-review-stale-clear fails closed on an already-clear task"
+
+  # --- failing re-verify PARKS the child and ALARMS (task 16 channel) -------
+  tr_vfail_phase="$(awk -F'|' '/t_vfail/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_vfail_phase" = "parked" ] && ok "task21: a failing re-verify PARKS the child" \
+    || bad "task21: a failing re-verify PARKS the child" "phase=$tr_vfail_phase"
+  have "task21: REPORT.md records the re-verify DEFECT, not just a stdout note" \
+    're-run verify command FAILED' "$(cat "$TR_RUN/.auto-pilot/REPORT.md")"
+  [ -f "$TR_RUN/.auto-pilot/ALARM" ] && ok "task21: a failing re-verify writes the ALARM sentinel" \
+    || bad "task21: a failing re-verify writes the ALARM sentinel"
+  have "task21: the ALARM sentinel names the verify-failure condition" \
+    'condition: restack-reverify-verify' "$(cat "$TR_RUN/.auto-pilot/ALARM" 2>/dev/null)"
+  have "task21: the ALARM's REPORT.md top line fires (task 16 channel, not REPORT-only)" \
+    '**ALARM' "$(head -1 "$TR_RUN/.auto-pilot/REPORT.md" 2>/dev/null)"
+
+  # --- UNDETERMINED gh (transient) and NOT_FOUND both PARK, never silently
+  # proceed as if there were no review delta ---------------------------------
+  tr_undet_phase="$(awk -F'|' '/t_undet/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_undet_phase" = "parked" ] && ok "task21: a TRANSIENT gh failure PARKS rather than skipping the audit" \
+    || bad "task21: a TRANSIENT gh failure PARKS rather than skipping the audit" "phase=$tr_undet_phase"
+  have "task21: transient gh failure is reported UNDETERMINED, not silently green" \
+    'gh/network UNDETERMINED' "$trout"
+
+  tr_notfound_phase="$(awk -F'|' '/t_notfound/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_notfound_phase" = "parked" ] && ok "task21: a NOT_FOUND gh read also PARKS (never trusted as 'no delta')" \
+    || bad "task21: a NOT_FOUND gh read also PARKS" "phase=$tr_notfound_phase"
+
+  # --- squash-merge deletes the parent branch; the final tip is STILL
+  # obtainable via refs/pull/<n>/head, so the audit runs (not undetermined) --
+  tr_del_phase="$(awk -F'|' '/t_del/{gsub(/^ +| +$/,"",$3); print $3}' "$TR_RUN/.auto-pilot/RUN.md")"
+  [ "$tr_del_phase" != "parked" ] && ok "task21: a DELETED parent branch does not park its child (refs/pull/<n>/head still fetchable)" \
+    || bad "task21: a DELETED parent branch does not park its child" "phase=$tr_del_phase"
+  have "task21: t_del reports done+re-verified despite the deleted parent branch" \
+    'restack t_del done (onto-base)' "$trout"
 
   unset FAKE_GH_DB
 else
