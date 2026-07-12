@@ -274,11 +274,18 @@ emit_harness_runtime() {
   # (e.g. just the claude-*-cwd literal) does not permit the enclosing mkdir, so
   # the Bash tool dies before it ever runs the command.
   #
-  # Matched by PATTERN, not by a uid-resolved path: the <N> in claude-<N> is not
+  # Matched by PATTERN, not by a uid-resolved path: the id in claude-<id> is not
   # the uid (see render_profile) and a resolved path silently misses, restoring
-  # the exit-code poisoning. Still narrow — only /tmp/claude-<digits> trees, and
-  # never a blanket /tmp write.
-  claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[0-9]+(/|$)'
+  # the exit-code poisoning.
+  #
+  # TWO distinct shapes live here, and granting only one still poisons exit codes:
+  #   /tmp/claude-<id>/<project>/<session>/…  the scratch TREE (mkdir'd)
+  #   /tmp/claude-<hex>-cwd                   the cwd-tracking FILE, rewritten
+  #                                           after EVERY Bash call, with a fresh
+  #                                           hex id each time
+  # The detached orchestrator uses the -cwd files; an interactive session was seen
+  # using the numeric tree. Cover both, and no more: still never a blanket /tmp write.
+  claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[A-Za-z0-9]+(-cwd)?(/|$)'
   printf '(allow file-write*\n'
   printf '  (regex #"%s")\n' "$sock_pattern"
   printf '  (regex #"%s")\n' "$claude_tmp_pattern"
@@ -663,7 +670,7 @@ render_plist() {
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
         label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" \
+        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
         self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3"
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -678,6 +685,7 @@ write_launch() {
       --throttle) throttle="$2"; shift 2 ;;
       --claude-bin) claude_bin="$2"; shift 2 ;;
       --path) path="$2"; shift 2 ;;
+      --tmpdir) tmpdir="$2"; shift 2 ;;
       --out-script) out_script="$2"; shift 2 ;;
       --out-plist) out_plist="$2"; shift 2 ;;
       --plist-template) plist_template="$2"; shift 2 ;;
@@ -688,6 +696,11 @@ write_launch() {
   done
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
   [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
+  # Fail closed rather than let the job inherit no TMPDIR: without a writable temp
+  # dir the jailed shell cannot even run a heredoc, and the harness's mux socket
+  # cannot be created — both fail in ways that look like unrelated tool errors.
+  [ -n "$tmpdir" ] || die "write-launch requires --tmpdir <dir> (fail-closed): a launchd job inherits no usable TMPDIR; pass a run-owned dir INSIDE the confinement root, and render the profile with the SAME TMPDIR so the srt-mux socket grant matches"
+  case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
   [ -n "$label" ] || die "write-launch requires --label"
   # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
   # plist injection on top of xml_escape, and it's what launchd expects anyway.
@@ -722,6 +735,15 @@ write_launch() {
     printf 'set -uo pipefail\n'
     printf 'export AUTO_PILOT_UNTIL=%q\n' "$until"
     printf 'export PATH=%q\n' "$path"
+    # A launchd job inherits no usable TMPDIR, so without this the jailed process
+    # has nowhere writable to put temp files: zsh dies with "can't create temp file
+    # for here document" on any heredoc, and the harness's mux socket can't be
+    # created. Pin it to a run-owned dir (inside the confinement root, so temp
+    # writes stay contained) and RENDER THE PROFILE WITH THE SAME TMPDIR — the
+    # srt-mux socket grant is anchored to it, so a mismatch silently re-breaks the
+    # inner sandbox.
+    printf 'export TMPDIR=%q\n' "$tmpdir"
+    printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # Record the log's size BEFORE this wake writes to it. The log is appended
     # to across every wake, so classify-exit must look only at the bytes THIS
@@ -1553,7 +1575,7 @@ launch() {
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path) wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;

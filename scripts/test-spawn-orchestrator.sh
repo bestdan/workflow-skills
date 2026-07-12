@@ -78,8 +78,12 @@ have "profile: network-bind block present for the srt-mux socket" \
 # launchd run used /tmp/claude-522 on a uid-501 host). A uid-derived grant misses,
 # the harness's mkdir is denied, and every exit code is re-poisoned to 1 — finding
 # #20 restored silently. This assertion is what pins that down.
-have "profile: harness /tmp scratch tree granted by uid-independent pattern" \
-  "(regex #\"^$tmp_c/claude-[0-9]+(/|\$)\")" "$body"
+# Covers BOTH shapes the harness uses — the mkdir'd scratch TREE (/tmp/claude-<id>/…)
+# and the cwd-tracking FILE rewritten after every Bash call (/tmp/claude-<hex>-cwd).
+# Granting only one still poisons every exit code to 1; the detached orchestrator
+# uses the -cwd files, an interactive session was seen using the numeric tree.
+have "profile: harness /tmp runtime granted by uid-independent pattern (tree AND -cwd file)" \
+  "(regex #\"^$tmp_c/claude-[A-Za-z0-9]+(-cwd)?(/|\$)\")" "$body"
 lack "profile: harness /tmp grant is NOT a uid-resolved path (it would miss)" \
   "(subpath \"$tmp_c/claude-$(id -u)\")" "$body"
 have "profile: ~/.claude/session-env granted as a subpath" \
@@ -389,7 +393,7 @@ printf 'run the graph\n' >"$BASE/prompt.txt"
 LAUNCH_PATH='/opt/homebrew/bin:/usr/bin:/bin'
 wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
-  --path "$LAUNCH_PATH" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
 lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
 have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
@@ -418,7 +422,7 @@ if command -v plutil >/dev/null 2>&1; then
   mkdir -p "$BASE/a&b<x"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
     --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
-    --path "$LAUNCH_PATH" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+    --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
   if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
 else
   echo "skip - launch: plist lint (plutil absent)"
@@ -426,11 +430,11 @@ fi
 # label injection rejected at the source (defense-in-depth on top of xml_escape)
 "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label 'a</string><key>x' --claude-bin "$BIN" \
-  --path "$LAUNCH_PATH" --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/i.sh" --out-plist "$BASE/i.plist" >/dev/null 2>&1 \
   && bad "launch: injecting label rejected" || ok "launch: injecting label rejected"
 # write-launch fail-closed on a missing input file
 wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
-  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
+  --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --tmpdir "$BASE/tmp" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
 [ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
