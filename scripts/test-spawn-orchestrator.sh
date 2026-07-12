@@ -4191,6 +4191,45 @@ USEOF
   [ $? = 0 ] && ok "status-report: a die inside status_report does not propagate out of supervisor-scan" \
     || bad "status-report: supervisor-scan's exit code leaked status_report's die"
 
+  # --- G2: a HUNG gh must not wedge the wake ---------------------------------
+  # The subshell above contains a `die` (an EXIT). It does NOT contain a HANG.
+  # status_report is the ONLY thing on the supervisor's per-wake path that makes
+  # network calls, and `launch` auto-resolves a real `gh`, so production wakes do
+  # reach the network. launchd will not start the next StartInterval wake while
+  # this one is still running — so ONE hung `gh` (blackholed TCP, captive portal,
+  # an auth prompt) wedges the supervisor PERMANENTLY: no agent, and no further
+  # alarm scans or pause-exempt-ledger checks either. Finding #22's silent
+  # zero-work loop, reached through the OBSERVABILITY feature. Bounded by a
+  # hand-rolled watchdog (macOS ships no coreutils `timeout`).
+  SR_HANG="$SR/hangbin"; mkdir -p "$SR_HANG"
+  printf '#!/bin/sh\nsleep 120\n' >"$SR_HANG/gh"; chmod +x "$SR_HANG/gh"
+  # A FRESH run dir, with no prior status-report-state: reusing $SR_RUN let the
+  # interval gate SKIP the report entirely, so the hang never happened and the
+  # timing assertion passed in 0s while proving nothing. (Caught only because the
+  # "announced" assertion below went red — an elapsed-time bound is satisfied just
+  # as well by never running the thing.)
+  SR_HRUN="$SR/hangrun"; rm -rf "$SR_HRUN"; cp -R "$SR_RUN" "$SR_HRUN"
+  rm -f "$SR_HRUN/.auto-pilot/status-report-state" "$SR_HRUN/.auto-pilot/STATUS.md" 2>/dev/null
+  srh_start="$(date +%s)"
+  PATH="$GUARD:$PATH" SPAWN_REPORT_TIMEOUT=2 "$SCRIPT" supervisor-scan --dir "$SR_HRUN" \
+    --label com.autopilot.sr.hang --report-every 1 --gh "$SR_HANG/gh" >/dev/null 2>"$SR/hang.err"
+  srh_rc=$?
+  srh_el=$(( $(date +%s) - srh_start ))
+  [ "$srh_rc" = 0 ] && ok "status-report [hung gh]: supervisor-scan still exits 0 (the wake completes)" \
+    || bad "status-report [hung gh]: supervisor-scan did not complete" "rc=$srh_rc"
+  [ "$srh_el" -lt 30 ] \
+    && ok "status-report [hung gh]: the wake is BOUNDED (${srh_el}s), not wedged until the hang ends" \
+    || bad "status-report [hung gh]: the wake WEDGED — a hung gh stops every future alarm scan and ledger check" "elapsed=${srh_el}s"
+  have "status-report [hung gh]: the kill is announced, not silent" \
+    'status-report exceeded' "$(cat "$SR/hang.err" 2>/dev/null)"
+  # and the hung gh must not survive as an orphan, accumulating one per interval
+  sleep 1
+  if pgrep -f "$SR_HANG/gh" >/dev/null 2>&1; then
+    bad "status-report [hung gh]: the killed report left an ORPHANED gh running" "pgrep matched"
+  else
+    ok "status-report [hung gh]: the whole process group is reaped — no orphaned gh"
+  fi
+
   # --- C: NO MODEL CALL, and still emitted on a GATE-CLOSED wake --------------
   # Driven through the REAL generated wrapper (write-launch), never a
   # reimplementation of its call sequence — same discipline as the gate tests

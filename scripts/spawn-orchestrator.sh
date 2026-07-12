@@ -403,8 +403,43 @@ DEFAULT_TASK_CEILING=2700
 STATUS_REPORT_NAME="STATUS.md"
 STATUS_REPORT_STATE_NAME="status-report-state"
 DEFAULT_REPORT_INTERVAL=900
+# The report is the ONLY thing on the supervisor's per-wake path that makes
+# NETWORK calls (`gh`, the usage query) — and `launch` auto-resolves a real `gh`,
+# so production wakes do reach the network. launchd will NOT start the next
+# StartInterval wake while the current one is still running, so ONE hung `gh` (a
+# blackholed TCP connect, a captive portal, an auth prompt) wedges the supervisor
+# PERMANENTLY: no agent, and no further alarm scans or pause-exempt-ledger checks
+# either — the supervisor's own watchdogs stop with it. That is finding #22's
+# silent, zero-work loop reached through the OBSERVABILITY feature. Bound it.
+# A missed interval costs a human one stale STATUS.md; a wedged supervisor costs
+# them the night.
+# The env seam exists so the suite can prove the bound with a 2s hang instead of
+# sitting out a 60s one; production never sets it.
+REPORT_TIMEOUT_SECONDS_DEFAULT="${SPAWN_REPORT_TIMEOUT:-60}"
 
 die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
+
+# Run a command under a wall-clock bound. macOS ships no coreutils `timeout`, so
+# watchdog it by hand. `set -m` puts the job in its OWN process group, so the kill
+# reaps the whole tree — killing only the shell function would orphan the `gh` it
+# spawned and leave it running (and accumulating, one per interval). Returns the
+# command's status, or 124 (the `timeout` convention) if it was killed.
+_run_bounded() {
+  local secs="$1"; shift
+  local rc=0 job wd
+  set -m
+  "$@" &
+  job=$!
+  set +m
+  ( sleep "$secs"; kill -TERM -"$job" 2>/dev/null; sleep 2; kill -KILL -"$job" 2>/dev/null ) 2>/dev/null &
+  wd=$!
+  wait "$job" 2>/dev/null || rc=$?
+  # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
+  case "$rc" in 143|137) rc=124 ;; esac
+  kill -KILL "$wd" 2>/dev/null
+  wait "$wd" 2>/dev/null || true
+  return "$rc"
+}
 
 # --- CONVENTION (task 26, the sweep after #191's `_alarm_safe`) ---------------
 # `die` is `exit 2`, not `return 2`. An `exit` inside a same-shell function call
@@ -2485,9 +2520,21 @@ supervisor_scan() {
   local -a rpt_extra_args=()
   [ -n "$gh_bin" ] && rpt_extra_args+=(--gh "$gh_bin")
   [ -n "$usage_bin" ] && rpt_extra_args+=(--usage-bin "$usage_bin")
-  ( status_report --dir "$dir" --label "$label" --report-every "$report_every" \
-      ${rpt_extra_args[@]+"${rpt_extra_args[@]}"} ) \
-    || echo "spawn-orchestrator: supervisor-scan: status-report failed (non-fatal, see above)" >&2
+  # Time-bounded, not merely subshelled. The subshell contains a `die` (an EXIT);
+  # it does NOT contain a HANG, and this is the one place on the supervisor's
+  # per-wake path that touches the network (see REPORT_TIMEOUT_SECONDS_DEFAULT).
+  # A hung `gh` here does not just lose the report — launchd will not start the
+  # next wake while this one runs, so it silently stops the alarm scan and the
+  # pause-exempt ledger too, on every wake thereafter.
+  local rpt_rc=0
+  _run_bounded "$REPORT_TIMEOUT_SECONDS_DEFAULT" \
+    status_report --dir "$dir" --label "$label" --report-every "$report_every" \
+      ${rpt_extra_args[@]+"${rpt_extra_args[@]}"} || rpt_rc=$?
+  if [ "$rpt_rc" = 124 ]; then
+    echo "spawn-orchestrator: supervisor-scan: status-report exceeded ${REPORT_TIMEOUT_SECONDS_DEFAULT}s and was killed (a hung gh/usage query?) — this wake proceeds; STATUS.md is stale, the supervisor is not" >&2
+  elif [ "$rpt_rc" != 0 ]; then
+    echo "spawn-orchestrator: supervisor-scan: status-report failed (non-fatal, see above)" >&2
+  fi
 
   # Always 0: this is bookkeeping, not a gate. The wrapper falls through to the
   # real gate, which owns the decision to invoke the agent or not.
