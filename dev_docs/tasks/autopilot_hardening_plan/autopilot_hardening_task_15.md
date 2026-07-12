@@ -2,7 +2,7 @@
 title: "exit contract: distinguish 'paused mid-run' from 'run complete' — a heartbeat + an explicit exit reason"
 priority: high
 size: 3
-status: new
+status: in_progress
 created: 2026-07-11
 source_branch: main
 related_files:
