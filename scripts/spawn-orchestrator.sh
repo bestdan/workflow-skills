@@ -3632,12 +3632,15 @@ launch() {
   local dry=0
   local -a wl=() sm=() dt=() rh=()
   local plist="" out_script="" out_plist="" handle="" until="" label=""
+  local report_gh_set=0 report_usage_set=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry=1; shift ;;
       --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
       --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit|--pause-exempt-max) wl+=("$1" "$2"); shift 2 ;;
+      --report-gh) report_gh_set=1; wl+=("$1" "$2"); shift 2 ;;
+      --report-usage-bin) report_usage_set=1; wl+=("$1" "$2"); shift 2 ;;
+      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit|--pause-exempt-max|--report-every) wl+=("$1" "$2"); shift 2 ;;
       --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
       --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
       --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
@@ -3647,6 +3650,22 @@ launch() {
     esac
   done
   [ -n "$out_plist" ] && [ -n "$label" ] && [ -n "$handle" ] || die "launch requires --out-plist, --label, and --handle"
+
+  # `status-report`'s --gh / --usage-bin are EXPLICIT-ONLY down in status_report
+  # and supervisor_scan, so the test suite can never reach a real `gh` (a network
+  # + Keychain call) by accident. But explicit-only with nobody supplying them
+  # means the report's PR reconciliation and rate-window sections are dead in
+  # PRODUCTION — and the reconciliation is the one section that caught finding
+  # #23. `launch` is the production entry point, so IT resolves them. Tests only
+  # ever call `launch --dry-run`; the wrappers they execute come from
+  # `write-launch`, which keeps them hermetic.
+  if [ "$report_gh_set" = 0 ]; then
+    local gh_bin; gh_bin="$(command -v gh 2>/dev/null || true)"
+    if [ -n "$gh_bin" ]; then wl+=(--report-gh "$gh_bin"); fi
+  fi
+  if [ "$report_usage_set" = 0 ] && [ -x "$ROOT/scripts/claude-usage.sh" ]; then
+    wl+=(--report-usage-bin "$ROOT/scripts/claude-usage.sh")
+  fi
 
   if [ "$dry" = 1 ]; then
     printf 'launch plan (order is load-bearing — auth is verified BEFORE we spawn):\n'

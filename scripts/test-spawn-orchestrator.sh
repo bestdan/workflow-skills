@@ -668,6 +668,20 @@ rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"
 [ $? = 2 ] && [ ! -e "$BASE/h.txt" ] && printf '%s' "$rho" | grep -qF 'no live process' && ok "record-handle: dead pid fails closed" || bad "record-handle: dead pid fails closed"
 "$SCRIPT" record-handle --pid abc --out "$BASE/h.txt" >/dev/null 2>&1 && bad "record-handle: non-numeric pid fails" || ok "record-handle: non-numeric pid fails"
 
+# The report's --gh / --usage-bin are explicit-only downstream so the suite can
+# never reach a real gh. That makes `launch` — the production entry point — the
+# only thing that can supply them: if it rejects or drops these flags, the
+# report's PR reconciliation (the section that caught finding #23) is dead in
+# production while every test stays green. Same defect as a parsed-but-unemitted
+# --park-limit; pin the whole passthrough.
+for lim in --report-every --report-gh --report-usage-bin --park-limit --no-progress-limit; do
+  lpass="$("$SCRIPT" launch "$lim" 9 --dry-run 2>&1 || true)"
+  case "$lpass" in
+    *"unknown launch argument: $lim"*) bad "launch: $lim survives the launch passthrough" "$lpass" ;;
+    *) ok "launch: $lim survives the launch passthrough" ;;
+  esac
+done
+
 # --- launch --dry-run: the safety-critical ordering (smoke BEFORE detach) ------
 dro="$("$SCRIPT" launch --dry-run --out-script "$BASE/l.sh" --out-plist "$BASE/l.plist" --label com.x --handle "$BASE/h2.txt" 2>&1)"
 smoke_ln="$(printf '%s\n' "$dro" | grep -n smoke-test | cut -d: -f1)"
