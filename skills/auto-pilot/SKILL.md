@@ -308,6 +308,10 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   <run-dir>`): the `ALARM` sentinel is the alarm's per-run idempotency key, so one
   that outlives the resume suppresses the alarm if the same condition recurs and
   the resumed run halts silently. `REPORT.md`'s history stays.
+- **Clear the terminal exit state too** (`spawn-orchestrator.sh clear-exit-state
+  --dir <run-worktree>`): the done-sentinel and `exit_reason*` are durable, and
+  `deadline` is by definition recovered BY this resume — left in place they make a
+  live run read back as finished ([`references/resume.md`](references/resume.md)).
 - **Then fall into the run loop**, clearing any run-level pause markers first
   ([`references/run-budget.md`](references/run-budget.md) owns pause semantics).
 

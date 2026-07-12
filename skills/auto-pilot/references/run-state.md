@@ -349,9 +349,9 @@ tasks are **eligible to claim next** — graph readiness — is not encoded in a
 blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |   |
-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- | - |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |   |
+| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
+| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
