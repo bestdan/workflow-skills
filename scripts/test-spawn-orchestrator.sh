@@ -2589,6 +2589,16 @@ GHFAILEOF
     mkdir -p "$root/run/.auto-pilot"
   }
 
+  # A provably DEAD pid (spawned, killed, reaped) and the live pid of this very
+  # test shell, with its real `ps` start-time. RUN.md's `orchestrator_pid` /
+  # `orchestrator_started_at` are what the stale-orchestrator check reads, and
+  # I5 gates the prune of an UNMATCHED worker worktree on that check saying the
+  # orchestrator is provably dead — a LIVE one means the unmatched row could be
+  # a dispatch in flight whose row hasn't been written back yet.
+  _dead_pid() { local p; sleep 30 & p=$!; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; printf '%s' "$p"; }
+  LIVE_PID=$$
+  LIVE_STARTED="$(ps -o lstart= -p $$)"
+
   # --- I1: run worktree HEAD parked off the run-state branch -> repaired ----
   D1="$DOC/i1"; RUN_ID1="doctor-i1"
   _doctor_new_run "$D1" "$RUN_ID1"
@@ -2857,6 +2867,61 @@ GHFAILEOF
   [ "$(cat "$I4DB/402.labels")" = "task-loop" ] && ok "doctor I4: already-correct PR's labels are untouched" \
     || bad "doctor I4: already-correct PR's labels are untouched" "$(cat "$I4DB/402.labels")"
 
+  # --- I4: a gh WRITE that fails is never reported as a completed repair -----
+  # Same D5 rule the failed `worktree remove` follows: a gh blip mid-repair that
+  # still wrote "I4 repaired" into REPORT.md/QUESTIONS.md would be exactly the
+  # silent lie doctor exists to eliminate. Reads succeed here (so the repair is
+  # correctly ATTEMPTED); both writes fail.
+  DOCTOR_GH_WFAIL="$DOC/gh-write-fail"
+  cat >"$DOCTOR_GH_WFAIL" <<'GHWEOF'
+#!/usr/bin/env bash
+set -uo pipefail
+db="${DOCTOR_GH_DB:?DOCTOR_GH_DB not set}"
+[ "$1" = pr ] || exit 1
+sub="$2"; num="$3"; shift 3
+case "$sub" in
+  view)
+    jqexpr=""
+    while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
+    case "$jqexpr" in
+      .state) cat "$db/$num.state" 2>/dev/null; true ;;
+      .isDraft) cat "$db/$num.draft" 2>/dev/null || echo false ;;
+      '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null; true ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  edit|ready) exit 1 ;;   # the write blip
+  *) exit 1 ;;
+esac
+GHWEOF
+  chmod +x "$DOCTOR_GH_WFAIL"
+
+  D4W="$DOC/i4-write-fail"; RUN_ID4W="doctor-i4-write-fail"
+  _doctor_new_run "$D4W" "$RUN_ID4W"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID4W"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_stale | handed-off | br-stale | main | - | #411 | |\n'
+  } >"$D4W/run/.auto-pilot/RUN.md"
+  : >"$D4W/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D4W/run/.auto-pilot/REPORT.md"
+  git -C "$D4W/run" add .auto-pilot; git -C "$D4W/run" commit -q -m "seed run state"
+  I4WDB="$D4W/ghdb"; mkdir -p "$I4WDB"
+  printf 'OPEN\n' >"$I4WDB/411.state"; printf 'true\n' >"$I4WDB/411.draft"; printf 'task-claim\n' >"$I4WDB/411.labels"
+  export DOCTOR_GH_DB="$I4WDB"
+  d4wout="$("$SCRIPT" doctor --dir "$D4W/run" --run-id "$RUN_ID4W" --gh "$DOCTOR_GH_WFAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d4wrc=$?
+  [ "$d4wrc" = 0 ] && ok "doctor I4 (write blip): exits 0" || bad "doctor I4 (write blip): exits 0" "$d4wout"
+  # The summary's repair note has the form `I4: <task> PR #<n>` — the FAILED
+  # announcements above deliberately don't, so match the note's exact shape.
+  lack "doctor I4 (write blip): a FAILED gh write is never summarized as a repair" 'I4: t_stale PR #411' "$d4wout"
+  have "doctor I4 (write blip): the summary counts no repairs at all" 'repaired=0' "$d4wout"
+  lack "doctor I4 (write blip): REPORT.md never records the repair that didn't happen" 'I4 repaired' "$(cat "$D4W/run/.auto-pilot/REPORT.md")"
+  lack "doctor I4 (write blip): QUESTIONS.md never records the repair that didn't happen" 'missing its repo-pr review signal' "$(cat "$D4W/run/.auto-pilot/QUESTIONS.md")"
+  have "doctor I4 (write blip): the failed label write is announced" 'gh pr edit` FAILED' "$d4wout"
+  have "doctor I4 (write blip): the failed ready write is announced" 'gh pr ready` FAILED' "$d4wout"
+  unset DOCTOR_GH_DB
+
   # --- I5: orphan worker worktrees under <run root>/workers/ (G2) -----------
   # D4: `pending` is deliberately NOT on the safe list any more — the phase
   # cell lags a live dispatch (it flips AFTER the orchestrator's RUN.md
@@ -2866,9 +2931,12 @@ GHFAILEOF
   # alone (the literal live-run reproduction: `task_14 | pending` with an
   # open PR, from this very run); a `parked` row that STILL has an OPEN PR
   # recorded -> left alone (the open-PR guard); a branch with NO RUN.md row
-  # at all -> pruned (nothing claims it is live).
+  # at all -> pruned, BUT only because this run's recorded orchestrator is
+  # provably dead (the unmatched case's liveness gate — see the i5-live /
+  # i5-dead scenarios below, which own that half of the invariant).
   D5="$DOC/i5"; RUN_ID5="doctor-i5"
   _doctor_new_run "$D5" "$RUN_ID5"
+  D5_DEAD_PID="$(_dead_pid)"
   for br in br-terminal br-unsafe br-pending br-openpr br-nomatch; do
     git -C "$D5/run" checkout -q main
     git -C "$D5/run" checkout -q -b "$br"
@@ -2879,7 +2947,8 @@ GHFAILEOF
   # BACK to it (no -b: it already exists) now that the branches above exist.
   git -C "$D5/run" checkout -q "auto-pilot/$RUN_ID5"
   {
-    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID5"
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5"
+    printf 'orchestrator_pid: %s\norchestrator_started_at: "Wed Jul  9 20:00:00 2026"\n---\n\n' "$D5_DEAD_PID"
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     printf '| t_terminal | parked       | br-terminal | main | - | -    | |\n'
@@ -2922,6 +2991,94 @@ GHFAILEOF
     || bad "doctor I5: the no-row orphan worktree is observably gone"
 
   unset DOCTOR_GH_DB
+
+  # --- I5 (LIVE DISPATCH): the unmatched-branch data-loss regression ---------
+  # The exact shape a LIVE dispatch presents, which the scenario above cannot
+  # catch because it pre-bakes the `branch` cell: the orchestrator writes a
+  # task's branch/phase/pr back only AFTER /deliver-task returns, so mid-flight
+  # the row reads `| t_live | pending | - | … |` and matches NO worktree branch,
+  # while the just-created worker worktree is clean, has no commits beyond its
+  # base, and has no PR yet — i.e. every other prune condition holds. With the
+  # run's orchestrator LIVE, the worktree MUST survive: removing it destroys a
+  # dispatch in flight.
+  D5L="$DOC/i5-live"; RUN_ID5L="doctor-i5-live"
+  _doctor_new_run "$D5L" "$RUN_ID5L"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5L"
+    printf 'orchestrator_pid: %s\norchestrator_started_at: "%s"\n---\n\n' "$LIVE_PID" "$LIVE_STARTED"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_live | pending | - | main | - | - | |\n'
+  } >"$D5L/run/.auto-pilot/RUN.md"
+  : >"$D5L/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D5L/run/.auto-pilot/REPORT.md"
+  git -C "$D5L/run" add .auto-pilot; git -C "$D5L/run" commit -q -m "seed run state"
+  mkdir -p "$D5L/workers"
+  # Exactly what /deliver-task does at claim: a fresh worker worktree on a new
+  # task branch cut from the base. Nothing committed, nothing pushed, no PR.
+  git -C "$D5L/run" worktree add -q -b bestdan/t-live-work "$D5L/workers/w-live" main
+  # And a worker left on a DETACHED HEAD (`abbrev-ref` reads back "HEAD", which
+  # no row's branch cell can equal) — the same unmatched bucket.
+  git -C "$D5L/run" worktree add -q --detach "$D5L/workers/w-detached" main
+
+  d5lout="$("$SCRIPT" doctor --dir "$D5L/run" --run-id "$RUN_ID5L" 2>&1)"; d5lrc=$?
+  [ "$d5lrc" = 0 ] && ok "doctor I5 (live dispatch): exits 0" || bad "doctor I5 (live dispatch): exits 0" "$d5lout"
+  [ -d "$D5L/workers/w-live" ] && ok "doctor I5 (live dispatch): a live dispatch's worker worktree SURVIVES (unmatched row + LIVE orchestrator)" \
+    || bad "doctor I5 (live dispatch): a live dispatch's worker worktree SURVIVES — it was destroyed"
+  [ -d "$D5L/workers/w-detached" ] && ok "doctor I5 (live dispatch): a detached-HEAD worker worktree SURVIVES too" \
+    || bad "doctor I5 (live dispatch): a detached-HEAD worker worktree SURVIVES too — it was destroyed"
+  have "doctor I5 (live dispatch): reports the live worktree as skipped, not repaired" 'skipped (unsafe to prune)' "$d5lout"
+  have "doctor I5 (live dispatch): the skip names the liveness gate" 'not provably dead' "$d5lout"
+  lack "doctor I5 (live dispatch): nothing is reported as removed" 'I5: removed' "$d5lout"
+
+  # --- I5 (DEAD orchestrator): the converse — invariant 5 still prunes -------
+  # The same unmatched shape, but the run's recorded orchestrator is provably
+  # dead: nothing can be mid-dispatch when the process that dispatches is gone,
+  # so the orphan is removed as before. The liveness gate must not have been a
+  # way of quietly disabling invariant 5.
+  D5D="$DOC/i5-dead"; RUN_ID5D="doctor-i5-dead"
+  _doctor_new_run "$D5D" "$RUN_ID5D"
+  D5D_DEAD_PID="$(_dead_pid)"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5D"
+    printf 'orchestrator_pid: %s\norchestrator_started_at: "Wed Jul  9 20:00:00 2026"\n---\n\n' "$D5D_DEAD_PID"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_live | pending | - | main | - | - | |\n'
+  } >"$D5D/run/.auto-pilot/RUN.md"
+  : >"$D5D/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D5D/run/.auto-pilot/REPORT.md"
+  git -C "$D5D/run" add .auto-pilot; git -C "$D5D/run" commit -q -m "seed run state"
+  mkdir -p "$D5D/workers"
+  git -C "$D5D/run" worktree add -q -b bestdan/t-orphan-work "$D5D/workers/w-orphan" main
+
+  d5dout="$("$SCRIPT" doctor --dir "$D5D/run" --run-id "$RUN_ID5D" 2>&1)"; d5drc=$?
+  [ "$d5drc" = 0 ] && ok "doctor I5 (dead orchestrator): exits 0" || bad "doctor I5 (dead orchestrator): exits 0" "$d5dout"
+  have "doctor I5 (dead orchestrator): reports the prune" 'I5: removed w-orphan' "$d5dout"
+  [ ! -d "$D5D/workers/w-orphan" ] && ok "doctor I5 (dead orchestrator): a genuinely orphaned worktree is still observably pruned" \
+    || bad "doctor I5 (dead orchestrator): a genuinely orphaned worktree is still observably pruned"
+
+  # --- I5 (UNDETERMINED liveness): no pid recorded -> fail closed, no prune --
+  # D2's posture, applied to the destructive action: an undetermined liveness
+  # read is not "dead", so it never green-lights a `worktree remove --force`.
+  D5U="$DOC/i5-nopid"; RUN_ID5U="doctor-i5-nopid"
+  _doctor_new_run "$D5U" "$RUN_ID5U"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID5U"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_live | pending | - | main | - | - | |\n'
+  } >"$D5U/run/.auto-pilot/RUN.md"
+  : >"$D5U/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D5U/run/.auto-pilot/REPORT.md"
+  git -C "$D5U/run" add .auto-pilot; git -C "$D5U/run" commit -q -m "seed run state"
+  mkdir -p "$D5U/workers"
+  git -C "$D5U/run" worktree add -q -b bestdan/t-nopid-work "$D5U/workers/w-nopid" main
+
+  d5uout="$("$SCRIPT" doctor --dir "$D5U/run" --run-id "$RUN_ID5U" 2>&1)"
+  [ -d "$D5U/workers/w-nopid" ] && ok "doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES (fail closed)" \
+    || bad "doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES"
+  have "doctor I5 (undetermined liveness): reported as skipped" 'skipped (unsafe to prune)' "$d5uout"
 
   # --- I6: a chained task's parent tip moved off its frozen base_sha --------
   # (a) the orchestrator moved the base mid-run, no merge -> park the child.

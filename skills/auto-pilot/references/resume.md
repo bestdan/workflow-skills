@@ -10,7 +10,34 @@ this leans on live in [`run-state.md`](run-state.md); pause semantics live in
 Resume's job is to reconcile a crashed or paused run's durable state against
 reality, then fall into the normal **Run phase** loop for whatever remains ready.
 
-**Run the doctor, first — before anything else reads the worktree.** Run
+**Stale-orchestrator guard, first — before the doctor, and before anything else
+touches the worktree.** ("Locate the run-state branch" below is what resolves the
+`<run_id>` this and the doctor both take; it is a pure branch read that writes
+nothing, so it precedes both.) Read `orchestrator_pid` / `orchestrator_started_at`
+/ `until` from `RUN.md`'s front matter ([`run-state.md`](run-state.md) "`RUN.md`"),
+reading it **from the run-state branch** (`git show
+auto-pilot/<run_id>:.auto-pilot/RUN.md`, the same belt the doctor's invariant 2
+uses) so this guard never depends on the worktree state the doctor exists to
+repair. If a live orchestrator with the matching start-time is still running at
+that PID ([`launch-runtime.md`](launch-runtime.md) "Orphan / stale detection"), do
+not start a second one — report it and **stop here**. A dead PID, or a start-time
+mismatch (a recycled PID), means it's safe to proceed; the start-time is exactly
+what tells the two cases apart.
+
+**This ordering is load-bearing, not cosmetic.** The doctor **repairs** — it
+restores `HEAD`, discards stale run-state dirt, and `git worktree remove
+--force`s orphan worker worktrees (invariant 5). Every one of those is a write
+against a run that a live orchestrator may be _actively using_: a second
+`--resume` fired against a healthy run would, with the doctor running first,
+mutate that run's worktree tree out from under it. The guard must therefore
+answer "is anyone else driving this run?" **before** the first repairing write,
+not after. (The doctor's invariant 5 enforces the same rule independently — it
+refuses to prune a worktree no `RUN.md` row claims unless the orchestrator is
+_provably dead_ — because a destructive prune must not depend for its safety on
+a step ordering that no code enforces. Belt and braces: the guard here, the
+liveness gate there.)
+
+**Then run the doctor — before anything else reads the worktree.** Run
 `scripts/spawn-orchestrator.sh doctor --dir <run-worktree> --run-id <run_id>
 --questions .auto-pilot/QUESTIONS.md [--handler <h>]`
 ([`run-state.md`](run-state.md) "Run doctor"). `--resume`'s reconciliation pass
@@ -48,14 +75,6 @@ require **exactly one** in a resumable (`active` / `paused` / `systemic`) state.
 Zero matches, or more than one, is **fail-closed**: report the ambiguous
 `run_id`s by name and stop rather than guess which run to resume — the same
 never-guess posture the reconciliation below takes.
-
-**Stale-orchestrator guard.** Read `orchestrator_pid` / `orchestrator_started_at`
-/ `until` from `RUN.md`'s front matter ([`run-state.md`](run-state.md) "`RUN.md`").
-If a live orchestrator with the matching start-time is still running at that PID
-([`launch-runtime.md`](launch-runtime.md) "Orphan / stale detection"), do not
-start a second one — report it and stop. A dead PID, or a start-time mismatch (a
-recycled PID), means it's safe to proceed; the start-time is exactly what tells
-the two cases apart.
 
 **Reconcile each non-terminal task.** Re-read `RUN.md` via the `git show`
 read above.

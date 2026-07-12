@@ -501,26 +501,55 @@ ignored, and a **halt** exit means the loop must not dispatch.
    and not a draft, because deliver-task's step 7 makes the ready `task-loop` PR
    the review signal (the task file is deleted in the PR rather than flipped to
    `needs_review`). A G6/G7 crash gap — still `task-claim`, still draft — is a
-   **repair**: swap the label, `gh pr ready`. Skipped for a merged PR (labels no
+   **repair**: swap the label, `gh pr ready`. Each of those two `gh` **writes**
+   has its exit code checked, and only a write that actually succeeded is
+   reported as a repair — a gh blip that still recorded "I4 repaired" would be
+   the same silent lie invariant 5 forbids for a failed `worktree remove`; a
+   failed write is announced and left for the next pass, which re-reads the
+   still-stale state. Skipped for a merged PR (labels no
    longer matter). Other handlers stay behind `--handler` as future work.
 5. **No orphan worker worktrees from a dead dispatch** (G2). → **repair**, remove
    them — but only when removal is provably safe: the worktree is under
    `<run root>/workers/`; its `RUN.md` row is at a phase that is unambiguously
-   TERMINAL for that worktree (`parked` / `handed-off`), or no row matches the
-   worktree's branch at all; it has no uncommitted changes; its branch tip is
-   already pushed to `origin` **or** carries no commits beyond its base; and no
-   **OPEN** PR is recorded for it. `pending` is deliberately **not** on the
-   safe list: RUN.md's phase cell is written by a commit the orchestrator makes
-   **after** it dispatches, so there is a window — right after each RUN.md
-   commit+push — where a worker worktree is genuinely live (dispatched,
-   possibly with an open PR already) while its row still reads `pending`.
-   `pending` therefore can't distinguish "never dispatched" from "dispatched
-   moments ago," so it is never safe to prune on its own. Anything failing one
-   of those conditions is left alone and reported `skipped (unsafe to prune)`;
-   a `git worktree remove` that itself fails is reported as a **failed** prune,
-   never as a completed repair — leaving an orphan worktree behind is harmless,
-   deleting a live one destroys work, so every condition must hold, not most
-   of them.
+   TERMINAL for that worktree (`parked` / `handed-off`), **or** no row matches
+   the worktree's branch _and_ the run's orchestrator is **provably dead** (see
+   below); it has no uncommitted changes; its branch tip is already pushed to
+   `origin` **or** carries no commits beyond its base; and no **OPEN** PR is
+   recorded for it. `pending` is deliberately **not** on the safe list: RUN.md's
+   phase cell is written by a commit the orchestrator makes **after** it
+   dispatches, so there is a window — right after each RUN.md commit+push —
+   where a worker worktree is genuinely live (dispatched, possibly with an open
+   PR already) while its row still reads `pending`. `pending` therefore can't
+   distinguish "never dispatched" from "dispatched moments ago," so it is never
+   safe to prune on its own.
+
+   **An UNMATCHED worktree is not self-evidently abandoned either** — and
+   treating it as such was a data-loss bug. The orchestrator writes a task's
+   `branch` / `phase` / `pr` cells back only **after** `/deliver-task` returns
+   ([`../SKILL.md`](../SKILL.md) "State update after each task"), so for the
+   whole of a live dispatch the row reads `| t | pending | - | … |` and matches
+   **nothing** — while a freshly-created worker worktree is clean, carries no
+   commits beyond its base, and has no PR yet, i.e. satisfies every other
+   condition above. (A worker left on a **detached HEAD** lands in the same
+   bucket: its `rev-parse --abbrev-ref HEAD` reads back the literal `HEAD`,
+   which no row's `branch` cell can equal.) An unmatched worktree is therefore
+   pruned **only when the run's orchestrator is provably dead** — nothing can be
+   mid-dispatch if the process that dispatches is gone. That is the same
+   stale-orchestrator machinery `--resume` gates on ([`resume.md`](resume.md)
+   "Stale-orchestrator guard"; [`launch-runtime.md`](launch-runtime.md) "Orphan /
+   stale detection"): `RUN.md`'s `orchestrator_pid` + `orchestrator_started_at`,
+   where a **recycled** pid (start-time mismatch) counts as dead but an
+   **undetermined** read — no pid recorded, `ps` unreadable — does **not**, and
+   fails closed to `skipped`, the same D2 posture as invariants 3 and 6. This
+   duplicates `resume.md`'s own guard on purpose: a `git worktree remove
+   --force` must not depend for its safety on a step ordering that no code
+   enforces.
+
+   Anything failing one of those conditions is left alone and reported
+   `skipped (unsafe to prune)`; a `git worktree remove` that itself fails is
+   reported as a **failed** prune, never as a completed repair — leaving an
+   orphan worktree behind is harmless, deleting a live one destroys work, so
+   every condition must hold, not most of them.
 6. **A chained task's parent tip still equals its frozen `base_sha`.** → **park**
    the child — but only when the parent's own PR is _positively read_ as _not_
    merged. The `base_sha` freeze guard models the **orchestrator** moving a base

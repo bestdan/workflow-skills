@@ -3148,6 +3148,30 @@ _front_field() {
           -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
 }
 
+# The stale-orchestrator check (launch-runtime.md "Orphan / stale detection"):
+# given RUN.md's recorded `orchestrator_pid` / `orchestrator_started_at`, print
+# exactly one of live | dead | mismatch | none. LIVE only if the PID is alive
+# AND its process start-time matches the recorded one — the start-time is what
+# tells a live orchestrator apart from a RECYCLED pid (`mismatch`, i.e. the
+# recorded process is gone). `none` = nothing recorded, so liveness is
+# UNDETERMINED, not "dead". ONE implementation, shared by `status` and doctor's
+# invariant 5 — a second, divergent liveness check is exactly how the two would
+# drift apart on the one question a destructive prune depends on.
+_pid_state() {
+  local pid="$1" started="$2"
+  [ -n "$pid" ] || { printf 'none'; return 0; }
+  if kill -0 "$pid" 2>/dev/null; then
+    local actual; actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
+    if [ -n "$actual" ] && [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
+      printf 'live'
+    else
+      printf 'mismatch'
+    fi
+  else
+    printf 'dead'
+  fi
+}
+
 # Read-only: report the run's live state in one shot. Never writes anything.
 status() {
   local label="" dir="$PWD" ceiling="$DEFAULT_TASK_CEILING"
@@ -3201,21 +3225,7 @@ status() {
     last_event="$(printf '%s' "$last_event" | cut -c1-240)"
   fi
 
-  # PID liveness: live only if the PID is alive AND its process start-time
-  # matches the recorded one (guards a recycled PID) — dead / mismatch / none.
-  local pid_state="none"
-  if [ -n "$orch_pid" ]; then
-    if kill -0 "$orch_pid" 2>/dev/null; then
-      local actual_started; actual_started="$(ps -o lstart= -p "$orch_pid" 2>/dev/null)"
-      if [ -n "$actual_started" ] && [ "$(_norm_ws "$actual_started")" = "$(_norm_ws "$orch_started")" ]; then
-        pid_state="live"
-      else
-        pid_state="mismatch"
-      fi
-    else
-      pid_state="dead"
-    fi
-  fi
+  local pid_state; pid_state="$(_pid_state "$orch_pid" "$orch_started")"
 
   # Done-sentinel (written by `teardown --done-sentinel` / `exit-reason` on a
   # terminal reason) is the single source of "the run stopped for good" — it can
@@ -3756,16 +3766,28 @@ doctor() {
     # the ready task-loop PR IS the review signal). Only repo-pr is wired;
     # a future `linear` handler's own signal is kept behind --handler.
     if [ "$phase" = "handed-off" ] && [ "$handler" = "repo-pr" ]; then
+      # Each gh WRITE's exit code is checked, and `fixes` only grows on a write
+      # that actually succeeded (D5's rule, stated there for I5's failed
+      # `worktree remove`, and just as binding here): a gh blip mid-repair that
+      # still recorded "I4 repaired" in REPORT.md/QUESTIONS.md would be the exact
+      # silent lie doctor exists to eliminate. A failed write is announced and
+      # left for the next pass, which re-reads the still-stale label/draft state.
       local draft labels fixes=""
       draft="$(_doctor_pr_draft "$gh_bin" "$pr_num")"
       labels="$(_doctor_pr_labels "$gh_bin" "$pr_num")"
       case ",$labels," in *,task-claim,*)
-        "$gh_bin" pr edit "$pr_num" --remove-label task-claim --add-label task-loop >/dev/null 2>&1
-        fixes="label task-claim->task-loop" ;;
+        if "$gh_bin" pr edit "$pr_num" --remove-label task-claim --add-label task-loop >/dev/null 2>&1; then
+          fixes="label task-claim->task-loop"
+        else
+          echo "spawn-orchestrator: doctor I4: $task — \`gh pr edit\` FAILED for PR #$pr_num (label left at task-claim, not reported as a repair)"
+        fi ;;
       esac
       if [ "$draft" = "true" ]; then
-        "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1
-        fixes="${fixes:+$fixes, }marked ready (was draft)"
+        if "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1; then
+          fixes="${fixes:+$fixes, }marked ready (was draft)"
+        else
+          echo "spawn-orchestrator: doctor I4: $task — \`gh pr ready\` FAILED for PR #$pr_num (PR left as a draft, not reported as a repair)"
+        fi
       fi
       if [ -n "$fixes" ]; then
         i4_status="repaired"; repaired_notes+=("I4: $task PR #$pr_num")
@@ -3795,14 +3817,40 @@ doctor() {
   # real dispatch, possibly with an open PR already) while its row still
   # reads `pending`. `pending` therefore cannot distinguish "never dispatched"
   # from "dispatched moments ago"; only a phase that is unambiguously
-  # TERMINAL for this worktree (`parked`, `handed-off`), or a branch that
-  # matches no RUN.md row at all, is safe to treat as abandoned. Leaving an
-  # orphan worktree behind is harmless (the next pass, or a human, can still
-  # clean it up); deleting a live one destroys work — the asymmetry is why
-  # every condition below must hold, not most of them.
+  # TERMINAL for this worktree (`parked`, `handed-off`) is safe on the phase
+  # alone. Leaving an orphan worktree behind is harmless (the next pass, or a
+  # human, can still clean it up); deleting a live one destroys work — the
+  # asymmetry is why every condition below must hold, not most of them.
+  #
+  # An UNMATCHED worktree — no RUN.md row names its branch, including a worker
+  # left on a DETACHED HEAD (`rev-parse --abbrev-ref` reads back the literal
+  # "HEAD", which no row's `branch` cell can ever equal) — is NOT self-evidently
+  # abandoned, and treating it as such was a data-loss bug. The orchestrator
+  # writes a task's `branch`/`phase`/`pr` cells back only AFTER /deliver-task
+  # returns (SKILL.md "State update after each task"), so for the whole of a
+  # LIVE dispatch the row reads `| t | pending | - | …` and matches NOTHING —
+  # while a freshly-created worker worktree is clean, carries no commits beyond
+  # its base, and has no PR yet, i.e. passes every other condition below. The
+  # `pending`-is-not-safe guard above never saw that case, because the match is
+  # keyed on the branch cell the dispatch has not written yet.
+  #
+  # So an unmatched worktree is prunable ONLY when the run's orchestrator is
+  # PROVABLY DEAD — nothing can be mid-dispatch if the process that dispatches
+  # is gone. That is the same stale-orchestrator machinery --resume already
+  # gates on (resume.md "Stale-orchestrator guard"; launch-runtime.md "Orphan /
+  # stale detection"): RUN.md's `orchestrator_pid` + `orchestrator_started_at`
+  # via _pid_state, not a second liveness check of doctor's own. `live` skips,
+  # and so does an UNDETERMINED read (`none` — no pid recorded, or `ps`
+  # unreadable): same D2 posture as I3/I6, an undetermined signal never
+  # green-lights a destructive action. A recycled pid (`mismatch`) means the
+  # recorded process is gone, which IS provably dead.
   local run_root="$(dirname "$dir")" workers_root
   workers_root="$run_root/workers"
   if [ -d "$workers_root" ]; then
+    local front orch_state orch_dead=0
+    front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+    orch_state="$(_pid_state "$(_front_field orchestrator_pid)" "$(_front_field orchestrator_started_at)")"
+    case "$orch_state" in dead|mismatch) orch_dead=1 ;; esac
     local wt_line wt any_pruned=0
     while IFS= read -r wt_line; do
       case "$wt_line" in "worktree "*) wt="${wt_line#worktree }" ;; *) continue ;; esac
@@ -3816,9 +3864,12 @@ doctor() {
           break
         fi
       done
-      local safe_phase=0
+      local safe_phase=0 unmatched_live=0
       if [ "$matched" -eq 0 ]; then
-        safe_phase=1   # no RUN.md row at all — nothing claims this worktree is live
+        # No RUN.md row names this branch — could be a dead dispatch's orphan,
+        # or a LIVE dispatch whose row hasn't been written back yet. Only the
+        # orchestrator being provably dead tells the two apart.
+        if [ "$orch_dead" -eq 1 ]; then safe_phase=1; else unmatched_live=1; fi
       else
         case "$matched_phase" in parked|handed-off) safe_phase=1 ;; esac
       fi
@@ -3875,6 +3926,8 @@ doctor() {
           echo "spawn-orchestrator: doctor I5: FAILED to remove (left in place, not reported as a repair): $wt"
           report_bullets+=("- **I5 FAILED** — \`git worktree remove\` failed for \`$wt\`; left in place. Not a completed repair.")
         fi
+      elif [ "$unmatched_live" -eq 1 ]; then
+        echo "spawn-orchestrator: doctor I5: skipped (unsafe to prune) — no RUN.md row names branch '${wtbranch:-?}' and the run's orchestrator is $orch_state, not provably dead (this is what a LIVE dispatch looks like before its row is written back): $wt"
       else
         echo "spawn-orchestrator: doctor I5: skipped (unsafe to prune): $wt"
       fi
