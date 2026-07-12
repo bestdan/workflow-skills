@@ -22,6 +22,45 @@ BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.so-test.XXXXXX")"
 BASE="$(cd "$BASE" && pwd -P)"
 trap 'rm -rf "$BASE"' EXIT
 
+# --- The notifier guard: the suite may NEVER reach the real /usr/bin/osascript --
+#
+# The alarm (task 16) ends in a real macOS desktop notification, and several
+# tests trigger one INCIDENTALLY — supervisor-check's fatal-auth and no-progress
+# halts, the exit-handling tests, a doctor halt delivered by supervisor-scan —
+# because `_supervisor_halt` raises an alarm on its way out. Those tests assert on
+# the ALARM sentinel and REPORT.md, never on the notifier, so nothing stubbed it:
+# `_alarm_notify` did `command -v osascript`, found the REAL one, and every
+# developer running `scripts/check.sh` on a Mac got four desktop notifications
+# with `com.autopilot.test.*` fixture labels. The suite still passed — the side
+# effect escaped into the real world and nothing asserted a thing about it, which
+# is the same harness-diverges-from-production class as the findings this file
+# exists to pin down.
+#
+# So the leak is made IMPOSSIBLE BY CONSTRUCTION, not by remembering to stub:
+# ONE guard dir, prepended to PATH for the WHOLE suite, shadowing every binary
+# that can reach the user's machine — `osascript`, `terminal-notifier` (the
+# notifiers), `open`, and `launchctl` (which could otherwise bootstrap a REAL
+# launchd job from a fixture plist). Every stub RECORDS its invocation, so a test
+# that wants to assert on notifier calls can point $NOTIFY_GUARD_LOG at its own
+# recorder and count them (see the doctor halt's zero-notification assertion).
+# Tests with their own stub dir (the alarm suite's $ALSTUB) prepend it to PATH
+# themselves and still win — this guard is the floor, not a ceiling.
+GUARD="$BASE/guard-bin"; mkdir -p "$GUARD"
+NOTIFY_GUARD_LOG="$BASE/guard-notify.calls"; : >"$NOTIFY_GUARD_LOG"
+export NOTIFY_GUARD_LOG
+# The notifiers: record and succeed (a REAL notification is what we are preventing).
+for _n in osascript terminal-notifier open; do
+  printf '#!/bin/sh\nprintf "%%s: %%s\\n" "%s" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\nexit 0\n' "$_n" >"$GUARD/$_n"
+  chmod +x "$GUARD/$_n"
+done
+# launchctl: same shape as the alarm suite's own stub, so behavior is identical
+# whichever is on PATH — `print` exits 1 (job gone, which is the truth for every
+# fixture label), everything else no-ops 0. This also keeps a stray `bootstrap`
+# from loading a fixture plist into the developer's real launchd.
+printf '#!/bin/sh\nprintf "launchctl: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\n[ "$1" = print ] && exit 1\nexit 0\n' >"$GUARD/launchctl"
+chmod +x "$GUARD/launchctl"
+export PATH="$GUARD:$PATH"
+
 pass=0
 fail=0
 ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
@@ -2632,7 +2671,12 @@ GHFAILEOF
   printf '# report\n' >"$D2/run/.auto-pilot/REPORT.md"
   git -C "$D2/run" add .auto-pilot; git -C "$D2/run" commit -q -m "seed broken run state (no front matter)"
 
-  d2out="$("$SCRIPT" doctor --dir "$D2/run" --run-id "$RUN_ID2" 2>&1)"; d2rc=$?
+  # Point the notifier guard's recorder at a PER-TEST log so the doctor's own
+  # notifier calls can be COUNTED. Doctor runs inside the jail, where osascript is
+  # exec-denied, so the right count is ZERO — asserted positively below rather than
+  # merely implied by the absence of an ALARM sentinel.
+  D2_NOTIFY="$D2/notify.calls"; : >"$D2_NOTIFY"
+  d2out="$(NOTIFY_GUARD_LOG="$D2_NOTIFY" "$SCRIPT" doctor --dir "$D2/run" --run-id "$RUN_ID2" 2>&1)"; d2rc=$?
   [ "$d2rc" = 30 ] && ok "doctor I2 halt: exits 30 (a caller gating on this cannot dispatch)" \
     || bad "doctor I2 halt: exits 30" "exit=$d2rc out=$d2out"
   have "doctor I2 halt: RUN.md status is observably systemic-attempted or REPORT.md carries the alarm" 'ALARM' "$(cat "$D2/run/.auto-pilot/REPORT.md")"
@@ -2659,10 +2703,26 @@ GHFAILEOF
   [ ! -f "$D2/run/.auto-pilot/ALARM" ] \
     && ok "doctor halt: does NOT write the ALARM sentinel in-jail (which would gag the supervisor)" \
     || bad "doctor halt: does NOT write the ALARM sentinel in-jail"
+  # The POSITIVE form of the same property, with a recording notifier on PATH: a
+  # doctor halt must invoke the notifier ZERO times. In production the jail denies
+  # it anyway (osascript is exec-denied), so a doctor that TRIED to notify would be
+  # silently denied AND would leave the gagging sentinel behind — the count is the
+  # only thing that catches that regression.
+  d2_notify_n="$(wc -l <"$D2_NOTIFY" | tr -d " ")"
+  [ "$d2_notify_n" = 0 ] \
+    && ok "doctor halt: invokes the notifier ZERO times (it files an alarm-request instead)" \
+    || bad "doctor halt: invokes the notifier ZERO times" "got $d2_notify_n call(s): $(cat "$D2_NOTIFY")"
   # Now the un-jailed side runs (as it does above the gate on every wake, and
   # from supervisor-check right after the agent exits — the SAME wake).
-  scanout="$("$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  D2_SCAN_NOTIFY="$D2/scan-notify.calls"; : >"$D2_SCAN_NOTIFY"
+  scanout="$(NOTIFY_GUARD_LOG="$D2_SCAN_NOTIFY" "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
   have "doctor halt: the supervisor DELIVERS the doctor's alarm on its next scan" 'ALARM invariant' "$scanout"
+  # ...and the UN-jailed side is where the notification actually happens: exactly
+  # one, so the seam moved the notification rather than losing it.
+  d2_scan_n="$(grep -c "^osascript: " "$D2_SCAN_NOTIFY" | tr -d " ")"
+  [ "$d2_scan_n" = 1 ] \
+    && ok "doctor halt: the UN-JAILED supervisor notifies exactly once (the seam moves the alarm, never drops it)" \
+    || bad "doctor halt: the un-jailed supervisor notifies exactly once" "got $d2_scan_n"
   have "doctor halt: the delivered alarm names the invariant" 'invariant 2' "$scanout"
   have "doctor halt: the alarm reaches REPORT.md's very first line" 'ALARM (' "$(head -1 "$D2/run/.auto-pilot/REPORT.md")"
   [ -f "$D2/run/.auto-pilot/ALARM" ] \
@@ -3302,6 +3362,35 @@ GHWEOF
     && ok "doctor fail-closed: unknown --context" || bad "doctor fail-closed: unknown --context" "$o"
 else
   echo "skip - doctor: git not available"
+fi
+
+# --- the notifier guard held (checked LAST, over the whole suite) -------------
+# The acceptance criterion for the desktop-spam bug: no test, present or FUTURE,
+# may reach a real notifier. Two assertions, because the guard has to be both
+# IN PLACE and EFFECTIVE:
+#   1. structural — `osascript`/`terminal-notifier` resolve INSIDE the guard dir,
+#      so a binary outside it is unreachable by name for the whole suite. (Nothing
+#      in spawn-orchestrator.sh calls a notifier by absolute path; `_alarm_notify`
+#      goes through `command -v`, which is exactly what this shadows.)
+#   2. behavioral — the guard log is NON-EMPTY, i.e. alarms really did route
+#      through it. A guard that intercepted nothing would pass (1) while silently
+#      having stopped covering the code path, which is how this leak would return.
+guard_osa="$(command -v osascript || true)"
+case "$guard_osa" in
+  "$GUARD"/*) ok "notifier guard: osascript resolves INSIDE the guard dir, never the real binary" ;;
+  *) bad "notifier guard: osascript resolves INSIDE the guard dir" "resolved to: ${guard_osa:-(not found)}" ;;
+esac
+guard_tn="$(command -v terminal-notifier || true)"
+case "$guard_tn" in
+  "$GUARD"/*) ok "notifier guard: terminal-notifier resolves INSIDE the guard dir" ;;
+  *) bad "notifier guard: terminal-notifier resolves INSIDE the guard dir" "resolved to: ${guard_tn:-(not found)}" ;;
+esac
+guard_hits="$(grep -c '^osascript: ' "$NOTIFY_GUARD_LOG" 2>/dev/null | tr -d ' ')"
+case "$guard_hits" in ''|*[!0-9]*) guard_hits=0 ;; esac
+if [ "$guard_hits" -gt 0 ]; then
+  ok "notifier guard: the incidental alarms of this suite ($guard_hits) were CAUGHT by the guard, not delivered to a desktop"
+else
+  bad "notifier guard: the guard caught ZERO notifications — it is no longer covering the alarm path (the leak can return unseen)"
 fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
