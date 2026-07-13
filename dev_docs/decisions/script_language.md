@@ -8,8 +8,16 @@ governs **all** non-trivial scripting in this repo, not just that port.
 
 ## Decision
 
-1. **Anything that outgrows shell is written in Python**, run via `uv` with PEP 723 inline
-   metadata (the convention `scripts/validate.py` already established).
+1. **Anything that outgrows shell is written in Python.** Two invocation styles, and the split is
+   a _constraint_, not a preference (amended 2026-07-13 by task 2 — see "The constrained tier's
+   runtime"):
+   - **Unconstrained code** (`validate.py`, the Tier A renderers, ad-hoc scripts) runs via `uv`
+     with PEP 723 inline metadata — the convention `scripts/validate.py` established.
+     Dependencies are free here.
+   - **Constrained code** (anything reachable from launchd's pinned PATH or from inside the
+     Seatbelt jail — the orchestrator's supervisor, `doctor`, `status`, the verify broker) is
+     **stdlib-only on a pinned, pre-flight-resolved absolute interpreter (≥3.11)**. No `uv run`,
+     no resolver, no cache: `uv run` needs `~/.cache/uv` writable and **cannot run in the jail**.
 2. **Short scripts stay in bash.** Roughly < 300 lines of glue around `git`/`gh`/`jq`, gating
    on an exit code. That is shell at its best and there is nothing to gain by moving it.
 3. **Every non-trivial Python file is gated by `pyrefly` (strict) + `ruff`** in `just check`.
@@ -166,18 +174,126 @@ typing, and no `jq`.
   `text/template` is clumsy next to f-strings, and dynamically-shaped `gh api` JSON fights
   static typing into `any`-unmarshaling boilerplate.
 
-**Revisit Go if** eliminating the constrained bash becomes a goal in its own right — a compiled
+**Revisit Go if** eliminating the constrained bash becomes a goal in its own right — ~~a compiled
 binary is the only option that satisfies _both_ the launchd pinned-PATH and the Seatbelt
-`process-exec` allowlist constraints at once.
+`process-exec` allowlist constraints at once.~~
 
-> **This condition has already been triggered.** Co-review of PR #205 found that the constrained
-> tier is **~2,000+ lines, not ~1,000** — it also holds `doctor`, `status`, `classify_exit`, and
-> `exit_reason`, and it is gated by **two** constraints, not one (the Seatbelt exec allowlist was
-> missed entirely here). This section rejected Go while assuming Python could take everything
-> except a small supervisor loop. **That assumption was false.** The orchestrator port's
-> **task 2** now re-examines Go explicitly, before any Python is written. If it survives that
-> re-examination, amend this section with the reason it survived under the corrected numbers —
-> do not simply cite this original rejection.
+> **That condition triggered, Go was re-examined, and it is re-rejected — but not for the reason
+> above.** See "The constrained tier's runtime" below. The struck sentence — _"a compiled binary
+> is the only option that satisfies both constraints at once"_ — was **tested and found false**
+> (2026-07-13): a pinned absolute CPython runs in the jail under one exec grant. That was Go's
+> entire differentiator. The sentence is struck rather than deleted because the _reasoning error_
+> is the instructive part — **the constraint was asserted and never exercised**, which is the
+> failure mode `orch_py_task_11` exists to prevent.
+
+## The constrained tier's runtime (orchestrator port, task 2)
+
+**Decision (2026-07-13): stdlib-only Python on a pinned, pre-flight-resolved absolute
+interpreter (≥3.11). Go is re-rejected. The constrained tier ports; no bash is frozen.**
+
+### What forced the question
+
+Task 1's audit (`scripts/audit-orchestrator-reachability.py`, PR #206) measured the constrained
+tier: **17 subcommands, 2,618 handler lines** — the supervisor, `doctor`, `status`, `teardown`,
+the verify broker — against **1,422 lines** of freely-portable renderers. Constrained means
+reachable from a context that cannot freely resolve an interpreter: launchd's pinned minimal
+PATH (two generated jobs), the Seatbelt `process-exec` allowlist (the jailed run-phase agent),
+or an in-process bash call from something that is. At 1.8x the portable tier, "Python takes the
+renderers and bash keeps the program" was the likely outcome — so the runtime was settled
+**before** any Python was written.
+
+### The claim that collapsed
+
+Both this ADR and the port plan assumed an interpreter could not satisfy the launchd PATH **and**
+the Seatbelt exec allowlist at once, making a compiled binary uniquely qualified. **Neither
+constraint was ever exercised.** Both fail on contact with the actual jail:
+
+| Candidate                                     | Result, tested under a real rendered profile                                                  |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `uv run` (option c)                           | **Fails.** Needs `~/.cache/uv` writable — a write grant outside the worktree confinement.     |
+| `/usr/bin/python3` (the original option b)    | **Fails** un-granted, and is a CLT shim pinned at **3.9.6**.                                  |
+| **uv-managed CPython 3.11.14, absolute path** | **Runs.** One `--exec` grant, no cache writes, no PATH lookup, full stdlib (incl. `tomllib`). |
+| Go binary (option d)                          | **Runs.** One `--exec` literal.                                                               |
+
+The decisive distinction is **`uv run` versus the interpreter uv installs.** `uv run` is a
+package manager: it wants a cache and a network. The CPython binary it drops at
+`~/.local/share/uv/python/cpython-<ver>-.../bin/python3.11` is just an interpreter — invoked by
+absolute path it needs no PATH entry, no cache, and no writes. It exec'd inside the jail under a
+single grant. So an interpreter **does** satisfy both constraints at once, and Go's sole
+differentiator is gone.
+
+With that gone, Go's costs stand unopposed: a release pipeline for a solo repo with no plugin
+install hook, and a language that is worse at this program's actual workload (generating
+S-expressions, plists, and shell — `text/template` against f-strings — plus dynamically-shaped
+`gh api` JSON, which fights static typing into `any`-unmarshaling). **Go is re-rejected on the
+corrected numbers, not by citing the original rejection.**
+
+### What the decision requires
+
+Three requirements, all inherited by the constrained-tier port (task 8). They are not new
+patterns — they are the ones `write-launch` already uses for `--claude-bin` and `--path`
+(resolve absolute, fail closed: `spawn-orchestrator.sh:1363`):
+
+1. **Pre-flight resolve + assert, fail-closed at launch.** Resolve the interpreter and assert
+   **≥3.11** _at launch_. A version requirement cannot conjure an interpreter — it can only turn
+   a silent break into a loud pre-flight one. **Scope it honestly:** this catches the interpreter
+   being _absent or too old at launch_. It cannot see drift that happens _after_ launch — see
+   requirements 2–3 and the residual risk below.
+2. **Bake the _stable_ path into the launch script — never the version-stamped one.** The launch
+   script is written **once** (`write_launch`, `spawn-orchestrator.sh:1471`) and re-executed by
+   launchd unchanged on **every** `StartInterval` wake. So baking
+   `…/cpython-3.11.14-…/bin/python3.11` means a `uv` upgrade leaves every later wake execing a
+   path that no longer exists — silently, at 3am, forever. Bake **`~/.local/bin/python3.11`**,
+   the stable symlink `uv python install` maintains and repoints across patch upgrades. This is
+   the exact pattern `--claude-bin` already relies on: it bakes the stable `claude` symlink, not
+   `versions/2.1.207`.
+3. **Grant the symlink's _resolve target_ directory as a subpath.** Seatbelt resolves a symlink
+   and checks the **target** against the exec allowlist — granting `~/.local/bin` alone is **not
+   enough** and fails with `Operation not permitted` (verified). Grant a subpath over
+   `~/.local/share/uv/python`, which covers every installed version — verified with 3.11.14 and
+   3.14.2 under one grant. A version-stamped `(literal …cpython-3.11.14…)` grant would re-create
+   detached-run finding #3's drift trap on the jail side.
+
+   **And grant the _narrowest_ resolve-target directory — never the enclosing tree.** This is not
+   a style note; it is the difference between a jail and a hole. **PR #208** (the `git` fix) grants
+   `<dev>/usr`, _not_ the whole Command Line Tools tree — because CLT's `python3` is a symlink into
+   `<dev>/Library/Frameworks/…`, so the broad grant would have silently made a **second interpreter
+   executable inside the jail** while every test stayed green. Exercised against the landed fix:
+
+   ```console
+   $ sandbox-exec -f <profile> /usr/bin/git --version
+   git version 2.39.5 (Apple Git-154)
+   $ sandbox-exec -f <profile> /usr/bin/python3 -c "print('RUNS')"
+   python3: error: can't exec '.../usr/bin/python3' (Operation not permitted)
+   ```
+
+   `~/.local/share/uv/python` is already narrow in exactly this sense — it holds interpreters and
+   nothing else. Keep it that way; do not widen to `~/.local/share`.
+
+   This is **the same defect class as the `git` CLT-shim bug** (`orch_py_task_10`): a grant on the
+   path you _invoke_ is worthless if Seatbelt is checking the path it _resolves to_. Getting one
+   of these right and the other wrong is the easy mistake.
+
+**Accepted residual risk — stated in full, because an earlier draft of this section understated
+it.** Requirements 2–3 make the setup survive a `uv` **upgrade**. They do **not** survive the
+interpreter being **removed** mid-run (`uv python uninstall`, a pruned cache): the symlink
+dangles, and requirement 1 — a _launch-time_ assert — cannot see it. A wake would then fail at
+exec with no classification, and launchd would relaunch forever doing nothing: finding #22's
+silent-success failure class (`spawn-orchestrator.sh:3349`).
+
+**Be honest about the ledger:** this is a drift surface a **compiled binary would not have at
+all** — Go needs none of requirements 1–3. It is accepted anyway because it takes a _manual_ `uv`
+operation, mid-run, on a single-user host to trigger (uv does not auto-upgrade), and because it
+is still a far smaller surface than `uv run` (no cache, no network, no resolver). **Mitigation
+for task 8:** have the generated wake script test `[ -x "$interpreter" ]` and route a missing
+interpreter through the supervisor's halt path, so it lands as a _classified halt with an alarm_
+rather than an unclassified exec failure. That converts the residual from silent to loud, which
+is the property requirement 1 was claimed to provide and, on its own, does not.
+
+**Stdlib-only, and that is now cheap.** At ≥3.11 the stdlib covers the whole job (`json`, `re`,
+`subprocess`, `pathlib`, `tomllib`), so the constrained tier needs no third-party packages and
+therefore no resolver in the jail. `uv`+PEP 723 remains the convention for **unconstrained**
+scripts (`validate.py`, the Tier A renderers), where a dependency is free.
 
 ## Consequences
 
@@ -193,6 +309,14 @@ binary is the only option that satisfies _both_ the launchd pinned-PATH and the 
 - **Short scripts stay bash.** This is not a licence to rewrite `claude-usage.sh`,
   `await-pr-review.sh`, or `preflight-freshness.sh` — at 137–312 lines of `git`/`gh`/`jq` glue,
   they are shell at its best.
-- **The supervisor wake loop may permanently remain bash.** An accepted outcome, not a failure.
+- ~~**The supervisor wake loop may permanently remain bash.**~~ **Superseded 2026-07-13 by "The
+  constrained tier's runtime" above.** The wake loop was expected to stay bash because no
+  interpreter was thought able to satisfy the launchd PATH and the Seatbelt exec allowlist at
+  once. Tested, that turned out to be false: a pinned absolute CPython runs in the jail under one
+  grant. **The whole file is portable**, and the constrained tier is no longer frozen.
+- **Two Python invocation styles, on purpose.** Unconstrained scripts use `uv` + PEP 723
+  (`validate.py`, the Tier A renderers) — dependencies are free there. Constrained code is
+  **stdlib-only on a pinned absolute interpreter**: no `uv run`, no resolver, no cache, nothing
+  to resolve at 3am. The split is the constraint, not a style preference.
 - **Reopen this** if Claude Code bundles a runtime, gains a plugin install hook, or if `ty`
   reaches 1.0 (which would revisit the checker, not the language).
