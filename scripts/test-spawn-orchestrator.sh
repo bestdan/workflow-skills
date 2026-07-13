@@ -4214,13 +4214,19 @@ USEOF
   # (no --force). A long interval + an immediate re-call must NOT rewrite
   # STATUS.md — the whole point of "on by default, every 15m" is that most
   # wakes are cheap no-ops, not a fresh render each time.
-  srA_mtime_before="$(stat -f %m "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null || stat -c %Y "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  #
+  # Assert on EXISTENCE, not on mtime/content: every timestamp available here
+  # (stat mtime, last_emitted_at) is second-resolution, and these two calls are
+  # sub-second apart — so an mtime comparison passes even with the gate deleted
+  # outright (`if false; then`), which is exactly what the earlier version of
+  # this test did. Deleting the file first makes the assertion capable of
+  # failing: a gate that does not hold recreates it.
+  rm -f "$SR_RUN/.auto-pilot/STATUS.md"
   "$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a \
     --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 --report-every 3600 >/dev/null 2>&1
-  srA_mtime_after="$(stat -f %m "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null || stat -c %Y "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
-  [ "$srA_mtime_before" = "$srA_mtime_after" ] \
+  [ ! -e "$SR_RUN/.auto-pilot/STATUS.md" ] \
     && ok "status-report: a call inside --report-every (no --force) does not rewrite STATUS.md" \
-    || bad "status-report: the interval gate did not hold — STATUS.md was rewritten early" "before=$srA_mtime_before after=$srA_mtime_after"
+    || bad "status-report: the interval gate did not hold — STATUS.md was rewritten early" "STATUS.md was recreated inside the interval"
 
   # --- B: the delta — no forward progress vs a phase advance -----------------
   srBout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
@@ -4328,10 +4334,102 @@ USEOF
   have "status-report: the chained transient failure reads DEGRADED instead" \
     'DEGRADED:' "$srYmd"
 
+  # --- E2c: the ORDINARY shape must degrade too — the gap E2 above missed ----
+  # Both fixtures above happen to make a gh call the report already counts: a
+  # `claimed` task hits the #23 divergence lookup, a CHAINED task hits the
+  # orphan scan. Neither covers the everyday run: tasks in `pr-open` based
+  # DIRECTLY on base_branch. There the orphan scan skips every task (unchained)
+  # and the divergence loop skips every task (wrong phase), so the ONLY gh calls
+  # are the PR table's state/mergeable queries — and while those discarded their
+  # exit status, a totally dead gh made zero TRACKED calls: the table rendered
+  # `unknown/unknown` and the reality check still asserted "clean". Fail-open,
+  # in the single section this whole feature exists to make trustworthy.
+  SR_ORUN="$SR/degraded-ordinary"; mkdir -p "$SR_ORUN/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_open | pr-open | branch_handed | main | - | #201 | |\n'
+  } >"$SR_ORUN/.auto-pilot/RUN.md"
+  git init -q "$SR_ORUN"
+  git -C "$SR_ORUN" config user.email t@e; git -C "$SR_ORUN" config user.name T
+  git -C "$SR_ORUN" checkout -q -b auto-pilot/degraded-ordinary
+  git -C "$SR_ORUN" add .auto-pilot/RUN.md; git -C "$SR_ORUN" commit -q -m "run state"
+  srZout="$("$SCRIPT" status-report --dir "$SR_ORUN" --label com.autopilot.sr.deg0 --force \
+    --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 2>&1)"
+  srZmd="$(cat "$SR_ORUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  lack "status-report: a dead gh on an ordinary pr-open run never reads clean" \
+    'clean: no divergence' "$srZmd"
+  have "status-report: a dead gh on an ordinary pr-open run reads DEGRADED" \
+    'DEGRADED:' "$srZmd"
+  have "status-report: the ordinary-shape degrade reaches the digest" \
+    'reality=DEGRADED' "$srZout"
+
+  # --- E2d: the Open-PRs table prints its header ONCE, not once per row ------
+  # printf recycles its whole format string per argument, so folding the header
+  # into the row format re-printed it before EVERY row. The fixture has two PRs
+  # (#201, #202), so the table was mangled in the artifact a human reads while
+  # the suite's single-row substring assert sailed past it.
+  srA_hdrs="$(printf '%s\n' "$srAmd" | grep -c '^| task | pr | state | mergeable |$' || true)"
+  [ "$srA_hdrs" = 1 ] \
+    && ok "status-report: the Open-PRs table prints its header exactly once (2 PRs in the fixture)" \
+    || bad "status-report: the Open-PRs table header is repeated per row (printf format recycling)" \
+           "header printed $srA_hdrs times, expected 1"
+
+  # --- E2e: the stall duration ACCUMULATES; it is not the report interval ----
+  # "no forward progress in X" measured X from last_emitted_at — rewritten on
+  # every emit — so a run wedged for six hours read "no forward progress in
+  # 15m" at every single tick. The number that separates slow from wedged could
+  # never say so. It now measures from last_progress_at, carried forward across
+  # reports that see nothing move.
+  SR_SRUN="$SR/stall-run"; mkdir -p "$SR_SRUN/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'base_branch: main\n'
+    printf -- '---\n\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| task_stuck | implementing | branch_over | main | - | - | |\n'
+  } >"$SR_SRUN/.auto-pilot/RUN.md"
+  git init -q "$SR_SRUN"
+  git -C "$SR_SRUN" config user.email t@e; git -C "$SR_SRUN" config user.name T
+  git -C "$SR_SRUN" checkout -q -b auto-pilot/stall-run
+  git -C "$SR_SRUN" add .auto-pilot/RUN.md; git -C "$SR_SRUN" commit -q -m "run state"
+  SR_SSTATE="$SR_SRUN/.auto-pilot/status-report-state"
+  # First report seeds the state; nothing has moved since, so the next one is a
+  # genuine stall.
+  "$SCRIPT" status-report --dir "$SR_SRUN" --label com.autopilot.sr.stall --force \
+    --repo "$SR_REPO" --task-ceiling 120 >/dev/null 2>&1
+  # Backdate the moment the run last MOVED to 2h ago, leaving last_emitted_at
+  # recent — exactly the state an overnight wedge produces after many reports.
+  SR_STALL_SINCE=$(( $(date +%s) - 7200 ))
+  sed -e "s/^last_progress_at: .*/last_progress_at: $SR_STALL_SINCE/" "$SR_SSTATE" >"$SR_SSTATE.tmp"
+  mv "$SR_SSTATE.tmp" "$SR_SSTATE"
+  "$SCRIPT" status-report --dir "$SR_SRUN" --label com.autopilot.sr.stall --force \
+    --repo "$SR_REPO" --task-ceiling 120 >/dev/null 2>&1
+  srSmd="$(cat "$SR_SRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+  have "status-report: a 2h stall reports 2h, not the report interval" \
+    'no forward progress in 2h' "$srSmd"
+  # ...and the clock is NOT reset by the act of reporting: the carried-forward
+  # last_progress_at must survive, or the stall restarts from zero every emit.
+  grep -q "^last_progress_at: $SR_STALL_SINCE$" "$SR_SSTATE" \
+    && ok "status-report: emitting a report does not reset the stall clock" \
+    || bad "status-report: the stall clock was reset by the emission" \
+           "expected last_progress_at: $SR_STALL_SINCE, got $(sed -n 's/^last_progress_at: //p' "$SR_SSTATE")"
+
   # --- E3: duration parsing accepts digits only, never arithmetic ------------
   # `--report-every '1+1m'` used to reach bash arithmetic and be ACCEPTED —
   # the contract is off | integer seconds | <n>s|m|h, nothing else.
-  for badv in '1+1m' '+5s' '2 2h'; do
+  #
+  # `0` (and `0s`/`0m`) is in this list for a different reason than the
+  # arithmetic cases: it PARSES fine, it just isn't a duration. It bakes
+  # `sleep 0` into the generated wrapper's in-wake reporter — a busy-loop that
+  # spins a CPU and re-queries GitHub continuously for the whole model call,
+  # since the interval gate can never close against 0 either. `off` is how you
+  # say "never"; there is no way to say "always".
+  for badv in '1+1m' '+5s' '2 2h' '0' '0s' '0m'; do
     bdout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.bad \
       --report-every "$badv" 2>&1)"; bdc=$?
     [ "$bdc" = 2 ] && printf '%s' "$bdout" | grep -qF 'must be off' \

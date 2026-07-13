@@ -1245,6 +1245,16 @@ write_launch() {
       printf '( while :; do sleep %q; %s >>%q 2>&1 || true; done ) &\n' "$report_secs" "$tick_line" "$log"
       printf 'rpt=$!\n'
       printf 'set +m\n'
+      # Reap it on EVERY exit path, not just the one below. `set -m` put the
+      # loop in its own process group precisely so the kill reaps the gh it
+      # spawns — but that also detaches it from the wrapper's group, so a
+      # wrapper killed mid-model-call (launchctl bootout, teardown, reboot, a
+      # `set -e` abort) would leave the loop running forever, still firing real
+      # gh calls at a run that no longer exists. The trap costs one line; an
+      # orphaned reporter hammering GitHub overnight is the failure class this
+      # whole feature is about.
+      printf 'trap %s EXIT INT TERM HUP\n' \
+        "$(printf '%q' 'kill -TERM -"$rpt" 2>/dev/null || true; wait "$rpt" 2>/dev/null || true')"
     fi
     # NOT `exec`'d (task 10): the wrapper must observe claude's exit to
     # classify it, so the launchd-tracked PID is this wrapper, not claude
@@ -3393,7 +3403,7 @@ restack() {
 # returns 1 (nothing printed) on anything unparseable — fail CLOSED to the
 # caller, which `die`s rather than silently picking a default duration.
 _parse_duration_or_off() {
-  local v="$1" n
+  local v="$1" n secs
   case "$v" in
     off) printf 'off'; return 0 ;;
     # Strip the suffix FIRST and require the remainder to be pure digits —
@@ -3404,14 +3414,22 @@ _parse_duration_or_off() {
       n="${v%[smh]}"
       case "$n" in ''|*[!0-9]*) return 1 ;; esac
       case "$v" in
-        *s) printf '%s' "$n" ;;
-        *m) printf '%s' "$(( n * 60 ))" ;;
-        *h) printf '%s' "$(( n * 3600 ))" ;;
+        *s) secs="$n" ;;
+        *m) secs="$(( n * 60 ))" ;;
+        *h) secs="$(( n * 3600 ))" ;;
       esac
-      return 0 ;;
+      ;;
     ''|*[!0-9]*) return 1 ;;
-    *) printf '%s' "$v"; return 0 ;;
+    *) secs="$v" ;;
   esac
+  # Zero is not a duration, it is a busy-loop: `--report-every 0` bakes
+  # `sleep 0` into the generated wrapper's in-wake reporter, which then spins a
+  # CPU and hammers GitHub continuously for the whole model call (the interval
+  # gate can never close against 0 either). Reject it the same way as any other
+  # garbage — fail CLOSED — rather than letting a plausible typo for "always"
+  # through.
+  [ "$secs" -ge 1 ] || return 1
+  printf '%s' "$secs"
 }
 
 # Render "Ns" as "XhYmZs" (dropping zero leading units) for a human-facing line.
@@ -3505,15 +3523,18 @@ status_report() {
   [ -f "$run_md" ] || { echo "spawn-orchestrator: status-report: no run state found, skipping: $run_md" >&2; return 0; }
 
   # --- interval gate: skip quietly if the last report is still fresh --------
-  local prev_at="" prev_head=""
+  # last_emitted_at is when we last PRINTED; last_progress_at is when the run
+  # last MOVED. They are different questions and only the second one can answer
+  # "how long has this been stuck" — see the delta block below.
+  local prev_at="" prev_head="" prev_progress_at=""
   if [ -f "$state_file" ]; then
     prev_at="$(sed -n 's/^last_emitted_at: //p' "$state_file" | head -1)"
     prev_head="$(sed -n 's/^last_run_head: //p' "$state_file" | head -1)"
+    prev_progress_at="$(sed -n 's/^last_progress_at: //p' "$state_file" | head -1)"
   fi
   local now; now="$(date +%s)"
-  if [ "$force" != 1 ] && [ -n "$prev_at" ]; then
-    case "$prev_at" in *[!0-9]*) prev_at="" ;; esac
-  fi
+  case "$prev_at" in *[!0-9]*) prev_at="" ;; esac
+  case "$prev_progress_at" in *[!0-9]*) prev_progress_at="" ;; esac
   if [ "$force" != 1 ] && [ -n "$prev_at" ] && [ $((now - prev_at)) -lt "$interval" ]; then
     return 0
   fi
@@ -3583,6 +3604,15 @@ status_report() {
   done
 
   # --- open PRs + mergeable state ---------------------------------------------
+  # Every gh call in this function is counted into gh_degraded when it FAILS,
+  # including these two. They are the only gh calls made at all for the ordinary
+  # shape — a task in phase `pr-open` based directly on base_branch — because
+  # _restack_orphan_scan skips unchained tasks and the divergence loop below
+  # only looks at claimed|implementing. Discard their exit status and a totally
+  # dead gh (expired auth at 3am) makes ZERO tracked calls: the table renders
+  # `unknown/unknown` and the reality check goes on to assert "clean", which is
+  # the exact fail-open this report exists to close.
+  local gh_degraded=0
   local -a pr_lines=()
   if [ -n "$gh_bin" ]; then
     for ((i = 0; i < n; i++)); do
@@ -3590,9 +3620,12 @@ status_report() {
       _restack_empty "$pr" && continue
       local pr_num; pr_num="$(_pr_number "$pr")"
       [ -n "$pr_num" ] || continue
-      local st mg
-      st="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
-      mg="$("$gh_bin" pr view "$pr_num" --json mergeable --jq .mergeable 2>/dev/null)"
+      local st mg rc_st rc_mg
+      st="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"; rc_st=$?
+      mg="$("$gh_bin" pr view "$pr_num" --json mergeable --jq .mergeable 2>/dev/null)"; rc_mg=$?
+      # One degrade per task, not two: a dead gh fails both queries, and the
+      # count is a signal that the cross-check is incomplete, not a call tally.
+      { [ "$rc_st" -eq 0 ] && [ "$rc_mg" -eq 0 ]; } || gh_degraded=$((gh_degraded + 1))
       pr_lines+=("| $task | #$pr_num | ${st:-unknown} | ${mg:-unknown} |")
     done
   fi
@@ -3603,7 +3636,6 @@ status_report() {
   # DEGRADED — never as "clean". A stale RUN.md that was not actually
   # cross-checked must not read as healthy.
   local -a reality_lines=()
-  local gh_degraded=0
   if [ -n "$gh_bin" ]; then
     _restack_orphan_scan "$base_branch" "$gh_bin"
     if [ "${#_ORPHAN_LINES[@]}" -gt 0 ]; then
@@ -3685,8 +3717,15 @@ status_report() {
   fi
 
   # --- the delta: THE PAYLOAD --------------------------------------------------
+  # progress_at is the timestamp persisted for the NEXT report: `now` whenever
+  # this report can see the run move, and the previous value carried forward
+  # when it cannot. Measuring the stall against last_emitted_at instead would
+  # reset the clock on every emission, so a run wedged for six hours would read
+  # "no forward progress in 15m" at every tick — the one number that separates
+  # slow from wedged, structurally incapable of ever saying so.
   local cur_head; cur_head="$(_run_head "$dir")"; cur_head="${cur_head:-unknown}"
   local -a delta_lines=()
+  local progress_at="$now"
   if [ -z "$prev_at" ]; then
     delta_lines=("- first report for this run")
   elif [ -n "$prev_head" ] && [ "$prev_head" = "$cur_head" ]; then
@@ -3712,7 +3751,12 @@ status_report() {
     if [ "${#advanced[@]}" -gt 0 ]; then
       delta_lines=("- task branch(es) advanced — new commits on: ${advanced[*]} (RUN.md phase unchanged; working, not stalled)")
     else
-      local since; since=$((now - prev_at))
+      # NOTHING moved: carry the previous last_progress_at forward so the stall
+      # keeps ACCUMULATING across reports. Falling back to prev_at only covers
+      # the first report written after this field existed.
+      local last_prog="${prev_progress_at:-$prev_at}"
+      progress_at="$last_prog"
+      local since; since=$((now - last_prog))
       local nf="no forward progress in $(_fmt_duration "$since")"
       if [ "${#inflight_lines[@]}" -gt 0 ]; then
         nf="$nf; ${inflight_lines[0]#- }"
@@ -3771,7 +3815,12 @@ status_report() {
     printf '\n## Live state (from `status --label %s`)\n\n```\n%s\n```\n' "$label" "$status_out"
     printf '\n## Open PRs (mergeable state)\n\n'
     if [ "${#pr_lines[@]}" -gt 0 ]; then
-      printf '| task | pr | state | mergeable |\n| ---- | -- | ----- | --------- |\n%s\n' "${pr_lines[@]}"
+      # Header and rows in SEPARATE printfs: printf recycles its whole format
+      # string once per argument, so folding the header into the row format
+      # re-prints it before every row — a table that is mangled for the normal
+      # case of more than one open PR.
+      printf '| task | pr | state | mergeable |\n| ---- | -- | ----- | --------- |\n'
+      printf '%s\n' "${pr_lines[@]}"
     elif [ -z "$gh_bin" ]; then
       printf '%s\n' "- skipped: no --gh resolved for this report"
     else
@@ -3790,6 +3839,7 @@ status_report() {
   tmp="$(mktemp "$state_dir/.status-report-state.XXXXXX")" || die "mktemp failed"
   {
     printf 'last_emitted_at: %s\n' "$now"
+    printf 'last_progress_at: %s\n' "$progress_at"
     printf 'last_run_head: %s\n' "$cur_head"
     printf -- '--- phases ---\n'
     printf '%s\n' "${cur_map[@]:-}"
