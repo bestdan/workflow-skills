@@ -2,7 +2,7 @@
 title: Audit the full reachability set — which subcommands can actually be ported
 priority: high
 size: 3
-status: ready
+status: done
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
@@ -82,3 +82,38 @@ loudly — it further shrinks what the port can achieve, and further raises the 
 - Sanity-check the Tier A set against `smoke-confinement.sh` and a real `launch --dry-run`:
   nothing in Tier A may appear in the generated launch script, in the jailed agent's
   instructions, or as an in-process callee of any Tier B function.
+
+## Outcome
+
+`scripts/audit-orchestrator-reachability.py` walks the call graph, both generated launchd jobs,
+and the skill docs, then computes the **transitive** constrained closure (constraint is inherited
+through in-process calls). The 29-row table is in `dev_docs/orchestrator-python-port.md`.
+
+**Tier B: 17 subcommands, 2,618 handler lines. Tier A: 12, 1,458.** The audit found more
+constrained surface than either hand-drawn boundary, and the answer to the card's own question is
+yes, loudly:
+
+- **Eight subcommands moved into Tier B** that no prior list had: `teardown`, `verify-request`,
+  `verify-await`, `verify-broker`, `assert-run-head`, `alarm`, `alarm-request`, `report-tick`.
+- **A fourth entry point exists**: `write_verify_broker` generates a **second launchd job**
+  (`:5062`) whose script calls `verify-broker` under the same pinned PATH. Reading only
+  `write_launch` missed it.
+- **`teardown` is constrained purely by in-process call** — the supervisor's halt path
+  (`_supervisor_halt`, `supervisor_check`, `supervisor_gate`) calls its bash function directly.
+  It reads like a human cleanup command.
+- **`assert-run-head` runs every loop iteration from inside the jail** (`run-state.md:359`).
+- **`alarm-clear` moved *out* of Tier B** — every call site is `--resume`, which is attended.
+
+Two things this changes downstream, both recorded in the plan: the constrained tier is **2.6x**
+the portable one and holds the entire unattended runtime (task 2 decides against those numbers,
+not the old ~1,000), and a Tier A **generator** emits scripts that call Tier B **callees**, so no
+generator port can "finish" its callee.
+
+**Follow-ups written down, not fixed here** (per the plan's no-scope-creep rule):
+
+- `exit-reason` is **not read-only** — it upserts three RUN.md fields, makes a git commit, and
+  creates/removes the done sentinel (`:2559-2590`). A stdout/rc golden corpus would capture none
+  of that. Whatever card ports it needs acceptance criteria for the stateful contract.
+- The tier boundary has **no test**. If a future change teaches the run loop to call an
+  already-ported Tier A subcommand, it breaks in the jail at runtime and nothing catches it.
+  Task 3 should gate: no subcommand on the `PORTED` list may appear in the audit's Tier B.

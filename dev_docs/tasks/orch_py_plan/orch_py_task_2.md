@@ -22,29 +22,36 @@ tags: [orchestrator, decision, launchd, seatbelt]
 
 > **Moved to the front of the plan on 2026-07-13, and split from its implementation.** This was
 > originally task 8, on the theory that only the supervisor wake loop depended on it. The PR
-> #205 co-review proved that theory wrong: the constrained tier is **~2,000+ lines**, not
-> ~1,000, and it includes `doctor`, `status`, `classify_exit`, and `exit_reason`. This decision
-> now determines **how much of the file can ever move** — and whether Python is even the right
-> target. Deciding it *after* building 1,200 lines of Python would be deciding it too late to
-> act on. Splitting the decision from the port also resolves the promoter's "unbounded scope"
+> #205 co-review proved that theory wrong, and the task 1 audit then measured it: the
+> constrained tier is **2,618 lines across 17 subcommands** — `doctor`, `status`,
+> `classify-exit`, `exit-reason`, the whole supervisor and verify-broker path, and `teardown`.
+> This decision now determines **how much of the file can ever move** — and whether Python is
+> even the right target. Deciding it *after* building 1,458 lines of Python would be deciding it
+> too late to act on. Splitting the decision from the port also resolves the promoter's "unbounded scope"
 > flag: this card is now decision-only and bounded.
 
 Task 1's audit has just produced the definitive reachability map. This task turns it into a
 runtime decision. **No code is written here.** The output is a decision, recorded with its
 rationale.
 
-The constrained tier is reachable from two contexts, and **any answer must satisfy both**:
+Task 1's table (`dev_docs/orchestrator-python-port.md`, regenerable via
+`scripts/audit-orchestrator-reachability.py`) is the input. The constrained tier is reachable
+from **three** contexts — **four** entry points — and any answer must satisfy all of them:
 
 - **launchd's pinned minimal PATH** — the generated launch script's wake loop (`write-launch`
   fail-closes without `--path` precisely because a launchd job has a minimal environment).
+- **The verify broker's launchd job** (`:5062`) — a *second* generated job under the same
+  pinned PATH, which the audit found and both earlier hand-drawn boundaries missed.
 - **The Seatbelt `process-exec` allowlist** (`spawn-orchestrator.sh:711-724`) — the jailed
-  run-phase agent invokes `doctor` every loop iteration and `exit-reason` on every termination
-  from *inside* `sandbox-exec`. An interpreter that is on the PATH but **not** on the exec
-  allowlist cannot run there at all.
+  run-phase agent invokes `doctor` and `assert-run-head` every loop iteration, `exit-reason` on
+  every termination, and the `verify-request`/`verify-await` handshake on every verify, from
+  *inside* `sandbox-exec`. An interpreter on the PATH but **not** on the exec allowlist cannot
+  run there at all.
 
-Plus the in-process trap: `status_report` calls `status`, and `supervisor_check` calls
-`classify_exit`, as **bash functions** — never through the CLI. Those two cannot be ported and
-their bash deleted while their callers remain bash, under *any* interpreter.
+Plus the in-process trap: `status_report` calls `status`, `supervisor_check` calls
+`classify_exit`, and the supervisor halt path calls `teardown`, as **bash functions** — never
+through the CLI. None can be ported and its bash deleted while its callers remain bash, under
+*any* interpreter.
 
 ## Task
 
@@ -52,9 +59,10 @@ Present the options with the audit's real numbers and **get an explicit decision
 user**. Do not default silently — this is the plan's load-bearing call.
 
 - **(a) Freeze the constrained tier in bash.** Port only the renderers and generators
-  (~1,200 lines, tasks 3–7). `spawn-orchestrator.sh` ends at ~2,000+ lines of supervisor,
-  reporting, and diagnostic bash. Zero new runtime dependency on the unattended path.
-  **The safe default.**
+  (1,458 handler lines, tasks 3–7). `spawn-orchestrator.sh` ends at ~2,618+ lines of supervisor,
+  reporting, and diagnostic bash — **the entire unattended runtime stays shell.** Zero new
+  runtime dependency on the unattended path. **The safe default**, and note the audit made it a
+  worse deal than it looked: the port buys the renderers, not the program.
 - **(b) Stdlib-only Python on an absolute interpreter path.** Survives the minimal PATH and can
   be added to the exec allowlist as a literal. **Verify before choosing:** `/usr/bin/python3` is
   a Command Line Tools shim and measured **3.9.6** on this machine, against the repo's ≥3.11
@@ -67,8 +75,9 @@ user**. Do not default silently — this is the plan's load-bearing call.
   the bash entirely without widening the runtime surface.
   `dev_docs/decisions/script_language.md` rejected Go on distribution cost (no plugin install
   hook; a binary release pipeline for a solo repo) — but it did so **while believing the
-  constrained tier was ~1,000 lines and Python could take the rest.** That premise is now false,
-  so the tradeoff deserves one honest re-examination before 1,200 lines of Python exist.
+  constrained tier was ~1,000 lines and Python could take the rest.** The audit measured 2,618 —
+  **2.6x the Tier A total** — so that premise is not merely false, it is inverted. The tradeoff
+  deserves one honest re-examination before 1,458 lines of Python exist.
 
 Record the outcome by **amending `dev_docs/decisions/script_language.md`** — do not start a
 competing doc. If the answer is (d), this plan is superseded and must be rewritten before
