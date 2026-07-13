@@ -5,7 +5,7 @@
 
 ## Problem
 
-The failure pattern in `dev_docs/tasks/orch_py_plan/orch_py_task_11.md:22` is narrow and repeatable:
+The failure pattern in `dev_docs/tasks/orch_py_plan/orch_py_task_11.md` is narrow and repeatable:
 a runtime claim is reasoned to, written into a plan or decision, copied into downstream specs, and
 never executed. The current evidence is repo-local:
 
@@ -14,8 +14,12 @@ never executed. The current evidence is repo-local:
   `scripts/audit-orchestrator-reachability.py` made the boundary executable.
 - `dev_docs/decisions/script_language.md:177` preserves the struck Go premise; lines 207-209 state
   that neither the launchd PATH nor Seatbelt allowlist constraint had been exercised.
-- `dev_docs/tasks/orch_py_plan/orch_py_task_10.md:51` identifies the archetype:
-  `scripts/smoke-confinement.sh:51` grants `git`, but the suite never runs `git` in the jail.
+- `dev_docs/tasks/orch_py_plan/orch_py_task_10.md` identifies the archetype: the confinement smoke
+  granted `git` from day one and **never ran `git` in the jail** — an asserted grant that had never
+  once been exercised, and could not have succeeded if it had been. Task 10 (#208) has since fixed
+  it: the smoke's `§1c` now asserts execution
+  (`allowed "exec git (CLT shim re-execs its real target)"`). The archetype is fixed; the _class_ is
+  what this design is for.
 - `dev_docs/decisions/script_language.md:242` records the launch-script drift trap: a generated
   launch script is written once and re-run by launchd, so a baked version-stamped interpreter path
   fails after a `uv` upgrade.
@@ -84,11 +88,24 @@ A **load-bearing runtime claim** is a claim that satisfies all three predicates:
    exercise it without credentials, or with an explicitly live-only smoke gate.
 
 Claims matching this rule must be adjacent to an executable citation. Adjacent means within the same
-paragraph, the next paragraph, or the same table row. Acceptable citations are:
+paragraph, the next paragraph, or the same table row. Acceptable citations, **best anchor first**:
 
-- a checked-in script or fixture with the relevant assertion;
-- a smoke-suite assertion name and command;
-- a re-runnable fenced `console` repro block that includes the command and expected result.
+- a **named assertion** plus the command that runs it — e.g.
+  `allowed "exec git (CLT shim re-execs its real target)"`, run by `bash scripts/smoke-confinement.sh`;
+- a checked-in script or fixture identified by a **grep-able symbol** (a function name, an assertion
+  label) rather than a line offset;
+- a re-runnable fenced `console` repro block that includes the command and expected result;
+- a bare `file:line`, **only** when no stable anchor exists — and then paired with the quoted text it
+  points at, so drift is detectable.
+
+**Prefer anchors that cannot rot silently.** A line number is not a citation, it is a _guess about a
+file's current shape_. This design was written citing `scripts/smoke-confinement.sh:51` (the `git`
+grant) and `:79`/`:81`; task 10 then landed, added ~108 lines to that file, and every one of those
+numbers now resolves to something else — `:51` lands in the middle of a comment about
+`/usr/bin/security`. The citations did not break loudly. They kept resolving, to the wrong lines.
+That is the exact failure this document exists to prevent, committed by the document itself, and it
+is why the linter must not accept a naked line number as proof of anything. A named assertion
+survives a rebase; a line number does not.
 
 This rule is intentionally about runtime behavior. It does not apply to editorial claims, rough cost
 estimates, language taste, or user-facing docs that describe usage without deciding a constrained
@@ -119,20 +136,33 @@ It flags paragraphs and table rows that contain both:
 
 It passes if the same paragraph/table row or immediately following paragraph contains one of:
 
-- a **`file:line`** citation into `scripts/*.py`, `scripts/*.sh`, `test/**`, or a smoke/audit
-  fixture — a bare filename does not pass. A bare `scripts/smoke-confinement.sh` is exactly the
-  citation the `git` archetype already had: the script named the binary and never ran it, so naming
-  a file proves nothing about whether it asserts anything;
-- a named smoke/audit **assertion** plus the command that runs it (e.g. a `§1c` assertion label and
-  `bash scripts/smoke-confinement.sh`), or `uv run scripts/validate.py`,
-  `scripts/audit-orchestrator-reachability.py`, or a future exec-contract command;
+- a **named assertion** plus the command that runs it — a quoted `allowed "…"` / `denied "…"` label
+  from the smoke suite, or a named audit/validator check, together with `bash scripts/…`,
+  `uv run scripts/validate.py`, `scripts/audit-orchestrator-reachability.py`, or a future
+  exec-contract command. **This is the preferred form**: the assertion label is a string the linter
+  can `grep` for in the file it names, so the citation is itself checkable — and it survives edits
+  above it;
+- a **grep-able symbol** in a checked-in script or fixture (a function name, an assertion label);
 - a fenced `console` block with at least one command line beginning with `$` **and** the expected
-  result, so the block is re-runnable and falsifiable rather than decorative.
+  result, so the block is re-runnable and falsifiable rather than decorative;
+- a `file:line` **paired with the quoted text at that line**, accepted only where no stable anchor
+  exists. A naked line number does not pass, and neither does a bare filename.
 
-**No token may appear in both lists.** In particular `sandbox-exec` is a _trigger_ term above, so it
-cannot also be a citation: otherwise any paragraph flagged for saying `sandbox-exec` would satisfy
-the pass condition by saying it, and the rule could never fire on precisely the paragraphs it exists
-to police. A citation must name something _executable_, not repeat the domain term.
+Two rules keep the pass condition from being trivially satisfiable, which is the linter's real
+failure mode:
+
+- **A bare filename is not a citation.** `see scripts/smoke-confinement.sh` is _precisely_ the
+  citation the `git` archetype already had — the script named the binary and never ran it. Naming a
+  file proves nothing about whether it asserts anything.
+- **No token may appear in both lists.** `sandbox-exec` is a _trigger_ term above, so it cannot also
+  be a citation: otherwise any paragraph flagged for saying `sandbox-exec` would satisfy the pass
+  condition by saying it, and the rule could never fire on precisely the paragraphs it exists to
+  police. A citation must name something _executable_, not repeat the domain term.
+
+Because the preferred form is grep-able, the linter should go one step further and **verify the
+citation resolves**: fail when a cited assertion label is not found in the file it names. That makes
+the citation itself exercised rather than asserted — which is the whole point of this document, and
+it is the check that would have caught this document's own rotted line numbers.
 
 It fails with a message like:
 
@@ -233,7 +263,7 @@ Assertions per binary:
    the egress probes report PASS while the network was open. Stage the probe binary, assert `[ -x ]`
    on it, and fail the fixture — not the assertion — if the setup itself did not take.
 6. **Launch-script agreement.** Extract the executable path actually baked into the _generated_ launch
-   script (`write_launch`, `scripts/spawn-orchestrator.sh:1471`) and require it to equal the
+   script (the `write_launch()` function in `scripts/spawn-orchestrator.sh`) and require it to equal the
    contract's stable `invoke_path`. Without this, nothing in the contract ever reads the generated
    script, and a launch script that bakes `…/cpython-3.11.14-…/bin/python3.11` would pass every
    assertion above while breaking on the next `uv` upgrade — the fixture would be testing its own
@@ -244,36 +274,44 @@ Run-critical set. Task 10 establishes it as **eight** binaries — `git`, `gh`, 
 not catch the next symlink-farm regression. The rows that carry a distinct _shape_ and must be in the
 first slice:
 
-- `git`: the CLT **shim** shape (re-exec plus a `libexec` second hop); grant asserted without
-  execution at `scripts/smoke-confinement.sh:51`.
+- `git`: the CLT **shim** shape (re-exec plus a `libexec` second hop). Now covered by
+  `allowed "exec git (CLT shim re-execs its real target)"` and, for the second hop,
+  `allowed "git commit end-to-end (forks git-core helpers)"`.
 - `gh`: the Homebrew **symlink-farm** shape — a different failure than `git`'s, and the one that
   matters most, since `gh` is how the unattended agent opens PRs. `/opt/homebrew/bin` is 294/295
   symlinks into `Cellar`, so the `bin` grant permitted almost nothing; `jq` and `rg` are the same
-  shape and ride along on the `Cellar` grant.
-- `claude`: the generated launch script invokes it under `sandbox-exec` at
-  `scripts/spawn-orchestrator.sh:1470`.
-- `bash`: already exercised indirectly by `scripts/smoke-confinement.sh:79`, but should become an
+  shape and ride along on the `Cellar` grant. Covered by
+  `allowed "exec gh (Homebrew bin/ symlink into Cellar)"`.
+- `claude`: the generated launch script invokes it under `sandbox-exec` (`write_launch()` in
+  `scripts/spawn-orchestrator.sh`). No exec-contract row yet.
+- `bash`: already exercised indirectly by `allowed "write inside the worktree"`, but should become an
   explicit exec-contract row — it is the control, a real binary with no indirection.
 - `python3.11`: once Tier B Python lands, launch should invoke the stable symlink and the jail
-  should grant the uv install root, per `dev_docs/decisions/script_language.md:242` and `:250`.
+  should grant the uv install root, per the launch-script requirements in
+  `dev_docs/decisions/script_language.md` ("Bake the _stable_ path into the launch script" and
+  "Grant the symlink's _resolve target_ directory as a subpath").
+
+`jq`, `rg`, `node`, `uv`, and `codex` have grants but **no execution assertion** — they are the
+remaining unexercised rows, and the contract's first job after `git`/`gh` is to cover them.
 
 The fixture should be available in two modes:
 
 - fast deterministic profile-contract mode for `just check`, limited to rendering and text/metadata
   assertions that do not need credentials;
 - macOS smoke mode for `scripts/smoke-confinement.sh`, which actually runs the binaries under
-  `sandbox-exec`. The existing smoke already requires macOS and credentials for Claude calls
-  (`scripts/smoke-confinement.sh:8`), so keep it outside `just check`.
+  `sandbox-exec`. The existing smoke already requires macOS and credentials for Claude calls (its
+  header states "macOS only (sandbox-exec / launchctl)" and that it runs real `claude -p`
+  invocations), so keep it outside `just check`.
 
 ## Counterfactual Test
 
-| Historical failure                                                                                                                          | Would this design catch it before a spec?                            | Mechanism                             | Notes                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tier boundary hand-drawn wrong twice (`dev_docs/orchestrator-python-port.md:53`)                                                            | Only once the tier-boundary gate exists                              | Tier-boundary gate                    | The audit already found the eight missed subcommands; the new gate prevents later `PORTED` claims from contradicting it. The doc linter is **not** load-bearing here and is not claimed to be: it fires only on the exact strings `Tier A`/`Tier B`/`PORTED`, so a "freely portable" claim slips past it, and it cannot tell a real audit citation from a plausible-looking fabricated one. Visibility, not proof.                |
-| False Go premise: no interpreter can satisfy launchd PATH and Seatbelt exec allowlist (`dev_docs/decisions/script_language.md:177`, `:207`) | Yes                                                                  | Doc linter plus exec-contract repro   | The ADR sentence includes `interpreter`, `launchd`, `PATH`, `Seatbelt`, `process-exec`, and `only option`; without a nearby `sandbox-exec` repro or checked-in fixture, the linter fails. The exec-contract fixture gives the expected citation.                                                                                                                                                                                  |
-| `git` grant never executed (`scripts/smoke-confinement.sh:51`; task card at `dev_docs/tasks/orch_py_plan/orch_py_task_10.md:51`)            | Yes                                                                  | Exec-contract fixture                 | A positive row for `git` runs it in the rendered jail and fails on this host with `can't exec '/Library/Developer/CommandLineTools/usr/bin/git'`. The failure is not caught by denial-only assertions such as `scripts/smoke-confinement.sh:81`. Note the probe must be a real `commit`, not `--version`: `--version` clears the shim hop and would still go green on a `bin`-only grant that cannot fork the `git-core` helpers. |
-| Baked resolved version-stamped interpreter path would break after uv upgrade (`dev_docs/decisions/script_language.md:242`)                  | Yes for the design claim; later drift still needs runtime mitigation | Exec-contract fixture plus doc linter | Assertion 6 reads the _generated_ launch script and requires its baked path to equal the stable `invoke_path`: launch invokes `~/.local/bin/python3.11`, profile grants `~/.local/share/uv/python`. It would reject a launch script that bakes `.../cpython-3.11.14...`. It cannot prove a future user will not uninstall Python mid-run; that remains an explicit residual risk.                                                 |
-| Egress probes reported PASS while the network was wide open (`dev_docs/tasks/orch_py_plan/orch_py_task_11.md`)                              | Yes                                                                  | Liveness assertion (assertion 5)      | With `curl` unexecutable, every probe returned `rc=126` and the deny assertion passed on "exited non-zero" — never distinguishing _denied by policy_ from _never executed_. Assertion 5 fails the fixture when the probe was not executable, so the suite cannot report a blocked network it never tested. This is the row the resolve-target mechanisms alone do **not** cover.                                                  |
+| Historical failure                                                                                                                          | Would this design catch it before a spec?                            | Mechanism                             | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tier boundary hand-drawn wrong twice (`dev_docs/orchestrator-python-port.md:53`)                                                            | Only once the tier-boundary gate exists                              | Tier-boundary gate                    | The audit already found the eight missed subcommands; the new gate prevents later `PORTED` claims from contradicting it. The doc linter is **not** load-bearing here and is not claimed to be: it fires only on the exact strings `Tier A`/`Tier B`/`PORTED`, so a "freely portable" claim slips past it, and it cannot tell a real audit citation from a plausible-looking fabricated one. Visibility, not proof.                                                                                                                    |
+| False Go premise: no interpreter can satisfy launchd PATH and Seatbelt exec allowlist (`dev_docs/decisions/script_language.md:177`, `:207`) | Yes                                                                  | Doc linter plus exec-contract repro   | The ADR sentence includes `interpreter`, `launchd`, `PATH`, `Seatbelt`, `process-exec`, and `only option`; without a nearby `sandbox-exec` repro or checked-in fixture, the linter fails. The exec-contract fixture gives the expected citation.                                                                                                                                                                                                                                                                                      |
+| `git` grant never executed (task card `dev_docs/tasks/orch_py_plan/orch_py_task_10.md`)                                                     | Yes                                                                  | Exec-contract fixture                 | A positive row for `git` runs it in the rendered jail and fails on a stock host with `can't exec '/Library/Developer/CommandLineTools/usr/bin/git'`. Denial-only assertions such as `denied "exec unlisted /usr/bin/python3"` cannot catch it. Note the probe must be a real `commit`, not `--version`: `--version` clears the shim hop and would still go green on a `bin`-only grant that cannot fork the `git-core` helpers — which is why task 10 landed `allowed "git commit end-to-end (forks git-core helpers)"` alongside it. |
+| Baked resolved version-stamped interpreter path would break after uv upgrade (`dev_docs/decisions/script_language.md:242`)                  | Yes for the design claim; later drift still needs runtime mitigation | Exec-contract fixture plus doc linter | Assertion 6 reads the _generated_ launch script and requires its baked path to equal the stable `invoke_path`: launch invokes `~/.local/bin/python3.11`, profile grants `~/.local/share/uv/python`. It would reject a launch script that bakes `.../cpython-3.11.14...`. It cannot prove a future user will not uninstall Python mid-run; that remains an explicit residual risk.                                                                                                                                                     |
+| Egress probes reported PASS while the network was wide open (`dev_docs/tasks/orch_py_plan/orch_py_task_11.md`)                              | Yes                                                                  | Liveness assertion (assertion 5)      | With `curl` unexecutable, every probe returned `rc=126` and the deny assertion passed on "exited non-zero" — never distinguishing _denied by policy_ from _never executed_. Assertion 5 fails the fixture when the probe was not executable, so the suite cannot report a blocked network it never tested. This is the row the resolve-target mechanisms alone do **not** cover.                                                                                                                                                      |
 
 ## Cost and False-Positive Budget
 
