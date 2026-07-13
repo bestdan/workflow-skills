@@ -1,12 +1,16 @@
 # Coder capability matrix
 
-**Cached: 2026-07-03.** Benchmarks and pricing move fast. If this date is
+**Cached: 2026-07-13.** Benchmarks and pricing move fast. If this date is
 older than ~2 months, or a model in play isn't listed, refresh before
 recommending: web-search current SWE-bench Pro (Scale leaderboard),
 Terminal-Bench (tbench.ai), and vendor pricing pages — `firecrawl` (CLI) or
 WebFetch work for pages that block plain fetches — and update this file with
 a new cache date. Prefer Scale and tbench.ai over aggregator sites; treat
-vendor-self-reported numbers as upper bounds.
+vendor-self-reported numbers as upper bounds — including for OpenAI, whose own
+model guidance and pricing pages are the only source for the GPT-5.6 tiers
+below until those tiers land on Scale/tbench.ai. Where a row rests on vendor
+guidance alone, say so in the row rather than letting it read like a
+benchmarked number.
 
 ## Dimensions
 
@@ -37,16 +41,29 @@ packets and for review-adjacent work.
 
 ### codex (OpenAI Codex CLI)
 
-| Spec                 | $/Mtok in/out | Cost | Speed  | Correctness                                          | Best for                                                    |
-| -------------------- | ------------- | ---- | ------ | ---------------------------------------------------- | ----------------------------------------------------------- |
-| `codex:gpt-5.5`      | $5 / $30      | $$$  | slow   | Terminal-Bench 2.1 ~83% (top harness) · Pro ~57–59%* | Frontier agentic/terminal work; cross-vendor second opinion |
-| `codex:gpt-5.4`      | $2.50 / $15   | $$   | medium | SWE-bench Pro ~59% (tops Scale public set)           | Workhorse implementation; best benchmark-per-dollar         |
-| `codex:gpt-5.4-mini` | $0.75 / $4.50 | $    | fast   | Pro ~54% — strong for the price                      | Parallel packet fan-out, single-file fixes, bulk work       |
+| Spec                  | $/Mtok in/out | Cost | Speed  | Correctness / capability signal                                                                                     | Best for                                                                                        |
+| --------------------- | ------------- | ---- | ------ | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `codex:gpt-5.6-sol`   | $5 / $30      | $$$  | medium | Official flagship/frontier GPT-5.6; Artificial Analysis (AA) places max-reasoning Sol just behind Fable 5           | Frontier agentic/terminal work, hard bugs, long-horizon Codex runs, cross-vendor second opinion |
+| `codex:gpt-5.6-terra` | $2.50 / $15   | $$   | fast   | Official balanced GPT-5.6 tier and the `gpt-5.6` default; succeeds the workhorse tier (`gpt-5.4`) at the same price | Default Codex implementation when cost matters but task still needs strong reasoning            |
+| `codex:gpt-5.6-luna`  | $1 / $6       | $    | fast   | Official cost-sensitive/high-volume GPT-5.6 tier; succeeds the cheap tier (`gpt-5.4-mini`)                          | Parallel packet fan-out, mechanical/bulk edits, single-file fixes, cheap second passes          |
+| `codex:gpt-5.5`       | $5 / $30      | $$$  | slow   | Previous frontier; Terminal-Bench 2.1 ~83% (top harness) · Pro ~57–59%*                                             | Fallback if GPT-5.6 is unavailable                                                              |
+| `codex:gpt-5.4`       | $2.50 / $15   | $$   | medium | Previous workhorse; SWE-bench Pro ~59% (tops Scale public set at cache time)                                        | Fallback if Terra is unavailable                                                                |
+| `codex:gpt-5.4-mini`  | $0.75 / $4.50 | $    | fast   | Previous cheap tier; Pro ~54% — strong for the price                                                                | Fallback if Luna is unavailable                                                                 |
 
 *OpenAI self-reports higher; independent harnesses score lower — treat
-vendor numbers as upper bounds. Codex CLI is the most **token-efficient**
-harness (~4× fewer tokens than Claude Code in practitioner tests) and has
-the best sandboxing; slightly weaker design taste than Claude.
+vendor numbers as upper bounds. The three GPT-5.6 rows carry no SWE-bench Pro
+or Terminal-Bench score because none exists for them at this cache date: their
+capability, speed, and tier ordering are OpenAI's own claims, not measured
+here. Official guidance recommends `gpt-5.6` for most coding tasks and says
+GPT-5.6 improves token efficiency and frontend aesthetics; re-check against
+Scale/tbench.ai at the next refresh before trusting the ordering. Prefer the
+benchmarked `gpt-5.5`/`gpt-5.4` rows when a routing decision turns on a
+correctness margin. Luna costs more per token than the `gpt-5.4-mini` it
+succeeds, but wins on correctness-per-packet at bulk volume — which is what
+`mechanical-bulk` is actually optimizing. Codex CLI remains the most
+**token-efficient** harness
+(~4× fewer tokens than Claude Code in practitioner tests) and has the best
+sandboxing; slightly weaker design taste than Claude.
 
 ### agy (Google Antigravity CLI — subscription quota, not per-token)
 
@@ -83,14 +100,14 @@ assess-task label — apply it when the task's value is a second opinion.
 
 | `label`                  | Task profile                                    | 1st                                                              | 2nd                           | 3rd                           |
 | ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------- | ----------------------------- | ----------------------------- |
-| `architecture`           | Architecture / multi-file refactor / hard bug   | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | `agy:Gemini 3.1 Pro (High)`   |
-| `standard-pr`            | Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.4`               | `agy:Gemini 3.5 Flash (High)` |
-| `mechanical-bulk`        | Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.4-mini`                                             | `opus:claude-haiku-4-5`       | `devin:swe-1.6`               |
-| `frontend-creative`      | Frontend / design / creative naming & API shape | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | `codex:gpt-5.5`               |
-| `latency-loop`           | Latency-critical tight loop                     | `devin:swe-1.6-fast`                                             | `agy:Gemini 3.5 Flash (High)` | `codex:gpt-5.4-mini`          |
+| `architecture`           | Architecture / multi-file refactor / hard bug   | `opus:claude-opus-4-8`                                           | `codex:gpt-5.6-sol`           | `agy:Gemini 3.1 Pro (High)`   |
+| `standard-pr`            | Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.6-terra`         | `agy:Gemini 3.5 Flash (High)` |
+| `mechanical-bulk`        | Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.6-luna`                                             | `opus:claude-haiku-4-5`       | `devin:swe-1.6`               |
+| `frontend-creative`      | Frontend / design / creative naming & API shape | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | `codex:gpt-5.6-sol`           |
+| `latency-loop`           | Latency-critical tight loop                     | `devin:swe-1.6-fast`                                             | `agy:Gemini 3.5 Flash (High)` | `codex:gpt-5.6-luna`          |
 | `whole-codebase`         | Whole-codebase context (1M-token reads)         | `agy:Gemini 3.5 Flash (High)`                                    | `opus:claude-sonnet-5`        | —                             |
 | `verification-sensitive` | Verification-sensitive (the check IS the task)  | `opus:claude-opus-4-8`                                           | `opus:claude-sonnet-5`        | — (avoid devin/codex-sandbox) |
-| `long-horizon`           | Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-4-8`                                           | `codex:gpt-5.5`               | —                             |
+| `long-horizon`           | Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-4-8`                                           | `codex:gpt-5.6-sol`           | —                             |
 | `cross-vendor`           | Cross-vendor diversity (2nd opinion / review)   | pick a different vendor than the 1st author — codex ↔ opus ↔ agy |                               |                               |
 
 ## Operational modifiers (from pilot runs — outrank benchmark deltas)
