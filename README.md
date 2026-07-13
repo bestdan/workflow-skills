@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-12 skills, 17 commands, and 1 subagent, organized into six workflows:
+13 skills, 18 commands, and 1 subagent, organized into seven workflows:
 
 ### PR review
 
@@ -73,6 +73,12 @@ For the `linear` handler, merged PRs are reconciled explicitly via `/complete-ta
 | **analysis-pipeline**    | `/analysis-pipeline`, or auto when building report-producing analyses | Structure quantitative work as model → template → fill pipelines. Enforces input provenance, separation of narrative and computation, and reproducible output. Includes a working `example/` to copy from.                                                                                                           |
 | **review-facts**         | `/review-facts`                                                       | Independent fact-check of a completed analysis. Spawns the bundled `fact-reviewer` subagent (fresh context, read-only tools) to verify links resolve, cited values match sources, output is reproducible, narrative numbers trace to the model, units/formulas are correct, and the recommendation matches the data. |
 | **analysis-conventions** | Auto when writing notebooks or analysis scripts                       | Coding conventions for analysis work: when to use plain scripts vs marimo, `uv run` for execution, scratchpad patterns, notebook structure. Not user-invocable — loads in context.                                                                                                                                   |
+
+### Understanding the work
+
+| Skill     | Trigger                                                                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **tutor** | `/tutor [--pr <N> \| --diff [<ref>] \| <path>]`, or "walk me through what you did / quiz me on this / make sure I actually understand" | Teach you the work until you can defend it, rather than summarizing it at you. Builds a staged checklist (the problem and why it existed → the solution, its design decisions and edge cases → the blast radius), then works it one item at a time: elicits your understanding **first**, diagnoses the gap, closes it with code or a debugger, and verifies with a counterfactual quiz via `AskUserQuestion`. An item is only checked off when you've demonstrated it unprompted — and the session doesn't end until they all are. |
 
 ### Bundled subagent
 

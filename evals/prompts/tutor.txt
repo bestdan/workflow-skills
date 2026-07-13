@@ -1,0 +1,1 @@
+Okay, you just spent the last hour refactoring the auth middleware and I mostly just watched the diffs go by. I need to actually understand this before standup tomorrow — I'll have to defend it. Don't just summarize it at me; walk me through it properly, check whether I'm following, and push me on the parts I'm hand-waving.
