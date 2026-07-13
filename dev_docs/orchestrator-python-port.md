@@ -47,34 +47,81 @@ Two existing properties make this unusually safe, and the plan leans on both:
    outputs from today's bash **before** anything changes, and every later task must reproduce
    them **byte-for-byte**.
 
-## The constraint that actually shapes the plan: launchd, not the sandbox
+## The constraint that shapes the plan: TWO constrained contexts, not one
 
-`write-launch` generates a launch script that embeds `$self` — the absolute path to
-`spawn-orchestrator.sh` — and calls **back into it** on every supervisor wake:
+> **Corrected 2026-07-13 after co-review (PR #205).** An earlier draft of this plan claimed the
+> only constraint was launchd's PATH, and put `status`, `classify-exit`, `exit-reason`, and
+> `doctor` in the freely-portable tier. **That was wrong**, and it would have broken the wake
+> loop. The reachability analysis below is the corrected one. It is recorded rather than
+> quietly edited because the mistake is instructive: the CLI is _not_ the only seam — bash
+> functions call each other in-process, and the jailed agent calls back in.
 
-```
-supervisor-scan → heartbeat → supervisor-gate → sandbox-exec … claude → supervisor-check
-```
+A subcommand is **constrained** if it is reachable from a context that cannot freely resolve a
+Python interpreter. There are **three** such paths, and the original plan modelled only the
+first.
 
-That generated script runs under **launchd with a pinned, fingerprint-resolved minimal
-`PATH`**. (`write-launch` fail-closes without `--path` for precisely this reason: "a launchd
-job has a minimal PATH.") And `supervisor-scan` internally calls `status_report` — the
-**second-largest function in the file, at 443 lines**.
+**1. The generated launch script → launchd's pinned minimal PATH.** `write-launch` generates a
+script embedding `$self` (the absolute path to `spawn-orchestrator.sh`) and calls back into it
+on every wake: `supervisor-scan → heartbeat → supervisor-gate → sandbox-exec … claude →
+supervisor-check`. It runs under **launchd with a pinned, fingerprint-resolved minimal PATH**
+(`write-launch` fail-closes without `--path` for exactly this reason).
 
-So the boundary that matters is not the seatbelt jail; it is launchd's minimal environment.
-Anything reachable from the generated script needs its interpreter resolvable there, on every
-wake, forever — and if it isn't, the supervisor breaks **unattended, overnight**, which is the
-exact scenario auto-pilot exists for. This splits the work:
+**2. In-process bash function calls.** Constrained bash functions call other subcommands' bash
+functions _directly, in-process_ — not through the CLI. Verified:
 
-**Tier A — outside the wake loop.** `render-profile` (249), `render-settings`, `check-profile`,
-`write-launch` (327), `write-verify-broker` (126), `status` (180), `doctor` (659), `restack`
-(303), `exit-reason`. This is where nearly all the pain lives, and it ports with **zero**
-runtime-surface risk. Tasks 1–7.
+- `status_report` → `status` (`spawn-orchestrator.sh:4233`)
+- `supervisor_check` → `classify_exit` (`:3195`)
 
-**Tier B — inside the wake loop.** `status_report` (443), `supervisor_check` (264),
-`_supervisor_halt` (150), `supervisor_scan` (114), `supervisor_gate` (60), `heartbeat` —
-roughly 1,000+ lines. Deferred to a single decision task (8), where **leaving it in bash is
-an explicit and recommended outcome**.
+Porting `status` or `classify-exit` and **deleting their bash bodies breaks these callers
+outright.** The CLI seam does not protect you here, because these calls never go through it.
+
+**3. The jailed agent → the Seatbelt exec allowlist.** The run-phase agent runs _inside_
+`sandbox-exec` and invokes the orchestrator back out (`skills/auto-pilot/SKILL.md`):
+
+- `doctor` — **every loop iteration** ("Every iteration opens with the run doctor"; HALT on exit 30)
+- `exit-reason` — on every termination
+- `heartbeat`, `alarm-clear`
+
+The rendered profile carries a **`(allow process-exec` allowlist** (`:711-724`, fed by
+`--exec`/`--exec-dir`/`--toolchain`). Any subcommand invoked from inside the jail needs its
+interpreter **on that allowlist** — a constraint entirely separate from PATH resolvability.
+
+### The corrected tiers
+
+**Tier A — genuinely unconstrained.** Reached only by humans, skills, and launch-time code:
+
+| Subcommand                             | Lines    | Notes                   |
+| -------------------------------------- | -------- | ----------------------- |
+| `render-profile` (+ network allowlist) | 337      | the seatbelt renderer   |
+| `write-launch`                         | 327      | the generator           |
+| `restack`                              | 303 + 71 | post-merge, run outside |
+| `write-verify-broker`                  | 126      |                         |
+| `render-settings`                      | —        |                         |
+| `check-profile`                        | ~20      |                         |
+
+Roughly **1,200 lines** — the renderers and generators, which is still where the worst quoting
+and list-building code lives. These port with genuinely zero runtime-surface risk. **Tasks 1–4, 7.**
+
+**Tier B — constrained.** Every one of these is reachable from launchd's PATH, the Seatbelt
+exec allowlist, or an in-process call from something that is:
+
+| Subcommand                              | Lines | Constrained by                           |
+| --------------------------------------- | ----- | ---------------------------------------- |
+| `doctor`                                | 659   | **jail** (every loop iteration)          |
+| `status_report`                         | 443   | launchd (via `supervisor-scan`)          |
+| `supervisor_check` / `_supervisor_halt` | 414   | launchd                                  |
+| `status`                                | 180   | **in-process** (from `status_report`)    |
+| `supervisor_scan` / `supervisor_gate`   | 174   | launchd                                  |
+| `classify_exit`                         | 73    | **in-process** (from `supervisor_check`) |
+| `exit_reason`                           | 69    | **jail** (on termination)                |
+| `heartbeat`, `alarm-clear`              | —     | launchd + jail                           |
+
+Roughly **2,000+ lines**, all gated on the interpreter decision. **This is a materially bigger
+share than the original plan assumed** — the honest value of the unconstrained port is now
+"the renderers and generators," not "80% of the file."
+
+**Consequence for sequencing:** the interpreter decision (task 8) now gates _more_ of the work
+than it used to. See **Open questions**.
 
 ## Interpreter choice
 
@@ -90,27 +137,36 @@ hash-locked (`validate.py.lock`), `requires-python >=3.11`. That is the default 
 It is a poor fit for Tier B, where `uv` typically lives in `~/.local/bin` and would have to be
 added to the pinned launchd PATH. Three options, decided at task 8:
 
-| Option                                                         | Result                                        | Cost                                                                                      |
-| -------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **(a) `uv` for Tier A, bash stays for Tier B** _(recommended)_ | ~80% of the value, zero risk to the wake loop | ~1,000–1,200 lines of supervisor bash survive                                             |
-| **(b) stdlib-only on absolute `/usr/bin/python3`**             | kills the bash entirely                       | may be Python 3.9 on older macOS (repo's other Python needs ≥3.11); no third-party deps   |
-| **(c) `uv` everywhere, added to the pinned PATH**              | cleanest code                                 | largest new runtime dependency on the security-critical unattended path — not recommended |
+| Option                                                               | Result                                      | Cost                                                                                                                                                 |
+| -------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a) `uv` for Tier A, bash stays for Tier B** _(recommended)_       | the renderers and generators (~1,200 lines) | ~2,000+ lines of constrained bash survive — more than first assumed                                                                                  |
+| **(b) stdlib-only on absolute `/usr/bin/python3`**                   | kills the bash entirely                     | `/usr/bin/python3` is a Command Line Tools shim (and is 3.9 on this machine, vs the repo's ≥3.11); still needs adding to the Seatbelt exec allowlist |
+| **(c) `uv` everywhere, on the pinned PATH _and_ the exec allowlist** | cleanest code                               | largest new runtime dependency on the security-critical unattended path — not recommended                                                            |
+
+Note both (b) and (c) must satisfy **two** constraints, not one: resolvable on launchd's pinned
+PATH **and** permitted by the Seatbelt `process-exec` allowlist.
 
 ## Tasks
 
 Nine, each one PR. Full cards in `dev_docs/tasks/orch_py_plan/` (local).
 
-| # | Task                                                                            | Size |
-| - | ------------------------------------------------------------------------------- | ---- |
-| 1 | Golden-output corpus + the bash→Python dispatch seam, proved on `check-profile` | 5    |
-| 2 | Port `render-profile` (+ network allowlist) — the seatbelt renderer             | 5    |
-| 3 | Port `render-settings` — the layer-2 egress allowlist                           | 3    |
-| 4 | Port `write-launch` + `write-verify-broker` — the generators                    | 5    |
-| 5 | Port the read-only reporters: `status`, `classify-exit`, `exit-reason`          | 5    |
-| 6 | Port (or **delete**) `doctor` — 659 lines, the worst single function            | 5    |
-| 7 | Port (or defer) `restack`                                                       | 5    |
-| 8 | **Decide the launchd boundary**: port Tier B, or freeze it in bash              | 5    |
-| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder                  | 2    |
+| # | Task                                                                            | Tier | Size |
+| - | ------------------------------------------------------------------------------- | ---- | ---- |
+| 1 | Golden-output corpus + the bash→Python dispatch seam, proved on `check-profile` | A    | 5    |
+| 2 | Port `render-profile` (+ network allowlist) — the seatbelt renderer             | A    | 5    |
+| 3 | Port `render-settings` — the layer-2 egress allowlist                           | A    | 3    |
+| 4 | Port `write-launch` + `write-verify-broker` — the generators                    | A    | 5    |
+| 5 | ~~Port status / classify-exit / exit-reason~~ → **audit the reachability set**  | B    | 5    |
+| 6 | ~~Port (or delete) `doctor`~~ → **blocked: jail-invoked every loop**            | B    | 5    |
+| 7 | Port `restack`                                                                  | A    | 5    |
+| 8 | **Decide the interpreter question** — now gates tasks 5, 6, and the wake loop   | B    | 5    |
+| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder                  | —    | 2    |
+
+**Tasks 5 and 6 are no longer straight ports.** Both target constrained subcommands (`status`
+and `classify-exit` are called in-process from Tier B; `exit-reason` and `doctor` are invoked
+from inside the jail), so neither can proceed until task 8 decides the interpreter question.
+Task 5 is rewritten as a **reachability audit** — the analysis that should have preceded this
+plan — and task 6 is blocked on it.
 
 ## Non-goals
 
@@ -124,8 +180,22 @@ Nine, each one PR. Full cards in `dev_docs/tasks/orch_py_plan/` (local).
 
 ## Open questions
 
-1. **Which interpreter, and does Tier B ever move?** See the table above. Binds at task 8;
-   tasks 1–7 are unaffected. Listed first because it changes what "done" means.
+1. **Which interpreter — and should that decision move to the FRONT of the plan?** See the table
+   above. The corrected reachability analysis means this decision now gates **tasks 5, 6, and 8**
+   (~2,000 lines), not just task 8. The original sequencing put it last on the theory that only
+   the wake loop depended on it; that theory was wrong. Two options:
+   - **Keep it at task 8.** Tasks 1–4 and 7 (the renderers and generators, ~1,200 lines) are
+     genuinely unconstrained and can land first, which is real value delivered before any hard
+     call is made. Tasks 5–6 then wait.
+   - **Move it to task 1.5, before any porting.** It determines how much of the file can _ever_
+     move, so deciding it early stops the plan from optimistically porting toward a boundary
+     that may not hold. It would also let a Go-shaped answer (a compiled binary satisfies both
+     the PATH and exec-allowlist constraints at once — see the decision doc) be considered
+     before 1,200 lines of Python exist.
+
+   **Recommendation: keep it at task 8**, because tasks 1–4 are unconditionally safe and worth
+   banking regardless of the answer — but the decision is now materially more consequential than
+   this plan first claimed, and it deserves a deliberate call rather than a default.
 2. **Sequencing against PR #202.** That PR `shfmt`-reformats every line of
    `spawn-orchestrator.sh`. Any port work started before it lands will conflict
    catastrophically. **#202 must merge first** — it is a hard prerequisite on task 1. (It is
