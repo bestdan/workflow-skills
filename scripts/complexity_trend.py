@@ -38,7 +38,6 @@ CATEGORIES = {"progress", "reconciliation", "adapter"}
 SIDES = {"new", "old"}
 
 MARKER_RE = re.compile(r"SPECIAL-CASE\((" + "|".join(sorted(CATEGORIES)) + r")\)")
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class LedgerError(Exception):
@@ -46,6 +45,10 @@ class LedgerError(Exception):
         super().__init__(f"line {lineno}: {reason}")
         self.lineno = lineno
         self.reason = reason
+
+
+class CensusError(Exception):
+    """A NEW_CONTROLLER_PATHS entry is unreadable — not a ledger-line problem."""
 
 
 def load_ledger(path: Path) -> tuple[dict, list[dict]]:
@@ -58,7 +61,11 @@ def load_ledger(path: Path) -> tuple[dict, list[dict]]:
         meta = json.loads(lines[0])
     except json.JSONDecodeError as e:
         raise LedgerError(1, f"invalid JSON: {e}") from e
-    if meta.get("type") != "meta" or meta.get("schema") != 1:
+    if (
+        not isinstance(meta, dict)
+        or meta.get("type") != "meta"
+        or meta.get("schema") != 1
+    ):
         raise LedgerError(1, 'first line must be {"type": "meta", "schema": 1, ...}')
 
     events: list[dict] = []
@@ -73,8 +80,10 @@ def load_ledger(path: Path) -> tuple[dict, list[dict]]:
             raise LedgerError(lineno, "event must be a JSON object")
         if obj.get("type") != "event":
             raise LedgerError(lineno, 'type must be "event"')
-        if not isinstance(obj.get("date"), str) or not DATE_RE.match(obj["date"]):
-            raise LedgerError(lineno, "date must match YYYY-MM-DD")
+        try:
+            date.fromisoformat(obj["date"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise LedgerError(lineno, "date must be a valid YYYY-MM-DD date") from e
         if obj.get("side") not in SIDES:
             raise LedgerError(lineno, f"side must be one of {sorted(SIDES)}")
         delta = obj.get("delta")
@@ -92,15 +101,16 @@ def load_ledger(path: Path) -> tuple[dict, list[dict]]:
     return meta, events
 
 
-def marker_census(paths: list[str]) -> int:
-    """Count SPECIAL-CASE markers across the listed controller paths."""
-    total = 0
+def marker_census(paths: list[str]) -> dict[str, int]:
+    """Count SPECIAL-CASE markers per category across the controller paths."""
+    census = {c: 0 for c in sorted(CATEGORIES)}
     for rel in paths:
         p = ROOT / rel
         if not p.exists():
-            raise LedgerError(0, f"NEW_CONTROLLER_PATHS entry does not exist: {rel}")
-        total += len(MARKER_RE.findall(p.read_text()))
-    return total
+            raise CensusError(f"NEW_CONTROLLER_PATHS entry does not exist: {rel}")
+        for category in MARKER_RE.findall(p.read_text()):
+            census[category] += 1
+    return census
 
 
 def side_net(events: list[dict], side: str) -> int:
@@ -115,7 +125,7 @@ def category_net(events: list[dict], side: str) -> dict[str, int]:
     return out
 
 
-def print_report(events: list[dict], new_net: int, old_sheds_net: int) -> None:
+def print_report(events: list[dict]) -> None:
     new_events = [e for e in events if e["side"] == "new"]
     old_events = [e for e in events if e["side"] == "old"]
 
@@ -150,25 +160,30 @@ def print_report(events: list[dict], new_net: int, old_sheds_net: int) -> None:
 
 def run_check(args: argparse.Namespace) -> int:
     try:
-        meta, events = load_ledger(LEDGER)
+        _, events = load_ledger(LEDGER)
         census = marker_census(NEW_CONTROLLER_PATHS)
-    except LedgerError as e:
+    except (LedgerError, CensusError) as e:
         print(f"INVALID: {e}", file=sys.stderr)
         return 2
 
-    new_net = side_net(events, "new")
-    if new_net != census:
-        print(
-            f"INVALID: new-side ledger net ({new_net}) != live marker census "
-            f"({census}) across NEW_CONTROLLER_PATHS",
-            file=sys.stderr,
-        )
+    # Per-category, not just in aggregate: a "+1 progress" event must not be
+    # satisfied by an adapter marker in the code.
+    ledger_by_cat = category_net(events, "new")
+    if ledger_by_cat != census:
+        for cat in sorted(CATEGORIES):
+            if ledger_by_cat[cat] != census[cat]:
+                print(
+                    f"INVALID: new-side {cat}: ledger net {ledger_by_cat[cat]} != "
+                    f"live marker census {census[cat]} across NEW_CONTROLLER_PATHS",
+                    file=sys.stderr,
+                )
         return 2
 
+    new_net = side_net(events, "new")
     old_sheds_net = sum(
         -e["delta"] for e in events if e["side"] == "old" and e["delta"] < 0
     )
-    print_report(events, new_net, old_sheds_net)
+    print_report(events)
 
     if new_net >= 5 and new_net > old_sheds_net:
         print(
@@ -210,16 +225,16 @@ def run_add(args: argparse.Namespace) -> int:
         fh.write(json.dumps(event) + "\n")
 
     try:
-        meta, events = load_ledger(LEDGER)
+        _, events = load_ledger(LEDGER)
         census = marker_census(NEW_CONTROLLER_PATHS)
-    except LedgerError as e:
+    except (LedgerError, CensusError) as e:
         print(f"INVALID after append: {e}", file=sys.stderr)
         return 2
 
-    new_net = side_net(events, "new")
-    if new_net != census:
+    ledger_by_cat = category_net(events, "new")
+    if ledger_by_cat != census:
         print(
-            f"WARNING: appended, but new-side ledger net ({new_net}) now "
+            f"WARNING: appended, but the new-side ledger ({ledger_by_cat}) now "
             f"differs from the live marker census ({census}). Add or remove "
             f"SPECIAL-CASE markers in NEW_CONTROLLER_PATHS, or fix this "
             f"entry -- the next `check` will exit 2.",
