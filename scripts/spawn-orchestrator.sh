@@ -1417,8 +1417,17 @@ _supervisor_state_field() {
 _ensure_supervisor_state_ignored() {
   local d="$1" gi="$1/.gitignore"
   [ -d "$d" ] || return 0
+  # `.auto-pilot/` is agent-writable (only the ledger LITERAL is denied), and the
+  # supervisor runs UNJAILED — so a `.gitignore` symlink planted by the agent
+  # would make us append through it, as the host user, to a path of its choosing.
+  [ -L "$gi" ] && return 0
   if [ -f "$gi" ] && grep -qxF "$SUPERVISOR_STATE_NAME" "$gi" 2>/dev/null; then
     return 0
+  fi
+  # An existing .gitignore with no trailing newline would splice our pattern onto
+  # its last line (`RUN.mdsupervisor-state`), ignoring nothing.
+  if [ -s "$gi" ] && [ -n "$(tail -c1 "$gi" 2>/dev/null)" ]; then
+    printf '\n' >>"$gi" 2>/dev/null || return 0
   fi
   printf '%s\n' "$SUPERVISOR_STATE_NAME" >>"$gi" 2>/dev/null || return 0
 }

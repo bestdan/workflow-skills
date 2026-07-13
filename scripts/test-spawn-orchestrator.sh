@@ -466,24 +466,32 @@ fi
 # restore it, hits the deny, and fails the git operation. Assert the EFFECT (git
 # genuinely refuses to stage it), not merely that a .gitignore line exists — the
 # line is the mechanism, being untracked is the property.
-GIROOT="$BASE/gitignore-ledger"; mkdir -p "$GIROOT"
-git init -q "$GIROOT" 2>/dev/null
-git -C "$GIROOT" config user.email t@t; git -C "$GIROOT" config user.name t
-git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
-: >"$GIROOT/gi.log"
-( cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
-    --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1 ) || true
-if [ -f "$GIROOT/.auto-pilot/supervisor-state" ]; then
-  git -C "$GIROOT" add -A >/dev/null 2>&1 || true
-  if git -C "$GIROOT" diff --cached --name-only | grep -qx '.auto-pilot/supervisor-state'; then
-    bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
-        "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
+if command -v git >/dev/null 2>&1; then
+  GIROOT="$BASE/gitignore-ledger"; mkdir -p "$GIROOT"
+  git init -q "$GIROOT" 2>/dev/null
+  git -C "$GIROOT" config user.email t@t; git -C "$GIROOT" config user.name t
+  git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
+  : >"$GIROOT/gi.log"
+  ( cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
+      --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1 ) || true
+  if [ -f "$GIROOT/.auto-pilot/supervisor-state" ]; then
+    # `git add` must SUCCEED before its result means anything: a swallowed failure
+    # (locked index, broken fixture) leaves an empty cached diff, which reads as
+    # "the ledger wasn't staged" and passes the test without ever exercising it.
+    if ! git -C "$GIROOT" add -A >/dev/null 2>&1; then
+      bad "supervisor-state: precondition — \`git add -A\` succeeds" "git add failed in $GIROOT"
+    elif git -C "$GIROOT" diff --cached --name-only | grep -qxF '.auto-pilot/supervisor-state'; then
+      bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
+          "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
+    else
+      ok "supervisor-state: \`git add -A\` cannot stage the supervisor ledger"
+    fi
+    git -C "$GIROOT" reset -q >/dev/null 2>&1 || true
   else
-    ok "supervisor-state: \`git add -A\` cannot stage the supervisor ledger"
+    bad "supervisor-state: precondition — the ledger was written" "not found in $GIROOT/.auto-pilot"
   fi
-  git -C "$GIROOT" reset -q >/dev/null 2>&1 || true
 else
-  bad "supervisor-state: precondition — the ledger was written" "not found in $GIROOT/.auto-pilot"
+  echo "skip - supervisor-state: \`git add\` cannot stage the ledger (git not available)"
 fi
 
 # The leaf file need not exist yet (tolerated like --tmpdir tolerates the
