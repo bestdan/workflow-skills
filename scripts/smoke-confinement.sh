@@ -45,10 +45,24 @@ CLAUDE="$(command -v claude || true)"
   echo "claude not on PATH"
   exit 2
 }
+# /usr/bin/security is NOT decoration: the harness reads its credentials from the
+# macOS keychain by SPAWNING it, so a cold credential cache inside the jail makes
+# `claude -p` die outright — "EPERM: operation not permitted, posix_spawn
+# 'security'" — and §1b/§2 below then fail or go indeterminate for a reason that
+# has nothing to do with what they test. It reproduces only on a cold cache, which
+# is exactly what makes it a nasty intermittent. This is a SMOKE-only grant: a real
+# launch passes --toolchain, which already covers it via the /usr/bin subpath.
+# /usr/bin/curl is granted for the same reason, and its absence was corrupting §2's
+# VERDICT: with curl unexecutable, every curl-based egress probe returned rc=126
+# ("cannot execute") — so (b) and (c) reported "blocked, PASS" while proving
+# nothing, because curl never ran to be blocked. An egress test that passes when
+# the network is wide open is worse than no test. Grant it, and let layer 2 be what
+# blocks it.
 "$SO" render-profile --confine-under "$D/run" \
   --rw "$D/run/wt" --ro "$ROOT" --ro "$HOME/.claude" \
   --tmpdir "$D/run/wt/tmp" \
   --exec "$CLAUDE" --exec "$(command -v bash)" --exec "$(command -v git)" \
+  --exec /usr/bin/security --exec /usr/bin/curl \
   --out "$D/profile.sb" || {
   echo "render-profile failed"
   exit 2
@@ -57,12 +71,33 @@ CLAUDE="$(command -v claude || true)"
   echo "profile does not compile"
   exit 2
 }
+# A SECOND profile, rendered with --toolchain — what a real launch actually uses.
+# The minimal profile above grants only literal binaries, which is why it cannot
+# catch the shim/symlink defect class §1c exists for: an exec grant names a path,
+# but Seatbelt matches the RESOLVED target, and on a stock host the run's two most
+# important binaries both indirect (/usr/bin/git is a CLT shim that re-execs under
+# xcode-select -p; /opt/homebrew/bin/gh is a symlink into Cellar). Both were on an
+# allowlist and neither could run.
+"$SO" render-profile --confine-under "$D/run" \
+  --rw "$D/run/wt" --ro "$ROOT" --ro "$HOME/.claude" \
+  --tmpdir "$D/run/wt/tmp" --toolchain \
+  --exec "$CLAUDE" --exec "$(command -v bash)" --exec "$(command -v git)" \
+  --out "$D/profile-toolchain.sb" || {
+  echo "render-profile --toolchain failed"
+  exit 2
+}
+"$SO" check-profile "$D/profile-toolchain.sb" || {
+  echo "toolchain profile does not compile"
+  exit 2
+}
 "$SO" render-settings --source plan --coder codex --out "$D/settings.json" || exit 2
 echo "  profile + settings built"
 
 # denied() runs a single action under the seatbelt profile ONLY and passes when it
-# is refused (non-zero). allowed() passes when it succeeds (zero).
-run_jailed() { sandbox-exec -f "$D/profile.sb" "$@" >/dev/null 2>&1; }
+# is refused (non-zero). allowed() passes when it succeeds (zero). PROFILE selects
+# which rendered profile they run under (§1c swaps in the --toolchain one).
+PROFILE="$D/profile.sb"
+run_jailed() { sandbox-exec -f "$PROFILE" "$@" >/dev/null 2>&1; }
 denied() {
   local d="$1"
   shift
@@ -87,6 +122,63 @@ denied "write elsewhere under ~/.claude (session-env grant is not blanket)" \
   bash -c "echo x > $HOME/.claude/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST"
 rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" "$HOME/.claude/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" 2>/dev/null
 
+# --- exec grants must RUN, not merely be listed (task 10) -------------------
+# The regression guard for the shim/symlink defect class. Every §1 exec assertion
+# above is either a denial or uses `bash` — a real binary, not a shim — so a grant
+# that resolves to something ungranted sails straight through. That is exactly how
+# `git` shipped broken: line 51 has passed `--exec "$(command -v git)"` since day
+# one, the grant was asserted, and git was NEVER RUN inside the jail. It could not
+# have run: /usr/bin/git is a 119k Command Line Tools shim that re-execs
+# /Library/Developer/CommandLineTools/usr/bin/git, which nothing granted —
+# "can't exec … (errno=Operation not permitted)". `gh` was the same shape via
+# Homebrew's Cellar symlink farm. Assert EXECUTION, under the --toolchain profile a
+# real launch uses. A listed-but-unrunnable binary must fail this suite.
+echo "== 1c. Exec grants actually EXECUTE (--toolchain profile) =="
+PROFILE="$D/profile-toolchain.sb"
+# PIN the paths — do NOT let $PATH pick the binary. Each assertion below exists to
+# prove ONE grant, and an ambient lookup can satisfy it via a DIFFERENT one: a host
+# with Homebrew git first on PATH would exercise the Cellar grant here, so deleting
+# the xcode-select grant would leave this test green — a regression guard that no
+# longer guards the regression. /usr/bin/git IS the CLT shim this covers.
+allowed "exec git (CLT shim re-execs its real target)" /usr/bin/git --version
+if [ -x /opt/homebrew/bin/gh ]; then
+  allowed "exec gh (Homebrew bin/ symlink into Cellar)" /opt/homebrew/bin/gh --version
+else
+  INDET "exec gh (no Homebrew gh on this host — a real run needs it)"
+fi
+# Not just `--version`: a real commit forks the git-core helpers out of the
+# toolchain's libexec, a second exec hop that a bin-only grant would miss.
+allowed "git commit end-to-end (forks git-core helpers)" bash -c \
+  "cd $D/run/wt && rm -rf gitrepo && /usr/bin/git init -q gitrepo && cd gitrepo \
+     && /usr/bin/git -c user.email=a@b -c user.name=c commit -q --allow-empty -m smoke \
+     && /usr/bin/git log --oneline -1"
+# RE-EXAMINED, not flipped (task 10 acceptance): this denial's intent is "an
+# un-granted interpreter cannot run", and it still holds verbatim under the
+# toolchain profile — CLT's python3 resolves to <dev>/Library/Frameworks/…, which
+# is OUTSIDE the <dev>/usr subpath the git fix grants. The narrow grant is what
+# keeps this assertion meaningful; a whole-<dev> grant would have flipped it to an
+# allow. Asserted under BOTH profiles deliberately, so a future widening of the
+# toolchain grant trips here instead of passing quietly.
+denied "exec unlisted /usr/bin/python3 (still unlisted under --toolchain)" \
+  /usr/bin/python3 -c "print(1)"
+# The coarse exec wall's real load-bearing property: exec dirs are all
+# non-writable, and writable scopes are never exec-granted, so a binary the agent
+# STAGES cannot be run. This is what makes the launchctl/open exec denies complete.
+# The fixture MUST fail closed: denied() passes on ANY non-zero exit, so a silently
+# failed cp would leave no file and the assertion would pass on ENOENT instead of on
+# a Seatbelt denial — the same pass-for-the-wrong-reason this whole section exists
+# to kill. Assert the staged binary is real and executable before trusting the deny.
+cp /bin/echo "$D/run/wt/staged-binary" || {
+  echo "could not stage the exec fixture"
+  exit 2
+}
+[ -x "$D/run/wt/staged-binary" ] || {
+  echo "staged exec fixture is not executable"
+  exit 2
+}
+denied "exec a binary staged in the RW worktree" "$D/run/wt/staged-binary" hi
+PROFILE="$D/profile.sb"
+
 # --- exit-code integrity (task 12 / finding #20) --------------------------
 # A jail that can't report a correct exit code is a BROKEN jail. When the
 # harness's OWN runtime surface is denied, the Bash tool dies with EPERM BEFORE
@@ -100,11 +192,23 @@ rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" "$HOME/.claude/AUTOPILOT_SMOKE_SH
 echo "== 1b. Exit-code integrity through the harness (claude -p) =="
 JSON="$(cat "$D/settings.json")"
 EC_LOG="$D/exit-code.log"
+# TMPDIR is part of the launch CONTRACT, not ambience: write-launch exports the
+# profile's @spawn-tmpdir stamp — the exact dir the srt-mux socket grant is
+# anchored to — and fails closed on a render/launch mismatch precisely because a
+# drift makes the harness's inner sandbox silently degrade. Invoking claude here
+# through bare sandbox-exec does NOT inherit that, so without this export the
+# harness binds its mux socket in the ambient /var/folders TMPDIR, which the
+# profile does not grant; the inner sandbox then disables ITSELF, layer 2 stops
+# enforcing, and §2's egress deciders below grade a jail that has quietly become
+# one-layer. Reproduce the launch contract, or §2 is theatre.
+JAIL_TMPDIR="$D/run/wt/tmp"
+mkdir -p "$JAIL_TMPDIR"
+jailed_claude() { TMPDIR="$JAIL_TMPDIR" sandbox-exec -f "$D/profile.sb" "$CLAUDE" "$@"; }
 exit_code_check() { # <desc> <expect-rc> <shell-command> <rcfile-suffix>
   local desc="$1" expect="$2" cmd="$3" name="rc_ec_$4"
   local rcf="$D/run/wt/$name"
   rm -f "$rcf"
-  sandbox-exec -f "$D/profile.sb" "$CLAUDE" -p \
+  jailed_claude -p \
     "Run exactly this one bash command and then stop, nothing else: { $cmd ; } ; printf '%s' \$? > $rcf" \
     --permission-mode bypassPermissions --settings "$JSON" --max-turns 4 \
     --verbose --output-format stream-json >>"$EC_LOG" 2>&1
@@ -136,7 +240,7 @@ egress_check() { # <desc> <expect: reach|block> <rcfile-name> <shell-command>
   local desc="$1" expect="$2" name="$3" cmd="$4"
   local rcf="$D/run/wt/$name"
   rm -f "$rcf"
-  sandbox-exec -f "$D/profile.sb" "$CLAUDE" -p \
+  jailed_claude -p \
     "Run exactly this one bash command and then stop, nothing else: { $cmd ; } ; printf '%s' \$? > $rcf" \
     --permission-mode bypassPermissions --settings "$JSON" --max-turns 4 >/dev/null 2>&1
   if [ ! -s "$rcf" ]; then

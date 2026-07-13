@@ -235,6 +235,67 @@ fi
 fc "exec-dir /" "refusing --exec-dir /" --exec-dir /
 fc "exec-dir plain file" "not a directory" --exec-dir "$PLAIN"
 
+# --- toolchain: the active developer-tools dir (the CLT-shim grant) ------------
+# Seatbelt matches the RESOLVED exec target, and /usr/bin/git is a Command Line
+# Tools SHIM that re-execs <dev>/usr/bin/git — so (subpath "/usr/bin") permits the
+# shim and not the binary, and a jailed git dies with "can't exec … (Operation not
+# permitted)". --toolchain therefore has to grant xcode-select -p's usr/ dir.
+# smoke-confinement.sh proves this against a REAL jail, but check.sh never runs the
+# smoke (it is manual, macOS-only, and spends real credentials) — so without the
+# assertions below, deleting the grant would leave CI fully green. xcode-select is
+# invoked unqualified by the renderer, so a PATH-shadowing stub makes the whole
+# thing deterministic and host-independent: no Xcode, no CLT, no macOS required.
+tcstub="$BASE/tcstub"
+tcdev="$BASE/devdir"
+mkdir -p "$tcstub" "$tcdev/usr/bin"
+printf '#!/bin/sh\nprintf "%%s\\n" "%s"\n' "$tcdev" >"$tcstub/xcode-select"
+chmod +x "$tcstub/xcode-select"
+
+tcprof="$BASE/toolchain.sb"
+PATH="$tcstub:$PATH" "$SCRIPT" render-profile --rw "$RUN_WT" --toolchain --out "$tcprof" >/dev/null 2>&1
+tcbody="$(cat "$tcprof" 2>/dev/null)"
+have "toolchain: grants the active developer-tools usr/ dir (CLT shim's re-exec target)" \
+  "(subpath \"$tcdev/usr\")" "$tcbody"
+have "toolchain: still grants the standard bin dirs" '(subpath "/usr/bin")' "$tcbody"
+
+# A developer dir with no usr/ subdir is omitted, not fatal — same posture as any
+# other missing standard dir.
+tcdev2="$BASE/devdir-nousr"
+mkdir -p "$tcdev2"
+printf '#!/bin/sh\nprintf "%%s\\n" "%s"\n' "$tcdev2" >"$tcstub/xcode-select"
+tcprof2="$BASE/toolchain-nousr.sb"
+if PATH="$tcstub:$PATH" "$SCRIPT" render-profile --rw "$RUN_WT" --toolchain --out "$tcprof2" >/dev/null 2>&1; then
+  ok "toolchain: a developer dir with no usr/ is omitted, not fail-closed"
+else
+  bad "toolchain: a developer dir with no usr/ is omitted, not fail-closed"
+fi
+lack "toolchain: omits the usr-less developer dir from the exec block" \
+  "(subpath \"$tcdev2\")" "$(cat "$tcprof2" 2>/dev/null)"
+
+# xcode-select absent or failing (no developer tools installed) must not fail the
+# render — the grant is simply skipped.
+printf '#!/bin/sh\nexit 1\n' >"$tcstub/xcode-select"
+tcprof3="$BASE/toolchain-noxcode.sb"
+if PATH="$tcstub:$PATH" "$SCRIPT" render-profile --rw "$RUN_WT" --toolchain --out "$tcprof3" >/dev/null 2>&1; then
+  ok "toolchain: a failing xcode-select is skipped, not fail-closed"
+else
+  bad "toolchain: a failing xcode-select is skipped, not fail-closed"
+fi
+have "toolchain: still renders the standard bin dirs without a developer dir" \
+  '(subpath "/usr/bin")' "$(cat "$tcprof3" 2>/dev/null)"
+
+# --- toolchain: Homebrew's Cellar (the symlink-farm grant) --------------------
+# /opt/homebrew/bin is a symlink farm — nearly every entry points into
+# Cellar/<pkg>/<ver>/bin — and Seatbelt matches the resolved target, so the bin-dir
+# grant alone permits almost no Homebrew binary (gh, the tool the agent opens PRs
+# with, included). Host-dependent by nature: assert it only where Cellar exists.
+if [ -d /opt/homebrew/Cellar ]; then
+  have "toolchain: grants Homebrew's Cellar (bin/ is a symlink farm into it)" \
+    '(subpath "/opt/homebrew/Cellar")' "$tcbody"
+else
+  echo "skip - toolchain: grants Homebrew's Cellar (no /opt/homebrew/Cellar on this host)"
+fi
+
 if command -v sandbox-exec >/dev/null 2>&1; then
   EDBIN=""
   # Prefer no-arg zero-exit binaries so the success check is portable — BSD/macOS
