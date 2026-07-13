@@ -77,9 +77,9 @@ interpreter. Three such paths (four entry points — the verify broker is a *sec
 `scripts/audit-orchestrator-reachability.py`. Do not restate it from memory here; this boundary
 has been hand-drawn twice and been wrong twice.
 
-**Tier A (unconstrained): 12 subcommands, 1,458 handler lines.** `write-launch` (332), `restack`
+**Tier A (unconstrained): 12 subcommands, 1,422 handler lines.** `write-launch` (332), `restack`
 (320), `render-profile` (256), `launch` (142), `write-verify-broker` (130), `render-settings`
-(62), `check-profile` (59), `smoke-test`, `clear-exit-state`, `record-handle`, `alarm-clear`,
+(62), `check-profile` (23), `smoke-test`, `clear-exit-state`, `record-handle`, `alarm-clear`,
 `detach`. The renderers and generators — still the worst quoting/list-building code in the file.
 Tasks 3–7.
 
@@ -95,7 +95,7 @@ in-process), `assert-run-head` (153, **jail, every iteration**), `supervisor-sca
 The audit moved **eight** subcommands into Tier B that no hand-drawn list had caught — including
 `teardown`, which looks like a human cleanup command and is in fact part of the supervisor's halt
 path — and moved `alarm-clear` **out** (it is `--resume`-only, attended). The constrained tier is
-2.6x the unconstrained one and holds the entire unattended runtime.
+1.8x the unconstrained one and holds the entire unattended runtime.
 
 ### Interpreter choice (open question — see below)
 
@@ -147,7 +147,7 @@ and whether Python is even the right target — so it is settled before a line i
      largest runtime-surface increase on the security-critical unattended path. Not recommended.
 
    **RESOLVED 2026-07-13: this decision moved to the front of the plan (task 2).** The task 1
-   audit showed it gates 2,618 lines across 17 subcommands, so deciding it after building 1,458
+   audit showed it gates 2,618 lines across 17 subcommands, so deciding it after building 1,422
    lines of Python would be deciding it too late to act on. Task 2 also explicitly reopens
    **(d) a compiled binary (Go)** — the only option satisfying both constraints at once — because
    `dev_docs/decisions/script_language.md` rejected Go while believing a premise that is now

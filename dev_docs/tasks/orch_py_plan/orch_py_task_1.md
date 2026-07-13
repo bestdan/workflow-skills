@@ -89,7 +89,7 @@ loudly — it further shrinks what the port can achieve, and further raises the 
 and the skill docs, then computes the **transitive** constrained closure (constraint is inherited
 through in-process calls). The 29-row table is in `dev_docs/orchestrator-python-port.md`.
 
-**Tier B: 17 subcommands, 2,618 handler lines. Tier A: 12, 1,458.** The audit found more
+**Tier B: 17 subcommands, 2,618 handler lines. Tier A: 12, 1,422.** The audit found more
 constrained surface than either hand-drawn boundary, and the answer to the card's own question is
 yes, loudly:
 
@@ -104,7 +104,7 @@ yes, loudly:
 - **`assert-run-head` runs every loop iteration from inside the jail** (`run-state.md:359`).
 - **`alarm-clear` moved *out* of Tier B** — every call site is `--resume`, which is attended.
 
-Two things this changes downstream, both recorded in the plan: the constrained tier is **2.6x**
+Two things this changes downstream, both recorded in the plan: the constrained tier is **1.8x**
 the portable one and holds the entire unattended runtime (task 2 decides against those numbers,
 not the old ~1,000), and a Tier A **generator** emits scripts that call Tier B **callees**, so no
 generator port can "finish" its callee.

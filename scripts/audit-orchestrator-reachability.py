@@ -58,11 +58,16 @@ def load_lines() -> list[str]:
     return ORCH.read_text().splitlines()
 
 
-def function_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
+def function_spans(lines: list[str], dispatch_start: int) -> dict[str, tuple[int, int]]:
     """Map function name -> (first line, last line), 1-indexed inclusive.
 
     Top-level defs only (column 0), which is every function in this file. A
-    function runs until the next top-level def, or to the dispatch case.
+    function runs until the next top-level def, or — for the last one — to the
+    top-level code that follows it. Cap that final span at `dispatch_start`:
+    without it the last function (`check_profile`) swallows the arg parsing and
+    the dispatch `case` all the way to EOF, and reports 59 lines for a 23-line
+    body. Line counts are the tiers' whole argument; don't pad one side with the
+    dispatch table.
     """
     starts: list[tuple[int, str]] = []
     for i, line in enumerate(lines, 1):
@@ -71,7 +76,7 @@ def function_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
             starts.append((i, m.group(1)))
     spans: dict[str, tuple[int, int]] = {}
     for idx, (start, name) in enumerate(starts):
-        end = starts[idx + 1][0] - 1 if idx + 1 < len(starts) else len(lines)
+        end = starts[idx + 1][0] - 1 if idx + 1 < len(starts) else dispatch_start - 1
         spans[name] = (start, end)
     return spans
 
@@ -100,14 +105,23 @@ def in_process_callers(
 
     Only **command position** counts: the name must open a command — at the start
     of a line, inside `$(` / backticks, or after a `;`, `|`, `&&`, `||`, `(`, `{`,
-    `if`, `then`, `else`, `do`, `!`. A bare word match is not enough, because
-    `status`, `launch`, and `alarm` are also ordinary English and, worse, real
-    subcommands of other tools (`git status --porcelain` is all over this file).
+    or a keyword that takes a command (`if`, `elif`, `then`, `else`, `do`,
+    `while`, `until`, `!`). A bare word match is not enough, because `status`,
+    `launch`, and `alarm` are also ordinary English and, worse, real subcommands
+    of other tools (`git status --porcelain` is all over this file).
+
+    **`elif` must be in that keyword list**, and note `\bif\b` does not cover it —
+    there is no word boundary between `l` and `i`. `doctor` calls `_pause_exempt`
+    only through `elif _pause_exempt "$dir"; then` (`:6191`); miss that form and a
+    callee reachable *only* through it is silently classified Tier A, ported, and
+    breaks inside the jail at runtime — the exact failure this audit exists to
+    prevent.
 
     Excluded: the function's own body (recursion is not an external caller), the
     trailing dispatch `case`, and comments.
     """
-    opener = r"(?:^|\$\(|`|[;|&({]|\|\||&&|\bif\b|\bthen\b|\belse\b|\bdo\b|!)"
+    kw = r"\b(?:if|elif|then|else|do|while|until)\b"
+    opener = rf"(?:^|\$\(|`|[;|&({{]|\|\||&&|{kw}|!)"
     call = re.compile(rf"{opener}\s*{re.escape(fn)}(?=\s|$|\)|;)")
     own_start, own_end = spans[fn]
     hits: list[tuple[str, int]] = []
@@ -241,11 +255,11 @@ def main() -> int:
     args = ap.parse_args()
 
     lines = load_lines()
-    spans = function_spans(lines)
-    table = dispatch_table(lines)
     dispatch_start = min(
         i for i, line in enumerate(lines, 1) if line.startswith('case "$sub" in')
     )
+    spans = function_spans(lines, dispatch_start)
+    table = dispatch_table(lines)
     subs = set(table)
     launchd = launchd_calls(lines, spans, subs)
     skills = skill_calls(subs)

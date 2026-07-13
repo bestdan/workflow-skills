@@ -26,7 +26,7 @@ tags: [orchestrator, decision, launchd, seatbelt]
 > constrained tier is **2,618 lines across 17 subcommands** — `doctor`, `status`,
 > `classify-exit`, `exit-reason`, the whole supervisor and verify-broker path, and `teardown`.
 > This decision now determines **how much of the file can ever move** — and whether Python is
-> even the right target. Deciding it *after* building 1,458 lines of Python would be deciding it
+> even the right target. Deciding it *after* building 1,422 lines of Python would be deciding it
 > too late to act on. Splitting the decision from the port also resolves the promoter's "unbounded scope"
 > flag: this card is now decision-only and bounded.
 
@@ -59,7 +59,7 @@ Present the options with the audit's real numbers and **get an explicit decision
 user**. Do not default silently — this is the plan's load-bearing call.
 
 - **(a) Freeze the constrained tier in bash.** Port only the renderers and generators
-  (1,458 handler lines, tasks 3–7). `spawn-orchestrator.sh` ends at ~2,618+ lines of supervisor,
+  (1,422 handler lines, tasks 3–7). `spawn-orchestrator.sh` ends at ~2,618+ lines of supervisor,
   reporting, and diagnostic bash — **the entire unattended runtime stays shell.** Zero new
   runtime dependency on the unattended path. **The safe default**, and note the audit made it a
   worse deal than it looked: the port buys the renderers, not the program.
@@ -76,8 +76,8 @@ user**. Do not default silently — this is the plan's load-bearing call.
   `dev_docs/decisions/script_language.md` rejected Go on distribution cost (no plugin install
   hook; a binary release pipeline for a solo repo) — but it did so **while believing the
   constrained tier was ~1,000 lines and Python could take the rest.** The audit measured 2,618 —
-  **2.6x the Tier A total** — so that premise is not merely false, it is inverted. The tradeoff
-  deserves one honest re-examination before 1,458 lines of Python exist.
+  **1.8x the Tier A total** — so that premise is not merely false, it is inverted. The tradeoff
+  deserves one honest re-examination before 1,422 lines of Python exist.
 
 Record the outcome by **amending `dev_docs/decisions/script_language.md`** — do not start a
 competing doc. If the answer is (d), this plan is superseded and must be rewritten before

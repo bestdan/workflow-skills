@@ -131,7 +131,7 @@ _that_ is — so deleting `status`'s bash body breaks the wake loop just as sure
 | `verify-await`     | `verify_await` `:4913`     | 50    | —                                                                                 | —       | yes  | jail — verify handshake (`deliver-task:144`)        |
 | `report-tick`      | `report_tick` `:4587`      | 16    | —                                                                                 | `:1447` | —    | launchd — the in-wake reporter loop                 |
 
-**Tier A — genuinely unconstrained: 12 subcommands, 1,458 handler lines.** No in-process caller
+**Tier A — genuinely unconstrained: 12 subcommands, 1,422 handler lines.** No in-process caller
 that is itself constrained, absent from both generated jobs, never invoked from inside the jail.
 
 | Subcommand            | Fn (`:line`)                  | Lines | Only reached from                      |
@@ -142,7 +142,7 @@ that is itself constrained, absent from both generated jobs, never invoked from 
 | `launch`              | `launch` `:4603`              | 142   | humans / the launch phase              |
 | `write-verify-broker` | `write_verify_broker` `:4963` | 130   | launch-time, attended                  |
 | `render-settings`     | `render_settings` `:1094`     | 62    | launch-time, attended                  |
-| `check-profile`       | `check_profile` `:6226`       | 59    | humans, the suite                      |
+| `check-profile`       | `check_profile` `:6226`       | 23    | humans, the suite                      |
 | `smoke-test`          | `smoke_test` `:1557`          | 39    | `launch` `:4695` (attended)            |
 | `clear-exit-state`    | `clear_exit_state` `:2600`    | 37    | `--resume` (attended) — `resume.md:60` |
 | `record-handle`       | `record_handle` `:1523`       | 34    | `launch` `:4710` (attended)            |
@@ -170,7 +170,7 @@ because it is the assumption the tier rests on:** if `--resume`'s pre-flight is 
 from inside a jailed context, both flip to Tier B immediately.
 
 **The shape of the result did not change: the honest value of the unconstrained port is "the
-renderers and generators."** Tier A is 1,458 handler lines against Tier B's 2,618 — and Tier B
+renderers and generators."** Tier A is 1,422 handler lines against Tier B's 2,618 — and Tier B
 holds every piece of the unattended runtime. It is worse than the second estimate, not better.
 
 **A structural consequence for the port.** `write-launch` and `write-verify-broker` are Tier A —
@@ -199,7 +199,7 @@ added to the pinned launchd PATH. Options, decided at **task 2** (which also reo
 
 | Option                                                               | Result                                     | Cost                                                                                                                                                 |
 | -------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(a) `uv` for Tier A, bash stays for Tier B** _(recommended)_       | the renderers and generators (1,458 lines) | **2,618 lines** of constrained bash survive — the entire unattended runtime                                                                          |
+| **(a) `uv` for Tier A, bash stays for Tier B** _(recommended)_       | the renderers and generators (1,422 lines) | **2,618 lines** of constrained bash survive — the entire unattended runtime                                                                          |
 | **(b) stdlib-only on absolute `/usr/bin/python3`**                   | kills the bash entirely                    | `/usr/bin/python3` is a Command Line Tools shim (and is 3.9 on this machine, vs the repo's ≥3.11); still needs adding to the Seatbelt exec allowlist |
 | **(c) `uv` everywhere, on the pinned PATH _and_ the exec allowlist** | cleanest code                              | largest new runtime dependency on the security-critical unattended path — not recommended                                                            |
 
@@ -228,7 +228,7 @@ whether Python is even the right target — so it is settled before a line is po
 **Why the decision moved to the front.** It originally sat at task 8, on the theory that only
 the wake loop depended on it. The audit killed that theory: the constrained tier is **2,618
 lines across 17 subcommands** — `doctor`, `status`, `classify-exit`, `exit-reason`, the whole
-supervisor and verify-broker path, and `teardown`. Deciding _after_ writing 1,458 lines of
+supervisor and verify-broker path, and `teardown`. Deciding _after_ writing 1,422 lines of
 Python would be deciding too late to act on the answer — especially since one of the answers is
 **(d) a compiled binary (Go)**, which satisfies both constraints at once and would make the
 Python dispatch seam wasted work. Tasks 3–7 stay unconditionally safe under any Python-shaped
@@ -247,13 +247,13 @@ answer, so nothing is lost by settling it first.
 ## Open questions
 
 1. **RESOLVED — the runtime decision moved to the front (task 2).** The task 1 audit showed it
-   gates **2,618 lines across 17 subcommands**, so deciding it after 1,458 lines of Python
+   gates **2,618 lines across 17 subcommands**, so deciding it after 1,422 lines of Python
    existed would be too late to act on. No code is written until task 2 lands. Task 2 explicitly
    reopens **(d) a compiled binary (Go)** — the only option that satisfies the launchd-PATH and
    Seatbelt-exec-allowlist constraints at once — because
    `dev_docs/decisions/script_language.md` rejected Go while believing the constrained tier was
    ~1,000 lines and Python could take the rest. **That premise is now measurably false** (it is
-   2.6x that, and includes the entire unattended runtime), so it gets one honest re-examination.
+   1.8x that, and includes the entire unattended runtime), so it gets one honest re-examination.
 
 2. **RESOLVED — PR #202 merged**, and this branch is cut from it. The `shfmt` reformat is in;
    every `file:line` in the table above is against post-#202 `main`.
@@ -264,6 +264,10 @@ answer, so nothing is lost by settling it first.
    at runtime. Task 3 (the dispatch seam) is the natural place to make this a gate: assert that
    no subcommand on the `PORTED` list is in the audit's Tier B. Recorded here rather than fixed
    here, per the plan's own no-scope-creep rule.
-4. **Is `doctor` (659 lines) worth porting, or worth deleting?** It is a read-only diagnostic,
-   and diagnostics accrete. Porting is ~a day. Deleting is ten minutes. Task 6 requires
-   answering this before writing any code.
+4. **Is `doctor` (661 lines) worth porting, or worth deleting?** The framing this question
+   originally carried — "it is a read-only diagnostic, so deleting it is ten minutes" — is
+   **false, and this PR's own audit disproves it**. `doctor` is a _repair_ tool: it parks tasks
+   via `_set_task_phase` (writing `RUN.md`), removes orphaned git worktrees (`:6066`), and halts
+   the supervisor (`_doctor_halt`, `:5744`). It also runs from inside the jail on every loop
+   iteration. Deleting it is not a cleanup, it is removing the run's self-repair. **Task 8** —
+   not task 6 — has to answer this against that stateful contract.
