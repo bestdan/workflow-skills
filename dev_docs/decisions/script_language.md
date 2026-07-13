@@ -8,8 +8,16 @@ governs **all** non-trivial scripting in this repo, not just that port.
 
 ## Decision
 
-1. **Anything that outgrows shell is written in Python**, run via `uv` with PEP 723 inline
-   metadata (the convention `scripts/validate.py` already established).
+1. **Anything that outgrows shell is written in Python.** Two invocation styles, and the split is
+   a _constraint_, not a preference (amended 2026-07-13 by task 2 — see "The constrained tier's
+   runtime"):
+   - **Unconstrained code** (`validate.py`, the Tier A renderers, ad-hoc scripts) runs via `uv`
+     with PEP 723 inline metadata — the convention `scripts/validate.py` established.
+     Dependencies are free here.
+   - **Constrained code** (anything reachable from launchd's pinned PATH or from inside the
+     Seatbelt jail — the orchestrator's supervisor, `doctor`, `status`, the verify broker) is
+     **stdlib-only on a pinned, pre-flight-resolved absolute interpreter (≥3.11)**. No `uv run`,
+     no resolver, no cache: `uv run` needs `~/.cache/uv` writable and **cannot run in the jail**.
 2. **Short scripts stay in bash.** Roughly < 300 lines of glue around `git`/`gh`/`jq`, gating
    on an exit code. That is shell at its best and there is nothing to gain by moving it.
 3. **Every non-trivial Python file is gated by `pyrefly` (strict) + `ruff`** in `just check`.
@@ -166,16 +174,17 @@ typing, and no `jq`.
   `text/template` is clumsy next to f-strings, and dynamically-shaped `gh api` JSON fights
   static typing into `any`-unmarshaling boilerplate.
 
-**Revisit Go if** eliminating the constrained bash becomes a goal in its own right — a compiled
+**Revisit Go if** eliminating the constrained bash becomes a goal in its own right — ~~a compiled
 binary is the only option that satisfies _both_ the launchd pinned-PATH and the Seatbelt
-`process-exec` allowlist constraints at once.
+`process-exec` allowlist constraints at once.~~
 
 > **That condition triggered, Go was re-examined, and it is re-rejected — but not for the reason
-> above.** See "The constrained tier's runtime" below. The italicised claim in this section —
-> _"a compiled binary is the only option that satisfies both constraints at once"_ — was
-> **tested and found false** (2026-07-13). That was Go's entire differentiator. It is retained
-> here, struck through in spirit, because the reasoning error is the instructive part: the
-> constraint was assumed, never exercised.
+> above.** See "The constrained tier's runtime" below. The struck sentence — _"a compiled binary
+> is the only option that satisfies both constraints at once"_ — was **tested and found false**
+> (2026-07-13): a pinned absolute CPython runs in the jail under one exec grant. That was Go's
+> entire differentiator. The sentence is struck rather than deleted because the _reasoning error_
+> is the instructive part — **the constraint was asserted and never exercised**, which is the
+> failure mode `orch_py_task_11` exists to prevent.
 
 ## The constrained tier's runtime (orchestrator port, task 2)
 

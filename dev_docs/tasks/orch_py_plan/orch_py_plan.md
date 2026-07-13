@@ -143,7 +143,14 @@ and whether Python is even the right target — so it is settled before a line i
 10. [[orch_py_task_10]] — **BUG:** `git` cannot exec inside the jail. The `/usr/bin/git` **shim is
     already granted** by `(subpath "/usr/bin")`; what is ungranted is its **re-exec target** under
     the active developer dir. Found while testing task 2; independent of the port; blocks nothing
-    in it. (Tasks 1–9 are the port; task 10 is a bug card that rides along.)
+    in it.
+11. [[orch_py_task_11]] — **PROCESS:** enforce *exercising*. Four times on this plan a
+    load-bearing claim about runtime behavior was asserted, propagated into a spec, and never
+    executed — each time it was one command to check. Includes the archetype in the code:
+    `smoke-confinement.sh` grants `git` to the jail and never runs it.
+
+(Tasks 1–9 are the port. Tasks 10 and 11 rode along: a bug and a process fix, both found *by* the
+port rather than *in* it.)
 
 ## Open questions
 

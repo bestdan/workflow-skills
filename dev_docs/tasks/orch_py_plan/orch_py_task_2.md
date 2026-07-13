@@ -55,6 +55,11 @@ through the CLI. None can be ported and its bash deleted while its callers remai
 
 ## Task
 
+> **Historical — this section is the question as it was *asked*, not the answer.** The options
+> below are preserved as written, including their false premises, because the Outcome section
+> records that the premise under all of them ("no interpreter can satisfy both constraints") was
+> **never exercised, and is false**. Read the Outcome, not these options.
+
 Present the options with the audit's real numbers and **get an explicit decision from the
 user**. Do not default silently — this is the plan's load-bearing call.
 
@@ -70,9 +75,10 @@ user**. Do not default silently — this is the plan's load-bearing call.
 - **(c) `uv` everywhere** — on the pinned `--path` *and* the exec allowlist. Cleanest code,
   largest new runtime surface on the security-critical unattended path.
 - **(d) Reconsider a compiled binary (Go).** *This option is why the task moved to the front.* A
-  compiled binary **satisfies both constraints at once** — no interpreter to resolve on the
-  PATH, and one literal to add to the exec allowlist. It is the only option that could retire
-  the bash entirely without widening the runtime surface.
+  compiled binary satisfies both constraints at once — no interpreter to resolve on the PATH, and
+  one literal to add to the exec allowlist. ~~It is the only option that could retire the bash
+  entirely without widening the runtime surface.~~ **(Struck: tested and false — a pinned absolute
+  CPython does this too. See Outcome.)**
   `dev_docs/decisions/script_language.md` rejected Go on distribution cost (no plugin install
   hook; a binary release pipeline for a solo repo) — but it did so **while believing the
   constrained tier was ~1,000 lines and Python could take the rest.** The audit measured 2,618 —

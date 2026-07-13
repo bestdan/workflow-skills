@@ -1,9 +1,10 @@
 # Porting `spawn-orchestrator.sh` to Python
 
-**Status:** proposed
+**Status:** accepted — the runtime is decided (task 2, 2026-07-13); the port is unblocked
 **Created:** 2026-07-13
 **Task scaffolding:** `dev_docs/tasks/orch_py_plan/` (local-only — `dev_docs/tasks/*` is
-git-ignored; run `/promote-tasks` to score the nine tasks)
+git-ignored). Nine port tasks (1–9) plus two that rode along: `orch_py_task_10` (the `git`
+jail-exec bug) and `orch_py_task_11` (enforce exercising).
 
 ## The problem
 
