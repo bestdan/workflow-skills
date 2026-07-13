@@ -3832,9 +3832,14 @@ GHFAILEOF
     || bad "doctor halt: invokes the notifier ZERO times" "got $d2_notify_n call(s): $(cat "$D2_NOTIFY")"
   # Now the un-jailed side runs (as it does above the gate on every wake, and
   # from supervisor-check right after the agent exits — the SAME wake).
+  # supervisor-scan runs status-report under REPORT_TIMEOUT_SECONDS_DEFAULT, and
+  # nothing stubs `gh` here, so the report always runs the bound out and is killed.
+  # These cases assert on the alarm, not the report — pin the bound low so the
+  # wait is 2s instead of the 60s production default (see the hung-gh case below,
+  # which does the same). Left at 60 this single line costs the gate a full minute.
   D2_SCAN_NOTIFY="$D2/scan-notify.calls"
   : >"$D2_SCAN_NOTIFY"
-  scanout="$(NOTIFY_GUARD_LOG="$D2_SCAN_NOTIFY" "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  scanout="$(NOTIFY_GUARD_LOG="$D2_SCAN_NOTIFY" SPAWN_REPORT_TIMEOUT=2 "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
   have "doctor halt: the supervisor DELIVERS the doctor's alarm on its next scan" 'ALARM invariant' "$scanout"
   # ...and the UN-jailed side is where the notification actually happens: exactly
   # one, so the seam moved the notification rather than losing it.
@@ -3850,7 +3855,7 @@ GHFAILEOF
   # And it is delivered ONCE: a second scan (the run is still `systemic`) must
   # not re-notify under a second name — that per-wake noise is what makes the
   # next real alarm ignorable.
-  scanout2="$("$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  scanout2="$(SPAWN_REPORT_TIMEOUT=2 "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
   lack "doctor halt: a second scan never re-alarms the run it already announced" 'ALARM systemic' "$scanout2"
 
   # --- I2 (repair): RUN.md fine on the branch, missing from the WORKING TREE
