@@ -430,6 +430,16 @@ die() {
 # reaps the whole tree — killing only the shell function would orphan the `gh` it
 # spawned and leave it running (and accumulating, one per interval). Returns the
 # command's status, or 124 (the `timeout` convention) if it was killed.
+#
+# The watchdog needs the SAME two precautions, for a subtler reason. It is a
+# subshell whose `sleep` is a separate child, so killing the subshell's pid alone
+# leaves that `sleep` alive — and the orphan inherits whatever stdout the caller
+# had. When the caller is a command substitution, `$( )` reads until EVERY writer
+# closes the pipe, so an orphaned `sleep <secs>` holds the substitution open for
+# the whole bound even though the job finished in milliseconds and rc is already
+# 0. So: give the watchdog its own process group and group-kill it (reaping the
+# `sleep` with it), and keep its fds off the caller's stdout. Both are load-
+# bearing; drop either and a bounded call inside `$( )` silently costs `secs`.
 _run_bounded() {
   local secs="$1"
   shift
@@ -437,18 +447,18 @@ _run_bounded() {
   set -m
   "$@" &
   job=$!
-  set +m
   (
     sleep "$secs"
     kill -TERM -"$job" 2>/dev/null
     sleep 2
     kill -KILL -"$job" 2>/dev/null
-  ) 2>/dev/null &
+  ) >/dev/null 2>&1 &
   wd=$!
+  set +m
   wait "$job" 2>/dev/null || rc=$?
   # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
   case "$rc" in 143 | 137) rc=124 ;; esac
-  kill -KILL "$wd" 2>/dev/null
+  kill -KILL -"$wd" 2>/dev/null
   wait "$wd" 2>/dev/null || true
   return "$rc"
 }
