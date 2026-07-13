@@ -3834,7 +3834,19 @@ GHFAILEOF
   # from supervisor-check right after the agent exits — the SAME wake).
   D2_SCAN_NOTIFY="$D2/scan-notify.calls"
   : >"$D2_SCAN_NOTIFY"
+  # This capture is also the regression guard for `_run_bounded`'s watchdog: the
+  # scan bounds its status-report at REPORT_TIMEOUT_SECONDS_DEFAULT (60s), and if
+  # the watchdog's `sleep` survives the kill it keeps THIS `$( )` pipe open for the
+  # whole bound — the scan's own work takes well under a second. So the elapsed
+  # time of the substitution, not just its output, is the assertion. It cost the
+  # gate 60s a call until the watchdog was group-killed with its fds off the pipe.
+  scan_t0=$SECONDS
   scanout="$(NOTIFY_GUARD_LOG="$D2_SCAN_NOTIFY" "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
+  scan_elapsed=$((SECONDS - scan_t0))
+  [ "$scan_elapsed" -lt 15 ] \
+    && ok "doctor halt: a captured supervisor-scan returns as soon as the scan does (the watchdog does not hold the \$( ) pipe)" \
+    || bad "doctor halt: a captured supervisor-scan returns as soon as the scan does" \
+      "took ${scan_elapsed}s — the watchdog's sleep is orphaned and holding the command substitution open"
   have "doctor halt: the supervisor DELIVERS the doctor's alarm on its next scan" 'ALARM invariant' "$scanout"
   # ...and the UN-jailed side is where the notification actually happens: exactly
   # one, so the seam moved the notification rather than losing it.
