@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.54.2] - 2026-07-13
+
+### Fixes
+
+- grant the jail the binaries it was only pretending to have (#208) (436555d)
+
 ## [1.54.1] - 2026-07-13
 
 ### Fixes
