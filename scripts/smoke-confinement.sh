@@ -135,18 +135,23 @@ rm -f "$HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST" "$HOME/.claude/AUTOPILOT_SMOKE_SH
 # real launch uses. A listed-but-unrunnable binary must fail this suite.
 echo "== 1c. Exec grants actually EXECUTE (--toolchain profile) =="
 PROFILE="$D/profile-toolchain.sb"
-allowed "exec git (CLT shim re-execs its real target)" git --version
-if command -v gh >/dev/null 2>&1; then
-  allowed "exec gh (Homebrew bin/ symlink into Cellar)" gh --version
+# PIN the paths — do NOT let $PATH pick the binary. Each assertion below exists to
+# prove ONE grant, and an ambient lookup can satisfy it via a DIFFERENT one: a host
+# with Homebrew git first on PATH would exercise the Cellar grant here, so deleting
+# the xcode-select grant would leave this test green — a regression guard that no
+# longer guards the regression. /usr/bin/git IS the CLT shim this covers.
+allowed "exec git (CLT shim re-execs its real target)" /usr/bin/git --version
+if [ -x /opt/homebrew/bin/gh ]; then
+  allowed "exec gh (Homebrew bin/ symlink into Cellar)" /opt/homebrew/bin/gh --version
 else
-  INDET "exec gh (not installed on this host — a real run needs it)"
+  INDET "exec gh (no Homebrew gh on this host — a real run needs it)"
 fi
 # Not just `--version`: a real commit forks the git-core helpers out of the
 # toolchain's libexec, a second exec hop that a bin-only grant would miss.
 allowed "git commit end-to-end (forks git-core helpers)" bash -c \
-  "cd $D/run/wt && rm -rf gitrepo && git init -q gitrepo && cd gitrepo \
-     && git -c user.email=a@b -c user.name=c commit -q --allow-empty -m smoke \
-     && git log --oneline -1"
+  "cd $D/run/wt && rm -rf gitrepo && /usr/bin/git init -q gitrepo && cd gitrepo \
+     && /usr/bin/git -c user.email=a@b -c user.name=c commit -q --allow-empty -m smoke \
+     && /usr/bin/git log --oneline -1"
 # RE-EXAMINED, not flipped (task 10 acceptance): this denial's intent is "an
 # un-granted interpreter cannot run", and it still holds verbatim under the
 # toolchain profile — CLT's python3 resolves to <dev>/Library/Frameworks/…, which
@@ -159,7 +164,18 @@ denied "exec unlisted /usr/bin/python3 (still unlisted under --toolchain)" \
 # The coarse exec wall's real load-bearing property: exec dirs are all
 # non-writable, and writable scopes are never exec-granted, so a binary the agent
 # STAGES cannot be run. This is what makes the launchctl/open exec denies complete.
-cp /bin/echo "$D/run/wt/staged-binary" 2>/dev/null
+# The fixture MUST fail closed: denied() passes on ANY non-zero exit, so a silently
+# failed cp would leave no file and the assertion would pass on ENOENT instead of on
+# a Seatbelt denial — the same pass-for-the-wrong-reason this whole section exists
+# to kill. Assert the staged binary is real and executable before trusting the deny.
+cp /bin/echo "$D/run/wt/staged-binary" || {
+  echo "could not stage the exec fixture"
+  exit 2
+}
+[ -x "$D/run/wt/staged-binary" ] || {
+  echo "staged exec fixture is not executable"
+  exit 2
+}
 denied "exec a binary staged in the RW worktree" "$D/run/wt/staged-binary" hi
 PROFILE="$D/profile.sb"
 

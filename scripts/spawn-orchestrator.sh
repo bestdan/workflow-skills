@@ -819,11 +819,15 @@ render_profile() {
   # matches the RESOLVED path, and /opt/homebrew/bin is a symlink farm (nearly
   # every entry points into Cellar/<pkg>/<ver>/bin), so the bin-dir grant permits
   # almost no Homebrew binary — `gh`, the tool the agent opens PRs with, included.
-  # Granting Cellar is not a widening of the exec wall: /opt/homebrew/bin was
-  # already granted and is equally user-writable, and Homebrew's tree is not in any
-  # write scope, so the jailed agent cannot stage a binary there. Version-agnostic
-  # by design — a `brew upgrade` moves the target dir and must not silently
-  # re-break the jail.
+  # Cellar IS broader than bin/, and saying otherwise would be a lie: bin/ symlinks
+  # only the LINKED binaries, while Cellar also holds unlinked kegs and each
+  # package's internal libexec helpers. That breadth is acceptable, not free — exec
+  # is a COARSE guard here by design (see the template's exec block): the enforced
+  # wall is that NO exec-granted dir is in any write scope, so the agent cannot
+  # stage a binary in Cellar, and the write/network confinement is untouched.
+  # Version-agnostic by design — a `brew upgrade` moves the target dir, and pinning
+  # Cellar/<pkg>/<ver> would re-break the jail at 3am, which is this bug's whole
+  # lesson.
   if [ "$toolchain" = 1 ]; then
     local d dev
     for d in /bin /usr/bin /usr/sbin /usr/libexec /opt/homebrew/bin /opt/homebrew/Cellar \
