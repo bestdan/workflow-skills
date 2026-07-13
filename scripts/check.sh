@@ -11,13 +11,16 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 with_evals=0
 for arg in "$@"; do
   case "$arg" in
     --with-evals) with_evals=1 ;;
-    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -30,17 +33,11 @@ run() {
   fi
 }
 
-run dprint check
+run dprint check --incremental=false
 run claude plugin validate . --strict
 run uv run scripts/validate.py
-run bash scripts/test-await-pr-review.sh
-run bash scripts/test-preflight-freshness.sh
-run bash scripts/test-preflight.sh
-run bash scripts/test-claude-usage.sh
-run bash scripts/test-spawn-orchestrator.sh
-run bash scripts/test-linear-ready-live.sh
-run bash scripts/test-linear-relations-live.sh
-run bash scripts/test-linear-scan-live.sh
+run scripts/lint-shell.sh
+run scripts/test-shell.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then

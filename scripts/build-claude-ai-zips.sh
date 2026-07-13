@@ -60,7 +60,7 @@ bundle_task() {
   mkdir -p "$dest/commands/handlers"
   cp commands/*.md "$dest/commands/"
   cp commands/handlers/*.md "$dest/commands/handlers/"
-  cat > "$dest/CLAUDE-AI-NOTE.md" <<'EOF'
+  cat >"$dest/CLAUDE-AI-NOTE.md" <<'EOF'
 # Using this skill on claude.ai
 
 This skill was authored as a Claude Code plugin. The slash commands it
@@ -96,8 +96,8 @@ for skill_dir in skills/*/; do
   fi
   case "$name" in
     review-facts) bundle_review_facts ;;
-    task)         bundle_task ;;
-    *)            bundle_default "$name" ;;
+    task) bundle_task ;;
+    *) bundle_default "$name" ;;
   esac
 done
 

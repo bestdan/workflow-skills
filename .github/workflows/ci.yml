@@ -14,11 +14,13 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    name: Deterministic gate
+  quality:
+    name: Static shell quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -33,6 +35,12 @@ jobs:
         # `plugin validate`. Node/npm are preinstalled on ubuntu-latest.
         run: npm install -g dprint@0.54.0 @anthropic-ai/claude-code
 
+      - name: Install shell tools
+        run: |
+          curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
+          curl -fsSL https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+
       # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
       # `claude plugin validate` works headless (no auth) on a GitHub runner. If
       # it requires auth, fold manifest-schema validation into scripts/validate.py
@@ -40,6 +48,19 @@ jobs:
       # and manifest cross-consistency.
       - name: Deterministic quality gate
         run: bash scripts/check.sh
+
+  shell-tests:
+    name: Shell tests (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Deterministic shell tests
+        run: bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no

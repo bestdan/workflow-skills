@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1010,SC2034 # Fixtures intentionally contain shell source and retain outputs for diagnostics.
 # Test harness for scripts/spawn-orchestrator.sh.
 #
 # Self-contained and offline: builds real fixture dirs/binaries in a temp base
@@ -45,8 +46,10 @@ trap 'rm -rf "$BASE"' EXIT
 # recorder and count them (see the doctor halt's zero-notification assertion).
 # Tests with their own stub dir (the alarm suite's $ALSTUB) prepend it to PATH
 # themselves and still win — this guard is the floor, not a ceiling.
-GUARD="$BASE/guard-bin"; mkdir -p "$GUARD"
-NOTIFY_GUARD_LOG="$BASE/guard-notify.calls"; : >"$NOTIFY_GUARD_LOG"
+GUARD="$BASE/guard-bin"
+mkdir -p "$GUARD"
+NOTIFY_GUARD_LOG="$BASE/guard-notify.calls"
+: >"$NOTIFY_GUARD_LOG"
 export NOTIFY_GUARD_LOG
 # The notifiers: record and succeed (a REAL notification is what we are preventing).
 for _n in osascript terminal-notifier open; do
@@ -63,37 +66,55 @@ export PATH="$GUARD:$PATH"
 
 pass=0
 fail=0
-ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
-bad()  { fail=$((fail + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
+ok() {
+  pass=$((pass + 1))
+  echo "ok   - $1"
+}
+bad() {
+  fail=$((fail + 1))
+  echo "FAIL - $1"
+  [ -n "${2:-}" ] && echo "       $2"
+  return 0
+}
 # assert helpers use if/else — `cond && bad || ok` double-fires when bad returns non-zero.
-have()    { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
-lack()    { if grep -qF -- "$2" <<<"$3"; then bad "$1"; else ok "$1"; fi; }
-count_is() { local n; n="$(grep -cF -- "$3" <<<"$4")"; if [ "$n" = "$2" ]; then ok "$1"; else bad "$1" "want $2 got $n"; fi; }
+have() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
+lack() { if grep -qF -- "$2" <<<"$3"; then bad "$1"; else ok "$1"; fi; }
+count_is() {
+  local n
+  n="$(grep -cF -- "$3" <<<"$4")"
+  if [ "$n" = "$2" ]; then ok "$1"; else bad "$1" "want $2 got $n"; fi
+}
 
 # Fixtures: real dirs + a real executable + a real plain file.
-RUN_WT="$BASE/run-wt"; WORKER_WT="$BASE/worker-wt"; REPO_RO="$BASE/repo-ro"
+RUN_WT="$BASE/run-wt"
+WORKER_WT="$BASE/worker-wt"
+REPO_RO="$BASE/repo-ro"
 mkdir -p "$RUN_WT" "$WORKER_WT" "$REPO_RO"
-PLAIN="$BASE/plain"; : >"$PLAIN"
-BIN="$BASE/bin/tool"; mkdir -p "$BASE/bin"; printf '#!/bin/sh\n:\n' >"$BIN"; chmod +x "$BIN"
+PLAIN="$BASE/plain"
+: >"$PLAIN"
+BIN="$BASE/bin/tool"
+mkdir -p "$BASE/bin"
+printf '#!/bin/sh\n:\n' >"$BIN"
+chmod +x "$BIN"
 
 # --- render happy path: assert the token blocks are filled correctly ----------
 prof="$BASE/happy.sb"
 if out="$("$SCRIPT" render-profile --rw "$RUN_WT" --rw "$WORKER_WT" --ro "$REPO_RO" --exec "$BIN" --out "$prof" 2>&1)" \
-   && [ -f "$prof" ]; then
+  && [ -f "$prof" ]; then
   ok "render-profile: exit 0 and writes --out"
 else
   bad "render-profile: exit 0 and writes --out" "$out"
 fi
 
 body="$(cat "$prof" 2>/dev/null)"
-have "profile: deny-default present"      '(deny default)'         "$body"
-have "profile: RW run worktree present"   "(subpath \"$RUN_WT\")"  "$body"
-have "profile: exec binary as literal"    "(literal \"$BIN\")"     "$body"
+have "profile: deny-default present" '(deny default)' "$body"
+have "profile: RW run worktree present" "(subpath \"$RUN_WT\")" "$body"
+have "profile: exec binary as literal" "(literal \"$BIN\")" "$body"
 # An RW path appears twice (file-read* + file-write*); an RO path once (read only).
-count_is "profile: RW path is read+write" 2 "$RUN_WT"   "$body"
-count_is "profile: RO path is read-only"  1 "$REPO_RO"  "$body"
+count_is "profile: RW path is read+write" 2 "$RUN_WT" "$body"
+count_is "profile: RO path is read-only" 1 "$REPO_RO" "$body"
 # no unrendered template tokens remain
-lack "profile: no @@tokens@@ remain"      '@@'                     "$body"
+lack "profile: no @@tokens@@ remain" '@@' "$body"
 
 # --- task 12 / finding #20: the harness's OWN runtime surface (srt-mux socket +
 # the /tmp/claude-<uid> scratch tree + ~/.claude/session-env) must be permitted,
@@ -140,36 +161,41 @@ lack "profile: harness grant does not widen to a blanket /tmp subpath" \
 # (Seatbelt matches process-exec against the resolved vnode path, not the link;
 # `command -v` on Homebrew binaries returns the symlink, so the renderer must
 # canonicalize it or the exec is silently denied.)
-ln -s tool "$BASE/bin/tool-link"   # relative symlink → $BASE/bin/tool
+ln -s tool "$BASE/bin/tool-link" # relative symlink → $BASE/bin/tool
 symprof="$BASE/sym.sb"
 "$SCRIPT" render-profile --rw "$RUN_WT" --exec "$BASE/bin/tool-link" --out "$symprof" >/dev/null 2>&1
 symbody="$(cat "$symprof" 2>/dev/null)"
 have "exec symlink resolves to real target" "(literal \"$BIN\")" "$symbody"
-lack "exec symlink literal not emitted"     "tool-link"          "$symbody"
+lack "exec symlink literal not emitted" "tool-link" "$symbody"
 
 # --- fail-closed: bad inputs exit 2 and write nothing -------------------------
 fc() { # <name> <expected-substr> <args...>
-  local name="$1" want="$2"; shift 2
-  local target="$BASE/fc.sb"; rm -f "$target"
+  local name="$1" want="$2"
+  shift 2
+  local target="$BASE/fc.sb"
+  rm -f "$target"
   local o c
-  o="$("$SCRIPT" render-profile "$@" --out "$target" 2>&1)"; c=$?
+  o="$("$SCRIPT" render-profile "$@" --out "$target" 2>&1)"
+  c=$?
   if [ "$c" = 2 ] && [ ! -e "$target" ] && printf '%s' "$o" | grep -qF "$want"; then
     ok "fail-closed: $name"
   else
     bad "fail-closed: $name" "exit=$c wrote=$([ -e "$target" ] && echo YES || echo no) msg=$o"
   fi
 }
-fc "relative rw"        "must be absolute"          --rw "relative/path"
-fc "missing rw"         "does not exist"            --rw "$BASE/nope"
-fc "exec is a dir"      "not an executable file"    --exec "$REPO_RO"
-fc "exec non-exec file" "not an executable file"    --exec "$PLAIN"
+fc "relative rw" "must be absolute" --rw "relative/path"
+fc "missing rw" "does not exist" --rw "$BASE/nope"
+fc "exec is a dir" "not an executable file" --exec "$REPO_RO"
+fc "exec non-exec file" "not an executable file" --exec "$PLAIN"
 
 # --out required
-o="$("$SCRIPT" render-profile --rw "$RUN_WT" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --out' \
+o="$("$SCRIPT" render-profile --rw "$RUN_WT" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --out' \
   && ok "fail-closed: --out required" || bad "fail-closed: --out required" "$o"
 
 # unknown subcommand
-o="$("$SCRIPT" bogus 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown subcommand' \
+o="$("$SCRIPT" bogus 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown subcommand' \
   && ok "usage: unknown subcommand exits 2" || bad "usage: unknown subcommand exits 2" "$o"
 
 # --- Seatbelt compile check (macOS only; skip-with-note elsewhere) ------------
@@ -206,8 +232,8 @@ else
   echo "skip - check-profile: --exec-dir profile compiles (sandbox-exec not available)"
 fi
 
-fc "exec-dir /"           "refusing --exec-dir /"     --exec-dir /
-fc "exec-dir plain file"  "not a directory"           --exec-dir "$PLAIN"
+fc "exec-dir /" "refusing --exec-dir /" --exec-dir /
+fc "exec-dir plain file" "not a directory" --exec-dir "$PLAIN"
 
 if command -v sandbox-exec >/dev/null 2>&1; then
   EDBIN=""
@@ -215,7 +241,10 @@ if command -v sandbox-exec >/dev/null 2>&1; then
   # `sed --version` exits non-zero (unknown flag), which would false-fail even when
   # exec-dir confinement is working.
   for cand in /usr/bin/true /bin/echo /usr/bin/env; do
-    if command -v "$cand" >/dev/null 2>&1; then EDBIN="$cand"; break; fi
+    if command -v "$cand" >/dev/null 2>&1; then
+      EDBIN="$cand"
+      break
+    fi
   done
   if [ -n "$EDBIN" ]; then
     EDDIR="$(dirname "$EDBIN")"
@@ -257,11 +286,11 @@ fi
 escprof="$BASE/escape.sb"
 "$SCRIPT" render-profile --exec-dir /bin --rw "$RUN_WT" --out "$escprof" >/dev/null 2>&1
 escbody="$(cat "$escprof" 2>/dev/null)"
-have "escape: denies mach-lookup to launchd"       'com.apple.xpc.launchd'          "$escbody"
+have "escape: denies mach-lookup to launchd" 'com.apple.xpc.launchd' "$escbody"
 have "escape: denies mach-lookup to launchservices" 'com.apple.coreservices.launchservicesd' "$escbody"
-have "escape: denies exec of launchctl"            '(literal "/bin/launchctl")'     "$escbody"
-have "escape: denies exec of open"                 '(literal "/usr/bin/open")'      "$escbody"
-have "escape: denies exec of osascript"            '(literal "/usr/bin/osascript")' "$escbody"
+have "escape: denies exec of launchctl" '(literal "/bin/launchctl")' "$escbody"
+have "escape: denies exec of open" '(literal "/usr/bin/open")' "$escbody"
+have "escape: denies exec of osascript" '(literal "/usr/bin/osascript")' "$escbody"
 if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
   # /bin is exec-allowed here, so only the explicit process-exec deny can block
   # launchctl — a clean signal the escape binary is walled off, not merely absent.
@@ -278,14 +307,14 @@ fi
 sj="$BASE/settings.json"
 "$SCRIPT" render-settings --source linear --coder codex --out "$sj" >/dev/null 2>&1
 sbody="$(cat "$sj" 2>/dev/null)"
-have "settings: sandbox enabled"          '"enabled":true'          "$sbody"
-have "settings: deny-default allowlist"   '"allowedDomains"'        "$sbody"
+have "settings: sandbox enabled" '"enabled":true' "$sbody"
+have "settings: deny-default allowlist" '"allowedDomains"' "$sbody"
 have "settings: loopback bind off by default" '"allowLocalBinding":false' "$sbody"
-have "settings: {codex,linear} has openai" 'api.openai.com'          "$sbody"
-have "settings: {codex,linear} has linear" 'api.linear.app'          "$sbody"
-have "settings: always has anthropic"      'api.anthropic.com'       "$sbody"
-lack "settings: codex run omits devin"     'api.devin.ai'            "$sbody"
-lack "settings: no broad googleapis"       'googleapis'              "$sbody"
+have "settings: {codex,linear} has openai" 'api.openai.com' "$sbody"
+have "settings: {codex,linear} has linear" 'api.linear.app' "$sbody"
+have "settings: always has anthropic" 'api.anthropic.com' "$sbody"
+lack "settings: codex run omits devin" 'api.devin.ai' "$sbody"
+lack "settings: no broad googleapis" 'googleapis' "$sbody"
 if command -v python3 >/dev/null 2>&1; then
   if python3 -m json.tool "$sj" >/dev/null 2>&1; then ok "settings: valid JSON"; else bad "settings: valid JSON"; fi
 else
@@ -298,34 +327,38 @@ lack "settings: plan source omits linear" 'api.linear.app' "$(cat "$BASE/plan.js
 
 # fail-closed: unresolved / wildcard agy host writes nothing
 sfc() { # <name> <want-substr> <args...>
-  local name="$1" want="$2"; shift 2
-  local t="$BASE/sfc.json"; rm -f "$t"
-  local o c; o="$("$SCRIPT" render-settings "$@" --out "$t" 2>&1)"; c=$?
+  local name="$1" want="$2"
+  shift 2
+  local t="$BASE/sfc.json"
+  rm -f "$t"
+  local o c
+  o="$("$SCRIPT" render-settings "$@" --out "$t" 2>&1)"
+  c=$?
   if [ "$c" = 2 ] && [ ! -e "$t" ] && printf '%s' "$o" | grep -qF "$want"; then
     ok "settings fail-closed: $name"
   else
     bad "settings fail-closed: $name" "exit=$c wrote=$([ -e "$t" ] && echo YES || echo no) msg=$o"
   fi
 }
-sfc "agy needs --agy-host"  "requires --agy-host"  --source plan --coder agy
-sfc "agy rejects wildcard"  "never a wildcard"     --source plan --coder agy --agy-host '*.googleapis.com'
-sfc "unknown source"        "unknown --source"     --source bogus --coder codex
+sfc "agy needs --agy-host" "requires --agy-host" --source plan --coder agy
+sfc "agy rejects wildcard" "never a wildcard" --source plan --coder agy --agy-host '*.googleapis.com'
+sfc "unknown source" "unknown --source" --source bogus --coder codex
 # host-value injection: a per-run --mcp-host must not smuggle a bare wildcard or JSON
-sfc "mcp bare wildcard"     "invalid egress host"  --source plan --coder codex --mcp-host '*'
-sfc "mcp JSON injection"    "invalid egress host"  --source plan --coder codex --mcp-host 'x","*'
-sfc "mcp bad chars"         "invalid egress host"  --source plan --coder codex --mcp-host 'evil;rm'
+sfc "mcp bare wildcard" "invalid egress host" --source plan --coder codex --mcp-host '*'
+sfc "mcp JSON injection" "invalid egress host" --source plan --coder codex --mcp-host 'x","*'
+sfc "mcp bad chars" "invalid egress host" --source plan --coder codex --mcp-host 'evil;rm'
 # a well-formed mcp host and a legit subdomain wildcard are accepted
 "$SCRIPT" render-settings --source plan --coder codex --mcp-host mcp.example.com --out "$BASE/mcp.json" >/dev/null 2>&1
 have "settings: valid mcp host accepted" 'mcp.example.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
-have "settings: github wildcard kept"    '*.githubusercontent.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
+have "settings: github wildcard kept" '*.githubusercontent.com' "$(cat "$BASE/mcp.json" 2>/dev/null)"
 
 # --add-task-host: a plan-source run's add-task destination is allowed regardless
 # of --source (a plan run whose add-task handler routes to Linear still needs egress)
 "$SCRIPT" render-settings --source plan --add-task-host api.linear.app --out "$BASE/addtask.json" >/dev/null 2>&1
 have "settings: plan source + add-task-host allows linear" 'api.linear.app' "$(cat "$BASE/addtask.json" 2>/dev/null)"
 sfc "add-task-host bare wildcard" "invalid egress host" --source plan --add-task-host '*'
-sfc "add-task-host bad chars"     "invalid egress host" --source plan --add-task-host 'evil*'
-sfc "add-task-host empty"         "invalid egress host" --source plan --add-task-host ''
+sfc "add-task-host bad chars" "invalid egress host" --source plan --add-task-host 'evil*'
+sfc "add-task-host empty" "invalid egress host" --source plan --add-task-host ''
 sfc "add-task-host JSON injection" "invalid egress host" --source plan --add-task-host 'x","*'
 sfc "add-task-host embedded newline" "invalid egress host" --source plan --add-task-host $'good.com\nevil*.com'
 
@@ -337,42 +370,49 @@ mkdir -p "$BASE/root/wt"
   && ok "confine-under: rw inside root accepted" || bad "confine-under: rw inside root accepted"
 have "render: profile carries the @spawn-tmpdir stamp" ";; @spawn-tmpdir: $BASE/root/wt/tmp" "$(cat "$BASE/cf.sb" 2>/dev/null)"
 # --tmpdir must sit inside a confinement root when confined (bounds the job's mkdir).
-tdesc="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/elsewhere/tmp" --out "$BASE/td.sb" 2>&1)"; tdc=$?
+tdesc="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/elsewhere/tmp" --out "$BASE/td.sb" 2>&1)"
+tdc=$?
 [ "$tdc" = 2 ] && printf '%s' "$tdesc" | grep -qF 'escapes --confine-under' \
   && ok "render: --tmpdir outside confine root fails closed" || bad "render: --tmpdir outside confine root fails closed" "$tdesc"
 # SBPL line-injection: a scope path containing a newline (which could smuggle a
 # fake `;; @spawn-tmpdir:` line or its own allow rule) is rejected fail-closed.
 nlpath="$(printf '/x\n;; @spawn-tmpdir: /evil')"
-nlo="$("$SCRIPT" render-profile --rw "$nlpath" --tmpdir "$BASE/root/wt/tmp" --out "$BASE/nl.sb" 2>&1)"; nlc=$?
+nlo="$("$SCRIPT" render-profile --rw "$nlpath" --tmpdir "$BASE/root/wt/tmp" --out "$BASE/nl.sb" 2>&1)"
+nlc=$?
 [ "$nlc" = 2 ] && [ ! -e "$BASE/nl.sb" ] && printf '%s' "$nlo" | grep -qF 'newline' \
   && ok "render: a scope path with a newline fails closed" || bad "render: a scope path with a newline fails closed" "exit=$nlc"
-cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"; cfc=$?
+cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"
+cfc=$?
 if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
   ok "confine-under: rw / fails closed"
 else
   bad "confine-under: rw / fails closed" "exit=$cfc"
 fi
 # floor holds even WITHOUT --confine-under (the guard is opt-in; the floor isn't)
-rfo="$("$SCRIPT" render-profile --rw / --out "$BASE/rf.sb" 2>&1)"; rfc=$?
+rfo="$("$SCRIPT" render-profile --rw / --out "$BASE/rf.sb" 2>&1)"
+rfc=$?
 [ "$rfc" = 2 ] && [ ! -e "$BASE/rf.sb" ] && printf '%s' "$rfo" | grep -qF 'refusing --rw /' \
   && ok "floor: rw / refused with no --confine-under" || bad "floor: rw / refused with no --confine-under" "exit=$rfc"
 # a sibling that shares a prefix but is NOT under the root is rejected (literal prefix)
 mkdir -p "$BASE/rootX/wt"
-sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/wt" --out "$BASE/sib.sb" 2>&1)"; sibc=$?
+sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/wt" --out "$BASE/sib.sb" 2>&1)"
+sibc=$?
 [ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
   && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
 
 # --- cred-ro: a credential file stays RO inside an RW state dir (task 3, P1 #5) --
 # A tool state dir is --rw (its sessions/caches must be writable), but its own
 # token must not be — the (subpath) write allow would otherwise cover it.
-STATE="$BASE/state"; mkdir -p "$STATE"
-CREDF="$STATE/auth.json"; printf '{"token":"secret"}\n' >"$CREDF"
+STATE="$BASE/state"
+mkdir -p "$STATE"
+CREDF="$STATE/auth.json"
+printf '{"token":"secret"}\n' >"$CREDF"
 crprof="$BASE/cred.sb"
 "$SCRIPT" render-profile --rw "$STATE" --cred-ro "$CREDF" --exec "$BIN" --out "$crprof" >/dev/null 2>&1
 crbody="$(cat "$crprof" 2>/dev/null)"
-have "cred-ro: emits a deny file-write* block"  '(deny file-write*'      "$crbody"
-have "cred-ro: denies the credential literal"   "(literal \"$CREDF\")"   "$crbody"
-lack "cred-ro: no @@tokens@@ remain"            '@@'                     "$crbody"
+have "cred-ro: emits a deny file-write* block" '(deny file-write*' "$crbody"
+have "cred-ro: denies the credential literal" "(literal \"$CREDF\")" "$crbody"
+lack "cred-ro: no @@tokens@@ remain" '@@' "$crbody"
 # Ordering is load-bearing AND must be proved precisely: Seatbelt takes the LAST
 # matching rule, so the cred deny must follow the state dir's *file-write* allow*
 # specifically — not merely some earlier write rule (the static /dev/null allow),
@@ -396,7 +436,7 @@ fi
 lack "cred-ro: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nocred.sb" 2>/dev/null)"
 # fail-closed: a missing file / a directory writes nothing and exits 2
 fc "cred-ro missing file" "does not exist" --cred-ro "$BASE/nope-cred"
-fc "cred-ro is a dir"     "not a file"     --cred-ro "$STATE"
+fc "cred-ro is a dir" "not a file" --cred-ro "$STATE"
 
 # behavioral proof (macOS only): the state dir is writable, the token is not,
 # and the token is still READABLE (the deny is write-only).
@@ -440,13 +480,14 @@ fi
 # supervisor-state, and that ledger is only an authority the agent cannot forge
 # if the agent cannot write it — even though the run worktree (where it lives)
 # is otherwise --rw.
-WDROOT="$BASE/wd"; mkdir -p "$WDROOT/.auto-pilot"
+WDROOT="$BASE/wd"
+mkdir -p "$WDROOT/.auto-pilot"
 wdprof="$BASE/wd.sb"
 "$SCRIPT" render-profile --rw "$WDROOT" --workdir "$WDROOT" --exec "$BIN" --out "$wdprof" >/dev/null 2>&1
 wdbody="$(cat "$wdprof" 2>/dev/null)"
-have "--workdir: emits a deny file-write* block"        '(deny file-write*'                                   "$wdbody"
-have "--workdir: denies the supervisor-state literal"   "(literal \"$WDROOT/.auto-pilot/supervisor-state\")"   "$wdbody"
-lack "--workdir: no @@tokens@@ remain"                   '@@'                                                   "$wdbody"
+have "--workdir: emits a deny file-write* block" '(deny file-write*' "$wdbody"
+have "--workdir: denies the supervisor-state literal" "(literal \"$WDROOT/.auto-pilot/supervisor-state\")" "$wdbody"
+lack "--workdir: no @@tokens@@ remain" '@@' "$wdbody"
 # Precise ordering, same technique as the cred-ro proof above: the RW allow for
 # $WDROOT must appear, and THEN (last-match-wins) the deny for the state file.
 wd_order_ok="$(awk -v st="(subpath \"$WDROOT\")" -v sf="(literal \"$WDROOT/.auto-pilot/supervisor-state\")" '
@@ -467,13 +508,15 @@ fi
 # genuinely refuses to stage it), not merely that a .gitignore line exists — the
 # line is the mechanism, being untracked is the property.
 if command -v git >/dev/null 2>&1; then
-  GIROOT="$BASE/gitignore-ledger"; mkdir -p "$GIROOT"
+  GIROOT="$BASE/gitignore-ledger"
+  mkdir -p "$GIROOT"
   git init -q "$GIROOT" 2>/dev/null
-  git -C "$GIROOT" config user.email t@t; git -C "$GIROOT" config user.name t
+  git -C "$GIROOT" config user.email t@t
+  git -C "$GIROOT" config user.name t
   git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
   : >"$GIROOT/gi.log"
-  ( cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
-      --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1 ) || true
+  (cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
+    --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1) || true
   if [ -f "$GIROOT/.auto-pilot/supervisor-state" ]; then
     # `git add` must SUCCEED before its result means anything: a swallowed failure
     # (locked index, broken fixture) leaves an empty cached diff, which reads as
@@ -482,7 +525,7 @@ if command -v git >/dev/null 2>&1; then
       bad "supervisor-state: precondition — \`git add -A\` succeeds" "git add failed in $GIROOT"
     elif git -C "$GIROOT" diff --cached --name-only | grep -qxF '.auto-pilot/supervisor-state'; then
       bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
-          "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
+        "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
     else
       ok "supervisor-state: \`git add -A\` cannot stage the supervisor ledger"
     fi
@@ -497,7 +540,8 @@ fi
 # The leaf file need not exist yet (tolerated like --tmpdir tolerates the
 # harness's lazily created dirs) — a workdir whose .auto-pilot/supervisor-state
 # hasn't been written yet must still render, not fail closed.
-WDROOT2="$BASE/wd2"; mkdir -p "$WDROOT2"   # note: no .auto-pilot/ at all yet
+WDROOT2="$BASE/wd2"
+mkdir -p "$WDROOT2" # note: no .auto-pilot/ at all yet
 if o="$("$SCRIPT" render-profile --rw "$WDROOT2" --workdir "$WDROOT2" --exec "$BIN" --out "$BASE/wd2.sb" 2>&1)"; then
   ok "--workdir: a not-yet-existing .auto-pilot/supervisor-state does not fail closed"
 else
@@ -548,14 +592,14 @@ wlout="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.jso
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --until 'T' --label com.autopilot.test --claude-bin "$BIN" \
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/launch.sh" --out-plist "$BASE/job.plist" 2>&1)"
 lbody="$(cat "$BASE/launch.sh" 2>/dev/null)"
-have "launch: composes sandbox-exec -f"        'sandbox-exec -f'                    "$lbody"
-have "launch: invokes resolved claude bin"     "$BIN"                               "$lbody"
-have "launch: -p reads prompt from file"       '-p "$(cat'                          "$lbody"
-have "launch: bypassPermissions flag"          '--permission-mode bypassPermissions' "$lbody"
-have "launch: passes --settings"               '--settings'                         "$lbody"
-have "launch: redirects to log"                ">>$BASE/o.log"                       "$lbody"
-have "launch: emits --verbose"                 '--verbose'                           "$lbody"
-have "launch: exports resolved PATH"           "export PATH=$LAUNCH_PATH"            "$lbody"
+have "launch: composes sandbox-exec -f" 'sandbox-exec -f' "$lbody"
+have "launch: invokes resolved claude bin" "$BIN" "$lbody"
+have "launch: -p reads prompt from file" '-p "$(cat' "$lbody"
+have "launch: bypassPermissions flag" '--permission-mode bypassPermissions' "$lbody"
+have "launch: passes --settings" '--settings' "$lbody"
+have "launch: redirects to log" ">>$BASE/o.log" "$lbody"
+have "launch: emits --verbose" '--verbose' "$lbody"
+have "launch: exports resolved PATH" "export PATH=$LAUNCH_PATH" "$lbody"
 verbose_ln="$(printf '%s\n' "$lbody" | grep -n -- '--verbose' | head -1 | cut -d: -f1)"
 sjson_ln="$(printf '%s\n' "$lbody" | grep -n -- '--output-format stream-json' | head -1 | cut -d: -f1)"
 if [ -n "$verbose_ln" ] && [ -n "$sjson_ln" ] && [ "$verbose_ln" -lt "$sjson_ln" ]; then
@@ -572,9 +616,9 @@ fi
 # a body-wide assertion still passes, blessing exactly half of the bug this task
 # exists to fix (and the half that matters most: supervisor-scan runs ABOVE the
 # gate, so it is the only park-storm alarm path on a gated wake).
-lscan="$(printf '%s\n' "$lbody"  | grep 'supervisor-scan'  || true)"
-lchk="$(printf  '%s\n' "$lbody"  | grep 'supervisor-check' || true)"
-have "launch: supervisor-scan defaults --park-limit to 3"  '--park-limit 3' "$lscan"
+lscan="$(printf '%s\n' "$lbody" | grep 'supervisor-scan' || true)"
+lchk="$(printf '%s\n' "$lbody" | grep 'supervisor-check' || true)"
+have "launch: supervisor-scan defaults --park-limit to 3" '--park-limit 3' "$lscan"
 have "launch: supervisor-check defaults --park-limit to 3" '--park-limit 3' "$lchk"
 # an explicit --park-limit is threaded into BOTH the supervisor-scan and
 # supervisor-check invocations in the generated wrapper.
@@ -583,9 +627,9 @@ have "launch: supervisor-check defaults --park-limit to 3" '--park-limit 3' "$lc
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --park-limit 7 \
   --out-script "$BASE/pl.sh" --out-plist "$BASE/pl.plist" >/dev/null 2>&1
 plbody="$(cat "$BASE/pl.sh" 2>/dev/null)"
-pscan="$(printf '%s\n' "$plbody" | grep 'supervisor-scan'  || true)"
-pchk="$(printf  '%s\n' "$plbody" | grep 'supervisor-check' || true)"
-have "launch: --park-limit threaded into supervisor-scan"  '--park-limit 7' "$pscan"
+pscan="$(printf '%s\n' "$plbody" | grep 'supervisor-scan' || true)"
+pchk="$(printf '%s\n' "$plbody" | grep 'supervisor-check' || true)"
+have "launch: --park-limit threaded into supervisor-scan" '--park-limit 7' "$pscan"
 have "launch: --park-limit threaded into supervisor-check" '--park-limit 7' "$pchk"
 # --pause-exempt-max defaults to 21600 (6h) in the generated wrapper when
 # omitted. It belongs ONLY on the supervisor-SCAN line — the cap is enforced
@@ -594,8 +638,8 @@ have "launch: --park-limit threaded into supervisor-check" '--park-limit 7' "$pc
 # --park-limit/--no-progress-limit are. Asserted per line, same reasoning as
 # the --park-limit assertion above: a body-wide substring match cannot tell
 # "present on scan" from "present on check" apart.
-have "launch: supervisor-scan defaults --pause-exempt-max to 21600"  '--pause-exempt-max 21600' "$lscan"
-lack "launch: supervisor-check never receives --pause-exempt-max"    '--pause-exempt-max'        "$lchk"
+have "launch: supervisor-scan defaults --pause-exempt-max to 21600" '--pause-exempt-max 21600' "$lscan"
+lack "launch: supervisor-check never receives --pause-exempt-max" '--pause-exempt-max' "$lchk"
 # an explicit --pause-exempt-max is threaded into supervisor-scan, and ONLY
 # supervisor-scan.
 "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
@@ -603,21 +647,23 @@ lack "launch: supervisor-check never receives --pause-exempt-max"    '--pause-ex
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --pause-exempt-max 90 \
   --out-script "$BASE/pem.sh" --out-plist "$BASE/pem.plist" >/dev/null 2>&1
 pembody="$(cat "$BASE/pem.sh" 2>/dev/null)"
-pemscan="$(printf '%s\n' "$pembody" | grep 'supervisor-scan'  || true)"
-pemchk="$(printf  '%s\n' "$pembody" | grep 'supervisor-check' || true)"
-have "launch: --pause-exempt-max threaded into supervisor-scan"      '--pause-exempt-max 90' "$pemscan"
-lack "launch: --pause-exempt-max never threaded into supervisor-check" '--pause-exempt-max'  "$pemchk"
+pemscan="$(printf '%s\n' "$pembody" | grep 'supervisor-scan' || true)"
+pemchk="$(printf '%s\n' "$pembody" | grep 'supervisor-check' || true)"
+have "launch: --pause-exempt-max threaded into supervisor-scan" '--pause-exempt-max 90' "$pemscan"
+lack "launch: --pause-exempt-max never threaded into supervisor-check" '--pause-exempt-max' "$pemchk"
 # fail-closed: garbage --pause-exempt-max is refused, and nothing is written.
 pembad="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.pembad --claude-bin "$BIN" \
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --pause-exempt-max 0 \
-  --out-script "$BASE/pembad.sh" --out-plist "$BASE/pembad.plist" 2>&1)"; pembadc=$?
+  --out-script "$BASE/pembad.sh" --out-plist "$BASE/pembad.plist" 2>&1)"
+pembadc=$?
 [ "$pembadc" = 2 ] && [ ! -e "$BASE/pembad.sh" ] && printf '%s' "$pembad" | grep -qF 'positive integer' \
   && ok "write-launch: --pause-exempt-max 0 fails closed" \
   || bad "write-launch: --pause-exempt-max 0 fails closed" "exit=$pembadc $pembad"
 # fail-closed at the supervisor-scan CLI itself, not just at write-launch's
 # generation-time check — the two validate independently.
-scpe="$("$SCRIPT" supervisor-scan --dir "$BASE" --label com.autopilot.pescan --pause-exempt-max abc 2>&1)"; scpec=$?
+scpe="$("$SCRIPT" supervisor-scan --dir "$BASE" --label com.autopilot.pescan --pause-exempt-max abc 2>&1)"
+scpec=$?
 [ "$scpec" = 2 ] && printf '%s' "$scpe" | grep -qF 'positive integer' \
   && ok "supervisor-scan: --pause-exempt-max abc fails closed" \
   || bad "supervisor-scan: --pause-exempt-max abc fails closed" "exit=$scpec $scpe"
@@ -690,7 +736,10 @@ wltn="$("$SCRIPT" write-launch --profile "$BASE/nostamp.sb" --settings "$BASE/wl
 # Belt to the braces (canonicalize's newline guard blocks the injection at the
 # source): even if an earlier `;; @spawn-tmpdir:` line were present, the REAL
 # stamp is appended LAST, so write-launch (tail -1) must pick it, not the forgery.
-{ printf ';; @spawn-tmpdir: /evil/tmp\n'; cat "$BASE/cf.sb"; } >"$BASE/forged.sb"
+{
+  printf ';; @spawn-tmpdir: /evil/tmp\n'
+  cat "$BASE/cf.sb"
+} >"$BASE/forged.sb"
 "$SCRIPT" write-launch --profile "$BASE/forged.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.fg --claude-bin "$BIN" --path "$LAUNCH_PATH" \
   --out-script "$BASE/fg.sh" --out-plist "$BASE/fg.plist" >/dev/null 2>&1
@@ -726,24 +775,28 @@ done
 # smoke test passes, let the GUARD's launchctl stub stop the detach (print
 # exits 1 → no pid → launch fails AFTER the artifacts are written). launchctl
 # is already shadowed suite-wide, so nothing reaches the real launchd.
-RL="$BASE/real-launch"; mkdir -p "$RL/bin"
-printf '#!/bin/sh\nprintf %s\n' "'{\"type\":\"result\"}\\n'" >"$RL/bin/claude"; chmod +x "$RL/bin/claude"
-printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$RL/bin/sandbox-exec"; chmod +x "$RL/bin/sandbox-exec"
+RL="$BASE/real-launch"
+mkdir -p "$RL/bin"
+printf '#!/bin/sh\nprintf %s\n' "'{\"type\":\"result\"}\\n'" >"$RL/bin/claude"
+chmod +x "$RL/bin/claude"
+printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$RL/bin/sandbox-exec"
+chmod +x "$RL/bin/sandbox-exec"
 rlout="$(PATH="$RL/bin:$PATH" "$SCRIPT" launch \
   --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/rl.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.rl \
   --claude-bin "$RL/bin/claude" --path "$RL/bin:$LAUNCH_PATH" \
   --park-limit 9 --pause-exempt-max 77 --no-progress-limit 4 --report-every 1m \
   --report-gh "$RL/bin/claude" --report-usage-bin "$RL/bin/claude" \
-  --out-script "$RL/launch.sh" --out-plist "$RL/job.plist" --handle "$RL/handle" 2>&1)"; rlc=$?
+  --out-script "$RL/launch.sh" --out-plist "$RL/job.plist" --handle "$RL/handle" 2>&1)"
+rlc=$?
 lack "real launch: write_launch accepts every flag launch forwards (no unknown-argument die)" \
   'unknown write-launch argument' "$rlout"
 have "real launch: got past write-launch AND the smoke test (the real order ran)" \
   'smoke-test OK' "$rlout"
 rlbody="$(cat "$RL/launch.sh" 2>/dev/null)"
-rlscan="$(printf '%s\n' "$rlbody" | grep 'supervisor-scan'  || true)"
-rlchk="$(printf  '%s\n' "$rlbody" | grep 'supervisor-check' || true)"
-have "real launch: --park-limit lands on the generated supervisor-scan line"  '--park-limit 9' "$rlscan"
+rlscan="$(printf '%s\n' "$rlbody" | grep 'supervisor-scan' || true)"
+rlchk="$(printf '%s\n' "$rlbody" | grep 'supervisor-check' || true)"
+have "real launch: --park-limit lands on the generated supervisor-scan line" '--park-limit 9' "$rlscan"
 have "real launch: --park-limit lands on the generated supervisor-check line" '--park-limit 9' "$rlchk"
 have "real launch: --report-every lands on the generated supervisor-scan line" '--report-every 1m' "$rlscan"
 # the failure it DOES hit is the stubbed launchctl's missing pid — i.e. the
@@ -766,15 +819,18 @@ fi
 # so it can't green-light an invocation the real launch rejects. Grepped from
 # source since smoke-test execs claude for real and can't run offline here.
 smoke_src="$(sed -n '/^smoke_test()/,/^}/p' "$SCRIPT")"
-have "smoke-test: uses --verbose"              '--verbose'                 "$smoke_src"
+have "smoke-test: uses --verbose" '--verbose' "$smoke_src"
 have "smoke-test: uses --output-format stream-json" '--output-format stream-json' "$smoke_src"
 
 # --- task 4: verify broker (run verify OUTSIDE the jail) ----------------------
 # The broker just runs `bash -c "$cmd"`, so these round-trip in-jail with no
 # sandbox nesting — the pin/containment/fail-closed logic is fully exercised here.
 if command -v shasum >/dev/null 2>&1; then
-  VB="$BASE/vb"; mkdir -p "$VB/root/wt" "$VB/outside"; SENT="$VB/sentinel"
-  ROOT="$(cd "$VB/root" && pwd -P)"; WT="$(cd "$VB/root/wt" && pwd -P)"
+  VB="$BASE/vb"
+  mkdir -p "$VB/root/wt" "$VB/outside"
+  SENT="$VB/sentinel"
+  ROOT="$(cd "$VB/root" && pwd -P)"
+  WT="$(cd "$VB/root/wt" && pwd -P)"
   CMD='echo VERIFY_RAN; exit 0'
   PIN="$(printf '%s' "$CMD" | shasum -a 256 | awk '{print $1}')"
 
@@ -782,29 +838,30 @@ if command -v shasum >/dev/null 2>&1; then
   "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "$PIN" --id rt >/dev/null 2>&1
   have "verify-request: writes the request sentinel" "" "$([ -e "$SENT/rt.request" ] && echo present)"
   "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
-  have "verify-broker: consumes the request"  "" "$([ ! -e "$SENT/rt.request" ] && echo consumed)"
+  have "verify-broker: consumes the request" "" "$([ ! -e "$SENT/rt.request" ] && echo consumed)"
   rtres="$(cat "$SENT/rt.result" 2>/dev/null)"
-  have "verify-broker: result carries code 0"   'code: 0'    "$rtres"
-  have "verify-broker: ran the pinned command"  'VERIFY_RAN' "$rtres"
+  have "verify-broker: result carries code 0" 'code: 0' "$rtres"
+  have "verify-broker: ran the pinned command" 'VERIFY_RAN' "$rtres"
   awo="$("$SCRIPT" verify-await --sentinel-dir "$SENT" --id rt --timeout 4 2>&1)"
-  have "verify-await: reports code + output"     'code=0'     "$awo"
-  have "verify-await: prints the verify output"  'VERIFY_RAN' "$awo"
+  have "verify-await: reports code + output" 'code=0' "$awo"
+  have "verify-await: prints the verify output" 'VERIFY_RAN' "$awo"
 
   # a request whose cmd_hash != the broker's pinned hash is REFUSED, never run
   "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash deadbeef --id mism >/dev/null 2>&1
   "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
   mres="$(cat "$SENT/mism.result" 2>/dev/null)"
-  have "verify-broker: hash mismatch refused"    'cmd_hash mismatch' "$mres"
-  lack "verify-broker: refused req did not run"  'VERIFY_RAN'        "$mres"
+  have "verify-broker: hash mismatch refused" 'cmd_hash mismatch' "$mres"
+  lack "verify-broker: refused req did not run" 'VERIFY_RAN' "$mres"
 
   # a worktree OUTSIDE the run root is REFUSED
   OUT="$(cd "$VB/outside" && pwd -P)"
   "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$OUT" --cmd-hash "$PIN" --id esc >/dev/null 2>&1
   "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --confine-under "$ROOT" >/dev/null 2>&1
-  have "verify-broker: worktree escape refused"  'escapes --confine-under' "$(cat "$SENT/esc.result" 2>/dev/null)"
+  have "verify-broker: worktree escape refused" 'escapes --confine-under' "$(cat "$SENT/esc.result" 2>/dev/null)"
 
   # the broker's own --cmd-hash must match --verify-cmd (install/args mismatch)
-  bhm="$("$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --cmd-hash deadbeef --confine-under "$ROOT" 2>&1)"; bhc=$?
+  bhm="$("$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --cmd-hash deadbeef --confine-under "$ROOT" 2>&1)"
+  bhc=$?
   if [ "$bhc" = 2 ] && printf '%s' "$bhm" | grep -qF 'does not match'; then
     ok "verify-broker: pinned hash/cmd mismatch fails closed"
   else
@@ -814,19 +871,27 @@ if command -v shasum >/dev/null 2>&1; then
   # the 126-vs-0 contrast the whole task exists for: a #!/usr/bin/env bash script
   # the broker runs via the pinned `bash <script>` (works) — the same script's
   # direct shebang exec is what execve-denies in-jail (finding #4).
-  printf '#!/usr/bin/env bash\necho SHEBANG_OK\n' > "$WT/probe.sh"; chmod +x "$WT/probe.sh"
-  CMD2='bash probe.sh'; PIN2="$(printf '%s' "$CMD2" | shasum -a 256 | awk '{print $1}')"
+  printf '#!/usr/bin/env bash\necho SHEBANG_OK\n' >"$WT/probe.sh"
+  chmod +x "$WT/probe.sh"
+  CMD2='bash probe.sh'
+  PIN2="$(printf '%s' "$CMD2" | shasum -a 256 | awk '{print $1}')"
   "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "$PIN2" --id sb >/dev/null 2>&1
   "$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD2" --confine-under "$ROOT" >/dev/null 2>&1
   have "verify-broker: runs a shebang script via pinned bash" 'SHEBANG_OK' "$(cat "$SENT/sb.result" 2>/dev/null)"
 
   # verify-request fail-closed: non-hex cmd-hash, missing worktree
-  fcr() { local name="$1" want="$2"; shift 2; local o c; o="$("$SCRIPT" verify-request "$@" 2>&1)"; c=$?
-    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi; }
+  fcr() {
+    local name="$1" want="$2"
+    shift 2
+    local o c
+    o="$("$SCRIPT" verify-request "$@" 2>&1)"
+    c=$?
+    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi
+  }
   fcr "non-hex cmd-hash" "must be lowercase hex" --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "NOTHEX"
-  fcr "missing worktree"  "does not exist"        --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
+  fcr "missing worktree" "does not exist" --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
   printf 'x\n' >"$VB/notadir"
-  fcr "worktree is a file" "is not a directory"   --sentinel-dir "$SENT" --worktree "$VB/notadir" --cmd-hash "$PIN"
+  fcr "worktree is a file" "is not a directory" --sentinel-dir "$SENT" --worktree "$VB/notadir" --cmd-hash "$PIN"
 
   # write-verify-broker: renders an UN-JAILED launch script (no sandbox-exec) + a
   # valid plist, with the verify command pinned in.
@@ -834,9 +899,9 @@ if command -v shasum >/dev/null 2>&1; then
     --confine-under "$VB" --label com.autopilot.test.verify --workdir "$WT" --log "$VB/b.log" \
     --path '/usr/bin:/bin' --out-script "$VB/broker.sh" --out-plist "$VB/broker.plist" >/dev/null 2>&1
   vbody="$(cat "$VB/broker.sh" 2>/dev/null)"
-  have "write-verify-broker: invokes verify-broker"     'verify-broker'  "$vbody"
-  have "write-verify-broker: pins the verify command"   'bash scripts/check.sh' "$vbody"
-  have "write-verify-broker: pins a cmd-hash"           '--cmd-hash'     "$vbody"
+  have "write-verify-broker: invokes verify-broker" 'verify-broker' "$vbody"
+  have "write-verify-broker: pins the verify command" 'bash scripts/check.sh' "$vbody"
+  have "write-verify-broker: pins a cmd-hash" '--cmd-hash' "$vbody"
   lack "write-verify-broker: broker is UN-JAILED (no sandbox-exec)" 'sandbox-exec' "$vbody"
   if command -v plutil >/dev/null 2>&1; then
     if plutil -lint "$VB/broker.plist" >/dev/null 2>&1; then ok "write-verify-broker: plist lints"; else bad "write-verify-broker: plist lints"; fi
@@ -846,7 +911,8 @@ if command -v shasum >/dev/null 2>&1; then
   # write-verify-broker fail-closed: bad label
   wvbc="$("$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'x' --confine-under "$VB" \
     --label 'bad label' --workdir "$WT" --log "$VB/b.log" --path '/usr/bin:/bin' \
-    --out-script "$VB/x.sh" --out-plist "$VB/x.plist" 2>&1)"; wvc=$?
+    --out-script "$VB/x.sh" --out-plist "$VB/x.plist" 2>&1)"
+  wvc=$?
   if [ "$wvc" = 2 ] && printf '%s' "$wvbc" | grep -qF 'must be [A-Za-z0-9._-]'; then
     ok "write-verify-broker: bad label fails closed"
   else
@@ -857,7 +923,8 @@ else
 fi
 
 # --- status: read-only run inspection (task 8) ---------------------------------
-RUNDIR="$BASE/run"; mkdir -p "$RUNDIR/.auto-pilot"
+RUNDIR="$BASE/run"
+mkdir -p "$RUNDIR/.auto-pilot"
 RUNMD="$RUNDIR/.auto-pilot/RUN.md"
 {
   printf -- '---\n'
@@ -875,12 +942,13 @@ RUNMD="$RUNDIR/.auto-pilot/RUN.md"
 } >"$RUNMD"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working on T-2"}]}}\n' >"$RUNDIR/.auto-pilot/orchestrator.log"
 
-sout="$("$SCRIPT" status --label com.autopilot.test --dir "$RUNDIR" 2>&1)"; sc=$?
+sout="$("$SCRIPT" status --label com.autopilot.test --dir "$RUNDIR" 2>&1)"
+sc=$?
 [ "$sc" = 0 ] && ok "status: exits 0 on a well-formed run dir" || bad "status: exits 0 on a well-formed run dir" "$sout"
-have "status: prints the phase table"   'implementing'          "$sout"
-have "status: prints a STATUS: line"    'STATUS: active'        "$sout"
-have "status: STATUS line has tasks=2"  'tasks=2'               "$sout"
-have "status: STATUS line has until"    'until=2026-07-10T06:00:00' "$sout"
+have "status: prints the phase table" 'implementing' "$sout"
+have "status: prints a STATUS: line" 'STATUS: active' "$sout"
+have "status: STATUS line has tasks=2" 'tasks=2' "$sout"
+have "status: STATUS line has until" 'until=2026-07-10T06:00:00' "$sout"
 
 # a bogus/dead recorded PID (999999 — never a real live process) reports not-live
 have "status: dead pid reports pid=dead" 'pid=dead' "$sout"
@@ -889,7 +957,8 @@ have "status: dead pid reports pid=dead" 'pid=dead' "$sout"
 # still report not-live: kill -0 succeeds, but the start-time can't match a
 # fabricated value (and ps is unavailable in some jails, which also falls to
 # the not-live branch) — either way this must never read "pid=live".
-RUNMD2="$BASE/run2/.auto-pilot"; mkdir -p "$RUNMD2"
+RUNMD2="$BASE/run2/.auto-pilot"
+mkdir -p "$RUNMD2"
 {
   printf -- '---\n'
   printf 'status: active\n'
@@ -908,7 +977,8 @@ have "status: mismatched start-time reports mismatch" 'pid=mismatch' "$sout2"
 # front-matter parser: a double-quoted `until` with a trailing comment, and a
 # `paused_until` line that precedes `until`, must yield the BARE until value
 # (no quotes, no comment, not the paused_until value — anchored on `^until:`).
-RUNMD3="$BASE/run3/.auto-pilot"; mkdir -p "$RUNMD3"
+RUNMD3="$BASE/run3/.auto-pilot"
+mkdir -p "$RUNMD3"
 {
   printf -- '---\n'
   printf 'status: paused\n'
@@ -920,14 +990,16 @@ RUNMD3="$BASE/run3/.auto-pilot"; mkdir -p "$RUNMD3"
   printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
 } >"$RUNMD3/RUN.md"
 sout4="$("$SCRIPT" status --label com.autopilot.test3 --dir "$BASE/run3" 2>&1)"
-have "status: quoted+commented until parsed bare"  'until=2026-12-31T00:00:00' "$sout4"
-lack "status: until does not match paused_until"   'until=2020-01-01T00:00:00' "$sout4"
-lack "status: until value keeps no quotes"         'until="2026'               "$sout4"
+have "status: quoted+commented until parsed bare" 'until=2026-12-31T00:00:00' "$sout4"
+lack "status: until does not match paused_until" 'until=2020-01-01T00:00:00' "$sout4"
+lack "status: until value keeps no quotes" 'until="2026' "$sout4"
 
 # fail-closed: missing --label / missing RUN.md
-o="$("$SCRIPT" status --dir "$RUNDIR" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --label' \
+o="$("$SCRIPT" status --dir "$RUNDIR" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --label' \
   && ok "status fail-closed: missing --label" || bad "status fail-closed: missing --label" "$o"
-o="$("$SCRIPT" status --label x --dir "$BASE/no-such-dir" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'no run state found' \
+o="$("$SCRIPT" status --label x --dir "$BASE/no-such-dir" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -q 'no run state found' \
   && ok "status fail-closed: missing RUN.md" || bad "status fail-closed: missing RUN.md" "$o"
 
 # --- teardown --done-sentinel: the single completion mechanism (task 8) --------
@@ -945,11 +1017,14 @@ have "status: reports done once the sentinel exists" 'STATUS: done' "$sout3"
 # Build a real git repo with a run-state branch and a task branch, so the
 # fixture matches finding #23 exactly: the run worktree's HEAD found parked on
 # a task branch instead of `auto-pilot/<run_id>`.
-HEAD_REPO="$BASE/head-repo"; mkdir -p "$HEAD_REPO"
+HEAD_REPO="$BASE/head-repo"
+mkdir -p "$HEAD_REPO"
 git -C "$HEAD_REPO" init -q -b main
 git -C "$HEAD_REPO" config user.email test@example.com
 git -C "$HEAD_REPO" config user.name test
-: >"$HEAD_REPO/seed"; git -C "$HEAD_REPO" add seed; git -C "$HEAD_REPO" commit -q -m seed
+: >"$HEAD_REPO/seed"
+git -C "$HEAD_REPO" add seed
+git -C "$HEAD_REPO" commit -q -m seed
 
 RUN_ID="2026-07-11-test-run"
 git -C "$HEAD_REPO" checkout -q -b "auto-pilot/$RUN_ID"
@@ -975,8 +1050,10 @@ have "git show recovers RUN.md while HEAD is parked on a task branch" \
   'content-on-run-state-branch' "$shown"
 
 # (a) the guard fires: detects the deviation, restores HEAD, and records it.
-QFILE="$BASE/QUESTIONS.md"; : >"$QFILE"
-gout="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"; gc=$?
+QFILE="$BASE/QUESTIONS.md"
+: >"$QFILE"
+gout="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"
+gc=$?
 [ "$gc" = 0 ] && ok "assert-run-head: exits 0 after restoring" || bad "assert-run-head: exits 0 after restoring" "$gout"
 have "assert-run-head: reports the deviation" 'HEAD DEVIATION restored' "$gout"
 restored="$(git -C "$HEAD_REPO" rev-parse --abbrev-ref HEAD)"
@@ -987,7 +1064,8 @@ have "assert-run-head: records the deviation in QUESTIONS.md" 'HEAD was parked o
 have "assert-run-head: QUESTIONS.md entry is reversible" '**Reversible:** yes' "$qbody"
 
 # idempotent: running it again with HEAD already correct is a silent no-op.
-gout2="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"; gc2=$?
+gout2="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE" 2>&1)"
+gc2=$?
 [ "$gc2" = 0 ] && ok "assert-run-head: exits 0 when HEAD already correct" || bad "assert-run-head: exits 0 when HEAD already correct" "$gout2"
 have "assert-run-head: reports HEAD OK on a clean run" 'HEAD OK' "$gout2"
 qcount="$(grep -cE '^## Q[0-9]+' "$QFILE")"
@@ -996,29 +1074,33 @@ qcount="$(grep -cE '^## Q[0-9]+' "$QFILE")"
 
 # fail-closed: not a git worktree at all
 mkdir -p "$BASE/plain-dir-not-a-repo"
-o="$("$SCRIPT" assert-run-head --dir "$BASE/plain-dir-not-a-repo" --run-id "$RUN_ID" 2>&1)"; [ $? = 2 ] \
+o="$("$SCRIPT" assert-run-head --dir "$BASE/plain-dir-not-a-repo" --run-id "$RUN_ID" 2>&1)"
+[ $? = 2 ] \
   && printf '%s' "$o" | grep -q 'not a git worktree' \
   && ok "assert-run-head fail-closed: not a git worktree" || bad "assert-run-head fail-closed: not a git worktree" "$o"
 
 # fail-closed: missing required args
-o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir and --run-id' \
+o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir and --run-id' \
   && ok "assert-run-head fail-closed: missing --run-id" || bad "assert-run-head fail-closed: missing --run-id" "$o"
 
 # fail-closed: a DIRTY deviation must NOT restore (a non-conflicting checkout
 # would silently carry the uncommitted task-branch edits onto the run-state branch).
 git -C "$HEAD_REPO" checkout -q "auto-pilot/hardening-task_3"
 printf 'uncommitted edit\n' >>"$HEAD_REPO/task-file"
-o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" 2>&1)"; drc=$?
+o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" 2>&1)"
+drc=$?
 dhead="$(git -C "$HEAD_REPO" rev-parse --abbrev-ref HEAD)"
 [ "$drc" = 2 ] && printf '%s' "$o" | grep -q 'uncommitted changes' && [ "$dhead" = "auto-pilot/hardening-task_3" ] \
   && ok "assert-run-head fail-closed: dirty deviation is not restored" \
   || bad "assert-run-head fail-closed: dirty deviation is not restored" "rc=$drc head=$dhead msg=$o"
-git -C "$HEAD_REPO" checkout -q -- task-file   # drop the dirty edit for later checks
+git -C "$HEAD_REPO" checkout -q -- task-file # drop the dirty edit for later checks
 
 # numbering uses the MAX existing index, not a count — a non-contiguous
 # QUESTIONS.md (Q9, Q10) yields Q11, never a colliding low number.
 git -C "$HEAD_REPO" checkout -q "auto-pilot/hardening-task_3"
-QFILE2="$BASE/Q-noncontig.md"; printf '## Q9 — X — a\n\n## Q10 — X — b\n' >"$QFILE2"
+QFILE2="$BASE/Q-noncontig.md"
+printf '## Q9 — X — a\n\n## Q10 — X — b\n' >"$QFILE2"
 "$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" --questions "$QFILE2" >/dev/null 2>&1
 grep -q '^## Q11 — RUN —' "$QFILE2" \
   && ok "assert-run-head: numbers from the max index (Q11 after Q9/Q10)" \
@@ -1033,13 +1115,15 @@ rm -f "$HEAD_REPO/QREL.md"
   && ok "assert-run-head: relative --questions resolves against --dir" \
   || bad "assert-run-head: relative --questions resolves against --dir" "$(ls "$HEAD_REPO" 2>&1)"
 # --- classify-exit: supervisor-side exit classification (task 10, #22) -------
-CX="$BASE/cx"; mkdir -p "$CX"
+CX="$BASE/cx"
+mkdir -p "$CX"
 printf 'ok\n' >"$CX/clean.log"
 printf 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}\n' >"$CX/auth.log"
 printf 'API Error: 429 rate_limit_error: overloaded\n' >"$CX/rate.log"
 printf 'some other unrelated crash\n' >"$CX/weird.log"
 
-ceo="$("$SCRIPT" classify-exit --exit-code 0 --output "$CX/clean.log" 2>&1)"; cec=$?
+ceo="$("$SCRIPT" classify-exit --exit-code 0 --output "$CX/clean.log" 2>&1)"
+cec=$?
 [ "$cec" = 0 ] && [ "$ceo" = "done" ] && ok "classify-exit: clean exit -> done" || bad "classify-exit: clean exit -> done" "$ceo"
 
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" 2>&1)"
@@ -1060,7 +1144,7 @@ have "classify-exit: unclassified non-zero -> retry" 'retry:' "$ceo"
 printf '{"type":"assistant","text":"see foo.py:401 and the 4013-byte hunk @@ -401,7 +401,9 @@"}\n' >"$CX/incidental401.log"
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/incidental401.log" 2>&1)"
 have "classify-exit: incidental 401 (line number/diff hunk) -> retry" 'retry:' "$ceo"
-lack "classify-exit: incidental 401 is NOT fatal"                     'fatal:' "$ceo"
+lack "classify-exit: incidental 401 is NOT fatal" 'fatal:' "$ceo"
 # ...but a 401 in a genuine auth CONTEXT still is, including the exact shape the
 # motivating run-#2 failure took.
 printf 'API Error: 401 Invalid authentication credentials\n' >"$CX/ctx1.log"
@@ -1077,7 +1161,7 @@ OFF="$(wc -c <"$CX/appended.log" | tr -d ' ')"
 printf 'some later unrelated crash\n' >>"$CX/appended.log"
 ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/appended.log" --since-offset "$OFF" 2>&1)"
 have "classify-exit: --since-offset ignores a previous wake's 401" 'retry:' "$ceo"
-lack "classify-exit: stale 401 is not sticky across wakes"         'fatal:' "$ceo"
+lack "classify-exit: stale 401 is not sticky across wakes" 'fatal:' "$ceo"
 # without the offset the same file DOES read fatal — proving the offset is what
 # does the work here, not an accident of the fixture.
 have "classify-exit: whole-file read of the same log is fatal (the bug)" 'fatal:' \
@@ -1091,9 +1175,11 @@ ceo="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/auth.log" --since-off
 have "classify-exit: invalid --since-offset falls back to the whole file" 'fatal:' "$ceo"
 
 # fail-closed: required args
-o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --exit-code' \
+o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --exit-code' \
   && ok "classify-exit fail-closed: missing --exit-code" || bad "classify-exit fail-closed: missing --exit-code" "$o"
-o="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/nope.log" 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'not found' \
+o="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/nope.log" 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -qF 'not found' \
   && ok "classify-exit fail-closed: missing --output file" || bad "classify-exit fail-closed: missing --output file" "$o"
 
 # co-review: an auth signal that is CONTENT (transcript prose, a diff, or the
@@ -1127,27 +1213,39 @@ have "classify-exit: plain-prose OAuth-expiry on stderr -> fatal" 'fatal:' \
 # --- supervisor-check: fatal halt writes systemic status + REPORT alarm + teardown
 # (task 10) — fixture is a real git checkout so the run-state commit is observable.
 if command -v git >/dev/null 2>&1; then
-  SC="$BASE/sc-fatal"; mkdir -p "$SC/.auto-pilot"
-  ( cd "$SC" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  SC="$BASE/sc-fatal"
+  mkdir -p "$SC/.auto-pilot"
+  (cd "$SC" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   scout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/auth.log" --dir "$SC" \
     --label com.autopilot.test.fatal --state "$SC/.auto-pilot/supervisor-state" 2>&1)"
   have "supervisor-check: fatal halt reports itself" 'supervisor halt' "$scout"
   have "supervisor-check: fatal writes status: systemic" 'status: systemic' "$(cat "$SC/.auto-pilot/RUN.md")"
-  have "supervisor-check: fatal writes a pause_reason"  'pause_reason: non-retryable auth failure' "$(cat "$SC/.auto-pilot/RUN.md")"
+  have "supervisor-check: fatal writes a pause_reason" 'pause_reason: non-retryable auth failure' "$(cat "$SC/.auto-pilot/RUN.md")"
   have "supervisor-check: fatal appends a REPORT.md alarm" 'ALARM' "$(cat "$SC/.auto-pilot/REPORT.md")"
   scommits="$(git -C "$SC" log --oneline | wc -l | tr -d ' ')"
   [ "$scommits" = 2 ] && ok "supervisor-check: fatal halt commits the run-state change" \
     || bad "supervisor-check: fatal halt commits the run-state change" "commits=$scommits"
 
   # --- no-progress guard: N (default 3) consecutive non-zero, no-commit wakes halts
-  SC2="$BASE/sc-noprogress"; mkdir -p "$SC2/.auto-pilot"
-  ( cd "$SC2" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  SC2="$BASE/sc-noprogress"
+  mkdir -p "$SC2/.auto-pilot"
+  (cd "$SC2" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   STATE2="$SC2/.auto-pilot/supervisor-state"
   "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
   "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC2" --label com.autopilot.test.np --state "$STATE2" >/dev/null 2>&1
@@ -1159,8 +1257,14 @@ if command -v git >/dev/null 2>&1; then
   # EMPTY (a non-git run dir, or git missing from the launchd PATH) — an empty
   # head is sentineled so consecutive wakes still count as no progress instead of
   # resetting the counter to 1 forever and never halting.
-  SC_EH="$BASE/sc-emptyhead"; mkdir -p "$SC_EH/.auto-pilot"   # deliberately NOT a git repo
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >"$SC_EH/.auto-pilot/RUN.md"
+  SC_EH="$BASE/sc-emptyhead"
+  mkdir -p "$SC_EH/.auto-pilot" # deliberately NOT a git repo
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf -- '---\n'
+  } >"$SC_EH/.auto-pilot/RUN.md"
   printf '# report\n' >"$SC_EH/.auto-pilot/REPORT.md"
   STATE_EH="$SC_EH/.auto-pilot/supervisor-state"
   "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC_EH" --label com.autopilot.test.eh --state "$STATE_EH" >/dev/null 2>&1
@@ -1170,11 +1274,17 @@ if command -v git >/dev/null 2>&1; then
   have "supervisor-check: empty-HEAD halt still writes status: systemic" 'status: systemic' "$(cat "$SC_EH/.auto-pilot/RUN.md")"
 
   # --- a legitimate paused_until wait never trips the guard, even repeated ------
-  SC3="$BASE/sc-paused"; mkdir -p "$SC3/.auto-pilot"
-  ( cd "$SC3" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  SC3="$BASE/sc-paused"
+  mkdir -p "$SC3/.auto-pilot"
+  (cd "$SC3" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: paused\n'
+      printf 'paused_until: 2099-01-01T00:00:00\n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   STATE3="$SC3/.auto-pilot/supervisor-state"
   i=0
   while [ "$i" -lt 5 ]; do
@@ -1184,15 +1294,21 @@ if command -v git >/dev/null 2>&1; then
   lack "supervisor-check: a paused wake never halts, however many repeats" 'systemic' "$(cat "$SC3/.auto-pilot/RUN.md")"
 
   # --- forward progress (a fresh run-state commit) resets the guard's counter ---
-  SC4="$BASE/sc-progress"; mkdir -p "$SC4/.auto-pilot"
-  ( cd "$SC4" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  SC4="$BASE/sc-progress"
+  mkdir -p "$SC4/.auto-pilot"
+  (cd "$SC4" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   STATE4="$SC4/.auto-pilot/supervisor-state"
   "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
   # a task did real work between wakes: a new run-state commit lands
-  ( cd "$SC4" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "task progressed" )
+  (cd "$SC4" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "task progressed")
   "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" >/dev/null 2>&1
   pgout="$("$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$CX/weird.log" --dir "$SC4" --label com.autopilot.test.progress --state "$STATE4" 2>&1)"
   have "supervisor-check: a run-state commit resets the no-progress counter" '2/3 consecutive' "$pgout"
@@ -1204,11 +1320,11 @@ fi
 # --- write-launch: the generated script classifies its own exit (task 10) -----
 lbody10="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: calls supervisor-check after claude exits" 'supervisor-check' "$lbody10"
-have "launch: no longer execs claude directly"           'set +e'          "$lbody10"
-lack "launch: exec sandbox-exec no longer used"          'exec sandbox-exec' "$lbody10"
+have "launch: no longer execs claude directly" 'set +e' "$lbody10"
+lack "launch: exec sandbox-exec no longer used" 'exec sandbox-exec' "$lbody10"
 # the log offset must be captured BEFORE claude runs, and handed to
 # supervisor-check — else classification reads every past wake's bytes too.
-have "launch: captures the log offset before the run" 'off=$(wc -c'      "$lbody10"
+have "launch: captures the log offset before the run" 'off=$(wc -c' "$lbody10"
 have "launch: passes --since-offset to supervisor-check" '--since-offset "$off"' "$lbody10"
 off_ln="$(printf '%s\n' "$lbody10" | grep -n 'off=$(wc -c' | head -1 | cut -d: -f1)"
 sbx_ln="$(printf '%s\n' "$lbody10" | grep -n '^sandbox-exec -f' | head -1 | cut -d: -f1)"
@@ -1223,7 +1339,8 @@ fi
 # launch.sh with a stub claude (--claude-bin) and a stub sandbox-exec on PATH,
 # each recording their own invocation via a marker file. "claude was never
 # invoked" is then observable as "marker file absent" — no real jail involved.
-GT="$BASE/gate"; mkdir -p "$GT/bin"
+GT="$BASE/gate"
+mkdir -p "$GT/bin"
 GT_CLAUDE="$GT/bin/claude-stub"
 {
   printf '#!/bin/sh\n'
@@ -1239,7 +1356,7 @@ GT_SANDBOX="$GT/bin/sandbox-exec"
 {
   printf '#!/bin/sh\n'
   printf ': >"%s/sandbox-exec-called"\n' "$GT"
-  printf 'shift 2\n'  # drop "-f <profile>"
+  printf 'shift 2\n' # drop "-f <profile>"
   printf 'exec "$@"\n'
 } >"$GT_SANDBOX"
 chmod +x "$GT_SANDBOX"
@@ -1255,7 +1372,8 @@ PAST_TS="$(_gate_iso $((NOW_EPOCH - 3600)))"
 # front-matter body; returns (via echo) whether the claude stub ran.
 _gate_case() {
   local name="$1" front="$2"
-  local d="$GT/$name"; mkdir -p "$d/.auto-pilot"
+  local d="$GT/$name"
+  mkdir -p "$d/.auto-pilot"
   { printf -- '---\n%s\n---\n' "$front"; } >"$d/.auto-pilot/RUN.md"
   rm -f "$GT/claude-called" "$GT/sandbox-exec-called"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$d" \
@@ -1269,7 +1387,8 @@ _gate_case() {
 # Test A: paused_until an hour in the future -> exit 0, claude never invoked.
 gaA="$(_gate_case gate-future "status: active
 paused_until: $FUTURE_TS")"
-rcA="${gaA#rc=}"; rcA="${rcA%% *}"
+rcA="${gaA#rc=}"
+rcA="${rcA%% *}"
 [ "$rcA" = 0 ] && ok "gate: future paused_until exits 0" || bad "gate: future paused_until exits 0" "$gaA"
 [ ! -f "$GT/claude-called" ] && ok "gate: future paused_until never invokes claude" \
   || bad "gate: future paused_until never invokes claude"
@@ -1311,12 +1430,14 @@ have "gate: garbage paused_until logs unparseable+proceeding" "unparseable" \
 
 # supervisor-gate itself (unit-level, not through the wrapper): --dir with no
 # RUN.md at all is the other fail-safe path — proceed, don't die.
-sgo="$("$SCRIPT" supervisor-gate --dir "$GT/no-such-run" --label com.autopilot.gate.norun 2>&1)"; sgc=$?
+sgo="$("$SCRIPT" supervisor-gate --dir "$GT/no-such-run" --label com.autopilot.gate.norun 2>&1)"
+sgc=$?
 [ "$sgc" = 0 ] && ok "supervisor-gate: missing RUN.md fails safe (exit 0)" \
   || bad "supervisor-gate: missing RUN.md fails safe (exit 0)" "rc=$sgc out=$sgo"
 
 # fail-closed: required args
-o="$("$SCRIPT" supervisor-gate --label x 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --dir and --label' \
+o="$("$SCRIPT" supervisor-gate --label x 2>&1)"
+[ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --dir and --label' \
   && ok "supervisor-gate fail-closed: missing --dir" || bad "supervisor-gate fail-closed: missing --dir" "$o"
 
 # --- restack: post-merge restack of stacked PRs (task 18, finding #25) -------
@@ -1325,27 +1446,35 @@ o="$("$SCRIPT" supervisor-gate --label x 2>&1)"; [ $? = 2 ] && printf '%s' "$o" 
 # GitHub calls) so the git mechanics run for real while every GitHub
 # read/write is mocked and inspectable.
 if command -v git >/dev/null 2>&1; then
-  RS="$BASE/restack"; mkdir -p "$RS"
-  ORIGIN="$RS/origin.git"; WORK="$RS/work"
+  RS="$BASE/restack"
+  mkdir -p "$RS"
+  ORIGIN="$RS/origin.git"
+  WORK="$RS/work"
   git init --bare -q "$ORIGIN"
   git init -q "$WORK"
   git -C "$WORK" remote add origin "$ORIGIN"
   git -C "$WORK" config user.email test@example.com
   git -C "$WORK" config user.name "Test"
   git -C "$WORK" checkout -q -b main
-  echo root >"$WORK/root.txt"; git -C "$WORK" add root.txt; git -C "$WORK" commit -q -m root
+  echo root >"$WORK/root.txt"
+  git -C "$WORK" add root.txt
+  git -C "$WORK" commit -q -m root
   git -C "$WORK" push -q origin main
 
   # parent branch (task_parent, PR #100): adds parent.txt
   git -C "$WORK" checkout -q -b parent-branch
-  printf 'line1\n' >"$WORK/parent.txt"; git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "parent change"
+  printf 'line1\n' >"$WORK/parent.txt"
+  git -C "$WORK" add parent.txt
+  git -C "$WORK" commit -q -m "parent change"
   git -C "$WORK" push -q origin parent-branch
-  PARENT_SHA="$(git -C "$WORK" rev-parse parent-branch)"   # the child's frozen base_sha
+  PARENT_SHA="$(git -C "$WORK" rev-parse parent-branch)" # the child's frozen base_sha
 
   # child branch (task_child, PR #101): stacked on parent-branch, touches ONLY
   # child.txt — must restack cleanly regardless of what else happens to main.
   git -C "$WORK" checkout -q -b child-branch
-  echo child >"$WORK/child.txt"; git -C "$WORK" add child.txt; git -C "$WORK" commit -q -m "child change"
+  echo child >"$WORK/child.txt"
+  git -C "$WORK" add child.txt
+  git -C "$WORK" commit -q -m "child change"
   git -C "$WORK" push -q origin child-branch
 
   # Simulate the human squash-merging the parent PR into main: a NEW squash
@@ -1359,15 +1488,19 @@ if command -v git >/dev/null 2>&1; then
   # pre-review parent, so a clean rebase later must not be mistaken for proof
   # nothing was missed.
   printf 'line1-SECURITY-FIXED\n' >"$WORK/parent.txt"
-  git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "parent: post-hand-off review fix"
+  git -C "$WORK" add parent.txt
+  git -C "$WORK" commit -q -m "parent: post-hand-off review fix"
   git -C "$WORK" push -q origin main
 
   # Fake gh: PR state lives in flat files under $FAKE_GH_DB; `pr edit --base`
   # rewrites the base file (so a second restack observes the retarget) and
   # appends to edits.log (so the test can assert exactly what was retargeted).
-  FAKE_GH_DB="$RS/ghdb"; mkdir -p "$FAKE_GH_DB"
-  printf 'MERGED\n' >"$FAKE_GH_DB/100.state"; printf 'main\n' >"$FAKE_GH_DB/100.base"
-  printf 'OPEN\n'   >"$FAKE_GH_DB/101.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/101.base"
+  FAKE_GH_DB="$RS/ghdb"
+  mkdir -p "$FAKE_GH_DB"
+  printf 'MERGED\n' >"$FAKE_GH_DB/100.state"
+  printf 'main\n' >"$FAKE_GH_DB/100.base"
+  printf 'OPEN\n' >"$FAKE_GH_DB/101.state"
+  printf 'parent-branch\n' >"$FAKE_GH_DB/101.base"
   FAKE_GH="$RS/gh"
   cat >"$FAKE_GH" <<'GHEOF'
 #!/usr/bin/env bash
@@ -1404,7 +1537,8 @@ GHEOF
   chmod +x "$FAKE_GH"
   export FAKE_GH_DB
 
-  RUNDIR_RS="$RS/run"; mkdir -p "$RUNDIR_RS/.auto-pilot"
+  RUNDIR_RS="$RS/run"
+  mkdir -p "$RUNDIR_RS/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -1423,14 +1557,15 @@ GHEOF
   head_ref_0="$(git -C "$WORK" rev-parse --abbrev-ref HEAD)"
   head_sha_0="$(git -C "$WORK" rev-parse HEAD)"
 
-  rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc=$?
+  rsout="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  rsc=$?
   [ "$rsc" = 0 ] && ok "restack: exits 0 on a clean stacked restack" || bad "restack: exits 0 on a clean stacked restack" "$rsout"
   have "restack: reports task_child done" 'restack task_child done' "$rsout"
   have "restack: prints the copy-pasteable rebase command" 'git rebase --onto origin/main' "$rsout"
   have "restack: retargets the PR base" '101 main' "$(cat "$FAKE_GH_DB/edits.log" 2>/dev/null)"
 
   if [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "$head_ref_0" ] \
-     && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_0" ]; then
+    && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_0" ]; then
     ok "restack: a successful restack does NOT move the caller's HEAD"
   else
     bad "restack: a successful restack does NOT move the caller's HEAD" \
@@ -1446,9 +1581,9 @@ GHEOF
   # REPORT.md is where a human actually looks — the re-verify + stale-co-review
   # requirement is worthless on stdout alone (it only reaches orchestrator.log).
   rsreport="$(cat "$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null)"
-  have "restack: appends a Restack section to REPORT.md"      '## Restack'        "$rsreport"
-  have "restack: REPORT.md demands re-verify for the child"   'Re-verify required' "$rsreport"
-  have "restack: REPORT.md flags the co-review as STALE"      'STALE'              "$rsreport"
+  have "restack: appends a Restack section to REPORT.md" '## Restack' "$rsreport"
+  have "restack: REPORT.md demands re-verify for the child" 'Re-verify required' "$rsreport"
+  have "restack: REPORT.md flags the co-review as STALE" 'STALE' "$rsreport"
 
   git -C "$WORK" fetch -q origin
   diffnames="$(git -C "$WORK" diff --name-only origin/main origin/child-branch)"
@@ -1463,7 +1598,8 @@ GHEOF
   # does not churn REPORT.md either
   editcount_before="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
   reportsize_before="$(wc -c <"$RUNDIR_RS/.auto-pilot/REPORT.md" 2>/dev/null | tr -d ' ')"
-  rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc2=$?
+  rsout2="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  rsc2=$?
   [ "$rsc2" = 0 ] && ok "restack: idempotent second run exits 0" || bad "restack: idempotent second run exits 0" "$rsout2"
   have "restack: idempotent second run reports no-op" 'already based on main (no-op)' "$rsout2"
   editcount_after="$(wc -l <"$FAKE_GH_DB/edits.log" 2>/dev/null | tr -d ' ')"
@@ -1486,15 +1622,20 @@ GHEOF
   PARENT_SHA2="$(git -C "$WORK" rev-parse parent-branch)"
   git -C "$WORK" checkout -q -b conflict-child
   printf 'line1-CONFLICTING-EDIT\n' >"$WORK/parent.txt"
-  git -C "$WORK" add parent.txt; git -C "$WORK" commit -q -m "child edits the same line"
+  git -C "$WORK" add parent.txt
+  git -C "$WORK" commit -q -m "child edits the same line"
   git -C "$WORK" push -q origin conflict-child
-  printf 'OPEN\n' >"$FAKE_GH_DB/102.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/102.base"
+  printf 'OPEN\n' >"$FAKE_GH_DB/102.state"
+  printf 'parent-branch\n' >"$FAKE_GH_DB/102.base"
 
   git -C "$WORK" checkout -q parent-branch
   git -C "$WORK" checkout -q -b clean2
-  echo clean2 >"$WORK/clean2.txt"; git -C "$WORK" add clean2.txt; git -C "$WORK" commit -q -m "clean2 change"
+  echo clean2 >"$WORK/clean2.txt"
+  git -C "$WORK" add clean2.txt
+  git -C "$WORK" commit -q -m "clean2 change"
   git -C "$WORK" push -q origin clean2
-  printf 'OPEN\n' >"$FAKE_GH_DB/103.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/103.base"
+  printf 'OPEN\n' >"$FAKE_GH_DB/103.state"
+  printf 'parent-branch\n' >"$FAKE_GH_DB/103.base"
 
   {
     printf '| task_conflict | handed-off | conflict-child | parent-branch | %s | #102 | |\n' "$PARENT_SHA2"
@@ -1507,7 +1648,8 @@ GHEOF
   head_sha_1="$(git -C "$WORK" rev-parse HEAD)"
 
   precommit_tip="$(git -C "$ORIGIN" rev-parse conflict-child)"
-  rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rsc3=$?
+  rsout3="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  rsc3=$?
   [ "$rsc3" = 2 ] && ok "restack: fail-closed conflict exits non-zero" || bad "restack: fail-closed conflict exits non-zero" "exit=$rsc3"
   have "restack: fail-closed conflict reports a conflict" 'FAILED — rebase conflict' "$rsout3"
   have "restack: a conflict does not stop the other children" 'restack task_clean2 done' "$rsout3"
@@ -1518,7 +1660,7 @@ GHEOF
 
   # THE invariant: a run that both succeeded and conflicted left HEAD untouched.
   if [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "$head_ref_1" ] \
-     && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_1" ]; then
+    && [ "$(git -C "$WORK" rev-parse HEAD)" = "$head_sha_1" ]; then
     ok "restack: HEAD unchanged across a mixed success+conflict run (task 13 invariant)"
   else
     bad "restack: HEAD unchanged across a mixed success+conflict run (task 13 invariant)" \
@@ -1536,7 +1678,8 @@ GHEOF
   # fail-closed: a dirty caller worktree is never touched (an automated rebase
   # over a human's uncommitted work is how "helpful" recovery destroys state)
   echo dirty >"$WORK/uncommitted.txt"
-  dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dirty_c=$?
+  dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  dirty_c=$?
   if [ "$dirty_c" = 2 ] && printf '%s' "$dirty_out" | grep -qF 'worktree is dirty'; then
     ok "restack: dirty caller worktree fails closed"
   else
@@ -1545,7 +1688,8 @@ GHEOF
   rm -f "$WORK/uncommitted.txt"
 
   # --- orphaned-child detector: a merged/deleted base is a flagged defect ----
-  RSD="$RS/detect-run"; mkdir -p "$RSD/.auto-pilot"
+  RSD="$RS/detect-run"
+  mkdir -p "$RSD/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -1560,10 +1704,12 @@ GHEOF
     # the exact "looks healthy, does nothing" shape finding #25 warns about
     printf '| task_quiet   | handed-off | quiet-child   | parent-branch | - | #201 | |\n'
   } >"$RSD/.auto-pilot/RUN.md"
-  printf 'OPEN\n' >"$FAKE_GH_DB/200.state"   # no 200.base file at all -> baseRefName lookup fails
-  printf 'OPEN\n' >"$FAKE_GH_DB/201.state"; printf 'parent-branch\n' >"$FAKE_GH_DB/201.base"
+  printf 'OPEN\n' >"$FAKE_GH_DB/200.state" # no 200.base file at all -> baseRefName lookup fails
+  printf 'OPEN\n' >"$FAKE_GH_DB/201.state"
+  printf 'parent-branch\n' >"$FAKE_GH_DB/201.base"
 
-  dsout="$("$SCRIPT" restack --run-dir "$RSD" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; dsc=$?
+  dsout="$("$SCRIPT" restack --run-dir "$RSD" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  dsc=$?
   [ "$dsc" = 2 ] && ok "restack: orphan-detector run reports the missing-base_sha failure" \
     || bad "restack: orphan-detector run reports the missing-base_sha failure" "exit=$dsc"
   have "restack: flags a deleted/unreadable base as a defect" 'DEFECT task_deleted' "$dsout"
@@ -1576,7 +1722,8 @@ GHEOF
   # rate limit / network error also exits 1 but says something ELSE — that
   # proves nothing about the PR, so it must neither fail the restack (exit 2)
   # nor mint a false DEFECT during a GitHub blip.
-  RSU="$RS/undetermined-run"; mkdir -p "$RSU/.auto-pilot"
+  RSU="$RS/undetermined-run"
+  mkdir -p "$RSU/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -1588,7 +1735,8 @@ GHEOF
   TRANSIENT_GH="$RS/gh-transient"
   printf '#!/bin/sh\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' >"$TRANSIENT_GH"
   chmod +x "$TRANSIENT_GH"
-  udout="$("$SCRIPT" restack --run-dir "$RSU" --repo "$WORK" --remote origin --gh "$TRANSIENT_GH" 2>&1)"; udc=$?
+  udout="$("$SCRIPT" restack --run-dir "$RSU" --repo "$WORK" --remote origin --gh "$TRANSIENT_GH" 2>&1)"
+  udc=$?
   [ "$udc" = 0 ] && ok "restack: a transient gh failure does NOT fail the restack (exit 0, fail-safe)" \
     || bad "restack: a transient gh failure does NOT fail the restack (exit 0, fail-safe)" "exit=$udc $udout"
   lack "restack: a transient gh failure is never flagged as a DEFECT" 'DEFECT' "$udout"
@@ -1597,27 +1745,52 @@ GHEOF
 
   # === co-review scenarios: cascade (3-deep), retarget-failure, closed child ===
   # A fresh bare origin + clone so prior mutations don't bleed in.
-  C_ORIGIN="$RS/c-origin.git"; C_WORK="$RS/c-work"
+  C_ORIGIN="$RS/c-origin.git"
+  C_WORK="$RS/c-work"
   git init --bare -q "$C_ORIGIN"
   git init -q "$C_WORK"
   git -C "$C_WORK" remote add origin "$C_ORIGIN"
-  git -C "$C_WORK" config user.email t@e; git -C "$C_WORK" config user.name T
+  git -C "$C_WORK" config user.email t@e
+  git -C "$C_WORK" config user.name T
   git -C "$C_WORK" checkout -q -b main
-  echo r >"$C_WORK/r.txt"; git -C "$C_WORK" add r.txt; git -C "$C_WORK" commit -q -m r; git -C "$C_WORK" push -q origin main
+  echo r >"$C_WORK/r.txt"
+  git -C "$C_WORK" add r.txt
+  git -C "$C_WORK" commit -q -m r
+  git -C "$C_WORK" push -q origin main
   # chain A <- B <- C (each touches only its own file).
-  git -C "$C_WORK" checkout -q -b br-a; echo a >"$C_WORK/a.txt"; git -C "$C_WORK" add a.txt; git -C "$C_WORK" commit -q -m a; git -C "$C_WORK" push -q origin br-a
+  git -C "$C_WORK" checkout -q -b br-a
+  echo a >"$C_WORK/a.txt"
+  git -C "$C_WORK" add a.txt
+  git -C "$C_WORK" commit -q -m a
+  git -C "$C_WORK" push -q origin br-a
   A_SHA="$(git -C "$C_WORK" rev-parse br-a)"
-  git -C "$C_WORK" checkout -q -b br-b; echo b >"$C_WORK/b.txt"; git -C "$C_WORK" add b.txt; git -C "$C_WORK" commit -q -m b; git -C "$C_WORK" push -q origin br-b
+  git -C "$C_WORK" checkout -q -b br-b
+  echo b >"$C_WORK/b.txt"
+  git -C "$C_WORK" add b.txt
+  git -C "$C_WORK" commit -q -m b
+  git -C "$C_WORK" push -q origin br-b
   B_SHA="$(git -C "$C_WORK" rev-parse br-b)"
-  git -C "$C_WORK" checkout -q -b br-c; echo c >"$C_WORK/c.txt"; git -C "$C_WORK" add c.txt; git -C "$C_WORK" commit -q -m c; git -C "$C_WORK" push -q origin br-c
+  git -C "$C_WORK" checkout -q -b br-c
+  echo c >"$C_WORK/c.txt"
+  git -C "$C_WORK" add c.txt
+  git -C "$C_WORK" commit -q -m c
+  git -C "$C_WORK" push -q origin br-c
   # A squash-merges to main.
-  git -C "$C_WORK" checkout -q main; git -C "$C_WORK" merge -q --squash br-a >/dev/null; git -C "$C_WORK" commit -q -m "a squashed"; git -C "$C_WORK" push -q origin main
   git -C "$C_WORK" checkout -q main
-  C_DB="$RS/c-ghdb"; mkdir -p "$C_DB"
-  printf 'MERGED\n' >"$C_DB/1.state"; printf 'main\n' >"$C_DB/1.base"        # A merged
-  printf 'OPEN\n'   >"$C_DB/2.state"; printf 'br-a\n' >"$C_DB/2.base"        # B on parent branch
-  printf 'OPEN\n'   >"$C_DB/3.state"; printf 'br-b\n' >"$C_DB/3.base"        # C on B's branch
-  C_RUN="$RS/c-run"; mkdir -p "$C_RUN/.auto-pilot"
+  git -C "$C_WORK" merge -q --squash br-a >/dev/null
+  git -C "$C_WORK" commit -q -m "a squashed"
+  git -C "$C_WORK" push -q origin main
+  git -C "$C_WORK" checkout -q main
+  C_DB="$RS/c-ghdb"
+  mkdir -p "$C_DB"
+  printf 'MERGED\n' >"$C_DB/1.state"
+  printf 'main\n' >"$C_DB/1.base" # A merged
+  printf 'OPEN\n' >"$C_DB/2.state"
+  printf 'br-a\n' >"$C_DB/2.base" # B on parent branch
+  printf 'OPEN\n' >"$C_DB/3.state"
+  printf 'br-b\n' >"$C_DB/3.base" # C on B's branch
+  C_RUN="$RS/c-run"
+  mkdir -p "$C_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
@@ -1627,7 +1800,8 @@ GHEOF
     printf '| t_c | handed-off | br-c | br-b | %s | #3 | |\n' "$B_SHA"
   } >"$C_RUN/.auto-pilot/RUN.md"
   export FAKE_GH_DB="$C_DB"
-  cout="$("$SCRIPT" restack --run-dir "$C_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; ccode=$?
+  cout="$("$SCRIPT" restack --run-dir "$C_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  ccode=$?
   # B restacks onto-base (main); C CASCADEs onto B's new tip in a later pass —
   # its PR base stays br-b, never re-proposing B's changeset.
   have "restack cascade: B retargeted to main" '2 main' "$(cat "$C_DB/edits.log" 2>/dev/null)"
@@ -1649,18 +1823,37 @@ GHEOF
   # base_branch + its remote tip moved off C's base_sha) and cascaded, not
   # silently stranded. Fresh chain X<-Y<-Z; X merged.
   git -C "$C_WORK" checkout -q main
-  git -C "$C_WORK" checkout -q -b br-x; echo x >"$C_WORK/x.txt"; git -C "$C_WORK" add x.txt; git -C "$C_WORK" commit -q -m x; git -C "$C_WORK" push -q origin br-x
+  git -C "$C_WORK" checkout -q -b br-x
+  echo x >"$C_WORK/x.txt"
+  git -C "$C_WORK" add x.txt
+  git -C "$C_WORK" commit -q -m x
+  git -C "$C_WORK" push -q origin br-x
   X_SHA="$(git -C "$C_WORK" rev-parse br-x)"
-  git -C "$C_WORK" checkout -q -b br-y; echo y >"$C_WORK/y.txt"; git -C "$C_WORK" add y.txt; git -C "$C_WORK" commit -q -m y; git -C "$C_WORK" push -q origin br-y
+  git -C "$C_WORK" checkout -q -b br-y
+  echo y >"$C_WORK/y.txt"
+  git -C "$C_WORK" add y.txt
+  git -C "$C_WORK" commit -q -m y
+  git -C "$C_WORK" push -q origin br-y
   Y_SHA="$(git -C "$C_WORK" rev-parse br-y)"
-  git -C "$C_WORK" checkout -q -b br-z; echo z >"$C_WORK/z.txt"; git -C "$C_WORK" add z.txt; git -C "$C_WORK" commit -q -m z; git -C "$C_WORK" push -q origin br-z
-  git -C "$C_WORK" checkout -q main; git -C "$C_WORK" merge -q --squash br-x >/dev/null; git -C "$C_WORK" commit -q -m "x squashed"; git -C "$C_WORK" push -q origin main
+  git -C "$C_WORK" checkout -q -b br-z
+  echo z >"$C_WORK/z.txt"
+  git -C "$C_WORK" add z.txt
+  git -C "$C_WORK" commit -q -m z
+  git -C "$C_WORK" push -q origin br-z
   git -C "$C_WORK" checkout -q main
-  printf 'MERGED\n' >"$C_DB/30.state"; printf 'main\n' >"$C_DB/30.base"
-  printf 'OPEN\n'   >"$C_DB/31.state"; printf 'br-x\n' >"$C_DB/31.base"
-  printf 'OPEN\n'   >"$C_DB/32.state"; printf 'br-y\n' >"$C_DB/32.base"
+  git -C "$C_WORK" merge -q --squash br-x >/dev/null
+  git -C "$C_WORK" commit -q -m "x squashed"
+  git -C "$C_WORK" push -q origin main
+  git -C "$C_WORK" checkout -q main
+  printf 'MERGED\n' >"$C_DB/30.state"
+  printf 'main\n' >"$C_DB/30.base"
+  printf 'OPEN\n' >"$C_DB/31.state"
+  printf 'br-x\n' >"$C_DB/31.base"
+  printf 'OPEN\n' >"$C_DB/32.state"
+  printf 'br-y\n' >"$C_DB/32.base"
   # Phase 1: RUN.md WITHOUT Z, so only Y restacks (Z is never seen this run).
-  P1_RUN="$RS/p1-run"; mkdir -p "$P1_RUN/.auto-pilot"
+  P1_RUN="$RS/p1-run"
+  mkdir -p "$P1_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
@@ -1672,7 +1865,8 @@ GHEOF
   [ "$(cat "$C_DB/31.base")" = "main" ] && ok "restack resumable: phase-1 restacks Y to main" || bad "restack resumable: phase-1 restacks Y to main" "$(cat "$C_DB/31.base")"
   # Phase 2: a FRESH process (empty _RS_NEWTIP) with Z now in the table. Z's
   # recorded base_sha is Y's OLD tip; Y's remote tip has moved — Z must cascade.
-  P2_RUN="$RS/p2-run"; mkdir -p "$P2_RUN/.auto-pilot"
+  P2_RUN="$RS/p2-run"
+  mkdir -p "$P2_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
@@ -1698,11 +1892,20 @@ GHEOF
 
   # retarget-failure (fix 2): push succeeds, `gh pr edit` rejected -> DEFECT, the
   # child is NOT marked done, and the run exits non-zero. Fresh single stack.
-  printf 'MERGED\n' >"$C_DB/10.state"; printf 'main\n' >"$C_DB/10.base"
-  printf 'OPEN\n'   >"$C_DB/11.state"; printf 'br-a\n' >"$C_DB/11.base"; : >"$C_DB/11.editfail"
-  git -C "$C_WORK" checkout -q br-a; git -C "$C_WORK" checkout -q -b br-rt; echo rt >"$C_WORK/rt.txt"; git -C "$C_WORK" add rt.txt; git -C "$C_WORK" commit -q -m rt; git -C "$C_WORK" push -q origin br-rt
+  printf 'MERGED\n' >"$C_DB/10.state"
+  printf 'main\n' >"$C_DB/10.base"
+  printf 'OPEN\n' >"$C_DB/11.state"
+  printf 'br-a\n' >"$C_DB/11.base"
+  : >"$C_DB/11.editfail"
+  git -C "$C_WORK" checkout -q br-a
+  git -C "$C_WORK" checkout -q -b br-rt
+  echo rt >"$C_WORK/rt.txt"
+  git -C "$C_WORK" add rt.txt
+  git -C "$C_WORK" commit -q -m rt
+  git -C "$C_WORK" push -q origin br-rt
   git -C "$C_WORK" checkout -q main
-  RT_RUN="$RS/rt-run"; mkdir -p "$RT_RUN/.auto-pilot"
+  RT_RUN="$RS/rt-run"
+  mkdir -p "$RT_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
@@ -1710,19 +1913,28 @@ GHEOF
     printf '| t_p | handed-off | br-a | main | - | #10 | |\n'
     printf '| t_rt | handed-off | br-rt | br-a | %s | #11 | |\n' "$A_SHA"
   } >"$RT_RUN/.auto-pilot/RUN.md"
-  rtout="$("$SCRIPT" restack --run-dir "$RT_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; rtcode=$?
+  rtout="$("$SCRIPT" restack --run-dir "$RT_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  rtcode=$?
   have "restack retarget-fail: reports a DEFECT" 'DEFECT — rebased and force-pushed' "$rtout"
   lack "restack retarget-fail: does NOT report the child done" 'restack t_rt done' "$rtout"
   [ "$rtcode" = 2 ] && ok "restack retarget-fail: exits non-zero" || bad "restack retarget-fail: exits non-zero" "exit=$rtcode"
 
   # closed child (fix 3): a CLOSED child PR is a LOUD orphan — flag it, and NEVER
   # force-push its branch.
-  printf 'MERGED\n' >"$C_DB/20.state"; printf 'main\n' >"$C_DB/20.base"
-  printf 'CLOSED\n' >"$C_DB/21.state"; printf 'br-a\n' >"$C_DB/21.base"
-  git -C "$C_WORK" checkout -q br-a; git -C "$C_WORK" checkout -q -b br-closed; echo cl >"$C_WORK/cl.txt"; git -C "$C_WORK" add cl.txt; git -C "$C_WORK" commit -q -m cl; git -C "$C_WORK" push -q origin br-closed
+  printf 'MERGED\n' >"$C_DB/20.state"
+  printf 'main\n' >"$C_DB/20.base"
+  printf 'CLOSED\n' >"$C_DB/21.state"
+  printf 'br-a\n' >"$C_DB/21.base"
+  git -C "$C_WORK" checkout -q br-a
+  git -C "$C_WORK" checkout -q -b br-closed
+  echo cl >"$C_WORK/cl.txt"
+  git -C "$C_WORK" add cl.txt
+  git -C "$C_WORK" commit -q -m cl
+  git -C "$C_WORK" push -q origin br-closed
   git -C "$C_WORK" checkout -q main
   CLOSED_TIP_BEFORE="$(git -C "$C_WORK" rev-parse origin/br-closed)"
-  CL_RUN="$RS/cl-run"; mkdir -p "$CL_RUN/.auto-pilot"
+  CL_RUN="$RS/cl-run"
+  mkdir -p "$CL_RUN/.auto-pilot"
   {
     printf -- '---\nbase_branch: main\n---\n\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
@@ -1730,7 +1942,8 @@ GHEOF
     printf '| t_p2 | handed-off | br-a | main | - | #20 | |\n'
     printf '| t_cl | handed-off | br-closed | br-a | %s | #21 | |\n' "$A_SHA"
   } >"$CL_RUN/.auto-pilot/RUN.md"
-  clout="$("$SCRIPT" restack --run-dir "$CL_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"; clcode=$?
+  clout="$("$SCRIPT" restack --run-dir "$CL_RUN" --repo "$C_WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
+  clcode=$?
   have "restack closed-child: flagged as a DEFECT" 'DEFECT — PR #21 is CLOSED' "$clout"
   git -C "$C_WORK" fetch -q origin
   [ "$(git -C "$C_WORK" rev-parse origin/br-closed)" = "$CLOSED_TIP_BEFORE" ] \
@@ -1754,8 +1967,12 @@ fi
 # REAL generated launch wrapper. A test that would still pass with the alarm
 # deleted is worthless here — every production failure in this system exited 0.
 if command -v git >/dev/null 2>&1; then
-  AL="$BASE/alarm"; ALSTUB="$AL/stub"; mkdir -p "$ALSTUB"
-  OSA_CALLS="$AL/osascript.calls"; LC_CALLS="$AL/launchctl.calls"; CLAUDE_CALLS="$AL/claude.calls"
+  AL="$BASE/alarm"
+  ALSTUB="$AL/stub"
+  mkdir -p "$ALSTUB"
+  OSA_CALLS="$AL/osascript.calls"
+  LC_CALLS="$AL/launchctl.calls"
+  CLAUDE_CALLS="$AL/claude.calls"
 
   # osascript stub: records the AppleScript it was asked to run. The REAL
   # /usr/bin/osascript is exec-DENIED inside the jail (orchestrator.sb.tmpl), so
@@ -1782,7 +1999,7 @@ if command -v git >/dev/null 2>&1; then
   mkrun() {
     local d="$1" st="$2" un="$3" np="$4" i=0
     mkdir -p "$d/.auto-pilot"
-    ( cd "$d" && git init -q && git config user.email t@e && git config user.name t )
+    (cd "$d" && git init -q && git config user.email t@e && git config user.name t)
     {
       printf -- '---\n'
       printf 'status: %s\n' "$st"
@@ -1791,10 +2008,13 @@ if command -v git >/dev/null 2>&1; then
       printf -- '---\n'
       printf '| task | phase | branch | base | base_sha | pr | notes |\n'
       printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
-      while [ "$i" -lt "$np" ]; do printf '| T-%s | parked | b%s | main | - | - | x |\n' "$i" "$i"; i=$((i + 1)); done
+      while [ "$i" -lt "$np" ]; do
+        printf '| T-%s | parked | b%s | main | - | - | x |\n' "$i" "$i"
+        i=$((i + 1))
+      done
     } >"$d/.auto-pilot/RUN.md"
     printf '# report\n' >"$d/.auto-pilot/REPORT.md"
-    ( cd "$d" && git add -A && git -c user.name=t -c user.email=t@e commit -q -m init )
+    (cd "$d" && git add -A && git -c user.name=t -c user.email=t@e commit -q -m init)
   }
   # One supervisor wake, with the stubs on the launch PATH (the launchd wrapper's
   # own PATH is exactly this shape: a resolved list, not the caller's env).
@@ -1808,8 +2028,8 @@ if command -v git >/dev/null 2>&1; then
   alarm_asserts() {
     local name="$1" d="$2" cond="$3" action="$4"
     local sent="$d/.auto-pilot/ALARM"
-    have "alarm/$name: writes the ALARM sentinel"   "condition: $cond" "$(cat "$sent" 2>/dev/null)"
-    have "alarm/$name: sentinel names the action"   "$action"          "$(cat "$sent" 2>/dev/null)"
+    have "alarm/$name: writes the ALARM sentinel" "condition: $cond" "$(cat "$sent" 2>/dev/null)"
+    have "alarm/$name: sentinel names the action" "$action" "$(cat "$sent" 2>/dev/null)"
     have "alarm/$name: REPORT.md's FIRST line is the alarm" \
       "**ALARM" "$(head -1 "$d/.auto-pilot/REPORT.md" 2>/dev/null)"
     have "alarm/$name: REPORT.md's first line names the condition" \
@@ -1821,7 +2041,9 @@ if command -v git >/dev/null 2>&1; then
   }
 
   # (1) fatal auth halt — the #22 condition itself.
-  : >"$OSA_CALLS"; A1="$AL/fatal"; mkrun "$A1" active 2099-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A1="$AL/fatal"
+  mkrun "$A1" active 2099-01-01T00:00:00 0
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A1/.auto-pilot/orchestrator.log"
   a1out="$(alwake "$A1" 1 "$A1/.auto-pilot/orchestrator.log")"
   have "alarm/fatal-auth: the wake reports the ALARM" 'ALARM fatal-auth' "$a1out"
@@ -1829,7 +2051,9 @@ if command -v git >/dev/null 2>&1; then
 
   # (2) circuit-breaker / systemic — written by the AGENT, delivered by the
   # supervisor (the agent cannot notify: the jail denies osascript).
-  : >"$OSA_CALLS"; A2="$AL/systemic"; mkrun "$A2" systemic 2099-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A2="$AL/systemic"
+  mkrun "$A2" systemic 2099-01-01T00:00:00 0
   printf 'ok\n' >"$A2/.auto-pilot/orchestrator.log"
   a2out="$(alwake "$A2" 0 "$A2/.auto-pilot/orchestrator.log")"
   have "alarm/systemic: an exit-0 wake still alarms on a systemic RUN.md" 'ALARM systemic' "$a2out"
@@ -1837,7 +2061,9 @@ if command -v git >/dev/null 2>&1; then
 
   # (3) a failed invariant — raised by an IN-JAIL detector via alarm-request
   # (which cannot notify), drained + delivered by the un-jailed supervisor.
-  : >"$OSA_CALLS"; A3="$AL/invariant"; mkrun "$A3" active 2099-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A3="$AL/invariant"
+  mkrun "$A3" active 2099-01-01T00:00:00 0
   printf 'ok\n' >"$A3/.auto-pilot/orchestrator.log"
   "$SCRIPT" alarm-request --dir "$A3" --condition invariant \
     --reason 'invariant 7 FAILED: the run made no forward progress for 2 wakes' >/dev/null 2>&1
@@ -1855,7 +2081,9 @@ if command -v git >/dev/null 2>&1; then
 
   # (4) N consecutive no-progress wakes — the STALL. #22 never reached a halt
   # state at all: RUN.md looked healthy and the run did nothing.
-  : >"$OSA_CALLS"; A4="$AL/noprogress"; mkrun "$A4" active 2099-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A4="$AL/noprogress"
+  mkrun "$A4" active 2099-01-01T00:00:00 0
   printf 'some other unrelated crash\n' >"$A4/.auto-pilot/orchestrator.log"
   alwake "$A4" 1 "$A4/.auto-pilot/orchestrator.log" >/dev/null
   alwake "$A4" 1 "$A4/.auto-pilot/orchestrator.log" >/dev/null
@@ -1868,14 +2096,19 @@ if command -v git >/dev/null 2>&1; then
   # (5) a park storm — a graveyard of parked tasks with no single signal is
   # exactly what run-budget.md's circuit breaker exists to turn into one alarm.
   # It REPORTS but must not tear the job down: the other tasks may still deliver.
-  : >"$OSA_CALLS"; : >"$LC_CALLS"; A5="$AL/parkstorm"; mkrun "$A5" active 2099-01-01T00:00:00 3
+  : >"$OSA_CALLS"
+  : >"$LC_CALLS"
+  A5="$AL/parkstorm"
+  mkrun "$A5" active 2099-01-01T00:00:00 3
   printf 'ok\n' >"$A5/.auto-pilot/orchestrator.log"
   a5out="$(alwake "$A5" 0 "$A5/.auto-pilot/orchestrator.log")"
   have "alarm/park-storm: 3 parked tasks alarm" 'ALARM park-storm' "$a5out"
   alarm_asserts "park-storm" "$A5" "park-storm" 'unblock them'
   lack "alarm/park-storm: reports but does NOT tear the job down" 'bootout' "$(cat "$LC_CALLS" 2>/dev/null)"
   # …and a run under the limit never alarms (the threshold is real, not decorative)
-  : >"$OSA_CALLS"; A5B="$AL/parkfew"; mkrun "$A5B" active 2099-01-01T00:00:00 2
+  : >"$OSA_CALLS"
+  A5B="$AL/parkfew"
+  mkrun "$A5B" active 2099-01-01T00:00:00 2
   printf 'ok\n' >"$A5B/.auto-pilot/orchestrator.log"
   alwake "$A5B" 0 "$A5B/.auto-pilot/orchestrator.log" >/dev/null
   lack "alarm/park-storm: 2 parked tasks (< limit) do not alarm" \
@@ -1884,13 +2117,17 @@ if command -v git >/dev/null 2>&1; then
     || ok "alarm/park-storm: no sentinel under the limit"
 
   # (6) a run that blew its --until without finishing.
-  : >"$OSA_CALLS"; A6="$AL/deadline"; mkrun "$A6" active 2020-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A6="$AL/deadline"
+  mkrun "$A6" active 2020-01-01T00:00:00 0
   printf 'ok\n' >"$A6/.auto-pilot/orchestrator.log"
   a6out="$(alwake "$A6" 0 "$A6/.auto-pilot/orchestrator.log")"
   have "alarm/deadline: a blown --until alarms" 'ALARM deadline' "$a6out"
   alarm_asserts "deadline" "$A6" "deadline" '--until'
   # …but a FINISHED run's past deadline is not an alarm (it's just a finished run)
-  : >"$OSA_CALLS"; A6B="$AL/deadline-done"; mkrun "$A6B" done 2020-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A6B="$AL/deadline-done"
+  mkrun "$A6B" done 2020-01-01T00:00:00 0
   printf 'ok\n' >"$A6B/.auto-pilot/orchestrator.log"
   alwake "$A6B" 0 "$A6B/.auto-pilot/orchestrator.log" >/dev/null
   lack "alarm/deadline: a DONE run's past deadline never alarms" \
@@ -1901,9 +2138,13 @@ if command -v git >/dev/null 2>&1; then
   # 401 (the agent is dead by construction — it cannot alarm for itself, and the
   # jail would deny it osascript anyway). Assert claude is invoked exactly ONCE:
   # the alarm must not have needed a second model call to produce itself.
-  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"; : >"$LC_CALLS"
-  A7="$AL/wrapper"; mkrun "$A7" active 2099-01-01T00:00:00 0
-  A7LOG="$A7/.auto-pilot/orchestrator.log"; : >"$A7LOG"
+  : >"$OSA_CALLS"
+  : >"$CLAUDE_CALLS"
+  : >"$LC_CALLS"
+  A7="$AL/wrapper"
+  mkrun "$A7" active 2099-01-01T00:00:00 0
+  A7LOG="$A7/.auto-pilot/orchestrator.log"
+  : >"$A7LOG"
   printf 'run the graph\n' >"$AL/prompt.txt"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$A7" \
     --log "$A7LOG" --prompt-file "$AL/prompt.txt" --until '2099-01-01T00:00:00' \
@@ -1938,10 +2179,15 @@ if command -v git >/dev/null 2>&1; then
   # must produce ONE notification, or the alarm becomes the new noise and the
   # next real one is ignored. (Relaunch happens for real when a bootout doesn't
   # take — the very case the halt already warns about.)
-  : >"$OSA_CALLS"; A8="$AL/idem"; mkrun "$A8" active 2099-01-01T00:00:00 0
+  : >"$OSA_CALLS"
+  A8="$AL/idem"
+  mkrun "$A8" active 2099-01-01T00:00:00 0
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A8/.auto-pilot/orchestrator.log"
   i=0
-  while [ "$i" -lt 5 ]; do alwake "$A8" 1 "$A8/.auto-pilot/orchestrator.log" >/dev/null; i=$((i + 1)); done
+  while [ "$i" -lt 5 ]; do
+    alwake "$A8" 1 "$A8/.auto-pilot/orchestrator.log" >/dev/null
+    i=$((i + 1))
+  done
   ncalls="$(grep -c 'display notification' "$OSA_CALLS" 2>/dev/null | tr -d ' ')"
   [ "$ncalls" = 1 ] && ok "alarm/idempotent: 5 wakes in the same condition notify ONCE" \
     || bad "alarm/idempotent: 5 wakes in the same condition notify ONCE" "notifications=$ncalls"
@@ -1956,11 +2202,13 @@ if command -v git >/dev/null 2>&1; then
   # REPORT.md line are what a human (or `status`) can still see from a shell.
   # Both notifiers are stubbed to FAIL (exactly what the jail's process-exec deny
   # looks like from the caller's side), ahead of the real ones on PATH.
-  ALFAIL="$AL/stub-fail"; mkdir -p "$ALFAIL"
+  ALFAIL="$AL/stub-fail"
+  mkdir -p "$ALFAIL"
   printf '#!/bin/sh\nexit 1\n' >"$ALFAIL/osascript"
   printf '#!/bin/sh\nexit 1\n' >"$ALFAIL/terminal-notifier"
   chmod +x "$ALFAIL/osascript" "$ALFAIL/terminal-notifier"
-  A9="$AL/nonotify"; mkrun "$A9" active 2099-01-01T00:00:00 0
+  A9="$AL/nonotify"
+  mkrun "$A9" active 2099-01-01T00:00:00 0
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A9/.auto-pilot/orchestrator.log"
   n9="$(PATH="$ALFAIL:$GUARD:/usr/bin:/bin" "$SCRIPT" supervisor-check --exit-code 1 \
     --log "$A9/.auto-pilot/orchestrator.log" --dir "$A9" --label com.autopilot.test.nonotify \
@@ -1998,7 +2246,7 @@ if command -v git >/dev/null 2>&1; then
   mkgaterun() {
     local d="$1"
     mkdir -p "$d/.auto-pilot"
-    ( cd "$d" && git init -q && git config user.email t@e && git config user.name t )
+    (cd "$d" && git init -q && git config user.email t@e && git config user.name t)
     {
       printf -- '---\n'
       printf 'status: %s\n' "$2"
@@ -2011,7 +2259,7 @@ if command -v git >/dev/null 2>&1; then
     } >"$d/.auto-pilot/RUN.md"
     printf '# report\n' >"$d/.auto-pilot/REPORT.md"
     : >"$d/.auto-pilot/orchestrator.log"
-    ( cd "$d" && git add -A && git -c user.name=t -c user.email=t@e commit -q -m init )
+    (cd "$d" && git add -A && git -c user.name=t -c user.email=t@e commit -q -m init)
   }
 
   # (11a) The agent's circuit breaker wrote `status: systemic`, and the wake that
@@ -2020,8 +2268,11 @@ if command -v git >/dev/null 2>&1; then
   # and exits 0: the LAST wake this run will ever get. If the scan sits under that
   # exit, the run is torn down forever with nobody told — finding #22's silence,
   # restored by the very mechanism meant to end it.
-  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"; : >"$LC_CALLS"
-  G1="$AL/gate-systemic"; mkgaterun "$G1" systemic '' 2099-01-01T00:00:00
+  : >"$OSA_CALLS"
+  : >"$CLAUDE_CALLS"
+  : >"$LC_CALLS"
+  G1="$AL/gate-systemic"
+  mkgaterun "$G1" systemic '' 2099-01-01T00:00:00
   mkwrapper "$G1" com.autopilot.test.gsys "$AL/gsys.sh"
   bash "$AL/gsys.sh" >/dev/null 2>&1
   have "alarm/gate-systemic: a gate-CLOSED wake still alarms (the gate skips the AGENT, not the supervisor)" \
@@ -2035,8 +2286,11 @@ if command -v git >/dev/null 2>&1; then
   # The gate closes on paused_until and exits 0 — for the whole pause. A deadline
   # (or a park storm, or a pending in-jail alarm-request) under that exit is a
   # stalled run staying silent for hours: the exact #22 shape.
-  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"; : >"$LC_CALLS"
-  G2="$AL/gate-paused"; mkgaterun "$G2" paused 2099-01-01T00:00:00Z 2020-01-01T00:00:00
+  : >"$OSA_CALLS"
+  : >"$CLAUDE_CALLS"
+  : >"$LC_CALLS"
+  G2="$AL/gate-paused"
+  mkgaterun "$G2" paused 2099-01-01T00:00:00Z 2020-01-01T00:00:00
   mkwrapper "$G2" com.autopilot.test.gpause "$AL/gpause.sh"
   bash "$AL/gpause.sh" >/dev/null 2>&1
   have "alarm/gate-paused: a blown --until alarms even though the gate closed the wake" \
@@ -2047,8 +2301,10 @@ if command -v git >/dev/null 2>&1; then
 
   # (11c) …and a HEALTHY paused run alarms NOTHING. A closed gate is not itself a
   # condition — the scan decides. Get this wrong and every paused wake screams.
-  : >"$OSA_CALLS"; : >"$CLAUDE_CALLS"
-  G3="$AL/gate-healthy"; mkgaterun "$G3" paused 2099-01-01T00:00:00Z 2099-01-01T00:00:00
+  : >"$OSA_CALLS"
+  : >"$CLAUDE_CALLS"
+  G3="$AL/gate-healthy"
+  mkgaterun "$G3" paused 2099-01-01T00:00:00Z 2099-01-01T00:00:00
   mkwrapper "$G3" com.autopilot.test.ghealthy "$AL/ghealthy.sh"
   bash "$AL/ghealthy.sh" >/dev/null 2>&1
   lack "alarm/gate-healthy: a healthy paused wake raises NO notification" \
@@ -2061,8 +2317,10 @@ if command -v git >/dev/null 2>&1; then
   # `systemic` RUN.md next to a still-loaded job that relaunches into the same
   # condition every 300s: #22's loop, wearing the halt message as camouflage. The
   # sentinel path is made unwritable (a directory) to force the failure.
-  : >"$LC_CALLS"; : >"$OSA_CALLS"
-  A11="$AL/badsentinel"; mkrun "$A11" active 2099-01-01T00:00:00 0
+  : >"$LC_CALLS"
+  : >"$OSA_CALLS"
+  A11="$AL/badsentinel"
+  mkrun "$A11" active 2099-01-01T00:00:00 0
   mkdir -p "$A11/.auto-pilot/ALARM"
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A11/.auto-pilot/orchestrator.log"
   alwake "$A11" 1 "$A11/.auto-pilot/orchestrator.log" >/dev/null 2>&1
@@ -2099,11 +2357,17 @@ if command -v git >/dev/null 2>&1; then
 
   # fail-closed: the condition id is an idempotency key and a grep anchor; the
   # request's fields are read back line-wise, so a newline could forge them.
-  afc() { local name="$1" want="$2"; shift 2; local o c; o="$("$SCRIPT" "$@" 2>&1)"; c=$?
-    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "alarm fail-closed: $name"; else bad "alarm fail-closed: $name" "exit=$c msg=$o"; fi; }
+  afc() {
+    local name="$1" want="$2"
+    shift 2
+    local o c
+    o="$("$SCRIPT" "$@" 2>&1)"
+    c=$?
+    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "alarm fail-closed: $name"; else bad "alarm fail-closed: $name" "exit=$c msg=$o"; fi
+  }
   afc "bad condition charset" "must be [A-Za-z0-9._-]" alarm --dir "$A1" --condition 'bad id' --reason x
-  afc "relative --dir"        "must be absolute"        alarm --dir "rel/ative" --condition x --reason y
-  afc "missing --reason"      "requires --dir"          alarm --dir "$A1" --condition x
+  afc "relative --dir" "must be absolute" alarm --dir "rel/ative" --condition x --reason y
+  afc "missing --reason" "requires --dir" alarm --dir "$A1" --condition x
   afc "request newline reason" "must not contain a newline" \
     alarm-request --dir "$A1" --condition x --reason "$(printf 'a\ncondition: forged')"
 else
@@ -2119,7 +2383,9 @@ fi
 # (which records every invocation), then assert on the MARKER FILES — did the
 # supervisor actually boot the job out, or not?
 if command -v git >/dev/null 2>&1; then
-  EC="$BASE/exitcontract"; STUB="$EC/stub"; mkdir -p "$STUB"
+  EC="$BASE/exitcontract"
+  STUB="$EC/stub"
+  mkdir -p "$STUB"
 
   # sandbox-exec stub: drop `-f <profile>` and exec the rest. The real wrapper
   # composes the jail around claude; here we want the wrapper's LOGIC exercised
@@ -2157,19 +2423,27 @@ CLEOF
   # Leaves: $EC_DIR (run dir), $EC_LC (launchctl log), $EC_MARK (claude marker).
   ec_wake() {
     local name="$1" declare="$2" ecode="$3"
-    EC_DIR="$EC/$name"; EC_LC="$EC_DIR/launchctl.log"; EC_MARK="$EC_DIR/claude-ran"
+    EC_DIR="$EC/$name"
+    EC_LC="$EC_DIR/launchctl.log"
+    EC_MARK="$EC_DIR/claude-ran"
     mkdir -p "$EC_DIR/.auto-pilot"
-    { printf -- '---\n'; printf 'run_id: %s\n' "$name"; printf 'status: active\n'
-      printf 'pause_reason: \n'; printf -- '---\n'; printf '\n'
+    {
+      printf -- '---\n'
+      printf 'run_id: %s\n' "$name"
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf -- '---\n'
+      printf '\n'
       printf '| task | phase | branch | base | base_sha | pr | notes |\n'
       printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
       printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
     } >"$EC_DIR/.auto-pilot/RUN.md"
     printf '# report\n' >"$EC_DIR/.auto-pilot/REPORT.md"
-    ( cd "$EC_DIR" && git init -q && git add -A \
-      && git -c user.name=t -c user.email=t@t commit -q -m init )
+    (cd "$EC_DIR" && git init -q && git add -A \
+      && git -c user.name=t -c user.email=t@t commit -q -m init)
     : >"$EC_DIR/.auto-pilot/orchestrator.log"
-    : >"$EC_LC"; rm -f "$EC_MARK"
+    : >"$EC_LC"
+    rm -f "$EC_MARK"
     "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
       --workdir "$EC_DIR" --log "$EC_DIR/.auto-pilot/orchestrator.log" \
       --prompt-file "$BASE/prompt.txt" --label "com.autopilot.ec.$name" \
@@ -2182,7 +2456,8 @@ CLEOF
   # <name> <label-for-the-assertion> <yes|no: is a teardown expected?>
   ec_assert() {
     local name="$1" want_teardown="$2"
-    local lc; lc="$(cat "$EC/$name/launchctl.log" 2>/dev/null)"
+    local lc
+    lc="$(cat "$EC/$name/launchctl.log" 2>/dev/null)"
     if [ -f "$EC/$name/claude-ran" ]; then
       ok "exit contract [$name]: the generated wrapper really invoked claude"
     else
@@ -2235,8 +2510,8 @@ CLEOF
   have "exit contract [done]: reason committed to the run-state branch" \
     'exit_reason: done' "$(git -C "$EC/done" show HEAD:.auto-pilot/RUN.md 2>&1)"
   dstat="$("$SCRIPT" status --label com.autopilot.ec.done --dir "$EC/done" 2>&1)"
-  have "exit contract [done]: status reports done"           'STATUS: done' "$dstat"
-  have "exit contract [done]: status says NO relaunch"       'relaunch=no'  "$dstat"
+  have "exit contract [done]: status reports done" 'STATUS: done' "$dstat"
+  have "exit contract [done]: status says NO relaunch" 'relaunch=no' "$dstat"
 
   # deadline — the pre-dispatch guard stopped with tasks still ready. Tear down;
   # only an explicit --resume brings it back (never the timer).
@@ -2245,7 +2520,7 @@ CLEOF
   have "exit contract [deadline]: sentinel records the deadline reason (not a plain done)" \
     'reason: deadline' "$(cat "$EC/deadline/.auto-pilot/orchestrator.done" 2>/dev/null)"
   dlstat="$("$SCRIPT" status --label com.autopilot.ec.deadline --dir "$EC/deadline" 2>&1)"
-  have "exit contract [deadline]: status says NO relaunch"    'relaunch=no'       "$dlstat"
+  have "exit contract [deadline]: status says NO relaunch" 'relaunch=no' "$dlstat"
   lack "exit contract [deadline]: a deadline stop is NOT reported as a finished run" 'STATUS: done' "$dlstat"
 
   # systemic — circuit breaker / failed invariant. Tear down AND alarm.
@@ -2274,9 +2549,14 @@ CLEOF
   # seam). Driven through the REAL generated wrapper: the gate must close (claude is
   # never invoked) AND the heartbeat must still be fresh.
   ec_wake gateclosed "" 0
-  { printf -- '---\n'; printf 'run_id: gateclosed\n'; printf 'status: paused\n'
-    printf 'paused_until: 2099-01-01T00:00:00\n'; printf 'pause_reason: rate window\n'
-    printf -- '---\n'; } >"$EC/gateclosed/.auto-pilot/RUN.md"
+  {
+    printf -- '---\n'
+    printf 'run_id: gateclosed\n'
+    printf 'status: paused\n'
+    printf 'paused_until: 2099-01-01T00:00:00\n'
+    printf 'pause_reason: rate window\n'
+    printf -- '---\n'
+  } >"$EC/gateclosed/.auto-pilot/RUN.md"
   rm -f "$EC/gateclosed/.auto-pilot/heartbeat" "$EC/gateclosed/claude-ran"
   : >"$EC/gateclosed/launchctl.log"
   STUB_LAUNCHCTL_LOG="$EC/gateclosed/launchctl.log" STUB_CLAUDE_MARKER="$EC/gateclosed/claude-ran" \
@@ -2295,9 +2575,16 @@ CLEOF
   # --- fail-SAFE: a stale / garbage / absent declaration never tears down ------
   # The reason lives on the run-state branch, so it OUTLIVES its wake. A previous
   # wake's `done` must not tear down a live run.
-  SD="$EC/stale-done"; mkdir -p "$SD/.auto-pilot"
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: done\n'; printf 'exit_reason_at: 1000\n'; printf -- '---\n'; } >"$SD/.auto-pilot/RUN.md"
+  SD="$EC/stale-done"
+  mkdir -p "$SD/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'
+    printf 'exit_reason_at: 1000\n'
+    printf -- '---\n'
+  } >"$SD/.auto-pilot/RUN.md"
   printf '# report\n' >"$SD/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$SD/log"
   : >"$SD/launchctl.log"
@@ -2311,9 +2598,16 @@ CLEOF
   fi
 
   # A garbage reason falls back to inference (task 10's path), never to a teardown.
-  GB="$EC/garbage"; mkdir -p "$GB/.auto-pilot"
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: whatever-nonsense\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$GB/.auto-pilot/RUN.md"
+  GB="$EC/garbage"
+  mkdir -p "$GB/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: whatever-nonsense\n'
+    printf 'exit_reason_at: 9999999999\n'
+    printf -- '---\n'
+  } >"$GB/.auto-pilot/RUN.md"
   printf '# report\n' >"$GB/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$GB/log"
   : >"$GB/launchctl.log"
@@ -2330,10 +2624,17 @@ CLEOF
   # A FATAL auth exit still halts even when this wake declared `continuing` —
   # inference outranks declaration in exactly one direction (over-halting is safe;
   # relaunching into a dead credential 52 times is finding #22).
-  FA="$EC/fatal-vs-declared"; mkdir -p "$FA/.auto-pilot"
-  ( cd "$FA" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: continuing\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$FA/.auto-pilot/RUN.md"
+  FA="$EC/fatal-vs-declared"
+  mkdir -p "$FA/.auto-pilot"
+  (cd "$FA" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: continuing\n'
+    printf 'exit_reason_at: 9999999999\n'
+    printf -- '---\n'
+  } >"$FA/.auto-pilot/RUN.md"
   printf '# report\n' >"$FA/.auto-pilot/REPORT.md"
   : >"$FA/launchctl.log"
   STUB_LAUNCHCTL_LOG="$FA/launchctl.log" PATH="$STUB_PATH" \
@@ -2359,18 +2660,27 @@ CLEOF
   #      counter, the halt, the teardown. A `die` here would make the supervisor
   #      exit before classifying anything, on every wake, forever: claude burns
   #      quota, launchd relaunches, nothing alarms. Finding #22, unkillable.
-  WS="$EC/wake-start"; mkdir -p "$WS/.auto-pilot"
-  ( cd "$WS" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: done\n'; printf 'exit_reason_at: 1000\n'; printf -- '---\n'; } >"$WS/.auto-pilot/RUN.md"
+  WS="$EC/wake-start"
+  mkdir -p "$WS/.auto-pilot"
+  (cd "$WS" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'
+    printf 'exit_reason_at: 1000\n'
+    printf -- '---\n'
+  } >"$WS/.auto-pilot/RUN.md"
   printf '# report\n' >"$WS/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$WS/log"
   # ws_case <name> [extra supervisor-check args…] — a LIVE run (exit 0, clean log)
   # whose RUN.md carries a STALE terminal declaration. Observed: did `bootout` reach
   # launchctl, and did the supervisor still do its job, rather than die on a usage error?
   ws_case() {
-    local name="$1"; shift
-    : >"$WS/launchctl.log"; rm -f "$WS/.auto-pilot/orchestrator.done"
+    local name="$1"
+    shift
+    : >"$WS/launchctl.log"
+    rm -f "$WS/.auto-pilot/orchestrator.done"
     local wsc wsout
     wsout="$(STUB_LAUNCHCTL_LOG="$WS/launchctl.log" PATH="$STUB_PATH" \
       "$SCRIPT" supervisor-check --exit-code 0 --log "$WS/log" "$@" \
@@ -2400,10 +2710,17 @@ CLEOF
   # …and the duty that MATTERS: a fatal auth log with NO --wake-start must STILL halt.
   # This is the exact input the reviewer reproduced the regression with — the run
   # that, with a `die` here, relaunched into the same 401 forever with zero alarm.
-  WSF="$EC/wake-start-fatal"; mkdir -p "$WSF/.auto-pilot"
-  ( cd "$WSF" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: continuing\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$WSF/.auto-pilot/RUN.md"
+  WSF="$EC/wake-start-fatal"
+  mkdir -p "$WSF/.auto-pilot"
+  (cd "$WSF" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: continuing\n'
+    printf 'exit_reason_at: 9999999999\n'
+    printf -- '---\n'
+  } >"$WSF/.auto-pilot/RUN.md"
   printf '# report\n' >"$WSF/.auto-pilot/REPORT.md"
   : >"$WSF/launchctl.log"
   STUB_LAUNCHCTL_LOG="$WSF/launchctl.log" PATH="$STUB_PATH" \
@@ -2421,11 +2738,17 @@ CLEOF
   fi
 
   # …and the no-progress counter STILL counts across wakes with no wake stamp.
-  WSN="$EC/wake-start-noprogress"; mkdir -p "$WSN/.auto-pilot"
-  ( cd "$WSN" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  WSN="$EC/wake-start-noprogress"
+  mkdir -p "$WSN/.auto-pilot"
+  (cd "$WSN" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   : >"$WSN/launchctl.log"
   i=0
   while [ "$i" -lt 3 ]; do
@@ -2443,18 +2766,25 @@ CLEOF
   # the repo clears either, so a resumed — RUNNING — run used to read back as
   # finished forever, which a PathState watcher (and, with a stale declaration, the
   # supervisor itself) would act on.
-  CES="$EC/clear-exit-state"; mkdir -p "$CES/.auto-pilot"
-  { printf -- '---\n'; printf 'run_id: ces\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: deadline\n'; printf 'exit_reason_at: 1000\n'
+  CES="$EC/clear-exit-state"
+  mkdir -p "$CES/.auto-pilot"
+  {
+    printf -- '---\n'
+    printf 'run_id: ces\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: deadline\n'
+    printf 'exit_reason_at: 1000\n'
     printf 'exit_reason_detail: the pre-dispatch guard stopped with tasks still ready\n'
-    printf -- '---\n'; printf '\n'
+    printf -- '---\n'
+    printf '\n'
     printf '| task | phase | branch | base | base_sha | pr | notes |\n'
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
   } >"$CES/.auto-pilot/RUN.md"
   printf 'com.autopilot.ec.ces deadline 1970-01-01T00:00:00Z\nreason: deadline\n' \
     >"$CES/.auto-pilot/orchestrator.done"
-  ( cd "$CES" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+  (cd "$CES" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   have "clear-exit-state: precondition — the stale terminal state reads back as NO relaunch" \
     'relaunch=no' "$("$SCRIPT" status --label com.autopilot.ec.ces --dir "$CES" 2>&1)"
   "$SCRIPT" clear-exit-state --dir "$CES" >/dev/null 2>&1
@@ -2500,7 +2830,8 @@ CLEOF
   # every wake exits 0 and re-attempts the same failing teardown, `status` says
   # relaunch=no — zero work, zero alarm. Finding #22 by another route. This stub
   # FAILS the bootout and reports the job still loaded via `print`.
-  STUBF="$EC/stub-failing-bootout"; mkdir -p "$STUBF"
+  STUBF="$EC/stub-failing-bootout"
+  mkdir -p "$STUBF"
   cat >"$STUBF/launchctl" <<'LCFEOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${STUB_LAUNCHCTL_LOG:?}"
@@ -2511,17 +2842,25 @@ esac
 exit 0
 LCFEOF
   chmod +x "$STUBF/launchctl"
-  BF="$EC/bootout-fails"; mkdir -p "$BF/.auto-pilot"
-  ( cd "$BF" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: done\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$BF/.auto-pilot/RUN.md"
+  BF="$EC/bootout-fails"
+  mkdir -p "$BF/.auto-pilot"
+  (cd "$BF" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'
+    printf 'exit_reason_at: 9999999999\n'
+    printf -- '---\n'
+  } >"$BF/.auto-pilot/RUN.md"
   printf '# report\n' >"$BF/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$BF/log"
   : >"$BF/launchctl.log"
   bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$BF/log" --dir "$BF" \
     --label com.autopilot.ec.bf --state "$BF/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
-  bfboots="$(grep -c 'bootout' "$BF/launchctl.log" 2>/dev/null)"; bfboots="${bfboots:-0}"
+  bfboots="$(grep -c 'bootout' "$BF/launchctl.log" 2>/dev/null)"
+  bfboots="${bfboots:-0}"
   if [ "$bfboots" -ge 2 ] && grep -q '^print' "$BF/launchctl.log" 2>/dev/null; then
     ok "exit contract [bootout fails]: the declared-done teardown is VERIFIED (launchctl print) and retried"
   else
@@ -2546,14 +2885,20 @@ LCFEOF
   # one the generated launch script's last line invokes as a separate process.
 
   # --- the SYSTEMIC HALT path survives a die-capable teardown ---------------
-  HB="$EC/halt-unwritable-sentinel"; mkdir -p "$HB/.auto-pilot"
-  ( cd "$HB" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+  HB="$EC/halt-unwritable-sentinel"
+  mkdir -p "$HB/.auto-pilot"
+  (cd "$HB" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: systemic\n'
+    printf 'exit_reason_at: 9999999999\n'
     printf 'exit_reason_detail: task-26 repro — unwritable sentinel dir\n'
-    printf -- '---\n'; } >"$HB/.auto-pilot/RUN.md"
+    printf -- '---\n'
+  } >"$HB/.auto-pilot/RUN.md"
   printf '# report\n' >"$HB/.auto-pilot/REPORT.md"
-  ( cd "$HB" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  (cd "$HB" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed)
   printf 'ok\n' >"$HB/log"
   : >"$HB/launchctl.log"
   # Break the side channel: every mktemp under .auto-pilot/ (the done-sentinel,
@@ -2563,7 +2908,7 @@ LCFEOF
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$HB/log" --dir "$HB" \
     --label com.autopilot.ec.hb --state "$HB/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
   hbrc=$?
-  chmod +w "$HB/.auto-pilot"   # restore: the trap's rm -rf must be able to clean up
+  chmod +w "$HB/.auto-pilot" # restore: the trap's rm -rf must be able to clean up
   [ "$hbrc" = 0 ] \
     && ok "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" \
     || bad "halt survives unwritable sentinel: supervisor-check exits 0, never the bare teardown die (2)" "exit=$hbrc"
@@ -2573,12 +2918,19 @@ LCFEOF
   # --- the DECLARED-DONE teardown path survives a die-capable state write AND --
   # a die-capable teardown (same shape, different caller — supervisor_check's own
   # done|deadline branch, not the halt).
-  DS="$EC/done-unwritable-sentinel"; mkdir -p "$DS/.auto-pilot"
-  ( cd "$DS" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-    printf 'exit_reason: done\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >"$DS/.auto-pilot/RUN.md"
+  DS="$EC/done-unwritable-sentinel"
+  mkdir -p "$DS/.auto-pilot"
+  (cd "$DS" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf 'exit_reason: done\n'
+    printf 'exit_reason_at: 9999999999\n'
+    printf -- '---\n'
+  } >"$DS/.auto-pilot/RUN.md"
   printf '# report\n' >"$DS/.auto-pilot/REPORT.md"
-  ( cd "$DS" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  (cd "$DS" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed)
   printf 'ok\n' >"$DS/log"
   : >"$DS/launchctl.log"
   chmod -w "$DS/.auto-pilot"
@@ -2606,12 +2958,18 @@ LCFEOF
   # forever. Zero work, zero alarm — finding #22's loop, reached THROUGH the guard
   # that exists to backstop it. Same shape the declared-done branch above already
   # fixed for the same function; this is the call site that was missed.
-  NP26="$EC/noprogress-unwritable"; mkdir -p "$NP26/.auto-pilot"
-  ( cd "$NP26" && git init -q )
+  NP26="$EC/noprogress-unwritable"
+  mkdir -p "$NP26/.auto-pilot"
+  (cd "$NP26" && git init -q)
   # status active, and NO exit_reason: an agent that crashed without declaring.
-  { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'; printf -- '---\n'; } >"$NP26/.auto-pilot/RUN.md"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'pause_reason: \n'
+    printf -- '---\n'
+  } >"$NP26/.auto-pilot/RUN.md"
   printf '# report\n' >"$NP26/.auto-pilot/REPORT.md"
-  ( cd "$NP26" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed )
+  (cd "$NP26" && git add -A && git -c user.name=t -c user.email=t@t commit -q -m seed)
   printf 'crash\n' >"$NP26/log"
   : >"$NP26/launchctl.log"
   chmod -w "$NP26/.auto-pilot"
@@ -2641,19 +2999,19 @@ LCFEOF
   # rediscover the unwritable-sentinel repro above to explain a red suite.
   guardbody="$(cat "$SCRIPT")"
   have "regression guard: _verify_bootout subshells its internal teardown call" \
-    '( teardown --label "$label" >/dev/null ) || true' "$guardbody"
+    '(teardown --label "$label" >/dev/null) || true' "$guardbody"
   have "regression guard: _supervisor_halt subshells its teardown call" \
-    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null ); then' \
+    'if ! (teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null); then' \
     "$guardbody"
   have "regression guard: supervisor-check's declared-done/deadline branch subshells _write_supervisor_state" \
-    '( _write_supervisor_state "$state" 0 "$(_run_head "$dir")" ) \' "$guardbody"
+    '(_write_supervisor_state "$state" 0 "$(_run_head "$dir")") \' "$guardbody"
   have "regression guard: supervisor-check's declared-done/deadline branch subshells teardown" \
-    'if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null ); then' \
+    'if ! (teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null); then' \
     "$guardbody"
   have "regression guard: the no-progress guard subshells its supervisor-state write" \
-    '( _write_supervisor_state "$state" "$count" "$head" ) \' "$guardbody"
+    '(_write_supervisor_state "$state" "$count" "$head") \' "$guardbody"
   have "regression guard: doctor's invariant-7 guard subshells its supervisor-state write" \
-    '( _write_supervisor_state "$dstate" "$count" "$head" ) \' "$guardbody"
+    '(_write_supervisor_state "$dstate" "$count" "$head") \' "$guardbody"
 
   # --- a declared `systemic` PRESERVES the orchestrator's own diagnosis -----------
   # The supervisor used to pass a fixed string ("…see RUN.md pause_reason…") which
@@ -2662,13 +3020,18 @@ LCFEOF
   # The two fields carry DIFFERENT text on purpose: with the same string in both,
   # the assertion cannot tell "read exit_reason_detail" from "silently fell back to
   # pause_reason", and passes even when the detail read is broken.
-  SY="$EC/systemic-detail"; mkdir -p "$SY/.auto-pilot"
-  ( cd "$SY" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'
+  SY="$EC/systemic-detail"
+  mkdir -p "$SY/.auto-pilot"
+  (cd "$SY" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
     printf 'pause_reason: circuit breaker: T-2 failed verify 3x on the same assertion\n'
-    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason: systemic\n'
+    printf 'exit_reason_at: 9999999999\n'
     printf 'exit_reason_detail: failed invariant: base_sha moved under T-4 mid-delivery\n'
-    printf -- '---\n'; } >"$SY/.auto-pilot/RUN.md"
+    printf -- '---\n'
+  } >"$SY/.auto-pilot/RUN.md"
   printf '# report\n' >"$SY/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$SY/log"
   : >"$SY/launchctl.log"
@@ -2688,13 +3051,18 @@ LCFEOF
   # …and with NO detail recorded, the fallback to the already-recorded pause_reason
   # still carries a concrete cause into the alarm (the fallback must exist, but it
   # must be a FALLBACK — the assertion above proves it isn't the only path taken).
-  SYF="$EC/systemic-detail-fallback"; mkdir -p "$SYF/.auto-pilot"
-  ( cd "$SYF" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'
+  SYF="$EC/systemic-detail-fallback"
+  mkdir -p "$SYF/.auto-pilot"
+  (cd "$SYF" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
     printf 'pause_reason: circuit breaker: T-9 failed verify 3x on the same assertion\n'
-    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason: systemic\n'
+    printf 'exit_reason_at: 9999999999\n'
     printf 'exit_reason_detail: \n'
-    printf -- '---\n'; } >"$SYF/.auto-pilot/RUN.md"
+    printf -- '---\n'
+  } >"$SYF/.auto-pilot/RUN.md"
   printf '# report\n' >"$SYF/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$SYF/log"
   : >"$SYF/launchctl.log"
@@ -2709,13 +3077,18 @@ LCFEOF
   # reader deliberately does not strip `#` (these fields are free prose). A run that
   # never wrote a real pause_reason must not have that comment preserved as the halt's
   # cause, nor read back to the human as the alarm's concrete diagnosis.
-  SYC="$EC/systemic-template-comment"; mkdir -p "$SYC/.auto-pilot"
-  ( cd "$SYC" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'
+  SYC="$EC/systemic-template-comment"
+  mkdir -p "$SYC/.auto-pilot"
+  (cd "$SYC" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
     printf 'pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)\n'
-    printf 'exit_reason: systemic\n'; printf 'exit_reason_at: 9999999999\n'
+    printf 'exit_reason: systemic\n'
+    printf 'exit_reason_at: 9999999999\n'
     printf 'exit_reason_detail: \n'
-    printf -- '---\n'; } >"$SYC/.auto-pilot/RUN.md"
+    printf -- '---\n'
+  } >"$SYC/.auto-pilot/RUN.md"
   printf '# report\n' >"$SYC/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$SYC/log"
   : >"$SYC/launchctl.log"
@@ -2738,12 +3111,16 @@ LCFEOF
   # on a run that actually died on a dead credential) and sends the operator to debug
   # the wrong thing — the same "looks like an explanation, is a lie" failure mode this
   # whole task exists to abolish.
-  SP="$EC/stale-pause-reason-fatal"; mkdir -p "$SP/.auto-pilot"
-  ( cd "$SP" && git init -q )
-  { printf -- '---\n'; printf 'status: active\n'
+  SP="$EC/stale-pause-reason-fatal"
+  mkdir -p "$SP/.auto-pilot"
+  (cd "$SP" && git init -q)
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
     printf 'pause_reason: rate window until 03:00 (from an earlier pause, since resumed)\n'
     printf 'paused_until: \n'
-    printf -- '---\n'; } >"$SP/.auto-pilot/RUN.md"
+    printf -- '---\n'
+  } >"$SP/.auto-pilot/RUN.md"
   printf '# report\n' >"$SP/.auto-pilot/REPORT.md"
   : >"$SP/launchctl.log"
   STUB_LAUNCHCTL_LOG="$SP/launchctl.log" PATH="$STUB_PATH" \
@@ -2756,13 +3133,17 @@ LCFEOF
     'rate window until 03:00' "$sprun"
 
   # …same for the no-progress halt.
-  NP="$EC/stale-pause-reason-noprogress"; mkdir -p "$NP/.auto-pilot"
-  ( cd "$NP" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'
-         printf 'pause_reason: rate window until 03:00 (from an earlier pause, since resumed)\n'
-         printf -- '---\n'; } >.auto-pilot/RUN.md \
+  NP="$EC/stale-pause-reason-noprogress"
+  mkdir -p "$NP/.auto-pilot"
+  (cd "$NP" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: rate window until 03:00 (from an earlier pause, since resumed)\n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   : >"$NP/launchctl.log"
   i=0
   while [ "$i" -lt 3 ]; do
@@ -2781,12 +3162,19 @@ LCFEOF
   # Resetting the counter on the declaration alone lets a prompt/logic bug that
   # declares `paused` on every wake while dying non-zero and making no run-state
   # progress relaunch forever: the backstop can never fire, and nothing alarms.
-  PB="$EC/paused-uncorroborated"; mkdir -p "$PB/.auto-pilot"
-  ( cd "$PB" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'; printf 'pause_reason: \n'
-         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  PB="$EC/paused-uncorroborated"
+  mkdir -p "$PB/.auto-pilot"
+  (cd "$PB" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'pause_reason: \n'
+      printf 'exit_reason: paused\n'
+      printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   : >"$PB/launchctl.log"
   i=0
   while [ "$i" -lt 3 ]; do
@@ -2801,13 +3189,20 @@ LCFEOF
     'no forward progress' "$(cat "$PB/.auto-pilot/REPORT.md")"
 
   # …while a REAL pause (RUN.md's own `status: paused` + `paused_until`) stays exempt.
-  PC="$EC/paused-corroborated"; mkdir -p "$PC/.auto-pilot"
-  ( cd "$PC" && git init -q \
-    && { printf -- '---\n'; printf 'status: paused\n'; printf 'paused_until: 2099-01-01T00:00:00\n'
-         printf 'pause_reason: rate window\n'
-         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  PC="$EC/paused-corroborated"
+  mkdir -p "$PC/.auto-pilot"
+  (cd "$PC" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: paused\n'
+      printf 'paused_until: 2099-01-01T00:00:00\n'
+      printf 'pause_reason: rate window\n'
+      printf 'exit_reason: paused\n'
+      printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   : >"$PC/launchctl.log"
   i=0
   while [ "$i" -lt 5 ]; do
@@ -2828,14 +3223,20 @@ LCFEOF
   # could never fire; (b) it is durable across a `--resume`, so a run that paused
   # once would exempt itself from the guard forever. Declaring `paused` on every
   # wake while dying non-zero must STILL reach the halt.
-  PT="$EC/paused-until-comment"; mkdir -p "$PT/.auto-pilot"
-  ( cd "$PT" && git init -q \
-    && { printf -- '---\n'; printf 'status: active\n'
-         printf 'paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused\n'
-         printf 'pause_reason: # why the run paused/halted\n'
-         printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'; printf -- '---\n'; } >.auto-pilot/RUN.md \
+  PT="$EC/paused-until-comment"
+  mkdir -p "$PT/.auto-pilot"
+  (cd "$PT" && git init -q \
+    && {
+      printf -- '---\n'
+      printf 'status: active\n'
+      printf 'paused_until: # ISO time the orchestrator may resume past a rate-window pause; empty unless status is paused\n'
+      printf 'pause_reason: # why the run paused/halted\n'
+      printf 'exit_reason: paused\n'
+      printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n'
+    } >.auto-pilot/RUN.md \
     && printf '# report\n' >.auto-pilot/REPORT.md \
-    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   : >"$PT/launchctl.log"
   i=0
   while [ "$i" -lt 4 ]; do
@@ -2874,22 +3275,27 @@ LCFEOF
     T23_DIR="$EC/t23-$1"
     mkdir -p "$T23_DIR/.auto-pilot"
     {
-      printf -- '---\n'; printf 'run_id: t23-%s\n' "$1"; printf 'status: %s\n' "$2"
-      printf 'paused_until: %s\n' "$3"; printf 'pause_reason: rate window\n'
-      printf 'exit_reason: paused\n'; printf 'exit_reason_at: 9999999999\n'
+      printf -- '---\n'
+      printf 'run_id: t23-%s\n' "$1"
+      printf 'status: %s\n' "$2"
+      printf 'paused_until: %s\n' "$3"
+      printf 'pause_reason: rate window\n'
+      printf 'exit_reason: paused\n'
+      printf 'exit_reason_at: 9999999999\n'
       printf -- '---\n\n'
       printf '| task | phase | branch | base | base_sha | pr | notes |\n'
       printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     } >"$T23_DIR/.auto-pilot/RUN.md"
     printf '# report\n' >"$T23_DIR/.auto-pilot/REPORT.md"
     : >"$T23_DIR/.auto-pilot/orchestrator.log"
-    ( cd "$T23_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    (cd "$T23_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
     "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
       --workdir "$T23_DIR" --log "$T23_DIR/.auto-pilot/orchestrator.log" \
       --prompt-file "$BASE/prompt.txt" --label "com.autopilot.t23.$1" \
       --claude-bin "$STUB/claude" --path "$STUB_PATH" \
       --out-script "$T23_DIR/launch.sh" --out-plist "$T23_DIR/job.plist" >/dev/null 2>&1
-    : >"$T23_DIR/launchctl.log"; rm -f "$T23_DIR/claude-ran"
+    : >"$T23_DIR/launchctl.log"
+    rm -f "$T23_DIR/claude-ran"
   }
   t23_wake() { # one wake through the REAL generated wrapper (no STUB_DECLARE: see above)
     STUB_LAUNCHCTL_LOG="$T23_DIR/launchctl.log" STUB_CLAUDE_MARKER="$T23_DIR/claude-ran" \
@@ -2900,7 +3306,11 @@ LCFEOF
   # `paused_until` — the failure this task exists to catch. Must NOT be exempt:
   # 3 (the default --no-progress-limit) consecutive wakes trip the guard.
   t23_setup wedge paused ''
-  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  i=0
+  while [ "$i" -lt 3 ]; do
+    t23_wake
+    i=$((i + 1))
+  done
   have "task 23 [status: paused, no paused_until]: the no-progress guard trips and halts" \
     'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
   have "task 23 [status: paused, no paused_until]: the halt raises the no-progress alarm" \
@@ -2915,7 +3325,11 @@ LCFEOF
   # every wake and the agent is never even invoked, let alone halted.
   T23_FUTURE="$(_gate_iso $((NOW_EPOCH + 3600)))"
   t23_setup future paused "$T23_FUTURE"
-  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  i=0
+  while [ "$i" -lt 5 ]; do
+    t23_wake
+    i=$((i + 1))
+  done
   lack "task 23 [genuine pause, future paused_until]: the guard never halts while the window is open" \
     'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
   lack "task 23 [genuine pause, future paused_until]: the job is never torn down" \
@@ -2928,7 +3342,11 @@ LCFEOF
   # the task-11 behavior this fix must not regress.
   T23_JUSTPAST="$(_gate_iso $((NOW_EPOCH - 10)))"
   t23_setup pastreset paused "$T23_JUSTPAST"
-  i=0; while [ "$i" -lt 5 ]; do t23_wake; i=$((i + 1)); done
+  i=0
+  while [ "$i" -lt 5 ]; do
+    t23_wake
+    i=$((i + 1))
+  done
   lack "task 23 [relaunch past the reset]: the guard does not halt just past its own paused_until" \
     'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
   [ -f "$T23_DIR/claude-ran" ] && ok "task 23 [relaunch past the reset]: the agent IS invoked once the gate reopens" \
@@ -2939,7 +3357,11 @@ LCFEOF
   # (still declaring the same stale `paused`) halt.
   T23_STALE="$(_gate_iso $((NOW_EPOCH - 3600 - 120)))"
   t23_setup stale paused "$T23_STALE"
-  i=0; while [ "$i" -lt 3 ]; do t23_wake; i=$((i + 1)); done
+  i=0
+  while [ "$i" -lt 3 ]; do
+    t23_wake
+    i=$((i + 1))
+  done
   have "task 23 [pause overran its margin]: the guard re-arms and halts" \
     'status: systemic' "$(cat "$T23_DIR/.auto-pilot/RUN.md")"
   have "task 23 [pause overran its margin]: the job is torn down" \
@@ -2959,17 +3381,22 @@ LCFEOF
     pel_write_runmd active ''
     printf '# report\n' >"$PEL_DIR/.auto-pilot/REPORT.md"
     : >"$PEL_DIR/.auto-pilot/orchestrator.log"
-    ( cd "$PEL_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init )
+    (cd "$PEL_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
     "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
       --workdir "$PEL_DIR" --log "$PEL_DIR/.auto-pilot/orchestrator.log" \
       --prompt-file "$BASE/prompt.txt" --label "com.autopilot.pel.$1" \
       --claude-bin "$STUB/claude" --path "$STUB_PATH" --pause-exempt-max "$2" \
       --out-script "$PEL_DIR/launch.sh" --out-plist "$PEL_DIR/job.plist" >/dev/null 2>&1
-    : >"$PEL_DIR/launchctl.log"; rm -f "$PEL_DIR/claude-ran"
+    : >"$PEL_DIR/launchctl.log"
+    rm -f "$PEL_DIR/claude-ran"
   }
   pel_write_runmd() { # <status> <paused_until> -> (re)writes $PEL_DIR/.auto-pilot/RUN.md
-    { printf -- '---\n'; printf 'status: %s\n' "$1"; printf 'paused_until: %s\n' "$2"
-      printf 'pause_reason: \n'; printf -- '---\n\n'
+    {
+      printf -- '---\n'
+      printf 'status: %s\n' "$1"
+      printf 'paused_until: %s\n' "$2"
+      printf 'pause_reason: \n'
+      printf -- '---\n\n'
       printf '| task | phase | branch | base | base_sha | pr | notes |\n'
       printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     } >"$PEL_DIR/.auto-pilot/RUN.md"
@@ -2981,7 +3408,10 @@ LCFEOF
   pel_state() { cat "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null; }
   pel_exempt_since() { sed -n 's/^exempt_since: *//p' "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null | tail -1; }
   pel_seed_exempt_since() { # <old-epoch> -> overwrite the ledger directly (never sleeping).
-    { printf 'count: 0\n'; printf 'head: \n'; printf 'exempt_since: %s\n' "$1"
+    {
+      printf 'count: 0\n'
+      printf 'head: \n'
+      printf 'exempt_since: %s\n' "$1"
     } >"$PEL_DIR/.auto-pilot/supervisor-state"
   }
 
@@ -2991,7 +3421,7 @@ LCFEOF
   # `_pause_exempt` corroborates it every time (a few seconds ago is well within
   # the 1h margin), so nothing but the ledger's own cumulative cap can stop it.
   pel_setup forged 60
-  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 5 )))"
+  pel_write_runmd paused "$(_gate_iso $(($(date +%s) - 5)))"
   pel_wake
   lack "pause-exempt ledger [forged refresh]: does not halt before the cap" \
     'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
@@ -3000,8 +3430,8 @@ LCFEOF
     || bad "pause-exempt ledger [forged refresh]: the ledger started a streak (exempt_since set)" "$(pel_state)"
   # Seed the streak's start well past the 60s cap, then refresh `paused_until`
   # again (the forging agent, on its next wake) and wake once more.
-  pel_seed_exempt_since "$(( $(date +%s) - 120 ))"
-  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 5 )))"
+  pel_seed_exempt_since "$(($(date +%s) - 120))"
+  pel_write_runmd paused "$(_gate_iso $(($(date +%s) - 5)))"
   pel_wake
   have "pause-exempt ledger [forged refresh]: the cap trips and halts" \
     'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
@@ -3024,7 +3454,7 @@ LCFEOF
     || bad "pause-exempt ledger [far-future paused_until]: the gate closes, claude is never invoked"
   lack "pause-exempt ledger [far-future paused_until]: does not halt before the cap" \
     'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
-  pel_seed_exempt_since "$(( $(date +%s) - 120 ))"
+  pel_seed_exempt_since "$(($(date +%s) - 120))"
   pel_wake
   have "pause-exempt ledger [far-future paused_until]: the cap STILL trips and halts (enforcement is above the gate)" \
     'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
@@ -3038,9 +3468,13 @@ LCFEOF
   # gate stays closed while the window is open, and relaunch past the reset
   # still invokes the agent, with no halt anywhere in the sequence.
   pel_setup legit 3600
-  T_PEL_FUTURE="$(_gate_iso $(( $(date +%s) + 3600 )))"
+  T_PEL_FUTURE="$(_gate_iso $(($(date +%s) + 3600)))"
   pel_write_runmd paused "$T_PEL_FUTURE"
-  i=0; while [ "$i" -lt 3 ]; do pel_wake; i=$((i + 1)); done
+  i=0
+  while [ "$i" -lt 3 ]; do
+    pel_wake
+    i=$((i + 1))
+  done
   lack "pause-exempt ledger [legitimate pause, under the cap]: no halt while the window is open" \
     'status: systemic' "$(cat "$PEL_DIR/.auto-pilot/RUN.md")"
   [ ! -f "$PEL_DIR/claude-ran" ] \
@@ -3049,7 +3483,7 @@ LCFEOF
   [ -n "$(pel_exempt_since)" ] \
     && ok "pause-exempt ledger [legitimate pause, under the cap]: the ledger still tracks the streak" \
     || bad "pause-exempt ledger [legitimate pause, under the cap]: the ledger still tracks the streak"
-  T_PEL_PAST="$(_gate_iso $(( $(date +%s) - 10 )))"
+  T_PEL_PAST="$(_gate_iso $(($(date +%s) - 10)))"
   pel_write_runmd paused "$T_PEL_PAST"
   pel_wake
   [ -f "$PEL_DIR/claude-ran" ] \
@@ -3062,7 +3496,7 @@ LCFEOF
   # was genuinely paused and then resumed must not carry a stale streak into an
   # unrelated future pause.
   pel_setup clears 3600
-  pel_write_runmd paused "$(_gate_iso $(( $(date +%s) - 10 )))"
+  pel_write_runmd paused "$(_gate_iso $(($(date +%s) - 10)))"
   pel_wake
   [ -n "$(pel_exempt_since)" ] \
     && ok "pause-exempt ledger [clears]: a pause-exempt wake starts the streak" \
@@ -3075,10 +3509,12 @@ LCFEOF
 
   # fail-closed: an unknown reason is never written, and a RELAUNCHABLE reason can
   # never be smuggled into the terminal sentinel.
-  o="$("$SCRIPT" exit-reason --dir "$EC/continuing" --reason bogus 2>&1)"; ecc=$?
+  o="$("$SCRIPT" exit-reason --dir "$EC/continuing" --reason bogus 2>&1)"
+  ecc=$?
   [ "$ecc" = 2 ] && printf '%s' "$o" | grep -qF 'unknown exit reason' \
     && ok "exit-reason fail-closed: unknown reason" || bad "exit-reason fail-closed: unknown reason" "$o"
-  o="$("$SCRIPT" teardown --label com.autopilot.ec.x --reason continuing 2>&1)"; tdc=$?
+  o="$("$SCRIPT" teardown --label com.autopilot.ec.x --reason continuing 2>&1)"
+  tdc=$?
   [ "$tdc" = 2 ] && printf '%s' "$o" | grep -qF 'must be a TERMINAL exit reason' \
     && ok "teardown fail-closed: a relaunchable reason can't mark a run terminal" \
     || bad "teardown fail-closed: a relaunchable reason can't mark a run terminal" "$o"
@@ -3090,8 +3526,12 @@ fi
 # "Last heartbeat 40 min ago, per-task ceiling is 45m" is the distinction NO other
 # signal in the system can make: a slow task and a hung one look identical to an
 # exit code, a PID, and a log tail alike.
-HB="$BASE/hb"; mkdir -p "$HB/.auto-pilot"
-{ printf -- '---\n'; printf 'status: active\n'; printf -- '---\n'
+HB="$BASE/hb"
+mkdir -p "$HB/.auto-pilot"
+{
+  printf -- '---\n'
+  printf 'status: active\n'
+  printf -- '---\n'
   printf '| task | phase | branch | base | base_sha | pr | notes |\n'
   printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
   printf '| T-1  | implementing | b1 | main | - | - | - |\n'
@@ -3099,14 +3539,15 @@ HB="$BASE/hb"; mkdir -p "$HB/.auto-pilot"
 
 "$SCRIPT" heartbeat --dir "$HB" --note 'deliver-task:implement' >/dev/null 2>&1
 hbf="$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
-have "heartbeat: a fresh beat is reported healthy"        'healthy'           "$hbf"
-have "heartbeat: STATUS line carries heartbeat=healthy"   'heartbeat=healthy' "$hbf"
-lack "heartbeat: a fresh beat is not a stall"             'STALL'             "$hbf"
-have "heartbeat: the beat's sub-step note is surfaced"    'deliver-task:implement' "$hbf"
+have "heartbeat: a fresh beat is reported healthy" 'healthy' "$hbf"
+have "heartbeat: STATUS line carries heartbeat=healthy" 'heartbeat=healthy' "$hbf"
+lack "heartbeat: a fresh beat is not a stall" 'STALL' "$hbf"
+have "heartbeat: the beat's sub-step note is surfaced" 'deliver-task:implement' "$hbf"
 
 # Backdate the beat past the 45m per-task ceiling (50m ago) — the wedged case. It
 # has to be backdated by hand; the alternative is a 45-minute test.
-{ printf 'at: %s\n' "$(( $(date +%s) - 3000 ))"
+{
+  printf 'at: %s\n' "$(($(date +%s) - 3000))"
   printf 'iso: 2026-07-11T00:00:00Z\n'
   printf 'note: deliver-task:implement\n'
 } >"$HB/.auto-pilot/heartbeat"
@@ -3122,8 +3563,13 @@ have "heartbeat: a new beat clears the stall" 'heartbeat=healthy' \
   "$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
 
 # a run with no heartbeat at all (a pre-heartbeat run) reports none, never a false stall
-NOHB="$BASE/nohb"; mkdir -p "$NOHB/.auto-pilot"
-{ printf -- '---\n'; printf 'status: active\n'; printf -- '---\n'; } >"$NOHB/.auto-pilot/RUN.md"
+NOHB="$BASE/nohb"
+mkdir -p "$NOHB/.auto-pilot"
+{
+  printf -- '---\n'
+  printf 'status: active\n'
+  printf -- '---\n'
+} >"$NOHB/.auto-pilot/RUN.md"
 have "heartbeat: absent heartbeat reports none (not a false stall)" 'heartbeat=none' \
   "$("$SCRIPT" status --label com.autopilot.nohb --dir "$NOHB" 2>&1)"
 
@@ -3146,7 +3592,8 @@ fi
 # log string. Invariants 1 and 2 are the two that shipped as production
 # failures and are covered explicitly.
 if command -v git >/dev/null 2>&1; then
-  DOC="$BASE/doctor"; mkdir -p "$DOC"
+  DOC="$BASE/doctor"
+  mkdir -p "$DOC"
 
   # A fake `gh` for I3/I4/I6: PR state/draft/labels live in flat files under
   # $DOCTOR_GH_DB, same shape as restack's fake gh above but extended with
@@ -3214,7 +3661,9 @@ GHFAILEOF
     git -C "$root/run" config user.email t@example.com
     git -C "$root/run" config user.name T
     git -C "$root/run" checkout -q -b main
-    echo r >"$root/run/r.txt"; git -C "$root/run" add r.txt; git -C "$root/run" commit -q -m r
+    echo r >"$root/run/r.txt"
+    git -C "$root/run" add r.txt
+    git -C "$root/run" commit -q -m r
     git -C "$root/run" push -q origin main
     git -C "$root/run" checkout -q -b "auto-pilot/$run_id"
     mkdir -p "$root/run/.auto-pilot"
@@ -3226,12 +3675,20 @@ GHFAILEOF
   # I5 gates the prune of an UNMATCHED worker worktree on that check saying the
   # orchestrator is provably dead — a LIVE one means the unmatched row could be
   # a dispatch in flight whose row hasn't been written back yet.
-  _dead_pid() { local p; sleep 30 & p=$!; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; printf '%s' "$p"; }
+  _dead_pid() {
+    local p
+    sleep 30 &
+    p=$!
+    kill "$p" 2>/dev/null
+    wait "$p" 2>/dev/null
+    printf '%s' "$p"
+  }
   LIVE_PID=$$
   LIVE_STARTED="$(ps -o lstart= -p $$)"
 
   # --- I1: run worktree HEAD parked off the run-state branch -> repaired ----
-  D1="$DOC/i1"; RUN_ID1="doctor-i1"
+  D1="$DOC/i1"
+  RUN_ID1="doctor-i1"
   _doctor_new_run "$D1" "$RUN_ID1"
   {
     printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1"
@@ -3241,12 +3698,16 @@ GHFAILEOF
   } >"$D1/run/.auto-pilot/RUN.md"
   : >"$D1/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D1/run/.auto-pilot/REPORT.md"
-  git -C "$D1/run" add .auto-pilot; git -C "$D1/run" commit -q -m "seed run state"
+  git -C "$D1/run" add .auto-pilot
+  git -C "$D1/run" commit -q -m "seed run state"
   git -C "$D1/run" checkout -q main
   git -C "$D1/run" checkout -q -b bestdan/task-x
-  echo work >"$D1/run/task-file"; git -C "$D1/run" add task-file; git -C "$D1/run" commit -q -m "task work on the wrong branch"
+  echo work >"$D1/run/task-file"
+  git -C "$D1/run" add task-file
+  git -C "$D1/run" commit -q -m "task work on the wrong branch"
 
-  d1out="$("$SCRIPT" doctor --dir "$D1/run" --run-id "$RUN_ID1" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1rc=$?
+  d1out="$("$SCRIPT" doctor --dir "$D1/run" --run-id "$RUN_ID1" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d1rc=$?
   [ "$d1rc" = 0 ] && ok "doctor I1: exits 0 after repairing HEAD" || bad "doctor I1: exits 0 after repairing HEAD" "$d1out"
   have "doctor I1: summary reports the HEAD repair" 'I1: HEAD restored' "$d1out"
   d1head="$(git -C "$D1/run" rev-parse --abbrev-ref HEAD)"
@@ -3256,19 +3717,23 @@ GHFAILEOF
   have "doctor I1: appends a REPORT.md bullet" 'I1 repaired' "$(cat "$D1/run/.auto-pilot/REPORT.md")"
 
   # --- I2 (halt): RUN.md unreadable/unparseable FROM THE BRANCH -------------
-  D2="$DOC/i2-halt"; RUN_ID2="doctor-i2-halt"
+  D2="$DOC/i2-halt"
+  RUN_ID2="doctor-i2-halt"
   _doctor_new_run "$D2" "$RUN_ID2"
   printf 'not RUN.md at all -- no front matter\n' >"$D2/run/.auto-pilot/RUN.md"
   : >"$D2/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D2/run/.auto-pilot/REPORT.md"
-  git -C "$D2/run" add .auto-pilot; git -C "$D2/run" commit -q -m "seed broken run state (no front matter)"
+  git -C "$D2/run" add .auto-pilot
+  git -C "$D2/run" commit -q -m "seed broken run state (no front matter)"
 
   # Point the notifier guard's recorder at a PER-TEST log so the doctor's own
   # notifier calls can be COUNTED. Doctor runs inside the jail, where osascript is
   # exec-denied, so the right count is ZERO — asserted positively below rather than
   # merely implied by the absence of an ALARM sentinel.
-  D2_NOTIFY="$D2/notify.calls"; : >"$D2_NOTIFY"
-  d2out="$(NOTIFY_GUARD_LOG="$D2_NOTIFY" "$SCRIPT" doctor --dir "$D2/run" --run-id "$RUN_ID2" 2>&1)"; d2rc=$?
+  D2_NOTIFY="$D2/notify.calls"
+  : >"$D2_NOTIFY"
+  d2out="$(NOTIFY_GUARD_LOG="$D2_NOTIFY" "$SCRIPT" doctor --dir "$D2/run" --run-id "$RUN_ID2" 2>&1)"
+  d2rc=$?
   [ "$d2rc" = 30 ] && ok "doctor I2 halt: exits 30 (a caller gating on this cannot dispatch)" \
     || bad "doctor I2 halt: exits 30" "exit=$d2rc out=$d2out"
   have "doctor I2 halt: RUN.md status is observably systemic-attempted or REPORT.md carries the alarm" 'ALARM' "$(cat "$D2/run/.auto-pilot/REPORT.md")"
@@ -3306,7 +3771,8 @@ GHFAILEOF
     || bad "doctor halt: invokes the notifier ZERO times" "got $d2_notify_n call(s): $(cat "$D2_NOTIFY")"
   # Now the un-jailed side runs (as it does above the gate on every wake, and
   # from supervisor-check right after the agent exits — the SAME wake).
-  D2_SCAN_NOTIFY="$D2/scan-notify.calls"; : >"$D2_SCAN_NOTIFY"
+  D2_SCAN_NOTIFY="$D2/scan-notify.calls"
+  : >"$D2_SCAN_NOTIFY"
   scanout="$(NOTIFY_GUARD_LOG="$D2_SCAN_NOTIFY" "$SCRIPT" supervisor-scan --dir "$D2/run" --label doctor-alarm-test 2>&1)"
   have "doctor halt: the supervisor DELIVERS the doctor's alarm on its next scan" 'ALARM invariant' "$scanout"
   # ...and the UN-jailed side is where the notification actually happens: exactly
@@ -3327,7 +3793,8 @@ GHFAILEOF
   lack "doctor halt: a second scan never re-alarms the run it already announced" 'ALARM systemic' "$scanout2"
 
   # --- I2 (repair): RUN.md fine on the branch, missing from the WORKING TREE
-  D2R="$DOC/i2-repair"; RUN_ID2R="doctor-i2-repair"
+  D2R="$DOC/i2-repair"
+  RUN_ID2R="doctor-i2-repair"
   _doctor_new_run "$D2R" "$RUN_ID2R"
   {
     printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID2R"
@@ -3337,10 +3804,12 @@ GHFAILEOF
   } >"$D2R/run/.auto-pilot/RUN.md"
   : >"$D2R/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D2R/run/.auto-pilot/REPORT.md"
-  git -C "$D2R/run" add .auto-pilot; git -C "$D2R/run" commit -q -m "seed run state"
-  rm -f "$D2R/run/.auto-pilot/RUN.md"   # gone from the WORKING TREE only
+  git -C "$D2R/run" add .auto-pilot
+  git -C "$D2R/run" commit -q -m "seed run state"
+  rm -f "$D2R/run/.auto-pilot/RUN.md" # gone from the WORKING TREE only
 
-  d2rout="$("$SCRIPT" doctor --dir "$D2R/run" --run-id "$RUN_ID2R" 2>&1)"; d2rrc=$?
+  d2rout="$("$SCRIPT" doctor --dir "$D2R/run" --run-id "$RUN_ID2R" 2>&1)"
+  d2rrc=$?
   [ "$d2rrc" = 0 ] && ok "doctor I2 repair: exits 0 (working-tree-only loss is a repair, not a halt)" \
     || bad "doctor I2 repair: exits 0" "$d2rout"
   have "doctor I2 repair: summary reports the RUN.md restore" 'I2: RUN.md restored from branch' "$d2rout"
@@ -3353,7 +3822,8 @@ GHFAILEOF
   # before I2 ever got a chance to restore it. Assert on OBSERVED state, not
   # log strings: exit 0, HEAD back on the run-state branch, RUN.md restored,
   # REPORT.md carries the repair bullet.
-  D1D="$DOC/i1-i2-deadlock"; RUN_ID1D="doctor-i1-i2-deadlock"
+  D1D="$DOC/i1-i2-deadlock"
+  RUN_ID1D="doctor-i1-i2-deadlock"
   _doctor_new_run "$D1D" "$RUN_ID1D"
   {
     printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1D"
@@ -3363,11 +3833,14 @@ GHFAILEOF
   } >"$D1D/run/.auto-pilot/RUN.md"
   : >"$D1D/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D1D/run/.auto-pilot/REPORT.md"
-  git -C "$D1D/run" add .auto-pilot; git -C "$D1D/run" commit -q -m "seed run state"
+  git -C "$D1D/run" add .auto-pilot
+  git -C "$D1D/run" commit -q -m "seed run state"
   git -C "$D1D/run" checkout -q main
   git -C "$D1D/run" checkout -q -b bestdan/task-x
-  echo work >"$D1D/run/task-file"; git -C "$D1D/run" add task-file; git -C "$D1D/run" commit -q -m "task work on the wrong branch"
-  rm -f "$D1D/run/.auto-pilot/RUN.md"   # the literal acceptance-criterion scenario
+  echo work >"$D1D/run/task-file"
+  git -C "$D1D/run" add task-file
+  git -C "$D1D/run" commit -q -m "task work on the wrong branch"
+  rm -f "$D1D/run/.auto-pilot/RUN.md" # the literal acceptance-criterion scenario
   # D1: a real run worktree ALWAYS carries UNTRACKED .auto-pilot/ content (the
   # live run's own orchestrator.log/verify-broker.log). `git reset`/`checkout`
   # cannot discard untracked files, so without --ignore-untracked-run-state
@@ -3378,7 +3851,8 @@ GHFAILEOF
   mkdir -p "$D1D/run/.auto-pilot"
   printf 'orchestrator log line\n' >"$D1D/run/.auto-pilot/orchestrator.log"
 
-  d1dout="$("$SCRIPT" doctor --dir "$D1D/run" --run-id "$RUN_ID1D" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1drc=$?
+  d1dout="$("$SCRIPT" doctor --dir "$D1D/run" --run-id "$RUN_ID1D" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d1drc=$?
   [ "$d1drc" = 0 ] && ok "doctor I1+I2 deadlock: exits 0 (recovers instead of bailing to a human)" \
     || bad "doctor I1+I2 deadlock: exits 0" "$d1dout"
   d1dhead="$(git -C "$D1D/run" rev-parse --abbrev-ref HEAD)"
@@ -3401,7 +3875,8 @@ GHFAILEOF
   # before, `git reset`/`checkout` no-op on untracked files, so the discard
   # never actually unblocked assert_run_head. Assert the repair still fires
   # and the log is left in place untouched.
-  D1U="$DOC/i1-untracked-only"; RUN_ID1U="doctor-i1-untracked-only"
+  D1U="$DOC/i1-untracked-only"
+  RUN_ID1U="doctor-i1-untracked-only"
   _doctor_new_run "$D1U" "$RUN_ID1U"
   {
     printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1U"
@@ -3411,15 +3886,19 @@ GHFAILEOF
   } >"$D1U/run/.auto-pilot/RUN.md"
   : >"$D1U/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D1U/run/.auto-pilot/REPORT.md"
-  git -C "$D1U/run" add .auto-pilot; git -C "$D1U/run" commit -q -m "seed run state"
+  git -C "$D1U/run" add .auto-pilot
+  git -C "$D1U/run" commit -q -m "seed run state"
   git -C "$D1U/run" checkout -q main
   git -C "$D1U/run" checkout -q -b bestdan/task-z
-  echo work >"$D1U/run/task-file"; git -C "$D1U/run" add task-file; git -C "$D1U/run" commit -q -m "task work on the wrong branch"
-  mkdir -p "$D1U/run/.auto-pilot"   # same as above: the task branch carries no .auto-pilot/
+  echo work >"$D1U/run/task-file"
+  git -C "$D1U/run" add task-file
+  git -C "$D1U/run" commit -q -m "task work on the wrong branch"
+  mkdir -p "$D1U/run/.auto-pilot" # same as above: the task branch carries no .auto-pilot/
   printf 'orchestrator log line\n' >"$D1U/run/.auto-pilot/orchestrator.log"
   printf 'verify broker log line\n' >"$D1U/run/.auto-pilot/verify-broker.log"
 
-  d1uout="$("$SCRIPT" doctor --dir "$D1U/run" --run-id "$RUN_ID1U" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1urc=$?
+  d1uout="$("$SCRIPT" doctor --dir "$D1U/run" --run-id "$RUN_ID1U" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d1urc=$?
   [ "$d1urc" = 0 ] && ok "doctor I1 untracked-only: exits 0" || bad "doctor I1 untracked-only: exits 0" "$d1uout"
   d1uhead="$(git -C "$D1U/run" rev-parse --abbrev-ref HEAD)"
   [ "$d1uhead" = "auto-pilot/$RUN_ID1U" ] && ok "doctor I1 untracked-only: HEAD is observably back on the run-state branch" \
@@ -3431,7 +3910,8 @@ GHFAILEOF
 
   # --- I1 negative: HEAD off-branch with dirt OUTSIDE .auto-pilot/ still -----
   # fails closed. Someone's real work is never silently discarded.
-  D1N="$DOC/i1-negative"; RUN_ID1N="doctor-i1-negative"
+  D1N="$DOC/i1-negative"
+  RUN_ID1N="doctor-i1-negative"
   _doctor_new_run "$D1N" "$RUN_ID1N"
   {
     printf -- '---\nrun_id: %s\nstatus: active\n---\n\n' "$RUN_ID1N"
@@ -3441,14 +3921,18 @@ GHFAILEOF
   } >"$D1N/run/.auto-pilot/RUN.md"
   : >"$D1N/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D1N/run/.auto-pilot/REPORT.md"
-  git -C "$D1N/run" add .auto-pilot; git -C "$D1N/run" commit -q -m "seed run state"
+  git -C "$D1N/run" add .auto-pilot
+  git -C "$D1N/run" commit -q -m "seed run state"
   git -C "$D1N/run" checkout -q main
   git -C "$D1N/run" checkout -q -b bestdan/task-y
-  echo work >"$D1N/run/task-file"; git -C "$D1N/run" add task-file; git -C "$D1N/run" commit -q -m "task work on the wrong branch"
-  printf 'uncommitted real work\n' >"$D1N/run/important-work.txt"   # dirt OUTSIDE .auto-pilot/
+  echo work >"$D1N/run/task-file"
+  git -C "$D1N/run" add task-file
+  git -C "$D1N/run" commit -q -m "task work on the wrong branch"
+  printf 'uncommitted real work\n' >"$D1N/run/important-work.txt" # dirt OUTSIDE .auto-pilot/
   rm -f "$D1N/run/.auto-pilot/RUN.md"
 
-  d1nout="$("$SCRIPT" doctor --dir "$D1N/run" --run-id "$RUN_ID1N" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d1nrc=$?
+  d1nout="$("$SCRIPT" doctor --dir "$D1N/run" --run-id "$RUN_ID1N" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d1nrc=$?
   [ "$d1nrc" != 0 ] && ok "doctor I1 negative: real work outside .auto-pilot/ still fails closed (non-zero)" \
     || bad "doctor I1 negative: real work outside .auto-pilot/ still fails closed" "$d1nout"
   d1nhead="$(git -C "$D1N/run" rev-parse --abbrev-ref HEAD)"
@@ -3460,7 +3944,8 @@ GHFAILEOF
   # --- I3: every pr-open/in-review/iterating/handed-off task has a real, ----
   # open (or merged) PR. Covers: no PR number recorded, CLOSED, nonexistent,
   # OPEN (holds), and MERGED (holds — NOT a repair; a human merge is healthy).
-  D3="$DOC/i3"; RUN_ID3="doctor-i3"
+  D3="$DOC/i3"
+  RUN_ID3="doctor-i3"
   _doctor_new_run "$D3" "$RUN_ID3"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID3"
@@ -3477,16 +3962,21 @@ GHFAILEOF
   } >"$D3/run/.auto-pilot/RUN.md"
   : >"$D3/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D3/run/.auto-pilot/REPORT.md"
-  git -C "$D3/run" add .auto-pilot; git -C "$D3/run" commit -q -m "seed run state"
-  I3DB="$D3/ghdb"; mkdir -p "$I3DB"
+  git -C "$D3/run" add .auto-pilot
+  git -C "$D3/run" commit -q -m "seed run state"
+  I3DB="$D3/ghdb"
+  mkdir -p "$I3DB"
   printf 'CLOSED\n' >"$I3DB/301.state"
   # 302: no state file at all -> the fake gh's `.state` read still exits 0
   # (positively reports "nonexistent") -> "does not exist"
-  printf 'OPEN\n' >"$I3DB/303.state"; printf 'false\n' >"$I3DB/303.draft"; printf '\n' >"$I3DB/303.labels"
+  printf 'OPEN\n' >"$I3DB/303.state"
+  printf 'false\n' >"$I3DB/303.draft"
+  printf '\n' >"$I3DB/303.labels"
   printf 'MERGED\n' >"$I3DB/304.state"
   printf 'OPEN\n' >"$I3DB/305.state"
   export DOCTOR_GH_DB="$I3DB"
-  d3out="$("$SCRIPT" doctor --dir "$D3/run" --run-id "$RUN_ID3" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d3rc=$?
+  d3out="$("$SCRIPT" doctor --dir "$D3/run" --run-id "$RUN_ID3" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d3rc=$?
   [ "$d3rc" = 0 ] && ok "doctor I3: exits 0 (park is a repair, not a halt)" || bad "doctor I3: exits 0" "$d3out"
   d3run="$(cat "$D3/run/.auto-pilot/RUN.md")"
   have "doctor I3: no-PR row parked" $'t_nopr   | parked' "$d3run"
@@ -3500,7 +3990,8 @@ GHFAILEOF
   lack "doctor I3 (D3): the markdown-link row is never parked" $'t_mdlink | parked' "$d3run"
 
   # --- I3 (D2): a transient gh failure must never park an in-flight task ----
-  D3G="$DOC/i3-gh-fail"; RUN_ID3G="doctor-i3-gh-fail"
+  D3G="$DOC/i3-gh-fail"
+  RUN_ID3G="doctor-i3-gh-fail"
   _doctor_new_run "$D3G" "$RUN_ID3G"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID3G"
@@ -3511,8 +4002,10 @@ GHFAILEOF
   } >"$D3G/run/.auto-pilot/RUN.md"
   : >"$D3G/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D3G/run/.auto-pilot/REPORT.md"
-  git -C "$D3G/run" add .auto-pilot; git -C "$D3G/run" commit -q -m "seed run state"
-  d3gout="$("$SCRIPT" doctor --dir "$D3G/run" --run-id "$RUN_ID3G" --gh "$DOCTOR_GH_FAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d3grc=$?
+  git -C "$D3G/run" add .auto-pilot
+  git -C "$D3G/run" commit -q -m "seed run state"
+  d3gout="$("$SCRIPT" doctor --dir "$D3G/run" --run-id "$RUN_ID3G" --gh "$DOCTOR_GH_FAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d3grc=$?
   [ "$d3grc" = 0 ] && ok "doctor I3 (D2): a failing gh still exits 0 (undetermined, not a halt)" \
     || bad "doctor I3 (D2): a failing gh still exits 0" "exit=$d3grc out=$d3gout"
   d3grun="$(cat "$D3G/run/.auto-pilot/RUN.md")"
@@ -3523,7 +4016,8 @@ GHFAILEOF
   have "doctor I3 (D2): summary counts the gh failure as skipped, not parked" 'skipped=' "$d3gout"
 
   # --- I4: a handed-off repo-pr task's review signal (label + not-draft) ----
-  D4="$DOC/i4"; RUN_ID4="doctor-i4"
+  D4="$DOC/i4"
+  RUN_ID4="doctor-i4"
   _doctor_new_run "$D4" "$RUN_ID4"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID4"
@@ -3534,14 +4028,21 @@ GHFAILEOF
   } >"$D4/run/.auto-pilot/RUN.md"
   : >"$D4/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D4/run/.auto-pilot/REPORT.md"
-  git -C "$D4/run" add .auto-pilot; git -C "$D4/run" commit -q -m "seed run state"
-  I4DB="$D4/ghdb"; mkdir -p "$I4DB"
+  git -C "$D4/run" add .auto-pilot
+  git -C "$D4/run" commit -q -m "seed run state"
+  I4DB="$D4/ghdb"
+  mkdir -p "$I4DB"
   # t_stale: a G6/G7 crash gap -- still `task-claim`, still draft.
-  printf 'OPEN\n' >"$I4DB/401.state"; printf 'true\n' >"$I4DB/401.draft"; printf 'task-claim\n' >"$I4DB/401.labels"
+  printf 'OPEN\n' >"$I4DB/401.state"
+  printf 'true\n' >"$I4DB/401.draft"
+  printf 'task-claim\n' >"$I4DB/401.labels"
   # t_good: already carries the review signal -- must be a no-op.
-  printf 'OPEN\n' >"$I4DB/402.state"; printf 'false\n' >"$I4DB/402.draft"; printf 'task-loop\n' >"$I4DB/402.labels"
+  printf 'OPEN\n' >"$I4DB/402.state"
+  printf 'false\n' >"$I4DB/402.draft"
+  printf 'task-loop\n' >"$I4DB/402.labels"
   export DOCTOR_GH_DB="$I4DB"
-  d4out="$("$SCRIPT" doctor --dir "$D4/run" --run-id "$RUN_ID4" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d4rc=$?
+  d4out="$("$SCRIPT" doctor --dir "$D4/run" --run-id "$RUN_ID4" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4rc=$?
   [ "$d4rc" = 0 ] && ok "doctor I4: exits 0" || bad "doctor I4: exits 0" "$d4out"
   have "doctor I4: summary reports the repair for the stale PR" 'I4: t_stale PR #401' "$d4out"
   lack "doctor I4: no repair reported for the already-correct PR" 'I4: t_good' "$d4out"
@@ -3582,7 +4083,8 @@ esac
 GHWEOF
   chmod +x "$DOCTOR_GH_WFAIL"
 
-  D4W="$DOC/i4-write-fail"; RUN_ID4W="doctor-i4-write-fail"
+  D4W="$DOC/i4-write-fail"
+  RUN_ID4W="doctor-i4-write-fail"
   _doctor_new_run "$D4W" "$RUN_ID4W"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID4W"
@@ -3592,11 +4094,16 @@ GHWEOF
   } >"$D4W/run/.auto-pilot/RUN.md"
   : >"$D4W/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D4W/run/.auto-pilot/REPORT.md"
-  git -C "$D4W/run" add .auto-pilot; git -C "$D4W/run" commit -q -m "seed run state"
-  I4WDB="$D4W/ghdb"; mkdir -p "$I4WDB"
-  printf 'OPEN\n' >"$I4WDB/411.state"; printf 'true\n' >"$I4WDB/411.draft"; printf 'task-claim\n' >"$I4WDB/411.labels"
+  git -C "$D4W/run" add .auto-pilot
+  git -C "$D4W/run" commit -q -m "seed run state"
+  I4WDB="$D4W/ghdb"
+  mkdir -p "$I4WDB"
+  printf 'OPEN\n' >"$I4WDB/411.state"
+  printf 'true\n' >"$I4WDB/411.draft"
+  printf 'task-claim\n' >"$I4WDB/411.labels"
   export DOCTOR_GH_DB="$I4WDB"
-  d4wout="$("$SCRIPT" doctor --dir "$D4W/run" --run-id "$RUN_ID4W" --gh "$DOCTOR_GH_WFAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d4wrc=$?
+  d4wout="$("$SCRIPT" doctor --dir "$D4W/run" --run-id "$RUN_ID4W" --gh "$DOCTOR_GH_WFAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4wrc=$?
   [ "$d4wrc" = 0 ] && ok "doctor I4 (write blip): exits 0" || bad "doctor I4 (write blip): exits 0" "$d4wout"
   # The summary's repair note has the form `I4: <task> PR #<n>` — the FAILED
   # announcements above deliberately don't, so match the note's exact shape.
@@ -3620,13 +4127,16 @@ GHWEOF
   # at all -> pruned, BUT only because this run's recorded orchestrator is
   # provably dead (the unmatched case's liveness gate — see the i5-live /
   # i5-dead scenarios below, which own that half of the invariant).
-  D5="$DOC/i5"; RUN_ID5="doctor-i5"
+  D5="$DOC/i5"
+  RUN_ID5="doctor-i5"
   _doctor_new_run "$D5" "$RUN_ID5"
   D5_DEAD_PID="$(_dead_pid)"
   for br in br-terminal br-unsafe br-pending br-openpr br-nomatch; do
     git -C "$D5/run" checkout -q main
     git -C "$D5/run" checkout -q -b "$br"
-    echo "$br" >"$D5/run/$br.txt"; git -C "$D5/run" add "$br.txt"; git -C "$D5/run" commit -q -m "$br"
+    echo "$br" >"$D5/run/$br.txt"
+    git -C "$D5/run" add "$br.txt"
+    git -C "$D5/run" commit -q -m "$br"
     git -C "$D5/run" push -q origin "$br"
   done
   # _doctor_new_run already created+checked-out auto-pilot/$RUN_ID5 — switch
@@ -3644,7 +4154,8 @@ GHWEOF
   } >"$D5/run/.auto-pilot/RUN.md"
   : >"$D5/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5/run/.auto-pilot/REPORT.md"
-  git -C "$D5/run" add .auto-pilot; git -C "$D5/run" commit -q -m "seed run state"
+  git -C "$D5/run" add .auto-pilot
+  git -C "$D5/run" commit -q -m "seed run state"
   git -C "$D5/run" push -q origin "auto-pilot/$RUN_ID5"
   mkdir -p "$D5/workers"
   git -C "$D5/run" worktree add -q "$D5/workers/w-terminal" br-terminal
@@ -3652,11 +4163,13 @@ GHWEOF
   git -C "$D5/run" worktree add -q "$D5/workers/w-pending" br-pending
   git -C "$D5/run" worktree add -q "$D5/workers/w-openpr" br-openpr
   git -C "$D5/run" worktree add -q "$D5/workers/w-nomatch" br-nomatch
-  I5DB="$D5/ghdb"; mkdir -p "$I5DB"
+  I5DB="$D5/ghdb"
+  mkdir -p "$I5DB"
   printf 'OPEN\n' >"$I5DB/601.state"
   export DOCTOR_GH_DB="$I5DB"
 
-  d5out="$("$SCRIPT" doctor --dir "$D5/run" --run-id "$RUN_ID5" --gh "$DOCTOR_GH" 2>&1)"; d5rc=$?
+  d5out="$("$SCRIPT" doctor --dir "$D5/run" --run-id "$RUN_ID5" --gh "$DOCTOR_GH" 2>&1)"
+  d5rc=$?
   [ "$d5rc" = 0 ] && ok "doctor I5: exits 0" || bad "doctor I5: exits 0" "$d5out"
   have "doctor I5: reports the prune of the terminal-phase worktree" 'I5: removed w-terminal' "$d5out"
   [ ! -d "$D5/workers/w-terminal" ] && ok "doctor I5: the terminal-phase orphan worktree is observably gone" \
@@ -3687,7 +4200,8 @@ GHWEOF
   # base, and has no PR yet — i.e. every other prune condition holds. With the
   # run's orchestrator LIVE, the worktree MUST survive: removing it destroys a
   # dispatch in flight.
-  D5L="$DOC/i5-live"; RUN_ID5L="doctor-i5-live"
+  D5L="$DOC/i5-live"
+  RUN_ID5L="doctor-i5-live"
   _doctor_new_run "$D5L" "$RUN_ID5L"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5L"
@@ -3698,7 +4212,8 @@ GHWEOF
   } >"$D5L/run/.auto-pilot/RUN.md"
   : >"$D5L/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5L/run/.auto-pilot/REPORT.md"
-  git -C "$D5L/run" add .auto-pilot; git -C "$D5L/run" commit -q -m "seed run state"
+  git -C "$D5L/run" add .auto-pilot
+  git -C "$D5L/run" commit -q -m "seed run state"
   mkdir -p "$D5L/workers"
   # Exactly what /deliver-task does at claim: a fresh worker worktree on a new
   # task branch cut from the base. Nothing committed, nothing pushed, no PR.
@@ -3707,7 +4222,8 @@ GHWEOF
   # no row's branch cell can equal) — the same unmatched bucket.
   git -C "$D5L/run" worktree add -q --detach "$D5L/workers/w-detached" main
 
-  d5lout="$("$SCRIPT" doctor --dir "$D5L/run" --run-id "$RUN_ID5L" 2>&1)"; d5lrc=$?
+  d5lout="$("$SCRIPT" doctor --dir "$D5L/run" --run-id "$RUN_ID5L" 2>&1)"
+  d5lrc=$?
   [ "$d5lrc" = 0 ] && ok "doctor I5 (live dispatch): exits 0" || bad "doctor I5 (live dispatch): exits 0" "$d5lout"
   [ -d "$D5L/workers/w-live" ] && ok "doctor I5 (live dispatch): a live dispatch's worker worktree SURVIVES (unmatched row + LIVE orchestrator)" \
     || bad "doctor I5 (live dispatch): a live dispatch's worker worktree SURVIVES — it was destroyed"
@@ -3722,7 +4238,8 @@ GHWEOF
   # dead: nothing can be mid-dispatch when the process that dispatches is gone,
   # so the orphan is removed as before. The liveness gate must not have been a
   # way of quietly disabling invariant 5.
-  D5D="$DOC/i5-dead"; RUN_ID5D="doctor-i5-dead"
+  D5D="$DOC/i5-dead"
+  RUN_ID5D="doctor-i5-dead"
   _doctor_new_run "$D5D" "$RUN_ID5D"
   D5D_DEAD_PID="$(_dead_pid)"
   {
@@ -3734,11 +4251,13 @@ GHWEOF
   } >"$D5D/run/.auto-pilot/RUN.md"
   : >"$D5D/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5D/run/.auto-pilot/REPORT.md"
-  git -C "$D5D/run" add .auto-pilot; git -C "$D5D/run" commit -q -m "seed run state"
+  git -C "$D5D/run" add .auto-pilot
+  git -C "$D5D/run" commit -q -m "seed run state"
   mkdir -p "$D5D/workers"
   git -C "$D5D/run" worktree add -q -b bestdan/t-orphan-work "$D5D/workers/w-orphan" main
 
-  d5dout="$("$SCRIPT" doctor --dir "$D5D/run" --run-id "$RUN_ID5D" 2>&1)"; d5drc=$?
+  d5dout="$("$SCRIPT" doctor --dir "$D5D/run" --run-id "$RUN_ID5D" 2>&1)"
+  d5drc=$?
   [ "$d5drc" = 0 ] && ok "doctor I5 (dead orchestrator): exits 0" || bad "doctor I5 (dead orchestrator): exits 0" "$d5dout"
   have "doctor I5 (dead orchestrator): reports the prune" 'I5: removed w-orphan' "$d5dout"
   [ ! -d "$D5D/workers/w-orphan" ] && ok "doctor I5 (dead orchestrator): a genuinely orphaned worktree is still observably pruned" \
@@ -3747,7 +4266,8 @@ GHWEOF
   # --- I5 (UNDETERMINED liveness): no pid recorded -> fail closed, no prune --
   # D2's posture, applied to the destructive action: an undetermined liveness
   # read is not "dead", so it never green-lights a `worktree remove --force`.
-  D5U="$DOC/i5-nopid"; RUN_ID5U="doctor-i5-nopid"
+  D5U="$DOC/i5-nopid"
+  RUN_ID5U="doctor-i5-nopid"
   _doctor_new_run "$D5U" "$RUN_ID5U"
   {
     printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID5U"
@@ -3757,7 +4277,8 @@ GHWEOF
   } >"$D5U/run/.auto-pilot/RUN.md"
   : >"$D5U/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5U/run/.auto-pilot/REPORT.md"
-  git -C "$D5U/run" add .auto-pilot; git -C "$D5U/run" commit -q -m "seed run state"
+  git -C "$D5U/run" add .auto-pilot
+  git -C "$D5U/run" commit -q -m "seed run state"
   mkdir -p "$D5U/workers"
   git -C "$D5U/run" worktree add -q -b bestdan/t-nopid-work "$D5U/workers/w-nopid" main
 
@@ -3780,7 +4301,8 @@ GHWEOF
   # never be ATTEMPTED (no "I5: removed", no "FAILED to remove" for it) —
   # distinguishing "skipped" from "attempted and failed by luck", which is
   # all that saved the WIP on unpatched main.
-  D5C="$DOC/i5-corrupt"; RUN_ID5C="doctor-i5-corrupt"
+  D5C="$DOC/i5-corrupt"
+  RUN_ID5C="doctor-i5-corrupt"
   _doctor_new_run "$D5C" "$RUN_ID5C"
   D5C_DEAD_PID="$(_dead_pid)"
   {
@@ -3792,14 +4314,16 @@ GHWEOF
   } >"$D5C/run/.auto-pilot/RUN.md"
   : >"$D5C/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D5C/run/.auto-pilot/REPORT.md"
-  git -C "$D5C/run" add .auto-pilot; git -C "$D5C/run" commit -q -m "seed run state"
+  git -C "$D5C/run" add .auto-pilot
+  git -C "$D5C/run" commit -q -m "seed run state"
   mkdir -p "$D5C/workers"
   git -C "$D5C/run" worktree add -q -b bestdan/t-corrupt-work "$D5C/workers/w-corrupt" main
   echo "uncommitted WIP" >"$D5C/workers/w-corrupt/wip.txt"
   # Corrupt the worktree's `.git` link so every read INSIDE it fails outright.
   echo "gitdir: /nonexistent/gitdir/for/w-corrupt" >"$D5C/workers/w-corrupt/.git"
 
-  d5cout="$("$SCRIPT" doctor --dir "$D5C/run" --run-id "$RUN_ID5C" 2>&1)"; d5crc=$?
+  d5cout="$("$SCRIPT" doctor --dir "$D5C/run" --run-id "$RUN_ID5C" 2>&1)"
+  d5crc=$?
   [ "$d5crc" = 0 ] && ok "doctor I5 (corrupt git state): exits 0" || bad "doctor I5 (corrupt git state): exits 0" "$d5cout"
   [ -d "$D5C/workers/w-corrupt" ] && ok "doctor I5 (corrupt git state): the corrupted worktree SURVIVES" \
     || bad "doctor I5 (corrupt git state): the corrupted worktree SURVIVES — it was destroyed"
@@ -3820,14 +4344,19 @@ GHWEOF
 
   # --- I6: a chained task's parent tip moved off its frozen base_sha --------
   # (a) the orchestrator moved the base mid-run, no merge -> park the child.
-  D6="$DOC/i6"; RUN_ID6="doctor-i6"
+  D6="$DOC/i6"
+  RUN_ID6="doctor-i6"
   _doctor_new_run "$D6" "$RUN_ID6"
   git -C "$D6/run" checkout -q main
   git -C "$D6/run" checkout -q -b br-parent
-  echo p >"$D6/run/p.txt"; git -C "$D6/run" add p.txt; git -C "$D6/run" commit -q -m p
+  echo p >"$D6/run/p.txt"
+  git -C "$D6/run" add p.txt
+  git -C "$D6/run" commit -q -m p
   git -C "$D6/run" push -q origin br-parent
   PARENT_SHA6="$(git -C "$D6/run" rev-parse br-parent)"
-  echo p2 >"$D6/run/p2.txt"; git -C "$D6/run" add p2.txt; git -C "$D6/run" commit -q -m "parent moved (orchestrator)"
+  echo p2 >"$D6/run/p2.txt"
+  git -C "$D6/run" add p2.txt
+  git -C "$D6/run" commit -q -m "parent moved (orchestrator)"
   git -C "$D6/run" push -q origin br-parent
   git -C "$D6/run" checkout -q "auto-pilot/$RUN_ID6"
   {
@@ -3839,20 +4368,25 @@ GHWEOF
   } >"$D6/run/.auto-pilot/RUN.md"
   : >"$D6/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D6/run/.auto-pilot/REPORT.md"
-  git -C "$D6/run" add .auto-pilot; git -C "$D6/run" commit -q -m "seed run state"
+  git -C "$D6/run" add .auto-pilot
+  git -C "$D6/run" commit -q -m "seed run state"
 
-  d6out="$("$SCRIPT" doctor --dir "$D6/run" --run-id "$RUN_ID6" --questions .auto-pilot/QUESTIONS.md 2>&1)"; d6rc=$?
+  d6out="$("$SCRIPT" doctor --dir "$D6/run" --run-id "$RUN_ID6" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d6rc=$?
   [ "$d6rc" = 0 ] && ok "doctor I6: exits 0 (park is a repair, not a halt)" || bad "doctor I6: exits 0" "$d6out"
   have "doctor I6: parks the child whose parent's tip diverged" $'t_child  | parked' "$(cat "$D6/run/.auto-pilot/RUN.md")"
   have "doctor I6: REPORT.md explains why" 'without the parent'"'"'s PR merging' "$(cat "$D6/run/.auto-pilot/REPORT.md")"
 
   # (b) the SAME divergence, but the parent's PR is MERGED -> a human merge is
   # the expected trigger; the remedy is restack, never a park.
-  D6M="$DOC/i6-merged"; RUN_ID6M="doctor-i6-merged"
+  D6M="$DOC/i6-merged"
+  RUN_ID6M="doctor-i6-merged"
   _doctor_new_run "$D6M" "$RUN_ID6M"
   git -C "$D6M/run" checkout -q main
   git -C "$D6M/run" checkout -q -b br-parent
-  echo p >"$D6M/run/p.txt"; git -C "$D6M/run" add p.txt; git -C "$D6M/run" commit -q -m p
+  echo p >"$D6M/run/p.txt"
+  git -C "$D6M/run" add p.txt
+  git -C "$D6M/run" commit -q -m p
   git -C "$D6M/run" push -q origin br-parent
   PARENT_SHA6M="$(git -C "$D6M/run" rev-parse br-parent)"
   git -C "$D6M/run" checkout -q main
@@ -3871,11 +4405,14 @@ GHWEOF
   } >"$D6M/run/.auto-pilot/RUN.md"
   : >"$D6M/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D6M/run/.auto-pilot/REPORT.md"
-  git -C "$D6M/run" add .auto-pilot; git -C "$D6M/run" commit -q -m "seed run state"
-  I6MDB="$D6M/ghdb"; mkdir -p "$I6MDB"
+  git -C "$D6M/run" add .auto-pilot
+  git -C "$D6M/run" commit -q -m "seed run state"
+  I6MDB="$D6M/ghdb"
+  mkdir -p "$I6MDB"
   printf 'MERGED\n' >"$I6MDB/501.state"
   export DOCTOR_GH_DB="$I6MDB"
-  d6mout="$("$SCRIPT" doctor --dir "$D6M/run" --run-id "$RUN_ID6M" --gh "$DOCTOR_GH" 2>&1)"; d6mrc=$?
+  d6mout="$("$SCRIPT" doctor --dir "$D6M/run" --run-id "$RUN_ID6M" --gh "$DOCTOR_GH" 2>&1)"
+  d6mrc=$?
   [ "$d6mrc" = 0 ] && ok "doctor I6 (merged parent): exits 0" || bad "doctor I6 (merged parent): exits 0" "$d6mout"
   have "doctor I6 (merged parent, D3 markdown-link pr cell): says the remedy is restack, not park" 'remedy is restack, not park' "$d6mout"
   lack "doctor I6 (merged parent, D3 markdown-link pr cell): the child is NOT parked" $'t_child  | parked' "$(cat "$D6M/run/.auto-pilot/RUN.md")"
@@ -3886,14 +4423,19 @@ GHWEOF
   # failing gh, D2/D7) — must NOT park. Parking here would be the exact
   # violation the invariant's own comment warns against: a parent that
   # actually merged, parked anyway because its state could not be read.
-  D6U="$DOC/i6-gh-unreadable"; RUN_ID6U="doctor-i6-gh-unreadable"
+  D6U="$DOC/i6-gh-unreadable"
+  RUN_ID6U="doctor-i6-gh-unreadable"
   _doctor_new_run "$D6U" "$RUN_ID6U"
   git -C "$D6U/run" checkout -q main
   git -C "$D6U/run" checkout -q -b br-parent
-  echo p >"$D6U/run/p.txt"; git -C "$D6U/run" add p.txt; git -C "$D6U/run" commit -q -m p
+  echo p >"$D6U/run/p.txt"
+  git -C "$D6U/run" add p.txt
+  git -C "$D6U/run" commit -q -m p
   git -C "$D6U/run" push -q origin br-parent
   PARENT_SHA6U="$(git -C "$D6U/run" rev-parse br-parent)"
-  echo p2 >"$D6U/run/p2.txt"; git -C "$D6U/run" add p2.txt; git -C "$D6U/run" commit -q -m "parent moved"
+  echo p2 >"$D6U/run/p2.txt"
+  git -C "$D6U/run" add p2.txt
+  git -C "$D6U/run" commit -q -m "parent moved"
   git -C "$D6U/run" push -q origin br-parent
   git -C "$D6U/run" checkout -q "auto-pilot/$RUN_ID6U"
   {
@@ -3905,8 +4447,10 @@ GHWEOF
   } >"$D6U/run/.auto-pilot/RUN.md"
   : >"$D6U/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D6U/run/.auto-pilot/REPORT.md"
-  git -C "$D6U/run" add .auto-pilot; git -C "$D6U/run" commit -q -m "seed run state"
-  d6uout="$("$SCRIPT" doctor --dir "$D6U/run" --run-id "$RUN_ID6U" --gh "$DOCTOR_GH_FAIL" 2>&1)"; d6urc=$?
+  git -C "$D6U/run" add .auto-pilot
+  git -C "$D6U/run" commit -q -m "seed run state"
+  d6uout="$("$SCRIPT" doctor --dir "$D6U/run" --run-id "$RUN_ID6U" --gh "$DOCTOR_GH_FAIL" 2>&1)"
+  d6urc=$?
   [ "$d6urc" = 0 ] && ok "doctor I6 (D2/D7, gh unreadable): exits 0 (undetermined, not a halt)" \
     || bad "doctor I6 (D2/D7, gh unreadable): exits 0" "exit=$d6urc out=$d6uout"
   lack "doctor I6 (D2/D7, gh unreadable): the child is NOT parked on an unreadable parent state" \
@@ -3915,7 +4459,8 @@ GHWEOF
     'parent PR state unreadable' "$d6uout"
 
   # --- I7: forward progress across ITERATIONS within one live process ------
-  D7="$DOC/i7"; RUN_ID7="doctor-i7"
+  D7="$DOC/i7"
+  RUN_ID7="doctor-i7"
   _doctor_new_run "$D7" "$RUN_ID7"
   {
     printf -- '---\nrun_id: %s\nstatus: active\npause_reason: \n---\n\n' "$RUN_ID7"
@@ -3925,11 +4470,13 @@ GHWEOF
   } >"$D7/run/.auto-pilot/RUN.md"
   : >"$D7/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D7/run/.auto-pilot/REPORT.md"
-  git -C "$D7/run" add .auto-pilot; git -C "$D7/run" commit -q -m "seed run state"
+  git -C "$D7/run" add .auto-pilot
+  git -C "$D7/run" commit -q -m "seed run state"
 
   "$SCRIPT" doctor --dir "$D7/run" --run-id "$RUN_ID7" --no-progress-limit 3 >/dev/null 2>&1
   "$SCRIPT" doctor --dir "$D7/run" --run-id "$RUN_ID7" --no-progress-limit 3 >/dev/null 2>&1
-  d7out="$("$SCRIPT" doctor --dir "$D7/run" --run-id "$RUN_ID7" --no-progress-limit 3 2>&1)"; d7rc=$?
+  d7out="$("$SCRIPT" doctor --dir "$D7/run" --run-id "$RUN_ID7" --no-progress-limit 3 2>&1)"
+  d7rc=$?
   [ "$d7rc" = 30 ] && ok "doctor I7: halts after N consecutive no-progress iterations, exits 30" \
     || bad "doctor I7: halts after N consecutive no-progress iterations" "exit=$d7rc out=$d7out"
   have "doctor I7: reason names invariant 7" 'invariant 7' "$d7out"
@@ -3946,7 +4493,8 @@ GHWEOF
   # "doctor errored" rather than "the run must stop", and a wedged run keeps being
   # dispatched. The counter itself cannot advance while the dir is unwritable — but
   # the halt for THIS iteration must still fire, and must still be an exit 30.
-  D7U="$DOC/i7-unwritable"; RUN_ID7U="doctor-i7u"
+  D7U="$DOC/i7-unwritable"
+  RUN_ID7U="doctor-i7u"
   _doctor_new_run "$D7U" "$RUN_ID7U"
   {
     printf -- '---\nrun_id: %s\nstatus: active\npause_reason: \n---\n\n' "$RUN_ID7U"
@@ -3956,9 +4504,11 @@ GHWEOF
   } >"$D7U/run/.auto-pilot/RUN.md"
   : >"$D7U/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D7U/run/.auto-pilot/REPORT.md"
-  git -C "$D7U/run" add .auto-pilot; git -C "$D7U/run" commit -q -m "seed run state"
+  git -C "$D7U/run" add .auto-pilot
+  git -C "$D7U/run" commit -q -m "seed run state"
   chmod -w "$D7U/run/.auto-pilot"
-  d7uout="$("$SCRIPT" doctor --dir "$D7U/run" --run-id "$RUN_ID7U" --no-progress-limit 1 2>&1)"; d7urc=$?
+  d7uout="$("$SCRIPT" doctor --dir "$D7U/run" --run-id "$RUN_ID7U" --no-progress-limit 1 2>&1)"
+  d7urc=$?
   chmod +w "$D7U/run/.auto-pilot"
   [ "$d7urc" = 30 ] \
     && ok "doctor I7 (unwritable run dir): still HALTS with exit 30, never the bare die (2)" \
@@ -3972,7 +4522,8 @@ GHWEOF
     || bad "doctor: the loop cannot advance while a halt is in effect"
 
   # I7 never fires while the run is legitimately paused, however many repeats.
-  D7P="$DOC/i7-paused"; RUN_ID7P="doctor-i7-paused"
+  D7P="$DOC/i7-paused"
+  RUN_ID7P="doctor-i7-paused"
   _doctor_new_run "$D7P" "$RUN_ID7P"
   {
     printf -- '---\nrun_id: %s\nstatus: paused\npaused_until: 2099-01-01T00:00:00\n---\n\n' "$RUN_ID7P"
@@ -3982,7 +4533,8 @@ GHWEOF
   } >"$D7P/run/.auto-pilot/RUN.md"
   : >"$D7P/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D7P/run/.auto-pilot/REPORT.md"
-  git -C "$D7P/run" add .auto-pilot; git -C "$D7P/run" commit -q -m "seed paused run state"
+  git -C "$D7P/run" add .auto-pilot
+  git -C "$D7P/run" commit -q -m "seed paused run state"
   i=0
   while [ "$i" -lt 5 ]; do
     "$SCRIPT" doctor --dir "$D7P/run" --run-id "$RUN_ID7P" --no-progress-limit 3 >/dev/null 2>&1
@@ -3997,7 +4549,8 @@ GHWEOF
   # one strike from a spurious halt before any work runs. Drive it right up
   # to the limit under `loop` context, then prove a `resume` call resets
   # instead of tipping it over.
-  D7R="$DOC/i7-resume-context"; RUN_ID7R="doctor-i7-resume-context"
+  D7R="$DOC/i7-resume-context"
+  RUN_ID7R="doctor-i7-resume-context"
   _doctor_new_run "$D7R" "$RUN_ID7R"
   {
     printf -- '---\nrun_id: %s\nstatus: active\npause_reason: \n---\n\n' "$RUN_ID7R"
@@ -4007,12 +4560,14 @@ GHWEOF
   } >"$D7R/run/.auto-pilot/RUN.md"
   : >"$D7R/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D7R/run/.auto-pilot/REPORT.md"
-  git -C "$D7R/run" add .auto-pilot; git -C "$D7R/run" commit -q -m "seed run state"
+  git -C "$D7R/run" add .auto-pilot
+  git -C "$D7R/run" commit -q -m "seed run state"
   # Two no-progress `loop` iterations (count -> 2, one shy of the limit=3),
   # then a `resume` call: if resume incremented, this would halt (count=3).
   "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
   "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
-  d7rout="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context resume 2>&1)"; d7rrc=$?
+  d7rout="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context resume 2>&1)"
+  d7rrc=$?
   [ "$d7rrc" = 0 ] && ok "doctor I7 (D6): a resume call never halts, even after 2 prior no-progress loop iterations" \
     || bad "doctor I7 (D6): a resume call never halts" "exit=$d7rrc out=$d7rout"
   # Follow it with TWO more `loop` iterations: if resume had reset the
@@ -4020,16 +4575,20 @@ GHWEOF
   # halt; if resume had (wrongly) incremented, the limit would already have
   # been blown past.
   "$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop >/dev/null 2>&1
-  d7rout2="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop 2>&1)"; d7rrc2=$?
+  d7rout2="$("$SCRIPT" doctor --dir "$D7R/run" --run-id "$RUN_ID7R" --no-progress-limit 3 --context loop 2>&1)"
+  d7rrc2=$?
   [ "$d7rrc2" != 30 ] && ok "doctor I7 (D6): resume genuinely reset the counter (2 more loop iterations still don't halt)" \
     || bad "doctor I7 (D6): resume genuinely reset the counter" "exit=$d7rrc2 out=$d7rout2"
 
   # --- fail-closed: bad usage --------------------------------------------
-  o="$("$SCRIPT" doctor --run-id x 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir' \
+  o="$("$SCRIPT" doctor --run-id x 2>&1)"
+  [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir' \
     && ok "doctor fail-closed: missing --dir" || bad "doctor fail-closed: missing --dir" "$o"
-  o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --handler bogus 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --handler' \
+  o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --handler bogus 2>&1)"
+  [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --handler' \
     && ok "doctor fail-closed: unknown --handler" || bad "doctor fail-closed: unknown --handler" "$o"
-  o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --context bogus 2>&1)"; [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --context' \
+  o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --context bogus 2>&1)"
+  [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --context' \
     && ok "doctor fail-closed: unknown --context" || bad "doctor fail-closed: unknown --context" "$o"
 else
   echo "skip - doctor: git not available"
@@ -4092,7 +4651,8 @@ done
 # REAL generated wrapper wherever the acceptance criteria demand it (NO model
 # call; emitted on a gate-closed wake) — never a re-implementation of the
 # wrapper's own call sequence.
-SR="$BASE/status-report"; mkdir -p "$SR"
+SR="$BASE/status-report"
+mkdir -p "$SR"
 
 if command -v git >/dev/null 2>&1; then
   SR_REPO="$SR/repo"
@@ -4100,29 +4660,36 @@ if command -v git >/dev/null 2>&1; then
   git -C "$SR_REPO" config user.email test@example.com
   git -C "$SR_REPO" config user.name "Test"
   git -C "$SR_REPO" checkout -q -b main
-  echo root >"$SR_REPO/root.txt"; git -C "$SR_REPO" add root.txt; git -C "$SR_REPO" commit -q -m root
+  echo root >"$SR_REPO/root.txt"
+  git -C "$SR_REPO" add root.txt
+  git -C "$SR_REPO" commit -q -m root
 
   # branch_impl: a commit made "now" — comfortably inside a generous ceiling.
   git -C "$SR_REPO" checkout -q -b branch_impl
-  echo impl >"$SR_REPO/impl.txt"; git -C "$SR_REPO" add impl.txt; git -C "$SR_REPO" commit -q -m "impl work"
+  echo impl >"$SR_REPO/impl.txt"
+  git -C "$SR_REPO" add impl.txt
+  git -C "$SR_REPO" commit -q -m "impl work"
 
   # branch_over: a commit stamped 1h ago — over a 2-minute ceiling, the
   # working-vs-wedged signal the report exists to surface.
   git -C "$SR_REPO" checkout -q main
   git -C "$SR_REPO" checkout -q -b branch_over
-  echo over >"$SR_REPO/over.txt"; git -C "$SR_REPO" add over.txt
+  echo over >"$SR_REPO/over.txt"
+  git -C "$SR_REPO" add over.txt
   # An unambiguous "@<epoch> +0000" form — a bare "YYYY-MM-DDTHH:MM:SS" with no
   # zone is read by git as LOCAL time, which silently produced a commit git
   # thought was hours in the FUTURE on a non-UTC box (a real bug this exact
   # fixture caught once already).
-  SR_OVER_EPOCH=$(( $(date +%s) - 3600 ))
+  SR_OVER_EPOCH=$(($(date +%s) - 3600))
   GIT_AUTHOR_DATE="@$SR_OVER_EPOCH +0000" GIT_COMMITTER_DATE="@$SR_OVER_EPOCH +0000" \
     git -C "$SR_REPO" commit -q -m "over-ceiling work"
 
   git -C "$SR_REPO" checkout -q main
   for b in branch_handed branch_parked branch_child branch_claimed; do
     git -C "$SR_REPO" checkout -q -b "$b" main >/dev/null
-    echo "$b" >"$SR_REPO/$b.txt"; git -C "$SR_REPO" add "$b.txt"; git -C "$SR_REPO" commit -q -m "$b"
+    echo "$b" >"$SR_REPO/$b.txt"
+    git -C "$SR_REPO" add "$b.txt"
+    git -C "$SR_REPO" commit -q -m "$b"
   done
   # branch_fresh: claimed but NO commits beyond its base yet — every base..branch
   # range is empty, the shape whose old whole-history fallback selected the
@@ -4132,11 +4699,15 @@ if command -v git >/dev/null 2>&1; then
 
   # Fake gh: same flat-file-DB shape as restack's fixture, extended with
   # `pr list --head <branch>` (the #23 divergence lookup status-report adds).
-  SR_GHDB="$SR/ghdb"; mkdir -p "$SR_GHDB"
-  printf 'MERGED\n'     >"$SR_GHDB/201.state"; printf 'main\n' >"$SR_GHDB/201.base"; printf 'UNKNOWN\n' >"$SR_GHDB/201.mergeable"
-  printf '\n'           >"$SR_GHDB/202.state"; printf ''       >"$SR_GHDB/202.base" # base ref deleted (LOUD orphan)
-  printf 'OPEN\n'       >"$SR_GHDB/203.state"
-  printf '203\n'        >"$SR_GHDB/list-branch_claimed.number"
+  SR_GHDB="$SR/ghdb"
+  mkdir -p "$SR_GHDB"
+  printf 'MERGED\n' >"$SR_GHDB/201.state"
+  printf 'main\n' >"$SR_GHDB/201.base"
+  printf 'UNKNOWN\n' >"$SR_GHDB/201.mergeable"
+  printf '\n' >"$SR_GHDB/202.state"
+  printf '' >"$SR_GHDB/202.base" # base ref deleted (LOUD orphan)
+  printf 'OPEN\n' >"$SR_GHDB/203.state"
+  printf '203\n' >"$SR_GHDB/list-branch_claimed.number"
   SR_GH="$SR/gh"
   cat >"$SR_GH" <<'GHEOF'
 #!/usr/bin/env bash
@@ -4186,7 +4757,8 @@ USEOF
   # ISO-8601 UTC N seconds from now, portable BSD/GNU.
   _sr_iso() { date -u -v+"${1}"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+${1} seconds" +%Y-%m-%dT%H:%M:%SZ; }
 
-  SR_RUN="$SR/run"; mkdir -p "$SR_RUN/.auto-pilot"
+  SR_RUN="$SR/run"
+  mkdir -p "$SR_RUN/.auto-pilot"
   _sr_write_run_md() {
     # $1: task_claimed's phase (claimed|implementing) so the delta test can
     # advance it; $2: task_over's branch elapsed baseline stays fixed.
@@ -4213,18 +4785,20 @@ USEOF
   # `_run_head` from THIS dir, distinct from SR_REPO which supplies the task
   # branches for elapsed-time lookups).
   git init -q "$SR_RUN"
-  git -C "$SR_RUN" config user.email test@example.com; git -C "$SR_RUN" config user.name Test
+  git -C "$SR_RUN" config user.email test@example.com
+  git -C "$SR_RUN" config user.name Test
   git -C "$SR_RUN" checkout -q -b auto-pilot/test-run
-  git -C "$SR_RUN" add .auto-pilot/RUN.md; git -C "$SR_RUN" commit -q -m "run state v1"
+  git -C "$SR_RUN" add .auto-pilot/RUN.md
+  git -C "$SR_RUN" commit -q -m "run state v1"
 
   # --- A: core rendering, direct call, --force (bypass the interval gate) ---
   srAout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
     --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
   srAmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
-  have "status-report: renders the phase table"          '| task_impl | implementing'     "$srAmd"
-  have "status-report: in-flight elapsed is reported"     'task_impl (implementing): elapsed' "$srAmd"
-  have "status-report: OVER-ceiling task is flagged"      'task_over (implementing): elapsed' "$srAmd"
-  have "status-report: OVER-ceiling task says OVER"       'OVER the per-task ceiling'      "$srAmd"
+  have "status-report: renders the phase table" '| task_impl | implementing' "$srAmd"
+  have "status-report: in-flight elapsed is reported" 'task_impl (implementing): elapsed' "$srAmd"
+  have "status-report: OVER-ceiling task is flagged" 'task_over (implementing): elapsed' "$srAmd"
+  have "status-report: OVER-ceiling task says OVER" 'OVER the per-task ceiling' "$srAmd"
   ! printf '%s\n' "$srAmd" | grep 'task_impl (implementing)' | grep -q 'OVER' \
     && ok "status-report: within-ceiling task is not marked OVER" \
     || bad "status-report: within-ceiling task is not marked OVER"
@@ -4236,13 +4810,13 @@ USEOF
   ! printf '%s\n' "$srAmd" | grep 'task_fresh (implementing)' | grep -q 'OVER' \
     && ok "status-report: the fresh branch is never marked OVER off the repo's first commit" \
     || bad "status-report: the fresh branch is never marked OVER off the repo's first commit"
-  have "status-report: embeds status --label's own output"  'Live state (from `status'  "$srAmd"
-  have "status-report: heartbeat line present (from status)" 'heartbeat:'                "$srAmd"
+  have "status-report: embeds status --label's own output" 'Live state (from `status' "$srAmd"
+  have "status-report: heartbeat line present (from status)" 'heartbeat:' "$srAmd"
   have "status-report: PR state + mergeable for task_handed" '| task_handed | #201 | MERGED | UNKNOWN |' "$srAmd"
-  have "status-report: rate window rendered from --usage-bin" 'session 42% consumed'      "$srAmd"
+  have "status-report: rate window rendered from --usage-bin" 'session 42% consumed' "$srAmd"
   have "status-report: until remaining vs min_task_budget rendered" 'min_task_budget 20m' "$srAmd"
-  have "status-report: until remaining is OK (plenty of runway)"    'OK, at least one more task likely fits' "$srAmd"
-  have "status-report: first report says so (no prior state)"      'first report for this run' "$srAmd"
+  have "status-report: until remaining is OK (plenty of runway)" 'OK, at least one more task likely fits' "$srAmd"
+  have "status-report: first report says so (no prior state)" 'first report for this run' "$srAmd"
 
   # --- interval gate: a call within --report-every is a silent no-op ---------
   # (no --force). A long interval + an immediate re-call must NOT rewrite
@@ -4273,7 +4847,8 @@ USEOF
 
   # Now advance task_claimed's phase and commit — the run-state HEAD moves.
   _sr_write_run_md implementing
-  git -C "$SR_RUN" add .auto-pilot/RUN.md; git -C "$SR_RUN" commit -q -m "task_claimed -> implementing"
+  git -C "$SR_RUN" add .auto-pilot/RUN.md
+  git -C "$SR_RUN" commit -q -m "task_claimed -> implementing"
   srCout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.a --force \
     --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
   srCmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
@@ -4323,7 +4898,8 @@ USEOF
   SR_FAILGH="$SR/gh-failing"
   printf '#!/bin/sh\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' >"$SR_FAILGH"
   chmod +x "$SR_FAILGH"
-  SR_BRUN="$SR/degraded-run"; mkdir -p "$SR_BRUN/.auto-pilot"
+  SR_BRUN="$SR/degraded-run"
+  mkdir -p "$SR_BRUN/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -4333,9 +4909,11 @@ USEOF
     printf '| task_claimed | claimed | branch_claimed | main | - | - | |\n'
   } >"$SR_BRUN/.auto-pilot/RUN.md"
   git init -q "$SR_BRUN"
-  git -C "$SR_BRUN" config user.email t@e; git -C "$SR_BRUN" config user.name T
+  git -C "$SR_BRUN" config user.email t@e
+  git -C "$SR_BRUN" config user.name T
   git -C "$SR_BRUN" checkout -q -b auto-pilot/degraded-run
-  git -C "$SR_BRUN" add .auto-pilot/RUN.md; git -C "$SR_BRUN" commit -q -m "run state"
+  git -C "$SR_BRUN" add .auto-pilot/RUN.md
+  git -C "$SR_BRUN" commit -q -m "run state"
   srXout="$("$SCRIPT" status-report --dir "$SR_BRUN" --label com.autopilot.sr.deg --force \
     --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 2>&1)"
   srXmd="$(cat "$SR_BRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
@@ -4347,7 +4925,8 @@ USEOF
     'reality=DEGRADED' "$srXout"
   # ...and a transient failure against a CHAINED PR is also degraded — never a
   # false DEFECT (the restack scan's UNDETERMINED path, seen from the report).
-  SR_CRUN="$SR/degraded-chained"; mkdir -p "$SR_CRUN/.auto-pilot"
+  SR_CRUN="$SR/degraded-chained"
+  mkdir -p "$SR_CRUN/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -4357,9 +4936,11 @@ USEOF
     printf '| task_chained | pr-open | branch_child | branch_parent | - | #299 | |\n'
   } >"$SR_CRUN/.auto-pilot/RUN.md"
   git init -q "$SR_CRUN"
-  git -C "$SR_CRUN" config user.email t@e; git -C "$SR_CRUN" config user.name T
+  git -C "$SR_CRUN" config user.email t@e
+  git -C "$SR_CRUN" config user.name T
   git -C "$SR_CRUN" checkout -q -b auto-pilot/degraded-chained
-  git -C "$SR_CRUN" add .auto-pilot/RUN.md; git -C "$SR_CRUN" commit -q -m "run state"
+  git -C "$SR_CRUN" add .auto-pilot/RUN.md
+  git -C "$SR_CRUN" commit -q -m "run state"
   "$SCRIPT" status-report --dir "$SR_CRUN" --label com.autopilot.sr.degc --force \
     --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 >/dev/null 2>&1
   srYmd="$(cat "$SR_CRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
@@ -4378,7 +4959,8 @@ USEOF
   # exit status, a totally dead gh made zero TRACKED calls: the table rendered
   # `unknown/unknown` and the reality check still asserted "clean". Fail-open,
   # in the single section this whole feature exists to make trustworthy.
-  SR_ORUN="$SR/degraded-ordinary"; mkdir -p "$SR_ORUN/.auto-pilot"
+  SR_ORUN="$SR/degraded-ordinary"
+  mkdir -p "$SR_ORUN/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -4388,9 +4970,11 @@ USEOF
     printf '| task_open | pr-open | branch_handed | main | - | #201 | |\n'
   } >"$SR_ORUN/.auto-pilot/RUN.md"
   git init -q "$SR_ORUN"
-  git -C "$SR_ORUN" config user.email t@e; git -C "$SR_ORUN" config user.name T
+  git -C "$SR_ORUN" config user.email t@e
+  git -C "$SR_ORUN" config user.name T
   git -C "$SR_ORUN" checkout -q -b auto-pilot/degraded-ordinary
-  git -C "$SR_ORUN" add .auto-pilot/RUN.md; git -C "$SR_ORUN" commit -q -m "run state"
+  git -C "$SR_ORUN" add .auto-pilot/RUN.md
+  git -C "$SR_ORUN" commit -q -m "run state"
   srZout="$("$SCRIPT" status-report --dir "$SR_ORUN" --label com.autopilot.sr.deg0 --force \
     --repo "$SR_REPO" --gh "$SR_FAILGH" --task-ceiling 120 2>&1)"
   srZmd="$(cat "$SR_ORUN/.auto-pilot/STATUS.md" 2>/dev/null)"
@@ -4410,7 +4994,7 @@ USEOF
   [ "$srA_hdrs" = 1 ] \
     && ok "status-report: the Open-PRs table prints its header exactly once (2 PRs in the fixture)" \
     || bad "status-report: the Open-PRs table header is repeated per row (printf format recycling)" \
-           "header printed $srA_hdrs times, expected 1"
+      "header printed $srA_hdrs times, expected 1"
 
   # --- E2e: the stall duration ACCUMULATES; it is not the report interval ----
   # "no forward progress in X" measured X from last_emitted_at — rewritten on
@@ -4418,7 +5002,8 @@ USEOF
   # 15m" at every single tick. The number that separates slow from wedged could
   # never say so. It now measures from last_progress_at, carried forward across
   # reports that see nothing move.
-  SR_SRUN="$SR/stall-run"; mkdir -p "$SR_SRUN/.auto-pilot"
+  SR_SRUN="$SR/stall-run"
+  mkdir -p "$SR_SRUN/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -4428,9 +5013,11 @@ USEOF
     printf '| task_stuck | implementing | branch_over | main | - | - | |\n'
   } >"$SR_SRUN/.auto-pilot/RUN.md"
   git init -q "$SR_SRUN"
-  git -C "$SR_SRUN" config user.email t@e; git -C "$SR_SRUN" config user.name T
+  git -C "$SR_SRUN" config user.email t@e
+  git -C "$SR_SRUN" config user.name T
   git -C "$SR_SRUN" checkout -q -b auto-pilot/stall-run
-  git -C "$SR_SRUN" add .auto-pilot/RUN.md; git -C "$SR_SRUN" commit -q -m "run state"
+  git -C "$SR_SRUN" add .auto-pilot/RUN.md
+  git -C "$SR_SRUN" commit -q -m "run state"
   SR_SSTATE="$SR_SRUN/.auto-pilot/status-report-state"
   # First report seeds the state; nothing has moved since, so the next one is a
   # genuine stall.
@@ -4438,7 +5025,7 @@ USEOF
     --repo "$SR_REPO" --task-ceiling 120 >/dev/null 2>&1
   # Backdate the moment the run last MOVED to 2h ago, leaving last_emitted_at
   # recent — exactly the state an overnight wedge produces after many reports.
-  SR_STALL_SINCE=$(( $(date +%s) - 7200 ))
+  SR_STALL_SINCE=$(($(date +%s) - 7200))
   sed -e "s/^last_progress_at: .*/last_progress_at: $SR_STALL_SINCE/" "$SR_SSTATE" >"$SR_SSTATE.tmp"
   mv "$SR_SSTATE.tmp" "$SR_SSTATE"
   "$SCRIPT" status-report --dir "$SR_SRUN" --label com.autopilot.sr.stall --force \
@@ -4451,7 +5038,7 @@ USEOF
   grep -q "^last_progress_at: $SR_STALL_SINCE$" "$SR_SSTATE" \
     && ok "status-report: emitting a report does not reset the stall clock" \
     || bad "status-report: the stall clock was reset by the emission" \
-           "expected last_progress_at: $SR_STALL_SINCE, got $(sed -n 's/^last_progress_at: //p' "$SR_SSTATE")"
+      "expected last_progress_at: $SR_STALL_SINCE, got $(sed -n 's/^last_progress_at: //p' "$SR_SSTATE")"
 
   # --- E3: duration parsing accepts digits only, never arithmetic ------------
   # `--report-every '1+1m'` used to reach bash arithmetic and be ACCEPTED —
@@ -4465,7 +5052,8 @@ USEOF
   # say "never"; there is no way to say "always".
   for badv in '1+1m' '+5s' '2 2h' '0' '0s' '0m'; do
     bdout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.bad \
-      --report-every "$badv" 2>&1)"; bdc=$?
+      --report-every "$badv" 2>&1)"
+    bdc=$?
     [ "$bdc" = 2 ] && printf '%s' "$bdout" | grep -qF 'must be off' \
       && ok "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" \
       || bad "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" "exit=$bdc $bdout"
@@ -4474,7 +5062,8 @@ USEOF
   # --- E4: a QUOTED front-matter `until:` still parses ------------------------
   # The other front-matter readers strip wrapping quotes; the report's reader
   # must too, or `until: "2026-…"` renders as "unparseable until".
-  SR_QRUN="$SR/quoted-run"; mkdir -p "$SR_QRUN/.auto-pilot"
+  SR_QRUN="$SR/quoted-run"
+  mkdir -p "$SR_QRUN/.auto-pilot"
   {
     printf -- '---\n'
     printf 'base_branch: main\n'
@@ -4486,9 +5075,11 @@ USEOF
     printf '| task_pending | pending | - | main | - | - | |\n'
   } >"$SR_QRUN/.auto-pilot/RUN.md"
   git init -q "$SR_QRUN"
-  git -C "$SR_QRUN" config user.email t@e; git -C "$SR_QRUN" config user.name T
+  git -C "$SR_QRUN" config user.email t@e
+  git -C "$SR_QRUN" config user.name T
   git -C "$SR_QRUN" checkout -q -b auto-pilot/quoted-run
-  git -C "$SR_QRUN" add .auto-pilot/RUN.md; git -C "$SR_QRUN" commit -q -m "run state"
+  git -C "$SR_QRUN" add .auto-pilot/RUN.md
+  git -C "$SR_QRUN" commit -q -m "run state"
   "$SCRIPT" status-report --dir "$SR_QRUN" --label com.autopilot.sr.q --force \
     --repo "$SR_REPO" --task-ceiling 120 >/dev/null 2>&1
   srQmd="$(cat "$SR_QRUN/.auto-pilot/STATUS.md" 2>/dev/null)"
@@ -4505,10 +5096,13 @@ USEOF
   # copy+delete a watcher can observe half-written. Effect asserted: with an
   # UNUSABLE TMPDIR the report must still succeed, because nothing on its
   # write path may depend on TMPDIR at all.
-  SR_ARUN="$SR/atomic-run"; rm -rf "$SR_ARUN"; cp -R "$SR_BRUN" "$SR_ARUN"
+  SR_ARUN="$SR/atomic-run"
+  rm -rf "$SR_ARUN"
+  cp -R "$SR_BRUN" "$SR_ARUN"
   rm -f "$SR_ARUN/.auto-pilot/status-report-state" "$SR_ARUN/.auto-pilot/STATUS.md"
   atout="$(TMPDIR="$SR/definitely-nonexistent-tmp" "$SCRIPT" status-report --dir "$SR_ARUN" \
-    --label com.autopilot.sr.atomic --force --repo "$SR_REPO" --task-ceiling 120 2>&1)"; atc=$?
+    --label com.autopilot.sr.atomic --force --repo "$SR_REPO" --task-ceiling 120 2>&1)"
+  atc=$?
   [ "$atc" = 0 ] && [ -f "$SR_ARUN/.auto-pilot/STATUS.md" ] \
     && ok "status-report: succeeds with an unusable TMPDIR (temp files live in .auto-pilot/, renamed in place)" \
     || bad "status-report: succeeds with an unusable TMPDIR (temp files live in .auto-pilot/, renamed in place)" "exit=$atc $atout"
@@ -4517,11 +5111,14 @@ USEOF
     || bad "status-report: no temp-file droppings left beside the report" "$leftover"
 
   # --- F: no live gh/usage-bin call when the caller doesn't opt in -----------
-  SR_LEAK="$SR/leak-bin"; mkdir -p "$SR_LEAK"
+  SR_LEAK="$SR/leak-bin"
+  mkdir -p "$SR_LEAK"
   SR_GH_CALLED="$SR/gh-leak-called"
-  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_GH_CALLED" >"$SR_LEAK/gh"; chmod +x "$SR_LEAK/gh"
+  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_GH_CALLED" >"$SR_LEAK/gh"
+  chmod +x "$SR_LEAK/gh"
   SR_USAGE_CALLED="$SR/usage-leak-called"
-  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_USAGE_CALLED" >"$SR_LEAK/claude-usage.sh"; chmod +x "$SR_LEAK/claude-usage.sh"
+  printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SR_USAGE_CALLED" >"$SR_LEAK/claude-usage.sh"
+  chmod +x "$SR_LEAK/claude-usage.sh"
   rm -f "$SR_GH_CALLED" "$SR_USAGE_CALLED"
   PATH="$SR_LEAK:$PATH" "$SCRIPT" supervisor-scan --dir "$SR_RUN" --label com.autopilot.sr.f \
     --report-every off >/dev/null 2>&1
@@ -4553,20 +5150,24 @@ USEOF
   # alarm scans or pause-exempt-ledger checks either. Finding #22's silent
   # zero-work loop, reached through the OBSERVABILITY feature. Bounded by a
   # hand-rolled watchdog (macOS ships no coreutils `timeout`).
-  SR_HANG="$SR/hangbin"; mkdir -p "$SR_HANG"
-  printf '#!/bin/sh\nsleep 120\n' >"$SR_HANG/gh"; chmod +x "$SR_HANG/gh"
+  SR_HANG="$SR/hangbin"
+  mkdir -p "$SR_HANG"
+  printf '#!/bin/sh\nsleep 120\n' >"$SR_HANG/gh"
+  chmod +x "$SR_HANG/gh"
   # A FRESH run dir, with no prior status-report-state: reusing $SR_RUN let the
   # interval gate SKIP the report entirely, so the hang never happened and the
   # timing assertion passed in 0s while proving nothing. (Caught only because the
   # "announced" assertion below went red — an elapsed-time bound is satisfied just
   # as well by never running the thing.)
-  SR_HRUN="$SR/hangrun"; rm -rf "$SR_HRUN"; cp -R "$SR_RUN" "$SR_HRUN"
+  SR_HRUN="$SR/hangrun"
+  rm -rf "$SR_HRUN"
+  cp -R "$SR_RUN" "$SR_HRUN"
   rm -f "$SR_HRUN/.auto-pilot/status-report-state" "$SR_HRUN/.auto-pilot/STATUS.md" 2>/dev/null
   srh_start="$(date +%s)"
   PATH="$GUARD:$PATH" SPAWN_REPORT_TIMEOUT=2 "$SCRIPT" supervisor-scan --dir "$SR_HRUN" \
     --label com.autopilot.sr.hang --report-every 1 --gh "$SR_HANG/gh" >/dev/null 2>"$SR/hang.err"
   srh_rc=$?
-  srh_el=$(( $(date +%s) - srh_start ))
+  srh_el=$(($(date +%s) - srh_start))
   [ "$srh_rc" = 0 ] && ok "status-report [hung gh]: supervisor-scan still exits 0 (the wake completes)" \
     || bad "status-report [hung gh]: supervisor-scan did not complete" "rc=$srh_rc"
   [ "$srh_el" -lt 30 ] \
@@ -4587,7 +5188,8 @@ USEOF
   # reimplementation of its call sequence — same discipline as the gate tests
   # above. paused_until is an hour in the future, so the gate closes and
   # `claude` must never run; the report must still be written.
-  SRW="$SR/wrapper"; mkdir -p "$SRW/.auto-pilot" "$SRW/bin"
+  SRW="$SR/wrapper"
+  mkdir -p "$SRW/.auto-pilot" "$SRW/bin"
   cp "$SR_RUN/.auto-pilot/RUN.md" "$SRW/.auto-pilot/RUN.md"
   # RUN.md needs its own paused_until for the gate; append it to the front matter.
   SRW_FUTURE="$(_sr_iso 3600)"
@@ -4596,9 +5198,11 @@ USEOF
     { print }
   ' "$SRW/.auto-pilot/RUN.md" >"$SRW/.auto-pilot/RUN.md.tmp" && mv "$SRW/.auto-pilot/RUN.md.tmp" "$SRW/.auto-pilot/RUN.md"
   SRW_CLAUDE="$SRW/bin/claude-stub"
-  printf '#!/bin/sh\n: >"%s/claude-called"\nexit 0\n' "$SRW" >"$SRW_CLAUDE"; chmod +x "$SRW_CLAUDE"
+  printf '#!/bin/sh\n: >"%s/claude-called"\nexit 0\n' "$SRW" >"$SRW_CLAUDE"
+  chmod +x "$SRW_CLAUDE"
   SRW_SANDBOX="$SRW/bin/sandbox-exec"
-  printf '#!/bin/sh\n: >"%s/sandbox-exec-called"\nshift 2\nexec "$@"\n' "$SRW" >"$SRW_SANDBOX"; chmod +x "$SRW_SANDBOX"
+  printf '#!/bin/sh\n: >"%s/sandbox-exec-called"\nshift 2\nexec "$@"\n' "$SRW" >"$SRW_SANDBOX"
+  chmod +x "$SRW_SANDBOX"
   SRW_PATH="$SRW/bin:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRW" \
     --log "$SRW/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.sr.wrap \
@@ -4621,11 +5225,14 @@ USEOF
   # claude runs, and reap it when claude exits. Driven through the REAL
   # generated wrapper, gate OPEN, with a claude that takes 3s and a 1s
   # interval: more than one report digest must land in the log.
-  SRL="$SR/loop-wrapper"; mkdir -p "$SRL/.auto-pilot" "$SRL/bin"
-  cp "$SR_RUN/.auto-pilot/RUN.md" "$SRL/.auto-pilot/RUN.md"   # no paused_until: gate OPEN
+  SRL="$SR/loop-wrapper"
+  mkdir -p "$SRL/.auto-pilot" "$SRL/bin"
+  cp "$SR_RUN/.auto-pilot/RUN.md" "$SRL/.auto-pilot/RUN.md" # no paused_until: gate OPEN
   SRL_CLAUDE="$SRL/bin/claude-slow"
-  printf '#!/bin/sh\n: >"%s/claude-called"\nsleep 3\nexit 0\n' "$SRL" >"$SRL_CLAUDE"; chmod +x "$SRL_CLAUDE"
-  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SRL/bin/sandbox-exec"; chmod +x "$SRL/bin/sandbox-exec"
+  printf '#!/bin/sh\n: >"%s/claude-called"\nsleep 3\nexit 0\n' "$SRL" >"$SRL_CLAUDE"
+  chmod +x "$SRL_CLAUDE"
+  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SRL/bin/sandbox-exec"
+  chmod +x "$SRL/bin/sandbox-exec"
   SRL_PATH="$SRL/bin:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRL" \
     --log "$SRL/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.sr.loop \
@@ -4639,8 +5246,8 @@ USEOF
   srl_claude_ln="$(grep -n 'sandbox-exec -f' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
   srl_kill_ln="$(grep -n 'kill -TERM -"$rpt"' "$SRL/launch.sh" | head -1 | cut -d: -f1)"
   if [ -n "$srl_gate_ln" ] && [ -n "$srl_loop_ln" ] && [ -n "$srl_claude_ln" ] && [ -n "$srl_kill_ln" ] \
-     && [ "$srl_gate_ln" -lt "$srl_loop_ln" ] && [ "$srl_loop_ln" -lt "$srl_claude_ln" ] \
-     && [ "$srl_claude_ln" -lt "$srl_kill_ln" ]; then
+    && [ "$srl_gate_ln" -lt "$srl_loop_ln" ] && [ "$srl_loop_ln" -lt "$srl_claude_ln" ] \
+    && [ "$srl_claude_ln" -lt "$srl_kill_ln" ]; then
     ok "status-report [in-wake]: reporter sits below the gate, brackets the claude invocation, reap follows it"
   else
     bad "status-report [in-wake]: reporter sits below the gate, brackets the claude invocation, reap follows it" \
@@ -4650,7 +5257,7 @@ USEOF
   [ -f "$SRL/claude-called" ] && ok "status-report [in-wake]: gate was OPEN — claude really ran (3s)" \
     || bad "status-report [in-wake]: gate was OPEN — claude really ran (3s)"
   srl_digests="$(grep -c 'status-report: tasks=' "$SRL/o.log" 2>/dev/null | tr -d ' ')"
-  case "$srl_digests" in ''|*[!0-9]*) srl_digests=0 ;; esac
+  case "$srl_digests" in '' | *[!0-9]*) srl_digests=0 ;; esac
   if [ "$srl_digests" -ge 2 ]; then
     ok "status-report [in-wake]: reports kept firing DURING the model call ($srl_digests digests, wake-start alone would be 1)"
   else
@@ -4674,7 +5281,7 @@ else
 fi
 
 guard_hits="$(grep -c '^osascript: ' "$NOTIFY_GUARD_LOG" 2>/dev/null | tr -d ' ')"
-case "$guard_hits" in ''|*[!0-9]*) guard_hits=0 ;; esac
+case "$guard_hits" in '' | *[!0-9]*) guard_hits=0 ;; esac
 if [ "$guard_hits" -gt 0 ]; then
   ok "notifier guard: the incidental alarms of this suite ($guard_hits) were CAUGHT by the guard, not delivered to a desktop"
 else
