@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.54.0] - 2026-07-13
+
+### Features
+
+- ship the periodic status report the operator had to hand-roll (task 20) (#199) (c9843a8)
+
 ## [1.53.4] - 2026-07-12
 
 ### Fixes
