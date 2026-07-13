@@ -1543,6 +1543,28 @@ _supervisor_state_field() {
   grep -E "^${key}:" "$f" | head -1 | sed -e "s/^${key}: *//"
 }
 
+# Ensure `.auto-pilot/.gitignore` excludes the supervisor ledger. Idempotent, and
+# never fatal: an unwritable run dir is the halt path's problem, not this
+# bookkeeping helper's (see the `die`-is-`exit` convention above — a `die` here
+# would abort the very halt that called us).
+_ensure_supervisor_state_ignored() {
+  local d="$1" gi="$1/.gitignore"
+  [ -d "$d" ] || return 0
+  # `.auto-pilot/` is agent-writable (only the ledger LITERAL is denied), and the
+  # supervisor runs UNJAILED — so a `.gitignore` symlink planted by the agent
+  # would make us append through it, as the host user, to a path of its choosing.
+  [ -L "$gi" ] && return 0
+  if [ -f "$gi" ] && grep -qxF "$SUPERVISOR_STATE_NAME" "$gi" 2>/dev/null; then
+    return 0
+  fi
+  # An existing .gitignore with no trailing newline would splice our pattern onto
+  # its last line (`RUN.mdsupervisor-state`), ignoring nothing.
+  if [ -s "$gi" ] && [ -n "$(tail -c1 "$gi" 2>/dev/null)" ]; then
+    printf '\n' >>"$gi" 2>/dev/null || return 0
+  fi
+  printf '%s\n' "$SUPERVISOR_STATE_NAME" >>"$gi" 2>/dev/null || return 0
+}
+
 # Atomically persist the no-progress counter + last-seen run-state HEAD, plus
 # the pause-exempt ledger's `exempt_since` (the epoch of the first wake of the
 # current pause-exempt streak; empty when the run isn't currently exempt).
@@ -1562,6 +1584,14 @@ _write_supervisor_state() {
     exempt="$(_supervisor_state_field "$f" exempt_since)"
   fi
   mkdir -p "$d" || die "cannot create supervisor-state directory: $d"
+  # Keep the ledger OUT of git. The Seatbelt rule denies file-WRITE to this path,
+  # which stops the agent editing it — but `git add` only READS the file and
+  # writes the index, so an agent told to "commit run state" can happily stage the
+  # very ledger the deny exists to protect. Once it is TRACKED, a later
+  # checkout/reset tries to restore it, hits the deny, and fails the git operation
+  # in a way that is baffling to debug. The supervisor owns this file, so the
+  # supervisor — not the agent's choice of `git add` — is what keeps it untracked.
+  _ensure_supervisor_state_ignored "$d"
   local tmp; tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
   { printf 'count: %s\n' "$count"; printf 'head: %s\n' "$head"
     printf 'exempt_since: %s\n' "$exempt"; } >"$tmp" \
