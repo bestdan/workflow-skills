@@ -1,10 +1,10 @@
 ---
-title: Port doctor — the 659-line run diagnostic (BLOCKED — Tier B, jail-invoked)
+title: Port doctor — the 661-line run repair tool (BLOCKED — Tier B, jail-invoked)
 priority: medium
 size: 5
 status: needs_refinement
 human_approval_requested: true
-# promoter: scope exceeds size 5 (659-line function). ALSO re-scoped after PR #205 co-review: doctor is jail-invoked every loop, so it is Tier B and gated on task 8's interpreter decision.
+# promoter: scope exceeds size 5 (661-line function). ALSO re-scoped after PR #205 co-review: doctor is jail-invoked every loop, so it is Tier B and gated on task 8's interpreter decision.
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
@@ -25,7 +25,11 @@ tags: [orchestrator, python, port, seatbelt, blocked]
 > offered "just delete it" as an option. **Both premises were wrong**, and the card is now
 > blocked on task 2 (the runtime decision) rather than on the audit.
 
-`doctor` is **659 lines** — the single largest function in the file, a read-only run diagnostic.
+`doctor` is **661 lines** — the single largest function in the file. It is **not** a read-only
+diagnostic (an earlier draft of this card said so): it parks tasks via `_set_task_phase` (writing
+`RUN.md`), removes orphaned worktrees (`:6066`), and halts the supervisor (`_doctor_halt`,
+`:5744`). It is the run's self-repair, and any port or deletion has to answer to that stateful
+contract — a stdout/rc golden corpus would capture none of it.
 Two things changed:
 
 **1. It is Tier B, not Tier A.** The jailed run-phase agent invokes it from *inside*
@@ -56,7 +60,7 @@ behavior change and would need to be its own scoped task; it is not an option he
     before/after snapshot of the run dir.
   - The interpreter must be on the rendered profile's exec allowlist, and `render-profile` must
     emit it. A `doctor` that cannot exec inside the jail halts every run on iteration one.
-  - Given 659 lines, **split this card** before starting (it exceeds size 5 on its own).
+  - Given 661 lines, **split this card** before starting (it exceeds size 5 on its own).
 
 ## Acceptance Criteria
 

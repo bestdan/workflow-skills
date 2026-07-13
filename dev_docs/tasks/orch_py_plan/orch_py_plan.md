@@ -43,18 +43,19 @@ Two properties of the existing code make this unusually safe, and the plan leans
    `scripts/smoke-confinement.sh` drive the orchestrator purely through its subcommands
    (`render-profile`, `check-profile`, `render-settings`, `write-launch`, …). They are a
    characterization suite pinned to a contract, not to an implementation.
-2. **Most of the mass is pure.** The renderers are string-in / file-out. We capture golden
-   outputs from today's bash **before** touching anything, then require the Python to
-   reproduce them **byte-for-byte** (task 1).
+2. **Most of the Tier A mass is pure.** The renderers are string-in / file-out. We capture
+   golden outputs from today's bash **before** touching anything, then require the Python to
+   reproduce them **byte-for-byte** (task 3).
 
-### The load-bearing constraint: TWO constrained contexts
+### The load-bearing constraint: THREE constrained contexts
 
 > **Corrected 2026-07-13 after co-review (PR #205).** This section originally claimed the only
 > constraint was launchd's PATH, and listed `status`, `classify-exit`, `exit-reason`, and
 > `doctor` as freely portable. That was **wrong** and would have broken the wake loop.
 
 A subcommand is **constrained** if reachable from a context that cannot freely resolve a Python
-interpreter. Three such paths — the original plan modelled only the first:
+interpreter. Three such paths (four entry points — the verify broker is a *second* launchd job,
+`:5062`) — the original plan modelled only the first:
 
 1. **The generated launch script → launchd's pinned minimal PATH.** `supervisor-scan →
    heartbeat → supervisor-gate → sandbox-exec claude → supervisor-check`, all under a minimal
@@ -64,20 +65,37 @@ interpreter. Three such paths — the original plan modelled only the first:
    never go through the CLI, so the CLI seam does **not** protect them — deleting the bash body
    breaks the caller outright.
 3. **The jailed agent → the Seatbelt exec allowlist.** The run-phase agent, inside
-   `sandbox-exec`, invokes `doctor` **every loop iteration** and `exit-reason` on every
-   termination (`skills/auto-pilot/SKILL.md`), plus `heartbeat`/`alarm-clear`. The rendered
+   `sandbox-exec`, invokes `doctor` and `assert-run-head` **every loop iteration**,
+   `exit-reason` on every termination, `heartbeat` at every sub-step, the
+   `verify-request`/`verify-await` handshake on every task's verify, and `alarm-request` on a
+   doctor halt (`skills/auto-pilot/SKILL.md`, `skills/deliver-task/SKILL.md:143`). The rendered
    profile carries a `(allow process-exec` allowlist (`:711-724`) — any interpreter used here
    must be **on it**, a constraint distinct from PATH resolvability.
 
-**Tier A (unconstrained, ~1,200 lines):** `render-profile` (337), `write-launch` (327),
-`restack` (374), `write-verify-broker` (126), `render-settings`, `check-profile`. The renderers
-and generators — still the worst quoting/list-building code in the file. Tasks 3–7.
+**Traced by task 1** — the authoritative 29-row table is in
+[`dev_docs/orchestrator-python-port.md`](../../orchestrator-python-port.md), regenerable with
+`scripts/audit-orchestrator-reachability.py`. Do not restate it from memory here; this boundary
+has been hand-drawn twice and been wrong twice.
 
-**Tier B (constrained, ~2,000+ lines):** `doctor` (659, jail), `status_report` (443, launchd),
-`supervisor_check`/`_supervisor_halt` (414, launchd), `status` (180, in-process),
-`supervisor_scan`/`supervisor_gate` (174, launchd), `classify_exit` (73, in-process),
-`exit_reason` (69, jail), `heartbeat`/`alarm-clear`. All gated on the runtime decision
-(**task 2**) — a materially bigger share than first assumed.
+**Tier A (unconstrained): 12 subcommands, 1,422 handler lines.** `write-launch` (332), `restack`
+(320), `render-profile` (256), `launch` (142), `write-verify-broker` (130), `render-settings`
+(62), `check-profile` (23), `smoke-test`, `clear-exit-state`, `record-handle`, `alarm-clear`,
+`detach`. The renderers and generators — still the worst quoting/list-building code in the file.
+Tasks 3–7.
+
+**Tier B (constrained): 17 subcommands, 2,618 handler lines.** `doctor` (661, jail),
+`status-report` (457, in-process ← launchd), `supervisor-check` (291, launchd), `status` (199,
+in-process), `assert-run-head` (153, **jail, every iteration**), `supervisor-scan` (118, launchd),
+`alarm` (103, in-process), `supervisor-gate` (91, launchd), `exit-reason` (79, jail),
+`classify-exit` (76, in-process), `verify-broker` (74, **the second launchd job**),
+`verify-request`/`verify-await` (115, **jail — the verify handshake**), `heartbeat` (63),
+`alarm-request` (62, jail), `teardown` (60, **in-process ← the supervisor halt path**),
+`report-tick` (16, launchd). All gated on the runtime decision (**task 2**).
+
+The audit moved **eight** subcommands into Tier B that no hand-drawn list had caught — including
+`teardown`, which looks like a human cleanup command and is in fact part of the supervisor's halt
+path — and moved `alarm-clear` **out** (it is `--resume`-only, attended). The constrained tier is
+1.8x the unconstrained one and holds the entire unattended runtime.
 
 ### Interpreter choice (open question — see below)
 
@@ -119,8 +137,8 @@ and whether Python is even the right target — so it is settled before a line i
    satisfy **both** constraints: resolvable on launchd's pinned PATH **and** permitted by the
    Seatbelt `process-exec` allowlist.
    - **(a) `uv` for Tier A, bash stays for Tier B** *(recommended)*. Matches `validate.py`
-     exactly, no new dependency, zero risk to the supervisor loop. Cost: **~2,000+ lines** of
-     constrained bash survive — more than this plan originally assumed.
+     exactly, no new dependency, zero risk to the supervisor loop. Cost: **2,618 lines** of
+     constrained bash survive — the entire unattended runtime.
    - **(b) Stdlib-only Python on absolute `/usr/bin/python3`**. Survives the minimal PATH and
      can be added to the exec allowlist as a literal. Cost: it is a **Command Line Tools shim**
      (not unconditionally usable), and it is **3.9 on this machine** while the repo's other
@@ -128,9 +146,9 @@ and whether Python is even the right target — so it is settled before a line i
    - **(c) `uv` everywhere** — on the pinned `--path` *and* the exec allowlist. Cleanest code,
      largest runtime-surface increase on the security-critical unattended path. Not recommended.
 
-   **RESOLVED 2026-07-13: this decision moved to the front of the plan (task 2).** The corrected
-   reachability analysis showed it gates ~2,000 lines, not ~1,000, so deciding it after building
-   1,200 lines of Python would be deciding it too late to act on. Task 2 also explicitly reopens
+   **RESOLVED 2026-07-13: this decision moved to the front of the plan (task 2).** The task 1
+   audit showed it gates 2,618 lines across 17 subcommands, so deciding it after building 1,422
+   lines of Python would be deciding it too late to act on. Task 2 also explicitly reopens
    **(d) a compiled binary (Go)** — the only option satisfying both constraints at once — because
    `dev_docs/decisions/script_language.md` rejected Go while believing a premise that is now
    false.
