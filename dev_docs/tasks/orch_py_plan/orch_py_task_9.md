@@ -33,7 +33,7 @@ Write `dev_docs/orchestrator.md` capturing the durable knowledge:
   record: the generated launch script runs under a pinned minimal PATH, so anything it calls
   back into has a hard runtime constraint. Include the task-4 grep test as the guard that
   keeps the boundary from being widened by accident, and record whichever option (a)/(b)/(c)
-  task 8 chose, **with its rationale** — a future reader will otherwise "clean up" the
+  task 2 chose, **with its rationale** — a future reader will otherwise "clean up" the
   inconsistency and break an unattended 3am wake.
 - **The golden corpus:** what `test/golden/` is, how to regenerate it, and why it is committed.
 - **Gotchas hit during the port** — quoting in the generated script, fail-closed semantics,

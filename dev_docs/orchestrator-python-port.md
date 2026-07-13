@@ -100,7 +100,7 @@ interpreter **on that allowlist** — a constraint entirely separate from PATH r
 | `check-profile`                        | ~20      |                         |
 
 Roughly **1,200 lines** — the renderers and generators, which is still where the worst quoting
-and list-building code lives. These port with genuinely zero runtime-surface risk. **Tasks 1–4, 7.**
+and list-building code lives. These port with genuinely zero runtime-surface risk. **Tasks 3–7.**
 
 **Tier B — constrained.** Every one of these is reachable from launchd's PATH, the Seatbelt
 exec allowlist, or an in-process call from something that is:
@@ -116,12 +116,13 @@ exec allowlist, or an in-process call from something that is:
 | `exit_reason`                           | 69    | **jail** (on termination)                |
 | `heartbeat`, `alarm-clear`              | —     | launchd + jail                           |
 
-Roughly **2,000+ lines**, all gated on the interpreter decision. **This is a materially bigger
-share than the original plan assumed** — the honest value of the unconstrained port is now
-"the renderers and generators," not "80% of the file."
+Roughly **2,000+ lines**, all gated on the runtime decision. **This is a materially bigger share
+than the original plan assumed** — the honest value of the unconstrained port is now "the
+renderers and generators," not "80% of the file."
 
-**Consequence for sequencing:** the interpreter decision (task 8) now gates _more_ of the work
-than it used to. See **Open questions**.
+**Consequence for sequencing:** because this decision gates ~2,000 lines rather than ~1,000, it
+**moved to the front of the plan** (task 2, fed by the task 1 audit). Nothing is ported until it
+lands.
 
 ## Interpreter choice
 
@@ -135,7 +136,7 @@ there. Read that before relitigating this.
 `scripts/validate.py` already sets the repo's convention: PEP 723 inline metadata, `uv run`,
 hash-locked (`validate.py.lock`), `requires-python >=3.11`. That is the default for Tier A.
 It is a poor fit for Tier B, where `uv` typically lives in `~/.local/bin` and would have to be
-added to the pinned launchd PATH. Three options, decided at task 8:
+added to the pinned launchd PATH. Options, decided at **task 2** (which also reopens Go):
 
 | Option                                                               | Result                                      | Cost                                                                                                                                                 |
 | -------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -150,23 +151,29 @@ PATH **and** permitted by the Seatbelt `process-exec` allowlist.
 
 Nine, each one PR. Full cards in `dev_docs/tasks/orch_py_plan/` (local).
 
-| # | Task                                                                            | Tier | Size |
-| - | ------------------------------------------------------------------------------- | ---- | ---- |
-| 1 | Golden-output corpus + the bash→Python dispatch seam, proved on `check-profile` | A    | 5    |
-| 2 | Port `render-profile` (+ network allowlist) — the seatbelt renderer             | A    | 5    |
-| 3 | Port `render-settings` — the layer-2 egress allowlist                           | A    | 3    |
-| 4 | Port `write-launch` + `write-verify-broker` — the generators                    | A    | 5    |
-| 5 | ~~Port status / classify-exit / exit-reason~~ → **audit the reachability set**  | B    | 5    |
-| 6 | ~~Port (or delete) `doctor`~~ → **blocked: jail-invoked every loop**            | B    | 5    |
-| 7 | Port `restack`                                                                  | A    | 5    |
-| 8 | **Decide the interpreter question** — now gates tasks 5, 6, and the wake loop   | B    | 5    |
-| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder                  | —    | 2    |
+**The runtime decision comes first.** It determines how much of the file can ever move — and
+whether Python is even the right target — so it is settled before a line is ported.
 
-**Tasks 5 and 6 are no longer straight ports.** Both target constrained subcommands (`status`
-and `classify-exit` are called in-process from Tier B; `exit-reason` and `doctor` are invoked
-from inside the jail), so neither can proceed until task 8 decides the interpreter question.
-Task 5 is rewritten as a **reachability audit** — the analysis that should have preceded this
-plan — and task 6 is blocked on it.
+| # | Task                                                                         | Tier | Size |
+| - | ---------------------------------------------------------------------------- | ---- | ---- |
+| 1 | **Audit the full reachability set** — which subcommands are constrained      | —    | 3    |
+| 2 | **Decide the runtime** for the constrained tier. No code. **May reopen Go.** | —    | 3    |
+| 3 | Golden-output corpus + the bash→Python dispatch seam                         | A    | 5    |
+| 4 | Port `render-profile` (+ network allowlist) — the seatbelt renderer          | A    | 5    |
+| 5 | Port `render-settings` — the layer-2 egress allowlist                        | A    | 3    |
+| 6 | Port `write-launch` + `write-verify-broker` — the generators                 | A    | 5    |
+| 7 | Port `restack`                                                               | A    | 5    |
+| 8 | `doctor` / the constrained tier — conditional on task 2's decision           | B    | 5    |
+| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder               | —    | 2    |
+
+**Why the decision moved to the front.** It originally sat at task 8, on the theory that only
+the wake loop depended on it. The corrected reachability analysis killed that theory: the
+constrained tier is ~2,000 lines and includes `doctor`, `status`, `classify-exit`, and
+`exit-reason`. Deciding _after_ writing 1,200 lines of Python would be deciding too late to act
+on the answer — especially since one of the answers is **(d) a compiled binary (Go)**, which
+satisfies both constraints at once and would make the Python dispatch seam wasted work. Tasks
+3–7 stay unconditionally safe under any Python-shaped answer, so nothing is lost by settling it
+first.
 
 ## Non-goals
 
@@ -180,22 +187,15 @@ plan — and task 6 is blocked on it.
 
 ## Open questions
 
-1. **Which interpreter — and should that decision move to the FRONT of the plan?** See the table
-   above. The corrected reachability analysis means this decision now gates **tasks 5, 6, and 8**
-   (~2,000 lines), not just task 8. The original sequencing put it last on the theory that only
-   the wake loop depended on it; that theory was wrong. Two options:
-   - **Keep it at task 8.** Tasks 1–4 and 7 (the renderers and generators, ~1,200 lines) are
-     genuinely unconstrained and can land first, which is real value delivered before any hard
-     call is made. Tasks 5–6 then wait.
-   - **Move it to task 1.5, before any porting.** It determines how much of the file can _ever_
-     move, so deciding it early stops the plan from optimistically porting toward a boundary
-     that may not hold. It would also let a Go-shaped answer (a compiled binary satisfies both
-     the PATH and exec-allowlist constraints at once — see the decision doc) be considered
-     before 1,200 lines of Python exist.
+1. **RESOLVED — the runtime decision moved to the front (task 2).** The corrected reachability
+   analysis showed it gates ~2,000 lines, not ~1,000, so deciding it after 1,200 lines of Python
+   existed would be too late to act on. Task 1 (audit) now feeds task 2 (decide), and no code is
+   written until task 2 lands. Task 2 explicitly reopens **(d) a compiled binary (Go)** — the
+   only option that satisfies the launchd-PATH and Seatbelt-exec-allowlist constraints at once —
+   because `dev_docs/decisions/script_language.md` rejected Go while believing the constrained
+   tier was ~1,000 lines and Python could take the rest. That premise is now false, so it gets
+   one honest re-examination.
 
-   **Recommendation: keep it at task 8**, because tasks 1–4 are unconditionally safe and worth
-   banking regardless of the answer — but the decision is now materially more consequential than
-   this plan first claimed, and it deserves a deliberate call rather than a default.
 2. **Sequencing against PR #202.** That PR `shfmt`-reformats every line of
    `spawn-orchestrator.sh`. Any port work started before it lands will conflict
    catastrophically. **#202 must merge first** — it is a hard prerequisite on task 1. (It is
