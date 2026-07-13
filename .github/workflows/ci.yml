@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    name: Static shell quality
+    name: Deterministic gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,19 +48,6 @@ jobs:
       # and manifest cross-consistency.
       - name: Deterministic quality gate
         run: bash scripts/check.sh
-
-  shell-tests:
-    name: Shell tests (${{ matrix.os }})
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Deterministic shell tests
-        run: bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no

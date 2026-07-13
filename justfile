@@ -20,7 +20,8 @@ fmt:
 lint-shell:
     scripts/lint-shell.sh
 
-# Run deterministic Bats suites and the retained orchestrator harness.
+# Run deterministic Bats suites and the retained orchestrator harness locally,
+# including on macOS with the system Bash 3.2 compatibility floor.
 test-shell:
     scripts/test-shell.sh
 
