@@ -8,7 +8,7 @@ description: Use when choosing which coder agent and model should execute a codi
 Given a task (or a set of orchestrate-coders packets), recommend which coder
 backend and model should execute it. The output is one or more ranked coder
 specs in orchestrate-coders syntax — `opus:claude-sonnet-5`,
-`codex:gpt-5.4-mini`, `agy:Gemini 3.5 Flash (High)` — with a one-line
+`codex:gpt-5.6-luna`, `agy:Gemini 3.5 Flash (High)` — with a one-line
 rationale each, directly usable as `--coder` arguments.
 
 Two inputs drive the choice:
@@ -44,7 +44,7 @@ availability:
     ]
   codex:
     installed: true
-    default_model: gpt-5.5 # from `codex config get model` or config.toml
+    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-sol
   agy:
     installed: true
     logged_in: true # script-probed via `agy models` (free); false when the token is dead
