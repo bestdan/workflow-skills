@@ -35,19 +35,29 @@ LOCAL_CONFIG="$ROOT/dev_docs/tasks/.task-config.local.yml" # gitignored personal
 # and empty on failure/timeout. (macOS ships no `timeout`, hence the manual bound.)
 op_read_bounded() {
   command -v op >/dev/null 2>&1 || return 1
-  local tmp; tmp="$(mktemp)"
+  local tmp
+  tmp="$(mktemp)"
   op read "$1" >"$tmp" 2>/dev/null &
   local pid=$! i=0
   while kill -0 "$pid" 2>/dev/null; do
     i=$((i + 1))
     if [ "$i" -gt 60 ]; then
-      kill "$pid" 2>/dev/null; sleep 0.2; kill -9 "$pid" 2>/dev/null # TERM then KILL, so a TERM-ignoring op can't wedge the wait
-      wait "$pid" 2>/dev/null; rm -f "$tmp"; return 1
+      kill "$pid" 2>/dev/null
+      sleep 0.2
+      kill -9 "$pid" 2>/dev/null # TERM then KILL, so a TERM-ignoring op can't wedge the wait
+      wait "$pid" 2>/dev/null
+      rm -f "$tmp"
+      return 1
     fi
     sleep 0.1
   done
-  if wait "$pid"; then cat "$tmp"; rm -f "$tmp"; return 0; fi
-  rm -f "$tmp"; return 1
+  if wait "$pid"; then
+    cat "$tmp"
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 # --- resolve a key (opt-in) ---------------------------------------------------
@@ -60,14 +70,18 @@ op_read_bounded() {
 KEY="${LINEAR_API_KEY:-}"
 REF_SRC=""
 if [ -z "$KEY" ]; then
-  REF="${LINEAR_API_KEY_REF:-}"; [ -n "$REF" ] && REF_SRC="\$LINEAR_API_KEY_REF"
+  REF="${LINEAR_API_KEY_REF:-}"
+  [ -n "$REF" ] && REF_SRC="\$LINEAR_API_KEY_REF"
   # Prefer the gitignored local override, then the committed config. A personal
   # op://Private/... ref belongs in .task-config.local.yml — never committed to
   # this public repo — so read it first.
   for cfg in "$LOCAL_CONFIG" "$CONFIG"; do
     if [ -z "$REF" ] && [ -f "$cfg" ]; then
       REF="$(sed -n 's/^[[:space:]]*api_key_ref:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$cfg" | head -1)"
-      REF="${REF%\"}"; REF="${REF#\"}"; REF="${REF%\'}"; REF="${REF#\'}"
+      REF="${REF%\"}"
+      REF="${REF#\"}"
+      REF="${REF%\'}"
+      REF="${REF#\'}"
       [ -n "$REF" ] && REF_SRC="linear.api_key_ref (${cfg##*/})"
     fi
   done
@@ -98,25 +112,31 @@ if [ -z "$TEAM" ] && [ -f "$CONFIG" ]; then
   TEAM="$(sed -n 's/^[[:space:]]*team:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$CONFIG" | head -1)"
   # Strip surrounding quotes so a quoted `team: "ENG"` / `team: 'ENG'` resolves
   # the same as unquoted (the sed capture keeps the quote chars).
-  TEAM="${TEAM%\"}"; TEAM="${TEAM#\"}"
-  TEAM="${TEAM%\'}"; TEAM="${TEAM#\'}"
+  TEAM="${TEAM%\"}"
+  TEAM="${TEAM#\"}"
+  TEAM="${TEAM%\'}"
+  TEAM="${TEAM#\'}"
 fi
 if [ -z "$TEAM" ]; then
   echo "WARNING: test-linear-ready-live has a key but no team (\$LINEAR_TEAM unset, none in $CONFIG) — skipping." >&2
   exit 0
 fi
 
-HAPPY_OUT="$(mktemp)"; HAPPY_ERR="$(mktemp)"
-BAD_OUT="$(mktemp)"; BAD_ERR="$(mktemp)"
+HAPPY_OUT="$(mktemp)"
+HAPPY_ERR="$(mktemp)"
+BAD_OUT="$(mktemp)"
+BAD_ERR="$(mktemp)"
 trap 'rm -f "$HAPPY_OUT" "$HAPPY_ERR" "$BAD_OUT" "$BAD_ERR"' EXIT
 
 # Happy path: the real inherited key.
-python3 "$SCRIPT" --team "$TEAM" --max-estimate 3 >"$HAPPY_OUT" 2>"$HAPPY_ERR"; HAPPY_RC=$?
+python3 "$SCRIPT" --team "$TEAM" --max-estimate 3 >"$HAPPY_OUT" 2>"$HAPPY_ERR"
+HAPPY_RC=$?
 
 # Bad-key path: a bogus key with the op:// ref unset so it can't fall back and
 # accidentally succeed. Exercises the fail-closed exit `/do-tasks` falls back on.
 env -u LINEAR_API_KEY_REF LINEAR_API_KEY="lin_api_BOGUS_000000000000000000000000" \
-  python3 "$SCRIPT" --team "$TEAM" --max-estimate 3 >"$BAD_OUT" 2>"$BAD_ERR"; BAD_RC=$?
+  python3 "$SCRIPT" --team "$TEAM" --max-estimate 3 >"$BAD_OUT" 2>"$BAD_ERR"
+BAD_RC=$?
 
 python3 - "$HAPPY_OUT" "$HAPPY_ERR" "$HAPPY_RC" "$BAD_OUT" "$BAD_ERR" "$BAD_RC" <<'PY'
 import json, re, sys

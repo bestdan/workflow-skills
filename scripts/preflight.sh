@@ -38,20 +38,34 @@ FRESHNESS="$ROOT/scripts/preflight-freshness.sh"
 SPAWN="$ROOT/scripts/spawn-orchestrator.sh"
 FINGERPRINT_BINS="claude git gh codex uv node op"
 
-die() { echo "preflight: $*" >&2; exit 2; }
+die() {
+  echo "preflight: $*" >&2
+  exit 2
+}
 
 source_arg=""
 base="main"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --source) [ $# -ge 2 ] || die "missing value for --source"; source_arg="$2"; shift 2 ;;
-    --base) [ $# -ge 2 ] || die "missing value for --base"; base="$2"; shift 2 ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    --source)
+      [ $# -ge 2 ] || die "missing value for --source"
+      source_arg="$2"
+      shift 2
+      ;;
+    --base)
+      [ $# -ge 2 ] || die "missing value for --base"
+      base="$2"
+      shift 2
+      ;;
+    -h | --help)
+      sed -n '2,29p' "$0"
+      exit 0
+      ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 case "$source_arg" in
-  plan|linear) ;;
+  plan | linear) ;;
   "") die "requires --source <plan|linear>" ;;
   *) die "unknown --source (fail-closed): $source_arg" ;;
 esac
@@ -101,7 +115,8 @@ env_class="claude-web"
 [ -n "$codex_path" ] && env_class="local-full"
 echo "PREFLIGHT ENV_CLASS: $env_class"
 
-coder_out="$(bash "$PROBE_CODERS" 2>&1)"; coder_status=$?
+coder_out="$(bash "$PROBE_CODERS" 2>&1)"
+coder_status=$?
 if [ "$coder_status" != 0 ]; then
   blockers+=("coder probe failed (exit $coder_status) — cannot confirm coder availability/auth; rerun: $PROBE_CODERS")
 fi
@@ -145,7 +160,8 @@ fi
 
 # --- 2. Base freshness ----------------------------------------------------
 
-fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"; fresh_status=$?
+fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"
+fresh_status=$?
 printf '%s\n' "$fresh_out"
 case $fresh_status in
   0)
@@ -204,7 +220,7 @@ case "$handler" in
     site="$(sed -n 's/^[[:space:]]*site:[[:space:]]*//p' "$task_cfg" "$task_cfg_local" 2>/dev/null | tail -1 | tr -d '[:space:]')"
     dest_host="${site:-github.com}"
     ;;
-  gh-issue|repo-pr) dest_host="github.com" ;;
+  gh-issue | repo-pr) dest_host="github.com" ;;
   *) dest_host="github.com" ;;
 esac
 echo "PREFLIGHT DEST_HOST: $dest_host"
@@ -231,7 +247,13 @@ else
   else
     scratch_done=false
     home_probe=""
-    smoke_cleanup() { $scratch_done || { rm -rf "$scratch"; rm -f "${home_probe:-}"; }; scratch_done=true; }
+    smoke_cleanup() {
+      $scratch_done || {
+        rm -rf "$scratch"
+        rm -f "${home_probe:-}"
+      }
+      scratch_done=true
+    }
     # On a signal, clean up and DIE — don't let bash resume past the trap and run
     # the rest of the smoke against a just-deleted scratch dir (a spurious blocker).
     trap smoke_cleanup EXIT

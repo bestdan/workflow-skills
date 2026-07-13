@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034 # Some state arrays are consumed indirectly by generated scripts.
 # spawn-orchestrator.sh — materialize the auto-pilot detached orchestrator's
 # launch wrapper and its two-layer jail from a run's resolved inputs, so an
 # agent never hand-authors a sandbox-exec profile at launch (PRE-484).
@@ -417,7 +418,10 @@ DEFAULT_REPORT_INTERVAL=900
 # sitting out a 60s one; production never sets it.
 REPORT_TIMEOUT_SECONDS_DEFAULT="${SPAWN_REPORT_TIMEOUT:-60}"
 
-die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
+die() {
+  echo "spawn-orchestrator: $*" >&2
+  exit 2
+}
 
 # Run a command under a wall-clock bound. macOS ships no coreutils `timeout`, so
 # watchdog it by hand. `set -m` puts the job in its OWN process group, so the kill
@@ -425,17 +429,23 @@ die() { echo "spawn-orchestrator: $*" >&2; exit 2; }
 # spawned and leave it running (and accumulating, one per interval). Returns the
 # command's status, or 124 (the `timeout` convention) if it was killed.
 _run_bounded() {
-  local secs="$1"; shift
+  local secs="$1"
+  shift
   local rc=0 job wd
   set -m
   "$@" &
   job=$!
   set +m
-  ( sleep "$secs"; kill -TERM -"$job" 2>/dev/null; sleep 2; kill -KILL -"$job" 2>/dev/null ) 2>/dev/null &
+  (
+    sleep "$secs"
+    kill -TERM -"$job" 2>/dev/null
+    sleep 2
+    kill -KILL -"$job" 2>/dev/null
+  ) 2>/dev/null &
   wd=$!
   wait "$job" 2>/dev/null || rc=$?
   # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
-  case "$rc" in 143|137) rc=124 ;; esac
+  case "$rc" in 143 | 137) rc=124 ;; esac
   kill -KILL "$wd" 2>/dev/null
   wait "$wd" 2>/dev/null || true
   return "$rc"
@@ -480,12 +490,12 @@ _run_bounded() {
 #   systemic    circuit breaker / fatal auth      → TEAR DOWN + alarm
 #   deadline    pre-dispatch guard, tasks ready   → TEAR DOWN (resume via --resume)
 _is_exit_reason() {
-  case "$1" in continuing|paused|done|systemic|deadline) return 0 ;; *) return 1 ;; esac
+  case "$1" in continuing | paused | done | systemic | deadline) return 0 ;; *) return 1 ;; esac
 }
 # The three that mean "do not relaunch me". `systemic` is terminal too, but it
 # routes through the halt path (alarm + REPORT entry), not the plain teardown.
 _is_terminal_reason() {
-  case "$1" in done|systemic|deadline) return 0 ;; *) return 1 ;; esac
+  case "$1" in done | systemic | deadline) return 0 ;; *) return 1 ;; esac
 }
 
 # Canonicalize an absolute, existing path. Prints the canonical path on success;
@@ -497,14 +507,24 @@ canonicalize() {
   local p="$1"
   case "$p" in
     /*) ;;
-    *) echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2; return 1 ;;
+    *)
+      echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2
+      return 1
+      ;;
   esac
   # A newline in a path would break the line-oriented SBPL emission (`(allow …)`
   # rules, the `;; @spawn-tmpdir:` stamp) — a crafted dir name could smuggle its
   # own rule or a fake stamp line. No legitimate path here contains one; reject
   # fail-closed, same posture as the egress-host newline guard.
-  case "$p" in *$'\n'*) echo "spawn-orchestrator: path contains a newline (fail-closed)" >&2; return 1 ;; esac
-  [ -e "$p" ] || { echo "spawn-orchestrator: path does not exist (fail-closed): $p" >&2; return 1; }
+  case "$p" in *$'\n'*)
+    echo "spawn-orchestrator: path contains a newline (fail-closed)" >&2
+    return 1
+    ;;
+  esac
+  [ -e "$p" ] || {
+    echo "spawn-orchestrator: path does not exist (fail-closed): $p" >&2
+    return 1
+  }
   if [ -d "$p" ]; then
     (cd "$p" && pwd -P)
   else
@@ -517,14 +537,23 @@ canonicalize() {
     local d b target guard=0
     while [ -L "$p" ]; do
       guard=$((guard + 1))
-      [ "$guard" -le 40 ] || { echo "spawn-orchestrator: symlink chain too deep (fail-closed): $1" >&2; return 1; }
-      target="$(readlink "$p")" || { echo "spawn-orchestrator: cannot read link (fail-closed): $p" >&2; return 1; }
+      [ "$guard" -le 40 ] || {
+        echo "spawn-orchestrator: symlink chain too deep (fail-closed): $1" >&2
+        return 1
+      }
+      target="$(readlink "$p")" || {
+        echo "spawn-orchestrator: cannot read link (fail-closed): $p" >&2
+        return 1
+      }
       case "$target" in
         /*) p="$target" ;;
-        *)  p="$(cd "$(dirname "$p")" && pwd -P)/$target" ;;
+        *) p="$(cd "$(dirname "$p")" && pwd -P)/$target" ;;
       esac
     done
-    d="$(cd "$(dirname "$p")" && pwd -P)" || { echo "spawn-orchestrator: cannot resolve directory of: $p" >&2; return 1; }
+    d="$(cd "$(dirname "$p")" && pwd -P)" || {
+      echo "spawn-orchestrator: cannot resolve directory of: $p" >&2
+      return 1
+    }
     b="$(basename "$p")"
     printf '%s/%s' "$d" "$b"
   fi
@@ -547,10 +576,10 @@ sbpl_escape() {
 # a literal char — do NOT double it (that breaks the match).
 sbpl_regex_escape() {
   local s="$1" out="" c i
-  for (( i=0; i<${#s}; i++ )); do
+  for ((i = 0; i < ${#s}; i++)); do
     c="${s:$i:1}"
     case "$c" in
-      '\'|'"'|'.'|'*'|'+'|'?'|'('|')'|'['|']'|'{'|'}'|'|'|'^'|'$') out+="\\$c" ;;
+      '\' | '"' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '^' | '$') out+="\\$c" ;;
       *) out+="$c" ;;
     esac
   done
@@ -566,12 +595,17 @@ sbpl_regex_escape() {
 # ancestor chain can't be resolved.
 resolve_lazy() {
   local p="$1" tail=""
-  case "$p" in /*) ;; *) echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2; return 1 ;; esac
+  case "$p" in /*) ;; *)
+    echo "spawn-orchestrator: path must be absolute (fail-closed): $p" >&2
+    return 1
+    ;;
+  esac
   while [ ! -e "$p" ] && [ "$p" != "/" ]; do
     tail="/$(basename "$p")$tail"
     p="$(dirname "$p")"
   done
-  local c; c="$(canonicalize "$p")" || return 1
+  local c
+  c="$(canonicalize "$p")" || return 1
   printf '%s%s' "$c" "$tail"
 }
 
@@ -636,7 +670,8 @@ emit_harness_runtime() {
 # Emit an s-expression allowing `op` over the given canonical paths, or a
 # placeholder comment when the list is empty. Args: <op> <path>...
 emit_allow() {
-  local op="$1"; shift
+  local op="$1"
+  shift
   if [ "$#" -eq 0 ]; then
     printf ';; (none)\n'
     return
@@ -659,7 +694,8 @@ emit_allow() {
 # file must stay unwritable to the jailed agent. Args: <placeholder-comment>
 # <path>...
 emit_deny_write() {
-  local placeholder="$1"; shift
+  local placeholder="$1"
+  shift
   if [ "$#" -eq 0 ]; then
     printf ';; %s\n' "$placeholder"
     return
@@ -676,8 +712,11 @@ emit_deny_write() {
 # dirs (--exec-dir/--toolchain). Args: <literal>... -- <subpath>...
 emit_exec() {
   local -a lits=()
-  while [ $# -gt 0 ] && [ "$1" != "--" ]; do lits+=("$1"); shift; done
-  shift || true   # drop the -- separator
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    lits+=("$1")
+    shift
+  done
+  shift || true # drop the -- separator
   if [ "${#lits[@]}" -eq 0 ] && [ "$#" -eq 0 ]; then
     printf ';; (no coder/toolchain binaries resolved)\n'
     return
@@ -698,17 +737,60 @@ render_profile() {
   local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --rw) [ $# -ge 2 ] || die "missing value for --rw"; rw+=("$2"); shift 2 ;;
-      --ro) [ $# -ge 2 ] || die "missing value for --ro"; ro+=("$2"); shift 2 ;;
-      --cred-ro) [ $# -ge 2 ] || die "missing value for --cred-ro"; cred+=("$2"); shift 2 ;;
-      --tmpdir) [ $# -ge 2 ] || die "missing value for --tmpdir"; tmpdir="$2"; shift 2 ;;
-      --workdir) [ $# -ge 2 ] || die "missing value for --workdir"; workdir="$2"; shift 2 ;;
-      --exec) [ $# -ge 2 ] || die "missing value for --exec"; ex+=("$2"); shift 2 ;;
-      --exec-dir) [ $# -ge 2 ] || die "missing value for --exec-dir"; exd+=("$2"); shift 2 ;;
-      --toolchain) toolchain=1; shift ;;
-      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; confine+=("$2"); shift 2 ;;
-      --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
-      --template) [ $# -ge 2 ] || die "missing value for --template"; template="$2"; shift 2 ;;
+      --rw)
+        [ $# -ge 2 ] || die "missing value for --rw"
+        rw+=("$2")
+        shift 2
+        ;;
+      --ro)
+        [ $# -ge 2 ] || die "missing value for --ro"
+        ro+=("$2")
+        shift 2
+        ;;
+      --cred-ro)
+        [ $# -ge 2 ] || die "missing value for --cred-ro"
+        cred+=("$2")
+        shift 2
+        ;;
+      --tmpdir)
+        [ $# -ge 2 ] || die "missing value for --tmpdir"
+        tmpdir="$2"
+        shift 2
+        ;;
+      --workdir)
+        [ $# -ge 2 ] || die "missing value for --workdir"
+        workdir="$2"
+        shift 2
+        ;;
+      --exec)
+        [ $# -ge 2 ] || die "missing value for --exec"
+        ex+=("$2")
+        shift 2
+        ;;
+      --exec-dir)
+        [ $# -ge 2 ] || die "missing value for --exec-dir"
+        exd+=("$2")
+        shift 2
+        ;;
+      --toolchain)
+        toolchain=1
+        shift
+        ;;
+      --confine-under)
+        [ $# -ge 2 ] || die "missing value for --confine-under"
+        confine+=("$2")
+        shift 2
+        ;;
+      --out)
+        [ $# -ge 2 ] || die "missing value for --out"
+        out="$2"
+        shift 2
+        ;;
+      --template)
+        [ $# -ge 2 ] || die "missing value for --template"
+        template="$2"
+        shift 2
+        ;;
       *) die "unknown render-profile argument: $1" ;;
     esac
   done
@@ -731,9 +813,18 @@ render_profile() {
   # partial profile is never emitted.
   local -a rw_c=() ro_c=() cred_c=() ex_c=() exd_c=() confine_c=()
   local p c
-  for p in ${confine[@]+"${confine[@]}"}; do c="$(canonicalize "$p")" || exit 2; confine_c+=("$c"); done
-  for p in ${rw[@]+"${rw[@]}"}; do c="$(canonicalize "$p")" || exit 2; rw_c+=("$c"); done
-  for p in ${ro[@]+"${ro[@]}"}; do c="$(canonicalize "$p")" || exit 2; ro_c+=("$c"); done
+  for p in ${confine[@]+"${confine[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    confine_c+=("$c")
+  done
+  for p in ${rw[@]+"${rw[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    rw_c+=("$c")
+  done
+  for p in ${ro[@]+"${ro[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    ro_c+=("$c")
+  done
   # Credential files: must be an existing FILE (a token, not a dir). The literal
   # deny is emitted after the RW block so it overrides a co-located state-dir
   # write allow; a cred file outside every RW scope is harmless (already unwritable).
@@ -848,7 +939,10 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
     if [ "${#confine_c[@]}" -gt 0 ]; then
       local _t_ok=0 r
       for r in "${confine_c[@]}"; do
-        [ "$tmpdir_c" = "$r" ] || [ "${tmpdir_c#"$r"/}" != "$tmpdir_c" ] && { _t_ok=1; break; }
+        [ "$tmpdir_c" = "$r" ] || [ "${tmpdir_c#"$r"/}" != "$tmpdir_c" ] && {
+          _t_ok=1
+          break
+        }
       done
       [ "$_t_ok" = 1 ] || die "--tmpdir escapes --confine-under (fail-closed): $tmpdir_c"
     fi
@@ -882,7 +976,10 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # grants — the render and the launch can't drift apart. Exactly one stamp.
   printf ';; @spawn-tmpdir: %s\n' "$tmpdir_c" >>"$tmp"
 
-  mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write profile: $out"; }
+  mv "$tmp" "$out" || {
+    rm -f "$tmp"
+    die "failed to write profile: $out"
+  }
   echo "spawn-orchestrator: profile OK $out"
 }
 
@@ -896,17 +993,40 @@ render_network_allowlist() {
   local -a coders=() mcp=() add_task=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --coder) [ $# -ge 2 ] || die "missing value for --coder"; coders+=("$2"); shift 2 ;;
-      --source) [ $# -ge 2 ] || die "missing value for --source"; source="$2"; shift 2 ;;
-      --agy-host) [ $# -ge 2 ] || die "missing value for --agy-host"; agy_host="$2"; shift 2 ;;
-      --mcp-host) [ $# -ge 2 ] || die "missing value for --mcp-host"; mcp+=("$2"); shift 2 ;;
-      --add-task-host) [ $# -ge 2 ] || die "missing value for --add-task-host"; add_task+=("$2"); shift 2 ;;
-      --npm) npm=1; shift ;;
+      --coder)
+        [ $# -ge 2 ] || die "missing value for --coder"
+        coders+=("$2")
+        shift 2
+        ;;
+      --source)
+        [ $# -ge 2 ] || die "missing value for --source"
+        source="$2"
+        shift 2
+        ;;
+      --agy-host)
+        [ $# -ge 2 ] || die "missing value for --agy-host"
+        agy_host="$2"
+        shift 2
+        ;;
+      --mcp-host)
+        [ $# -ge 2 ] || die "missing value for --mcp-host"
+        mcp+=("$2")
+        shift 2
+        ;;
+      --add-task-host)
+        [ $# -ge 2 ] || die "missing value for --add-task-host"
+        add_task+=("$2")
+        shift 2
+        ;;
+      --npm)
+        npm=1
+        shift
+        ;;
       *) die "unknown allowlist argument: $1" ;;
     esac
   done
   case "$source" in
-    linear|plan) ;;
+    linear | plan) ;;
     "") die "network allowlist requires --source <linear|plan>" ;;
     *) die "unknown --source (fail-closed): $source" ;;
   esac
@@ -926,7 +1046,8 @@ render_network_allowlist() {
         case "$agy_host" in
           \**) die "agy host must be a concrete host, never a wildcard (fail-closed): $agy_host" ;;
         esac
-        hosts+=("$agy_host") ;;
+        hosts+=("$agy_host")
+        ;;
       *) die "unknown --coder (fail-closed): $c" ;;
     esac
   done
@@ -975,12 +1096,22 @@ render_settings() {
   local -a passthru=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --out) [ $# -ge 2 ] || die "missing value for --out"; out="$2"; shift 2 ;;
+      --out)
+        [ $# -ge 2 ] || die "missing value for --out"
+        out="$2"
+        shift 2
+        ;;
       # Default OFF: a listen socket lets the inside process reach host-local
       # services (the Solo control port, local proxies, …) — a pivot the jail
       # shouldn't grant. Enable only if a run genuinely needs to bind loopback.
-      --allow-local-binding) localbind=true; shift ;;
-      *) passthru+=("$1"); shift ;;
+      --allow-local-binding)
+        localbind=true
+        shift
+        ;;
+      *)
+        passthru+=("$1")
+        shift
+        ;;
     esac
   done
   [ -n "$out" ] || die "render-settings requires --out <file>"
@@ -999,8 +1130,14 @@ render_settings() {
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-settings.XXXXXX")" || die "mktemp failed"
   printf '{"sandbox":{"enabled":true,"network":{"allowedDomains":%s,"allowLocalBinding":%s}}}\n' "$array" "$localbind" >"$tmp" \
-    || { rm -f "$tmp"; die "failed to write settings"; }
-  mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write settings: $out"; }
+    || {
+      rm -f "$tmp"
+      die "failed to write settings"
+    }
+  mv "$tmp" "$out" || {
+    rm -f "$tmp"
+    die "failed to write settings: $out"
+  }
   echo "spawn-orchestrator: settings OK $out"
 }
 
@@ -1029,9 +1166,11 @@ xml_escape() {
 # chars can't corrupt the render; every substituted string value is XML-escaped.
 render_plist() {
   local label launch_script workdir log
-  label="$(xml_escape "$1")"; launch_script="$(xml_escape "$2")"
-  workdir="$(xml_escape "$3")"; log="$(xml_escape "$4")"
-  local interval="$5" throttle="$6" template="$7"   # integers, validated numeric upstream
+  label="$(xml_escape "$1")"
+  launch_script="$(xml_escape "$2")"
+  workdir="$(xml_escape "$3")"
+  log="$(xml_escape "$4")"
+  local interval="$5" throttle="$6" template="$7" # integers, validated numeric upstream
   local line
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line//@@LABEL@@/$label}"
@@ -1051,36 +1190,102 @@ render_plist() {
 # the log. %q-quoting keeps every interpolated path/string shell-safe.
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
-        label="" interval="300" throttle="30" out_script="" out_plist="" \
-        plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
-        self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
-        park_limit="$PARK_STORM_LIMIT_DEFAULT" \
-        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
-        report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin=""
+    label="" interval="300" throttle="30" out_script="" out_plist="" \
+    plist_template="$PLIST_TEMPLATE_DEFAULT" claude_bin="" path="" tmpdir="" \
+    self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
+    park_limit="$PARK_STORM_LIMIT_DEFAULT" \
+    pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
+    report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profile) profile="$2"; shift 2 ;;
-      --settings) settings="$2"; shift 2 ;;
-      --workdir) workdir="$2"; shift 2 ;;
-      --log) log="$2"; shift 2 ;;
-      --prompt-file) prompt="$2"; shift 2 ;;
-      --until) until="$2"; shift 2 ;;
-      --label) label="$2"; shift 2 ;;
-      --interval) interval="$2"; shift 2 ;;
-      --throttle) throttle="$2"; shift 2 ;;
-      --claude-bin) claude_bin="$2"; shift 2 ;;
-      --path) path="$2"; shift 2 ;;
-      --tmpdir) tmpdir="$2"; shift 2 ;;
-      --out-script) out_script="$2"; shift 2 ;;
-      --out-plist) out_plist="$2"; shift 2 ;;
-      --plist-template) plist_template="$2"; shift 2 ;;
-      --self) self="$2"; shift 2 ;;
-      --no-progress-limit) no_progress_limit="$2"; shift 2 ;;
-      --park-limit) park_limit="$2"; shift 2 ;;
-      --pause-exempt-max) pause_exempt_max="$2"; shift 2 ;;
-      --report-every) report_every="$2"; shift 2 ;;
-      --report-gh) report_gh="$2"; shift 2 ;;
-      --report-usage-bin) report_usage_bin="$2"; shift 2 ;;
+      --profile)
+        profile="$2"
+        shift 2
+        ;;
+      --settings)
+        settings="$2"
+        shift 2
+        ;;
+      --workdir)
+        workdir="$2"
+        shift 2
+        ;;
+      --log)
+        log="$2"
+        shift 2
+        ;;
+      --prompt-file)
+        prompt="$2"
+        shift 2
+        ;;
+      --until)
+        until="$2"
+        shift 2
+        ;;
+      --label)
+        label="$2"
+        shift 2
+        ;;
+      --interval)
+        interval="$2"
+        shift 2
+        ;;
+      --throttle)
+        throttle="$2"
+        shift 2
+        ;;
+      --claude-bin)
+        claude_bin="$2"
+        shift 2
+        ;;
+      --path)
+        path="$2"
+        shift 2
+        ;;
+      --tmpdir)
+        tmpdir="$2"
+        shift 2
+        ;;
+      --out-script)
+        out_script="$2"
+        shift 2
+        ;;
+      --out-plist)
+        out_plist="$2"
+        shift 2
+        ;;
+      --plist-template)
+        plist_template="$2"
+        shift 2
+        ;;
+      --self)
+        self="$2"
+        shift 2
+        ;;
+      --no-progress-limit)
+        no_progress_limit="$2"
+        shift 2
+        ;;
+      --park-limit)
+        park_limit="$2"
+        shift 2
+        ;;
+      --pause-exempt-max)
+        pause_exempt_max="$2"
+        shift 2
+        ;;
+      --report-every)
+        report_every="$2"
+        shift 2
+        ;;
+      --report-gh)
+        report_gh="$2"
+        shift 2
+        ;;
+      --report-usage-bin)
+        report_usage_bin="$2"
+        shift 2
+        ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -1139,15 +1344,16 @@ write_launch() {
   [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-launch requires an existing --workdir"
   [ -n "$log" ] || die "write-launch requires --log"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
-  case "$no_progress_limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer" ;; esac
+  case "$no_progress_limit" in *[!0-9]* | "") die "--no-progress-limit must be a positive integer" ;; esac
   [ "$no_progress_limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
-  case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer" ;; esac
+  case "$park_limit" in *[!0-9]* | "") die "--park-limit must be a positive integer" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer"
-  case "$pause_exempt_max" in *[!0-9]*|"") die "--pause-exempt-max must be a positive integer" ;; esac
+  case "$pause_exempt_max" in *[!0-9]* | "") die "--pause-exempt-max must be a positive integer" ;; esac
   [ "$pause_exempt_max" -ge 1 ] || die "--pause-exempt-max must be a positive integer"
   [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
 
-  local settings_json; settings_json="$(cat "$settings")"
+  local settings_json
+  settings_json="$(cat "$settings")"
   # Resolve claude to an ABSOLUTE path: a detached launchd job runs with a minimal
   # PATH (/usr/bin:/bin:/usr/sbin:/sbin) and would not find a Homebrew `claude`.
   # The caller should pass --claude-bin (the same path it gave render-profile's
@@ -1158,7 +1364,8 @@ write_launch() {
   case "$claude_bin" in /*) ;; *) die "--claude-bin must be absolute (fail-closed): $claude_bin" ;; esac
 
   local state_file="$workdir/.auto-pilot/$SUPERVISOR_STATE_NAME"
-  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
   {
     printf '#!/usr/bin/env bash\n'
     printf '# Auto-pilot orchestrator launch script (generated — do not edit).\n'
@@ -1286,15 +1493,27 @@ write_launch() {
     printf '%q supervisor-check --exit-code "$code" --log %q --since-offset "$off" --wake-start "$wake" --dir %q --label %q --state %q --no-progress-limit %q --park-limit %q\n' \
       "$self" "$log" "$workdir" "$label" "$state_file" "$no_progress_limit" "$park_limit"
     printf 'exit $?\n'
-  } >"$tmp" || { rm -f "$tmp"; die "failed to write launch script"; }
-  mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write launch script: $out_script"; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to write launch script"
+  }
+  mv "$tmp" "$out_script" || {
+    rm -f "$tmp"
+    die "failed to write launch script: $out_script"
+  }
   chmod +x "$out_script"
 
   [ -f "$plist_template" ] || die "plist template not found: $plist_template"
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-plist.XXXXXX")" || die "mktemp failed"
   render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
-    || { rm -f "$tmp"; die "failed to render plist"; }
-  mv "$tmp" "$out_plist" || { rm -f "$tmp"; die "failed to write plist: $out_plist"; }
+    || {
+      rm -f "$tmp"
+      die "failed to render plist"
+    }
+  mv "$tmp" "$out_plist" || {
+    rm -f "$tmp"
+    die "failed to write plist: $out_plist"
+  }
   echo "spawn-orchestrator: launch written $out_script $out_plist"
 }
 
@@ -1305,15 +1524,25 @@ record_handle() {
   local pid="" until="" out=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --pid) pid="$2"; shift 2 ;;
-      --until) until="$2"; shift 2 ;;
-      --out) out="$2"; shift 2 ;;
+      --pid)
+        pid="$2"
+        shift 2
+        ;;
+      --until)
+        until="$2"
+        shift 2
+        ;;
+      --out)
+        out="$2"
+        shift 2
+        ;;
       *) die "unknown record-handle argument: $1" ;;
     esac
   done
   [ -n "$pid" ] && [ -n "$out" ] || die "record-handle requires --pid and --out"
-  case "$pid" in *[!0-9]*|"") die "--pid must be numeric: $pid" ;; esac
-  local started; started="$(ps -p "$pid" -o lstart= 2>/dev/null)" || true
+  case "$pid" in *[!0-9]* | "") die "--pid must be numeric: $pid" ;; esac
+  local started
+  started="$(ps -p "$pid" -o lstart= 2>/dev/null)" || true
   [ -n "$started" ] || die "no live process at pid $pid (cannot record a dead handle)"
   {
     printf 'orchestrator_pid: %s\n' "$pid"
@@ -1329,15 +1558,23 @@ smoke_test() {
   local profile="" settings=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profile) profile="$2"; shift 2 ;;
-      --settings) settings="$2"; shift 2 ;;
+      --profile)
+        profile="$2"
+        shift 2
+        ;;
+      --settings)
+        settings="$2"
+        shift 2
+        ;;
       *) die "unknown smoke-test argument: $1" ;;
     esac
   done
   [ -f "$profile" ] && [ -f "$settings" ] || die "smoke-test requires --profile and --settings files"
   command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
-  local json; json="$(cat "$settings")"
-  local claude_bin; claude_bin="$(command -v claude 2>/dev/null)" || die "claude not found on PATH"
+  local json
+  json="$(cat "$settings")"
+  local claude_bin
+  claude_bin="$(command -v claude 2>/dev/null)" || die "claude not found on PATH"
   # Match the REAL launch's posture (bypassPermissions + the wrapper + settings) so
   # the smoke validates the same invocation the detached job will run. Assert on
   # observable output, not just $?, so a degraded claude that exits 0 without a live
@@ -1359,7 +1596,11 @@ smoke_test() {
 detach() {
   local plist=""
   while [ $# -gt 0 ]; do
-    case "$1" in --plist) plist="$2"; shift 2 ;; *) die "unknown detach argument: $1" ;; esac
+    case "$1" in --plist)
+      plist="$2"
+      shift 2
+      ;;
+    *) die "unknown detach argument: $1" ;; esac
   done
   [ -f "$plist" ] || die "detach requires an existing --plist"
   command -v launchctl >/dev/null 2>&1 || die "launchctl not available (macOS only)"
@@ -1371,9 +1612,21 @@ teardown() {
   local label="" done_sentinel="" reason="done"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --done-sentinel) [ $# -ge 2 ] || die "missing value for --done-sentinel"; done_sentinel="$2"; shift 2 ;;
-      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --done-sentinel)
+        [ $# -ge 2 ] || die "missing value for --done-sentinel"
+        done_sentinel="$2"
+        shift 2
+        ;;
+      --reason)
+        [ $# -ge 2 ] || die "missing value for --reason"
+        reason="$2"
+        shift 2
+        ;;
       *) die "unknown teardown argument: $1" ;;
     esac
   done
@@ -1418,7 +1671,7 @@ teardown() {
 _verify_bootout() {
   local label="$1"
   command -v launchctl >/dev/null 2>&1 || return 0
-  launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || return 0   # gone: bootout took
+  launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || return 0 # gone: bootout took
   # Subshelled, not just `|| true`: `teardown` `die`s (an `exit`) if a future edit
   # ever hands it a --done-sentinel here, and an `exit` from a same-shell function
   # call escapes `|| true` — it would take the retry, and the STILL-LOADED warning
@@ -1426,7 +1679,7 @@ _verify_bootout() {
   # best-effort (the `_alarm_safe` pattern, task 16 / #191). Today this call passes
   # no --done-sentinel, so `teardown` cannot yet die here — the subshell is the
   # guard against that ceasing to be true without anyone noticing.
-  ( teardown --label "$label" >/dev/null ) || true
+  (teardown --label "$label" >/dev/null) || true
   if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
     echo "spawn-orchestrator: teardown ($label): WARNING — launchctl bootout FAILED, the job is STILL LOADED and StartInterval will keep waking a finished run (zero work, zero alarm); remove it by hand: launchctl bootout gui/$(id -u)/$label" >&2
     return 1
@@ -1477,9 +1730,21 @@ classify_exit() {
   local code="" outfile="" offset=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
-      --output) [ $# -ge 2 ] || die "missing value for --output"; outfile="$2"; shift 2 ;;
-      --since-offset) [ $# -ge 2 ] || die "missing value for --since-offset"; offset="$2"; shift 2 ;;
+      --exit-code)
+        [ $# -ge 2 ] || die "missing value for --exit-code"
+        code="$2"
+        shift 2
+        ;;
+      --output)
+        [ $# -ge 2 ] || die "missing value for --output"
+        outfile="$2"
+        shift 2
+        ;;
+      --since-offset)
+        [ $# -ge 2 ] || die "missing value for --since-offset"
+        offset="$2"
+        shift 2
+        ;;
       *) die "unknown classify-exit argument: $1" ;;
     esac
   done
@@ -1498,7 +1763,7 @@ classify_exit() {
   # would leave the supervisor relaunching blind.
   local content
   case "$offset" in
-    ''|*[!0-9]*) content="$(cat "$outfile")" ;;
+    '' | *[!0-9]*) content="$(cat "$outfile")" ;;
     *) content="$(tail -c "+$((offset + 1))" "$outfile" 2>/dev/null)" || content="$(cat "$outfile")" ;;
   esac
 
@@ -1577,7 +1842,8 @@ _ensure_supervisor_state_ignored() {
 # every one of THEIR writes would silently blank the ledger `supervisor_scan`
 # just set, defeating the cap on the very next wake's supervisor-check call.
 _write_supervisor_state() {
-  local f="$1" count="$2" head="$3" exempt d; d="$(dirname "$f")"
+  local f="$1" count="$2" head="$3" exempt d
+  d="$(dirname "$f")"
   if [ "$#" -ge 4 ]; then
     exempt="$4"
   else
@@ -1592,18 +1858,28 @@ _write_supervisor_state() {
   # in a way that is baffling to debug. The supervisor owns this file, so the
   # supervisor — not the agent's choice of `git add` — is what keeps it untracked.
   _ensure_supervisor_state_ignored "$d"
-  local tmp; tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
-  { printf 'count: %s\n' "$count"; printf 'head: %s\n' "$head"
-    printf 'exempt_since: %s\n' "$exempt"; } >"$tmp" \
-    || { rm -f "$tmp"; die "failed to write supervisor state"; }
-  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write supervisor state: $f"; }
+  local tmp
+  tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
+  {
+    printf 'count: %s\n' "$count"
+    printf 'head: %s\n' "$head"
+    printf 'exempt_since: %s\n' "$exempt"
+  } >"$tmp" \
+    || {
+      rm -f "$tmp"
+      die "failed to write supervisor state"
+    }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write supervisor state: $f"
+  }
 }
 
 # The run-state branch's current tip, or empty if --dir isn't (yet) a git
 # checkout — best-effort, never fail-closed (a missing HEAD just means every
 # wake looks like "no progress," which is the safe direction for the guard).
 _run_head() {
-  ( cd "$1" 2>/dev/null && git rev-parse HEAD 2>/dev/null ) || true
+  (cd "$1" 2>/dev/null && git rev-parse HEAD 2>/dev/null) || true
 }
 
 # Task 23: how far past its own `paused_until` a genuine pause may run before
@@ -1642,16 +1918,20 @@ PAUSE_EXEMPT_MAX_SECONDS_DEFAULT=21600
 _pause_exempt() {
   local run_md="$1/.auto-pilot/RUN.md"
   [ -f "$run_md" ] || return 1
-  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
-  local st; st="$(printf '%s\n' "$front" | grep -E '^status:' | head -1 \
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local st
+  st="$(printf '%s\n' "$front" | grep -E '^status:' | head -1 \
     | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
   [ "$st" = "paused" ] || return 1
-  local paused_until; paused_until="$(printf '%s\n' "$front" | grep -E '^paused_until:' | head -1 \
+  local paused_until
+  paused_until="$(printf '%s\n' "$front" | grep -E '^paused_until:' | head -1 \
     | sed -e 's/^paused_until: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
   [ -n "$paused_until" ] || return 1
   local until_epoch
   until_epoch="$(_parse_iso8601_utc "$paused_until")" || return 1
-  local now_epoch; now_epoch="$(date -u +%s)"
+  local now_epoch
+  now_epoch="$(date -u +%s)"
   [ "$now_epoch" -le "$((until_epoch + PAUSE_EXEMPT_MARGIN_SECONDS_DEFAULT))" ]
 }
 
@@ -1661,15 +1941,26 @@ _pause_exempt() {
 # run-state.md's `RUN.md` template, so a missing key means the file is not
 # the shape this expects, and silently no-op-ing would hide that.
 _set_front_field() {
-  local f="$1" key="$2" value="$3" d; d="$(dirname "$f")"
-  local tmp; tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
+  local f="$1" key="$2" value="$3" d
+  d="$(dirname "$f")"
+  local tmp
+  tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
   awk -v key="$key" -v val="$value" '
     /^---$/ { dashes++; print; next }
     dashes==1 && $0 ~ "^" key ":" { print key ": " val; next }
     { print }
-  ' "$f" >"$tmp" || { rm -f "$tmp"; die "failed to render $key update for $f"; }
-  grep -qE "^${key}: " "$tmp" || { rm -f "$tmp"; die "front-matter key not found (fail-closed): $key in $f"; }
-  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+  ' "$f" >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to render $key update for $f"
+  }
+  grep -qE "^${key}: " "$tmp" || {
+    rm -f "$tmp"
+    die "front-matter key not found (fail-closed): $key in $f"
+  }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write $f"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -1715,21 +2006,29 @@ PARK_STORM_LIMIT_DEFAULT=3
 _alarm_action() {
   case "$1" in
     fatal-auth)
-      printf 're-authenticate: run `claude /login`, then `/auto-pilot <source> --resume`' ;;
+      printf 're-authenticate: run `claude /login`, then `/auto-pilot <source> --resume`'
+      ;;
     no-progress)
-      printf 'the run is STALLED (no forward progress, supervisor torn down): check `.auto-pilot/REPORT.md`, fix the cause (usually re-authenticate: `claude /login`), then `/auto-pilot <source> --resume`' ;;
+      printf 'the run is STALLED (no forward progress, supervisor torn down): check `.auto-pilot/REPORT.md`, fix the cause (usually re-authenticate: `claude /login`), then `/auto-pilot <source> --resume`'
+      ;;
     pause-exempt)
-      printf 'the run exceeded its total pause-exempt budget: a declared pause is not evidence, so check `.auto-pilot/REPORT.md` and `.auto-pilot/orchestrator.log` for whether this is a genuine, unusually long rate-window wait or a wedged agent papering over it, fix the cause, then `/auto-pilot <source> --resume`' ;;
+      printf 'the run exceeded its total pause-exempt budget: a declared pause is not evidence, so check `.auto-pilot/REPORT.md` and `.auto-pilot/orchestrator.log` for whether this is a genuine, unusually long rate-window wait or a wedged agent papering over it, fix the cause, then `/auto-pilot <source> --resume`'
+      ;;
     systemic)
-      printf 'the circuit breaker halted the run: read `.auto-pilot/REPORT.md` for the failing tasks, fix the systemic cause, then `/auto-pilot <source> --resume`' ;;
+      printf 'the circuit breaker halted the run: read `.auto-pilot/REPORT.md` for the failing tasks, fix the systemic cause, then `/auto-pilot <source> --resume`'
+      ;;
     invariant)
-      printf 'a run invariant FAILED: read `.auto-pilot/REPORT.md`, repair the run state by hand, then `/auto-pilot <source> --resume`' ;;
+      printf 'a run invariant FAILED: read `.auto-pilot/REPORT.md`, repair the run state by hand, then `/auto-pilot <source> --resume`'
+      ;;
     park-storm)
-      printf 'tasks are parking in bulk: read `.auto-pilot/REPORT.md`, unblock them (a broken base, dead `gh` auth, a failing verify), then `/auto-pilot <source> --resume`' ;;
+      printf 'tasks are parking in bulk: read `.auto-pilot/REPORT.md`, unblock them (a broken base, dead `gh` auth, a failing verify), then `/auto-pilot <source> --resume`'
+      ;;
     deadline)
-      printf 'the run hit its `--until` deadline with work unfinished: re-launch with a later `--until` (`/auto-pilot <source> --resume`) or accept what landed' ;;
+      printf 'the run hit its `--until` deadline with work unfinished: re-launch with a later `--until` (`/auto-pilot <source> --resume`) or accept what landed'
+      ;;
     *)
-      printf 'a human must act: read `.auto-pilot/REPORT.md`, fix the condition, then `/auto-pilot <source> --resume`' ;;
+      printf 'a human must act: read `.auto-pilot/REPORT.md`, fix the condition, then `/auto-pilot <source> --resume`'
+      ;;
   esac
 }
 
@@ -1770,11 +2069,31 @@ alarm() {
   local dir="" label="" condition="" reason="" action=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --condition) [ $# -ge 2 ] || die "missing value for --condition"; condition="$2"; shift 2 ;;
-      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
-      --action) [ $# -ge 2 ] || die "missing value for --action"; action="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --condition)
+        [ $# -ge 2 ] || die "missing value for --condition"
+        condition="$2"
+        shift 2
+        ;;
+      --reason)
+        [ $# -ge 2 ] || die "missing value for --reason"
+        reason="$2"
+        shift 2
+        ;;
+      --action)
+        [ $# -ge 2 ] || die "missing value for --action"
+        action="$2"
+        shift 2
+        ;;
       *) die "unknown alarm argument: $1" ;;
     esac
   done
@@ -1801,7 +2120,8 @@ alarm() {
   fi
 
   [ -n "$action" ] || action="$(_alarm_action "$condition")"
-  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   # 1. The sentinel — the shell-visible marker. Append: a run can raise more than
   #    one distinct condition, and each must stay greppable.
@@ -1852,10 +2172,26 @@ alarm_request() {
   local dir="" condition="" reason="" action=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --condition) [ $# -ge 2 ] || die "missing value for --condition"; condition="$2"; shift 2 ;;
-      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
-      --action) [ $# -ge 2 ] || die "missing value for --action"; action="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --condition)
+        [ $# -ge 2 ] || die "missing value for --condition"
+        condition="$2"
+        shift 2
+        ;;
+      --reason)
+        [ $# -ge 2 ] || die "missing value for --reason"
+        reason="$2"
+        shift 2
+        ;;
+      --action)
+        [ $# -ge 2 ] || die "missing value for --action"
+        action="$2"
+        shift 2
+        ;;
       *) die "unknown alarm-request argument: $1" ;;
     esac
   done
@@ -1869,13 +2205,20 @@ alarm_request() {
 
   local rd="$dir/.auto-pilot/$ALARM_REQUEST_DIR_NAME"
   mkdir -p "$rd" || die "cannot create the alarm-request dir: $rd"
-  local tmp; tmp="$(mktemp "$rd/.req.XXXXXX")" || die "mktemp failed"
+  local tmp
+  tmp="$(mktemp "$rd/.req.XXXXXX")" || die "mktemp failed"
   {
     printf 'condition: %s\n' "$condition"
     printf 'reason: %s\n' "$reason"
     printf 'action: %s\n' "$action"
-  } >"$tmp" || { rm -f "$tmp"; die "cannot write the alarm request"; }
-  mv "$tmp" "$rd/$condition.alarm" || { rm -f "$tmp"; die "cannot place the alarm request: $rd/$condition.alarm"; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "cannot write the alarm request"
+  }
+  mv "$tmp" "$rd/$condition.alarm" || {
+    rm -f "$tmp"
+    die "cannot place the alarm request: $rd/$condition.alarm"
+  }
   echo "spawn-orchestrator: alarm-request $condition (the supervisor will deliver it on its next wake)"
 }
 
@@ -1891,7 +2234,11 @@ alarm_clear() {
   local dir=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
       *) die "unknown alarm-clear argument: $1" ;;
     esac
   done
@@ -1916,7 +2263,7 @@ alarm_clear() {
 # costs us the notification, never the halt. Callers that WANT the exit (the CLI
 # subcommand, a fail-closed operator invocation) still call `alarm` directly.
 _alarm_safe() {
-  ( alarm "$@" ) || echo "spawn-orchestrator: alarm failed (the halt/teardown continues regardless)" >&2
+  (alarm "$@") || echo "spawn-orchestrator: alarm failed (the halt/teardown continues regardless)" >&2
   return 0
 }
 
@@ -1962,13 +2309,16 @@ _run_md_field() {
   [ -f "$f" ] || return 0
   awk '/^---$/{c++; next} c==1{print}' "$f" | grep -E "^${key}:" | head -1 \
     | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
-          -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
+      -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
 }
 
 # How many tasks are in the terminal `parked` phase (column 2 of RUN.md's table).
 _run_md_parked_count() {
   local f="$1"
-  [ -f "$f" ] || { echo 0; return 0; }
+  [ -f "$f" ] || {
+    echo 0
+    return 0
+  }
   awk -F'|' '/^\|/ { p=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == "parked") n++ } END { print n+0 }' "$f"
 }
 
@@ -1984,7 +2334,8 @@ _deadline_blown() {
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) ;;
     *) return 1 ;;
   esac
-  local now; now="$(date +%Y-%m-%dT%H:%M:%S)"
+  local now
+  now="$(date +%Y-%m-%dT%H:%M:%S)"
   [ "$now" \> "$u" ]
 }
 
@@ -2007,7 +2358,8 @@ _ALARM_HALT_CONDITION=""
 #                     owns the decision to stop.)
 _supervisor_alarm_scan() {
   local dir="$1" label="$2" park_limit="$3"
-  _ALARM_HALT_REASON=""; _ALARM_HALT_CONDITION=""
+  _ALARM_HALT_REASON=""
+  _ALARM_HALT_CONDITION=""
 
   _alarm_drain_requests "$dir" "$label"
 
@@ -2055,7 +2407,8 @@ _supervisor_alarm_scan() {
     return 0
   fi
 
-  local parked; parked="$(_run_md_parked_count "$run_md")"
+  local parked
+  parked="$(_run_md_parked_count "$run_md")"
   if [ "$parked" -ge "$park_limit" ]; then
     _alarm_safe --dir "$dir" --label "$label" --condition park-storm \
       --reason "$parked tasks are parked (limit $park_limit) — the run is filling a graveyard, not landing PRs"
@@ -2069,8 +2422,10 @@ _supervisor_alarm_scan() {
 # stopped is exactly the state this task exists to abolish. A file with no front
 # matter at all is still fail-closed (that is a malformed RUN.md, not an old one).
 _upsert_front_field() {
-  local f="$1" key="$2" value="$3" d; d="$(dirname "$f")"
-  local tmp; tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
+  local f="$1" key="$2" value="$3" d
+  d="$(dirname "$f")"
+  local tmp
+  tmp="$(mktemp "$d/.runmd.XXXXXX")" || die "mktemp failed"
   awk -v key="$key" -v val="$value" '
     /^---$/ {
       dashes++
@@ -2079,9 +2434,18 @@ _upsert_front_field() {
     }
     dashes==1 && $0 ~ "^" key ":" { print key ": " val; written = 1; next }
     { print }
-  ' "$f" >"$tmp" || { rm -f "$tmp"; die "failed to render $key update for $f"; }
-  grep -qE "^${key}: " "$tmp" || { rm -f "$tmp"; die "no front matter to write $key into (fail-closed): $f"; }
-  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+  ' "$f" >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to render $key update for $f"
+  }
+  grep -qE "^${key}: " "$tmp" || {
+    rm -f "$tmp"
+    die "no front matter to write $key into (fail-closed): $f"
+  }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write $f"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -2108,19 +2472,39 @@ _write_done_sentinel() {
   local f="$1" label="$2" reason="$3"
   case "$f" in
     /*) ;;
-    *) echo "spawn-orchestrator: done-sentinel path must be absolute (fail-closed): $f" >&2; return 1 ;;
+    *)
+      echo "spawn-orchestrator: done-sentinel path must be absolute (fail-closed): $f" >&2
+      return 1
+      ;;
   esac
-  local sdir; sdir="$(dirname "$f")"
-  mkdir -p "$sdir" || { echo "spawn-orchestrator: failed to create sentinel directory: $sdir" >&2; return 1; }
+  local sdir
+  sdir="$(dirname "$f")"
+  mkdir -p "$sdir" || {
+    echo "spawn-orchestrator: failed to create sentinel directory: $sdir" >&2
+    return 1
+  }
   # The temp file goes in the sentinel's OWN directory so the `mv` is a
   # same-filesystem atomic rename — a $TMPDIR temp could be on another filesystem,
   # making `mv` a non-atomic copy a watcher could observe half-written.
-  local tmp; tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" \
-    || { echo "spawn-orchestrator: mktemp failed under $sdir (disk full? read-only?)" >&2; return 1; }
-  { printf '%s %s %s\n' "$label" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp
+  tmp="$(mktemp "$sdir/.orchestrator-done.XXXXXX")" \
+    || {
+      echo "spawn-orchestrator: mktemp failed under $sdir (disk full? read-only?)" >&2
+      return 1
+    }
+  {
+    printf '%s %s %s\n' "$label" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'reason: %s\n' "$reason"
-  } >"$tmp" || { rm -f "$tmp"; echo "spawn-orchestrator: failed to write done sentinel" >&2; return 1; }
-  mv "$tmp" "$f" || { rm -f "$tmp"; echo "spawn-orchestrator: failed to write done sentinel: $f" >&2; return 1; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    echo "spawn-orchestrator: failed to write done sentinel" >&2
+    return 1
+  }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    echo "spawn-orchestrator: failed to write done sentinel: $f" >&2
+    return 1
+  }
 }
 
 # (agent side, in-jail) Declare WHY this orchestrator is exiting, before it exits.
@@ -2138,10 +2522,26 @@ exit_reason() {
   local dir="" reason="" label="auto-pilot" detail=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --reason) [ $# -ge 2 ] || die "missing value for --reason"; reason="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --detail) [ $# -ge 2 ] || die "missing value for --detail"; detail="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --reason)
+        [ $# -ge 2 ] || die "missing value for --reason"
+        reason="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --detail)
+        [ $# -ge 2 ] || die "missing value for --detail"
+        detail="$2"
+        shift 2
+        ;;
       *) die "unknown exit-reason argument: $1" ;;
     esac
   done
@@ -2165,10 +2565,11 @@ exit_reason() {
   # Best-effort commit, same posture as the supervisor halt: a broken git checkout
   # must not stop the orchestrator from exiting, and the on-disk RUN.md is still
   # what the supervisor reads on this wake.
-  ( cd "$dir" \
-    && git add -- .auto-pilot/RUN.md 2>/dev/null \
-    && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
-           commit -q -m "auto-pilot: exit reason $reason" \
+  (
+    cd "$dir" \
+      && git add -- .auto-pilot/RUN.md 2>/dev/null \
+      && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
+        commit -q -m "auto-pilot: exit reason $reason"
   ) 2>/dev/null || echo "spawn-orchestrator: exit-reason: run-state commit failed (not a git checkout, or nothing to commit)" >&2
 
   local sentinel="$dir/.auto-pilot/$DONE_SENTINEL_NAME"
@@ -2200,7 +2601,11 @@ clear_exit_state() {
   local dir=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
       *) die "unknown clear-exit-state argument: $1" ;;
     esac
   done
@@ -2215,10 +2620,11 @@ clear_exit_state() {
   _upsert_front_field "$run_md" exit_reason_at ""
   _upsert_front_field "$run_md" exit_reason_detail ""
 
-  ( cd "$dir" \
-    && git add -- .auto-pilot/RUN.md 2>/dev/null \
-    && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
-           commit -q -m "auto-pilot: clear exit state (resume)" \
+  (
+    cd "$dir" \
+      && git add -- .auto-pilot/RUN.md 2>/dev/null \
+      && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
+        commit -q -m "auto-pilot: clear exit state (resume)"
   ) 2>/dev/null || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout, or nothing to commit)" >&2
 
   echo "spawn-orchestrator: exit state cleared (done-sentinel removed, exit_reason blanked) $dir"
@@ -2232,8 +2638,16 @@ heartbeat() {
   local dir="" note=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --note) [ $# -ge 2 ] || die "missing value for --note"; note="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --note)
+        [ $# -ge 2 ] || die "missing value for --note"
+        note="$2"
+        shift 2
+        ;;
       *) die "unknown heartbeat argument: $1" ;;
     esac
   done
@@ -2242,11 +2656,24 @@ heartbeat() {
   local d="$dir/.auto-pilot"
   mkdir -p "$d" || die "cannot create run-state directory: $d"
   note="$(printf '%s' "${note:-beat}" | tr '\n' ' ')"
-  local now iso; now="$(date +%s)"; iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local tmp; tmp="$(mktemp "$d/.heartbeat.XXXXXX")" || die "mktemp failed"
-  { printf 'at: %s\n' "$now"; printf 'iso: %s\n' "$iso"; printf 'note: %s\n' "$note"; } >"$tmp" \
-    || { rm -f "$tmp"; die "failed to write heartbeat"; }
-  mv "$tmp" "$d/$HEARTBEAT_NAME" || { rm -f "$tmp"; die "failed to write heartbeat: $d/$HEARTBEAT_NAME"; }
+  local now iso
+  now="$(date +%s)"
+  iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp
+  tmp="$(mktemp "$d/.heartbeat.XXXXXX")" || die "mktemp failed"
+  {
+    printf 'at: %s\n' "$now"
+    printf 'iso: %s\n' "$iso"
+    printf 'note: %s\n' "$note"
+  } >"$tmp" \
+    || {
+      rm -f "$tmp"
+      die "failed to write heartbeat"
+    }
+  mv "$tmp" "$d/$HEARTBEAT_NAME" || {
+    rm -f "$tmp"
+    die "failed to write heartbeat: $d/$HEARTBEAT_NAME"
+  }
   echo "spawn-orchestrator: heartbeat $iso ($note)"
 }
 
@@ -2272,17 +2699,20 @@ heartbeat() {
 # Args: <run-dir> <wake-start-epoch>
 _declared_exit_reason() {
   local dir="$1" wake="${2:-}"
-  case "$wake" in ''|*[!0-9]*) return 0 ;; esac
+  case "$wake" in '' | *[!0-9]*) return 0 ;; esac
   local run_md="$dir/.auto-pilot/RUN.md"
   [ -f "$run_md" ] || return 0
-  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
-  local r; r="$(printf '%s\n' "$front" | grep -E '^exit_reason:' | head -1 \
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local r
+  r="$(printf '%s\n' "$front" | grep -E '^exit_reason:' | head -1 \
     | sed -e 's/^exit_reason: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
   _is_exit_reason "$r" || return 0
-  local at; at="$(printf '%s\n' "$front" | grep -E '^exit_reason_at:' | head -1 \
+  local at
+  at="$(printf '%s\n' "$front" | grep -E '^exit_reason_at:' | head -1 \
     | sed -e 's/^exit_reason_at: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
   # An undatable declaration can't be attributed to a wake, so it isn't trusted.
-  case "$at" in ''|*[!0-9]*) return 0 ;; esac
+  case "$at" in '' | *[!0-9]*) return 0 ;; esac
   [ "$at" -ge "$wake" ] || return 0
   printf '%s' "$r"
 }
@@ -2315,15 +2745,30 @@ _supervisor_halt() {
   local dir="" label="" reason="" condition="halt" preserve=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) dir="$2"; shift 2 ;;
-      --label) label="$2"; shift 2 ;;
-      --reason) reason="$2"; shift 2 ;;
+      --dir)
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        label="$2"
+        shift 2
+        ;;
+      --reason)
+        reason="$2"
+        shift 2
+        ;;
       # The alarm's idempotency key. A halt that FOLLOWS a scan-raised alarm
       # passes the SAME condition, so `alarm` no-ops instead of double-notifying
       # — the idempotency is the de-dupe, no second flag needed.
-      --condition) condition="$2"; shift 2 ;;
+      --condition)
+        condition="$2"
+        shift 2
+        ;;
       # ONLY the declared-`systemic` caller passes this. See below.
-      --preserve-pause-reason) preserve=1; shift ;;
+      --preserve-pause-reason)
+        preserve=1
+        shift
+        ;;
       *) die "unknown supervisor-halt argument: $1" ;;
     esac
   done
@@ -2345,7 +2790,7 @@ _supervisor_halt() {
     # the halt down with them, before the ALARM and before the teardown. The
     # REPORT.md alarm + the notification below are then the records that must not
     # be lost.
-    ( _set_front_field "$run_md" status systemic ) \
+    (_set_front_field "$run_md" status systemic) \
       || echo "spawn-orchestrator: supervisor halt: could not write status: systemic (RUN.md front matter missing/malformed) — relying on the REPORT.md alarm" >&2
     # `pause_reason` must name the TRUE cause of THIS halt. On the declared-`systemic`
     # path only, the orchestrator has already recorded its OWN concrete diagnosis
@@ -2361,7 +2806,8 @@ _supervisor_halt() {
     # `paused_until`, but not `pause_reason`). Preserving it would make RUN.md assert
     # a FALSE cause: "halted systemic — rate window until 03:00" on a run that
     # actually died on a dead credential, pointing the operator at the wrong thing.
-    local existing_pause; existing_pause=""
+    local existing_pause
+    existing_pause=""
     [ "$preserve" = 1 ] && existing_pause="$(_run_front_field "$dir" pause_reason)"
     # A `pause_reason` that is only the template's inline `# …` doc comment is not a
     # diagnosis to preserve — keeping it would leave RUN.md asserting "why the run
@@ -2370,14 +2816,14 @@ _supervisor_halt() {
     if [ -n "$existing_pause" ]; then
       echo "spawn-orchestrator: supervisor halt: preserving the run's own pause_reason: $existing_pause" >&2
     else
-      ( _set_front_field "$run_md" pause_reason "$reason" ) \
+      (_set_front_field "$run_md" pause_reason "$reason") \
         || echo "spawn-orchestrator: supervisor halt: could not write pause_reason (RUN.md front matter missing/malformed)" >&2
     fi
     # The halt IS an exit reason (task 15): a run that halted must read back as
     # `systemic`, not as a run whose last declaration happened to be `continuing`.
-    ( _upsert_front_field "$run_md" exit_reason systemic ) \
+    (_upsert_front_field "$run_md" exit_reason systemic) \
       || echo "spawn-orchestrator: supervisor halt: could not write exit_reason: systemic (RUN.md front matter missing/malformed)" >&2
-    ( _upsert_front_field "$run_md" exit_reason_at "$(date +%s)" ) \
+    (_upsert_front_field "$run_md" exit_reason_at "$(date +%s)") \
       || echo "spawn-orchestrator: supervisor halt: could not write exit_reason_at (RUN.md front matter missing/malformed)" >&2
   else
     echo "spawn-orchestrator: supervisor halt: no RUN.md at $run_md, skipping run-state write" >&2
@@ -2403,10 +2849,11 @@ _supervisor_halt() {
   fi
 
   if [ -f "$run_md" ] || [ -f "$report_md" ]; then
-    ( cd "$dir" \
-      && git add -- .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
-      && git -c user.name="auto-pilot-supervisor" -c user.email="auto-pilot@localhost" \
-             commit -q -m "auto-pilot: supervisor halt — $reason" \
+    (
+      cd "$dir" \
+        && git add -- .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
+        && git -c user.name="auto-pilot-supervisor" -c user.email="auto-pilot@localhost" \
+          commit -q -m "auto-pilot: supervisor halt — $reason"
     ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
   fi
 
@@ -2434,7 +2881,7 @@ _supervisor_halt() {
     # that prevents finding #22's relaunch loop. Subshelling (the `_alarm_safe`
     # pattern, task 16 / #191) confines the exit to the subshell so the halt keeps
     # going regardless.
-    if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null ); then
+    if ! (teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason systemic >/dev/null); then
       echo "spawn-orchestrator: supervisor halt: teardown FAILED (see above) — verifying bootout anyway" >&2
     fi
     # Verify the bootout actually took (shared with the declared done/deadline
@@ -2479,27 +2926,33 @@ _supervisor_halt() {
 _supervisor_pause_exempt_ledger() {
   local dir="$1" label="$2" cap="$3"
   local state="$dir/.auto-pilot/$SUPERVISOR_STATE_NAME"
-  local cur_count; cur_count="$(_supervisor_state_field "$state" count)"
-  case "$cur_count" in ''|*[!0-9]*) cur_count=0 ;; esac
-  local cur_head; cur_head="$(_supervisor_state_field "$state" head)"
+  local cur_count
+  cur_count="$(_supervisor_state_field "$state" count)"
+  case "$cur_count" in '' | *[!0-9]*) cur_count=0 ;; esac
+  local cur_head
+  cur_head="$(_supervisor_state_field "$state" head)"
 
   if ! _pause_exempt "$dir"; then
     # Not currently exempt: the streak (if any) ends here.
-    ( _write_supervisor_state "$state" "$cur_count" "$cur_head" "" ) \
+    (_write_supervisor_state "$state" "$cur_count" "$cur_head" "") \
       || echo "spawn-orchestrator: supervisor-scan: could not clear the pause-exempt ledger (a stale exempt_since could wrongly cap a FUTURE, unrelated exempt streak once the write path recovers)" >&2
     return 0
   fi
 
-  local exempt_since; exempt_since="$(_supervisor_state_field "$state" exempt_since)"
-  case "$exempt_since" in ''|*[!0-9]*) exempt_since="" ;; esac
+  local exempt_since
+  exempt_since="$(_supervisor_state_field "$state" exempt_since)"
+  case "$exempt_since" in '' | *[!0-9]*) exempt_since="" ;; esac
   if [ -z "$exempt_since" ]; then
-    local now; now="$(date +%s)"
-    ( _write_supervisor_state "$state" "$cur_count" "$cur_head" "$now" ) \
+    local now
+    now="$(date +%s)"
+    (_write_supervisor_state "$state" "$cur_count" "$cur_head" "$now") \
       || echo "spawn-orchestrator: supervisor-scan: could not start the pause-exempt ledger (the cap cannot be enforced across wakes while this is broken — a fresh streak starts as soon as the write path recovers)" >&2
     return 0
   fi
 
-  local now elapsed; now="$(date +%s)"; elapsed=$((now - exempt_since))
+  local now elapsed
+  now="$(date +%s)"
+  elapsed=$((now - exempt_since))
   if [ "$elapsed" -gt "$cap" ]; then
     _supervisor_halt --dir "$dir" --label "$label" --condition pause-exempt \
       --reason "the run has been pause-exempt for ${elapsed}s, exceeding its total exempted budget (--pause-exempt-max ${cap}s) — a declared pause (RUN.md's status/paused_until) is agent-written, not evidence of a real rate-window wait, and this run stayed exempt longer than any legitimate wait should take"
@@ -2525,15 +2978,35 @@ _supervisor_pause_exempt_ledger() {
 # must do on EVERY wake regardless of the gate belongs on THIS side of it.
 supervisor_scan() {
   local dir="" label="" park_limit="$PARK_STORM_LIMIT_DEFAULT" \
-        pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
-        report_every="$DEFAULT_REPORT_INTERVAL" gh_bin="" usage_bin=""
+    pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
+    report_every="$DEFAULT_REPORT_INTERVAL" gh_bin="" usage_bin=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --park-limit) [ $# -ge 2 ] || die "missing value for --park-limit"; park_limit="$2"; shift 2 ;;
-      --pause-exempt-max) [ $# -ge 2 ] || die "missing value for --pause-exempt-max"; pause_exempt_max="$2"; shift 2 ;;
-      --report-every) [ $# -ge 2 ] || die "missing value for --report-every"; report_every="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --park-limit)
+        [ $# -ge 2 ] || die "missing value for --park-limit"
+        park_limit="$2"
+        shift 2
+        ;;
+      --pause-exempt-max)
+        [ $# -ge 2 ] || die "missing value for --pause-exempt-max"
+        pause_exempt_max="$2"
+        shift 2
+        ;;
+      --report-every)
+        [ $# -ge 2 ] || die "missing value for --report-every"
+        report_every="$2"
+        shift 2
+        ;;
       # Explicit opt-in only (task 20): NOT auto-resolved via `command -v gh`
       # here. `status_report`'s own gh-dependent reconciliation is skipped
       # unless a resolved gh path is threaded in — see write_launch, which
@@ -2541,17 +3014,25 @@ supervisor_scan() {
       # existing supervisor-scan call site (this file's own test suite
       # included) would silently start invoking a REAL gh over the network on
       # whatever PR numbers its fixture RUN.md happens to contain.
-      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
+      --gh)
+        [ $# -ge 2 ] || die "missing value for --gh"
+        gh_bin="$2"
+        shift 2
+        ;;
       # Same reasoning, for the rate-window query (real network + Keychain).
-      --usage-bin) [ $# -ge 2 ] || die "missing value for --usage-bin"; usage_bin="$2"; shift 2 ;;
+      --usage-bin)
+        [ $# -ge 2 ] || die "missing value for --usage-bin"
+        usage_bin="$2"
+        shift 2
+        ;;
       *) die "unknown supervisor-scan argument: $1" ;;
     esac
   done
   [ -n "$dir" ] && [ -n "$label" ] || die "supervisor-scan requires --dir and --label"
   [ -d "$dir" ] || die "supervisor-scan --dir not found: $dir"
-  case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer: $park_limit" ;; esac
+  case "$park_limit" in *[!0-9]* | "") die "--park-limit must be a positive integer: $park_limit" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"
-  case "$pause_exempt_max" in *[!0-9]*|"") die "--pause-exempt-max must be a positive integer: $pause_exempt_max" ;; esac
+  case "$pause_exempt_max" in *[!0-9]* | "") die "--pause-exempt-max must be a positive integer: $pause_exempt_max" ;; esac
   [ "$pause_exempt_max" -ge 1 ] || die "--pause-exempt-max must be a positive integer: $pause_exempt_max"
 
   _supervisor_alarm_scan "$dir" "$label" "$park_limit"
@@ -2599,7 +3080,7 @@ supervisor_scan() {
   local rpt_rc=0
   _run_bounded "$REPORT_TIMEOUT_SECONDS_DEFAULT" \
     status_report --dir "$dir" --label "$label" --report-every "$report_every" \
-      ${rpt_extra_args[@]+"${rpt_extra_args[@]}"} || rpt_rc=$?
+    ${rpt_extra_args[@]+"${rpt_extra_args[@]}"} || rpt_rc=$?
   if [ "$rpt_rc" = 124 ]; then
     echo "spawn-orchestrator: supervisor-scan: status-report exceeded ${REPORT_TIMEOUT_SECONDS_DEFAULT}s and was killed (a hung gh/usage query?) — this wake proceeds; STATUS.md is stale, the supervisor is not" >&2
   elif [ "$rpt_rc" != 0 ]; then
@@ -2615,18 +3096,54 @@ supervisor_scan() {
 # exits. See the file-header comment above for the full decision.
 supervisor_check() {
   local code="" log="" dir="" label="" state="" limit=3 offset="" wake="" \
-        park_limit="$PARK_STORM_LIMIT_DEFAULT"
+    park_limit="$PARK_STORM_LIMIT_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --exit-code) [ $# -ge 2 ] || die "missing value for --exit-code"; code="$2"; shift 2 ;;
-      --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
-      --since-offset) [ $# -ge 2 ] || die "missing value for --since-offset"; offset="$2"; shift 2 ;;
-      --wake-start) [ $# -ge 2 ] || die "missing value for --wake-start"; wake="$2"; shift 2 ;;
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --state) [ $# -ge 2 ] || die "missing value for --state"; state="$2"; shift 2 ;;
-      --no-progress-limit) [ $# -ge 2 ] || die "missing value for --no-progress-limit"; limit="$2"; shift 2 ;;
-      --park-limit) [ $# -ge 2 ] || die "missing value for --park-limit"; park_limit="$2"; shift 2 ;;
+      --exit-code)
+        [ $# -ge 2 ] || die "missing value for --exit-code"
+        code="$2"
+        shift 2
+        ;;
+      --log)
+        [ $# -ge 2 ] || die "missing value for --log"
+        log="$2"
+        shift 2
+        ;;
+      --since-offset)
+        [ $# -ge 2 ] || die "missing value for --since-offset"
+        offset="$2"
+        shift 2
+        ;;
+      --wake-start)
+        [ $# -ge 2 ] || die "missing value for --wake-start"
+        wake="$2"
+        shift 2
+        ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --state)
+        [ $# -ge 2 ] || die "missing value for --state"
+        state="$2"
+        shift 2
+        ;;
+      --no-progress-limit)
+        [ $# -ge 2 ] || die "missing value for --no-progress-limit"
+        limit="$2"
+        shift 2
+        ;;
+      --park-limit)
+        [ $# -ge 2 ] || die "missing value for --park-limit"
+        park_limit="$2"
+        shift 2
+        ;;
       *) die "unknown supervisor-check argument: $1" ;;
     esac
   done
@@ -2658,8 +3175,8 @@ supervisor_check() {
   esac
   [ -f "$log" ] || die "supervisor-check --log not found: $log"
   [ -d "$dir" ] || die "supervisor-check --dir not found: $dir"
-  case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
-  case "$park_limit" in *[!0-9]*|"") die "--park-limit must be a positive integer: $park_limit" ;; esac
+  case "$limit" in *[!0-9]* | "") die "--no-progress-limit must be a positive integer: $limit" ;; esac
+  case "$park_limit" in *[!0-9]* | "") die "--park-limit must be a positive integer: $park_limit" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"
 
   # Alarm conditions the supervisor can see WITHOUT classifying an exit (task
@@ -2674,7 +3191,8 @@ supervisor_check() {
     return "$code"
   fi
 
-  local class; class="$(classify_exit --exit-code "$code" --output "$log" --since-offset "$offset")"
+  local class
+  class="$(classify_exit --exit-code "$code" --output "$log" --since-offset "$offset")"
 
   # A fatal classification halts BEFORE the declared reason is even read. This is
   # the one place inference outranks declaration, and deliberately so: a
@@ -2692,15 +3210,16 @@ supervisor_check() {
   # THE EXIT CONTRACT (task 15): the agent's own declaration, when this wake made
   # one, decides relaunch-vs-teardown. This is what replaces the blind timer — the
   # supervisor stops inferring what the agent already knew.
-  local declared; declared="$(_declared_exit_reason "$dir" "$wake")"
+  local declared
+  declared="$(_declared_exit_reason "$dir" "$wake")"
   case "$declared" in
-    done|deadline)
+    done | deadline)
       # Subshelled: `_write_supervisor_state` `die`s on a write failure (mktemp,
       # disk full, read-only run dir), and the run has ALREADY declared it is
       # finished — a wedged bookkeeping cache must not cost us the teardown below,
       # any more than a wedged halt may (see _supervisor_halt's identical
       # `teardown` reasoning). Same `_alarm_safe`-style subshell.
-      ( _write_supervisor_state "$state" 0 "$(_run_head "$dir")" ) \
+      (_write_supervisor_state "$state" 0 "$(_run_head "$dir")") \
         || echo "spawn-orchestrator: supervisor-check: could not persist supervisor-state (tearing down regardless — the run already declared $declared)" >&2
       # stderr NOT suppressed, and the bootout VERIFIED (the same check the halt
       # path does): `teardown` swallows a failed `launchctl bootout`, and an
@@ -2711,7 +3230,7 @@ supervisor_check() {
       # identical call: it `die`s (an `exit`) if the done-sentinel write fails, and
       # an unguarded exit here would abort BEFORE `_verify_bootout` below ever
       # runs — the exact defect class this file exists to close.
-      if ! ( teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null ); then
+      if ! (teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null); then
         echo "spawn-orchestrator: supervisor-check: teardown FAILED (see above) — verifying bootout anyway" >&2
       fi
       _verify_bootout "$label" || true
@@ -2724,7 +3243,8 @@ supervisor_check() {
       # pause_reason — the operator wakes to an alarm pointing at itself, with the
       # concrete cause gone. `exit_reason_detail` exists for exactly this; the
       # already-recorded `pause_reason` is the fallback.
-      local sys_detail; sys_detail="$(_run_front_field "$dir" exit_reason_detail)"
+      local sys_detail
+      sys_detail="$(_run_front_field "$dir" exit_reason_detail)"
       [ -n "$sys_detail" ] || sys_detail="$(_run_front_field "$dir" pause_reason)"
       # run-state.md's RUN.md TEMPLATE declares these keys with an inline `# …` doc
       # comment, and this reader deliberately does not strip `#` (they are free prose
@@ -2808,12 +3328,13 @@ supervisor_check() {
   prev_count="$(_supervisor_state_field "$state" count)"
   # A corrupt (non-numeric) count must not brick the guard via an arithmetic
   # error under `set -u` — treat it as a fresh start.
-  case "$prev_count" in ''|*[!0-9]*) prev_count=0 ;; esac
+  case "$prev_count" in '' | *[!0-9]*) prev_count=0 ;; esac
   # An empty HEAD (non-git dir, git absent from the launchd PATH, an unborn
   # branch) must count AS no-progress, not silently reset the guard to 1 every
   # wake — a broken environment is exactly when the relaunch loop this guard
   # backstops is most likely. Sentinel it so empty == empty advances the counter.
-  head="$(_run_head "$dir")"; head="${head:-unknown}"
+  head="$(_run_head "$dir")"
+  head="${head:-unknown}"
 
   if [ -n "$prev_head" ] && [ "$prev_head" = "$head" ]; then
     count=$((prev_count + 1))
@@ -2827,7 +3348,7 @@ supervisor_check() {
   # crashing agent under a wedged run dir never halts, never alarms and never tears
   # down: StartInterval relaunches it forever. Zero work, zero alarm — finding #22's
   # loop, reached through the very guard that exists to backstop it.
-  ( _write_supervisor_state "$state" "$count" "$head" ) \
+  (_write_supervisor_state "$state" "$count" "$head") \
     || echo "spawn-orchestrator: supervisor-check: could not persist supervisor-state (the no-progress counter cannot advance across wakes while this is broken — the halt below still fires if THIS wake already reached the limit)" >&2
 
   if [ "$count" -ge "$limit" ]; then
@@ -2873,10 +3394,16 @@ _parse_iso8601_utc() {
     *[+-][0-9][0-9]:[0-9][0-9]) n="${n%:*}${n##*:}" ;;
   esac
   for fmt in '%Y-%m-%dT%H:%M:%SZ' '%Y-%m-%dT%H:%M:%S%z' '%Y-%m-%dT%H:%M:%S' \
-             '%Y-%m-%dT%H:%MZ' '%Y-%m-%dT%H:%M'; do
-    epoch="$(date -j -u -f "$fmt" "$n" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+    '%Y-%m-%dT%H:%MZ' '%Y-%m-%dT%H:%M'; do
+    epoch="$(date -j -u -f "$fmt" "$n" +%s 2>/dev/null)" && {
+      printf '%s' "$epoch"
+      return 0
+    }
   done
-  epoch="$(date -u -d "$v" +%s 2>/dev/null)" && { printf '%s' "$epoch"; return 0; }
+  epoch="$(date -u -d "$v" +%s 2>/dev/null)" && {
+    printf '%s' "$epoch"
+    return 0
+  }
   return 1
 }
 
@@ -2893,8 +3420,16 @@ supervisor_gate() {
   local dir="" label=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
       *) die "unknown supervisor-gate argument: $1" ;;
     esac
   done
@@ -2908,11 +3443,13 @@ supervisor_gate() {
 
   # _front_field (above) reads the global $front — same convention status()
   # uses, reused here rather than re-deriving a front-matter parser.
-  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
 
-  local run_status; run_status="$(_front_field status)"
+  local run_status
+  run_status="$(_front_field status)"
   case "$run_status" in
-    done|systemic)
+    done | systemic)
       # A done/systemic run must never relaunch (task 10's fatal-halt
       # teardown path, reused rather than reimplemented — see
       # _supervisor_halt's identical `teardown --label` call).
@@ -2922,7 +3459,8 @@ supervisor_gate() {
       ;;
   esac
 
-  local paused_until; paused_until="$(_front_field paused_until)"
+  local paused_until
+  paused_until="$(_front_field paused_until)"
   [ -n "$paused_until" ] || return 0
 
   local until_epoch
@@ -2931,7 +3469,8 @@ supervisor_gate() {
     return 0
   fi
 
-  local now_epoch; now_epoch="$(date -u +%s)"
+  local now_epoch
+  now_epoch="$(date -u +%s)"
   if [ "$now_epoch" -lt "$until_epoch" ]; then
     echo "spawn-orchestrator: supervisor-gate: paused until $paused_until, skipping this wake without invoking the agent"
     return 20
@@ -2971,7 +3510,8 @@ supervisor_gate() {
 _restack_read_run_md() {
   local run_md="$1"
   [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
-  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
   _RS_BASE_BRANCH="$(printf '%s\n' "$front" | grep -E '^base_branch:' | head -1 \
     | sed -e 's/^base_branch: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
   [ -n "$_RS_BASE_BRANCH" ] || _RS_BASE_BRANCH="main"
@@ -2980,7 +3520,13 @@ _restack_read_run_md() {
   # when THIS pass force-pushed it. A child of a branch we just rewrote must be
   # cascaded onto that new tip (see restack's "cascade" mode), or force-pushing
   # a parent silently orphans its own child inside the same run.
-  _RS_TASK=(); _RS_PHASE=(); _RS_BRANCH=(); _RS_BASE=(); _RS_BASE_SHA=(); _RS_PR=(); _RS_NEWTIP=()
+  _RS_TASK=()
+  _RS_PHASE=()
+  _RS_BRANCH=()
+  _RS_BASE=()
+  _RS_BASE_SHA=()
+  _RS_PR=()
+  _RS_NEWTIP=()
   local line
   while IFS= read -r line; do
     # skip the header separator row (only pipes/colons/dashes/spaces)
@@ -2989,20 +3535,25 @@ _restack_read_run_md() {
     IFS='|' read -ra cols <<<"$line"
     [ "${#cols[@]}" -ge 7 ] || continue
     t="$(printf '%s' "${cols[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    [ "$t" != "task" ] || continue   # header row
+    [ "$t" != "task" ] || continue # header row
     ph="$(printf '%s' "${cols[2]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     b="$(printf '%s' "${cols[3]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     base="$(printf '%s' "${cols[4]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     bsha="$(printf '%s' "${cols[5]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     pr="$(printf '%s' "${cols[6]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    _RS_TASK+=("$t"); _RS_PHASE+=("$ph"); _RS_BRANCH+=("$b"); _RS_BASE+=("$base"); _RS_BASE_SHA+=("$bsha"); _RS_PR+=("$pr")
+    _RS_TASK+=("$t")
+    _RS_PHASE+=("$ph")
+    _RS_BRANCH+=("$b")
+    _RS_BASE+=("$base")
+    _RS_BASE_SHA+=("$bsha")
+    _RS_PR+=("$pr")
     _RS_NEWTIP+=("")
   done < <(awk '/^\|/{print}' "$run_md")
 }
 
 # True (0) when a RUN.md cell is one of its "empty" spellings (the table uses
 # both a bare hyphen and an em-dash depending on which doc wrote it).
-_restack_empty() { case "$1" in ''|-|'—') return 0 ;; *) return 1 ;; esac; }
+_restack_empty() { case "$1" in '' | - | '—') return 0 ;; *) return 1 ;; esac }
 
 # Extract the bare PR number from any shape RUN.md's `pr` column actually
 # holds: a bare number (`188`), a `#`-prefixed number (`#188`), or the
@@ -3021,7 +3572,8 @@ _pr_number() {
     \[*\]\(*\))
       # markdown link: the PR number is the trailing digits of the URL
       # inside the (...) — take the text between the LAST '(' and ')'.
-      cell="${cell##*(}"; cell="${cell%)*}"
+      cell="${cell##*(}"
+      cell="${cell%)*}"
       printf '%s' "$cell" | grep -oE '[0-9]+$'
       ;;
     *)
@@ -3048,11 +3600,13 @@ _pr_number() {
 # Exit: 0 rebased+pushed (tip on stdout) | 3 rebase conflict | 4 push rejected
 _restack_rebase_push() {
   local repo="$1" remote="$2" branch="$3" base_sha="$4" onto_ref="$5" lease_sha="$6"
-  local sw; sw="$(mktemp -d "${TMPDIR:-/tmp}/restack-wt.XXXXXX")" || return 4
-  rm -rf "$sw"   # `git worktree add` requires the path NOT to exist yet
+  local sw
+  sw="$(mktemp -d "${TMPDIR:-/tmp}/restack-wt.XXXXXX")" || return 4
+  rm -rf "$sw" # `git worktree add` requires the path NOT to exist yet
 
   git -C "$repo" worktree add --detach "$sw" "$remote/$branch" >/dev/null 2>&1 || {
-    rm -rf "$sw"; return 4
+    rm -rf "$sw"
+    return 4
   }
   # Cleanup is unconditional from here on — every `return` below goes through it.
   local rc=0 tip=""
@@ -3104,17 +3658,21 @@ _restack_orphan_scan() {
     local task="${_RS_TASK[$i]}" base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
     [ "$base" != "$base_branch" ] || continue
     _restack_empty "$pr" && continue
-    local pr_num; pr_num="$(_pr_number "$pr")"
+    local pr_num
+    pr_num="$(_pr_number "$pr")"
     local live_base live_state rc_base rc_state gone=0
-    live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>&1)"; rc_base=$?
-    live_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>&1)"; rc_state=$?
+    live_base="$("$gh_bin" pr view "$pr_num" --json baseRefName --jq .baseRefName 2>&1)"
+    rc_base=$?
+    live_state="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>&1)"
+    rc_state=$?
     if [ "$rc_base" -ne 0 ] || [ "$rc_state" -ne 0 ]; then
       case "$live_base$live_state" in
         *"Could not resolve to a PullRequest"*) gone=1 ;;
         *)
           _ORPHAN_UNAVAILABLE=$((_ORPHAN_UNAVAILABLE + 1))
           _ORPHAN_UNAVAILABLE_LINES+=("UNDETERMINED $task PR #$pr_num — gh query failed (auth/rate-limit/network?); orphan check skipped this pass, NOT flagged as a defect")
-          continue ;;
+          continue
+          ;;
       esac
     fi
     if [ "$gone" = 1 ] || [ -z "$live_base" ]; then
@@ -3126,18 +3684,23 @@ _restack_orphan_scan() {
     [ "$live_base" != "$base_branch" ] || continue
     local base_pr="" k
     for ((k = 0; k < n; k++)); do
-      if [ "${_RS_BRANCH[$k]}" = "$live_base" ]; then base_pr="$(_pr_number "${_RS_PR[$k]}")"; break; fi
+      if [ "${_RS_BRANCH[$k]}" = "$live_base" ]; then
+        base_pr="$(_pr_number "${_RS_PR[$k]}")"
+        break
+      fi
     done
     local base_state="" rc_bs=0
     if [ -n "$base_pr" ] && ! _restack_empty "$base_pr"; then
-      base_state="$("$gh_bin" pr view "$base_pr" --json state --jq .state 2>&1)"; rc_bs=$?
+      base_state="$("$gh_bin" pr view "$base_pr" --json state --jq .state 2>&1)"
+      rc_bs=$?
       if [ "$rc_bs" -ne 0 ]; then
         case "$base_state" in
-          *"Could not resolve to a PullRequest"*) base_state="" ;;   # parent PR positively gone: no MERGED evidence
+          *"Could not resolve to a PullRequest"*) base_state="" ;; # parent PR positively gone: no MERGED evidence
           *)
             _ORPHAN_UNAVAILABLE=$((_ORPHAN_UNAVAILABLE + 1))
             _ORPHAN_UNAVAILABLE_LINES+=("UNDETERMINED $task PR #$pr_num — parent-PR state query failed (auth/rate-limit/network?); orphan check skipped this pass, NOT flagged as a defect")
-            continue ;;
+            continue
+            ;;
         esac
       fi
     fi
@@ -3153,11 +3716,30 @@ restack() {
   local run_dir="" repo="" remote="origin" gh_bin="" dry=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --run-dir) [ $# -ge 2 ] || die "missing value for --run-dir"; run_dir="$2"; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
-      --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
-      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
-      --dry-run) dry=1; shift ;;
+      --run-dir)
+        [ $# -ge 2 ] || die "missing value for --run-dir"
+        run_dir="$2"
+        shift 2
+        ;;
+      --repo)
+        [ $# -ge 2 ] || die "missing value for --repo"
+        repo="$2"
+        shift 2
+        ;;
+      --remote)
+        [ $# -ge 2 ] || die "missing value for --remote"
+        remote="$2"
+        shift 2
+        ;;
+      --gh)
+        [ $# -ge 2 ] || die "missing value for --gh"
+        gh_bin="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry=1
+        shift
+        ;;
       *) die "unknown restack argument: $1" ;;
     esac
   done
@@ -3185,7 +3767,8 @@ restack() {
   # "helpful" automated recovery destroys a human's in-progress state.
   [ -z "$(git -C "$repo" status --porcelain 2>/dev/null)" ] \
     || die "--repo worktree is dirty (fail-closed): commit or stash before restacking: $repo"
-  local gitdir; gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
+  local gitdir
+  gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
   case "$gitdir" in /*) ;; *) gitdir="$repo/$gitdir" ;; esac
   { [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -e "$gitdir/MERGE_HEAD" ]; } \
     && die "--repo worktree is mid-rebase/mid-merge (fail-closed): finish or abort it first: $repo"
@@ -3204,14 +3787,16 @@ restack() {
   # grandchild only becomes actionable once its own parent has been rewritten
   # (cascade) or retargeted (onto-base) by an earlier pass.
   while [ "$progressed" = 1 ] && [ "$pass" -le "$n" ]; do
-    progressed=0; pass=$((pass + 1))
+    progressed=0
+    pass=$((pass + 1))
     local i
     for ((i = 0; i < n; i++)); do
       local task="${_RS_TASK[$i]}" branch="${_RS_BRANCH[$i]}" base="${_RS_BASE[$i]}" \
-            base_sha="${_RS_BASE_SHA[$i]}" pr="${_RS_PR[$i]}"
-      [ "$base" != "$base_branch" ] || continue   # independent task — nothing to restack
-      _restack_empty "$pr" && continue            # no PR yet — nothing to retarget
-      local pr_num; pr_num="$(_pr_number "$pr")"
+        base_sha="${_RS_BASE_SHA[$i]}" pr="${_RS_PR[$i]}"
+      [ "$base" != "$base_branch" ] || continue # independent task — nothing to restack
+      _restack_empty "$pr" && continue          # no PR yet — nothing to retarget
+      local pr_num
+      pr_num="$(_pr_number "$pr")"
 
       # Idempotent: trust the PR's OWN live base over our (possibly stale)
       # RUN.md column — a child already retargeted to base_branch is a no-op,
@@ -3243,9 +3828,13 @@ restack() {
 
       local parent_pr="" j pidx=-1
       for ((j = 0; j < n; j++)); do
-        if [ "${_RS_BRANCH[$j]}" = "$base" ]; then pidx=$j; parent_pr="$(_pr_number "${_RS_PR[$j]}")"; break; fi
+        if [ "${_RS_BRANCH[$j]}" = "$base" ]; then
+          pidx=$j
+          parent_pr="$(_pr_number "${_RS_PR[$j]}")"
+          break
+        fi
       done
-      [ "$pidx" -ge 0 ] || continue   # parent not tracked in this run
+      [ "$pidx" -ge 0 ] || continue # parent not tracked in this run
 
       # Two distinct reasons a child needs rewriting, and they are NOT the same op:
       #
@@ -3262,9 +3851,10 @@ restack() {
       # the very run that was supposed to fix orphaned children.
       local newtip="${_RS_NEWTIP[$pidx]}" mode="" onto_ref="" retarget=""
       if [ -n "$newtip" ] && ! _restack_empty "$base_sha" && [ "$base_sha" != "$newtip" ]; then
-        mode="cascade"; onto_ref="$newtip"
+        mode="cascade"
+        onto_ref="$newtip"
       else
-        _restack_empty "$parent_pr" && continue   # parent has no PR — can't know if it merged
+        _restack_empty "$parent_pr" && continue # parent has no PR — can't know if it merged
         local parent_state
         parent_state="$("$gh_bin" pr view "$parent_pr" --json state --jq .state 2>/dev/null)"
         if [ "$parent_state" = "MERGED" ]; then
@@ -3273,7 +3863,9 @@ restack() {
             failed=$((failed + 1))
             continue
           fi
-          mode="onto-base"; onto_ref="$remote/$base_branch"; retarget="$base_branch"
+          mode="onto-base"
+          onto_ref="$remote/$base_branch"
+          retarget="$base_branch"
         else
           # RESUMABLE cascade: the parent's PR is still OPEN, but a PRIOR restack
           # run may have already rewritten it (retargeted to base_branch and
@@ -3286,7 +3878,7 @@ restack() {
           parent_live_base="$("$gh_bin" pr view "$parent_pr" --json baseRefName --jq .baseRefName 2>/dev/null)"
           parent_remote_tip="$(git -C "$repo" rev-parse "$remote/$base" 2>/dev/null)"
           if [ "$parent_live_base" = "$base_branch" ] && ! _restack_empty "$base_sha" \
-             && [ -n "$parent_remote_tip" ] && [ "$parent_remote_tip" != "$base_sha" ]; then
+            && [ -n "$parent_remote_tip" ] && [ "$parent_remote_tip" != "$base_sha" ]; then
             # Idempotent: a cascade-mode child keeps its PR base on the parent
             # branch, so the top-of-loop live-base no-op check can't catch an
             # already-cascaded child. If it already sits on the parent's current
@@ -3296,7 +3888,8 @@ restack() {
               echo "spawn-orchestrator: restack $task already cascaded onto $base's tip (no-op)"
               continue
             fi
-            mode="cascade"; onto_ref="$parent_remote_tip"
+            mode="cascade"
+            onto_ref="$parent_remote_tip"
           else
             # A human reviewing/merging the parent is the EXPECTED trigger; an
             # unmerged, un-rewritten parent just means this child isn't ready yet.
@@ -3315,7 +3908,8 @@ restack() {
       [ -n "$retarget" ] && echo "  gh pr edit $pr_num --base $retarget"
       [ "$dry" = 1 ] && continue
 
-      local lease_sha; lease_sha="$(git -C "$repo" rev-parse "$remote/$branch" 2>/dev/null)"
+      local lease_sha
+      lease_sha="$(git -C "$repo" rev-parse "$remote/$branch" 2>/dev/null)"
       if [ -z "$lease_sha" ]; then
         echo "spawn-orchestrator: restack $task FAILED — no $remote/$branch to lease against (fail-closed; branch never pushed?)"
         failed=$((failed + 1))
@@ -3323,21 +3917,27 @@ restack() {
       fi
 
       local tip rc
-      tip="$(_restack_rebase_push "$repo" "$remote" "$branch" "$base_sha" "$onto_ref" "$lease_sha")"; rc=$?
+      tip="$(_restack_rebase_push "$repo" "$remote" "$branch" "$base_sha" "$onto_ref" "$lease_sha")"
+      rc=$?
       case "$rc" in
         3)
           echo "spawn-orchestrator: restack $task FAILED — rebase conflict (fail-closed, NOT force-pushing; a human must resolve)"
-          failed=$((failed + 1)); continue ;;
+          failed=$((failed + 1))
+          continue
+          ;;
         4)
           echo "spawn-orchestrator: restack $task FAILED — force-with-lease push rejected (fail-closed, remote moved since fetch; re-run restack)"
-          failed=$((failed + 1)); continue ;;
+          failed=$((failed + 1))
+          continue
+          ;;
       esac
 
       # The rebase + force-push already happened, so a child's downstream cascade
       # must see the new tip regardless of what the retarget does below.
-      _RS_BASE_SHA[$i]="$onto_ref"   # this child's parent-tip is now the ref it sits on
-      _RS_NEWTIP[$i]="$tip"          # so ITS children cascade onto the tip we just pushed
-      restacked=$((restacked + 1)); progressed=1
+      _RS_BASE_SHA[$i]="$onto_ref" # this child's parent-tip is now the ref it sits on
+      _RS_NEWTIP[$i]="$tip"        # so ITS children cascade onto the tip we just pushed
+      restacked=$((restacked + 1))
+      progressed=1
 
       local retarget_ok=1
       if [ -n "$retarget" ]; then
@@ -3435,21 +4035,24 @@ restack() {
 _parse_duration_or_off() {
   local v="$1" n secs
   case "$v" in
-    off) printf 'off'; return 0 ;;
+    off)
+      printf 'off'
+      return 0
+      ;;
     # Strip the suffix FIRST and require the remainder to be pure digits —
     # `*[0-9]m` alone also matches `1+1m`, which would reach bash arithmetic
     # (accepted as an expression, or an arithmetic ERROR on worse garbage)
     # instead of being rejected. The contract is digits, not expressions.
     *[smh])
       n="${v%[smh]}"
-      case "$n" in ''|*[!0-9]*) return 1 ;; esac
+      case "$n" in '' | *[!0-9]*) return 1 ;; esac
       case "$v" in
         *s) secs="$n" ;;
-        *m) secs="$(( n * 60 ))" ;;
-        *h) secs="$(( n * 3600 ))" ;;
+        *m) secs="$((n * 60))" ;;
+        *h) secs="$((n * 3600))" ;;
       esac
       ;;
-    ''|*[!0-9]*) return 1 ;;
+    '' | *[!0-9]*) return 1 ;;
     *) secs="$v" ;;
   esac
   # Zero is not a duration, it is a busy-loop: `--report-every 0` bakes
@@ -3465,11 +4068,18 @@ _parse_duration_or_off() {
 # Render "Ns" as "XhYmZs" (dropping zero leading units) for a human-facing line.
 _fmt_duration() {
   local s="$1"
-  case "$s" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+  case "$s" in '' | *[!0-9]*)
+    printf 'unknown'
+    return 0
+    ;;
+  esac
   local h=$((s / 3600)) m=$(((s % 3600) / 60)) sec=$((s % 60))
-  if [ "$h" -gt 0 ]; then printf '%dh%dm' "$h" "$m"
-  elif [ "$m" -gt 0 ]; then printf '%dm%ds' "$m" "$sec"
-  else printf '%ds' "$sec"
+  if [ "$h" -gt 0 ]; then
+    printf '%dh%dm' "$h" "$m"
+  elif [ "$m" -gt 0 ]; then
+    printf '%dm%ds' "$m" "$sec"
+  else
+    printf '%ds' "$sec"
   fi
 }
 
@@ -3490,8 +4100,8 @@ _report_task_elapsed() {
   # whole-history read would select the REPOSITORY'S OLDEST COMMIT — reporting
   # the task as running since repo genesis and (usually) OVER the ceiling,
   # instead of the documented "elapsed unknown".
-  case "$first_ct" in ''|*[!0-9]*) return 0 ;; esac
-  printf '%s' "$(( $(date +%s) - first_ct ))"
+  case "$first_ct" in '' | *[!0-9]*) return 0 ;; esac
+  printf '%s' "$(($(date +%s) - first_ct))"
 }
 
 # Read one RUN.md front-matter field: delegates to `_run_md_field`, the ONE
@@ -3504,8 +4114,8 @@ _report_front_field() { _run_md_field "$1" "$2"; }
 # bucketed for the report's summary line.
 _report_bucket() {
   case "$1" in
-    ''|pending) printf 'pending' ;;
-    claimed|implementing|pr-open|in-review|iterating) printf 'in-flight' ;;
+    '' | pending) printf 'pending' ;;
+    claimed | implementing | pr-open | in-review | iterating) printf 'in-flight' ;;
     handed-off) printf 'handed-off' ;;
     parked) printf 'parked' ;;
     *) printf 'unknown' ;;
@@ -3519,18 +4129,53 @@ _report_bucket() {
 # either way. `--force` bypasses the interval gate (test/manual convenience).
 status_report() {
   local dir="" label="" report_every="$DEFAULT_REPORT_INTERVAL" ceiling="$DEFAULT_TASK_CEILING" \
-        repo="" gh_bin="" usage_bin="" remote="origin" force=0
+    repo="" gh_bin="" usage_bin="" remote="origin" force=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --report-every) [ $# -ge 2 ] || die "missing value for --report-every"; report_every="$2"; shift 2 ;;
-      --task-ceiling) [ $# -ge 2 ] || die "missing value for --task-ceiling"; ceiling="$2"; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
-      --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
-      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
-      --usage-bin) [ $# -ge 2 ] || die "missing value for --usage-bin"; usage_bin="$2"; shift 2 ;;
-      --force) force=1; shift ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --report-every)
+        [ $# -ge 2 ] || die "missing value for --report-every"
+        report_every="$2"
+        shift 2
+        ;;
+      --task-ceiling)
+        [ $# -ge 2 ] || die "missing value for --task-ceiling"
+        ceiling="$2"
+        shift 2
+        ;;
+      --repo)
+        [ $# -ge 2 ] || die "missing value for --repo"
+        repo="$2"
+        shift 2
+        ;;
+      --remote)
+        [ $# -ge 2 ] || die "missing value for --remote"
+        remote="$2"
+        shift 2
+        ;;
+      --gh)
+        [ $# -ge 2 ] || die "missing value for --gh"
+        gh_bin="$2"
+        shift 2
+        ;;
+      --usage-bin)
+        [ $# -ge 2 ] || die "missing value for --usage-bin"
+        usage_bin="$2"
+        shift 2
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
       *) die "unknown status-report argument: $1" ;;
     esac
   done
@@ -3538,7 +4183,8 @@ status_report() {
   case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
   [ -n "$repo" ] || repo="$dir"
 
-  local interval; interval="$(_parse_duration_or_off "$report_every")" \
+  local interval
+  interval="$(_parse_duration_or_off "$report_every")" \
     || die "--report-every must be off, an integer (seconds), or <n>s|m|h: $report_every"
 
   local run_md="$dir/.auto-pilot/RUN.md"
@@ -3550,7 +4196,10 @@ status_report() {
     echo "spawn-orchestrator: status-report disabled (--report-every off)"
     return 0
   fi
-  [ -f "$run_md" ] || { echo "spawn-orchestrator: status-report: no run state found, skipping: $run_md" >&2; return 0; }
+  [ -f "$run_md" ] || {
+    echo "spawn-orchestrator: status-report: no run state found, skipping: $run_md" >&2
+    return 0
+  }
 
   # --- interval gate: skip quietly if the last report is still fresh --------
   # last_emitted_at is when we last PRINTED; last_progress_at is when the run
@@ -3562,7 +4211,8 @@ status_report() {
     prev_head="$(sed -n 's/^last_run_head: //p' "$state_file" | head -1)"
     prev_progress_at="$(sed -n 's/^last_progress_at: //p' "$state_file" | head -1)"
   fi
-  local now; now="$(date +%s)"
+  local now
+  now="$(date +%s)"
   case "$prev_at" in *[!0-9]*) prev_at="" ;; esac
   case "$prev_progress_at" in *[!0-9]*) prev_progress_at="" ;; esac
   if [ "$force" != 1 ] && [ -n "$prev_at" ] && [ $((now - prev_at)) -lt "$interval" ]; then
@@ -3578,7 +4228,8 @@ status_report() {
   # below are skipped (reported as such), never silently defaulted.
 
   # --- build on `status --label`: the run-level facts, not a second reader --
-  local status_out; status_out="$(status --dir "$dir" --label "$label" --task-ceiling "$ceiling" 2>&1)"
+  local status_out
+  status_out="$(status --dir "$dir" --label "$label" --task-ceiling "$ceiling" 2>&1)"
 
   # --- the phase table: the ONE shared RUN.md table parser -------------------
   _restack_read_run_md "$run_md"
@@ -3587,8 +4238,9 @@ status_report() {
   local -a phase_lines=() cur_map=()
   for ((i = 0; i < n; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" \
-          base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
-    local bucket; bucket="$(_report_bucket "$phase")"
+      base="${_RS_BASE[$i]}" pr="${_RS_PR[$i]}"
+    local bucket
+    bucket="$(_report_bucket "$phase")"
     case "$bucket" in
       pending) counts_pending=$((counts_pending + 1)) ;;
       in-flight) counts_inflight=$((counts_inflight + 1)) ;;
@@ -3604,7 +4256,8 @@ status_report() {
   for ((i = 0; i < n; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" base="${_RS_BASE[$i]}"
     [ "$(_report_bucket "$phase")" = in-flight ] || continue
-    local elapsed; elapsed="$(_report_task_elapsed "$repo" "$base" "$branch" "$remote")"
+    local elapsed
+    elapsed="$(_report_task_elapsed "$repo" "$base" "$branch" "$remote")"
     if [ -n "$elapsed" ]; then
       local over=""
       [ "$elapsed" -gt "$ceiling" ] && over=" — OVER the per-task ceiling"
@@ -3648,11 +4301,14 @@ status_report() {
     for ((i = 0; i < n; i++)); do
       local task="${_RS_TASK[$i]}" pr="${_RS_PR[$i]}"
       _restack_empty "$pr" && continue
-      local pr_num; pr_num="$(_pr_number "$pr")"
+      local pr_num
+      pr_num="$(_pr_number "$pr")"
       [ -n "$pr_num" ] || continue
       local st mg rc_st rc_mg
-      st="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"; rc_st=$?
-      mg="$("$gh_bin" pr view "$pr_num" --json mergeable --jq .mergeable 2>/dev/null)"; rc_mg=$?
+      st="$("$gh_bin" pr view "$pr_num" --json state --jq .state 2>/dev/null)"
+      rc_st=$?
+      mg="$("$gh_bin" pr view "$pr_num" --json mergeable --jq .mergeable 2>/dev/null)"
+      rc_mg=$?
       # One degrade per task, not two: a dead gh fails both queries, and the
       # count is a signal that the cross-check is incomplete, not a call tally.
       { [ "$rc_st" -eq 0 ] && [ "$rc_mg" -eq 0 ]; } || gh_degraded=$((gh_degraded + 1))
@@ -3678,10 +4334,11 @@ status_report() {
     # divergence a stale phase table must not read as healthy.
     for ((i = 0; i < n; i++)); do
       local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}"
-      case "$phase" in claimed|implementing) ;; *) continue ;; esac
+      case "$phase" in claimed | implementing) ;; *) continue ;; esac
       _restack_empty "$branch" && continue
       local live_num live_state rc_list
-      live_num="$("$gh_bin" pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"; rc_list=$?
+      live_num="$("$gh_bin" pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
+      rc_list=$?
       if [ "$rc_list" -ne 0 ]; then
         gh_degraded=$((gh_degraded + 1))
         continue
@@ -3711,7 +4368,8 @@ status_report() {
   local rate_line="rate window: unavailable (no --usage-bin provided)"
   if [ -n "$usage_bin" ] && { [ -x "$usage_bin" ] || command -v "$usage_bin" >/dev/null 2>&1; }; then
     rate_line="rate window: unavailable"
-    local usage_json; usage_json="$("$usage_bin" 2>/dev/null)"
+    local usage_json
+    usage_json="$("$usage_bin" 2>/dev/null)"
     if [ -n "$usage_json" ]; then
       local pct rst
       pct="$(printf '%s' "$usage_json" | grep -oE '"session":\{"percent":[0-9]+' | grep -oE '[0-9]+$')"
@@ -3722,8 +4380,10 @@ status_report() {
   fi
 
   # --- --until remaining vs min_task_budget -----------------------------------
-  local until_val; until_val="$(_report_front_field "$run_md" until)"
-  local min_budget_raw; min_budget_raw="$(_report_front_field "$run_md" min_task_budget)"
+  local until_val
+  until_val="$(_report_front_field "$run_md" until)"
+  local min_budget_raw
+  min_budget_raw="$(_report_front_field "$run_md" min_task_budget)"
   local until_line="until: (none)"
   if [ -n "$until_val" ]; then
     local until_epoch remaining_line="" min_secs=""
@@ -3753,7 +4413,9 @@ status_report() {
   # reset the clock on every emission, so a run wedged for six hours would read
   # "no forward progress in 15m" at every tick — the one number that separates
   # slow from wedged, structurally incapable of ever saying so.
-  local cur_head; cur_head="$(_run_head "$dir")"; cur_head="${cur_head:-unknown}"
+  local cur_head
+  cur_head="$(_run_head "$dir")"
+  cur_head="${cur_head:-unknown}"
   local -a delta_lines=()
   local progress_at="$now"
   if [ -z "$prev_at" ]; then
@@ -3786,8 +4448,10 @@ status_report() {
       # the first report written after this field existed.
       local last_prog="${prev_progress_at:-$prev_at}"
       progress_at="$last_prog"
-      local since; since=$((now - last_prog))
-      local nf="no forward progress in $(_fmt_duration "$since")"
+      local since
+      since=$((now - last_prog))
+      local nf
+      nf="no forward progress in $(_fmt_duration "$since")"
       if [ "${#inflight_lines[@]}" -gt 0 ]; then
         nf="$nf; ${inflight_lines[0]#- }"
       else
@@ -3829,8 +4493,10 @@ status_report() {
   # pattern as _write_done_sentinel/_write_supervisor_state. A TMPDIR temp +
   # `mv` across filesystems is a non-atomic copy+delete, and a watcher must
   # never observe a half-written STATUS.md or state file.
-  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local tmp; tmp="$(mktemp "$state_dir/.status-report.XXXXXX")" || die "mktemp failed"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp
+  tmp="$(mktemp "$state_dir/.status-report.XXXXXX")" || die "mktemp failed"
   {
     printf '# Auto-pilot status report — %s\n\n' "$ts"
     printf 'Run: %s   Report interval: every %s\n\n' "$label" "$(_fmt_duration "$interval")"
@@ -3860,8 +4526,14 @@ status_report() {
     printf '\n## %s\n' "$until_line"
     printf '\n## Reality check (cross-checked against git/GitHub, not RUN.md alone)\n\n'
     printf '%s\n' "${reality_lines[@]}"
-  } >"$tmp" || { rm -f "$tmp"; die "failed to render status report"; }
-  mv "$tmp" "$out" || { rm -f "$tmp"; die "failed to write status report: $out"; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to render status report"
+  }
+  mv "$tmp" "$out" || {
+    rm -f "$tmp"
+    die "failed to write status report: $out"
+  }
 
   # --- persist wake-local state (NOT committed — like supervisor-state/
   # heartbeat, this is scratch for the next report, not part of the run's
@@ -3875,8 +4547,14 @@ status_report() {
     printf '%s\n' "${cur_map[@]:-}"
     printf -- '--- branch tips ---\n'
     printf '%s\n' "${tip_map[@]:-}"
-  } >"$tmp" || { rm -f "$tmp"; die "failed to persist status-report state"; }
-  mv "$tmp" "$state_file" || { rm -f "$tmp"; die "failed to persist status-report state: $state_file"; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to persist status-report state"
+  }
+  mv "$tmp" "$state_file" || {
+    rm -f "$tmp"
+    die "failed to persist status-report state: $state_file"
+  }
 
   local reality_flag="clean"
   case "${reality_lines[0]}" in
@@ -3885,10 +4563,11 @@ status_report() {
     "- DEGRADED:"*) reality_flag="DEGRADED(gh-failures=$gh_degraded)" ;;
     *)
       if [ "$gh_degraded" -gt 0 ]; then
-        reality_flag="DIVERGENCE($(( ${#reality_lines[@]} - 1 )))+DEGRADED"
+        reality_flag="DIVERGENCE($((${#reality_lines[@]} - 1)))+DEGRADED"
       else
         reality_flag="DIVERGENCE(${#reality_lines[@]})"
-      fi ;;
+      fi
+      ;;
   esac
   echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
 }
@@ -3928,17 +4607,59 @@ launch() {
   local report_gh_set=0 report_usage_set=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dry-run) dry=1; shift ;;
-      --profile) wl+=(--profile "$2"); sm+=(--profile "$2"); shift 2 ;;
-      --settings) wl+=(--settings "$2"); sm+=(--settings "$2"); shift 2 ;;
-      --report-gh) report_gh_set=1; wl+=("$1" "$2"); shift 2 ;;
-      --report-usage-bin) report_usage_set=1; wl+=("$1" "$2"); shift 2 ;;
-      --workdir|--log|--prompt-file|--interval|--throttle|--plist-template|--claude-bin|--path|--tmpdir|--park-limit|--no-progress-limit|--pause-exempt-max|--report-every) wl+=("$1" "$2"); shift 2 ;;
-      --until) wl+=(--until "$2"); until="$2"; shift 2 ;;
-      --label) wl+=(--label "$2"); label="$2"; shift 2 ;;
-      --out-script) wl+=(--out-script "$2"); out_script="$2"; shift 2 ;;
-      --out-plist) wl+=(--out-plist "$2"); out_plist="$2"; plist="$2"; shift 2 ;;
-      --handle) handle="$2"; shift 2 ;;
+      --dry-run)
+        dry=1
+        shift
+        ;;
+      --profile)
+        wl+=(--profile "$2")
+        sm+=(--profile "$2")
+        shift 2
+        ;;
+      --settings)
+        wl+=(--settings "$2")
+        sm+=(--settings "$2")
+        shift 2
+        ;;
+      --report-gh)
+        report_gh_set=1
+        wl+=("$1" "$2")
+        shift 2
+        ;;
+      --report-usage-bin)
+        report_usage_set=1
+        wl+=("$1" "$2")
+        shift 2
+        ;;
+      --workdir | --log | --prompt-file | --interval | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
+        wl+=("$1" "$2")
+        shift 2
+        ;;
+      --until)
+        wl+=(--until "$2")
+        until="$2"
+        shift 2
+        ;;
+      --label)
+        wl+=(--label "$2")
+        label="$2"
+        shift 2
+        ;;
+      --out-script)
+        wl+=(--out-script "$2")
+        out_script="$2"
+        shift 2
+        ;;
+      --out-plist)
+        wl+=(--out-plist "$2")
+        out_plist="$2"
+        plist="$2"
+        shift 2
+        ;;
+      --handle)
+        handle="$2"
+        shift 2
+        ;;
       *) die "unknown launch argument: $1" ;;
     esac
   done
@@ -3953,7 +4674,8 @@ launch() {
   # ever call `launch --dry-run`; the wrappers they execute come from
   # `write-launch`, which keeps them hermetic.
   if [ "$report_gh_set" = 0 ]; then
-    local gh_bin; gh_bin="$(command -v gh 2>/dev/null || true)"
+    local gh_bin
+    gh_bin="$(command -v gh 2>/dev/null || true)"
     if [ -n "$gh_bin" ]; then wl+=(--report-gh "$gh_bin"); fi
   fi
   if [ "$report_usage_set" = 0 ] && [ -x "$ROOT/scripts/claude-usage.sh" ]; then
@@ -3970,19 +4692,19 @@ launch() {
   fi
 
   write_launch "${wl[@]}"
-  smoke_test "${sm[@]}"            # BEFORE detach — a dead credential stops here.
-  teardown --label "$label" >/dev/null 2>&1   # clear any stale registration; bootstrap fails on a dup label.
+  smoke_test "${sm[@]}"                     # BEFORE detach — a dead credential stops here.
+  teardown --label "$label" >/dev/null 2>&1 # clear any stale registration; bootstrap fails on a dup label.
   detach --plist "$plist"
   # `launchctl bootstrap` is asynchronous — the pid may not be reported for a beat,
   # so poll briefly rather than reading once (a single read fails closed spuriously).
   local pid="" i
   for i in 1 2 3 4 5 6 7 8 9 10; do
     pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
-    case "$pid" in ''|*[!0-9]*) pid="" ;; *) break ;; esac
+    case "$pid" in '' | *[!0-9]*) pid="" ;; *) break ;; esac
     sleep 0.2
   done
   if [ -z "$pid" ]; then
-    teardown --label "$label" >/dev/null 2>&1   # don't leave an orphaned job loaded
+    teardown --label "$label" >/dev/null 2>&1 # don't leave an orphaned job loaded
     die "detached but could not read the orchestrator PID from launchctl (job booted out)"
   fi
   record_handle --pid "$pid" --until "$until" --out "$handle"
@@ -4028,11 +4750,23 @@ verify_hash() {
 # Atomically write a result file: `code:` on line 1, then the raw output after a
 # fixed marker so verify-await can split it back out losslessly.
 _write_verify_result() {
-  local f="$1" code="$2" out="$3" d; d="$(dirname "$f")"
-  local tmp; tmp="$(mktemp "$d/.res.XXXXXX")" || return 1
-  { printf 'code: %s\n' "$code"; printf -- '--- output ---\n'; printf '%s\n' "$out"; } >"$tmp" \
-    || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  local f="$1" code="$2" out="$3" d
+  d="$(dirname "$f")"
+  local tmp
+  tmp="$(mktemp "$d/.res.XXXXXX")" || return 1
+  {
+    printf 'code: %s\n' "$code"
+    printf -- '--- output ---\n'
+    printf '%s\n' "$out"
+  } >"$tmp" \
+    || {
+      rm -f "$tmp"
+      return 1
+    }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    return 1
+  }
 }
 
 # (jailed side) Drop a verify request the un-jailed broker will pick up. The
@@ -4041,30 +4775,60 @@ verify_request() {
   local dir="" worktree="" cmd_hash="" id=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
-      --worktree) [ $# -ge 2 ] || die "missing value for --worktree"; worktree="$2"; shift 2 ;;
-      --cmd-hash) [ $# -ge 2 ] || die "missing value for --cmd-hash"; cmd_hash="$2"; shift 2 ;;
-      --id) [ $# -ge 2 ] || die "missing value for --id"; id="$2"; shift 2 ;;
+      --sentinel-dir)
+        [ $# -ge 2 ] || die "missing value for --sentinel-dir"
+        dir="$2"
+        shift 2
+        ;;
+      --worktree)
+        [ $# -ge 2 ] || die "missing value for --worktree"
+        worktree="$2"
+        shift 2
+        ;;
+      --cmd-hash)
+        [ $# -ge 2 ] || die "missing value for --cmd-hash"
+        cmd_hash="$2"
+        shift 2
+        ;;
+      --id)
+        [ $# -ge 2 ] || die "missing value for --id"
+        id="$2"
+        shift 2
+        ;;
       *) die "unknown verify-request argument: $1" ;;
     esac
   done
   [ -n "$dir" ] && [ -n "$worktree" ] && [ -n "$cmd_hash" ] \
     || die "verify-request requires --sentinel-dir, --worktree, and --cmd-hash"
-  case "$cmd_hash" in *[!0-9a-f]*|"") die "--cmd-hash must be lowercase hex (fail-closed): $cmd_hash" ;; esac
-  local wt; wt="$(canonicalize "$worktree")" || exit 2
+  case "$cmd_hash" in *[!0-9a-f]* | "") die "--cmd-hash must be lowercase hex (fail-closed): $cmd_hash" ;; esac
+  local wt
+  wt="$(canonicalize "$worktree")" || exit 2
   [ -d "$wt" ] || die "verify-request --worktree is not a directory (fail-closed): $wt"
   mkdir -p "$dir" || die "cannot create sentinel dir: $dir"
-  local d; d="$(cd "$dir" && pwd -P)" || die "cannot resolve sentinel dir: $dir"
+  local d
+  d="$(cd "$dir" && pwd -P)" || die "cannot resolve sentinel dir: $dir"
   if [ -n "$id" ]; then
     case "$id" in *[!A-Za-z0-9._-]*) die "--id must be [A-Za-z0-9._-] (fail-closed): $id" ;; esac
   else
-    local t; t="$(mktemp "$d/req.XXXXXX")" || die "mktemp failed"; id="$(basename "$t")"; rm -f "$t"
+    local t
+    t="$(mktemp "$d/req.XXXXXX")" || die "mktemp failed"
+    id="$(basename "$t")"
+    rm -f "$t"
   fi
   local reqfile="$d/$id.request" tmp
   tmp="$(mktemp "$d/.req.XXXXXX")" || die "mktemp failed"
-  { printf 'worktree: %s\n' "$wt"; printf 'cmd_hash: %s\n' "$cmd_hash"; } >"$tmp" \
-    || { rm -f "$tmp"; die "cannot write request"; }
-  mv "$tmp" "$reqfile" || { rm -f "$tmp"; die "cannot place request: $reqfile"; }
+  {
+    printf 'worktree: %s\n' "$wt"
+    printf 'cmd_hash: %s\n' "$cmd_hash"
+  } >"$tmp" \
+    || {
+      rm -f "$tmp"
+      die "cannot write request"
+    }
+  mv "$tmp" "$reqfile" || {
+    rm -f "$tmp"
+    die "cannot place request: $reqfile"
+  }
   echo "spawn-orchestrator: verify-request $id"
 }
 
@@ -4076,10 +4840,26 @@ verify_broker() {
   local dir="" cmd="" cmd_hash="" root=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
-      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; cmd="$2"; shift 2 ;;
-      --cmd-hash) [ $# -ge 2 ] || die "missing value for --cmd-hash"; cmd_hash="$2"; shift 2 ;;
-      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; root="$2"; shift 2 ;;
+      --sentinel-dir)
+        [ $# -ge 2 ] || die "missing value for --sentinel-dir"
+        dir="$2"
+        shift 2
+        ;;
+      --verify-cmd)
+        [ $# -ge 2 ] || die "missing value for --verify-cmd"
+        cmd="$2"
+        shift 2
+        ;;
+      --cmd-hash)
+        [ $# -ge 2 ] || die "missing value for --cmd-hash"
+        cmd_hash="$2"
+        shift 2
+        ;;
+      --confine-under)
+        [ $# -ge 2 ] || die "missing value for --confine-under"
+        root="$2"
+        shift 2
+        ;;
       *) die "unknown verify-broker argument: $1" ;;
     esac
   done
@@ -4087,28 +4867,33 @@ verify_broker() {
     || die "verify-broker requires --sentinel-dir, --verify-cmd, and --confine-under"
   # The broker runs its OWN pinned command; --cmd-hash (if given) must match it —
   # this catches an install/args mismatch, never authorizes a request's command.
-  local pin; pin="$(verify_hash "$cmd")"
+  local pin
+  pin="$(verify_hash "$cmd")"
   if [ -n "$cmd_hash" ] && [ "$cmd_hash" != "$pin" ]; then
     die "verify-broker --cmd-hash does not match --verify-cmd (fail-closed)"
   fi
-  local rootc; rootc="$(canonicalize "$root")" || exit 2
-  local d; d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
+  local rootc
+  rootc="$(canonicalize "$root")" || exit 2
+  local d
+  d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
 
   local req handled=0
   for req in "$d"/*.request; do
     [ -e "$req" ] || continue
     handled=$((handled + 1))
-    local id; id="$(basename "$req" .request)"
+    local id
+    id="$(basename "$req" .request)"
     local resultf="$d/$id.result"
     local wt rh
     wt="$(sed -n 's/^worktree: //p' "$req" | head -1)"
     rh="$(sed -n 's/^cmd_hash: //p' "$req" | head -1)"
-    rm -f "$req"    # claim it — a handled request never re-runs
+    rm -f "$req" # claim it — a handled request never re-runs
     if [ "$rh" != "$pin" ]; then
       _write_verify_result "$resultf" 2 "verify-broker: request cmd_hash mismatch (pinned=$pin request=$rh) — refused"
       continue
     fi
-    local wtc; wtc="$(cd "$wt" 2>/dev/null && pwd -P)"
+    local wtc
+    wtc="$(cd "$wt" 2>/dev/null && pwd -P)"
     if [ -z "$wtc" ] || { [ "$wtc" != "$rootc" ] && [ "${wtc#"$rootc"/}" = "$wtc" ]; }; then
       _write_verify_result "$resultf" 2 "verify-broker: worktree escapes --confine-under (worktree=$wt root=$rootc) — refused"
       continue
@@ -4116,7 +4901,8 @@ verify_broker() {
     # Run the PINNED command in the worktree. `bash -c "$cmd"` on a trusted, pinned
     # string is the same execution the human runs re-invoking check.sh pre-merge.
     local out code
-    out="$(cd "$wtc" && bash -c "$cmd" 2>&1)"; code=$?
+    out="$(cd "$wtc" && bash -c "$cmd" 2>&1)"
+    code=$?
     _write_verify_result "$resultf" "$code" "$out"
   done
   echo "spawn-orchestrator: verify-broker scanned $d (handled=$handled, pin=$pin)"
@@ -4128,26 +4914,45 @@ verify_await() {
   local dir="" id="" timeout=600 interval=2
   while [ $# -gt 0 ]; do
     case "$1" in
-      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; dir="$2"; shift 2 ;;
-      --id) [ $# -ge 2 ] || die "missing value for --id"; id="$2"; shift 2 ;;
-      --timeout) [ $# -ge 2 ] || die "missing value for --timeout"; timeout="$2"; shift 2 ;;
-      --interval) [ $# -ge 2 ] || die "missing value for --interval"; interval="$2"; shift 2 ;;
+      --sentinel-dir)
+        [ $# -ge 2 ] || die "missing value for --sentinel-dir"
+        dir="$2"
+        shift 2
+        ;;
+      --id)
+        [ $# -ge 2 ] || die "missing value for --id"
+        id="$2"
+        shift 2
+        ;;
+      --timeout)
+        [ $# -ge 2 ] || die "missing value for --timeout"
+        timeout="$2"
+        shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"
+        shift 2
+        ;;
       *) die "unknown verify-await argument: $1" ;;
     esac
   done
   [ -n "$dir" ] && [ -n "$id" ] || die "verify-await requires --sentinel-dir and --id"
   case "$timeout$interval" in *[!0-9]*) die "--timeout/--interval must be integers" ;; esac
   [ "$interval" -gt 0 ] || die "--interval must be > 0 (else the wait loop never advances)"
-  local d; d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
+  local d
+  d="$(cd "$dir" 2>/dev/null && pwd -P)" || die "sentinel dir not found: $dir"
   local resultf="$d/$id.result" waited=0
   while [ ! -e "$resultf" ]; do
     [ "$waited" -lt "$timeout" ] || die "verify-await timed out after ${timeout}s waiting for $id (broker down?)"
-    sleep "$interval"; waited=$((waited + interval))
+    sleep "$interval"
+    waited=$((waited + interval))
   done
-  local code; code="$(sed -n 's/^code: //p' "$resultf" | head -1)"
+  local code
+  code="$(sed -n 's/^code: //p' "$resultf" | head -1)"
   echo "spawn-orchestrator: verify-await $id code=$code"
   sed -n '/^--- output ---$/,$p' "$resultf" | sed '1d'
-  case "$code" in ''|*[!0-9]*) return 2 ;; *) return "$code" ;; esac
+  case "$code" in '' | *[!0-9]*) return 2 ;; *) return "$code" ;; esac
 }
 
 # Render an UN-JAILED broker launch script + its launchd plist. The verify command
@@ -4157,23 +4962,75 @@ verify_await() {
 # the orchestrator's jail to reach a working execve.
 write_verify_broker() {
   local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
-        self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
-        out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT"
+    self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
+    out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --sentinel-dir) [ $# -ge 2 ] || die "missing value for --sentinel-dir"; sentinel="$2"; shift 2 ;;
-      --verify-cmd) [ $# -ge 2 ] || die "missing value for --verify-cmd"; verify_cmd="$2"; shift 2 ;;
-      --confine-under) [ $# -ge 2 ] || die "missing value for --confine-under"; root="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --workdir) [ $# -ge 2 ] || die "missing value for --workdir"; workdir="$2"; shift 2 ;;
-      --log) [ $# -ge 2 ] || die "missing value for --log"; log="$2"; shift 2 ;;
-      --path) [ $# -ge 2 ] || die "missing value for --path"; path="$2"; shift 2 ;;
-      --self) [ $# -ge 2 ] || die "missing value for --self"; self="$2"; shift 2 ;;
-      --interval) [ $# -ge 2 ] || die "missing value for --interval"; interval="$2"; shift 2 ;;
-      --throttle) [ $# -ge 2 ] || die "missing value for --throttle"; throttle="$2"; shift 2 ;;
-      --out-script) [ $# -ge 2 ] || die "missing value for --out-script"; out_script="$2"; shift 2 ;;
-      --out-plist) [ $# -ge 2 ] || die "missing value for --out-plist"; out_plist="$2"; shift 2 ;;
-      --plist-template) [ $# -ge 2 ] || die "missing value for --plist-template"; plist_template="$2"; shift 2 ;;
+      --sentinel-dir)
+        [ $# -ge 2 ] || die "missing value for --sentinel-dir"
+        sentinel="$2"
+        shift 2
+        ;;
+      --verify-cmd)
+        [ $# -ge 2 ] || die "missing value for --verify-cmd"
+        verify_cmd="$2"
+        shift 2
+        ;;
+      --confine-under)
+        [ $# -ge 2 ] || die "missing value for --confine-under"
+        root="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --workdir)
+        [ $# -ge 2 ] || die "missing value for --workdir"
+        workdir="$2"
+        shift 2
+        ;;
+      --log)
+        [ $# -ge 2 ] || die "missing value for --log"
+        log="$2"
+        shift 2
+        ;;
+      --path)
+        [ $# -ge 2 ] || die "missing value for --path"
+        path="$2"
+        shift 2
+        ;;
+      --self)
+        [ $# -ge 2 ] || die "missing value for --self"
+        self="$2"
+        shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"
+        shift 2
+        ;;
+      --throttle)
+        [ $# -ge 2 ] || die "missing value for --throttle"
+        throttle="$2"
+        shift 2
+        ;;
+      --out-script)
+        [ $# -ge 2 ] || die "missing value for --out-script"
+        out_script="$2"
+        shift 2
+        ;;
+      --out-plist)
+        [ $# -ge 2 ] || die "missing value for --out-plist"
+        out_plist="$2"
+        shift 2
+        ;;
+      --plist-template)
+        [ $# -ge 2 ] || die "missing value for --plist-template"
+        plist_template="$2"
+        shift 2
+        ;;
       *) die "unknown write-verify-broker argument: $1" ;;
     esac
   done
@@ -4189,8 +5046,10 @@ write_verify_broker() {
   [ -f "$plist_template" ] || die "plist template not found: $plist_template"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
 
-  local pin; pin="$(verify_hash "$verify_cmd")"
-  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-launch.XXXXXX")" || die "mktemp failed"
+  local pin
+  pin="$(verify_hash "$verify_cmd")"
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-launch.XXXXXX")" || die "mktemp failed"
   {
     printf '#!/usr/bin/env bash\n'
     printf '# Auto-pilot verify BROKER (generated — do not edit). Runs UN-JAILED so\n'
@@ -4206,14 +5065,26 @@ write_verify_broker() {
     printf '  --cmd-hash %q \\\n' "$pin"
     printf '  --confine-under %q \\\n' "$root"
     printf '  >>%q 2>&1\n' "$log"
-  } >"$tmp" || { rm -f "$tmp"; die "failed to write broker launch script"; }
-  mv "$tmp" "$out_script" || { rm -f "$tmp"; die "failed to write broker launch script: $out_script"; }
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to write broker launch script"
+  }
+  mv "$tmp" "$out_script" || {
+    rm -f "$tmp"
+    die "failed to write broker launch script: $out_script"
+  }
   chmod +x "$out_script"
 
   tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-plist.XXXXXX")" || die "mktemp failed"
   render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
-    || { rm -f "$tmp"; die "failed to render broker plist"; }
-  mv "$tmp" "$out_plist" || { rm -f "$tmp"; die "failed to write broker plist: $out_plist"; }
+    || {
+      rm -f "$tmp"
+      die "failed to render broker plist"
+    }
+  mv "$tmp" "$out_plist" || {
+    rm -f "$tmp"
+    die "failed to write broker plist: $out_plist"
+  }
   echo "spawn-orchestrator: verify-broker written $out_script $out_plist (pin $pin)"
 }
 
@@ -4228,9 +5099,10 @@ _norm_ws() { printf '%s' "$1" | awk '{$1=$1; print}'; }
 # done-sentinel against RUN.md's `exit_reason_at` — a sentinel older than the live
 # declaration is a leftover, not the run's current verdict.
 _file_mtime() {
-  local m; m="$(stat -f %m "$1" 2>/dev/null)" || m=""
-  case "$m" in ''|*[!0-9]*) m="$(stat -c %Y "$1" 2>/dev/null)" || m="" ;; esac
-  case "$m" in ''|*[!0-9]*) m="" ;; esac
+  local m
+  m="$(stat -f %m "$1" 2>/dev/null)" || m=""
+  case "$m" in '' | *[!0-9]*) m="$(stat -c %Y "$1" 2>/dev/null)" || m="" ;; esac
+  case "$m" in '' | *[!0-9]*) m="" ;; esac
   printf '%s' "$m"
 }
 
@@ -4243,7 +5115,7 @@ _front_field() {
   local key="$1"
   printf '%s\n' "$front" | grep -E "^${key}:" | head -1 \
     | sed -e "s/^${key}: *//" -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' \
-          -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
+      -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/'
 }
 
 # The stale-orchestrator check (launch-runtime.md "Orphan / stale detection"):
@@ -4257,9 +5129,13 @@ _front_field() {
 # drift apart on the one question a destructive prune depends on.
 _pid_state() {
   local pid="$1" started="$2"
-  [ -n "$pid" ] || { printf 'none'; return 0; }
+  [ -n "$pid" ] || {
+    printf 'none'
+    return 0
+  }
   if kill -0 "$pid" 2>/dev/null; then
-    local actual; actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
+    local actual
+    actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
     if [ -n "$actual" ] && [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
       printf 'live'
     else
@@ -4275,15 +5151,27 @@ status() {
   local label="" dir="$PWD" ceiling="$DEFAULT_TASK_CEILING"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --task-ceiling) [ $# -ge 2 ] || die "missing value for --task-ceiling"; ceiling="$2"; shift 2 ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --task-ceiling)
+        [ $# -ge 2 ] || die "missing value for --task-ceiling"
+        ceiling="$2"
+        shift 2
+        ;;
       *) die "unknown status argument: $1" ;;
     esac
   done
   [ -n "$label" ] || die "status requires --label"
   case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
-  case "$ceiling" in ''|*[!0-9]*) die "--task-ceiling must be a positive integer (seconds): $ceiling" ;; esac
+  case "$ceiling" in '' | *[!0-9]*) die "--task-ceiling must be a positive integer (seconds): $ceiling" ;; esac
   [ "$ceiling" -ge 1 ] || die "--task-ceiling must be a positive integer (seconds): $ceiling"
 
   local run_md="$dir/.auto-pilot/RUN.md"
@@ -4294,20 +5182,23 @@ status() {
 
   # Front matter is the block between the first two `---` lines. No YAML tool
   # required — plain awk/sed line matching.
-  local front; front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
 
   local run_status until_val orch_pid orch_started
-  run_status="$(_front_field status)"; [ -n "$run_status" ] || run_status="unknown"
+  run_status="$(_front_field status)"
+  [ -n "$run_status" ] || run_status="unknown"
   until_val="$(_front_field until)"
   orch_pid="$(_front_field orchestrator_pid)"
   orch_started="$(_front_field orchestrator_started_at)"
 
   # Per-task phase table: every `| ... |` line after the front matter.
-  local table; table="$(awk '/^\|/{print}' "$run_md")"
+  local table
+  table="$(awk '/^\|/{print}' "$run_md")"
   local task_rows task_count
   task_rows="$(printf '%s\n' "$table" | grep -Ev '^\| *:?-+:? *(\| *:?-+:? *)*\|?$' || true)"
   if [ -n "$task_rows" ]; then
-    task_count=$(( $(printf '%s\n' "$task_rows" | wc -l | tr -d ' ') - 1 )) # minus header row
+    task_count=$(($(printf '%s\n' "$task_rows" | wc -l | tr -d ' ') - 1)) # minus header row
     [ "$task_count" -ge 0 ] || task_count=0
   else
     task_count=0
@@ -4323,7 +5214,8 @@ status() {
     last_event="$(printf '%s' "$last_event" | cut -c1-240)"
   fi
 
-  local pid_state; pid_state="$(_pid_state "$orch_pid" "$orch_started")"
+  local pid_state
+  pid_state="$(_pid_state "$orch_pid" "$orch_started")"
 
   # Done-sentinel (written by `teardown --done-sentinel` / `exit-reason` on a
   # terminal reason) is the single source of "the run stopped for good" — it can
@@ -4354,7 +5246,7 @@ status() {
 
   if [ -n "$sentinel_reason" ]; then
     if [ -n "$exit_r" ] && [ -n "$declared_at" ] && [ -n "$sentinel_at" ] \
-       && [ "$declared_at" -gt "$sentinel_at" ]; then
+      && [ "$declared_at" -gt "$sentinel_at" ]; then
       sentinel_done="stale"
     else
       exit_r="$sentinel_reason"
@@ -4388,9 +5280,9 @@ status() {
     hb_note="$(sed -n 's/^note: //p' "$hb" | head -1)"
   fi
   case "$hb_at" in
-    ''|*[!0-9]*) hb_line="(no heartbeat file — a pre-heartbeat run, or the orchestrator never started a loop iteration)" ;;
+    '' | *[!0-9]*) hb_line="(no heartbeat file — a pre-heartbeat run, or the orchestrator never started a loop iteration)" ;;
     *)
-      hb_age=$(( $(date +%s) - hb_at ))
+      hb_age=$(($(date +%s) - hb_at))
       [ "$hb_age" -ge 0 ] || hb_age=0
       if [ "$hb_age" -gt "$ceiling" ]; then
         hb_state="stale"
@@ -4408,7 +5300,7 @@ status() {
   local alarm_file="$dir/.auto-pilot/$ALARM_SENTINEL_NAME" alarm_count=0 alarm_display="none"
   if [ -f "$alarm_file" ]; then
     alarm_count="$(grep -c '^condition: ' "$alarm_file" 2>/dev/null | tr -d ' ')"
-    case "$alarm_count" in ''|*[!0-9]*) alarm_count=0 ;; esac
+    case "$alarm_count" in '' | *[!0-9]*) alarm_count=0 ;; esac
     alarm_display="$(grep '^condition: ' "$alarm_file" 2>/dev/null | sed 's/^condition: //' | tr '\n' ',' | sed -e 's/,$//' -e 's/,/, /g')"
     [ -n "$alarm_display" ] || alarm_display="unreadable"
   fi
@@ -4458,10 +5350,25 @@ assert_run_head() {
   local dir="" run_id="" questions="" ignore_untracked_run_state=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --run-id) [ $# -ge 2 ] || die "missing value for --run-id"; run_id="$2"; shift 2 ;;
-      --questions) [ $# -ge 2 ] || die "missing value for --questions"; questions="$2"; shift 2 ;;
-      --ignore-untracked-run-state) ignore_untracked_run_state=1; shift ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --run-id)
+        [ $# -ge 2 ] || die "missing value for --run-id"
+        run_id="$2"
+        shift 2
+        ;;
+      --questions)
+        [ $# -ge 2 ] || die "missing value for --questions"
+        questions="$2"
+        shift 2
+        ;;
+      --ignore-untracked-run-state)
+        ignore_untracked_run_state=1
+        shift
+        ;;
       *) die "unknown assert-run-head argument: $1" ;;
     esac
   done
@@ -4514,7 +5421,8 @@ assert_run_head() {
     case "$questions" in /*) ;; *) questions="$dir/$questions" ;; esac
     # Number from the MAX existing index, not the count — QUESTIONS.md is not
     # guaranteed contiguously numbered from Q1 (other writers append too).
-    local n; n="$(grep -oE '^## Q[0-9]+' "$questions" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
+    local n
+    n="$(grep -oE '^## Q[0-9]+' "$questions" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
     [ -n "$n" ] || n=0
     local qn=$((n + 1))
     {
@@ -4593,7 +5501,7 @@ assert_run_head() {
 # and the teardown.
 _doctor_halt() {
   local dir="$1" label="$2" reason="$3"
-  ( alarm_request --dir "$dir" --condition invariant --reason "doctor: $reason" ) \
+  (alarm_request --dir "$dir" --condition invariant --reason "doctor: $reason") \
     || echo "spawn-orchestrator: doctor: could not file the alarm-request (the halt continues; the supervisor's systemic scan is the remaining channel)" >&2
   _supervisor_halt --dir "$dir" ${label:+--label "$label"} --condition "" --reason "$reason"
 }
@@ -4603,8 +5511,10 @@ _doctor_halt() {
 # if the task isn't found — a doctor repair silently rewriting the wrong row
 # (or no row at all) must never happen.
 _set_task_phase() {
-  local f="$1" task="$2" new_phase="$3" d; d="$(dirname "$f")"
-  local tmp; tmp="$(mktemp "$d/.taskphase.XXXXXX")" || die "mktemp failed"
+  local f="$1" task="$2" new_phase="$3" d
+  d="$(dirname "$f")"
+  local tmp
+  tmp="$(mktemp "$d/.taskphase.XXXXXX")" || die "mktemp failed"
   awk -v task="$task" -v phase="$new_phase" 'BEGIN { FS = OFS = "|" }
     /^\|/ {
       t = $2; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -4617,7 +5527,10 @@ _set_task_phase() {
     rm -f "$tmp"
     die "doctor: task row not found (fail-closed): $task in $f"
   fi
-  mv "$tmp" "$f" || { rm -f "$tmp"; die "failed to write $f"; }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write $f"
+  }
 }
 
 # Append a QUESTIONS.md entry in run-state.md's format, numbering from the MAX
@@ -4627,7 +5540,8 @@ _set_task_phase() {
 _doctor_questions_entry() {
   local qfile="$1" title="$2" options="$3" call="$4" why="$5" reversible="$6"
   [ -n "$qfile" ] || return 0
-  local n; n="$(grep -oE '^## Q[0-9]+' "$qfile" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
+  local n
+  n="$(grep -oE '^## Q[0-9]+' "$qfile" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1)"
   [ -n "$n" ] || n=0
   local qn=$((n + 1))
   {
@@ -4644,30 +5558,62 @@ _doctor_questions_entry() {
 # gh field readers (mirrors restack's `gh pr view <n> --json X --jq .X`
 # pattern — one call per field, so gh does the JSON extraction and neither
 # side depends on `jq` being installed).
-_doctor_pr_state()  { "$1" pr view "$2" --json state   --jq .state   2>/dev/null; }
-_doctor_pr_draft()  { "$1" pr view "$2" --json isDraft --jq .isDraft 2>/dev/null; }
-_doctor_pr_labels() { "$1" pr view "$2" --json labels  --jq '[.labels[].name] | join(",")' 2>/dev/null; }
+_doctor_pr_state() { "$1" pr view "$2" --json state --jq .state 2>/dev/null; }
+_doctor_pr_draft() { "$1" pr view "$2" --json isDraft --jq .isDraft 2>/dev/null; }
+_doctor_pr_labels() { "$1" pr view "$2" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null; }
 
 doctor() {
   local dir="" run_id="" label="" questions="" handler="repo-pr" gh_bin="" limit="3" context="loop"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir) [ $# -ge 2 ] || die "missing value for --dir"; dir="$2"; shift 2 ;;
-      --run-id) [ $# -ge 2 ] || die "missing value for --run-id"; run_id="$2"; shift 2 ;;
-      --label) [ $# -ge 2 ] || die "missing value for --label"; label="$2"; shift 2 ;;
-      --questions) [ $# -ge 2 ] || die "missing value for --questions"; questions="$2"; shift 2 ;;
-      --handler) [ $# -ge 2 ] || die "missing value for --handler"; handler="$2"; shift 2 ;;
-      --gh) [ $# -ge 2 ] || die "missing value for --gh"; gh_bin="$2"; shift 2 ;;
-      --no-progress-limit) [ $# -ge 2 ] || die "missing value for --no-progress-limit"; limit="$2"; shift 2 ;;
-      --context) [ $# -ge 2 ] || die "missing value for --context"; context="$2"; shift 2 ;;
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --run-id)
+        [ $# -ge 2 ] || die "missing value for --run-id"
+        run_id="$2"
+        shift 2
+        ;;
+      --label)
+        [ $# -ge 2 ] || die "missing value for --label"
+        label="$2"
+        shift 2
+        ;;
+      --questions)
+        [ $# -ge 2 ] || die "missing value for --questions"
+        questions="$2"
+        shift 2
+        ;;
+      --handler)
+        [ $# -ge 2 ] || die "missing value for --handler"
+        handler="$2"
+        shift 2
+        ;;
+      --gh)
+        [ $# -ge 2 ] || die "missing value for --gh"
+        gh_bin="$2"
+        shift 2
+        ;;
+      --no-progress-limit)
+        [ $# -ge 2 ] || die "missing value for --no-progress-limit"
+        limit="$2"
+        shift 2
+        ;;
+      --context)
+        [ $# -ge 2 ] || die "missing value for --context"
+        context="$2"
+        shift 2
+        ;;
       *) die "unknown doctor argument: $1" ;;
     esac
   done
   [ -n "$dir" ] && [ -n "$run_id" ] || die "doctor requires --dir and --run-id"
   case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
-  case "$handler" in repo-pr|linear) ;; *) die "unknown --handler (fail-closed): $handler" ;; esac
-  case "$context" in loop|resume) ;; *) die "unknown --context (fail-closed): $context" ;; esac
-  case "$limit" in *[!0-9]*|"") die "--no-progress-limit must be a positive integer: $limit" ;; esac
+  case "$handler" in repo-pr | linear) ;; *) die "unknown --handler (fail-closed): $handler" ;; esac
+  case "$context" in loop | resume) ;; *) die "unknown --context (fail-closed): $context" ;; esac
+  case "$limit" in *[!0-9]* | "") die "--no-progress-limit must be a positive integer: $limit" ;; esac
   [ "$limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
   if [ -n "$questions" ]; then
     case "$questions" in /*) ;; *) questions="$dir/$questions" ;; esac
@@ -4699,12 +5645,21 @@ doctor() {
     fi
     local total=7 summary
     summary="spawn-orchestrator: doctor: $total invariants — ok=$n_ok repaired=$n_repaired"
-    [ "${#repaired_notes[@]}" -gt 0 ] && summary+=" ($(IFS=', '; printf '%s' "${repaired_notes[*]}"))"
+    [ "${#repaired_notes[@]}" -gt 0 ] && summary+=" ($(
+      IFS=', '
+      printf '%s' "${repaired_notes[*]}"
+    ))"
     summary+=" parked=$n_parked"
-    [ "${#parked_notes[@]}" -gt 0 ] && summary+=" ($(IFS=', '; printf '%s' "${parked_notes[*]}"))"
+    [ "${#parked_notes[@]}" -gt 0 ] && summary+=" ($(
+      IFS=', '
+      printf '%s' "${parked_notes[*]}"
+    ))"
     summary+=" halt=$n_halt"
     summary+=" skipped=$n_skipped"
-    [ "${#skipped_notes[@]}" -gt 0 ] && summary+=" ($(IFS=', '; printf '%s' "${skipped_notes[*]}"))"
+    [ "${#skipped_notes[@]}" -gt 0 ] && summary+=" ($(
+      IFS=', '
+      printf '%s' "${skipped_notes[*]}"
+    ))"
     echo "$summary"
   }
 
@@ -4739,8 +5694,8 @@ doctor() {
   local i1_discarded=0 i1_parked_on
   i1_parked_on="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   if [ "$i1_parked_on" != "$branch" ] \
-     && [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] \
-     && [ -z "$(git -C "$dir" status --porcelain -- . ":(exclude).auto-pilot/" 2>/dev/null)" ]; then
+    && [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] \
+    && [ -z "$(git -C "$dir" status --porcelain -- . ":(exclude).auto-pilot/" 2>/dev/null)" ]; then
     if [ -n "$(git -C "$dir" status --porcelain -- .auto-pilot/ 2>/dev/null | grep -v '^??')" ]; then
       git -C "$dir" reset -q -- .auto-pilot/ 2>/dev/null
       git -C "$dir" checkout -q -- .auto-pilot/ 2>/dev/null
@@ -4748,13 +5703,16 @@ doctor() {
     i1_discarded=1
   fi
   local i1_out i1_rc
-  i1_out="$(assert_run_head --dir "$dir" --run-id "$run_id" --ignore-untracked-run-state ${questions:+--questions "$questions"} 2>&1)"; i1_rc=$?
+  i1_out="$(assert_run_head --dir "$dir" --run-id "$run_id" --ignore-untracked-run-state ${questions:+--questions "$questions"} 2>&1)"
+  i1_rc=$?
   [ "$i1_rc" -eq 0 ] || die "doctor: invariant 1 (HEAD) could not be repaired: $i1_out"
   if [ "$i1_discarded" -eq 1 ]; then
-    n_repaired=$((n_repaired + 1)); repaired_notes+=("I1: discarded stale .auto-pilot/ dirt on $i1_parked_on, HEAD restored")
+    n_repaired=$((n_repaired + 1))
+    repaired_notes+=("I1: discarded stale .auto-pilot/ dirt on $i1_parked_on, HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\` with stale \`.auto-pilot/\` content; tracked changes there were discarded (untracked run logs were left in place — never \`git clean\`ed) and HEAD was restored (see QUESTIONS.md for the deviation record).")
   elif printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
-    n_repaired=$((n_repaired + 1)); repaired_notes+=("I1: HEAD restored")
+    n_repaired=$((n_repaired + 1))
+    repaired_notes+=("I1: HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\`; restored (see QUESTIONS.md for the deviation record).")
   else
     n_ok=$((n_ok + 1))
@@ -4772,10 +5730,11 @@ doctor() {
   report_branch="$(git -C "$dir" show "$branch:.auto-pilot/REPORT.md" 2>/dev/null)"
   local branch_ok=1 fm_run_id="" fm_status=""
   if [ -z "$run_branch" ] || ! git -C "$dir" cat-file -e "$branch:.auto-pilot/QUESTIONS.md" 2>/dev/null \
-     || ! git -C "$dir" cat-file -e "$branch:.auto-pilot/REPORT.md" 2>/dev/null; then
+    || ! git -C "$dir" cat-file -e "$branch:.auto-pilot/REPORT.md" 2>/dev/null; then
     branch_ok=0
   else
-    local front2; front2="$(printf '%s\n' "$run_branch" | awk '/^---$/{c++; next} c==1{print}')"
+    local front2
+    front2="$(printf '%s\n' "$run_branch" | awk '/^---$/{c++; next} c==1{print}')"
     fm_run_id="$(printf '%s\n' "$front2" | grep -E '^run_id:' | head -1 | sed -e 's/^run_id: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
     fm_status="$(printf '%s\n' "$front2" | grep -E '^status:' | head -1 | sed -e 's/^status: *//' -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//')"
     { [ -n "$fm_run_id" ] && [ -n "$fm_status" ]; } || branch_ok=0
@@ -4802,7 +5761,8 @@ doctor() {
   if [ "$wt_ok" -eq 0 ]; then
     git -C "$dir" checkout "$branch" -- .auto-pilot/ 2>/dev/null \
       || die "doctor: invariant 2 repair failed — could not restore .auto-pilot/ from $branch (fail-closed)"
-    n_repaired=$((n_repaired + 1)); repaired_notes+=("I2: RUN.md restored from branch")
+    n_repaired=$((n_repaired + 1))
+    repaired_notes+=("I2: RUN.md restored from branch")
     report_bullets+=("- **I2 repaired** — RUN.md was missing/unparseable in the run worktree though it was readable on \`$branch\`; restored \`.auto-pilot/\` from the branch.")
   else
     n_ok=$((n_ok + 1))
@@ -4818,7 +5778,7 @@ doctor() {
   # both — state, isDraft, labels).
   local need_gh=0 i
   for ((i = 0; i < n_rows; i++)); do
-    case "${_RS_PHASE[$i]}" in pr-open|in-review|iterating|handed-off) need_gh=1 ;; esac
+    case "${_RS_PHASE[$i]}" in pr-open | in-review | iterating | handed-off) need_gh=1 ;; esac
   done
   if [ "$need_gh" -eq 1 ]; then
     [ -n "$gh_bin" ] || gh_bin="$(command -v gh 2>/dev/null)" || true
@@ -4831,10 +5791,11 @@ doctor() {
   local i3_status="ok" i4_status="ok" i3_skipped=0
   for ((i = 0; i < n_rows; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" pr="${_RS_PR[$i]}"
-    case "$phase" in pr-open|in-review|iterating|handed-off) ;; *) continue ;; esac
+    case "$phase" in pr-open | in-review | iterating | handed-off) ;; *) continue ;; esac
     if _restack_empty "$pr"; then
       _set_task_phase "$run_md" "$task" "parked"
-      i3_status="parked"; parked_notes+=("I3: $task")
+      i3_status="parked"
+      parked_notes+=("I3: $task")
       report_bullets+=("- **I3 parked — $task**: phase was \`$phase\` with no PR number recorded — a human must look.")
       _doctor_questions_entry "$questions" "$task — phase $phase with no recorded PR" \
         "park the task | leave it as-is" "parked" \
@@ -4846,10 +5807,12 @@ doctor() {
     # own markdown-link form (`[#188](https://…/pull/188)`) — `_pr_number` is
     # the one shared parser for all three; a cell that still doesn't parse is
     # treated the same as "no PR recorded" rather than handed to gh verbatim.
-    local pr_num; pr_num="$(_pr_number "$pr")"
+    local pr_num
+    pr_num="$(_pr_number "$pr")"
     if [ -z "$pr_num" ]; then
       _set_task_phase "$run_md" "$task" "parked"
-      i3_status="parked"; parked_notes+=("I3: $task")
+      i3_status="parked"
+      parked_notes+=("I3: $task")
       report_bullets+=("- **I3 parked — $task**: phase was \`$phase\` with an unparseable PR cell (\`$pr\`) — a human must look.")
       _doctor_questions_entry "$questions" "$task — phase $phase with an unparseable PR cell" \
         "park the task | leave it as-is" "parked" \
@@ -4858,7 +5821,8 @@ doctor() {
       continue
     fi
     local state state_rc
-    state="$(_doctor_pr_state "$gh_bin" "$pr_num")"; state_rc=$?
+    state="$(_doctor_pr_state "$gh_bin" "$pr_num")"
+    state_rc=$?
     if [ "$state_rc" -ne 0 ]; then
       # D2: a non-zero gh rc (401, rate limit, network blip) is UNDETERMINED,
       # never a positive signal the PR is gone. Parking on it is the exact
@@ -4866,7 +5830,8 @@ doctor() {
       # the same 401 finding #22 already burned us on once. Leave the phase
       # alone; a human, or the next doctor pass once gh recovers, gets a real
       # signal to act on instead of a guess.
-      i3_skipped=1; skipped_notes+=("I3: $task (gh unreadable)")
+      i3_skipped=1
+      skipped_notes+=("I3: $task (gh unreadable)")
       echo "spawn-orchestrator: doctor I3: $task — gh unreadable (exit $state_rc), skipping (undetermined; never park on a transient gh failure)"
       continue
     fi
@@ -4877,9 +5842,10 @@ doctor() {
         # NOT a violation. Doctor must not "repair" a merge.
         continue
         ;;
-      CLOSED|"")
+      CLOSED | "")
         _set_task_phase "$run_md" "$task" "parked"
-        i3_status="parked"; parked_notes+=("I3: $task")
+        i3_status="parked"
+        parked_notes+=("I3: $task")
         local why="PR #$pr_num is CLOSED (unmerged)"
         [ -z "$state" ] && why="PR #$pr_num does not exist or is unreadable"
         report_bullets+=("- **I3 parked — $task**: $why — the delivery's PR is gone; a human must look.")
@@ -4891,7 +5857,8 @@ doctor() {
         ;;
       *)
         _set_task_phase "$run_md" "$task" "parked"
-        i3_status="parked"; parked_notes+=("I3: $task")
+        i3_status="parked"
+        parked_notes+=("I3: $task")
         report_bullets+=("- **I3 parked — $task**: PR #$pr_num has unexpected state '$state' — a human must look.")
         continue
         ;;
@@ -4917,7 +5884,8 @@ doctor() {
           fixes="label task-claim->task-loop"
         else
           echo "spawn-orchestrator: doctor I4: $task — \`gh pr edit\` FAILED for PR #$pr_num (label left at task-claim, not reported as a repair)"
-        fi ;;
+        fi
+        ;;
       esac
       if [ "$draft" = "true" ]; then
         if "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1; then
@@ -4927,7 +5895,8 @@ doctor() {
         fi
       fi
       if [ -n "$fixes" ]; then
-        i4_status="repaired"; repaired_notes+=("I4: $task PR #$pr_num")
+        i4_status="repaired"
+        repaired_notes+=("I4: $task PR #$pr_num")
         report_bullets+=("- **I4 repaired — $task** (PR #$pr_num): $fixes — a G6/G7 crash gap left the repo-pr review signal stale.")
         _doctor_questions_entry "$questions" "$task — PR #$pr_num missing its repo-pr review signal" \
           "apply the missing label/ready swap | leave it as-is" "applied ($fixes)" \
@@ -4981,20 +5950,22 @@ doctor() {
   # unreadable): same D2 posture as I3/I6, an undetermined signal never
   # green-lights a destructive action. A recycled pid (`mismatch`) means the
   # recorded process is gone, which IS provably dead.
-  local run_root="$(dirname "$dir")" workers_root
+  local run_root workers_root
+  run_root="$(dirname "$dir")"
   workers_root="$run_root/workers"
   if [ -d "$workers_root" ]; then
     local front orch_state orch_dead=0
     front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
     orch_state="$(_pid_state "$(_front_field orchestrator_pid)" "$(_front_field orchestrator_started_at)")"
-    case "$orch_state" in dead|mismatch) orch_dead=1 ;; esac
+    case "$orch_state" in dead | mismatch) orch_dead=1 ;; esac
     local wt_line wt any_pruned=0 i5_skipped=0
     while IFS= read -r wt_line; do
       case "$wt_line" in "worktree "*) wt="${wt_line#worktree }" ;; *) continue ;; esac
       case "$wt" in "$workers_root"/*) ;; *) continue ;; esac
       [ -d "$wt" ] || continue
       local wtbranch wtbranch_rc matched=0 matched_phase="" matched_pr="" matched_base="" j
-      wtbranch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"; wtbranch_rc=$?
+      wtbranch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      wtbranch_rc=$?
       local undetermined=0
       if [ "$wtbranch_rc" -ne 0 ]; then
         # Could not even read the worktree's current branch — its git state is
@@ -5004,7 +5975,10 @@ doctor() {
       else
         for ((j = 0; j < n_rows; j++)); do
           if [ "${_RS_BRANCH[$j]}" = "$wtbranch" ]; then
-            matched=1; matched_phase="${_RS_PHASE[$j]}"; matched_pr="${_RS_PR[$j]}"; matched_base="${_RS_BASE[$j]}"
+            matched=1
+            matched_phase="${_RS_PHASE[$j]}"
+            matched_pr="${_RS_PR[$j]}"
+            matched_base="${_RS_BASE[$j]}"
             break
           fi
         done
@@ -5018,30 +5992,35 @@ doctor() {
         # orchestrator being provably dead tells the two apart.
         if [ "$orch_dead" -eq 1 ]; then safe_phase=1; else unmatched_live=1; fi
       else
-        case "$matched_phase" in parked|handed-off) safe_phase=1 ;; esac
+        case "$matched_phase" in parked | handed-off) safe_phase=1 ;; esac
       fi
 
       local dirty dirty_rc local_tip local_tip_rc pushed=0 clean_ok=0
-      dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"; dirty_rc=$?
+      dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
+      dirty_rc=$?
       if [ "$dirty_rc" -ne 0 ]; then
         # Could not determine cleanliness at all — not the same as "clean".
         undetermined=1
       elif [ -z "$dirty" ]; then
         clean_ok=1
       fi
-      local_tip="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"; local_tip_rc=$?
+      local_tip="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+      local_tip_rc=$?
       if [ "$local_tip_rc" -ne 0 ]; then
         # Could not read HEAD at all — not the same as "no commits".
         undetermined=1
       elif [ -z "$local_tip" ]; then
-        pushed=1   # no commits at all — a truly dead dispatch
+        pushed=1 # no commits at all — a truly dead dispatch
       else
-        local remote_tip; remote_tip="$(git -C "$wt" rev-parse "origin/$wtbranch" 2>/dev/null)"
+        local remote_tip
+        remote_tip="$(git -C "$wt" rev-parse "origin/$wtbranch" 2>/dev/null)"
         [ -n "$remote_tip" ] && [ "$local_tip" = "$remote_tip" ] && pushed=1
         if [ "$pushed" -ne 1 ]; then
           # OR: no commits beyond its base — nothing would be lost by removal.
-          local base_ref="$matched_base"; [ -n "$base_ref" ] || base_ref="$base_branch"
-          local ahead; ahead="$(git -C "$wt" rev-list --count "origin/$base_ref..$wtbranch" 2>/dev/null)"
+          local base_ref="$matched_base"
+          [ -n "$base_ref" ] || base_ref="$base_branch"
+          local ahead
+          ahead="$(git -C "$wt" rev-list --count "origin/$base_ref..$wtbranch" 2>/dev/null)"
           [ "$ahead" = "0" ] && pushed=1
         fi
       fi
@@ -5059,14 +6038,15 @@ doctor() {
         [ -n "$gh_bin" ] && wpr_num="$(_pr_number "$matched_pr")"
         if [ -n "$gh_bin" ] && [ -n "$wpr_num" ]; then
           local wpr_state wpr_rc
-          wpr_state="$(_doctor_pr_state "$gh_bin" "$wpr_num")"; wpr_rc=$?
+          wpr_state="$(_doctor_pr_state "$gh_bin" "$wpr_num")"
+          wpr_rc=$?
           if [ "$wpr_rc" -eq 0 ]; then
             [ "$wpr_state" = "OPEN" ] && no_open_pr=0
           else
-            no_open_pr=0   # unreadable — fail closed (do not prune)
+            no_open_pr=0 # unreadable — fail closed (do not prune)
           fi
         else
-          no_open_pr=0   # gh unavailable/unparseable PR cell — fail closed
+          no_open_pr=0 # gh unavailable/unparseable PR cell — fail closed
         fi
       fi
 
@@ -5127,15 +6107,18 @@ doctor() {
   local i6_status="ok" i6_skipped=0
   for ((i = 0; i < n_rows; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" base="${_RS_BASE[$i]}" bsha="${_RS_BASE_SHA[$i]}"
-    [ "$base" != "$base_branch" ] || continue     # independent task — nothing frozen
-    _restack_empty "$bsha" && continue            # no frozen base yet — nothing to compare
-    [ "$phase" != "handed-off" ] || continue       # terminal success — already delivered
+    [ "$base" != "$base_branch" ] || continue # independent task — nothing frozen
+    _restack_empty "$bsha" && continue        # no frozen base yet — nothing to compare
+    [ "$phase" != "handed-off" ] || continue  # terminal success — already delivered
 
     local pidx=-1 j
     for ((j = 0; j < n_rows; j++)); do
-      if [ "${_RS_BRANCH[$j]}" = "$base" ]; then pidx=$j; break; fi
+      if [ "${_RS_BRANCH[$j]}" = "$base" ]; then
+        pidx=$j
+        break
+      fi
     done
-    [ "$pidx" -ge 0 ] || continue   # parent not tracked in this run
+    [ "$pidx" -ge 0 ] || continue # parent not tracked in this run
 
     local parent_pr="${_RS_PR[$pidx]}" parent_merged=0 parent_unreadable=0
     if ! _restack_empty "$parent_pr"; then
@@ -5144,7 +6127,8 @@ doctor() {
       [ -n "$gh_bin" ] && ppr_num="$(_pr_number "$parent_pr")"
       if [ -n "$gh_bin" ] && [ -n "$ppr_num" ]; then
         local pstate pstate_rc
-        pstate="$(_doctor_pr_state "$gh_bin" "$ppr_num")"; pstate_rc=$?
+        pstate="$(_doctor_pr_state "$gh_bin" "$ppr_num")"
+        pstate_rc=$?
         if [ "$pstate_rc" -eq 0 ]; then
           [ "$pstate" = "MERGED" ] && parent_merged=1
         else
@@ -5171,7 +6155,8 @@ doctor() {
     [ -n "$current_tip" ] || current_tip="$(git -C "$dir" rev-parse "origin/$base" 2>/dev/null)"
     if [ -n "$current_tip" ] && [ "$current_tip" != "$bsha" ] && [ "$phase" != "parked" ]; then
       _set_task_phase "$run_md" "$task" "parked"
-      i6_status="parked"; parked_notes+=("I6: $task")
+      i6_status="parked"
+      parked_notes+=("I6: $task")
       report_bullets+=("- **I6 parked — $task**: parent \`$base\`'s tip moved off the frozen base_sha (\`$bsha\` -> \`$current_tip\`) without the parent's PR merging.")
       _doctor_questions_entry "$questions" "$task — parent $base's tip moved off its frozen base_sha" \
         "park the child | ignore the divergence" "parked" \
@@ -5210,8 +6195,9 @@ doctor() {
     local prev_head prev_count head count
     prev_head="$(_supervisor_state_field "$dstate" head)"
     prev_count="$(_supervisor_state_field "$dstate" count)"
-    case "$prev_count" in ''|*[!0-9]*) prev_count=0 ;; esac
-    head="$(_run_head "$dir")"; head="${head:-unknown}"
+    case "$prev_count" in '' | *[!0-9]*) prev_count=0 ;; esac
+    head="$(_run_head "$dir")"
+    head="${head:-unknown}"
     if [ -n "$prev_head" ] && [ "$prev_head" = "$head" ]; then
       count=$((prev_count + 1))
     else
@@ -5221,7 +6207,7 @@ doctor() {
     # a `die` from this bookkeeping write would `exit` before invariant 7's halt and
     # before doctor's own exit-30 (HALT) contract, turning a wedged run dir into a
     # silent relaunch loop instead of the alarm it is supposed to raise.
-    ( _write_supervisor_state "$dstate" "$count" "$head" ) \
+    (_write_supervisor_state "$dstate" "$count" "$head") \
       || echo "spawn-orchestrator: doctor WARNING — could not persist doctor no-progress state (the counter cannot advance across iterations while this is broken — the halt below still fires if THIS iteration already reached the limit)" >&2
     if [ "$count" -ge "$limit" ]; then
       n_halt=$((n_halt + 1))
@@ -5247,7 +6233,8 @@ check_profile() {
   # reaching execvp() means the profile parsed and loaded fine. Only a genuine
   # parse/compile error (which never reaches execvp) is a failure.
   local errout status
-  errout="$(sandbox-exec -f "$f" /usr/bin/true 2>&1)"; status=$?
+  errout="$(sandbox-exec -f "$f" /usr/bin/true 2>&1)"
+  status=$?
   if [ "$status" -eq 0 ] || printf '%s' "$errout" | grep -q 'execvp('; then
     echo "spawn-orchestrator: profile OK $f"
     return 0
@@ -5257,7 +6244,8 @@ check_profile() {
 }
 
 [ $# -ge 1 ] || die "usage: spawn-orchestrator.sh <render-profile|check-profile> …"
-sub="$1"; shift
+sub="$1"
+shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
   render-settings) render_settings "$@" ;;
@@ -5288,6 +6276,9 @@ case "$sub" in
   status-report) status_report "$@" ;;
   report-tick) report_tick "$@" ;;
   doctor) doctor "$@" ;;
-  -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 0 ;;
+  -h | --help)
+    sed -n '2,/^[^#]/{/^#/p;}' "$0"
+    exit 0
+    ;;
   *) die "unknown subcommand: $sub" ;;
 esac

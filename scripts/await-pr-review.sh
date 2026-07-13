@@ -50,17 +50,41 @@ mode="all"
 interval=30
 timeout=900
 
-die() { echo "await-pr-review: $*" >&2; exit 2; }
+die() {
+  echo "await-pr-review: $*" >&2
+  exit 2
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --pr) pr="$2"; shift 2 ;;
-    --repo) repo="$2"; shift 2 ;;
-    --reviewer) reviewers+=("$2"); shift 2 ;;
-    --mode) mode="$2"; shift 2 ;;
-    --interval) interval="$2"; shift 2 ;;
-    --timeout) timeout="$2"; shift 2 ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    --pr)
+      pr="$2"
+      shift 2
+      ;;
+    --repo)
+      repo="$2"
+      shift 2
+      ;;
+    --reviewer)
+      reviewers+=("$2")
+      shift 2
+      ;;
+    --mode)
+      mode="$2"
+      shift 2
+      ;;
+    --interval)
+      interval="$2"
+      shift 2
+      ;;
+    --timeout)
+      timeout="$2"
+      shift 2
+      ;;
+    -h | --help)
+      sed -n '2,40p' "$0"
+      exit 0
+      ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -68,11 +92,11 @@ done
 [ -n "$pr" ] || die "--pr is required"
 [ -n "$repo" ] || die "--repo is required"
 [ "${#reviewers[@]}" -gt 0 ] || reviewers=("Copilot")
-case "$mode" in all|any) ;; *) die "--mode must be 'all' or 'any'" ;; esac
+case "$mode" in all | any) ;; *) die "--mode must be 'all' or 'any'" ;; esac
 # Non-integer interval/timeout would make `sleep` fail and the `-ge` comparison
 # error every tick — with no `set -e` that busy-spins, hammering the gh API.
-case "$interval" in *[!0-9]*|"") die "--interval must be a non-negative integer (seconds)" ;; esac
-case "$timeout" in *[!0-9]*|"") die "--timeout must be a non-negative integer (seconds)" ;; esac
+case "$interval" in *[!0-9]* | "") die "--interval must be a non-negative integer (seconds)" ;; esac
+case "$timeout" in *[!0-9]* | "") die "--timeout must be a non-negative integer (seconds)" ;; esac
 # A missing dependency would otherwise look like a transient empty response and
 # loop until timeout — fail fast with an actionable message instead.
 command -v gh >/dev/null 2>&1 || die "gh CLI is required but not found in PATH"
@@ -105,21 +129,25 @@ while :; do
     still_pending=()
     for token in "${pending[@]}"; do
       if printf '%s\n' "$review_logins" | grep -qiF "$token"; then
-        landed+=("$token")                                   # signal 1: reviews[]
+        landed+=("$token") # signal 1: reviews[]
       elif printf '%s\n' "$initial_requested" | grep -qiF "$token" \
         && ! printf '%s\n' "$requested_logins" | grep -qiF "$token"; then
-        landed+=("$token")                                   # signal 2: dropped out
+        landed+=("$token") # signal 2: dropped out
       else
         still_pending+=("$token")
       fi
     done
-    pending=("${still_pending[@]+"${still_pending[@]}"}")  # empty-safe under bash 3.2 set -u
+    pending=("${still_pending[@]+"${still_pending[@]}"}") # empty-safe under bash 3.2 set -u
 
     if [ "$mode" = "any" ] && [ "${#landed[@]}" -gt 0 ]; then
-      IFS=,; echo "AWAIT_REVIEW: landed reviewer=${landed[*]} after=${SECONDS}s"; exit 0
+      IFS=,
+      echo "AWAIT_REVIEW: landed reviewer=${landed[*]} after=${SECONDS}s"
+      exit 0
     fi
     if [ "${#pending[@]}" -eq 0 ]; then
-      IFS=,; echo "AWAIT_REVIEW: landed reviewer=${landed[*]} after=${SECONDS}s"; exit 0
+      IFS=,
+      echo "AWAIT_REVIEW: landed reviewer=${landed[*]} after=${SECONDS}s"
+      exit 0
     fi
   fi
 
@@ -128,5 +156,6 @@ while :; do
   [ "$SECONDS" -ge "$timeout" ] && break
 done
 
-IFS=,; echo "AWAIT_REVIEW: timeout reviewer=${pending[*]} after=${SECONDS}s"
+IFS=,
+echo "AWAIT_REVIEW: timeout reviewer=${pending[*]} after=${SECONDS}s"
 exit 1

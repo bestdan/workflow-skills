@@ -40,18 +40,29 @@ readonly OAUTH_BETA="anthropic-beta: oauth-2025-04-20"
 readonly KEYCHAIN_SERVICE="Claude Code-credentials"
 readonly LINUX_CREDS="${HOME}/.claude/.credentials.json"
 
-die_unavail() { echo "claude-usage: $*" >&2; exit 1; }
-die_err()     { echo "claude-usage: $*" >&2; exit 2; }
+die_unavail() {
+  echo "claude-usage: $*" >&2
+  exit 1
+}
+die_err() {
+  echo "claude-usage: $*" >&2
+  exit 2
+}
 
 MODE="json"
 FROM_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-percent) MODE="percent" ;;
-    --from-file) shift; FROM_FILE="${1:-}"; [ -n "$FROM_FILE" ] || die_err "--from-file needs a path" ;;
-    --help|-h)
+    --from-file)
+      shift
+      FROM_FILE="${1:-}"
+      [ -n "$FROM_FILE" ] || die_err "--from-file needs a path"
+      ;;
+    --help | -h)
       sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0 ;;
+      exit 0
+      ;;
     *) die_err "unknown argument: $1" ;;
   esac
   shift

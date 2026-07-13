@@ -35,13 +35,27 @@ set -uo pipefail
 remote="origin"
 refs=()
 
-die() { echo "preflight-freshness: $*" >&2; exit 2; }
+die() {
+  echo "preflight-freshness: $*" >&2
+  exit 2
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
-    --ref) [ $# -ge 2 ] || die "missing value for --ref"; refs+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    --remote)
+      [ $# -ge 2 ] || die "missing value for --remote"
+      remote="$2"
+      shift 2
+      ;;
+    --ref)
+      [ $# -ge 2 ] || die "missing value for --ref"
+      refs+=("$2")
+      shift 2
+      ;;
+    -h | --help)
+      sed -n '2,32p' "$0"
+      exit 0
+      ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -90,8 +104,10 @@ for ref in "${refs[@]}"; do
 done
 
 if [ "${#stale[@]}" -gt 0 ]; then
-  IFS=,; echo "FRESHNESS: stale refs=${stale[*]} hint=\"git fetch $remote\""
+  IFS=,
+  echo "FRESHNESS: stale refs=${stale[*]} hint=\"git fetch $remote\""
   exit 1
 fi
-IFS=,; echo "FRESHNESS: fresh refs=${fresh[*]-}"
+IFS=,
+echo "FRESHNESS: fresh refs=${fresh[*]-}"
 exit 0

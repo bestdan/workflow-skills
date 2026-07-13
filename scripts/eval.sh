@@ -16,7 +16,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 MANIFEST="evals/manifest.tsv"
 MAX_TURNS_DEFAULT=6
@@ -43,7 +43,7 @@ fail=0
 failed=()
 
 while IFS=$'\t' read -r skill prompt_file max_turns; do
-  [[ -z "${skill// }" || "$skill" == \#* ]] && continue
+  [[ -z "${skill// /}" || "$skill" == \#* ]] && continue
   # optional skill filter from argv
   if [[ -n "${1:-}" ]] && ! printf '%s\n' "$@" | grep -qx "$skill"; then
     continue

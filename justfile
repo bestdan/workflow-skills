@@ -10,9 +10,24 @@ default:
 check:
     scripts/check.sh
 
-# Auto-format all files with dprint.
+# Auto-format all files with dprint and shfmt.
 fmt:
-    dprint fmt
+    dprint fmt --incremental=false
+    @files=""; for file in $(git ls-files --cached --others --exclude-standard '*.sh' '*.bash'); do [ ! -f "$file" ] || files="$files $file"; done; [ -z "$files" ] || shfmt -i 2 -ci -bn -w $files
+    @files=""; for file in $(git ls-files --cached --others --exclude-standard '*.bats'); do [ ! -f "$file" ] || files="$files $file"; done; [ -z "$files" ] || shfmt -ln bats -i 2 -ci -bn -w $files
+
+# Check Bash syntax, formatting, and ShellCheck findings.
+lint-shell:
+    scripts/lint-shell.sh
+
+# Run deterministic Bats suites and the retained orchestrator harness locally,
+# including on macOS with the system Bash 3.2 compatibility floor.
+test-shell:
+    scripts/test-shell.sh
+
+# Run credentialed integration checks (excluded from `just check`).
+test-shell-live:
+    scripts/test-shell-live.sh
 
 # Run only the repo-native structural/consistency validator.
 validate:
