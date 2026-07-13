@@ -9,6 +9,7 @@ load test_helper
   run bash "$REPO_ROOT/scripts/claude-usage.sh" --from-file "$TEST_TMPDIR/usage.json"
   assert_success
   assert_output --partial '"percent":43'
+  assert_output --partial '"resets_at":"2026-07-10T05:00:00Z"'
   assert_output --partial '"spend_used_minor":32261'
   run bash "$REPO_ROOT/scripts/claude-usage.sh" --from-file "$TEST_TMPDIR/usage.json" --session-percent
   assert_success

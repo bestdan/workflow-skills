@@ -12,14 +12,19 @@ for tool in shfmt shellcheck; do
   fi
 done
 
+[ -x test/vendor/bats-core/bin/bats ] || {
+  echo "lint-shell: bats submodules missing — run: git submodule update --init --recursive" >&2
+  exit 2
+}
+
 shell_files=()
 bats_files=()
 while IFS= read -r file; do
   case "$file" in
-    *.sh) shell_files+=("$file") ;;
+    *.sh | *.bash) shell_files+=("$file") ;;
     *.bats) bats_files+=("$file") ;;
   esac
-done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bats' | while IFS= read -r file; do
+done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bash' '*.bats' | while IFS= read -r file; do
   [ -f "$file" ] && printf '%s\n' "$file"
 done)
 

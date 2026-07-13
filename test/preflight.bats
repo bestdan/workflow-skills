@@ -12,6 +12,7 @@ probe() {
   probe true true
   run env PREFLIGHT_PROBE_CODERS="$BIN_DIR/fake-probe" bash "$REPO_ROOT/scripts/preflight.sh" --source plan --base main
   assert_output --partial 'PREFLIGHT VERDICT:'
+  refute_output --partial 'PREFLIGHT BLOCKER: coder'
   run bash "$REPO_ROOT/scripts/preflight.sh" --base main
   assert_failure 2
   assert_output --partial '--source'

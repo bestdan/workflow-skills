@@ -13,7 +13,7 @@ check:
 # Auto-format all files with dprint and shfmt.
 fmt:
     dprint fmt --incremental=false
-    @files=""; for file in $(git ls-files --cached --others --exclude-standard '*.sh'); do [ ! -f "$file" ] || files="$files $file"; done; [ -z "$files" ] || shfmt -i 2 -ci -bn -w $files
+    @files=""; for file in $(git ls-files --cached --others --exclude-standard '*.sh' '*.bash'); do [ ! -f "$file" ] || files="$files $file"; done; [ -z "$files" ] || shfmt -i 2 -ci -bn -w $files
     @files=""; for file in $(git ls-files --cached --others --exclude-standard '*.bats'); do [ ! -f "$file" ] || files="$files $file"; done; [ -z "$files" ] || shfmt -ln bats -i 2 -ci -bn -w $files
 
 # Check Bash syntax, formatting, and ShellCheck findings.

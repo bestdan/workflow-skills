@@ -36,6 +36,15 @@ json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
   assert_output --partial 'AWAIT_REVIEW: landed'
 }
 
+@test "a requested reviewer that drops out without a review counts as landed" {
+  json "$TEST_TMPDIR/requested" '[]' '[{"login":"Copilot"}]'
+  json "$TEST_TMPDIR/cleared" '[]' '[]'
+  make_gh "$TEST_TMPDIR/requested" "$TEST_TMPDIR/cleared"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout 5
+  assert_success
+  assert_output --partial 'AWAIT_REVIEW: landed'
+}
+
 @test "times out when review never lands" {
   json "$TEST_TMPDIR/wait" '[]' '[{"login":"Copilot"}]'
   make_gh "$TEST_TMPDIR/wait"
@@ -56,6 +65,7 @@ json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
 }
 
 @test "rejects invalid mode" {
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --mode neither
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --mode neither
   assert_failure 2
+  assert_output --partial "--mode must be 'all' or 'any'"
 }

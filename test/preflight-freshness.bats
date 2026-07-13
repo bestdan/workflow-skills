@@ -44,6 +44,18 @@ advance_remote() {
   assert_output --partial 'FRESHNESS: fresh refs='
 }
 
+@test "multi-ref reports only the stale ref" {
+  git -C "$TEST_TMPDIR/clone" checkout -qb feature
+  git -C "$TEST_TMPDIR/clone" push -q origin feature
+  git clone -q --template= "$TEST_TMPDIR/remote.git" "$TEST_TMPDIR/other"
+  git -C "$TEST_TMPDIR/other" checkout -q feature
+  git -C "$TEST_TMPDIR/other" commit --allow-empty -qm remote
+  git -C "$TEST_TMPDIR/other" push -q origin feature
+  freshness --ref main --ref feature
+  assert_failure 1
+  assert_output --partial 'FRESHNESS: stale refs=feature'
+}
+
 @test "unreachable remote is unknown" {
   rm -rf "$TEST_TMPDIR/remote.git"
   freshness
