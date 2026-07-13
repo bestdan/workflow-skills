@@ -49,11 +49,18 @@ machine does* must be accompanied by a command that **makes the machine do it**.
 
 ## Task
 
-1. **Close the archetype — assert execution, not configuration.** In `smoke-confinement.sh`, add
-   positive `allowed …` assertions that each granted binary **actually runs** inside the jail
-   (`git --version`, the resolved interpreter, `bash`). A grant that is never exercised is not a
-   guarantee, it is a comment. This subsumes `orch_py_task_10`'s test requirement — **coordinate
-   so the assertion is written once**, not twice.
+> **Scope shrank: PR #208 (task 10's fix) already closed the archetype.** `smoke-confinement.sh`
+> now carries positive `allowed "exec git …"` assertions under a real `--toolchain` profile, so a
+> granted binary is proven to *run*, not merely to be listed. Step 1 below is therefore **done** —
+> what remains is to **generalize** it. Do not re-litigate the git row; build the contract around
+> it.
+
+1. ~~**Close the archetype — assert execution, not configuration.**~~ **DONE in PR #208.** It also
+   supplied the rule the design must generalize: **grant the _narrowest_ resolve-target dir, never
+   the enclosing tree.** #208 grants `<dev>/usr`, not the whole CLT tree — the broad grant would
+   have made a second interpreter executable in the jail *with every test still green*. A fixture
+   that only checks "does the granted binary run" would **not** have caught that; it needs a
+   negative side too (an un-granted interpreter must still be refused).
 
 2. **Make the jail's exec contract executable, both directions.** The recurring root cause is
    subtler than "no test": **Seatbelt checks the path a binary _resolves to_, not the path you

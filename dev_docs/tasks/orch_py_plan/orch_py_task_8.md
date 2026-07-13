@@ -59,10 +59,13 @@ runtime"):
 - **Bake the _stable_ symlink (`~/.local/bin/python3.11`) into the launch script — never the
   version-stamped target.** The script is written once (`:1471`) and re-run by launchd unchanged
   on every wake; a baked `…/cpython-3.11.14-…` dies silently on the next `uv` upgrade.
-- **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`) —
-  `render-profile` must emit it. Seatbelt checks the **resolved** path, so granting `~/.local/bin`
-  alone fails `Operation not permitted` (verified). **Same defect class as the `git` CLT-shim bug**
-  ([[orch_py_task_10]]).
+- **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`), and the
+  **narrowest** one — `render-profile` must emit it. Seatbelt checks the **resolved** path, so
+  granting `~/.local/bin` alone fails `Operation not permitted` (verified). **Same defect class as
+  the `git` CLT-shim bug** ([[orch_py_task_10]], fixed in **PR #208**) — which grants `<dev>/usr`,
+  not the whole CLT tree, because the broad grant would have silently made a second interpreter
+  executable in the jail. **Do not widen to `~/.local/share`.** Follow #208's smoke pattern: assert
+  the interpreter *runs* under the rendered profile, not merely that it is granted.
 - **Handle the residual: the wake script must test `[ -x "$interpreter" ]`** and route a missing
   interpreter through the supervisor halt path — a classified halt + alarm, never an unclassified
   exec failure that relaunches forever (finding #22's class). A `uv python uninstall` mid-run

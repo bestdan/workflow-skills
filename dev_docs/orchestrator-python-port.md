@@ -223,11 +223,15 @@ no PATH entry, no cache, no writes.
    re-run by launchd unchanged on every wake, so a baked `…/cpython-3.11.14-…` path dies silently
    on the next `uv` upgrade. `--claude-bin` already does this right — it bakes the stable `claude`
    symlink, not `versions/2.1.207`.
-3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`).
-   Seatbelt checks the **resolved** path, so granting `~/.local/bin` alone fails with `Operation
-   not permitted` (verified). One subpath grant covers 3.11.14 and 3.14.2. **Same defect class as
-   the `git` CLT-shim bug (task 10)** — a grant on the path you _invoke_ is worthless if Seatbelt
-   checks the path it _resolves to_.
+3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`) — and the
+   **narrowest** such dir, never the enclosing tree. Seatbelt checks the **resolved** path, so
+   granting `~/.local/bin` alone fails with `Operation not permitted` (verified). One subpath grant
+   covers 3.11.14 and 3.14.2. **Same defect class as the `git` CLT-shim bug (task 10, fixed in PR
+   #208)** — a grant on the path you _invoke_ is worthless if Seatbelt checks the path it _resolves
+   to_. #208 grants `<dev>/usr` rather than the whole CLT tree precisely because the broad grant
+   would have made a **second interpreter executable inside the jail** with every test still green.
+   **Do not widen to `~/.local/share`.** Verified by `smoke-confinement.sh`'s positive
+   `allowed "exec git …"` assertions — the check this requirement is proven by.
 
 **Residual risk (task 8 must handle):** requirements 2–3 survive a `uv` **upgrade** but not a
 `uv python uninstall` mid-run — the symlink dangles and requirement 1's launch-time assert cannot

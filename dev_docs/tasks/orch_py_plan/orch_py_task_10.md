@@ -2,7 +2,7 @@
 title: git cannot exec inside the jail — the CLT shim's re-exec TARGET is not on the exec allowlist
 priority: high
 size: 2
-status: ready
+status: done # merged as PR #208 (into main, 2026-07-13)
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
@@ -88,14 +88,41 @@ being a deliberate denial in the smoke test.
 - The CLT/Xcode path is **resolved** (`xcode-select -p`), never hard-coded, and its absence is
   non-fatal.
 - The confinement properties still hold: writes outside the worktree still denied, `/etc/sudoers`
-  still unreadable, and the deliberate `exec unlisted /usr/bin/python3` denial is **re-examined,
-  not silently flipped** — granting the CLT subpath makes `/usr/bin/python3` executable, so that
-  assertion's intent (an un-granted interpreter cannot run) needs restating against a binary that
-  is genuinely not on the list.
+  still unreadable, and — **corrected, see Outcome** — the deliberate `exec unlisted
+  /usr/bin/python3` denial **must SURVIVE**, not be restated.
+
+  > **An earlier draft of this criterion was wrong** and said the opposite: that "granting the CLT
+  > subpath makes `/usr/bin/python3` executable, so that assertion's intent needs restating."
+  > **Exercised against the landed fix: false.** It was inferred from a test that granted the
+  > *whole* CLT tree, never from the grant the fix actually makes.
 
 **User-run:**
 
 - A real `--dry-run` launch renders a profile whose exec block contains the active toolchain dir.
+
+## Outcome — merged as PR #208 (2026-07-13, into `main`)
+
+Fixed by granting the active developer dir's **`usr`** subdir (`xcode-select -p` → `<dev>/usr`,
+covering `bin/` **and** `libexec/` for git-core's helpers) plus `/opt/homebrew/Cellar` — the same
+defect via Homebrew's symlink farm. Verified under the real `--toolchain` profile:
+
+```console
+$ sandbox-exec -f <profile> /usr/bin/git --version
+git version 2.39.5 (Apple Git-154)
+$ sandbox-exec -f <profile> /usr/bin/python3 -c "print('RUNS')"
+python3: error: can't exec '/Library/Developer/CommandLineTools/usr/bin/python3' (Operation not permitted)
+```
+
+**Both properties hold at once — and the reason is the lesson.** The fix grants `<dev>/usr`
+**narrowly**, not the enclosing CLT tree. CLT's `python3` at `<dev>/usr/bin/python3` is itself a
+symlink into `<dev>/Library/Frameworks/…`, which sits **outside** that grant, so Seatbelt still
+refuses it. Granting the whole tree would have swallowed `Library/Frameworks`, silently made a
+second interpreter executable, and weakened the jail while every test stayed green.
+
+**Generalized rule (now requirement 3 in the ADR): grant the _narrowest_ resolve-target directory,
+never the enclosing tree.** #208 also closed the archetype — `smoke-confinement.sh` now carries
+positive `allowed "exec git …"` assertions, so a granted binary is proven to *run*, not merely to
+be listed.
 
 ## Note
 

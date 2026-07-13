@@ -151,10 +151,12 @@ fingerprint-resolved `--path` already work this way at `spawn-orchestrator.sh:13
    unchanged on every wake, so a baked `…/cpython-3.11.14-…` path dies silently on the next `uv`
    upgrade. `--claude-bin` already does this right (stable `claude` symlink, not
    `versions/2.1.207`).
-3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`).
-   Seatbelt checks the **resolved** path — granting `~/.local/bin` alone fails `Operation not
-   permitted` (verified). One subpath covers 3.11.14 and 3.14.2. **Same defect class as the `git`
-   CLT-shim bug** ([[orch_py_task_10]]).
+3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`) — the
+   **narrowest** one, never the enclosing tree. Seatbelt checks the **resolved** path — granting
+   `~/.local/bin` alone fails `Operation not permitted` (verified). One subpath covers 3.11.14 and
+   3.14.2. **Same defect class as the `git` CLT-shim bug** ([[orch_py_task_10]], fixed in **PR
+   #208**, which grants `<dev>/usr` and not the whole CLT tree — the broad grant would have made a
+   second interpreter executable in the jail while every test stayed green).
 
 **Accepted residual risk:** 2–3 survive a `uv` **upgrade**, but not a `uv python uninstall`
 mid-run — the symlink dangles and requirement 1's launch-time assert cannot see it. Task 8 must

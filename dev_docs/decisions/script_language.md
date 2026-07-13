@@ -254,6 +254,22 @@ patterns — they are the ones `write-launch` already uses for `--claude-bin` an
    3.14.2 under one grant. A version-stamped `(literal …cpython-3.11.14…)` grant would re-create
    detached-run finding #3's drift trap on the jail side.
 
+   **And grant the _narrowest_ resolve-target directory — never the enclosing tree.** This is not
+   a style note; it is the difference between a jail and a hole. **PR #208** (the `git` fix) grants
+   `<dev>/usr`, _not_ the whole Command Line Tools tree — because CLT's `python3` is a symlink into
+   `<dev>/Library/Frameworks/…`, so the broad grant would have silently made a **second interpreter
+   executable inside the jail** while every test stayed green. Exercised against the landed fix:
+
+   ```console
+   $ sandbox-exec -f <profile> /usr/bin/git --version
+   git version 2.39.5 (Apple Git-154)
+   $ sandbox-exec -f <profile> /usr/bin/python3 -c "print('RUNS')"
+   python3: error: can't exec '.../usr/bin/python3' (Operation not permitted)
+   ```
+
+   `~/.local/share/uv/python` is already narrow in exactly this sense — it holds interpreters and
+   nothing else. Keep it that way; do not widen to `~/.local/share`.
+
    This is **the same defect class as the `git` CLT-shim bug** (`orch_py_task_10`): a grant on the
    path you _invoke_ is worthless if Seatbelt is checking the path it _resolves to_. Getting one
    of these right and the other wrong is the easy mistake.
