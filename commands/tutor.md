@@ -17,5 +17,3 @@ do not re-derive or restate the pedagogy here.
 - `--diff [<ref>]` — teach the working tree, or a git range the user names.
 - `<path>` — teach a plan directory (`dev_docs/tasks/<name>_plan/`), a file, or a
   subsystem.
-
-Do not end the session until every item on the checklist is verified.

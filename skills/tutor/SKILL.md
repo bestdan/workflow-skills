@@ -15,9 +15,11 @@ where that model is wrong or thin, close each gap, and verify the close with a
 question they cannot answer from recognition alone. Then move on. One concept at
 a time, gated, until the checklist is done.
 
-**The session does not end until every checklist item is verified.** That is the
-contract. If the user tries to stop early, tell them exactly what remains
-unverified and let them decide with that in hand — don't quietly declare victory.
+**You do not end the session while checklist items are unverified.** That is the
+contract. Only the user can call it early — and if they try, tell them exactly
+what remains unverified and let them decide with that in hand. If they still
+choose to stop, stop cleanly: print the checklist as it stands, unchecked items
+named. Don't quietly declare victory.
 
 ## Target
 
@@ -200,5 +202,4 @@ the doc closed. That's the exam. If it comes out clean, say so and print the
 final checklist. If it doesn't, you've found the item that wasn't as verified as
 you thought — reopen it and continue.
 
-Then offer, once, to distill the checklist into a durable note under `dev_docs/`.
-Don't push it. The understanding was the point; the file is a souvenir.
+The checklist was scaffolding. The understanding was the point; let the file go.
