@@ -17,7 +17,7 @@ Three stores exist; only one is authoritative for a given fact.
   human-facing morning summary. They are always allowed to be _behind_ the
   tracker and git, never ahead (see **Write order**).
 
-## The three files
+## The three files (+ one non-durable rendering)
 
 All run files live under `.auto-pilot/` in the worktree and are committed to
 the **run-state branch** (below) — never to a task branch. Paths:
@@ -27,6 +27,18 @@ the **run-state branch** (below) — never to a task branch. Paths:
 | `.auto-pilot/RUN.md`       | The task graph + each task's current lifecycle **phase** and the run's verify tooling. The machine-readable state the run loop and `--resume` read. |
 | `.auto-pilot/QUESTIONS.md` | The decision log — one indexed entry per reversible call the run made without a human.                                                              |
 | `.auto-pilot/REPORT.md`    | The rolling human-facing report the user wakes to.                                                                                                  |
+
+`.auto-pilot/STATUS.md` is a **fourth, non-durable** artifact (task 20,
+finding #28): the periodic status report, overwritten every interval by
+`spawn-orchestrator.sh status-report` (default every 15m, `--report-every off`
+disables) — a delta-aware rendering of `status --label` plus the reality
+cross-check below, never itself committed to the run-state branch and never a
+substitute for `REPORT.md`. It exists because every failure mode in this
+system looks like success (`exit 0`, `terminal_reason: completed`), so an
+unconditional, periodic, _affirmative_ signal is the only thing that makes the
+report's _absence_ meaningful — see "Heartbeat" below for the signal it's
+built on, and `_restack_orphan_scan` (task 18) for the reconciliation it
+reuses rather than re-implementing.
 
 ### `RUN.md`
 
