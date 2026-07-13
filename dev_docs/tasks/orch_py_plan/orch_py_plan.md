@@ -71,13 +71,13 @@ interpreter. Three such paths — the original plan modelled only the first:
 
 **Tier A (unconstrained, ~1,200 lines):** `render-profile` (337), `write-launch` (327),
 `restack` (374), `write-verify-broker` (126), `render-settings`, `check-profile`. The renderers
-and generators — still the worst quoting/list-building code in the file. Tasks 1–4, 7.
+and generators — still the worst quoting/list-building code in the file. Tasks 3–7.
 
 **Tier B (constrained, ~2,000+ lines):** `doctor` (659, jail), `status_report` (443, launchd),
 `supervisor_check`/`_supervisor_halt` (414, launchd), `status` (180, in-process),
 `supervisor_scan`/`supervisor_gate` (174, launchd), `classify_exit` (73, in-process),
-`exit_reason` (69, jail), `heartbeat`/`alarm-clear`. All gated on the interpreter decision
-(task 8) — a materially bigger share than first assumed.
+`exit_reason` (69, jail), `heartbeat`/`alarm-clear`. All gated on the runtime decision
+(**task 2**) — a materially bigger share than first assumed.
 
 ### Interpreter choice (open question — see below)
 
@@ -95,20 +95,23 @@ in **Open questions**.
   `preflight-freshness` et al. are 137–312 lines, correct, and idiomatic shell. Leave them.
 - **Not** porting `scripts/test-spawn-orchestrator.sh`. It is the safety net; rewriting the
   net while moving the trapeze defeats the point. It keeps running as bash against the CLI.
-- **Not** touching Tier B (the launchd wake loop) before task 8, and possibly not at all.
+- **Not** touching the constrained tier before task 2 decides its runtime — and possibly not at all.
 - **Not** adding a package manager, venv, or build step for plugin consumers.
 
 ## Tasks
 
-1. [[orch_py_task_1]] — Golden-output corpus + the bash→Python dispatch seam, proved on `check-profile`.
-2. [[orch_py_task_2]] — Port `render-profile` (+ `render_network_allowlist`): the seatbelt renderer.
-3. [[orch_py_task_3]] — Port `render-settings`: the layer-2 egress allowlist.
-4. [[orch_py_task_4]] — Port `write-launch` + `write-verify-broker`: the generators.
-5. [[orch_py_task_5]] — **Audit the full reachability set** (was: port the reporters — they are Tier B).
-6. [[orch_py_task_6]] — `doctor`: **blocked on task 8** (jail-invoked every loop; was: port or delete).
+**The runtime decision now comes first.** It determines how much of the file can ever move —
+and whether Python is even the right target — so it is settled before a line is ported.
+
+1. [[orch_py_task_1]] — **Audit the full reachability set** (which subcommands are actually constrained).
+2. [[orch_py_task_2]] — **Decide the runtime** for the constrained tier. No code. May reopen Go.
+3. [[orch_py_task_3]] — Golden-output corpus + the bash→Python dispatch seam.
+4. [[orch_py_task_4]] — Port `render-profile` (+ network allowlist): the seatbelt renderer.
+5. [[orch_py_task_5]] — Port `render-settings`: the layer-2 egress allowlist.
+6. [[orch_py_task_6]] — Port `write-launch` + `write-verify-broker`: the generators.
 7. [[orch_py_task_7]] — Port `restack`.
-8. [[orch_py_task_8]] — Decide the launchd boundary: port Tier B, or freeze it in bash and document why.
-9. [[orch_py_task_9]] — Graduate the architecture into `dev_docs/orchestrator.md`; delete this plan folder.
+8. [[orch_py_task_8]] — `doctor` / the constrained tier — conditional on task 2's decision.
+9. [[orch_py_task_9]] — Graduate into `dev_docs/orchestrator.md`; delete this plan folder.
 
 ## Open questions
 
@@ -125,17 +128,17 @@ in **Open questions**.
    - **(c) `uv` everywhere** — on the pinned `--path` *and* the exec allowlist. Cleanest code,
      largest runtime-surface increase on the security-critical unattended path. Not recommended.
 
-   **This no longer binds only at task 8.** The corrected reachability analysis means it gates
-   tasks **5, 6, and 8** (~2,000 lines). Tasks 1–4 and 7 stay unconditionally safe. Consider
-   moving the decision earlier — it also determines whether a compiled-binary answer (which
-   satisfies both constraints at once; see `dev_docs/decisions/script_language.md`) should be
-   revisited *before* 1,200 lines of Python exist.
+   **RESOLVED 2026-07-13: this decision moved to the front of the plan (task 2).** The corrected
+   reachability analysis showed it gates ~2,000 lines, not ~1,000, so deciding it after building
+   1,200 lines of Python would be deciding it too late to act on. Task 2 also explicitly reopens
+   **(d) a compiled binary (Go)** — the only option satisfying both constraints at once — because
+   `dev_docs/decisions/script_language.md` rejected Go while believing a premise that is now
+   false.
 
-2. **Sequencing against PR #202.** That PR reformats every line of `spawn-orchestrator.sh`
-   with `shfmt`. Any port work started before it lands will conflict catastrophically. This
-   plan assumes **#202 merges first**. It is not encoded as `is_blocked_by` (that resolves
-   task slugs, not PRs) — it is a hard prerequisite on task 1.
+2. **RESOLVED: PR #202 merged** (2026-07-13T11:55:57Z). It reformatted every line of
+   `spawn-orchestrator.sh` with `shfmt`, so rebase onto `main` before starting — a branch cut
+   before it will conflict badly.
 
-3. **Is `doctor` (659 lines) worth porting, or worth deleting?** It is a diagnostic
-   read-only command. Before porting it wholesale, worth asking whether it is actually used
-   or whether it accreted. A port is ~a day; a deletion is ten minutes.
+3. **RESOLVED: `doctor` cannot be deleted.** The PR #205 co-review established it is invoked by
+   the jailed agent on **every loop iteration** (HALT on exit 30). It is load-bearing, not
+   accreted. It is also therefore *constrained*, so its port is gated on task 2.

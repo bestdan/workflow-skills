@@ -1,7 +1,7 @@
 ---
-title: Port render-profile — the seatbelt profile renderer
+title: Decide the runtime for the constrained tier — before any code is ported
 priority: high
-size: 5
+size: 3
 status: ready
 created: 2026-07-13
 expires: 2026-12-31
@@ -9,61 +9,85 @@ source_branch: bestdan/port-orchestrator-to-python
 parent: orch_py
 is_blocked_by: orch_py_task_1
 related_files:
-  - scripts/spawn-orchestrator.sh:330 # render-profile docs
-  - scripts/spawn-orchestrator.sh:711 # render_network_allowlist
-  - scripts/smoke-confinement.sh
-  - scripts/test-spawn-orchestrator.sh:100 # render happy path
-tags: [orchestrator, python, port, security]
+  - dev_docs/decisions/script_language.md # the language ADR this amends
+  - scripts/spawn-orchestrator.sh:711 # the Seatbelt process-exec allowlist
+  - scripts/spawn-orchestrator.sh:163 # write_launch's --path fail-closed guard
+  - skills/auto-pilot/SKILL.md:338 # the jailed agent's per-iteration doctor call
+tags: [orchestrator, decision, launchd, seatbelt]
 ---
 
 ← [[orch_py_plan]]
 
 ## Context
 
-`render_profile` (249 lines) plus `render_network_allowlist` (88 lines) turn resolved paths
-and flags into a Seatbelt `.sb` profile — the layer-1 jail. This is the highest-value port
-target: it is pure (flags in, one file out), it is the worst of the bash (path canonicalization,
-list building, and quoting into an S-expression, all without associative arrays), and it is
-the most safety-critical thing in the repo. A quoting bug here is a sandbox escape.
+> **Moved to the front of the plan on 2026-07-13, and split from its implementation.** This was
+> originally task 8, on the theory that only the supervisor wake loop depended on it. The PR
+> #205 co-review proved that theory wrong: the constrained tier is **~2,000+ lines**, not
+> ~1,000, and it includes `doctor`, `status`, `classify_exit`, and `exit_reason`. This decision
+> now determines **how much of the file can ever move** — and whether Python is even the right
+> target. Deciding it *after* building 1,200 lines of Python would be deciding it too late to
+> act on. Splitting the decision from the port also resolves the promoter's "unbounded scope"
+> flag: this card is now decision-only and bounded.
 
-It is also the best-tested thing in the repo. `scripts/test-spawn-orchestrator.sh` covers it
-from line 100 onward: the happy-path token blocks, exec-symlink resolution (the A1
-regression), fail-closed bad inputs, `--confine-under` write-scope bounding, `--cred-ro`
-keeping a credential file read-only inside an RW state dir, the `--workdir` ledger case, and
-`--exec-dir`/`--toolchain` coarse exec mode. `scripts/smoke-confinement.sh` then compiles the
-rendered profile with `sandbox-exec` and asserts real writes/reads/execs are actually denied.
+Task 1's audit has just produced the definitive reachability map. This task turns it into a
+runtime decision. **No code is written here.** The output is a decision, recorded with its
+rationale.
 
-Task 1's golden corpus pins the exact bytes of every one of those renders.
+The constrained tier is reachable from two contexts, and **any answer must satisfy both**:
+
+- **launchd's pinned minimal PATH** — the generated launch script's wake loop (`write-launch`
+  fail-closes without `--path` precisely because a launchd job has a minimal environment).
+- **The Seatbelt `process-exec` allowlist** (`spawn-orchestrator.sh:711-724`) — the jailed
+  run-phase agent invokes `doctor` every loop iteration and `exit-reason` on every termination
+  from *inside* `sandbox-exec`. An interpreter that is on the PATH but **not** on the exec
+  allowlist cannot run there at all.
+
+Plus the in-process trap: `status_report` calls `status`, and `supervisor_check` calls
+`classify_exit`, as **bash functions** — never through the CLI. Those two cannot be ported and
+their bash deleted while their callers remain bash, under *any* interpreter.
 
 ## Task
 
-- Implement `render-profile` and its network-allowlist helper in
-  `scripts/orchestrator/` (new module, e.g. `profile.py`), reproducing the current output
-  **byte-for-byte** — same token blocks, same ordering, same quoting, same trailing newlines.
-- Preserve the fail-closed contract exactly: bad input exits **2** and writes **nothing**
-  (no partial `--out` file). Verify by asserting the output path does not exist after a
-  failure.
-- Preserve symlink resolution for `--exec` targets (the A1 regression): an exec allowlist
-  entry must resolve to its real target, or the jail can be bypassed via a symlink.
-- Add `render-profile` to the `PORTED` list; delete `render_profile` and
-  `render_network_allowlist` from the bash.
-- Do **not** change the profile's content, ordering, or semantics, even if something looks
-  improvable. Any suspected bug goes in a follow-up task, not this PR — a behavior change
-  here is indistinguishable from a port defect.
+Present the options with the audit's real numbers and **get an explicit decision from the
+user**. Do not default silently — this is the plan's load-bearing call.
+
+- **(a) Freeze the constrained tier in bash.** Port only the renderers and generators
+  (~1,200 lines, tasks 3–7). `spawn-orchestrator.sh` ends at ~2,000+ lines of supervisor,
+  reporting, and diagnostic bash. Zero new runtime dependency on the unattended path.
+  **The safe default.**
+- **(b) Stdlib-only Python on an absolute interpreter path.** Survives the minimal PATH and can
+  be added to the exec allowlist as a literal. **Verify before choosing:** `/usr/bin/python3` is
+  a Command Line Tools shim and measured **3.9.6** on this machine, against the repo's ≥3.11
+  convention. Confirm what is actually resolvable rather than assuming.
+- **(c) `uv` everywhere** — on the pinned `--path` *and* the exec allowlist. Cleanest code,
+  largest new runtime surface on the security-critical unattended path.
+- **(d) Reconsider a compiled binary (Go).** *This option is why the task moved to the front.* A
+  compiled binary **satisfies both constraints at once** — no interpreter to resolve on the
+  PATH, and one literal to add to the exec allowlist. It is the only option that could retire
+  the bash entirely without widening the runtime surface.
+  `dev_docs/decisions/script_language.md` rejected Go on distribution cost (no plugin install
+  hook; a binary release pipeline for a solo repo) — but it did so **while believing the
+  constrained tier was ~1,000 lines and Python could take the rest.** That premise is now false,
+  so the tradeoff deserves one honest re-examination before 1,200 lines of Python exist.
+
+Record the outcome by **amending `dev_docs/decisions/script_language.md`** — do not start a
+competing doc. If the answer is (d), this plan is superseded and must be rewritten before
+task 3 begins.
 
 ## Acceptance Criteria
 
 **Code-enforced:**
 
-- Every `render-profile` case in `test/golden/` reproduces byte-for-byte.
-- `bash scripts/test-spawn-orchestrator.sh` passes unchanged, including the fail-closed,
-  symlink, `--confine-under`, `--cred-ro`, `--workdir`, and `--exec-dir` sections.
-- `bash scripts/smoke-confinement.sh` passes on macOS: the Python-rendered profile compiles
-  under `sandbox-exec` and every denied/allowed assertion holds. **This is the real gate** —
-  the golden corpus proves the bytes match, the smoke test proves the jail still holds.
-- `just check` green.
+- `dev_docs/decisions/script_language.md` carries the decision, dated, with the audit's line
+  counts and the two-constraint analysis. If Go is re-rejected, the doc states **why it survived
+  re-examination under the corrected numbers** — not merely that it was rejected once before.
+- `dev_docs/orchestrator-python-port.md` and every downstream card reflect the decision: under
+  (a), task 8's `doctor` port closes as won't-do; under (b)/(c), task 8 inherits the PATH +
+  exec-allowlist requirements; under (d), the plan is rewritten.
+- **No code is written.** If the diff touches `scripts/`, this task has overrun its scope.
 
 **User-run:**
 
-- Render a profile with the Python path and eyeball the `.sb` against one rendered by the
-  bash on `main`; `diff` must be empty.
+- The decision is made **by the user, explicitly** — not inferred, not defaulted. Frame the
+  tradeoff plainly: what breaks at 3am if the interpreter is missing, versus how many lines of
+  bash stay forever.

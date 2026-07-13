@@ -166,9 +166,18 @@ typing, and no `jq`.
   `text/template` is clumsy next to f-strings, and dynamically-shaped `gh api` JSON fights
   static typing into `any`-unmarshaling boilerplate.
 
-**Revisit Go if** eliminating the last ~1,000 lines of supervisor bash becomes a goal in its
-own right. That is the one thing Python cannot do without putting an interpreter on the launchd
-PATH — and it is exactly the tradeoff the orchestrator port's task 8 exists to decide.
+**Revisit Go if** eliminating the constrained bash becomes a goal in its own right — a compiled
+binary is the only option that satisfies _both_ the launchd pinned-PATH and the Seatbelt
+`process-exec` allowlist constraints at once.
+
+> **This condition has already been triggered.** Co-review of PR #205 found that the constrained
+> tier is **~2,000+ lines, not ~1,000** — it also holds `doctor`, `status`, `classify_exit`, and
+> `exit_reason`, and it is gated by **two** constraints, not one (the Seatbelt exec allowlist was
+> missed entirely here). This section rejected Go while assuming Python could take everything
+> except a small supervisor loop. **That assumption was false.** The orchestrator port's
+> **task 2** now re-examines Go explicitly, before any Python is written. If it survives that
+> re-examination, amend this section with the reason it survived under the corrected numbers —
+> do not simply cite this original rejection.
 
 ## Consequences
 

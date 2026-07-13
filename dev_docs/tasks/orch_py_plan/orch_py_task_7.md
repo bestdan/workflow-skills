@@ -7,7 +7,7 @@ created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
 parent: orch_py
-is_blocked_by: orch_py_task_4
+is_blocked_by: orch_py_task_6
 related_files:
   - scripts/spawn-orchestrator.sh:258 # restack docs
   - scripts/spawn-orchestrator.sh # _restack_orphan_scan (71 lines)

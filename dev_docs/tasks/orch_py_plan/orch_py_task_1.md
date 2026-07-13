@@ -1,99 +1,84 @@
 ---
-title: Golden-output corpus and the bash→Python dispatch seam
+title: Audit the full reachability set — which subcommands can actually be ported
 priority: high
-size: 5
+size: 3
 status: ready
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
 parent: orch_py
-is_blocked_by: py_toolchain_task_1
 related_files:
-  - scripts/spawn-orchestrator.sh:6249 # the subcommand dispatch case block
-  - scripts/test-spawn-orchestrator.sh
-  - scripts/validate.py:1 # PEP 723 + uv convention to copy
-  - scripts/check.sh
-tags: [orchestrator, python, port, foundation]
+  - scripts/spawn-orchestrator.sh:4233 # status_report -> status (in-process)
+  - scripts/spawn-orchestrator.sh:3195 # supervisor_check -> classify_exit (in-process)
+  - scripts/spawn-orchestrator.sh:711 # the Seatbelt process-exec allowlist
+  - scripts/spawn-orchestrator.sh:2559 # exit-reason's mutations (RUN.md, commit, sentinel)
+  - skills/auto-pilot/SKILL.md:305 # the jailed agent's loop: doctor, exit-reason, heartbeat
+tags: [orchestrator, python, port, audit, launchd, seatbelt]
 ---
 
 ← [[orch_py_plan]]
 
 ## Context
 
-`scripts/spawn-orchestrator.sh` dispatches 29 subcommands from a single `case` block near
-line 6249 (`render-profile) render_profile "$@" ;;` and so on). Everything that consumes the
-orchestrator — the skills, `scripts/smoke-confinement.sh`, the generated launch script, and
-the 5,292-line `scripts/test-spawn-orchestrator.sh` harness — goes through that CLI. Nothing
-reaches into its internals.
+> **This task replaces "Port the read-only reporters: status, classify-exit, exit-reason."**
+> Co-review of PR #205 (Copilot and codex, independently) established that **all three of those
+> are constrained**, and that the plan's original Tier A/B split was wrong. Porting them as
+> planned would have **broken the supervisor wake loop**. The port must not continue past the
+> renderers until the real reachability set is known — that is now this task's job.
 
-That makes the CLI a **contract we can hold fixed while swapping the implementation**. This
-task builds the two things every later task depends on, and ports one trivial subcommand to
-prove the seam end-to-end.
+The original plan assumed one constraint (launchd's pinned PATH) and one seam (the CLI). Both
+assumptions were incomplete. Three ways a subcommand is reachable from a context that cannot
+freely resolve a Python interpreter:
 
-**Prerequisite satisfied:** PR #202 (the `shfmt`/ShellCheck/Bats tooling) **merged on
-2026-07-13**. Rebase onto `main` before starting — it reformatted every line of
-`spawn-orchestrator.sh`, so any branch cut before it will conflict badly.
+1. **The generated launch script**, under launchd's pinned minimal PATH.
+2. **In-process bash function calls** — these bypass the CLI entirely. Confirmed:
+   `status_report` → `status` (`:4233`), `supervisor_check` → `classify_exit` (`:3195`).
+   Deleting a ported function's bash body **breaks its in-process caller outright**.
+3. **The jailed run-phase agent**, which invokes the orchestrator from *inside* `sandbox-exec`
+   and is therefore bound by the profile's `(allow process-exec` allowlist (`:711-724`).
+   Confirmed: `doctor` runs **every loop iteration**, `exit-reason` on every termination, plus
+   `heartbeat` and `alarm-clear` (`skills/auto-pilot/SKILL.md`).
 
-The repo already has a Python convention to copy verbatim — `scripts/validate.py` uses PEP
-723 inline metadata (`# /// script`), runs via `uv run scripts/validate.py`, and hash-locks
-its deps in `scripts/validate.py.lock`. Follow it; do not invent a new one.
+Note also that **`exit-reason` is not read-only** — it upserts three RUN.md fields, makes a git
+commit, and creates/removes the done sentinel (`:2559-2590`). Any future port of it needs
+acceptance criteria covering that stateful contract; a stdout/stderr/rc golden corpus would
+capture none of it. Record this on whatever card eventually ports it.
 
 ## Task
 
-**1. Capture the golden corpus (do this first, before any Python exists).**
+Produce the reachability map that should have preceded this plan. For **every one of the 29
+subcommands**, determine and record:
 
-Add `scripts/capture-golden.sh` that drives the *current bash* orchestrator over a matrix of
-inputs and records stdout, stderr, exit code, and any `--out` file byte-for-byte into
-`test/golden/<subcommand>/<case>/`. Cover at minimum the pure renderers, since they are what
-tasks 2–4 replace:
+- **Is it invoked by the generated launch script?** (Read the `write_launch` printf body.)
+- **Is its bash function called in-process by any other function?** Walk the call graph — do
+  **not** rely on the CLI dispatch table, which is exactly the mistake that produced the
+  original boundary. `rg '\b<fn_name>\b'` across the file, minus its own definition and dispatch
+  entry.
+- **Is it invoked by the jailed agent?** (`rg 'spawn-orchestrator\.sh [a-z-]+' skills/auto-pilot/`.)
+- **Therefore: Tier A (free to port) or Tier B (gated on the interpreter decision)?**
 
-- `render-profile` — with/without `--confine-under`, `--cred-ro`, `--workdir`, `--tmpdir`,
-  multiple `--rw`/`--ro`, `--exec` vs `--exec-dir`/`--toolchain`, and the fail-closed
-  bad-input cases (which must exit 2 and write nothing).
-- `render-settings` — the egress allowlist narrowing cases.
-- `check-profile` — a compiling profile and a non-compiling one.
-- `write-launch` / `write-verify-broker` — full flag set; the generated script and plist.
+Write the result as a table in `dev_docs/orchestrator-python-port.md`, replacing the current
+tier lists, and update `orch_py_plan.md` plus any affected task cards to match.
 
-Paths in the output must be normalized (the corpus is committed and must be
-machine-independent — substitute `$HOME`, the repo root, and any tmpdir with stable tokens).
-
-**2. Build the dispatch seam.**
-
-- Create `scripts/orchestrator/__main__.py` (PEP 723 header, `argparse`, `uv run`), with a
-  subcommand registry and a single `main()`.
-- In `spawn-orchestrator.sh`, add a `PORTED` list and route matching subcommands to Python
-  *before* the existing `case` block; everything not on the list falls through to the bash
-  function unchanged. Preserve argv, stdin, stdout/stderr streams, and the exit code exactly.
-- Port **`check-profile`** only (it is ~20 lines and calls `sandbox-exec -f`), and delete its
-  bash function.
-
-**3. Wire it into the gates.**
-
-- The **`pyrefly` + `ruff` gate is not built here** — it is owned by
-  [`py_toolchain_task_1`](../py_toolchain_plan/py_toolchain_task_1.md), which this task is
-  blocked on. The port lands *onto* a working toolchain rather than dragging one in with it.
-  Just make sure the new Python is covered by the existing gate.
-- Model closed state sets (e.g. the exit classification) as `Literal` + `match` +
-  `assert_never`, so adding a variant without handling it is a **type error**. Verified to work
-  under `pyrefly`; it is the main safety property the port is buying.
-- Add `test/golden.bats` asserting the Python subcommand reproduces its golden files
-  byte-for-byte.
+If the audit finds **additional** constrained subcommands beyond the seven already known
+(`status`, `classify_exit`, `exit_reason`, `doctor`, and the supervisor/heartbeat set), say so
+loudly — it further shrinks what the port can achieve, and further raises the stakes of the runtime decision in task 2, which follows immediately.
 
 ## Acceptance Criteria
 
 **Code-enforced:**
 
-- `scripts/capture-golden.sh` run against the pre-port bash produces a committed
-  `test/golden/` corpus that is stable across two consecutive runs and across machines
-  (paths normalized).
-- `test/golden.bats` asserts `check-profile`'s Python implementation matches its golden
-  stdout, stderr, and exit code exactly. It fails if the implementation drifts.
-- `bash scripts/test-spawn-orchestrator.sh` passes **unchanged** — not one assertion edited.
-  If a test needs editing, the seam is wrong.
-- `just check` is green, and covers the new Python file.
-- `bash scripts/smoke-confinement.sh` still passes on macOS (it calls `check-profile`).
+- A complete **29-row** table exists in `dev_docs/orchestrator-python-port.md`: one row per
+  subcommand, with all three reachability answers and the resulting tier.
+- Every row is backed by a `file:line` citation. Nothing is asserted from memory — the original
+  boundary was wrong precisely because it was reasoned about rather than traced.
+- A checked-in script (or documented command) reproduces the in-process call-graph walk, so the
+  audit can be re-run after a future refactor instead of trusted forever.
+- `orch_py_plan.md` and every task card agree with the table; no stale tier claim survives
+  anywhere in the plan.
 
 **User-run:**
 
-- Confirm a real auto-pilot launch still works end-to-end: `spawn-orchestrator.sh launch
-  --dry-run` produces the same script and plist as before the change.
+- Sanity-check the Tier A set against `smoke-confinement.sh` and a real `launch --dry-run`:
+  nothing in Tier A may appear in the generated launch script, in the jailed agent's
+  instructions, or as an in-process callee of any Tier B function.
