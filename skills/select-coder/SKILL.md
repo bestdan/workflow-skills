@@ -44,7 +44,7 @@ availability:
     ]
   codex:
     installed: true
-    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-sol
+    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
   agy:
     installed: true
     logged_in: true # script-probed via `agy models` (free); false when the token is dead
