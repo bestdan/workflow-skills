@@ -353,7 +353,9 @@
 #     --exec-dir  A directory permitted to exec (subpath, coarser than --exec).
 #                 Must exist and must not be "/". Repeatable.
 #     --toolchain  Convenience: add each of a standard set of bin dirs (that
-#                  exist on this host) to the exec-dir set.
+#                  exist on this host) to the exec-dir set, plus the active
+#                  developer-tools dir (xcode-select -p), without which the
+#                  /usr/bin CLT shims — git above all — cannot exec their target.
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
 #     Every render ALSO emits fixed, RENDERER-OWNED (never caller-supplied) write
@@ -801,12 +803,35 @@ render_profile() {
 
   # --toolchain: expand to the standard bin dirs, skipping any that don't exist
   # on this host (a missing standard dir is not fail-closed — it's just omitted).
+  #
+  # The active developer-tools dir is NOT optional dressing: on a stock macOS host
+  # /usr/bin/git is a Command Line Tools SHIM that re-execs the real binary under
+  # this dir. Granting (subpath "/usr/bin") permits the shim and NOT its target, so
+  # a jailed `git` dies with "can't exec '<dev>/usr/bin/git' (Operation not
+  # permitted)" — and git is the jailed agent's whole job (commit, push, PR). Every
+  # xcrun-style shim in /usr/bin (python3, clang, …) has the same shape. Resolved
+  # via xcode-select, never hard-coded: it is /Library/Developer/CommandLineTools on
+  # a CLT host and an Xcode.app/Contents/Developer path on an Xcode one. The `/usr`
+  # subdir is where both keep bin/ and libexec/ (git-core's helpers), so grant that
+  # rather than the whole (multi-GB, on Xcode) developer tree.
+  #
+  # /opt/homebrew/Cellar is the SAME defect in the other direction: Seatbelt
+  # matches the RESOLVED path, and /opt/homebrew/bin is a symlink farm (nearly
+  # every entry points into Cellar/<pkg>/<ver>/bin), so the bin-dir grant permits
+  # almost no Homebrew binary — `gh`, the tool the agent opens PRs with, included.
+  # Granting Cellar is not a widening of the exec wall: /opt/homebrew/bin was
+  # already granted and is equally user-writable, and Homebrew's tree is not in any
+  # write scope, so the jailed agent cannot stage a binary there. Version-agnostic
+  # by design — a `brew upgrade` moves the target dir and must not silently
+  # re-break the jail.
   if [ "$toolchain" = 1 ]; then
-    local d
-    for d in /bin /usr/bin /usr/sbin /usr/libexec /opt/homebrew/bin \
+    local d dev
+    for d in /bin /usr/bin /usr/sbin /usr/libexec /opt/homebrew/bin /opt/homebrew/Cellar \
       "$HOME/.local/bin" "$HOME/.local/share/claude" "$HOME/.codex" "$HOME/.nvm"; do
       [ -d "$d" ] && exd+=("$d")
     done
+    dev="$(xcode-select -p 2>/dev/null || true)"
+    [ -n "$dev" ] && [ -d "$dev/usr" ] && exd+=("$dev/usr")
   fi
 
   # Canonicalize ALL inputs first — any bad path aborts before we write, so a
