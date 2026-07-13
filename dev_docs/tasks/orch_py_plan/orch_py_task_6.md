@@ -1,66 +1,77 @@
 ---
-title: Port doctor — the 659-line run diagnostic
+title: Port doctor — the 659-line run diagnostic (BLOCKED — Tier B, jail-invoked)
 priority: medium
 size: 5
 status: needs_refinement
 human_approval_requested: true
-# promoter: scope exceeds size 5 — porting a 659-line function is >300 lines of diff; split (or decide the delete-vs-port question as its own card)
+# promoter: scope exceeds size 5 (659-line function). ALSO re-scoped after PR #205 co-review: doctor is jail-invoked every loop, so it is Tier B and gated on task 8's interpreter decision.
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
 parent: orch_py
-is_blocked_by: orch_py_task_5
+is_blocked_by: orch_py_task_8
 related_files:
   - scripts/spawn-orchestrator.sh:282 # doctor docs
-tags: [orchestrator, python, port]
+  - scripts/spawn-orchestrator.sh:711 # the Seatbelt process-exec allowlist
+  - skills/auto-pilot/SKILL.md:338 # "Every iteration opens with the run doctor"
+tags: [orchestrator, python, port, seatbelt, blocked]
 ---
 
 ← [[orch_py_plan]]
 
 ## Context
 
-`doctor` is **659 lines** — the single largest function in the file, a cheap read-only run
-diagnostic generalizing findings #22/#23. It is the clearest single instance of the thesis:
-659 lines of branching, state-gathering, and formatted reporting, written without
-associative arrays.
+> **Re-scoped 2026-07-13 after co-review of PR #205.** This card originally sat in Tier A and
+> offered "just delete it" as an option. **Both premises were wrong**, and the card is now
+> blocked on task 8 rather than on task 5.
 
-**Before porting, answer the plan's open question 3: is `doctor` actually used?** It is a
-diagnostic; diagnostics accrete. Check whether any skill, the auto-pilot orchestrator, or the
-supervisor invokes it, and whether you have ever run it by hand. Porting it is roughly a day
-of careful work. **Deleting it is ten minutes.** If it is dead or near-dead, propose deletion
-in this PR instead of a port — that is a better outcome, and the plan explicitly sanctions it.
+`doctor` is **659 lines** — the single largest function in the file, a read-only run diagnostic.
+Two things changed:
 
-If it stays, it is a good port candidate precisely because it is read-only: a defect degrades
-a report, it does not breach a jail or corrupt a run.
+**1. It is Tier B, not Tier A.** The jailed run-phase agent invokes it from *inside*
+`sandbox-exec`: *"Every iteration opens with the run doctor"* (`skills/auto-pilot/SKILL.md:338`;
+HALT on `status: systemic`, exit 30 — the loop must not dispatch). Porting it to Python
+therefore requires the interpreter to be **on the Seatbelt `process-exec` allowlist**
+(`spawn-orchestrator.sh:711-724`) — which is exactly the decision task 8 makes. It cannot be
+ported before then.
+
+**2. The "just delete it" option is dead.** It rested on `doctor` possibly being unused. It is
+not: it is called on **every single loop iteration** of every auto-pilot run, and it can halt
+the run. Deleting it would also have contradicted the plan's own contracts — an unchanged
+29-subcommand CLI, and "the harness passes unedited" (`orch_py_task_1.md`). A deletion is a
+behavior change and would need to be its own scoped task; it is not an option here.
 
 ## Task
 
-**First**, determine usage (grep the skills, the orchestrator, the launch script; ask the
-user). Then either:
+**Do not start this until task 8 has decided the interpreter question.**
 
-**(a) Delete it** — remove `doctor`, its dispatch entry, its docs block, and its harness
-coverage. Note the deletion in the PR body with the evidence it was unused. Stop here.
-
-**(b) Port it** — implement in `scripts/orchestrator/doctor.py`:
-
-- Reproduce output byte-for-byte. Preserve every check, its ordering, and its verdict text.
-- Preserve the read-only guarantee: `doctor` must not mutate run state. Assert this in a test
-  (snapshot the run dir before and after; require it unchanged).
-- Preserve the fail-closed posture on undetermined signals.
-- Add to `PORTED`; delete the bash function.
+- **If task 8 chooses (a) — freeze Tier B in bash:** this card is **closed as won't-do**.
+  `doctor` stays in bash. Say so explicitly in `dev_docs/orchestrator.md` (task 9), with the
+  reason (jail-invoked every loop), so no future reader re-opens it.
+- **If task 8 chooses (b) or (c) — an interpreter reachable from the jail:** port `doctor` under
+  those constraints:
+  - Reproduce output byte-for-byte. Preserve every check, its ordering, its verdict text, and
+    the **exit-30 HALT contract** the run loop depends on.
+  - Preserve the read-only guarantee (`doctor` must not mutate run state) — assert it with a
+    before/after snapshot of the run dir.
+  - The interpreter must be on the rendered profile's exec allowlist, and `render-profile` must
+    emit it. A `doctor` that cannot exec inside the jail halts every run on iteration one.
+  - Given 659 lines, **split this card** before starting (it exceeds size 5 on its own).
 
 ## Acceptance Criteria
 
 **Code-enforced:**
 
-- If deleted: `just check` green, harness passes with the `doctor` coverage removed, and no
-  caller anywhere references the subcommand (grep clean).
-- If ported: golden corpus reproduces byte-for-byte across the diagnostic's branches
-  (healthy run, halted run, missing state, stale heartbeat); a test asserts the run directory
-  is byte-identical before and after a `doctor` invocation; harness passes unchanged.
-- `just check` green either way.
+- If closed as won't-do: `dev_docs/orchestrator.md` records `doctor` as permanently bash, with
+  the jail-invocation reason and a `file:line` citation.
+- If ported: golden corpus reproduces byte-for-byte across the diagnostic's branches; a test
+  asserts the run directory is unchanged after a `doctor` run; the **exit-30 HALT path is
+  explicitly tested**; `render-profile` emits the interpreter on the exec allowlist.
+- Harness passes unchanged either way.
+- `just check` green.
 
-**User-run:**
+**User-run (mandatory if ported):**
 
-- Run `doctor` against a real (or archived) auto-pilot run directory and confirm the report
-  is identical to the bash version's.
+- Run a **real auto-pilot loop** and confirm `doctor` executes inside the jail on every
+  iteration and can still HALT the run. A green unit suite proves nothing here — the failure
+  mode is "the jailed agent cannot exec the interpreter", which only appears in a real run.

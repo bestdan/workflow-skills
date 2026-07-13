@@ -9,7 +9,7 @@ created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
 parent: orch_py
-is_blocked_by: orch_py_task_7
+is_blocked_by: orch_py_task_5
 related_files:
   - scripts/spawn-orchestrator.sh:157 # supervisor-check
   - scripts/spawn-orchestrator.sh:213 # supervisor-gate
@@ -26,8 +26,25 @@ tags: [orchestrator, python, port, launchd, decision]
 This is the task the whole plan has been deferring, and it is a **decision task** as much as
 a coding one.
 
-Everything left in bash is Tier B: the subcommands reachable from the **generated launch
-script**, which runs under launchd with a **pinned, fingerprint-resolved minimal PATH**:
+> **Corrected 2026-07-13 after co-review of PR #205.** This card originally described a single
+> constraint (launchd's PATH) over ~1,000 lines. Both were wrong: there are **two** constraints,
+> and Tier B is **~2,000+ lines** — it also holds `doctor` (659), `status` (180),
+> `classify_exit` (73), and `exit_reason` (69), which the plan had mis-assigned to Tier A.
+
+Tier B is everything reachable from a context that cannot freely resolve a Python interpreter.
+**Two distinct constraints**, and any option must satisfy *both*:
+
+- **launchd's pinned minimal PATH** — the generated launch script's wake loop.
+- **The Seatbelt `process-exec` allowlist** (`spawn-orchestrator.sh:711-724`) — the jailed
+  run-phase agent invokes `doctor` (every loop iteration), `exit-reason` (every termination),
+  `heartbeat`, and `alarm-clear` from *inside* `sandbox-exec`. An interpreter that is on the
+  PATH but not on the exec allowlist **cannot run there at all**.
+
+Plus the in-process trap: `status_report` calls `status` and `supervisor_check` calls
+`classify_exit` as **bash functions**, not via the CLI — so those two cannot be ported and
+deleted while their callers remain bash, regardless of interpreter.
+
+The launchd-reachable set:
 
 | Subcommand         | Lines | Role                                      |
 | ------------------ | ----: | ----------------------------------------- |

@@ -40,6 +40,13 @@ suppressions one group at a time, each a small reviewable PR. Task 4 removes the
 - Add a root `pyproject.toml` configuring `ruff` and `pyrefly`.
 - Wire both into `scripts/check.sh` (so `just check` covers them) and confirm CI picks them up
   via the existing `uv` setup. Invoke them via `uvx` so no new install step is needed.
+- **Pin exact tool versions** — `uvx ruff@<X.Y.Z>`, `uvx pyrefly@<X.Y.Z>` (or dev-dependency
+  pins in the new `pyproject.toml`). Never bare `uvx ruff`. Unpinned, every run floats to the
+  latest release, so a new `ruff` rule or a `pyrefly` strictness change turns `just check` and
+  CI red on an unrelated PR. Worse, **mid-port that is indistinguishable from a port defect** —
+  the exact failure mode the orchestrator plan treats as its hardest problem. Pinning also
+  matches the repo's existing hash-locked convention (`scripts/validate.py.lock`), which this
+  plan cites as the model to copy. Tool bumps become deliberate, reviewable PRs.
 - Add a `just lint-py` target mirroring `just lint-shell`, so the fast Python gate can be run
   alone in an agent loop.
 - Configure `pyrefly` at the **strictest setting the codebase can hold**, with one hard
