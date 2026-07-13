@@ -22,3 +22,8 @@ dev_docs/co-review/
 #   !dev_docs/tasks/<name>_plan/keep-me.md
 dev_docs/tasks/*
 !dev_docs/tasks/.task-config.yml
+# Durable exception: the containment findings are the record that stops the same
+# two Seatbelt facts being rediscovered a fifth time. They must outlive the plan.
+!dev_docs/tasks/jail_containment_plan/
+dev_docs/tasks/jail_containment_plan/*
+!dev_docs/tasks/jail_containment_plan/jail_containment_plan.md
