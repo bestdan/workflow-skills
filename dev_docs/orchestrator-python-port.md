@@ -78,6 +78,13 @@ an explicit and recommended outcome**.
 
 ## Interpreter choice
 
+**Why Python at all** — and why not TypeScript or Go — is settled separately in
+[`dev_docs/decisions/script_language.md`](decisions/script_language.md). Short version: TS 7's
+10x is type-checking speed, not runtime, and Node is now the _least_ safe assumption available
+(Claude Code ships as a native binary and no longer guarantees a Node runtime). Go was the real
+contender and is rejected on distribution cost, with the condition for revisiting it recorded
+there. Read that before relitigating this.
+
 `scripts/validate.py` already sets the repo's convention: PEP 723 inline metadata, `uv run`,
 hash-locked (`validate.py.lock`), `requires-python >=3.11`. That is the default for Tier A.
 It is a poor fit for Tier B, where `uv` typically lives in `~/.local/bin` and would have to be
