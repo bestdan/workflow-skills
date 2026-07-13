@@ -14,11 +14,11 @@ Keep the no-model supervisor. Delete most of what it currently supervises.
 
 ## 1. `RUN.md` must become output, never control input
 
-The design already says the tracker and Git are authoritative and the run files are only “cache + report” ([run-state.md](/Users/danielegan/src/workflow-skills/skills/auto-pilot/references/run-state.md:8)). But the same file contains `status`, `paused_until`, `exit_reason`, PID identity, deadline, and phases that directly drive relaunch and teardown ([run-state.md](/Users/danielegan/src/workflow-skills/skills/auto-pilot/references/run-state.md:31)). The agent declares why it stopped, and—except for fatal-auth inference—“declaring beats inferring” ([run-state.md](/Users/danielegan/src/workflow-skills/skills/auto-pilot/references/run-state.md:115)).
+The design already says the tracker and Git are authoritative and the run files are only “cache + report” ([run-state.md](../skills/auto-pilot/references/run-state.md#L8)). But the same file contains `status`, `paused_until`, `exit_reason`, PID identity, deadline, and phases that directly drive relaunch and teardown ([run-state.md](../skills/auto-pilot/references/run-state.md#L31)). The agent declares why it stopped, and—except for fatal-auth inference—“declaring beats inferring” ([run-state.md](../skills/auto-pilot/references/run-state.md#L115)).
 
 That is the contradiction.
 
-Task 23 proves it decisively: two agent-written fields were found not to be independent authority ([task 23](/Users/danielegan/src/workflow-skills/dev_docs/tasks/autopilot_hardening_plan/autopilot_hardening_task_23.md:19)). While I was reviewing, its fix landed and added roughly 700 lines across code/tests/docs, including a special `supervisor-state` ledger protected by a per-file Seatbelt denial. The implementation itself now says a declared pause “is not evidence” ([spawn-orchestrator.sh](/Users/danielegan/src/workflow-skills/scripts/spawn-orchestrator.sh:2286)).
+Task 23 proves it decisively: two agent-written fields were found not to be independent authority ([task 23](tasks/autopilot_hardening_plan/autopilot_hardening_task_23.md#L19)). While I was reviewing, its fix landed and added roughly 700 lines across code/tests/docs, including a special `supervisor-state` ledger protected by a per-file Seatbelt denial. The implementation itself now says a declared pause “is not evidence” ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L2286)).
 
 That fix has discovered the right architecture one field at a time: supervisor-owned state outside the agent’s write authority. Generalize it instead of repeating it.
 
@@ -42,7 +42,7 @@ Delete from agent authority:
 - Doctor no-progress state and the agent-to-supervisor `alarm-request` protocol.
 - Destructive live-loop orphan cleanup. Clean workers only when the controller’s own lease proves no child owns them.
 
-The documented write order—push → tracker → run file—is useful recovery discipline ([run-state.md](/Users/danielegan/src/workflow-skills/skills/auto-pilot/references/run-state.md:402)), but it should update a projection, not define the controller’s memory.
+The documented write order—push → tracker → run file—is useful recovery discipline ([run-state.md](../skills/auto-pilot/references/run-state.md#L402)), but it should update a projection, not define the controller’s memory.
 
 ## 2. “No model in the supervisor” is right; 4,500 lines of Bash is not
 
@@ -80,7 +80,7 @@ Use a small typed implementation with atomic persistence—Python plus SQLite wo
 - the thin macOS launchd adapter;
 - perhaps notification delivery.
 
-Move restacking into a separate post-merge reconciler. Move verification into the controller or a controller-owned broker whose result path the agent cannot write. The current broker explicitly admits the agent can forge `code: 0` because its result lives in the writable run tree ([launch-runtime.md](/Users/danielegan/src/workflow-skills/skills/auto-pilot/references/launch-runtime.md:414)).
+Move restacking into a separate post-merge reconciler. Move verification into the controller or a controller-owned broker whose result path the agent cannot write. The current broker explicitly admits the agent can forge `code: 0` because its result lives in the writable run tree ([launch-runtime.md](../skills/auto-pilot/references/launch-runtime.md#L414)).
 
 ## 3. The gate seam is a design smell: make it two programs
 
@@ -93,7 +93,7 @@ The generated wrapper currently has a hand-maintained “above/below” topology
 - agent;
 - post-agent check.
 
-The code needs extensive comments merely to preserve that topology ([spawn-orchestrator.sh](/Users/danielegan/src/workflow-skills/scripts/spawn-orchestrator.sh:1093)). The post-mortem shows two independent PRs landing on the wrong side without conflicts ([review feedback](/Users/danielegan/src/workflow-skills/dev_docs/auto-pilot-developer-review-feedback.md:62)).
+The code needs extensive comments merely to preserve that topology ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L1093)). The post-mortem shows two independent PRs landing on the wrong side without conflicts ([review feedback](auto-pilot-developer-review-feedback.md#L62)).
 
 That is not an implementation accident. An early exit in the middle of a generated program creates a permanent bypass hazard.
 
@@ -135,7 +135,7 @@ The review feedback is unusually conclusive:
 - fake `gh` had impossible exit semantics;
 - tests bypassed the generated gate;
 - notifier guards could not observe their own bypass;
-- settled-state fixtures missed the dangerous window between writes ([review feedback](/Users/danielegan/src/workflow-skills/dev_docs/auto-pilot-developer-review-feedback.md:13)).
+- settled-state fixtures missed the dangerous window between writes ([review feedback](auto-pilot-developer-review-feedback.md#L13)).
 
 The suite is not useless. Its sandbox renderer and pure parser tests have value. But 600 shell assertions cannot establish that the composed program works, especially when the composed program is generated.
 

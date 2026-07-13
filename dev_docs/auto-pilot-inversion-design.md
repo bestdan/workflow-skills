@@ -21,7 +21,7 @@ The system has **three interacting weaknesses**, not one:
 2. **Generated control-flow seams.** The launchd wrapper's above/below-the-gate topology is maintained by comments and print statements.
 3. **A harness that does not exercise production composition.** Fixtures diverge from production precisely at the invariant boundary.
 
-**The honest attribution.** Of the ten defects in our history, only four are caused by weakness (1):
+**The honest attribution.** Of the ten defects in our history, only four are prevented by the scoped inversion — **two** by supervisor-owned authority (weakness 1), **two** by killing the generated seam (weakness 2):
 
 | Defect                                             | Prevented by the inversion? | Actual cause                                    |
 | -------------------------------------------------- | --------------------------- | ----------------------------------------------- |
@@ -90,7 +90,7 @@ v1's rule — _"exit 0 without external effect is no progress"_ — is **gameabl
 The predicate must therefore be qualified:
 
 - A **commit** counts only if it is a **descendant of the leased baseline**, has a **non-empty tree delta**, and has **not been credited before**. Even then it proves _activity_, not correctness.
-- A **verify verdict** is **keyed to an exact tree SHA**, and only the **first** verdict for that SHA counts. Otherwise the agent gets a verdict, mutates the tree, and claims credit for the new state.
+- A **verify verdict** is **keyed to (tree SHA, base SHA)**, and only the **first** verdict for that key counts. Otherwise the agent gets a verdict, mutates the tree, and claims credit for the new state. Tree alone is **not** enough — a squash-merge restack routinely reproduces a **byte-identical tree on a new base**, and task 21's re-verify must not be satisfied by the pre-restack verdict. Keying by **commit SHA** is worse: an amend mints a fresh commit on the same tree and farms credit again.
 - **PR / tracker** changes count only as **allowed workflow transitions attributable to this attempt**.
 - **Human-authored** changes during a lease trigger reconciliation; they never credit the worker.
 - Churn gets a **bounded budget**.
@@ -136,13 +136,15 @@ Task 20's implementation may later become a projection, but **the user need — 
 **Stage 1 — the scenario harness, against the current production entry point.**
 Real Git repos and worktrees, an **injected clock**, a fake `claude`, and **explicit fake adapters** for GitHub/tracker/launchd/notifier — _not_ ambient `PATH` shadowing (the mechanism that could not observe its own bypass). This improves **either** architecture, so it is unconditionally worth building and carries no rewrite risk.
 
-Scenarios: repeated `exit 0` with no external effect → halt+alarm; valid/missing/expired/far-future pause; crash after **every** transaction; `NOT_FOUND` vs transient; parent merge → verify + co-review actually re-run; teardown partial failure; and **one macOS canary** on real launchd + real Seatbelt with a fake model.
+Scenarios: repeated `exit 0` with no external effect → halt+alarm; valid/missing/expired/far-future pause; crash after **every** transaction; `NOT_FOUND` vs transient; parent merge → verify + co-review actually re-run; teardown partial failure; a **hostile fake model** that forges a result file or writes supervisor state → the controller rejects it (this is the authority boundary the whole design rests on — it must be tested, not asserted); and **one macOS canary** on real launchd + real Seatbelt with a fake model.
 
 **Stage 2 — supervisor-owned lease + state outside the worktree; verdicts bound to a tree SHA.**
 The authority win. Lands in the **current bash**. No rewrite.
 
 **Stage 3 — replace the generated wrapper with stable `watch` / `worker`.**
 Kills the seam as a category. **Not independently shippable**: its definition must include the watcher, the attempt launcher, the scenario runner, a **behavioral parity matrix**, and the launchd/Seatbelt canary. Ship the harness first, then switch entry points behind it.
+
+**The split is forced by the OS, not chosen for taste.** From `man 5 launchd.plist`: _"If the job is running during an interval firing, that interval firing will likewise be missed."_ The wake interval is **300s** and the task ceiling is **2700s**, so during any substantial task **~9 of every 10 intervals are missed by design** — and there is **no timeout on the `claude` call**. A hung model call therefore means no scan, no heartbeat, no alarm, no `supervisor-check`, no halt, **forever**: the run is silently, permanently dead, and nothing inside the system can notice, because the only thing that could notice is the process that is blocked. No guard inside the wrapper fixes this. The watcher must be a **separate program in its own launchd job** that spawns the worker rather than synchronously hosting it.
 
 **Decide before Stage 3:** foreground vs detached as the **default**. The original review recommended foreground default with `--detach` an explicit deployment mode; run #2 showed the _partially attended_ human is the common case. This materially changes how much launchd/TCC/jail surface we carry, so it is a **prerequisite**, not a footnote.
 
