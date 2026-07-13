@@ -192,47 +192,73 @@ callee.
 contender and is rejected on distribution cost, with the condition for revisiting it recorded
 there. Read that before relitigating this.
 
-`scripts/validate.py` already sets the repo's convention: PEP 723 inline metadata, `uv run`,
-hash-locked (`validate.py.lock`), `requires-python >=3.11`. That is the default for Tier A.
-It is a poor fit for Tier B, where `uv` typically lives in `~/.local/bin` and would have to be
-added to the pinned launchd PATH. Options, decided at **task 2** (which also reopens Go):
+**RESOLVED at task 2 (2026-07-13): stdlib-only Python on a pinned, pre-flight-resolved absolute
+interpreter (≥3.11). Go re-rejected. Nothing is frozen in bash — the whole file is portable.**
+Full rationale, including why Go lost under the corrected numbers, is in
+[`decisions/script_language.md`](decisions/script_language.md) → "The constrained tier's runtime".
 
-| Option                                                               | Result                                     | Cost                                                                                                                                                 |
-| -------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(a) `uv` for Tier A, bash stays for Tier B** _(recommended)_       | the renderers and generators (1,422 lines) | **2,618 lines** of constrained bash survive — the entire unattended runtime                                                                          |
-| **(b) stdlib-only on absolute `/usr/bin/python3`**                   | kills the bash entirely                    | `/usr/bin/python3` is a Command Line Tools shim (and is 3.9 on this machine, vs the repo's ≥3.11); still needs adding to the Seatbelt exec allowlist |
-| **(c) `uv` everywhere, on the pinned PATH _and_ the exec allowlist** | cleanest code                              | largest new runtime dependency on the security-critical unattended path — not recommended                                                            |
+The premise this plan was built on — that no interpreter could satisfy the launchd PATH _and_ the
+Seatbelt exec allowlist, so Tier B was stuck in bash — **was never exercised, and is false.**
+Tested against a real rendered profile:
 
-Note both (b) and (c) must satisfy **two** constraints, not one: resolvable on launchd's pinned
-PATH **and** permitted by the Seatbelt `process-exec` allowlist.
+| Option                                                        | Runs in the jail?                                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **(c) `uv run`**                                              | **No** — needs `~/.cache/uv` writable, a write grant outside the worktree confinement. |
+| **(b, as originally written) `/usr/bin/python3`**             | **No** un-granted — a CLT shim, and 3.9.6 against the repo's ≥3.11.                    |
+| **(b, as decided) uv-managed CPython 3.11.14, absolute path** | **Yes** — one grant, no cache writes, no PATH lookup, full stdlib.                     |
+| **(d) Go binary**                                             | **Yes** — one exec literal. But its sole differentiator was "only option that can"…    |
+
+The distinction that unlocked it: **`uv run` is not the interpreter.** `uv run` is a package
+manager (cache + network); the CPython binary uv _installs_ at
+`~/.local/share/uv/python/cpython-<ver>-…/bin/python3.11` is just an interpreter — absolute path,
+no PATH entry, no cache, no writes.
+
+**Requirements this puts on every Tier B port (task 8 inherits them):**
+
+1. **Pre-flight resolve + assert ≥3.11, fail-closed at launch** — not at 3am. A version
+   requirement cannot conjure an interpreter; it converts a silent break into a loud one.
+2. **Bake the resolved absolute path into the launch script and the exec grant** — never a PATH
+   lookup. The same pattern `--claude-bin` and the fingerprint-resolved `--path` already use
+   (`spawn-orchestrator.sh:1363`).
+3. **Grant the interpreter _directory_ as a subpath, not a version-stamped literal** — a
+   `cpython-3.11.14-…` literal re-creates detached-run finding #3's version-drift trap. Verified:
+   one subpath grant covers 3.11.14 and 3.14.2.
+
+`scripts/validate.py`'s convention (PEP 723, `uv run`, hash-locked) stays the default for
+**Tier A**, where a dependency is free. Tier B is stdlib-only — at ≥3.11 the stdlib covers the
+whole job (`json`, `re`, `subprocess`, `pathlib`, `tomllib`), so no resolver ever enters the jail.
 
 ## Tasks
 
 Nine, each one PR. Full cards in `dev_docs/tasks/orch_py_plan/` (local).
 
-**The runtime decision comes first.** It determines how much of the file can ever move — and
-whether Python is even the right target — so it is settled before a line is ported.
+**The runtime decision came first, and it landed (task 2).** Python on a pinned absolute
+interpreter, Go re-rejected, **nothing frozen in bash**. Tasks 3–7 (Tier A) and task 8 (Tier B)
+are all now unblocked, and the port's ceiling is the whole file rather than the renderers.
 
-| # | Task                                                                         | Tier | Size |
-| - | ---------------------------------------------------------------------------- | ---- | ---- |
-| 1 | **Audit the full reachability set** — which subcommands are constrained      | —    | 3    |
-| 2 | **Decide the runtime** for the constrained tier. No code. **May reopen Go.** | —    | 3    |
-| 3 | Golden-output corpus + the bash→Python dispatch seam                         | A    | 5    |
-| 4 | Port `render-profile` (+ network allowlist) — the seatbelt renderer          | A    | 5    |
-| 5 | Port `render-settings` — the layer-2 egress allowlist                        | A    | 3    |
-| 6 | Port `write-launch` + `write-verify-broker` — the generators                 | A    | 5    |
-| 7 | Port `restack`                                                               | A    | 5    |
-| 8 | `doctor` / the constrained tier — conditional on task 2's decision           | B    | 5    |
-| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder               | —    | 2    |
+| # | Task                                                                                   | Tier | Size |
+| - | -------------------------------------------------------------------------------------- | ---- | ---- |
+| 1 | **Audit the full reachability set** — which subcommands are constrained                | —    | 3    |
+| 2 | **Decide the runtime** — ✅ pinned stdlib Python ≥3.11; Go re-rejected; nothing frozen | —    | 3    |
+| 3 | Golden-output corpus + the bash→Python dispatch seam                                   | A    | 5    |
+| 4 | Port `render-profile` (+ network allowlist) — the seatbelt renderer                    | A    | 5    |
+| 5 | Port `render-settings` — the layer-2 egress allowlist                                  | A    | 3    |
+| 6 | Port `write-launch` + `write-verify-broker` — the generators                           | A    | 5    |
+| 7 | Port `restack`                                                                         | A    | 5    |
+| 8 | `doctor` / the constrained tier — **unblocked**; inherits the 3 interpreter rules      | B    | 5    |
+| 9 | Graduate to `dev_docs/orchestrator.md`; delete the plan folder                         | —    | 2    |
 
-**Why the decision moved to the front.** It originally sat at task 8, on the theory that only
-the wake loop depended on it. The audit killed that theory: the constrained tier is **2,618
-lines across 17 subcommands** — `doctor`, `status`, `classify-exit`, `exit-reason`, the whole
-supervisor and verify-broker path, and `teardown`. Deciding _after_ writing 1,422 lines of
-Python would be deciding too late to act on the answer — especially since one of the answers is
-**(d) a compiled binary (Go)**, which satisfies both constraints at once and would make the
-Python dispatch seam wasted work. Tasks 3–7 stay unconditionally safe under any Python-shaped
-answer, so nothing is lost by settling it first.
+**Why the decision moved to the front — and what it bought.** It originally sat at task 8, on the
+theory that only the wake loop depended on it. The audit killed that theory: the constrained tier
+is **2,618 lines across 17 subcommands**. Deciding _after_ writing 1,422 lines of Python would
+have been deciding too late to act on the answer — especially with **(d) Go** on the table, which
+would have made the Python dispatch seam wasted work.
+
+Settling it first paid off in the opposite direction from the one expected. The plan assumed the
+answer would be "freeze Tier B in bash" and the port would buy only the renderers. **Testing the
+constraint instead of assuming it showed the whole file is portable** — the jail runs a pinned
+CPython under one exec grant. Had this been left at task 8, 1,422 lines of Python would have been
+written under a false ceiling, and the supervisor would have been written off as permanent bash.
 
 ## Non-goals
 
@@ -246,14 +272,14 @@ answer, so nothing is lost by settling it first.
 
 ## Open questions
 
-1. **RESOLVED — the runtime decision moved to the front (task 2).** The task 1 audit showed it
-   gates **2,618 lines across 17 subcommands**, so deciding it after 1,422 lines of Python
-   existed would be too late to act on. No code is written until task 2 lands. Task 2 explicitly
-   reopens **(d) a compiled binary (Go)** — the only option that satisfies the launchd-PATH and
-   Seatbelt-exec-allowlist constraints at once — because
-   `dev_docs/decisions/script_language.md` rejected Go while believing the constrained tier was
-   ~1,000 lines and Python could take the rest. **That premise is now measurably false** (it is
-   1.8x that, and includes the entire unattended runtime), so it gets one honest re-examination.
+1. **RESOLVED (task 2, 2026-07-13) — stdlib Python on a pinned absolute interpreter; Go
+   re-rejected; no bash frozen.** The re-examination Go was owed under the corrected numbers
+   happened, and Go lost — but not on distribution cost. Its differentiator ("the only option
+   satisfying the launchd-PATH and Seatbelt-exec constraints at once") was **tested and found
+   false**: a uv-managed CPython, invoked by absolute path, runs in the jail under one exec grant
+   with no cache writes and no PATH lookup. With the differentiator gone, Go's costs stand alone.
+   Rationale: [`decisions/script_language.md`](decisions/script_language.md) → "The constrained
+   tier's runtime". The three requirements it imposes are in **Interpreter choice** above.
 
 2. **RESOLVED — PR #202 merged**, and this branch is cut from it. The `shfmt` reformat is in;
    every `file:line` in the table above is against post-#202 `main`.

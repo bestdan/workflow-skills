@@ -2,7 +2,7 @@
 title: Decide the runtime for the constrained tier — before any code is ported
 priority: high
 size: 3
-status: ready
+status: done
 created: 2026-07-13
 expires: 2026-12-31
 source_branch: bestdan/port-orchestrator-to-python
@@ -100,3 +100,57 @@ task 3 begins.
 - The decision is made **by the user, explicitly** — not inferred, not defaulted. Frame the
   tradeoff plainly: what breaks at 3am if the interpreter is missing, versus how many lines of
   bash stay forever.
+
+## Outcome (2026-07-13)
+
+**Decision: (b) — stdlib-only Python on a pinned, pre-flight-resolved absolute interpreter
+(≥3.11). Go re-rejected. Nothing is frozen in bash; the whole file is portable.** Recorded by
+amending `dev_docs/decisions/script_language.md` ("The constrained tier's runtime"), per this
+card's instruction not to start a competing doc.
+
+**The plan's load-bearing premise was false, and nobody had tested it.** Both this plan and the
+language ADR assumed no interpreter could satisfy launchd's pinned PATH *and* the Seatbelt exec
+allowlist at once — which is what made a compiled binary uniquely qualified, and what made
+"freeze Tier B in bash" the expected answer. Exercised against a real rendered profile:
+
+| Candidate | Runs in the jail? |
+| --------- | ----------------- |
+| `uv run` | **No** — needs `~/.cache/uv` writable: a write grant outside the worktree confinement. |
+| `/usr/bin/python3` | **No** un-granted (CLT shim), and 3.9.6 vs the repo's ≥3.11. |
+| **uv-managed CPython 3.11.14, absolute path** | **Yes** — one exec grant, no cache writes, no PATH lookup, full stdlib. |
+| Go binary | **Yes** — but this was supposed to be the *only* thing that could. |
+
+The distinction nobody had drawn: **`uv run` is not the interpreter.** `uv run` is a package
+manager (cache + network); the CPython binary uv installs is just an interpreter, and by absolute
+path it needs no PATH entry, no cache, and no writes.
+
+**Why Go lost.** Not on distribution cost — on the collapse of its differentiator. Once an
+interpreter satisfies both constraints, Go's remaining case is a release pipeline for a solo repo
+with no plugin install hook, against a language that is worse at this program's actual workload
+(S-expr/plist/shell templating, dynamically-shaped `gh` JSON). The ADR states this explicitly
+rather than citing the original rejection, as this card required.
+
+**What it bought.** The expected outcome was "the port buys the renderers, not the program"
+(1,422 of 4,040 handler lines). The real outcome is that **all 2,618 constrained lines are
+portable too** — the supervisor, `doctor`, `status`, the verify broker. Task 8 is unblocked
+rather than closed as won't-do.
+
+**Requirements passed downstream** (task 8 inherits; not new patterns — `--claude-bin` and the
+fingerprint-resolved `--path` already work this way at `spawn-orchestrator.sh:1363`):
+
+1. Pre-flight **resolve + assert ≥3.11, fail-closed at launch**, not at 3am. A version
+   requirement cannot conjure an interpreter — it converts a silent break into a loud one.
+2. **Bake the resolved absolute path** into the launch script and the exec grant. Never a PATH
+   lookup.
+3. Grant the interpreter **directory as a subpath**, not a version-stamped literal — a
+   `cpython-3.11.14-…` literal re-creates detached-run finding #3's version-drift trap. Verified:
+   one subpath grant covers 3.11.14 and 3.14.2.
+
+**Accepted residual risk:** a soft dependency on a uv-managed interpreter existing on the host,
+on the unattended path. Requirement 1 is the mitigation.
+
+**Found while testing, filed separately — `git` cannot exec inside the jail.** `/usr/bin/git` is
+a CLT shim that re-execs `/Library/Developer/CommandLineTools/usr/bin/git`, which no profile
+grants; `smoke-confinement.sh` passes `--exec "$(command -v git)"` but never *runs* git jailed,
+so it has never caught this. Independent of the runtime decision and **not fixed here** (this
+card is decision-only): see `dev_docs/tasks/orch_py_plan/orch_py_task_10.md`.

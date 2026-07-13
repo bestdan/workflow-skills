@@ -97,13 +97,21 @@ The audit moved **eight** subcommands into Tier B that no hand-drawn list had ca
 path — and moved `alarm-clear` **out** (it is `--resume`-only, attended). The constrained tier is
 1.8x the unconstrained one and holds the entire unattended runtime.
 
-### Interpreter choice (open question — see below)
+### Interpreter choice — RESOLVED (task 2, 2026-07-13)
 
-`scripts/validate.py` establishes the repo's Python convention: PEP 723 inline metadata,
-`uv run`, hash-locked (`validate.py.lock`), `requires-python >=3.11`. That is the obvious
-default for Tier A. It is a poor fit for Tier B, where `uv` typically lives in `~/.local/bin`
-and would have to be added to the pinned launchd PATH. Recommendation and alternatives are
-in **Open questions**.
+**Stdlib-only Python on a pinned, pre-flight-resolved absolute interpreter (≥3.11). Go
+re-rejected. Nothing is frozen in bash — the whole file is portable, Tier B included.**
+
+The premise this plan rested on — that no interpreter could satisfy launchd's pinned PATH *and*
+the Seatbelt exec allowlist, so Tier B was stuck in shell — **was never tested, and is false.**
+A uv-managed CPython 3.11 invoked by *absolute path* runs inside the jail under one exec grant,
+with no cache writes and no PATH lookup. (`uv run` genuinely does fail — it needs `~/.cache/uv`
+writable — but `uv run` is a package manager, not the interpreter it installs. That distinction
+is the whole decision.)
+
+Rationale, the collapse of Go's differentiator, and the three requirements the port inherits:
+[`decisions/script_language.md`](../../decisions/script_language.md) → "The constrained tier's
+runtime".
 
 ## Scope / non-goals
 
@@ -128,8 +136,10 @@ and whether Python is even the right target — so it is settled before a line i
 5. [[orch_py_task_5]] — Port `render-settings`: the layer-2 egress allowlist.
 6. [[orch_py_task_6]] — Port `write-launch` + `write-verify-broker`: the generators.
 7. [[orch_py_task_7]] — Port `restack`.
-8. [[orch_py_task_8]] — `doctor` / the constrained tier — conditional on task 2's decision.
+8. [[orch_py_task_8]] — `doctor` / the constrained tier — **unblocked** by task 2; it ports.
 9. [[orch_py_task_9]] — Graduate into `dev_docs/orchestrator.md`; delete this plan folder.
+10. [[orch_py_task_10]] — **BUG:** `git` cannot exec inside the jail (CLT shim not on the exec
+    allowlist). Found while testing task 2; independent of the port; blocks nothing in it.
 
 ## Open questions
 
