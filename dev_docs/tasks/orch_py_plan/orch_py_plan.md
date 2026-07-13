@@ -121,7 +121,8 @@ runtime".
   `preflight-freshness` et al. are 137–312 lines, correct, and idiomatic shell. Leave them.
 - **Not** porting `scripts/test-spawn-orchestrator.sh`. It is the safety net; rewriting the
   net while moving the trapeze defeats the point. It keeps running as bash against the CLI.
-- **Not** touching the constrained tier before task 2 decides its runtime — and possibly not at all.
+- **Not** touching the constrained tier before task 2 decides its runtime. (Task 2 decided: it
+  **ports**. An earlier draft added "and possibly not at all" — that is no longer true.)
 - **Not** adding a package manager, venv, or build step for plugin consumers.
 
 ## Tasks
@@ -130,7 +131,8 @@ runtime".
 and whether Python is even the right target — so it is settled before a line is ported.
 
 1. [[orch_py_task_1]] — **Audit the full reachability set** (which subcommands are actually constrained).
-2. [[orch_py_task_2]] — **Decide the runtime** for the constrained tier. No code. May reopen Go.
+2. [[orch_py_task_2]] — **Decide the runtime** — ✅ **done 2026-07-13:** pinned stdlib Python
+   ≥3.11; Go re-rejected; **nothing frozen in bash**.
 3. [[orch_py_task_3]] — Golden-output corpus + the bash→Python dispatch seam.
 4. [[orch_py_task_4]] — Port `render-profile` (+ network allowlist): the seatbelt renderer.
 5. [[orch_py_task_5]] — Port `render-settings`: the layer-2 egress allowlist.
@@ -138,30 +140,33 @@ and whether Python is even the right target — so it is settled before a line i
 7. [[orch_py_task_7]] — Port `restack`.
 8. [[orch_py_task_8]] — `doctor` / the constrained tier — **unblocked** by task 2; it ports.
 9. [[orch_py_task_9]] — Graduate into `dev_docs/orchestrator.md`; delete this plan folder.
-10. [[orch_py_task_10]] — **BUG:** `git` cannot exec inside the jail (CLT shim not on the exec
-    allowlist). Found while testing task 2; independent of the port; blocks nothing in it.
+10. [[orch_py_task_10]] — **BUG:** `git` cannot exec inside the jail. The `/usr/bin/git` **shim is
+    already granted** by `(subpath "/usr/bin")`; what is ungranted is its **re-exec target** under
+    the active developer dir. Found while testing task 2; independent of the port; blocks nothing
+    in it. (Tasks 1–9 are the port; task 10 is a bug card that rides along.)
 
 ## Open questions
 
-1. **Which interpreter — and should the decision move to the front?** Any option for Tier B must
-   satisfy **both** constraints: resolvable on launchd's pinned PATH **and** permitted by the
-   Seatbelt `process-exec` allowlist.
-   - **(a) `uv` for Tier A, bash stays for Tier B** *(recommended)*. Matches `validate.py`
-     exactly, no new dependency, zero risk to the supervisor loop. Cost: **2,618 lines** of
-     constrained bash survive — the entire unattended runtime.
-   - **(b) Stdlib-only Python on absolute `/usr/bin/python3`**. Survives the minimal PATH and
-     can be added to the exec allowlist as a literal. Cost: it is a **Command Line Tools shim**
-     (not unconditionally usable), and it is **3.9 on this machine** while the repo's other
-     Python requires ≥3.11; stdlib-only means no `pyyaml`.
-   - **(c) `uv` everywhere** — on the pinned `--path` *and* the exec allowlist. Cleanest code,
-     largest runtime-surface increase on the security-critical unattended path. Not recommended.
+1. **Which interpreter? — RESOLVED 2026-07-13 (task 2): stdlib-only Python on a pinned,
+   pre-flight-resolved absolute interpreter (≥3.11). Go re-rejected. Nothing frozen in bash.**
 
-   **RESOLVED 2026-07-13: this decision moved to the front of the plan (task 2).** The task 1
-   audit showed it gates 2,618 lines across 17 subcommands, so deciding it after building 1,422
-   lines of Python would be deciding it too late to act on. Task 2 also explicitly reopens
-   **(d) a compiled binary (Go)** — the only option satisfying both constraints at once — because
-   `dev_docs/decisions/script_language.md` rejected Go while believing a premise that is now
-   false.
+   The options this question used to list are kept only as a record of what was believed, because
+   **the premise under all of them was false**: it was assumed no interpreter could satisfy
+   launchd's pinned PATH *and* the Seatbelt exec allowlist at once, which made "(a) bash stays for
+   Tier B" the recommendation and made a Go binary "the only option satisfying both constraints at
+   once."
+
+   **Tested, that premise collapsed.** A uv-managed CPython invoked by absolute path runs in the
+   jail under one exec grant, with no cache writes and no PATH lookup — so an interpreter *does*
+   satisfy both, and Go's differentiator is gone. (`uv run` genuinely does fail — it needs
+   `~/.cache/uv` writable — but `uv run` is a package manager, not the interpreter it installs.
+   That distinction is the whole decision.) The stale options — "(a) recommended", "(b) on
+   `/usr/bin/python3`" (a 3.9.6 CLT shim), "(c) uv everywhere", "(d) Go, the only option that
+   can" — are all superseded.
+
+   See "Interpreter choice — RESOLVED" above and
+   [`decisions/script_language.md`](../../decisions/script_language.md) → "The constrained tier's
+   runtime" for the rationale and the three requirements the port inherits.
 
 2. **RESOLVED: PR #202 merged** (2026-07-13T11:55:57Z). It reformatted every line of
    `spawn-orchestrator.sh` with `shfmt`, so rebase onto `main` before starting — a branch cut

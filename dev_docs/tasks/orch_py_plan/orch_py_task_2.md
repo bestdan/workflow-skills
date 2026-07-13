@@ -138,16 +138,24 @@ rather than closed as won't-do.
 **Requirements passed downstream** (task 8 inherits; not new patterns — `--claude-bin` and the
 fingerprint-resolved `--path` already work this way at `spawn-orchestrator.sh:1363`):
 
-1. Pre-flight **resolve + assert ≥3.11, fail-closed at launch**, not at 3am. A version
-   requirement cannot conjure an interpreter — it converts a silent break into a loud one.
-2. **Bake the resolved absolute path** into the launch script and the exec grant. Never a PATH
-   lookup.
-3. Grant the interpreter **directory as a subpath**, not a version-stamped literal — a
-   `cpython-3.11.14-…` literal re-creates detached-run finding #3's version-drift trap. Verified:
-   one subpath grant covers 3.11.14 and 3.14.2.
+1. Pre-flight **resolve + assert ≥3.11, fail-closed at launch.** Catches an absent or too-old
+   interpreter *at launch*; it **cannot** see drift after launch.
+2. **Bake the _stable_ symlink (`~/.local/bin/python3.11`) into the launch script — never the
+   version-stamped target.** The launch script is written once (`:1471`) and re-run by launchd
+   unchanged on every wake, so a baked `…/cpython-3.11.14-…` path dies silently on the next `uv`
+   upgrade. `--claude-bin` already does this right (stable `claude` symlink, not
+   `versions/2.1.207`).
+3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`).
+   Seatbelt checks the **resolved** path — granting `~/.local/bin` alone fails `Operation not
+   permitted` (verified). One subpath covers 3.11.14 and 3.14.2. **Same defect class as the `git`
+   CLT-shim bug** ([[orch_py_task_10]]).
 
-**Accepted residual risk:** a soft dependency on a uv-managed interpreter existing on the host,
-on the unattended path. Requirement 1 is the mitigation.
+**Accepted residual risk:** 2–3 survive a `uv` **upgrade**, but not a `uv python uninstall`
+mid-run — the symlink dangles and requirement 1's launch-time assert cannot see it. Task 8 must
+have the wake script test `[ -x "$interpreter" ]` and route a missing interpreter through the
+supervisor halt path (a classified halt + alarm, not an unclassified exec failure that relaunches
+forever — finding #22's class). **A compiled binary would not have this drift surface at all**;
+it is charged against Python honestly in the ADR.
 
 **Found while testing, filed separately — `git` cannot exec inside the jail.** `/usr/bin/git` is
 a CLT shim that re-execs `/Library/Developer/CommandLineTools/usr/bin/git`, which no profile

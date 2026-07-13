@@ -54,12 +54,19 @@ Port it under the three requirements task 2 imposes
 runtime"):
 
 - **Pre-flight resolve + assert ≥3.11, fail-closed at launch.** A `doctor` that cannot exec
-  inside the jail halts every run on iteration one — so this must fail in front of a human at
-  launch, never at 3am.
-- **Bake the resolved absolute interpreter path into the launch script and the profile's exec
-  grant** — never a PATH lookup. `render-profile` must emit the grant.
-- **Grant the interpreter *directory* as a subpath, not a version-stamped literal** — a
-  `cpython-3.11.14-…` literal re-creates finding #3's version-drift trap.
+  inside the jail halts every run on iteration one. This catches an absent/too-old interpreter
+  *at launch*; it **cannot** see drift afterwards.
+- **Bake the _stable_ symlink (`~/.local/bin/python3.11`) into the launch script — never the
+  version-stamped target.** The script is written once (`:1471`) and re-run by launchd unchanged
+  on every wake; a baked `…/cpython-3.11.14-…` dies silently on the next `uv` upgrade.
+- **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`) —
+  `render-profile` must emit it. Seatbelt checks the **resolved** path, so granting `~/.local/bin`
+  alone fails `Operation not permitted` (verified). **Same defect class as the `git` CLT-shim bug**
+  ([[orch_py_task_10]]).
+- **Handle the residual: the wake script must test `[ -x "$interpreter" ]`** and route a missing
+  interpreter through the supervisor halt path — a classified halt + alarm, never an unclassified
+  exec failure that relaunches forever (finding #22's class). A `uv python uninstall` mid-run
+  dangles the symlink, and the launch-time assert cannot see it.
 
 Behavioural contract to preserve:
 
@@ -78,13 +85,18 @@ Behavioural contract to preserve:
 
 **Code-enforced:**
 
-- If closed as won't-do: `dev_docs/orchestrator.md` records `doctor` as permanently bash, with
-  the jail-invocation reason and a `file:line` citation.
-- If ported: golden corpus reproduces byte-for-byte across the diagnostic's branches; a test
-  asserts the run directory is unchanged after a `doctor` run; the **exit-30 HALT path is
-  explicitly tested**; `render-profile` emits the interpreter on the exec allowlist.
-- Harness passes unchanged either way.
-- `just check` green.
+- Golden corpus reproduces `doctor`'s stdout/rc byte-for-byte across its branches, and the
+  **exit-30 HALT path is explicitly tested**.
+- **Each mutation has its own criterion — `doctor` is NOT read-only** (an earlier draft of this
+  card demanded "a test asserts the run directory is unchanged after a `doctor` run", which
+  contradicts the contract above and would have failed every valid repair): task-parking writes
+  `RUN.md` correctly, orphaned worktrees are removed, `alarm-request` is filed via `_doctor_halt`,
+  and the supervisor halts. A stdout/rc corpus captures none of this.
+- `render-profile` emits the interpreter's **resolve-target** dir on the exec allowlist, and
+  `sandbox-exec` can actually run the interpreter under the rendered profile (assert the *run*,
+  not just the grant — that is the `git` bug's lesson).
+- The wake script fails **loud** on a missing interpreter (classified halt + alarm), not silent.
+- Harness passes unchanged; `just check` green.
 
 **User-run (mandatory if ported):**
 

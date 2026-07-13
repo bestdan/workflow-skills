@@ -215,14 +215,25 @@ no PATH entry, no cache, no writes.
 
 **Requirements this puts on every Tier B port (task 8 inherits them):**
 
-1. **Pre-flight resolve + assert ≥3.11, fail-closed at launch** — not at 3am. A version
-   requirement cannot conjure an interpreter; it converts a silent break into a loud one.
-2. **Bake the resolved absolute path into the launch script and the exec grant** — never a PATH
-   lookup. The same pattern `--claude-bin` and the fingerprint-resolved `--path` already use
-   (`spawn-orchestrator.sh:1363`).
-3. **Grant the interpreter _directory_ as a subpath, not a version-stamped literal** — a
-   `cpython-3.11.14-…` literal re-creates detached-run finding #3's version-drift trap. Verified:
-   one subpath grant covers 3.11.14 and 3.14.2.
+1. **Pre-flight resolve + assert ≥3.11, fail-closed at launch.** Catches an absent or too-old
+   interpreter _at launch_. It **cannot** see drift after launch — scope the claim honestly.
+2. **Bake the _stable_ symlink into the launch script (`~/.local/bin/python3.11`), never the
+   version-stamped target.** The launch script is written once (`spawn-orchestrator.sh:1471`) and
+   re-run by launchd unchanged on every wake, so a baked `…/cpython-3.11.14-…` path dies silently
+   on the next `uv` upgrade. `--claude-bin` already does this right — it bakes the stable `claude`
+   symlink, not `versions/2.1.207`.
+3. **Grant the symlink's _resolve target_ dir as a subpath** (`~/.local/share/uv/python`).
+   Seatbelt checks the **resolved** path, so granting `~/.local/bin` alone fails with `Operation
+   not permitted` (verified). One subpath grant covers 3.11.14 and 3.14.2. **Same defect class as
+   the `git` CLT-shim bug (task 10)** — a grant on the path you _invoke_ is worthless if Seatbelt
+   checks the path it _resolves to_.
+
+**Residual risk (task 8 must handle):** requirements 2–3 survive a `uv` **upgrade** but not a
+`uv python uninstall` mid-run — the symlink dangles and requirement 1's launch-time assert cannot
+see it. Mitigation: the wake script should test `[ -x "$interpreter" ]` and route a missing
+interpreter through the supervisor halt path, so it lands as a classified halt with an alarm
+rather than an unclassified exec failure that relaunches forever (finding #22's class). **This is
+a drift surface a compiled binary would not have** — charged honestly against Python in the ADR.
 
 `scripts/validate.py`'s convention (PEP 723, `uv run`, hash-locked) stays the default for
 **Tier A**, where a dependency is free. Tier B is stdlib-only — at ≥3.11 the stdlib covers the
@@ -230,7 +241,9 @@ whole job (`json`, `re`, `subprocess`, `pathlib`, `tomllib`), so no resolver eve
 
 ## Tasks
 
-Nine, each one PR. Full cards in `dev_docs/tasks/orch_py_plan/` (local).
+Nine port tasks, each one PR — plus `orch_py_task_10`, an independent bug card (the `git`
+jail-exec defect) that rides along in the same folder. Full cards in `dev_docs/tasks/orch_py_plan/`
+(local).
 
 **The runtime decision came first, and it landed (task 2).** Python on a pinned absolute
 interpreter, Go re-rejected, **nothing frozen in bash**. Tasks 3–7 (Tier A) and task 8 (Tier B)

@@ -225,22 +225,45 @@ Three requirements, all inherited by the constrained-tier port (task 8). They ar
 patterns — they are the ones `write-launch` already uses for `--claude-bin` and `--path`
 (resolve absolute, fail closed: `spawn-orchestrator.sh:1363`):
 
-1. **Pre-flight resolve + assert, fail-closed at launch.** Resolve the interpreter to an absolute
-   path and assert **≥3.11** _at launch_, not at 3am. A version requirement cannot conjure an
-   interpreter — it can only turn a silent 3am break into a loud pre-flight one. That is its
-   whole job, and it is worth having.
-2. **Bake the resolved path in.** The absolute interpreter path goes into the generated launch
-   script and the profile's exec grant — never a PATH lookup, exactly as `--claude-bin` and the
-   fingerprint-resolved `--path` already work.
-3. **Grant the interpreter _directory_ as a subpath, not a version-stamped literal.** A literal
-   `cpython-3.11.14-…` re-creates detached-run finding #3's version-drift trap (`claude →
-   versions/2.1.207`): a `uv` upgrade silently breaks the jail. A subpath over
-   `~/.local/share/uv/python` covers upgrades — verified with 3.11.14 and 3.14.2 under one grant.
+1. **Pre-flight resolve + assert, fail-closed at launch.** Resolve the interpreter and assert
+   **≥3.11** _at launch_. A version requirement cannot conjure an interpreter — it can only turn
+   a silent break into a loud pre-flight one. **Scope it honestly:** this catches the interpreter
+   being _absent or too old at launch_. It cannot see drift that happens _after_ launch — see
+   requirements 2–3 and the residual risk below.
+2. **Bake the _stable_ path into the launch script — never the version-stamped one.** The launch
+   script is written **once** (`write_launch`, `spawn-orchestrator.sh:1471`) and re-executed by
+   launchd unchanged on **every** `StartInterval` wake. So baking
+   `…/cpython-3.11.14-…/bin/python3.11` means a `uv` upgrade leaves every later wake execing a
+   path that no longer exists — silently, at 3am, forever. Bake **`~/.local/bin/python3.11`**,
+   the stable symlink `uv python install` maintains and repoints across patch upgrades. This is
+   the exact pattern `--claude-bin` already relies on: it bakes the stable `claude` symlink, not
+   `versions/2.1.207`.
+3. **Grant the symlink's _resolve target_ directory as a subpath.** Seatbelt resolves a symlink
+   and checks the **target** against the exec allowlist — granting `~/.local/bin` alone is **not
+   enough** and fails with `Operation not permitted` (verified). Grant a subpath over
+   `~/.local/share/uv/python`, which covers every installed version — verified with 3.11.14 and
+   3.14.2 under one grant. A version-stamped `(literal …cpython-3.11.14…)` grant would re-create
+   detached-run finding #3's drift trap on the jail side.
 
-**Accepted residual risk:** this puts a soft dependency on a uv-managed interpreter existing on
-the host, on the unattended path. Requirement 1 is the mitigation — it fails at launch, in front
-of a human, rather than mid-run. This is a smaller surface than `uv run` (no cache, no network,
-no resolver) and it buys the removal of 2,618 lines of Bash 3.2 that no type checker can see.
+   This is **the same defect class as the `git` CLT-shim bug** (`orch_py_task_10`): a grant on the
+   path you _invoke_ is worthless if Seatbelt is checking the path it _resolves to_. Getting one
+   of these right and the other wrong is the easy mistake.
+
+**Accepted residual risk — stated in full, because an earlier draft of this section understated
+it.** Requirements 2–3 make the setup survive a `uv` **upgrade**. They do **not** survive the
+interpreter being **removed** mid-run (`uv python uninstall`, a pruned cache): the symlink
+dangles, and requirement 1 — a _launch-time_ assert — cannot see it. A wake would then fail at
+exec with no classification, and launchd would relaunch forever doing nothing: finding #22's
+silent-success failure class (`spawn-orchestrator.sh:3349`).
+
+**Be honest about the ledger:** this is a drift surface a **compiled binary would not have at
+all** — Go needs none of requirements 1–3. It is accepted anyway because it takes a _manual_ `uv`
+operation, mid-run, on a single-user host to trigger (uv does not auto-upgrade), and because it
+is still a far smaller surface than `uv run` (no cache, no network, no resolver). **Mitigation
+for task 8:** have the generated wake script test `[ -x "$interpreter" ]` and route a missing
+interpreter through the supervisor's halt path, so it lands as a _classified halt with an alarm_
+rather than an unclassified exec failure. That converts the residual from silent to loud, which
+is the property requirement 1 was claimed to provide and, on its own, does not.
 
 **Stdlib-only, and that is now cheap.** At ≥3.11 the stdlib covers the whole job (`json`, `re`,
 `subprocess`, `pathlib`, `tomllib`), so the constrained tier needs no third-party packages and

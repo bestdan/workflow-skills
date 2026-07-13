@@ -1,5 +1,5 @@
 ---
-title: git cannot exec inside the jail — the CLT shim is not on the exec allowlist
+title: git cannot exec inside the jail — the CLT shim's re-exec TARGET is not on the exec allowlist
 priority: high
 size: 2
 status: ready
