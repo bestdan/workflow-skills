@@ -148,9 +148,15 @@ and whether Python is even the right target — so it is settled before a line i
     load-bearing claim about runtime behavior was asserted, propagated into a spec, and never
     executed — each time it was one command to check. Includes the archetype in the code:
     `smoke-confinement.sh` grants `git` to the jail and never runs it.
+12. [[orch_py_task_12]] — **BUG (security):** layer 2 does not enforce. The launch script's
+    `--permission-mode bypassPermissions` disables the harness's inner sandbox — which *is* layer
+    2 — so the jailed agent has open network egress: a raw socket to an arbitrary host connects.
+    Found while fixing task 10, whose exec fixes let the smoke's §2 run at all. Task 11's thesis,
+    demonstrated. Gates task 5: do not port `render-settings` until it is known whether anything
+    reads the allowlist it emits.
 
-(Tasks 1–9 are the port. Tasks 10 and 11 rode along: a bug and a process fix, both found *by* the
-port rather than *in* it.)
+(Tasks 1–9 are the port. Tasks 10, 11 and 12 rode along: two bugs and a process fix, all found
+*by* the port rather than *in* it.)
 
 ## Open questions
 
