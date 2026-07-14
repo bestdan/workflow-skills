@@ -1,12 +1,13 @@
-# Linear handler — false-closures backstop
+# Linear handler — /find-false-closures flow
 
-This is a **standalone backstop, not a `/slash` command flow.** No command in
-this plugin invokes it automatically; it exists purely as
-`commands/handlers/assets/linear-false-closures.py`, a runnable script you
-point at a project and repo.
+Invoked from `/find-false-closures` when `handler: linear` is configured, and
+also runnable **standalone** — the whole flow is packaged as
+`commands/handlers/assets/linear-false-closures.py`, a script you can point at a
+project and repo directly (see "Run it — the shipped script" below). The command
+path just resolves scope + repo from config and runs that same asset.
 
 **Shared reference:** see `commands/handlers/linear-common.md` for connection
-details and the config schema this backstop's project/repo scoping assumes.
+details and the config schema this flow's project/repo scoping assumes.
 
 ## The bug it detects
 
@@ -41,6 +42,41 @@ nothing. A completed issue with no owning merged PR is a **false closure**.
 The closing-keyword signal is what covers cloud/hosted runs, where the PR head
 branch frequently does not embed the Linear id and branch matching alone would
 miss delivered work.
+
+## Invoked from `/find-false-closures`
+
+The command is a thin wrapper over the asset. Resolve two things from config,
+then run the script once per project:
+
+1. **Scope (projects).** If the caller passed `--project <uuid>`, use only that.
+   Otherwise resolve the configured `linear.projects` via `linear-common.md`
+   "Resolve configured projects" and run the asset once per project id. This
+   flow is **project-scoped** (the asset queries `project(id:)`), so if no
+   projects are configured and none was passed, stop and tell the user to
+   configure `linear.projects` or pass `--project`.
+2. **Repo.** If the caller passed `--repo owner/name`, use it. Otherwise default
+   to the current repo's `origin`:
+
+   ```bash
+   gh repo view --json nameWithOwner --jq .nameWithOwner
+   ```
+
+   (One repo per run — a Linear project whose work spans several repos needs a
+   run per repo, or the widest repo whose merged PRs cover it. Passing `--repo`
+   overrides the default.)
+
+Then, per resolved project, run the asset (dry-run unless the caller passed
+`--apply`), reading the API key exactly as the standalone path does:
+
+```bash
+python3 commands/handlers/assets/linear-false-closures.py \
+  --project "<project-id>" --repo "<owner/name>" [--apply]
+```
+
+Fold each project's `ok`/`skip`/`FALSE CLOSURES` output into the command's
+combined report. The op-in-agent-shell key gotcha below applies here too — the
+asset resolves the key itself, so run the command from an `op`-authorized shell
+(or a headless one with `$OP_SERVICE_ACCOUNT_TOKEN`).
 
 ## Security boundary + the op-in-agent-shell gotcha
 
