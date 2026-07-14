@@ -1,6 +1,6 @@
 ---
 name: select-coder
-description: Use when choosing which coder agent and model should execute a coding task — e.g. "which model should implement this", "pick the best coder for these packets", "what's the cheapest model that can handle X", or /select-coder. Scores the task against a capability matrix (correctness, speed, cost, context, creativity, autonomy, verification behavior, data handling, containment) and the locally available agents/models, then recommends ranked `<backend>:<model>` specs. Works standalone or as a subagent; orchestrate-coders uses it for per-packet assignment overrides.
+description: Use when choosing which coder agent and model should execute a coding task — e.g. "which model should implement this", "pick the best coder for these packets", "what's the cheapest model that can handle X", or /select-coder. Scores the task against a capability matrix (correctness, speed, cost, context, creativity, autonomy, verification behavior, secret exposure, containment) and the locally available agents/models, then recommends ranked `<backend>:<model>` specs. Works standalone or as a subagent; orchestrate-coders uses it for per-packet assignment overrides.
 ---
 
 # select-coder — pick the right agent and model for the task
@@ -45,7 +45,7 @@ availability:
   codex:
     installed: true
     default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
-    auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); drives the data-handling gate
+    auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); ranks codex within the secret-exposure gate
   agy:
     installed: true
     logged_in: true # script-probed via `agy models` (free); false when the token is dead
@@ -131,22 +131,25 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    label), filtered to what's available. Produce a ranked list (best first),
    max 3 per task. On `confidence: low`, also consider the `runner_up` row.
 
-3. **Run the two gates first** (`matrix.md` → "Data handling and containment").
+3. **Run the two gates first** (`matrix.md` → "Secret exposure and containment").
    They filter candidates rather than penalize them, and they are the only
    dimensions that can disqualify a backend outright.
-   - **Data handling.** Every backend except `opus` trains on your code by
-     default. `codex` is exempt when `availability.codex.auth` is `api-key`; when
-     it is `chatgpt`, the plan tier decides (consumer trains, Business/Enterprise
-     does not) and the CLI cannot report the tier — so ask, or assume consumer.
-     `agy` and `devin` have opt-outs that neither CLI reports; treat them as not
-     exercised unless the user says otherwise. The devin open-weight passthroughs
-     have an undocumented destination and no opt-out at all.
+   - **Secret exposure.** The trigger is whether the agent could read a live
+     secret or real PII in this repo — not whether the vendor trains on code.
+     If it could: drop `agy` (Google staff may read what the agent read) and
+     `devin` (demonstrated prompt-injection secret exfiltration; its passthrough
+     models make the destination unanswerable). Keep `opus` and `codex`, and
+     prefer `codex.auth: api-key` over a consumer `chatgpt` login — that only
+     changes how _durable_ a leak is, so use it to rank, not to disqualify.
+     Whatever survives, tell the user to deny reads of `~/.ssh` / `~/.aws` and
+     keep `.env` out of the worktree: that, not the vendor choice, is what
+     prevents the leak.
    - **Containment.** Unattended or parallel work near the main checkout rules out
      `agy`, whose workspace boundary is not enforceable.
-   - **Non-interactive runs never prompt** (see above), so they cannot ask whether
-     the repo is sensitive. Default to the conservative answer — sensitive, no
-     opt-out in force — unless `.coders.yml` sets
-     `data_policy.repo_may_train: true`. State the assumption in the report.
+   - **Non-interactive runs never prompt** (see above). Check for secrets cheaply
+     instead (a present `.env`, an ignored credential file); if inconclusive,
+     assume the gate fires and say so. `.coders.yml` can set
+     `data_policy.repo_has_secrets: false` to override.
 
    Name the gate that removed each dropped backend. A gate is not a tiebreak.
 

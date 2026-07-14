@@ -33,11 +33,12 @@ if command -v codex >/dev/null 2>&1; then
     m=$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$HOME/.codex/config.toml" | head -1)
   fi
   [ -n "$m" ] && codex_model=$m
-  # Billing mode decides codex's TRAINING posture, so select-coder's data-handling
-  # gate needs it: API-billed => no training (default since 2023). A *consumer*
-  # ChatGPT plan (Free/Plus/Pro) inherits ChatGPT data controls, where training is
-  # ON unless the user opted out. ChatGPT Business/Enterprise do not train by
-  # default — but the CLI cannot tell us the tier, only the auth mode, so
+  # Billing mode decides codex's TRAINING posture, which select-coder uses to rank
+  # (not to disqualify): API-billed => no training (default since 2023), so a
+  # secret the agent reads stays transient. A *consumer* ChatGPT plan
+  # (Free/Plus/Pro) inherits ChatGPT data controls, where training is ON unless
+  # opted out — which makes any leak durable. ChatGPT Business/Enterprise do not
+  # train by default, but the CLI reports only the auth mode, not the tier, so
   # `chatgpt` here means "ask which tier", not "training is on".
   # NB: `codex login status` prints to STDERR, not stdout — capture with 2>&1 or
   # this silently reads empty and every repo looks like it needs the strict gate.
