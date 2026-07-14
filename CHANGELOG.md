@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.55.2] - 2026-07-14
+
+### Fixes
+
+- deliver agy's input in -p, not on stdin (#213) (532fa6a)
+
 ## [1.55.1] - 2026-07-13
 
 ### Fixes
