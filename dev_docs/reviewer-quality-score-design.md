@@ -18,15 +18,20 @@ them per reviewer. The output is evidence for two decisions we currently make on
 vibes — **which reviewers to keep running**, and **how to fix a reviewer's
 prompt**.
 
-## The key insight: the grader is already blind
+## The key insight: the grader is already (mostly) blind
 
-`co-review` step 8 hands the reconciler sub-agent every finding labelled
-neutrally as "Reviewer A", "Reviewer B", … — deliberately, so it cannot grade an
-agent instead of a finding. It then rates each finding `high` / `medium` / `low`,
-where `low` explicitly means "wrong, not applicable, or over-engineering."
+`co-review` step 8 hands the reconciler sub-agent findings from Claude and the
+local agents labelled neutrally as "Reviewer A", "Reviewer B", … — deliberately,
+so it cannot grade an agent instead of a finding. It then rates each finding
+`high` / `medium` / `low`, where `low` explicitly means "wrong, not applicable,
+or over-engineering."
 
 That is already a blinded grade against a shared diff. The instrument exists; we
-simply throw its readings away. This design writes them down.
+simply throw its readings away. This design writes them down — and closes the
+one blinding gap that exists today: **GitHub comments currently reach the
+reconciler with their real authors.** A finding graded under the name "Copilot"
+is not a blind grade, so bot rows would be worthless. Section 1 fixes this by
+relabelling _every_ source, not just the local ones.
 
 ## The firewall (the load-bearing constraint)
 
@@ -55,16 +60,46 @@ Consequences, all deliberate:
 - co-review is **write-only** to the ledger. It never reads it — not even to warn
   you mid-run that a reviewer looks bad.
 - The write is performed by a **script**, not an agent. A sub-agent would return
-  text into the main context; a script returns nothing. Structural, not
-  prompt-enforced.
+  text into the main context; a script returns nothing.
 - Acting on the data is a **human decision**, made deliberately against a large
   sample, not an automated demotion fired by a threshold on a handful of rows.
+
+**Honesty about enforcement.** In a prose-driven skill, "no step reads the
+ledger" is a _policy_ control, not a capability boundary — the agent retains
+`Read` access to a predictable path, and an agent that ran `/co-review-stats`
+earlier in a session carries the scores in context into any co-review run in
+that same session. Mitigations, strongest first:
+
+1. **Optional deny rule** (real capability boundary for direct reads): add
+   `"Read(~/.claude/co-review/**)"` to `permissions.deny`. The stats script
+   still works — it reads the file itself and is invoked via Bash.
+2. **Same-session rule**, stated in both `/co-review-stats` and `co-review`:
+   after viewing stats, don't run a co-review in the same session; if aggregate
+   reviewer scores are already in context when co-review starts, say so in the
+   run summary so the run's rows can be discounted.
+3. The stats script prints the table itself (its stdout is the deliverable);
+   the model adds no numbers of its own.
+
+This is proportionate to a single-user tool. The failure it leaves open —
+deliberately reading the ledger mid-review in defiance of the skill — also
+defeats any local enforcement short of removing the file, and is visible in the
+transcript.
 
 ## Components
 
 ### 1. Reconciler contract (edit to `co-review` step 8)
 
-Two changes to the JSON the reconciler returns.
+Three changes: one to what the reconciler is given, two to the JSON it returns.
+
+**Blind every source, not just local ones.** Today step 8 anonymizes Claude and
+the local agents but passes GitHub comments "with author". All sources —
+including GitHub bots and human commenters — are relabelled to neutral
+"Reviewer X" labels before the reconciler sees them, and the label→identity
+mapping stays with the main agent. Humans are included in reconciliation (their
+comments corroborate or contradict findings, and an identifiable human name
+would unblind the grader just as a bot name does); they are anonymized like
+everyone else and handled specially only at recording time (see
+`human_corroborated` below).
 
 **Split `low` into three verdicts.** The current `low` conflates failure modes
 that demand opposite responses. The verdict set becomes:
@@ -117,15 +152,25 @@ Append-only, two record types.
 ```json
 {
   "type": "run",
+  "schema": 1,
   "run_id": "2026-07-14T15-02-11Z-a3f9",
   "ts": "2026-07-14T15:02:11Z",
   "repo": "bestdan/workflow-skills",
   "pr": 231,
+  "base_sha": "5ceb4a9",
+  "head_sha": "3d1a42b",
   "mode": { "local": false, "post": false, "non_interactive": false },
   "diff_lines": 412,
+  "co_review_version": "1.4.2",
+  "reconciler_model": "claude-opus-4-8",
   "reviewers": [
-    { "name": "claude", "disposition": "ran" },
-    { "name": "devin", "disposition": "ran" },
+    { "name": "claude", "disposition": "ran", "model": "claude-opus-4-8" },
+    {
+      "name": "devin",
+      "disposition": "ran",
+      "model": "swe-1.6",
+      "command": "devin --sandbox --permission-mode auto --prompt-file ..."
+    },
     { "name": "agy", "disposition": "skipped", "reason": "auth probe failed" },
     { "name": "codex", "disposition": "timed-out" }
   ]
@@ -135,6 +180,24 @@ Append-only, two record types.
 Without this record, a reviewer that ran ten times and found nothing is
 indistinguishable from one that never ran — and "finds nothing" is itself a
 quality signal worth seeing.
+
+**Provenance, because names drift.** "devin" is not one thing over time: its
+model gets bumped in `.co-review.yml`, its command string changes, the
+reconciler model changes with the session, and the skill itself evolves — and
+any of those can move a wrong-rate. Each run therefore records a `schema`
+version, the plugin version, the reconciler's model, the diff identity
+(`base_sha`/`head_sha`), and each reviewer's model and exact command string.
+That is the cheap subset that lets `--since` answer "did devin regress after
+the model bump?" without probing CLI versions or hashing prompts on every run —
+if the free-text `rationale` grep ever shows drift these fields can't explain,
+add more then.
+
+**Eligible cohort.** A run appears in the ledger **iff reconciliation
+completed** — the record is written immediately after the reconciler returns.
+An invocation that aborts earlier (staleness stop, no PR found, hard error) is
+intentionally absent: no grades were produced, so it can neither help nor hurt
+any reviewer. The denominator is "reconciled runs," and the stats output says
+so.
 
 **`finding`** — one per reconciler row, with `sources` **unblinded** to real
 reviewer names.
@@ -147,14 +210,20 @@ reviewer names.
   "line": 42,
   "issue": "...",
   "sources": ["devin", "claude"],
+  "human_corroborated": false,
   "verdict": "wrong",
   "rationale": "..."
 }
 ```
 
 **Who is scored:** Claude's own review (as `claude`), the local CLI agents, and
-GitHub bot reviews. Human PR comments are **dropped, not logged** — scoring
-colleagues is not the goal and the rows would only pollute the aggregate.
+GitHub bot reviews. Humans are **never named in the ledger** — scoring
+colleagues is not the goal. But a human source can't simply be dropped from
+`sources`: if devin and a human reported the same issue, deleting the human
+would make devin look like the sole discoverer. So the recording script strips
+human identities and sets the anonymous `human_corroborated` flag instead — the
+finding keeps its evidential weight without anyone being scored. A finding
+raised _only_ by humans is not recorded at all.
 
 **Reviewer naming.** A local CLI agent is recorded under its config name
 (`codex`, `agy`, `devin`, `copilot`); a GitHub bot is recorded under its bot
@@ -176,8 +245,10 @@ ledger is local-only, under `~/.claude/`, never committed, never synced.
 
 ### 3. The write — `scripts/co-review-record.py`
 
-A new step at the **end** of a co-review run, after reconciliation and after any
-fixes are applied. The main agent writes three temp files and calls:
+A new step **immediately after the reconciler returns** (before fixes are
+applied, so a failure later in the run can't lose the record — the grades exist
+the moment reconciliation completes). The main agent writes three temp files
+and calls:
 
 ```bash
 uv run scripts/co-review-record.py \
@@ -191,6 +262,14 @@ uv run scripts/co-review-record.py \
 - The script performs the unblinding join, appends both record types, and prints
   exactly one line: `RECORDED: 14 findings, 4 reviewers`. It never echoes ledger
   contents.
+- **Consistency model.** Auto-pilot can run co-reviews concurrently, and
+  "never fatal" invites retries — so the append must not be naive. The script:
+  takes an exclusive `flock` on the ledger; **dedups on `run_id`** (if the id
+  already appears, exit `RECORDED: duplicate, skipped` — retries are
+  idempotent); writes the run record and all its findings as **one batch under
+  the one lock** (no interleaving, no run-without-findings torn state); releases
+  the lock. All-or-nothing per run, plain JSONL, no database — proportionate to
+  a ledger that will hold hundreds of rows.
 - Failure to record is **never fatal** — a warning in the run summary, matching
   co-review's existing posture on reviewer failures. Telemetry must not be able
   to break a review.
@@ -209,21 +288,38 @@ to inform.
 
 Per reviewer:
 
-| Column        | Definition                                               |
-| ------------- | -------------------------------------------------------- |
-| `runs`        | Runs where the reviewer's disposition was `ran`          |
-| `findings`    | Rows listing the reviewer in `sources`                   |
-| `wrong %`     | The headline: `wrong` ÷ findings                         |
-| `n/a %`       | `not-applicable` ÷ findings — a _context_ problem        |
-| `oos %`       | `out-of-scope` ÷ findings — a _rubric_ problem           |
-| `high`        | Findings that survived as `high`                         |
-| `unique-high` | `high` rows where the reviewer was the **sole** source   |
-| `finds/run`   | Volume — catches the reviewer that is quiet, not correct |
+| Column        | Definition                                                          |
+| ------------- | ------------------------------------------------------------------- |
+| `runs`        | Runs where the reviewer's disposition was `ran`                     |
+| `findings`    | Rows listing the reviewer in `sources`                              |
+| `wrong %`     | The headline: `wrong` ÷ findings                                    |
+| `Δ claude`    | Paired wrong-rate delta vs `claude` (see below)                     |
+| `n/a %`       | `not-applicable` ÷ findings — a _context_ problem                   |
+| `oos %`       | `out-of-scope` ÷ findings — a _rubric_ problem                      |
+| `high`        | Findings that survived as `high`                                    |
+| `unique-high` | `high` rows: sole automated source **and** not `human_corroborated` |
+| `finds/run`   | Volume — catches the reviewer that is quiet, not correct            |
+
+**The baseline comparison is paired, not marginal.** Reviewers don't skip at
+random — auth failures cluster in time, timeouts correlate with big diffs — so
+devin's wrong-rate over _its_ runs against Claude's wrong-rate over _all_ runs
+would confound reviewer quality with workload selection. `Δ claude` is computed
+only over the runs where **both** that reviewer and `claude` ran: same diffs,
+same reconciler, same session. The marginal `wrong %` stays in the table (it's
+what you intuitively read), but `Δ claude` is the column that supports a
+keep/drop decision. The script also prints each reviewer's paired-cohort size —
+with N this small, honest denominators beat confidence-interval theater, and
+`--repo` / `--since` provide the stratification that matters.
 
 `unique-high` is the column that prevents the obvious mistake. Precision alone
 would reward a reviewer that reports nothing (0 findings, 0% wrong, perfect
 score) and might evict a noisy reviewer that is nonetheless the only one catching
-real bugs. Both numbers have to be read together.
+real bugs. Both numbers have to be read together. Two caveats are inherent in
+its definition: a `human_corroborated` catch is excluded (a human on the PR had
+it anyway, so the reviewer added redundancy, not discovery), and "unique" is
+always **relative to the reviewers that ran that day** — the run record makes
+that cohort explicit, so the stats can't silently credit a reviewer for being
+alone in an empty room.
 
 Flags: `--since <date>`, `--repo <name>` (did a reviewer regress after a model
 bump? is it fine on Python and hopeless on shell?).
@@ -246,14 +342,18 @@ bump? is it fine on Python and hopeless on shell?).
 ## Success criteria
 
 1. A co-review run appends one `run` record and one `finding` record per
-   reconciled finding, in every mode, and a recording failure never breaks a run.
-2. No agent in the review path reads `findings.jsonl`. Enforced by there being no
-   step that does, and stated as an explicit rule in `co-review`'s Rules section
-   so a later edit doesn't quietly reintroduce one.
-3. `/co-review-stats` reports every reviewer plus the `claude` baseline, with
-   arithmetic done in the script.
-4. After ~30 runs, the table can answer: _is devin actually wrong more often than
-   Claude, and does it catch anything nobody else does?_
+   reconciled finding, in every mode; the write is locked, batched, and
+   idempotent on `run_id`; and a recording failure never breaks a run.
+2. The reconciler sees **only neutral labels** — including for GitHub bots and
+   human commenters. No identifiable source name reaches the grader.
+3. No agent in the review path reads `findings.jsonl`. Enforced by there being
+   no step that does, stated as an explicit rule in `co-review`'s Rules section,
+   and hardenable via the optional `permissions.deny` read rule.
+4. `/co-review-stats` reports every reviewer plus the `claude` baseline, with
+   the headline comparison **paired on common runs** and all arithmetic done in
+   the script.
+5. After ~30 runs, the table can answer: _is devin actually wrong more often
+   than Claude on the same diffs, and does it catch anything nobody else does?_
 
 ## Open question, resolved by data
 
