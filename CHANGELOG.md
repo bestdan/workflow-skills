@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.56.1] - 2026-07-14
+
+### Fixes
+
+- restore the operational-modifiers table, harden the auth probe (#215) (4cbeac0)
+
 ## [1.56.0] - 2026-07-14
 
 ### Features
