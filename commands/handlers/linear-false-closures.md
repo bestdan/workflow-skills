@@ -28,12 +28,19 @@ optionally-restore pass — without changing either command's rule tables.
 
 ## Detection rule
 
-A completed issue must be **owned** by a merged PR: the PR's head branch
-embeds the issue's identifier (regex match — not equality on Linear's
-suggested `branchName`, since the real branch is routinely a shortened form
-of it), or one of the issue's attachment URLs is itself a merged PR. A PR that
-only mentions the id in its body owns nothing. A completed issue with no
-owning merged PR is a **false closure**.
+A completed issue must be **owned** by a merged PR, by any of three signals:
+the PR's head branch embeds the issue's identifier (regex match — not equality
+on Linear's suggested `branchName`, since the real branch is routinely a
+shortened form of it); one of the issue's attachment URLs points at a merged PR
+(compared on canonical `owner/repo/pull/<n>` identity, so a trailing slash,
+`?src=linear` query, or `/files` tab still matches); or the PR title/body
+**closes** the issue with a keyword (`closes PRE-123`). A PR that merely
+name-drops the id — no branch, no attachment, no closing keyword — owns
+nothing. A completed issue with no owning merged PR is a **false closure**.
+
+The closing-keyword signal is what covers cloud/hosted runs, where the PR head
+branch frequently does not embed the Linear id and branch matching alone would
+miss delivered work.
 
 ## Security boundary + the op-in-agent-shell gotcha
 

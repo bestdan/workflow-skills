@@ -7,22 +7,25 @@ that merely mentions a sibling issue therefore sweeps that sibling to Done, with
 no branch, no PR, and no code. It has done so repeatedly, and it's why that
 integration got disabled.
 
-``/reconcile-tasks`` cannot repair this: its rule table (see
-commands/handlers/linear-reconcile.md) is promote/complete-only and never
-demotes, so a falsely-completed issue is invisible to it. This script is the
-standalone backstop that fills that gap without changing reconcile's or
-sweep-for-complete's rule tables — there is no `/slash` command that invokes it.
+This script is the standalone backstop that detects those false closures and
+optionally restores them. (See commands/handlers/linear-false-closures.md for
+how it relates to the other Linear task commands.)
 
 The test applied here:
 
     A completed issue must be OWNED by a merged PR.
 
-Ownership means the PR is *about* the issue -- its head branch embeds the
-issue's identifier (regex match, not equality on Linear's suggested
-``branchName``: the real branch is routinely a shortened form of it), or the
-issue carries a link attachment pointing at a merged PR. A PR that only
-name-drops the id in its body owns nothing. A completed issue with no owning
-merged PR is a false closure.
+Ownership means the PR is *about* the issue, established by any of: its head
+branch embeds the issue's identifier (regex match, not equality on Linear's
+suggested ``branchName``: the real branch is routinely a shortened form of it);
+the issue carries a link attachment pointing at a merged PR; or the PR
+title/body *closes* the issue with a keyword (``closes PRE-123``). A PR that
+merely name-drops the id -- no branch, no attachment, no closing keyword --
+owns nothing. A completed issue with no owning merged PR is a false closure.
+
+The closing-keyword signal matters on cloud/hosted runs, where the PR head
+branch often does not embed the Linear id, so the branch match alone would
+miss delivered work.
 
 Safety: READ-ONLY by default -- lists false closures and changes nothing. Pass
 --apply to restore them to their own team's Todo/unstarted state (resolved per
@@ -69,7 +72,7 @@ query($project: String!, $cursor: String) {
         title
         startedAt
         team { id }
-        attachments(first: 50) { nodes { url } }
+        attachments(first: 250) { nodes { url } pageInfo { hasNextPage } }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -161,7 +164,7 @@ def merged_prs(repo):
             "api",
             "--paginate",
             "--jq",
-            ".[] | select(.merged_at != null) | {headRefName: .head.ref, url: .html_url}",
+            ".[] | select(.merged_at != null) | {headRefName: .head.ref, url: .html_url, title: .title, body: .body}",
             f"repos/{repo}/pulls?state=closed&per_page=100",
         ],
         capture_output=True,
@@ -172,6 +175,22 @@ def merged_prs(repo):
     return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
 
 
+PR_IDENTITY = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", re.I)
+
+
+def pr_identity(url):
+    """Canonical `owner/repo/pull/<n>` for a GitHub PR url, else None.
+
+    Linear stores whatever url was attached -- routinely with a trailing slash,
+    a `?src=linear` query, a fragment, or a `/files` tab -- so an exact-string
+    match against gh's canonical `html_url` misses real ownership links and
+    would misclassify delivered work as a false closure. Compare parsed
+    identities, not raw strings.
+    """
+    m = PR_IDENTITY.search(url or "")
+    return f"{m.group(1).lower()}/pull/{m.group(2)}" if m else None
+
+
 def owning_pr(issue, prs, merged):
     """The merged PR that actually delivered this issue, or None.
 
@@ -180,17 +199,27 @@ def owning_pr(issue, prs, merged):
     routinely a shortened form of it, so an equality test would report real,
     delivered work as a false closure -- and --apply would then un-complete it.
 
-    A PR that merely mentions the id in its body owns nothing; only the branch
-    it was built on, or a link attachment the issue itself carries, counts.
+    Three ownership signals, in order of authority: the branch it was built on,
+    a link attachment the issue itself carries, or a PR whose title/body closes
+    the issue with a keyword (``closes PRE-123``). A bare mention of the id --
+    none of the three -- owns nothing; that is the over-close bug this catches.
+    The keyword signal is what covers cloud runs whose branches lack the id.
     """
     ident = re.escape(issue["identifier"].lower())
     token = re.compile(rf"(?<!\d){ident}(?!\d)")
+    closes = re.compile(
+        rf"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#?{ident}(?!\d)", re.I
+    )
     for pr in prs:
         if token.search((pr.get("headRefName") or "").lower()):
             return pr["url"]
     for att in issue["attachments"]["nodes"]:
-        if att["url"] in merged:
+        key = pr_identity(att["url"])
+        if key and key in merged:
             return att["url"]
+    for pr in prs:
+        if closes.search(f"{pr.get('title') or ''}\n{pr.get('body') or ''}"):
+            return pr["url"]
     return None
 
 
@@ -228,16 +257,27 @@ def main():
     project_name, issues = completed_issues(key, args.project)
 
     prs = merged_prs(args.repo)
-    merged = {pr["url"] for pr in prs}
+    merged = {k for k in (pr_identity(pr["url"]) for pr in prs) if k}
 
-    false_closures, legit = [], []
+    false_closures, legit, truncated = [], [], []
     for issue in issues:
         owner = owning_pr(issue, prs, merged)
-        (legit if owner else false_closures).append((issue, owner))
+        if owner:
+            legit.append((issue, owner))
+        elif issue["attachments"]["pageInfo"]["hasNextPage"]:
+            # >250 attachments: we can't prove none of them owns this issue, so
+            # never call it a false closure (a wrong call would reopen real work).
+            truncated.append(issue)
+        else:
+            false_closures.append((issue, owner))
 
     print(f"project: {project_name}  ({len(issues)} completed issues)")
     for issue, owner in legit:
         print(f"  ok    {issue['identifier']}  <- {owner}")
+    for issue in truncated:
+        print(
+            f"  skip  {issue['identifier']}  (>250 attachments — not classified)"
+        )
 
     if not false_closures:
         print("\nno false closures.")
@@ -260,8 +300,8 @@ def main():
     print(f"\nRestoring {len(false_closures)}...")
     cache, ok, fail = {}, 0, 0
     for issue, _ in false_closures:
-        todo = resolve_todo_state(key, issue["team"]["id"], cache)
         try:
+            todo = resolve_todo_state(key, issue["team"]["id"], cache)
             if gql(key, MOVE_ISSUE, {"id": issue["id"], "state": todo["id"]})[
                 "issueUpdate"
             ]["success"]:
