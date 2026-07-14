@@ -25,6 +25,7 @@ probed_at=$(date +%Y-%m-%d)
 
 codex_installed=false
 codex_model=unknown
+codex_auth=unknown
 if command -v codex >/dev/null 2>&1; then
   codex_installed=true
   m=$(codex config get model 2>/dev/null)
@@ -32,6 +33,19 @@ if command -v codex >/dev/null 2>&1; then
     m=$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$HOME/.codex/config.toml" | head -1)
   fi
   [ -n "$m" ] && codex_model=$m
+  # Billing mode decides codex's TRAINING posture, which select-coder uses to rank
+  # (not to disqualify): API-billed => no training (default since 2023), so a
+  # secret the agent reads stays transient. A *consumer* ChatGPT plan
+  # (Free/Plus/Pro) inherits ChatGPT data controls, where training is ON unless
+  # opted out — which makes any leak durable. ChatGPT Business/Enterprise do not
+  # train by default, but the CLI reports only the auth mode, not the tier, so
+  # `chatgpt` here means "ask which tier", not "training is on".
+  # NB: `codex login status` prints to STDERR, not stdout — capture with 2>&1 or
+  # this silently reads empty and every repo looks like it needs the strict gate.
+  case "$(codex login status 2>&1)" in
+    *"API key"* | *"api key"*) codex_auth=api-key ;;
+    *ChatGPT*) codex_auth=chatgpt ;;
+  esac
 fi
 
 agy_installed=false
@@ -70,6 +84,7 @@ availability:
   codex:
     installed: $codex_installed
     default_model: $codex_model
+    auth: $codex_auth # api-key => no training. chatgpt => consumer tiers train by default; Business/Enterprise do not — tier is NOT detectable here, ask.
   agy:
     installed: $agy_installed
     logged_in: $agy_logged_in # false when the token is dead (e.g. stale file-store over SSH)

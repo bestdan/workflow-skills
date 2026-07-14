@@ -1,5 +1,5 @@
 ---
-description: Recommend which coder agent and model should execute a coding task — probes locally available backends (opus, codex, agy, devin) once into a cached config, scores the task against a capability matrix (correctness, speed, cost, creativity, autonomy, verification), and returns ranked coder specs; usable standalone or as orchestrate-coders --coder arguments
+description: Recommend which coder agent and model should execute a coding task — probes locally available backends (opus, codex, agy, devin) once into a cached config, scores the task against a capability matrix (correctness, speed, cost, context, creativity, autonomy, verification, secret exposure, containment), and returns ranked coder specs; usable standalone or as orchestrate-coders --coder arguments
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, WebSearch, WebFetch, AskUserQuestion, Skill
 argument-hint: "<task description> [--plan <name>] [--refresh] [-n N]"
 ---
