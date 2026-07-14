@@ -1,6 +1,6 @@
 ---
 name: select-coder
-description: Use when choosing which coder agent and model should execute a coding task — e.g. "which model should implement this", "pick the best coder for these packets", "what's the cheapest model that can handle X", or /select-coder. Scores the task against a capability matrix (correctness, speed, cost, creativity, autonomy, verification behavior) and the locally available agents/models, then recommends ranked `<backend>:<model>` specs. Works standalone or as a subagent; orchestrate-coders uses it for per-packet assignment overrides.
+description: Use when choosing which coder agent and model should execute a coding task — e.g. "which model should implement this", "pick the best coder for these packets", "what's the cheapest model that can handle X", or /select-coder. Scores the task against a capability matrix (correctness, speed, cost, context, creativity, autonomy, verification behavior, data handling, containment) and the locally available agents/models, then recommends ranked `<backend>:<model>` specs. Works standalone or as a subagent; orchestrate-coders uses it for per-packet assignment overrides.
 ---
 
 # select-coder — pick the right agent and model for the task
@@ -45,6 +45,7 @@ availability:
   codex:
     installed: true
     default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
+    auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); drives the data-handling gate
   agy:
     installed: true
     logged_in: true # script-probed via `agy models` (free); false when the token is dead
@@ -130,7 +131,26 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    label), filtered to what's available. Produce a ranked list (best first),
    max 3 per task. On `confidence: low`, also consider the `runner_up` row.
 
-3. **Apply the operational modifiers** (also in `matrix.md`) — these come
+3. **Run the two gates first** (`matrix.md` → "Data handling and containment").
+   They filter candidates rather than penalize them, and they are the only
+   dimensions that can disqualify a backend outright.
+   - **Data handling.** Every backend except `opus` trains on your code by
+     default. `codex` is exempt when `availability.codex.auth` is `api-key`; when
+     it is `chatgpt`, the plan tier decides (consumer trains, Business/Enterprise
+     does not) and the CLI cannot report the tier — so ask, or assume consumer.
+     `agy` and `devin` have opt-outs that neither CLI reports; treat them as not
+     exercised unless the user says otherwise. The devin open-weight passthroughs
+     have an undocumented destination and no opt-out at all.
+   - **Containment.** Unattended or parallel work near the main checkout rules out
+     `agy`, whose workspace boundary is not enforceable.
+   - **Non-interactive runs never prompt** (see above), so they cannot ask whether
+     the repo is sensitive. Default to the conservative answer — sensitive, no
+     opt-out in force — unless `.coders.yml` sets
+     `data_policy.repo_may_train: true`. State the assumption in the report.
+
+   Name the gate that removed each dropped backend. A gate is not a tiebreak.
+
+4. **Apply the operational modifiers** (also in `matrix.md`) — these come
    from real pilot runs and outrank benchmark deltas:
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
@@ -141,7 +161,7 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
      paths near the main checkout; fine for scoped worktree edits.
    - opus self-verifies honestly → prefer when verification honesty matters.
 
-4. **Report**: per candidate — the coder spec, one-line why, and the cost
+5. **Report**: per candidate — the coder spec, one-line why, and the cost
    tier (`$`, `$$`, `$$$` per matrix). If the top pick is unavailable but
    would clearly win, say so and name what it would take (e.g. "devin pro
    tier would unlock swe-1.6-fast").
