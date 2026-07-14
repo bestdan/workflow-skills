@@ -42,9 +42,13 @@ if command -v codex >/dev/null 2>&1; then
   # `chatgpt` here means "ask which tier", not "training is on".
   # NB: `codex login status` prints to STDERR, not stdout — capture with 2>&1 or
   # this silently reads empty and every repo looks like it needs the strict gate.
+  # Arm order is deliberate: `chatgpt` is the conservative classification (a leak
+  # may be trained on), `api-key` the permissive one. Output naming both must
+  # resolve to chatgpt, so test it first. Unmatched output falls through to the
+  # `unknown` initialized above — no default arm needed.
   case "$(codex login status 2>&1)" in
-    *"API key"* | *"api key"*) codex_auth=api-key ;;
     *ChatGPT*) codex_auth=chatgpt ;;
+    *"API key"* | *"api key"*) codex_auth=api-key ;;
   esac
 fi
 

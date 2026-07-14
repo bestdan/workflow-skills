@@ -25,6 +25,21 @@ load test_helper
   assert_output --partial 'installed: false'
 }
 
+@test "coder probe classifies codex auth from stderr" {
+  make_stub date 'echo 2026-01-01'
+  make_stub sed 'exec /usr/bin/sed "$@"'
+  make_stub head 'exec /usr/bin/head "$@"'
+  make_stub cat 'exec /bin/cat "$@"'
+  # `codex login status` prints to STDERR. If the probe ever drops its 2>&1 it
+  # reads empty and silently classifies every install as `unknown`, so assert
+  # the stderr path specifically.
+  make_stub codex 'if [ "$1 $2" = "login status" ]; then echo "Logged in using ChatGPT" >&2; fi'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$REPO_ROOT/scripts/probe-coders.sh"
+  assert_success
+  assert_output --partial 'auth: chatgpt'
+}
+
 @test "eval rejects a missing claude dependency" {
   PATH="$BIN_DIR:/bin:/usr/bin"
   run bash "$REPO_ROOT/scripts/eval.sh"
