@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.56.0] - 2026-07-14
+
+### Features
+
+- add secret-exposure, containment, and context dimensions (#214) (9816c87)
+
 ## [1.55.2] - 2026-07-14
 
 ### Fixes
