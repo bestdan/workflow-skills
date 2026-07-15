@@ -19,6 +19,7 @@
 # Usage:
 #   scripts/claude-usage.sh                 # compact JSON of session/weekly/spend
 #   scripts/claude-usage.sh --session-percent   # just the integer percent-consumed
+#   scripts/claude-usage.sh --session-status    # "<percent> <reset_epoch>" for the 5h window
 #   scripts/claude-usage.sh --from-file <f>     # parse a saved response (no net/keychain)
 #   scripts/claude-usage.sh --help
 #
@@ -28,9 +29,11 @@
 #    "spend_used_minor":0}
 #
 # Exit status:
-#   0  usage read OK; JSON (or the bare percent) on stdout.
-#   1  usage UNAVAILABLE (no token, network failure, or unexpected shape) —
-#      the caller falls back to the proxy. A one-line reason goes to stderr.
+#   0  usage read OK; JSON (or the bare percent, or the "<percent> <epoch>"
+#      status line) on stdout.
+#   1  usage UNAVAILABLE (no token, network failure, unexpected shape, or —
+#      for --session-status — no session resets_at) — the caller falls back
+#      to the proxy. A one-line reason goes to stderr.
 #   2  usage error (missing dependency, bad arguments).
 
 set -uo pipefail
@@ -54,6 +57,7 @@ FROM_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-percent) MODE="percent" ;;
+    --session-status) MODE="status" ;;
     --from-file)
       shift
       FROM_FILE="${1:-}"
@@ -111,7 +115,7 @@ fi
 # --- Parse + emit ----------------------------------------------------------
 # A missing session window is fail-closed: the orchestrator needs the 5h read.
 printf '%s' "$usage_json" | MODE="$MODE" python3 -c '
-import json, os, sys
+import datetime, json, os, sys
 
 try:
     data = json.load(sys.stdin)
@@ -130,6 +134,16 @@ except (TypeError, ValueError):
 
 if os.environ.get("MODE") == "percent":
     print(session_pct); sys.exit(0)
+
+if os.environ.get("MODE") == "status":
+    resets_at = session.get("resets_at")
+    if not resets_at:
+        sys.stderr.write("claude-usage: session has no resets_at\n"); sys.exit(1)
+    try:
+        epoch = int(datetime.datetime.fromisoformat(resets_at.replace("Z", "+00:00")).timestamp())
+    except (TypeError, ValueError):
+        sys.stderr.write("claude-usage: session resets_at is not valid ISO 8601\n"); sys.exit(1)
+    print(f"{session_pct} {epoch}"); sys.exit(0)
 
 def window(entry):
     if not entry:
