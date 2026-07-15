@@ -64,7 +64,9 @@ die() {
 }
 
 usage() {
-  sed -n '2,66p' "$0"
+  # Print the leading comment block (past the shebang), stopping at the first
+  # non-comment line — so this can't drift into printing code as the file grows.
+  awk 'NR > 1 { if (/^#/) print; else exit }' "$0"
 }
 
 # Print the PR's state (OPEN/MERGED/CLOSED) lowercased, or empty on failure.
