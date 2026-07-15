@@ -20,7 +20,14 @@ load test_helper
   write_fixture "$TEST_TMPDIR/usage.json" '{"limits":[{"kind":"session","percent":42.6,"resets_at":"2026-07-10T05:00:00Z"}],"spend":{"used":{"amount_minor":32261}}}'
   run bash "$REPO_ROOT/scripts/claude-usage.sh" --from-file "$TEST_TMPDIR/usage.json" --session-status
   assert_success
-  assert_output '43 1783659600'
+  assert_output '42 1783659600'
+}
+
+@test "session status floors the percent so near-cap does not read as 100" {
+  write_fixture "$TEST_TMPDIR/usage.json" '{"limits":[{"kind":"session","percent":99.6,"resets_at":"2026-07-10T05:00:00Z"}]}'
+  run bash "$REPO_ROOT/scripts/claude-usage.sh" --from-file "$TEST_TMPDIR/usage.json" --session-status
+  assert_success
+  assert_output '99 1783659600'
 }
 
 @test "fails closed for --session-status with no resets_at" {

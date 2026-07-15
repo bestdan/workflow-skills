@@ -141,9 +141,12 @@ if os.environ.get("MODE") == "status":
         sys.stderr.write("claude-usage: session has no resets_at\n"); sys.exit(1)
     try:
         epoch = int(datetime.datetime.fromisoformat(resets_at.replace("Z", "+00:00")).timestamp())
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError):
         sys.stderr.write("claude-usage: session resets_at is not valid ISO 8601\n"); sys.exit(1)
-    print(f"{session_pct} {epoch}"); sys.exit(0)
+    # Floor (not round) here: this gates car`s cap check, so only a genuine 100
+    # may read as 100 — rounding would let a 99.6% voluntary quit trip the cap.
+    session_floor = int(float(session["percent"]))
+    print(f"{session_floor} {epoch}"); sys.exit(0)
 
 def window(entry):
     if not entry:

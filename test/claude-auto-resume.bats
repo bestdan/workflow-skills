@@ -64,9 +64,66 @@ write_usage_stub() {
   assert_output --partial "no active rate limit detected"
 }
 
+# --- full capped iteration, end-to-end ------------------------------------
+# Drive the actual resume loop (wait_until -> --continue relaunch -> flag
+# cleanup -> loop cap) with a file-backed fake clock so wait_until terminates
+# instantly. `date` reads the clock; the `sleep` stub jumps it far past the
+# reset target so the countdown breaks after one tick.
+install_fake_clock() {
+  printf '%s' 1000 >"$TEST_TMPDIR/clock"
+  make_stub date 'if [ "$1" = "+%s" ]; then cat "'"$TEST_TMPDIR"'/clock"; else exec /bin/date "$@"; fi'
+  make_stub sleep 'c=$(cat "'"$TEST_TMPDIR"'/clock"); printf "%s" "$((c + 2000000))" >"'"$TEST_TMPDIR"'/clock"'
+}
+
+@test "resumes once when capped, then exits when the cap clears" {
+  install_fake_clock
+  # Stateful usage stub: first call reports the cap (100), the next reports a
+  # cleared window (50) so the loop resumes exactly once then quits.
+  printf '%s' 0 >"$TEST_TMPDIR/count"
+  cat >"$SCRIPT_DIR/claude-usage.sh" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "$TEST_TMPDIR/count"); printf '%s' "\$((n + 1))" >"$TEST_TMPDIR/count"
+reset=\$(( \$(cat "$TEST_TMPDIR/clock") + 1000000 ))
+if [ "\$n" -eq 0 ]; then echo "100 \$reset"; else echo "50 \$reset"; fi
+EOF
+  chmod +x "$SCRIPT_DIR/claude-usage.sh"
+  make_stub claude 'printf "%s\n" "$*" >>"'"$TEST_TMPDIR"'/claude-calls.txt"' 'exit 0'
+  : >"$HOME/.claude/.rl_warn" # flag present so we can assert it is cleaned up
+
+  CAR_BUFFER=0 run bash "$CAR" --no-tmux firstprompt
+  assert_success
+  assert_output --partial "rate-limited"
+  assert_output --partial "no active rate limit detected"
+  # claude ran twice: initial prompt, then --continue on the resume.
+  run cat "$TEST_TMPDIR/claude-calls.txt"
+  assert_line --index 0 "firstprompt"
+  assert_line --index 1 "--continue"
+  assert_file_not_exist "$HOME/.claude/.rl_warn"
+}
+
+@test "stops after CAR_MAX_LOOPS resumes" {
+  install_fake_clock
+  # Always capped: the reset is kept ahead of the (advancing) fake clock so
+  # every iteration re-arms, exercising the runaway-loop guard.
+  cat >"$SCRIPT_DIR/claude-usage.sh" <<EOF
+#!/usr/bin/env bash
+echo "100 \$(( \$(cat "$TEST_TMPDIR/clock") + 1000000 ))"
+EOF
+  chmod +x "$SCRIPT_DIR/claude-usage.sh"
+  make_stub claude 'printf "x\n" >>"'"$TEST_TMPDIR"'/claude-calls.txt"' 'exit 0'
+
+  CAR_BUFFER=0 CAR_MAX_LOOPS=2 run bash "$CAR" --no-tmux
+  assert_failure 1
+  assert_output --partial "hit CAR_MAX_LOOPS=2"
+  # Ran MAX_LOOPS + 1 times: the resume that trips the guard still launched.
+  run grep -c x "$TEST_TMPDIR/claude-calls.txt"
+  assert_output 3
+}
+
 # --- capped_reset_epoch, exercised directly -------------------------------
-# Resuming (looping back into claude) can't be tested end-to-end without
-# actually sleeping/relaunching, so the resume-decision logic is verified by
+# The cases below isolate just the resume decision (no relaunch), covering the
+# below-cap / at-cap / past-reset / offline branches. The resume-decision logic
+# is verified by
 # extracting and sourcing just that function.
 
 load_capped_reset_epoch() {
