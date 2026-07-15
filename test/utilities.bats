@@ -40,6 +40,122 @@ load test_helper
   assert_output --partial 'auth: chatgpt'
 }
 
+@test "pr-fix-guard check: open PR is safe to push" {
+  make_stub gh 'echo OPEN'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$REPO_ROOT/scripts/pr-fix-guard.sh" check --pr 1
+  assert_success
+  assert_output --partial 'PRGUARD: state=open'
+}
+
+@test "pr-fix-guard check: merged PR is a dead branch (exit 4)" {
+  make_stub gh 'echo MERGED'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$REPO_ROOT/scripts/pr-fix-guard.sh" check --pr 1
+  assert_failure 4
+  assert_output --partial 'PRGUARD: state=merged'
+}
+
+@test "pr-fix-guard check: gh failure is unknown, never fatal (exit 3)" {
+  make_stub gh 'exit 1'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$REPO_ROOT/scripts/pr-fix-guard.sh" check --pr 1
+  assert_failure 3
+  assert_output --partial 'PRGUARD: state=unknown'
+}
+
+# --- verify: content-diff detection, exercised against a REAL throwaway repo ---
+# Stubbing git would make these vacuous — the content-diff logic is the thing
+# under test — so build an actual repo. `origin` is a second local repo the
+# fixture fetches from, so `git fetch origin <base>` in the script works offline.
+_prg_make_repo() {
+  REPO="$TEST_TMPDIR/work"
+  ORIGIN="$TEST_TMPDIR/origin.git"
+  # Hermetic: block inherited global/system git config so this repo's own
+  # core.hooksPath (whose pre-commit hook blocks commits to main) can't leak in
+  # and fail the fixture's commits.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+  git init -q --bare "$ORIGIN"
+  git init -q "$REPO"
+  git -C "$REPO" config core.hooksPath /dev/null
+  git -C "$REPO" config user.email t@t.t
+  git -C "$REPO" config user.name t
+  git -C "$REPO" config commit.gpgsign false
+  git -C "$REPO" remote add origin "$ORIGIN"
+  printf 'base\n' >"$REPO/f.txt"
+  git -C "$REPO" add f.txt
+  git -C "$REPO" commit -qm base
+  git -C "$REPO" push -q origin HEAD:main
+  git -C "$REPO" fetch -q origin # establish the origin/main tracking ref
+}
+
+@test "pr-fix-guard verify: open PR needs no verification" {
+  _prg_make_repo
+  make_stub gh 'echo OPEN'
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
+  assert_success
+  assert_output --partial 'PRGUARD: verdict=open'
+}
+
+@test "pr-fix-guard verify: fix content present in base is landed" {
+  _prg_make_repo
+  # A fix commit whose content is then also pushed to base.
+  printf 'fixed\n' >"$REPO/f.txt"
+  git -C "$REPO" commit -qam fix
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
+  git -C "$REPO" push -q origin HEAD:main
+  make_stub gh 'echo MERGED'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
+  assert_success
+  assert_output --partial 'PRGUARD: verdict=landed'
+}
+
+@test "pr-fix-guard verify: fix content absent from base is orphaned (exit 5)" {
+  _prg_make_repo
+  # Fix committed locally but base never receives it — the race we guard against.
+  printf 'fixed\n' >"$REPO/f.txt"
+  git -C "$REPO" commit -qam fix
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
+  make_stub gh 'echo MERGED'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
+  assert_failure 5
+  assert_output --partial 'PRGUARD: orphaned-file=f.txt'
+  assert_output --partial 'PRGUARD: verdict=orphaned'
+}
+
+@test "pr-fix-guard verify: squash-merge is landed even though commit is not an ancestor of base" {
+  # THE design-constraint regression test. Base gets the fix CONTENT via a fresh
+  # squashed commit; the branch's own commit is unreachable from base. An
+  # ancestry check (--is-ancestor) would wrongly call this orphaned. Content
+  # diff must call it landed. If this fails, someone rewrote verify as ancestry.
+  _prg_make_repo
+  printf 'fixed\n' >"$REPO/f.txt"
+  git -C "$REPO" commit -qam 'fix (branch commit)'
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
+  # Simulate the squash merge: base advances to a NEW commit with the same
+  # content but a different SHA, with the branch commit not in its history.
+  git -C "$REPO" checkout -q -B squashed origin/main
+  printf 'fixed\n' >"$REPO/f.txt"
+  git -C "$REPO" commit -qam 'squashed PR (new sha)'
+  git -C "$REPO" push -q origin HEAD:main
+  # Prove the premise: the branch commit is NOT an ancestor of base.
+  run git -C "$REPO" merge-base --is-ancestor "$sha" origin/main
+  assert_failure
+  make_stub gh 'echo MERGED'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
+  assert_success
+  assert_output --partial 'PRGUARD: verdict=landed'
+}
+
 @test "eval rejects a missing claude dependency" {
   PATH="$BIN_DIR:/bin:/usr/bin"
   run bash "$REPO_ROOT/scripts/eval.sh"
