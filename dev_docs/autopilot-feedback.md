@@ -75,7 +75,7 @@ the main repo's `.git`.
 Make the run worktree a **standalone clone** rooted inside the confinement root
 (so every git write — objects, refs, worktree admin — lands in the RW jail), not
 a linked worktree of the main repo. This also cleanly contains worker worktrees:
-they become linked worktrees of the *run clone*, whose `.git` is already RW.
+they become linked worktrees of the _run clone_, whose `.git` is already RW.
 
 - `references/launch-runtime.md` §1 and SKILL "Step 1" should specify a clone, not
   a linked worktree, and stop describing the main repo's `.git` as part of the RO
@@ -140,8 +140,8 @@ Keychain/Security access that the jail denies by design.
 - The launch profile must mount the credential store the resolved helper needs
   (`~/.config/gh` RO) and exec-allow the helper binary (`gh`).
 - Pre-flight should resolve the **effective** `credential.helper` for the remote
-  host and verify a **non-interactive** credential retrieval works *inside the
-  sandbox*, not just that `gh auth status` passes outside it. An osxkeychain-only
+  host and verify a **non-interactive** credential retrieval works _inside the
+  sandbox_, not just that `gh auth status` passes outside it. An osxkeychain-only
   host (no `gh` helper) should block with a specific message, since Keychain
   access is denied in the jail.
 
@@ -171,8 +171,8 @@ left implicit.
 
 The unifying problem: `preflight.sh` / `smoke-confinement.sh` verify **exec**, a
 **$HOME write-deny**, and **egress rendering**, but never verify the run's
-**actual load-bearing operation** — *a git commit from the run worktree, on this
-host's git config, inside the jail*. Because that check is missing, four
+**actual load-bearing operation** — _a git commit from the run worktree, on this
+host's git config, inside the jail_. Because that check is missing, four
 independent fatal/near-fatal conditions all read as `PREFLIGHT VERDICT: go`.
 
 ### Proposed pre-flight addition
