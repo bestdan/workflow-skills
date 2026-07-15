@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.57.0] - 2026-07-15
+
+### Features
+
+- add Linear false-closures detection backstop (#218) (a3581d2)
+
 ## [1.56.1] - 2026-07-14
 
 ### Fixes
