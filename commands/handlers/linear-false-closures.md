@@ -29,19 +29,29 @@ optionally-restore pass — without changing either command's rule tables.
 
 ## Detection rule
 
-A completed issue must be **owned** by a merged PR, by any of three signals:
+A completed issue must be **owned** by delivered work, by any of four signals:
 the PR's head branch embeds the issue's identifier (regex match — not equality
 on Linear's suggested `branchName`, since the real branch is routinely a
 shortened form of it); one of the issue's attachment URLs points at a merged PR
 (compared on canonical `owner/repo/pull/<n>` identity, so a trailing slash,
-`?src=linear` query, or `/files` tab still matches); or the PR title/body
-**closes** the issue with a keyword (`closes PRE-123`). A PR that merely
-name-drops the id — no branch, no attachment, no closing keyword — owns
-nothing. A completed issue with no owning merged PR is a **false closure**.
+`?src=linear` query, or `/files` tab still matches); the PR title/body
+**closes** the issue with a keyword (`closes PRE-123`); or the issue is a
+**parent** whose sub-issues are themselves completed (a rollup shell carries no
+PR of its own — its children did the work). A completed issue that matches none
+of these — a PR merely name-drops the id, and no completed children — is a
+**false closure**.
 
-The closing-keyword signal is what covers cloud/hosted runs, where the PR head
-branch frequently does not embed the Linear id and branch matching alone would
-miss delivered work.
+The closing-keyword signal covers cloud/hosted runs, where the PR head branch
+frequently does not embed the Linear id and branch matching alone would miss
+delivered work. The sub-issue signal covers parents that were closed once their
+child slices delivered (with no branch or PR of their own).
+
+**Archived issues are trusted, by design.** Archival is a deeper-vetting gate —
+an issue is only archived after it has been reviewed and confirmed correctly
+closed. The query therefore does not pass `includeArchived`: an archived
+completion is settled, not a candidate. This is not a coverage gap. The backstop
+targets exactly the window where the over-close bug is still unreviewed — live
+completed issues — and leaves the vetted archive alone.
 
 ## Invoked from `/find-false-closures`
 
@@ -54,24 +64,35 @@ then run the script once per project:
    flow is **project-scoped** (the asset queries `project(id:)`), so if no
    projects are configured and none was passed, stop and tell the user to
    configure `linear.projects` or pass `--project`.
-2. **Repo.** If the caller passed `--repo owner/name`, use it. Otherwise default
-   to the current repo's `origin`:
+2. **Repo.** Resolve in this order: the caller's `--repo owner/name`; else the
+   project's own `repo:` under `linear.projects` (each configured project may
+   name its repo, since the workspace spans more than one — see
+   `linear-common.md`); else the current repo's `origin`:
 
    ```bash
    gh repo view --json nameWithOwner --jq .nameWithOwner
    ```
 
    (One repo per run — a Linear project whose work spans several repos needs a
-   run per repo, or the widest repo whose merged PRs cover it. Passing `--repo`
-   overrides the default.)
+   run per repo, or the widest repo whose merged PRs cover it. `--repo`
+   overrides everything; the per-project `repo:` is what makes a
+   multi-project sweep resolve the right repo for each project.)
 
 Then, per resolved project, run the asset (dry-run unless the caller passed
 `--apply`), reading the API key exactly as the standalone path does:
 
 ```bash
 python3 commands/handlers/assets/linear-false-closures.py \
-  --project "<project-id>" --repo "<owner/name>" [--apply]
+  --project "<project-id>" --repo "<owner/name>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
 ```
+
+Pass `--since` through when the caller gave one (`48h`/`2d` shorthand, an ISO
+datetime, or a Linear duration) to limit the scan to recently-closed issues —
+what a scheduled run wants. Pass `--only` through with `--apply` to restore just
+the named ids (they must be among the detected false closures) rather than the
+whole flagged set. Each `FALSE CLOSURES` line names the merged PR that most
+likely tripped the close (the one bare-mentioning the id, merged just before the
+completion instant), so the report is actionable without hand-tracing history.
 
 Fold each project's `ok`/`skip`/`FALSE CLOSURES` output into the command's
 combined report. The op-in-agent-shell key gotcha below applies here too — the
@@ -110,8 +131,14 @@ resolve).
 # Dry run (lists false closures, changes nothing):
 python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --repo owner/name
 
+# Only issues completed in the last 48h (48h / 2d / ISO / -P2D):
+python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --repo owner/name --since 48h
+
 # Restore false closures to their team's Todo state:
 python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --repo owner/name --apply
+
+# Restore only specific flagged ids (must be among those detected):
+python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --repo owner/name --apply --only PRE-1,PRE-2
 ```
 
 `--project` is the Linear project UUID (see "Resolve configured projects" in

@@ -13,15 +13,16 @@ how it relates to the other Linear task commands.)
 
 The test applied here:
 
-    A completed issue must be OWNED by a merged PR.
+    A completed issue must be OWNED by delivered work.
 
-Ownership means the PR is *about* the issue, established by any of: its head
-branch embeds the issue's identifier (regex match, not equality on Linear's
-suggested ``branchName``: the real branch is routinely a shortened form of it);
-the issue carries a link attachment pointing at a merged PR; or the PR
-title/body *closes* the issue with a keyword (``closes PRE-123``). A PR that
-merely name-drops the id -- no branch, no attachment, no closing keyword --
-owns nothing. A completed issue with no owning merged PR is a false closure.
+Ownership is established by any of: its head branch embeds the issue's
+identifier (regex match, not equality on Linear's suggested ``branchName``: the
+real branch is routinely a shortened form of it); the issue carries a link
+attachment pointing at a merged PR; the PR title/body *closes* the issue with a
+keyword (``closes PRE-123``); or the issue is a parent whose sub-issues are
+themselves completed (a rollup shell carries no PR of its own -- its children
+did the work). A completed issue that matches none of these -- a PR that merely
+name-drops the id, and no completed children -- is a false closure.
 
 The closing-keyword signal matters on cloud/hosted runs, where the PR head
 branch often does not embed the Linear id, so the branch match alone would
@@ -49,6 +50,13 @@ headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
 Usage:
   python3 linear-false-closures.py --project <uuid> --repo owner/name
   python3 linear-false-closures.py --project <uuid> --repo owner/name --apply
+  # only issues closed recently; restore just the ones you name:
+  python3 linear-false-closures.py --project <uuid> --repo owner/name --since 48h
+  python3 linear-false-closures.py --project <uuid> --repo owner/name --apply --only PRE-1,PRE-2
+
+Each false closure is reported with the merged PR that most likely tripped it
+(the one bare-mentioning the id, merged just before the completion instant), so
+the flag is actionable without hand-tracing the PR history.
 """
 
 import argparse
@@ -58,21 +66,28 @@ import re
 import subprocess
 import sys
 import urllib.request
+from datetime import datetime
 
 API = "https://api.linear.app/graphql"
 
+# gte this and every completed issue matches -- the default when no --since is
+# given, so the one query serves both "the whole history" and a recent window.
+EPOCH = "1970-01-01T00:00:00.000Z"
+
 COMPLETED_ISSUES = """
-query($project: String!, $cursor: String) {
+query($project: String!, $cursor: String, $since: DateTimeOrDuration!) {
   project(id: $project) {
     name
-    issues(filter: { state: { type: { eq: "completed" } } }, first: 100, after: $cursor) {
+    issues(filter: { state: { type: { eq: "completed" } }, completedAt: { gte: $since } }, first: 100, after: $cursor) {
       nodes {
         id
         identifier
         title
         startedAt
+        completedAt
         team { id }
         attachments(first: 250) { nodes { url } pageInfo { hasNextPage } }
+        children(first: 50, includeArchived: true) { nodes { identifier state { type } } pageInfo { hasNextPage } }
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -136,11 +151,31 @@ def gql(key, query, variables=None):
     return payload["data"]
 
 
-def completed_issues(key, project):
-    """All completed issues in the project, paginated -- no silent 100-issue cap."""
+def to_since(s):
+    """Normalize --since to a Linear DateTimeOrDuration.
+
+    Accepts a friendly ``48h`` / ``2d`` shorthand (the common "closed recently"
+    case), any ISO-8601 datetime, or a Linear duration (``-P2D``) passed through
+    verbatim. None -> EPOCH, i.e. the whole completed history.
+    """
+    if not s:
+        return EPOCH
+    m = re.fullmatch(r"(\d+)\s*([hd])", s.strip(), re.I)
+    if m:
+        n, unit = m.group(1), m.group(2).lower()
+        return f"-PT{n}H" if unit == "h" else f"-P{n}D"
+    return s.strip()
+
+
+def completed_issues(key, project, since):
+    """Completed issues in the project (since `since`), paginated -- no 100 cap."""
     out, cursor = [], None
     while True:
-        data = gql(key, COMPLETED_ISSUES, {"project": project, "cursor": cursor})
+        data = gql(
+            key,
+            COMPLETED_ISSUES,
+            {"project": project, "cursor": cursor, "since": since},
+        )
         proj = data.get("project")
         if proj is None:
             die(f"no project {project}")
@@ -164,7 +199,7 @@ def merged_prs(repo):
             "api",
             "--paginate",
             "--jq",
-            ".[] | select(.merged_at != null) | {headRefName: .head.ref, url: .html_url, title: .title, body: .body}",
+            ".[] | select(.merged_at != null) | {number: .number, headRefName: .head.ref, url: .html_url, title: .title, body: .body, mergedAt: .merged_at}",
             f"repos/{repo}/pulls?state=closed&per_page=100",
         ],
         capture_output=True,
@@ -199,11 +234,13 @@ def owning_pr(issue, prs, merged):
     routinely a shortened form of it, so an equality test would report real,
     delivered work as a false closure -- and --apply would then un-complete it.
 
-    Three ownership signals, in order of authority: the branch it was built on,
-    a link attachment the issue itself carries, or a PR whose title/body closes
-    the issue with a keyword (``closes PRE-123``). A bare mention of the id --
-    none of the three -- owns nothing; that is the over-close bug this catches.
-    The keyword signal is what covers cloud runs whose branches lack the id.
+    Four ownership signals: the branch it was built on, a link attachment the
+    issue itself carries, a PR whose title/body closes the issue with a keyword
+    (``closes PRE-123``), or -- for a parent rollup shell that carries no PR of
+    its own -- sub-issues that are themselves completed. A bare mention of the
+    id, with none of these, owns nothing; that is the over-close bug this
+    catches. The keyword signal covers cloud runs whose branches lack the id;
+    the sub-issue signal covers parents closed once their children delivered.
     """
     ident = re.escape(issue["identifier"].lower())
     token = re.compile(rf"(?<!\d){ident}(?!\d)")
@@ -220,7 +257,57 @@ def owning_pr(issue, prs, merged):
     for pr in prs:
         if closes.search(f"{pr.get('title') or ''}\n{pr.get('body') or ''}"):
             return pr["url"]
+    kids = issue.get("children") or {}
+    nodes = kids.get("nodes", [])
+    if nodes and not kids.get("pageInfo", {}).get("hasNextPage"):
+        # Only credit a parent whose children have all reached a terminal state
+        # (completed/canceled) with at least one actually completed. If the child
+        # list is truncated we can't prove that, so fall through and flag it --
+        # re-closing a real rollup is cheap; clearing a bad one is not.
+        types = {k["state"]["type"] for k in nodes}
+        if types <= {"completed", "canceled"} and "completed" in types:
+            done = ", ".join(
+                k["identifier"] for k in nodes if k["state"]["type"] == "completed"
+            )
+            return f"sub-issues {done} (completed)"
     return None
+
+
+def _ts(s):
+    """Parse an ISO-8601 timestamp (with trailing Z) to a datetime, else None."""
+    try:
+        return datetime.fromisoformat((s or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def closing_mention_pr(issue, prs):
+    """The merged PR that most likely tripped this false closure, or None.
+
+    The over-close integration fires on a bare id mention in a merged PR and
+    closes the issue seconds later. So among the merged PRs that bare-mention
+    the id, the culprit is the one merged at or just before the completion
+    instant. Reported only, to make the flag actionable -- never acted on.
+    """
+    ident = re.escape(issue["identifier"].lower())
+    token = re.compile(rf"(?<!\d){ident}(?!\d)")
+    hits = [
+        pr
+        for pr in prs
+        if token.search(f"{pr.get('title') or ''}\n{pr.get('body') or ''}".lower())
+    ]
+    if not hits:
+        return None
+    done = _ts(issue.get("completedAt"))
+
+    def rank(pr):
+        merged = _ts(pr.get("mergedAt"))
+        if done and merged:
+            # merged-before-completion first, then nearest in time to it.
+            return (0 if merged <= done else 1, abs((done - merged).total_seconds()))
+        return (2, 0)
+
+    return min(hits, key=rank)
 
 
 def resolve_todo_state(key, team_id, cache):
@@ -247,6 +334,16 @@ def main():
     ap.add_argument("--project", required=True, help="Linear project UUID.")
     ap.add_argument("--repo", required=True, help="owner/name of the GitHub repo.")
     ap.add_argument(
+        "--since",
+        help="Only issues completed since this: 48h / 2d shorthand, an ISO "
+        "datetime, or a Linear duration (-P2D). Default: the whole history.",
+    )
+    ap.add_argument(
+        "--only",
+        help="Comma-separated issue ids to restore (must be among the detected "
+        "false closures). Scopes --apply to exactly these; ignored in dry run.",
+    )
+    ap.add_argument(
         "--apply",
         action="store_true",
         help="Restore false closures to Todo. Without it, DRY RUN.",
@@ -254,7 +351,7 @@ def main():
     args = ap.parse_args()
 
     key = get_key()
-    project_name, issues = completed_issues(key, args.project)
+    project_name, issues = completed_issues(key, args.project, to_since(args.since))
 
     prs = merged_prs(args.repo)
     merged = {k for k in (pr_identity(pr["url"]) for pr in prs) if k}
@@ -275,9 +372,7 @@ def main():
     for issue, owner in legit:
         print(f"  ok    {issue['identifier']}  <- {owner}")
     for issue in truncated:
-        print(
-            f"  skip  {issue['identifier']}  (>250 attachments — not classified)"
-        )
+        print(f"  skip  {issue['identifier']}  (>250 attachments — not classified)")
 
     if not false_closures:
         print("\nno false closures.")
@@ -288,18 +383,40 @@ def main():
     )
     for issue, _ in false_closures:
         never = " (never started)" if not issue["startedAt"] else ""
-        print(f"  BAD   {issue['identifier']}  {issue['title'][:60]}{never}")
+        culprit = closing_mention_pr(issue, prs)
+        tag = ""
+        if culprit:
+            tag = (
+                f"  — likely closed by #{culprit['number']} "
+                f"(merged {culprit.get('mergedAt') or '?'}, mentions id)"
+            )
+        print(f"  BAD   {issue['identifier']}  {issue['title'][:60]}{never}{tag}")
+
+    to_restore = false_closures
+    if args.only:
+        wanted = {x.strip().upper() for x in args.only.split(",") if x.strip()}
+        detected = {i["identifier"].upper() for i, _ in false_closures}
+        missing = wanted - detected
+        if missing:
+            die(f"--only ids not among detected false closures: {sorted(missing)}")
+        to_restore = [
+            (i, o) for i, o in false_closures if i["identifier"].upper() in wanted
+        ]
 
     if not args.apply:
+        scope = (
+            f"the {len(to_restore)} named"
+            if args.only
+            else f"these {len(false_closures)}"
+        )
         print(
-            f"\nDRY RUN — nothing restored. Re-run with --apply to restore these "
-            f"{len(false_closures)} to Todo."
+            f"\nDRY RUN — nothing restored. Re-run with --apply to restore {scope} to Todo."
         )
         return 1
 
-    print(f"\nRestoring {len(false_closures)}...")
+    print(f"\nRestoring {len(to_restore)}...")
     cache, ok, fail = {}, 0, 0
-    for issue, _ in false_closures:
+    for issue, _ in to_restore:
         try:
             todo = resolve_todo_state(key, issue["team"]["id"], cache)
             if gql(key, MOVE_ISSUE, {"id": issue["id"], "state": todo["id"]})[

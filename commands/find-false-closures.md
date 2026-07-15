@@ -1,7 +1,7 @@
 ---
 description: Detect completed Linear issues that no merged PR owns (the bare-id over-close bug) and optionally restore them — a safe, schedulable backstop
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(op *), Bash(python3 *), Glob, Grep, Read, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
-argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>]"
+argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>] [--since 48h] [--only PRE-1,PRE-2]"
 ---
 
 # Find False Closures
@@ -28,7 +28,17 @@ whichever of those wraps it.
   configured `linear.projects`. Repeatable is not needed here — omit to sweep
   every configured project.
 - **`--repo <owner/name>`** — the GitHub repo whose merged PRs establish
-  ownership. Defaults to the current repo's `origin` (`gh repo view`).
+  ownership. Resolution order: this flag, else the project's own `repo:` in
+  `linear.projects` (each project can name its repo — the workspace spans
+  more than one), else the current repo's `origin` (`gh repo view`).
+- **`--since <window>`** — only consider issues completed within the window:
+  `48h` / `2d` shorthand, an ISO datetime, or a Linear duration (`-P2D`).
+  Omit to scan the whole completed history. Ideal for a scheduled run that
+  only needs to look at what closed since it last ran.
+- **`--only PRE-1,PRE-2`** — with `--apply`, restore **exactly** these ids
+  (which must be among the detected false closures) instead of the whole
+  flagged set. Lets an apply match a specific approval rather than reopening
+  everything a project-wide scan turns up.
 
 ## 1. Resolve the handler
 
@@ -43,7 +53,7 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
   runs the detection asset per project, and — with `--apply` — restores the
   flagged issues). If the relative path doesn't resolve, find it with **Glob**
   (`**/commands/handlers/linear-false-closures.md`) and Read the result. Pass
-  `--apply`, `--project`, and `--repo` through.
+  `--apply`, `--project`, `--repo`, `--since`, and `--only` through.
 - File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
   handler repo-pr — there is no tracker state to falsely close; a merged PR
   **is** the record. `/find-false-closures` has nothing to do."
