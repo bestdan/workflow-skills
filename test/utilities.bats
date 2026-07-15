@@ -92,7 +92,8 @@ _prg_make_repo() {
 @test "pr-fix-guard verify: open PR needs no verification" {
   _prg_make_repo
   make_stub gh 'echo OPEN'
-  local sha; sha="$(git -C "$REPO" rev-parse HEAD)"
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
   PATH="$BIN_DIR:/bin:/usr/bin"
   run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
   assert_success
@@ -104,7 +105,8 @@ _prg_make_repo() {
   # A fix commit whose content is then also pushed to base.
   printf 'fixed\n' >"$REPO/f.txt"
   git -C "$REPO" commit -qam fix
-  local sha; sha="$(git -C "$REPO" rev-parse HEAD)"
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
   git -C "$REPO" push -q origin HEAD:main
   make_stub gh 'echo MERGED'
   PATH="$BIN_DIR:/bin:/usr/bin"
@@ -118,7 +120,8 @@ _prg_make_repo() {
   # Fix committed locally but base never receives it — the race we guard against.
   printf 'fixed\n' >"$REPO/f.txt"
   git -C "$REPO" commit -qam fix
-  local sha; sha="$(git -C "$REPO" rev-parse HEAD)"
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
   make_stub gh 'echo MERGED'
   PATH="$BIN_DIR:/bin:/usr/bin"
   run bash -c "cd '$REPO' && '$REPO_ROOT/scripts/pr-fix-guard.sh' verify --pr 1 --commit $sha"
@@ -135,7 +138,8 @@ _prg_make_repo() {
   _prg_make_repo
   printf 'fixed\n' >"$REPO/f.txt"
   git -C "$REPO" commit -qam 'fix (branch commit)'
-  local sha; sha="$(git -C "$REPO" rev-parse HEAD)"
+  local sha
+  sha="$(git -C "$REPO" rev-parse HEAD)"
   # Simulate the squash merge: base advances to a NEW commit with the same
   # content but a different SHA, with the branch commit not in its history.
   git -C "$REPO" checkout -q -B squashed origin/main

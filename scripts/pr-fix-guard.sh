@@ -82,9 +82,20 @@ cmd_check() {
   local pr="" repo=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --pr) [ $# -ge 2 ] || die "missing value for --pr"; pr="$2"; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
-      -h | --help) usage; exit 0 ;;
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr="$2"
+        shift 2
+        ;;
+      --repo)
+        [ $# -ge 2 ] || die "missing value for --repo"
+        repo="$2"
+        shift 2
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
       *) die "unknown argument: $1" ;;
     esac
   done
@@ -97,10 +108,22 @@ cmd_check() {
     exit 3
   fi
   case "$state" in
-    open) echo "PRGUARD: state=open"; exit 0 ;;
-    merged) echo "PRGUARD: state=merged"; exit 4 ;;
-    closed) echo "PRGUARD: state=closed"; exit 4 ;;
-    *) echo "PRGUARD: state=unknown"; exit 3 ;;
+    open)
+      echo "PRGUARD: state=open"
+      exit 0
+      ;;
+    merged)
+      echo "PRGUARD: state=merged"
+      exit 4
+      ;;
+    closed)
+      echo "PRGUARD: state=closed"
+      exit 4
+      ;;
+    *)
+      echo "PRGUARD: state=unknown"
+      exit 3
+      ;;
   esac
 }
 
@@ -108,12 +131,35 @@ cmd_verify() {
   local pr="" commit="" base="main" remote="origin" repo=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --pr) [ $# -ge 2 ] || die "missing value for --pr"; pr="$2"; shift 2 ;;
-      --commit) [ $# -ge 2 ] || die "missing value for --commit"; commit="$2"; shift 2 ;;
-      --base) [ $# -ge 2 ] || die "missing value for --base"; base="$2"; shift 2 ;;
-      --remote) [ $# -ge 2 ] || die "missing value for --remote"; remote="$2"; shift 2 ;;
-      --repo) [ $# -ge 2 ] || die "missing value for --repo"; repo="$2"; shift 2 ;;
-      -h | --help) usage; exit 0 ;;
+      --pr)
+        [ $# -ge 2 ] || die "missing value for --pr"
+        pr="$2"
+        shift 2
+        ;;
+      --commit)
+        [ $# -ge 2 ] || die "missing value for --commit"
+        commit="$2"
+        shift 2
+        ;;
+      --base)
+        [ $# -ge 2 ] || die "missing value for --base"
+        base="$2"
+        shift 2
+        ;;
+      --remote)
+        [ $# -ge 2 ] || die "missing value for --remote"
+        remote="$2"
+        shift 2
+        ;;
+      --repo)
+        [ $# -ge 2 ] || die "missing value for --repo"
+        repo="$2"
+        shift 2
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
       *) die "unknown argument: $1" ;;
     esac
   done
@@ -168,12 +214,22 @@ cmd_verify() {
   exit 5
 }
 
-[ $# -ge 1 ] || { usage >&2; exit 2; }
+[ $# -ge 1 ] || {
+  usage >&2
+  exit 2
+}
 subcmd="$1"
 shift
 case "$subcmd" in
   check) cmd_check "$@" ;;
   verify) cmd_verify "$@" ;;
-  -h | --help) usage; exit 0 ;;
-  *) echo "pr-fix-guard: unknown subcommand: $subcmd" >&2; usage >&2; exit 2 ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "pr-fix-guard: unknown subcommand: $subcmd" >&2
+    usage >&2
+    exit 2
+    ;;
 esac
