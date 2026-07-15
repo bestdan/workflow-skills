@@ -38,6 +38,9 @@ linear:
       # list_projects when absent.
       wip_limit: 5 # optional — per-project override (else inherits the top-level wip_limit).
       max_estimate: 5 # optional — per-project override (else inherits linear.max_estimate).
+      repo: bestdan/workflow-skills # optional — GitHub owner/name whose merged PRs establish
+    # ownership for /find-false-closures. A workspace can span repos, so each project may name
+    # its own; absent → /find-false-closures falls back to the current repo's origin.
     - id: 9f3a0b1c-0000-0000-0000-000000000000 # a second project, no overrides → inherits wip_limit 3, max_estimate 3.
   global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across ALL configured
   # projects, enforced on top of the per-project caps (absent → no global ceiling; the sum of
@@ -60,7 +63,7 @@ linear:
 
 - `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
-- Per-project override keys are **only** `wip_limit` and `max_estimate`. `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global. `api_key_ref` is a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override").
+- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global. `api_key_ref` is a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
 - `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).

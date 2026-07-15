@@ -3,6 +3,8 @@ temp/
 .claude/
 .firecrawl/
 dist/
+__pycache__/
+*.pyc
 
 # co-review local-reviewer config — which local agents (gemini, codex, …) are
 # available is machine-specific, so this is not committed/shared.

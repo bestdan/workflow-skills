@@ -4,6 +4,11 @@ linear:
   projects: # replaces the deprecated scalar default_project (handlers now read only this list)
     - id: ebbc284b-a1c1-4cb3-96e0-914e210a79a2
       name: Handler parity follow-ups
+      # repo: owner/name — optional. The GitHub repo whose merged PRs establish
+      # ownership for /find-false-closures. A workspace can span repos, so each
+      # project may name its own; without it the command falls back to the
+      # current repo's origin. Example: repo: bestdan/workflow-skills
+      repo: bestdan/workflow-skills
 # api_key_ref (the op:// pointer to a Linear personal API key) is PERSONAL and
 # machine-specific — it does NOT belong in this committed, public config.
 # Put it in the gitignored local override instead: dev_docs/tasks/.task-config.local.yml
