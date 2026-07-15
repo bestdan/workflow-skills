@@ -21,6 +21,28 @@ prevent.
 This doc records the blockers with evidence, root cause, and a proposed fix for
 each, plus the pre-flight gaps that let a broken launch read as green.
 
+## Status — the gate landed (cheap fix first)
+
+The **meta-finding's jailed-commit smoke is now implemented** and wired into the
+launch gate, so the failure class above can no longer read as `go`:
+
+- `scripts/preflight.sh` §4b (`PREFLIGHT SMOKE_JAILED_COMMIT`) reproduces the real
+  launch topology — a linked run worktree off a source repo mounted **read-only** —
+  and runs a `git commit` **inside the jail** under the host's real git config. A
+  denial is a hard **`no-go`** naming the cause; this one check catches Blockers
+  1 and 2. It also reports `PREFLIGHT HOOKS_PATH` and resolves the push remote's
+  effective `credential.helper` (`PREFLIGHT CRED_HELPER`) — a Keychain-bound
+  helper is a hard blocker, a `gh` helper is a recorded advisory (Blocker 3).
+- `scripts/smoke-confinement.sh` §1d is the matching deep regression guard: the
+  pre-existing "git commit end-to-end" test inits its repo _inside_ the RW
+  worktree, so it never exercised this topology.
+
+On the reporting host these correctly emit `no-go` today — the launch genuinely
+cannot commit until the topology fix lands. The **remaining fixes stay open** as
+follow-ups: the standalone-clone run root (Blocker 1), `core.hooksPath`
+neutralization in that clone (Blocker 2), in-jail credential provisioning +
+retrieval (Blocker 3), and the orchestrator prompt/broker assets (Blocker 4).
+
 ## Environment
 
 - **Host:** macOS (`darwin`), `local-full` (all coder CLIs on PATH).
@@ -182,6 +204,11 @@ step): create the throwaway run clone exactly as launch would, render the real
 profile, and run `git commit` **and** a dry-run credential fetch **inside** the
 jail. Make a failure a hard `no-go` with the specific cause. This single check
 would have caught Blockers 1, 2, and 3.
+
+> **Implemented.** `scripts/preflight.sh` §4b (`SMOKE_JAILED_COMMIT`, hard
+> `no-go`) and `scripts/smoke-confinement.sh` §1d. Credential retrieval is
+> currently a `credential.helper` **resolution + advisory**, not yet a live
+> in-jail fetch — the full fetch is folded into the Blocker-3 follow-up.
 
 ---
 

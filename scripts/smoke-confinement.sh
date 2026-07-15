@@ -179,6 +179,53 @@ cp /bin/echo "$D/run/wt/staged-binary" || {
 denied "exec a binary staged in the RW worktree" "$D/run/wt/staged-binary" hi
 PROFILE="$D/profile.sb"
 
+# --- 1d. the run's load-bearing op: a commit from a linked run worktree -----
+# The §1c "git commit end-to-end" test above inits its repo INSIDE the RW
+# worktree, so that repo's .git is writable and the commit always passes — it
+# proves git-core helper exec, NOT the topology the real launch uses. The launch
+# places the run worktree as a git LINKED worktree of the main repo, whose admin
+# dir (index.lock, HEAD, refs, objects) lives in the main repo's .git — which §1
+# mounts READ-ONLY. So the one operation the orchestrator runs on every wake, a
+# commit from that worktree, is DENIED, and the run wedges silently at 3am
+# (dev_docs/autopilot-feedback.md Blocker 1 + meta-finding). Reproduce it with a
+# throwaway repo mounted RO + a linked worktree as the RW run root, under a
+# dedicated profile, and assert the commit SUCCEEDS. It fails today by design;
+# the fix is a standalone clone as the run root, at which point this fixture
+# should build a clone instead of a linked worktree.
+echo "== 1d. Commit from a linked run worktree, main repo RO (Blocker 1) =="
+JC="$D/jc"
+jc_built=false
+if mkdir -p "$JC/run" "$JC/run/tmp" \
+  && git init -q "$JC/repo" \
+  && git -C "$JC/repo" -c user.email=a@b -c user.name=c commit -q --allow-empty -m base \
+  && git -C "$JC/repo" worktree add -q --detach "$JC/run/wt" HEAD; then
+  jc_built=true
+fi
+if ! $jc_built; then
+  INDET "linked-worktree commit (could not build the throwaway topology)"
+elif ! "$SO" render-profile --confine-under "$JC/run" \
+  --rw "$JC/run" --ro "$JC/repo" --tmpdir "$JC/run/tmp" --toolchain \
+  --exec "$(command -v git)" --exec "$(command -v bash)" --out "$JC/profile.sb" >/dev/null 2>&1; then
+  FAIL "linked-worktree commit (render-profile failed for the run topology)"
+else
+  jc_err="$JC/commit.err"
+  # Host's REAL git config (no core.hooksPath override): one check catches both a
+  # linked-worktree admin dir stranded in the RO repo AND an exec-denied host hook.
+  sandbox-exec -f "$JC/profile.sb" bash -c '
+    cd "$1/run/wt" || exit 91
+    printf probe > smoke-file || exit 92
+    git add smoke-file || exit 93
+    git -c user.email=a@b -c user.name=c commit -q -m "jailed commit smoke" || exit 94
+  ' _ "$JC" >/dev/null 2>"$jc_err"
+  jc_rc=$?
+  if [ "$jc_rc" -eq 0 ]; then
+    PASS "commit from a linked run worktree succeeds inside the jail"
+  else
+    FAIL "commit from a linked run worktree is DENIED — $(head -1 "$jc_err" 2>/dev/null)"
+  fi
+  git -C "$JC/repo" worktree remove --force "$JC/run/wt" >/dev/null 2>&1 || true
+fi
+
 # --- exit-code integrity (task 12 / finding #20) --------------------------
 # A jail that can't report a correct exit code is a BROKEN jail. When the
 # harness's OWN runtime surface is denied, the Bash tool dies with EPERM BEFORE
