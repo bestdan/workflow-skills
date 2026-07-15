@@ -1,10 +1,117 @@
 # Audit: deterministic-code opportunities across the skills/commands prose
 
-**Date:** 2026-07-10
+**Date:** 2026-07-10 · **Updated:** 2026-07-15 (see "Update" below)
 **Status:** Findings only — no code changed. Each recommendation below is sized
 to become its own task/PR.
 **Scope:** All prose under `skills/`, `commands/` (including
 `commands/handlers/`), and `agents/`.
+
+> **Read the [Update — 2026-07-15](#update--2026-07-15) section first.** Since
+> this audit was written, main landed the read-extraction pattern it advocated
+> — built as a fast-path/floor design — but on the *Linear* path this audit had
+> written off as
+> unscriptable. Several conclusions below (the "Structural constraint," Finding
+> #1's Linear caveat, §6's fact-reviewer note) are materially refined by what
+> shipped. The original 2026-07-10 text is preserved as-is below the update as
+> the historical record.
+
+## Update — 2026-07-15
+
+Five days of work on main (this branch is ~96 commits behind it) shipped the
+read-extraction pattern this audit was arguing for, and it lands squarely on
+the Linear handler the audit's "Structural constraint" section had ruled out.
+Four new commands arrived — `/complete-task`, `/sweep-for-complete`,
+`/reconcile-tasks`, `/find-false-closures` — alongside **four new read-only
+Linear GraphQL scripts**. Two of those scripts back the new commands directly
+(`linear-scan.py`, `linear-false-closures.py`); the other two harden the
+pre-existing claim and reoptimize flows (`linear-ready.py`,
+`linear-relations.py`).
+
+### The central constraint was too absolute — Linear *reads* are now scripted
+
+The audit's "Structural constraint" claimed any MCP-bound Linear flow "is prose
+no matter how mechanical it looks, because its actual work happens through MCP
+calls the agent alone can make." That is now only half-true. The raw-API-key
+GraphQL route the audit already saw in `linear-archive.py` has been generalized
+into a **fast-path/floor** pattern, and the mechanical Linear reads have been
+extracted into code:
+
+| Script | Lines | Replaces (per-issue MCP loop) | Consumers |
+|---|---|---|---|
+| `commands/handlers/assets/linear-scan.py` | 255 | in-flight scan + linked-PR attachment fetch | `/sweep-for-complete` (row 1), `/reconcile-tasks` (row 2) |
+| `commands/handlers/assets/linear-ready.py` | 310 | ready-selection gates for the claim | `linear-claim.md` |
+| `commands/handlers/assets/linear-relations.py` | 334 | `get_issue includeRelations` per-issue loop — the biggest single token spend in the repo | `/reoptimize-tasks` graph load |
+| `commands/handlers/assets/linear-false-closures.py` | 438 | the entire over-close detection flow | `/find-false-closures` |
+
+The handler prose no longer *re-derives* these reads — it names one source of
+truth (`linear-common.md`'s "In-flight scan" / "ready selection" blocks) that
+the script and the MCP floor both implement, and each handler **tries the
+script first (when `Bash` is available), falling back to the MCP floor on any
+non-zero exit.** That fast-path/floor shape is the answer to the audit's
+dilemma: reads over Linear's GraphQL *can* be scripted (raw API key, exactly the
+`linear-archive.py` precedent), while only **mutations and interactive/auth-bound
+MCP calls** are genuinely prose-only. The refined rule: *Linear read/scan/graph
+paths are scriptable and now mostly are; Linear writes stay MCP.*
+
+### `/find-false-closures` refutes the "ownership judgment resists scripting" presumption
+
+§6's fact-reviewer note presumed that deciding whether something "counts as"
+owned/broken is "NL judgment on response bodies" and so resists scripting. The
+new `/find-false-closures` backstop is the counter-example: its entire
+"is this completed issue actually owned by delivered work?" decision is
+**deterministic**, encoded in `linear-false-closures.py` as four explicit
+ownership signals — head-branch identifier regex, attachment-URL canonical
+`owner/repo/pull/<n>` match, closing-keyword match, and sub-issue rollup — with
+the command reduced to a thin wrapper that resolves scope+repo from config and
+runs the asset. Ownership that looked like judgment turned out to be a rule set.
+The remaining judgment (which PRE-407/PRE-408 demotion rules are safe to add)
+correctly stays out of code, gated behind the reconciler's bounded-rule-set
+doctrine.
+
+### The four new commands already follow the audit's prescription
+
+All four are thin, handler-dispatched dispatchers. The three that do a
+deterministic *read* push it into a script and keep only judgment +
+MCP-mutation glue in prose; `/complete-task` is the pure mutation primitive —
+correctly prose-only, since it has no read to extract:
+
+| Command / handler | Command | Handler | Deterministic core |
+|---|---|---|---|
+| `/complete-task` (primitive) | 87 | `linear-complete.md` 108 | one state-transition mutation (MCP write — correctly prose) |
+| `/sweep-for-complete` | 76 | `linear-sweep-complete.md` 279 | `linear-scan.py` fast-path |
+| `/reconcile-tasks` | 85 | `linear-reconcile.md` 269 | `linear-scan.py` fast-path (rows 1–2) |
+| `/find-false-closures` | 79 | `linear-false-closures.md` 146 | `linear-false-closures.py` (whole flow) |
+
+New prose added: ~327 command + ~802 handler lines. New code added: ~1,337
+asset lines across four scripts. The 5:1 prose-to-code ratio the surface audit
+computed has moved materially toward code **on the Linear path** — the exact
+path the audit had marked "prose no matter how mechanical."
+
+### What this leaves for the original recommendations
+
+- **Finding #1 (`task-scan.py`)** — thesis validated (scan/rank/readiness *is*
+  the hottest re-derivation, and it *is* worth scripting), and its stated
+  caveat "only serves the `repo-pr` handler … Linear … isn't covered" is now
+  **half-closed**: `linear-scan.py` covers the Linear scan/readiness read. The
+  **repo-pr** `task-scan.py` over `dev_docs/tasks/**/*.md` remains **unbuilt**
+  and is still the top pick for that handler.
+- **Finding #2 (`plan-graph.py`)** — the `--audit` companion the audit imagined
+  for `/reoptimize-tasks` effectively **landed** as `linear-relations.py` (the
+  graph *load*). But `/push-plan`'s own topological ordering + cycle detection
+  is **still hand-executed in prose** (`push-plan.md` line 21, "order the tasks
+  topologically") with no script — so the push-side `plan-graph.py`
+  recommendation stands.
+- **Finding #3 / #4 / #5** — unaddressed by this wave (all repo-pr / auto-pilot
+  scoped); recommendations stand as written.
+
+Bottom line: the audit's core bet — extract the re-derived reads, keep the
+judgment and the mutations in prose — is now demonstrated in production on
+Linear. The remaining open items are the **repo-pr** analogues
+(`task-scan.py`, `plan-graph.py` push side) and the auto-pilot supervisor.
+
+---
+
+_Original 2026-07-10 audit follows unchanged._
 
 ## Why this audit
 
@@ -61,6 +168,13 @@ Roughly a 5:1 prose-to-code ratio. Biggest single prose files, by size alone:
   entirely in prose.
 
 ## Structural constraint that shapes every recommendation below
+
+> **Refined 2026-07-15 — see the Update above.** This section overstates the
+> constraint. Linear *reads/scans/graph loads* have since been scripted via the
+> raw-API-key GraphQL route (`linear-scan.py`, `linear-ready.py`,
+> `linear-relations.py`, `linear-false-closures.py`) behind a fast-path/floor
+> fallback. Only Linear **mutations** and interactive/auth-bound MCP calls are
+> genuinely prose-only. Read the paragraph below with that correction in mind.
 
 Any flow that runs through an **MCP tool** (`mcp__linear__*`,
 `mcp__atlassian__*`) cannot move into a script — MCP tools are only invocable
@@ -278,6 +392,13 @@ generalize.**
   what prose is for.
 
 ## Prioritized recommendations
+
+> **Status as of 2026-07-15 (see Update above):** the Linear analogues of #1
+> and #2 have **shipped** — `linear-scan.py` (scan/readiness) and
+> `linear-relations.py` (reoptimize graph load). What remains open is the
+> **repo-pr** side of each: `task-scan.py` over `dev_docs/tasks/**/*.md` (#1)
+> and `plan-graph.py` for `/push-plan`'s still-in-prose topological ordering
+> (#2). #3–#5 are unaddressed.
 
 1. **`scripts/task-scan.py`** — highest frequency (every `/list-tasks`,
    `/do-tasks`, `/promote-tasks`, `/archive-tasks`, `/doctor` on the default
