@@ -83,11 +83,16 @@ Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-task
 
 ### The Unassigned bucket
 
-A synthetic scope the **`/do-tasks` claim path only** (its "Find candidates" and "Pre-claim WIP gate") composes on top of the resolved configured projects — the select-only consumers (`/add-task`, `/list-tasks`, `/promote-tasks`) never see it. It exists **only when 1+ projects are configured** (with none, the whole-team scope already spans everything, so there is no "outside"):
+A synthetic scope that composes on top of the resolved configured projects. It exists **only when 1+ projects are configured** (with none, the whole-team scope already spans everything, so there is no "outside"). There are **two variants** with different membership rules — pick the one for the consumer at hand, never mix them:
+
+- **Claim variant** — used by **`/do-tasks`'s claim path only** (its "Find candidates" and "Pre-claim WIP gate"); the select-only consumers (`/add-task`, `/list-tasks`, `/promote-tasks`) never see it. Membership is the catch-all for issues with **no project** or in a project **not** among the configured `id`s. For `/do-tasks` the Unassigned bucket is a **feature** — pick up team work not filed under a project — so the wide catch-all is intentional.
+- **Sweep/reconcile variant** — used by **`/sweep-for-complete` and `/reconcile-tasks`'s default (no-`--all`) scope only**. Membership is **narrower**: `projectId == null` **only** (issues with genuinely no project — never "any project outside the configured set"). These two verbs are destructive-adjacent (they complete issues / move them to review), so the wide claim-variant catch-all would silently pull every unrelated, unconfigured project's in-flight work into a scheduled `--apply` run's blast radius — exactly the footgun this narrower rule exists to close. `--all` remains the explicit whole-team escape hatch for these two verbs when the wider sweep is actually wanted.
+
+Shape (identical for both variants; only the membership rule above differs):
 
 - `{ id: "__unassigned__", name: "Unassigned", wip_limit: <linear.unassigned_wip_limit if set, else the top-level wip_limit (default 3)>, max_estimate: <linear.max_estimate, default 3>, unassigned: true }`.
-- `id: "__unassigned__"` is a **sentinel**, not a real Linear project id and **distinct from `id: null`** (which means "whole team — omit `projectId`"). It is the catch-all for issues with **no project** or in a project **not** among the configured `id`s. Because the Linear MCP `list_issues` `project` argument has no null-project value, this scope's membership is resolved **by exclusion** (client-side filter on each issue's `projectId`) and its in-flight is counted **by subtraction** (whole-team − Σ configured) — **never** by passing the sentinel as a `projectId`.
-- When `unassigned_wip_limit` is `0`, the bucket still appears (so it can be reported) but its cap is `0` → it is never ranked-claimed.
+- `id: "__unassigned__"` is a **sentinel**, not a real Linear project id and **distinct from `id: null`** (which means "whole team — omit `projectId`"). Because the Linear MCP `list_issues` `project` argument has no null-project value, this scope's membership is resolved **by exclusion** (client-side filter on each issue's `projectId`) and its in-flight is counted **by subtraction** (whole-team − Σ configured) — **never** by passing the sentinel as a `projectId`.
+- When `unassigned_wip_limit` is `0`, the bucket still appears (so it can be reported) but its cap is `0` → it is never ranked-claimed (claim variant only — the sweep/reconcile variant doesn't consult `wip_limit`).
 
 ### Resolve claim scope
 
