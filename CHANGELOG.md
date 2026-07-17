@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.62.0] - 2026-07-17
+
+### Features
+
+- validate reset_epoch and add resume grace at the pause writer (#226) (e6eed6a)
+
 ## [1.61.0] - 2026-07-17
 
 ### Features
