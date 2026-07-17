@@ -16,9 +16,9 @@ load test_helper
 }
 
 @test "less-claude launch is CAO fail-closed and resume rechecks it" {
-  run grep -F 'require `cao`, `cao-run`, and `cao-server` on `PATH`' "$REPO_ROOT/skills/auto-pilot/SKILL.md"
+  run grep -F 'require `cao`, `cao-run`, and `cao-server` on `PATH`' "$REPO_ROOT/skills/auto-pilot/references/launch-preflight.md"
   assert_success
-  run grep -F 'nc -z localhost' "$REPO_ROOT/skills/auto-pilot/SKILL.md"
+  run grep -F 'nc -z localhost' "$REPO_ROOT/skills/auto-pilot/references/launch-preflight.md"
   assert_success
   run grep -F 're-verify `cao`, `cao-run`, and `cao-server` on `PATH`' "$REPO_ROOT/skills/auto-pilot/references/resume.md"
   assert_success
