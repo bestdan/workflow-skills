@@ -2,7 +2,7 @@
 title: Reserve-sized near-cap threshold + per-task usage instrumentation (hardening #2)
 priority: medium
 size: 3
-status: new
+status: needs_review # PR #228 (stacked on #227)
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:

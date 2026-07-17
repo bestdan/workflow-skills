@@ -2,7 +2,7 @@
 title: Graduate durable design to dev_docs/cao_usage.md and delete plan scaffolding
 priority: low
 size: 1
-status: new
+status: parked # per run preflight — runs after tasks 1-5 merge (needs the landed design to graduate)
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:

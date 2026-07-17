@@ -2,7 +2,7 @@
 title: reset_epoch validation + resume grace for clock skew (hardening #3 + #4)
 priority: medium
 size: 2
-status: new
+status: needs_review # PR #226 (stacked on #225)
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:
