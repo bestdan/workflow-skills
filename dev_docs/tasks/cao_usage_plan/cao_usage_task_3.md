@@ -2,7 +2,7 @@
 title: Pre-invoke reserve check — gate before each Claude-heavy turn (hardening #1)
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:

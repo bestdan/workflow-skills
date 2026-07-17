@@ -102,6 +102,13 @@ half, the scout's **capability join**, must re-run against the current
 environment — and **base freshness**. As at launch, a hard failure here
 **BLOCKS THE RESUME**, fail-closed the same way.
 
+**Less-claude capability join.** Read `run_profile` and its profile fields from
+the selected `RUN.md` before re-running the join. When it is `less-claude`,
+re-verify `cao`, `cao-run`, and `cao-server` on `PATH` and `nc -z localhost
+9889`; a missing binary or non-responding `cao-server` **BLOCKS THE RESUME**.
+Then re-check every recorded `cao_coder_mapping` route against the current CAO
+fleet. Do not restart the daemon or downgrade the profile during resume.
+
 **Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
 but run-state branches are named `auto-pilot/<run_id>`
 ([`run-state.md`](run-state.md) "Run-state branch") and nothing stops more than

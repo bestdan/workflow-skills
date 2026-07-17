@@ -58,7 +58,7 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
 ## Launch phase (interactive)
 
 Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
-[--reserve <pct>] [--resume]`
+[--reserve <pct>] [--profile less-claude] [--resume]`
 (`commands/auto-pilot.md`). Launch runs **interactively, tonight, while the human
 can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
@@ -68,7 +68,11 @@ spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
 
 **Preamble — parse + resolve.** Parse `<source>`, `--until`, `--reserve`,
-`--resume`. `--reserve <pct>` is the run's fixed rate-window headroom floor;
+`--profile less-claude`, `--resume`. `--profile` is optional and only accepts
+`less-claude`; without it, preserve the existing launch behavior exactly. On a
+fresh less-claude launch, resolve and persist the profile settings in step 3.
+On `--resume`, read those settings from the selected `RUN.md` rather than
+re-parsing a profile choice. `--reserve <pct>` is the run's fixed rate-window headroom floor;
 default it to `15`, require a numeric percentage from 0 through 100, and
 persist the resolved value in `RUN.md`. On resume, use that persisted value
 unless an explicit, validated `--reserve` replaces it. `--until` accepts an
@@ -161,6 +165,12 @@ stays here rather than in `scripts/preflight.sh`
 ([`references/launch-runtime.md`](references/launch-runtime.md) "Laptop
 sleep"). If it can't be guaranteed, **BLOCKS LAUNCH**.
 
+**Less-claude CAO gate (BLOCKS LAUNCH).** Only when `--profile less-claude` is
+present, require `cao`, `cao-run`, and `cao-server` on `PATH`, then prove the
+already-running daemon responds at `localhost:9889` with `nc -z localhost
+9889`. Any missing binary or failed port probe **BLOCKS LAUNCH**; name the
+missing prerequisite and do not start or restart `cao-server`.
+
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
 Collapse every config decision the unattended run could hit into a fixed choice,
@@ -182,6 +192,13 @@ so nothing prompts at 3am:
 - **Coder config** — run `select-coder` once to resolve each task's
   `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
   dispatches without prompting for a missing default.
+- **Less-claude profile** — only for `--profile less-claude`, resolve every
+  task through `select-coder --cao-fleet`, which admits only `codex` / `agy`,
+  and record its matching named CAO dispatch mapping (`codex` → `cao-codex`,
+  `agy` → `cao-agy`). Set `orchestrate-coders`' `default_coder` to a CAO named
+  entry, never a generic `cao` placeholder. Set `co_review_mode: off` unless
+  the user selects the `cheap-single` dial during this launch, and set
+  `diff_judgment_tier: sonnet`.
 - **Custom/local commands** are **disabled** for the run unless explicitly
   approved at this step (untrusted-config posture, matching co-review's rule).
 
@@ -226,7 +243,9 @@ graph and its blocker edges. Write `.auto-pilot/RUN.md` — front matter
 step 5, `min_task_budget` from step 3) plus the per-task table, in the exact
 format defined in
 [`references/run-state.md`](references/run-state.md) "`RUN.md`" — do **not**
-restate that format here. Also seed empty `.auto-pilot/QUESTIONS.md` and
+restate that format here. A less-claude launch writes its profile fields; an
+ordinary launch omits them and uses their documented defaults, preserving its
+existing `RUN.md` bytes. Also seed empty `.auto-pilot/QUESTIONS.md` and
 `.auto-pilot/REPORT.md`. **Commit** all three to the run-state branch (the
 first write under the run-state branch's fixed write order).
 
