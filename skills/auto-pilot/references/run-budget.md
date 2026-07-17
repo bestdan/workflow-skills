@@ -63,23 +63,41 @@ neither alone is enough:
 
 ### Pre-invoke reserve
 
-The run keeps a fixed **reserve** of **15% headroom** by default. Launch and
-resume accept `--reserve <pct>` to replace that floor for this run; require a
-numeric percentage from 0 through 100 and record the resolved value in the
-run's durable configuration. It is a headroom floor, not a consumed-percent
-threshold: for a successful `--session-status` read of `<percent> <reset_epoch>`,
-compute `headroom = 100 - percent`; when `headroom < reserve`, do not start
-the operation.
+The run keeps a fixed **reserve floor** of **15% headroom** by default. Launch
+and resume accept `--reserve <pct>` to replace that floor for this run; require
+a numeric percentage from 0 through 100 and record the resolved value in the
+run's durable `reserve` configuration. This task does not rewrite that fixed
+floor or its override. The effective reserve used by the gate is:
+
+```
+observed_worst_task_delta = max(recorded in-window usage_deltas)
+reserve = max(fixed_floor, observed_worst_task_delta * safety)
+```
+
+where `safety = 1.25`. `max` is deliberately the high-percentile policy here:
+it sizes for the largest retained observed task interval, rather than averaging
+away a costly task. Only recorded, same-window deltas participate. Until there
+are **N = 5** such deltas, set `reserve = fixed_floor`; an empty, malformed, or
+short record never lowers the fixed floor. It remains a headroom threshold, not
+a consumed-percent threshold: for a successful `--session-status` read of
+`<percent> <reset_epoch>`, compute `headroom = 100 - percent`; when `headroom < reserve`, do not start the operation.
 
 At the start of a delivery cycle, `/deliver-task` calls
 `scripts/claude-usage.sh --session-status` once and cache its successful
 `percent` and raw `reset_epoch` for that cycle. Apply that cached reading before
 **claim**, **verify**, enabled **co-review**, and every iterate-round
 **re-verify** and repeated **co-review**; do not make equivalent usage reads
-in one cycle. Discard the cache at the next cycle and read again. A failed
-(non-zero exit) usage read is not permission to proceed: use the existing
-conservative time/dispatch proxy for that hook, and if it crosses its threshold
-take the same near-cap path.
+in one cycle. That same successful cached reading is also the sole input to the
+per-task instrumentation: before evaluating this cycle's gate, atomically
+compare it with `usage_delta_baseline` and update `usage_deltas` and the
+baseline as specified in [`run-state.md`](run-state.md) "`RUN.md`". Thus the
+next cycle's one read accounts for the interval since the preceding read; do
+not issue a second instrumentation query. Discard the cache at the next cycle
+and read again. A failed (non-zero exit) usage read is not permission to
+proceed: use the existing conservative time/dispatch proxy for that hook, and
+if it crosses its threshold take the same near-cap path. It is **not** a sample:
+clear `usage_delta_baseline` atomically and record no delta or fabricated
+`reset_epoch`.
 
 If either the direct reading or that fallback says near-cap, use **exactly**
 the checkpoint-then-exit path below: write the pause state with

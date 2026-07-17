@@ -48,7 +48,8 @@ copied.
   used only by `/auto-pilot`; when absent, standalone behavior is unchanged.
   When present, it enables the auto-pilot reserve gate below and this skill
   reads any recorded less-claude profile fields only at their named lifecycle
-  steps; it does not define or rewrite run state.
+  steps. It does not otherwise define or rewrite run state; the reserve gate's
+  one atomic usage-baseline/delta update is the explicit exception.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
@@ -59,12 +60,24 @@ copied.
 ## Auto-pilot reserve gate
 
 Only when `--run-state <RUN.md>` is supplied, read the persisted `reserve`
-from that `RUN.md` and obtain `scripts/claude-usage.sh --session-status` once
-at the start of this delivery cycle. Cache that cycle's successful `<percent>
-<reset_epoch>` status; do not re-read it at later lifecycle boundaries. A
-non-zero usage read is fail-closed: use auto-pilot's existing conservative
-time/dispatch proxy at the boundary instead, never treat the failed query as
-headroom.
+as the **fixed floor** and obtain `scripts/claude-usage.sh --session-status`
+once at the start of this delivery cycle. Cache that cycle's successful
+`<percent> <reset_epoch>` status; do not re-read it at later lifecycle
+boundaries. Before the first gate decision, use this same cached status to
+perform the atomic `usage_delta_baseline` / `usage_deltas` update in
+[`run-state.md`](../auto-pilot/references/run-state.md) "`RUN.md`": append a
+delta only when the previous and current raw validated `reset_epoch` match;
+discard a cross-window delta; then replace the baseline. A non-zero usage read
+is fail-closed: clear that baseline and record nothing, use auto-pilot's
+existing conservative time/dispatch proxy at the boundary, and never treat the
+failed query as headroom or a sample.
+
+For a successful cached status, calculate the effective `reserve` from the
+fixed floor and the persisted rolling deltas exactly as
+[`run-budget.md`](../auto-pilot/references/run-budget.md) "Pre-invoke reserve"
+defines. Fewer than five valid recorded in-window deltas means the effective
+reserve is the fixed floor. Do not alter the persisted `reserve` field or
+include Codex/Antigravity worker usage.
 
 Consult the cached status (or that fallback) immediately before each
 Claude-consuming lifecycle boundary:

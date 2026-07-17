@@ -68,6 +68,8 @@ orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time —
 until: 2026-07-10T06:00:00 # the run's --until deadline
 min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; run-budget.md); only written for a time-boxed (--until) run
 reserve: 15 # minimum session-window headroom percent before claim, verify, or enabled co-review; --reserve overrides this fixed default
+usage_delta_baseline: # last successful session-status sample: {percent: 42, reset_epoch: 1783823504}; empty until the first valid sample or after a failed read
+usage_deltas: [] # rolling (at most 20) Claude-orchestrator consumption intervals: [{percent: 8, reset_epoch: 1783823504}]
 ---
 
 | task    | phase        | branch            | base              | base_sha | pr   | notes                  |
@@ -127,6 +129,33 @@ reserve: 15 # minimum session-window headroom percent before claim, verify, or e
   the resolved co-review reviewer set (it is reviewer-latency-coupled, not a
   constant) and writes it here; formula and defaults live in
   [`run-budget.md`](run-budget.md) "Minimum task budget".
+- `reserve` remains the task-3-owned **fixed floor** (15 by default, or the
+  launch/resume `--reserve` override). The gate derives its effective reserve
+  from it and `usage_deltas`; it never overwrites this configured floor.
+- `usage_delta_baseline` is the most recent successful validated
+  `--session-status` sample, kept only to form the next interval. On each new
+  successful cached cycle read, compare its raw `reset_epoch` to this baseline.
+  If they match and the delta is non-negative, append `{percent:
+  current.percent - baseline.percent, reset_epoch: current.reset_epoch}` to
+  `usage_deltas` (retain only the newest 20 entries) and replace the baseline
+  with the current `{percent, reset_epoch}`. If the epochs differ,
+  **discard the cross-window delta**, append nothing, and replace the baseline
+  with the current `{percent, reset_epoch}` — a fresh window starts a fresh
+  baseline. If the epochs match but the delta is **negative** — an
+  inconsistent same-window reading — treat it like a failed read: **clear**
+  the baseline instead of replacing it with the anomalous value, and append
+  nothing, so a corrupted reading can't inflate a later interval. A
+  nonzero/invalid reader result likewise clears the baseline and appends
+  nothing — it must not synthesize a sample or epoch. These updates are one
+  atomic RUN.md rewrite before the reserve decision, using the same one
+  per-cycle reading as the reserve gate. The entries measure only the Claude
+  orchestrator's consumed session percent; never include Codex/Antigravity
+  worker usage.
+- `usage_deltas` is the rolling, capped (20-entry) record consumed by the
+  measured-reserve calculation. Every entry carries the raw validated
+  `reset_epoch` that identifies the rate window in which both reads occurred;
+  only those in-window deltas are eligible for the five-sample calculation in
+  [`run-budget.md`](run-budget.md) "Pre-invoke reserve".
 - `run_profile`, `cao_coder_mapping`, `co_review_mode`, and
   `diff_judgment_tier` are fixed per-run delivery settings. Defaults preserve
   ordinary auto-pilot. A `less-claude` run records the named mapping (`codex` →
