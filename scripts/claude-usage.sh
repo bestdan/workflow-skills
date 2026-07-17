@@ -23,6 +23,10 @@
 #   scripts/claude-usage.sh --from-file <f>     # parse a saved response (no net/keychain)
 #   scripts/claude-usage.sh --help
 #
+# Environment for --session-status:
+#   CLAUDE_USAGE_RESET_STATE_FILE      durable last-reset observation (default
+#                                      ~/.claude/claude-usage-reset-state.json)
+#
 # Output (default), one JSON line on stdout:
 #   {"session":{"percent":42,"resets_at":"2026-07-10T05:00:00Z"},
 #    "weekly_all":{"percent":18,"resets_at":"..."},
@@ -30,7 +34,8 @@
 #
 # Exit status:
 #   0  usage read OK; JSON (or the bare percent, or the "<percent> <epoch>"
-#      status line) on stdout.
+#      status line) on stdout. For --session-status, the epoch is the raw,
+#      validated rate-window reset; the pause writer owns any grace/fallback.
 #   1  usage UNAVAILABLE (no token, network failure, unexpected shape, or —
 #      for --session-status — no session resets_at) — the caller falls back
 #      to the proxy. A one-line reason goes to stderr.
@@ -114,8 +119,10 @@ fi
 
 # --- Parse + emit ----------------------------------------------------------
 # A missing session window is fail-closed: the orchestrator needs the 5h read.
-printf '%s' "$usage_json" | MODE="$MODE" python3 -c '
-import datetime, json, os, sys
+printf '%s' "$usage_json" | MODE="$MODE" \
+  CLAUDE_USAGE_RESET_STATE_FILE="${CLAUDE_USAGE_RESET_STATE_FILE:-${HOME}/.claude/claude-usage-reset-state.json}" \
+  python3 -c '
+import datetime, json, os, sys, tempfile, time
 
 try:
     data = json.load(sys.stdin)
@@ -140,13 +147,57 @@ if os.environ.get("MODE") == "status":
     if not resets_at:
         sys.stderr.write("claude-usage: session has no resets_at\n"); sys.exit(1)
     try:
-        epoch = int(datetime.datetime.fromisoformat(resets_at.replace("Z", "+00:00")).timestamp())
+        reset_epoch = int(datetime.datetime.fromisoformat(resets_at.replace("Z", "+00:00")).timestamp())
     except (TypeError, ValueError, AttributeError):
         sys.stderr.write("claude-usage: session resets_at is not valid ISO 8601\n"); sys.exit(1)
+    now = int(time.time())
+    state_file = os.environ["CLAUDE_USAGE_RESET_STATE_FILE"]
+
+    # `resets_at` comes from outside this process. It must validate and persist
+    # before this pure reader emits it for the pause writer to consume.
+    valid = now < reset_epoch < now + 21600
+    prior_reset = None
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, encoding="utf-8") as f:
+                prior_reset = int(json.load(f)["reset_epoch"])
+            if prior_reset <= 0:
+                raise ValueError
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        # A corrupt/unreadable prior observation is not evidence against the
+        # CURRENT reading -- treat it as "no prior state" so one bad write
+        # does not wedge every future call into the fail-safe forever.
+        prior_reset = None
+
+    # A reset time may only move backward after the previous window has ended.
+    if prior_reset is not None and now < prior_reset and reset_epoch < prior_reset:
+        valid = False
+
+    if not valid:
+        sys.stderr.write("claude-usage: implausible session reset\n"); sys.exit(1)
+    # Preserve the last accepted reset atomically with when and why it was
+    # observed, so the next read can reject a same-window regression.
+    tmp = None
+    try:
+        parent = os.path.dirname(state_file) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".claude-usage-reset-", dir=parent)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"reset_epoch": reset_epoch, "observed_at": now, "source": "session-status"}, f, separators=(",", ":"))
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, state_file)
+    except OSError:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        sys.stderr.write("claude-usage: cannot persist reset observation\n"); sys.exit(1)
     # Floor (not round) here: this gates car`s cap check, so only a genuine 100
     # may read as 100 — rounding would let a 99.6% voluntary quit trip the cap.
     session_floor = int(float(session["percent"]))
-    print(f"{session_floor} {epoch}"); sys.exit(0)
+    print(f"{session_floor} {reset_epoch}"); sys.exit(0)
 
 def window(entry):
     if not entry:
