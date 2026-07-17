@@ -73,7 +73,7 @@ the operation.
 
 At the start of a delivery cycle, `/deliver-task` calls
 `scripts/claude-usage.sh --session-status` once and cache its successful
-`percent` and `reset_epoch` for that cycle. Apply that cached reading before
+`percent` and raw `reset_epoch` for that cycle. Apply that cached reading before
 **claim**, **verify**, enabled **co-review**, and every iterate-round
 **re-verify** and repeated **co-review**; do not make equivalent usage reads
 in one cycle. Discard the cache at the next cycle and read again. A failed
@@ -83,7 +83,7 @@ take the same near-cap path.
 
 If either the direct reading or that fallback says near-cap, use **exactly**
 the checkpoint-then-exit path below: write the pause state with
-`paused_until` converted from `reset_epoch` to its canonical ISO-8601 form,
+`paused_until` from the raw `reset_epoch` as specified below, to its canonical ISO-8601 form,
 commit it, and exit before the operation. There is no separate pre-invoke
 pause implementation.
 
@@ -119,7 +119,18 @@ console string is not.
 When the proxy crosses its near-cap threshold, or the error backstop fires:
 
 1. **Write state first**, per [`run-state.md`](run-state.md) "Write order" —
-   including `paused_until: <reset>` and the pause reason — then **exit**.
+   including `paused_until: <pause deadline>`, `pause_observed_at`,
+   `pause_source`, and the pause reason — in one atomic RUN.md rewrite, then
+   **exit**. `claude-usage.sh --session-status` validates the external
+   `resets_at`: it must be in the future but less than six hours away, and may
+   not move backward before the previously observed reset has passed. The reader
+   returns the raw validated `reset_epoch`; the pause writer sets
+   `paused_until = reset_epoch + grace`, with grace configurable from 60 through
+   180 seconds (default 120; `CLAUDE_USAGE_RESUME_GRACE_SECONDS`). It atomically
+   writes that deadline with `pause_observed_at` and `pause_source`. If a failed
+   read still warrants a pause, the pause writer instead sets `paused_until = now + 3600`
+   as the fail-safe. Early timer wakes are free because `supervisor-gate`
+   is a shell gate, so grace exists only to remove reset-boundary races.
    This is a **checkpoint-then-exit**, not an in-process sleep: the process
    holding hours of context does not sit and wait, it dies and lets a
    relaunch reconstruct everything from the run-state branch. When the

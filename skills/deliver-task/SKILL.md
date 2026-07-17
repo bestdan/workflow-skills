@@ -76,7 +76,8 @@ Claude-consuming lifecycle boundary:
 For a successful status, compute `headroom = 100 - percent`. When `headroom <
 reserve`, follow auto-pilot's existing [`run-budget.md`](../auto-pilot/references/run-budget.md)
 "Near-cap → pause + relaunch past reset" checkpoint-then-exit protocol,
-including canonical `paused_until` from `reset_epoch`, and stop this lifecycle
+including atomically writing `paused_until = reset_epoch + grace` (with
+`pause_observed_at` and `pause_source`) in canonical ISO-8601 form, and stop this lifecycle
 before the boundary. This is an expected auto-pilot pause, **not a delivery
 failure**. The usage query is predictive only; an actual 429 remains
 authoritatively classified by auto-pilot's `supervisor-check` /

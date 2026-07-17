@@ -52,7 +52,9 @@ base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
 status: active # run-level: active | paused | systemic | done
-paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
+paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; successful session-status pauses write reset_epoch + grace, failed reads that warrant a pause write now + 3600, and it is empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
+pause_observed_at: # epoch seconds when the signal that produced paused_until was observed; atomically write it with paused_until, pause_source, status, and pause_reason
+pause_source: # source of that signal, e.g. claude-usage:session-status or supervisor:rate-limit; atomically write it with paused_until, pause_observed_at, status, and pause_reason
 pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
 exit_reason: continuing # why the orchestrator last exited: continuing | paused | done | systemic | deadline (see "Exit contract" below)
 exit_reason_at: 1783823504 # epoch seconds the reason was declared — how the supervisor tells THIS wake's declaration from a stale one
@@ -85,8 +87,9 @@ reserve: 15 # minimum session-window headroom percent before claim, verify, or e
   never the error, and out-of-order/orphaned stacks are fixed mechanically
   rather than by asking a human to merge bottom-up from memory (run #1's
   finding #14, closed by automation, not by prose).
-- `status` / `paused_until` / `pause_reason` are the **run-level** fields the run
-  loop writes: `status: paused` + `paused_until` (+ reason) at a rate-window pause,
+- `status` / `paused_until` / `pause_observed_at` / `pause_source` / `pause_reason`
+  are the **run-level** fields the run loop writes atomically: `status: paused` +
+  `paused_until` + observation time/source (+ reason) at a rate-window pause,
   `status: systemic` (+ reason) when the circuit breaker halts, `status: paused`
   (+ reason, `paused_until` empty) when the pre-dispatch deadline guard stops with
   ready tasks left — resumable only by an explicit `--resume`, never a timer — and
