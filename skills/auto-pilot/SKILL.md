@@ -173,6 +173,16 @@ already-running daemon responds at `localhost:9889` with `nc -z localhost
 9889`. Any missing binary or failed port probe **BLOCKS LAUNCH**; name the
 missing prerequisite and do not start or restart `cao-server`.
 
+Then gate on **working-directory mode**: require
+`[ "${CAO_ENABLE_WORKING_DIRECTORY:-}" = "true" ]`. Without it a CAO worker
+ignores the caller-owned worktree and `cao-run` harvests an empty diff on an
+otherwise successful task — a silent no-op delivery. An unset value **BLOCKS
+LAUNCH** (fix: `export CAO_ENABLE_WORKING_DIRECTORY=true` in the shell that
+starts `cao-server`). This asserts the launch shell as a proxy, not the daemon's
+own env — the flag is uninspectable at runtime and the proxy has limits; see
+[`references/launch-runtime.md`](references/launch-runtime.md) "CAO
+working-directory gate."
+
 ### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
 Collapse every config decision the unattended run could hit into a fixed choice,

@@ -106,8 +106,13 @@ environment — and **base freshness**. As at launch, a hard failure here
 the selected `RUN.md` before re-running the join. When it is `less-claude`,
 re-verify `cao`, `cao-run`, and `cao-server` on `PATH` and `nc -z localhost
 9889`; a missing binary or non-responding `cao-server` **BLOCKS THE RESUME**.
-Then re-check every recorded `cao_coder_mapping` route against the current CAO
-fleet. Do not restart the daemon or downgrade the profile during resume.
+Re-apply the launch phase's **working-directory gate** too — require
+`[ "${CAO_ENABLE_WORKING_DIRECTORY:-}" = "true" ]` in the resume environment (the
+same launch-shell proxy, and the same caveat that macOS makes the daemon's real
+env uninspectable; see [`../SKILL.md`](../SKILL.md) "Less-claude CAO gate"); an
+unset value **BLOCKS THE RESUME**. Then re-check every recorded
+`cao_coder_mapping` route against the current CAO fleet. Do not restart the
+daemon or downgrade the profile during resume.
 
 **Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
 but run-state branches are named `auto-pilot/<run_id>`

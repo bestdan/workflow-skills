@@ -485,3 +485,39 @@ process-local guard would re-notify every wake and turn the alarm into the new
 noise. A repeat wake in the same condition re-halts **silently**. `--resume` clears
 the sentinel (`alarm-clear`, [`resume.md`](resume.md)) — the key is per **run**,
 and a resumed run must be able to alarm again.
+
+## CAO working-directory gate
+
+Rationale for the launch-phase check ([`../SKILL.md`](../SKILL.md) "Less-claude
+CAO gate"), re-applied on resume ([`resume.md`](resume.md)).
+
+**The failure it guards.** The CAO backend must run against the caller-owned
+worktree. That behavior is controlled entirely by `CAO_ENABLE_WORKING_DIRECTORY=true`
+in the **`cao-server` daemon's** process environment. Without it the worker edits
+elsewhere and `cao-run` harvests an **empty diff on an otherwise successful task**
+(`../../orchestrate-coders/SKILL.md` "Runtime prerequisite"; confirmed live) — a
+`less-claude` run that hands off empty PRs while every readiness signal is green.
+This is the "done can't be trusted" failure class the problem statement names,
+so it is worth a gate.
+
+**Why the gate is a proxy, not proof.** The flag is not directly inspectable at
+runtime: it is neither a `cao config` key nor a `cao env` managed var (it lives
+only in the daemon's process environment), and macOS **redacts a running
+process's environment** — `ps eww -p <pid>` prints nothing usable even for your
+own PID. So the daemon's actual value cannot be read back. The gate instead
+asserts the **launch shell's** value (`[ "${CAO_ENABLE_WORKING_DIRECTORY:-}" = "true" ]`)
+as the best cheap proxy: the pre-flight and the daemon are normally started from
+the same login environment (the export lives in the shell profile), so a set
+launch value strongly implies a set daemon value. The limit is honest — if
+`cao-server` was started from a context that lacks the var (a `launchd` job, a
+login item, a bare non-interactive `ssh` exec), the proxy passes while the daemon
+runs without it. The gate therefore reliably catches "the var is set nowhere,"
+not "the var is set here but not on the daemon."
+
+**The definitive check, and why it is deferred.** The only check that proves the
+live behavior is a **functional smoke**: create a throwaway git worktree, run a
+trivial `cao-run` task that makes a known edit, and assert the harvested diff is
+non-empty. It is deferred from the launch gate as heavier than launch warrants
+(it spins a real worker). Run it by hand if a `less-claude` run ever delivers
+empty PRs. The more robust preventive fix is environmental, not code: ensure the
+daemon is always started from an environment that carries the export.

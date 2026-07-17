@@ -125,8 +125,14 @@ skip the pinned shell verification command.
 
 CAO must already be running: `cao`, `cao-run`, and `cao-server` must be on
 `PATH`, the daemon must answer on `localhost:9889`, and the daemon must have
-been started with `CAO_ENABLE_WORKING_DIRECTORY=true`. Auto-pilot does not start
-or restart that service. See [CAO’s custom-coder contract](../skills/orchestrate-coders/SKILL.md).
+been started with `CAO_ENABLE_WORKING_DIRECTORY=true` — without it a worker
+edits outside the worktree and `cao-run` harvests an empty diff (a silent no-op
+delivery). Auto-pilot does not start or restart that service. The launch
+pre-flight gates on all of these, including a `CAO_ENABLE_WORKING_DIRECTORY=true`
+check against the launch shell as a proxy for the daemon (macOS can't read the
+daemon's own env); if the daemon was started from a var-less context this proxy
+can pass while the daemon lacks it, so keep the export in the profile that
+starts `cao-server`. See [CAO’s custom-coder contract](../skills/orchestrate-coders/SKILL.md).
 
 ### `--resume`
 
