@@ -7,3 +7,7 @@ dist/
 # co-review local-reviewer config — which local agents (gemini, codex, …) are
 # available is machine-specific, so this is not committed/shared.
 dev_docs/co-review/
+
+# task-loop config — carries machine-local project IDs and a personal API key
+# reference, so it's not committed/shared.
+dev_docs/tasks/.task-config.yml
