@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.63.0] - 2026-07-17
+
+### Features
+
+- less-claude run profile (CAO coder + review/verify knobs) (#227) (371cd41)
+
 ## [1.62.0] - 2026-07-17
 
 ### Features
