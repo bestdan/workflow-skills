@@ -1,5 +1,5 @@
 ---
-description: Orchestrate coding work across coder agents — the session decomposes the task into packets, dispatches each to a selected coder backend (opus subagent, codex, agy, devin, or a custom CLI), verifies the diffs, and integrates the results
+description: Orchestrate coding work across coder agents — the session decomposes the task into packets, dispatches each to a selected coder backend (opus subagent, codex, agy, devin, a custom CLI, or a configured CAO custom coder such as cao-codex / cao-agy), verifies the diffs, and integrates the results
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, SendMessage, AskUserQuestion, Skill
 argument-hint: "<task> [--coder <backend>[:<model>]]... [-n N] [--plan <name>]"
 ---
@@ -11,8 +11,9 @@ Invoke the **orchestrate-coders** skill with the arguments as given. The skill
 config resolution, decomposition, dispatch, verification, integration, and the
 per-backend mechanics in `skills/orchestrate-coders/backends/`. This command
 adds nothing beyond routing; do not re-derive or restate the workflow here.
-Do not limit delegation to Agent-tool subagents: `codex`, `agy`, `devin`, and
-custom coders are dispatched by Bash through the skill's CLI backend contract.
+Do not limit delegation to Agent-tool subagents: `codex`, `agy`, `devin`,
+custom coders, and configured CAO custom coders (`cao-codex` / `cao-agy`) are
+dispatched by Bash through the skill's CLI backend contract.
 
 - `<task>` — what to build; may be omitted when `--plan <name>` names an
   existing `dev_docs/tasks/<name>_plan/` plan to execute.

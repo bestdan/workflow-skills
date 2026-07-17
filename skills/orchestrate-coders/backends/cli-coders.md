@@ -1,4 +1,4 @@
-# CLI coder backends — codex, agy, devin, custom
+# CLI coder backends — codex, agy, devin, custom, CAO custom coders
 
 Every external coder is driven through the same shell contract; only the
 invocation line differs. The orchestrator never trusts a coder's self-report —

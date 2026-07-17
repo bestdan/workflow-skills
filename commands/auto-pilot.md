@@ -22,17 +22,29 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
   source; otherwise → resolve as a Linear project. The chosen adapter
   (`skills/auto-pilot/references/adapters.md`) normalizes it to the run-state
   representation.
-- `--until <time>` — wall-clock bound for the run; the orchestrator stops itself
-  at this time (and a hard outer watchdog enforces it — see
-  `skills/auto-pilot/references/launch-runtime.md`). Omit for the skill's default
-  bound.
+- `--until <time>` — wall-clock deadline for the run, as an absolute ISO-8601
+  time or `now+<duration>`. Enforcement is fail-soft: the run loop's
+  pre-dispatch guard declines to _start_ a task once there isn't enough time
+  left to plausibly finish it, so the run stops cleanly rather than a hard
+  watchdog killing a task mid-delivery (see
+  `skills/auto-pilot/references/run-budget.md`, "Minimum task budget"). Omit
+  entirely for no wall-clock deadline — the run continues until the task graph
+  is exhausted or another stop condition (e.g. budget reserve) is hit.
 - `--reserve <pct>` — fixed minimum rate-window headroom before a
   Claude-consuming delivery operation. Defaults to `15`; require a numeric
   percentage from 0 through 100. The launch phase persists the resolved value
   for resume.
 - `--profile less-claude` — opt in to the CAO-backed, lower-Claude run profile.
-  Its resolved settings are persisted in `RUN.md`; on `--resume`, those
-  recorded settings are authoritative, so this flag is not required again.
+  Concretely it: routes coding dispatch through `select-coder --cao-fleet` to a
+  named CAO custom coder (`cao-codex` / `cao-agy`, never a generic `cao`
+  placeholder); sets `co_review_mode: off` unless dialed to `cheap-single`; and
+  sets `diff_judgment_tier: sonnet` so diff judgment runs on Sonnet instead of
+  Opus. Shell verification (the project's check command plus exercising the
+  feature) is unchanged. See
+  [`dev_docs/auto-pilot-how-to-use.md`](../dev_docs/auto-pilot-how-to-use.md)
+  for more. Its resolved settings are persisted in `RUN.md`; on `--resume`,
+  those recorded settings are authoritative, so this flag is not required
+  again.
 - `--resume` — reconcile a crashed or paused run's state against reality, then
   continue the run. Parse it, and if present, dispatch to the SKILL's **Resume
   phase** (`skills/auto-pilot/SKILL.md`, "Resume phase (--resume)", whose
