@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.60.0] - 2026-07-17
+
+### Features
+
+- add CAO coder backend (cao-coder.sh) (#224) (b03bfd8)
+
 ## [1.59.0] - 2026-07-15
 
 ### Features
