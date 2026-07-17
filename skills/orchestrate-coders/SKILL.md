@@ -79,6 +79,50 @@ This file is the **resolved-config shape**, defined once in
 `skills/select-coder/SKILL.md` ("Resolved config (non-interactive callers)")
 and shared here rather than redefined.
 
+### CAO custom-coder template
+
+To dispatch a packet through the local CAO fleet, add one named custom command
+per pinned backend/model pair. The wrapper ships with this repository at
+`scripts/cao-coder.sh`:
+
+```yaml
+coders:
+  - name: cao-codex
+    command: "scripts/cao-coder.sh {SPEC} {WORKTREE} codex:gpt-5.6-terra"
+  - name: cao-agy
+    command: "scripts/cao-coder.sh {SPEC} {WORKTREE} 'agy:Gemini 3.5 Flash (High)'"
+```
+
+`command:` substitutes only `{SPEC}` and `{WORKTREE}`; it has no model
+placeholder. One named entry therefore pins one backend/model for the whole
+run. Per-packet model selection means choosing the matching `cao-*` entry,
+not expecting a single static entry to vary its model. Quote a model containing
+spaces as shown.
+
+These are **untrusted custom commands**: show the exact command and confirm
+before its first run. Under `--non-interactive`, pass the exact command through
+the caller's `--allow-command` approval mechanism; otherwise it must be
+skipped.
+
+Runtime prerequisite: `cao-server`, the local CAO session host (normally on
+`localhost:9889`, started with `cao-server`), must already be running **with
+`CAO_ENABLE_WORKING_DIRECTORY=true` exported in the daemon's environment**, and
+both `cao` and `cao-run` must be on `PATH`. The env var is load-bearing: without
+it the worker ignores the caller-owned worktree and edits elsewhere, so
+`cao-run`'s diff harvest — and therefore this wrapper — comes back empty even on
+a successful task (confirmed live). The launch gate belongs to the CAO run
+profile pre-flight and is re-checked when auto-pilot resumes; this wrapper does
+not start the daemon.
+
+`scripts/cao-coder.sh` accepts only an already-existing caller-owned worktree, so
+it cannot invoke CAO's worktree-creation path. Its `cao-run` dependency has
+the same existing-directory contract: `~/.local/bin/cao-run:46-50` calls
+`git worktree add` only inside `if [ ! -d "$wt" ]`, then uses the existing
+directory at line 51. `cao-run` prints the harvested diff and the wrapper
+forwards its exit status unchanged. Home-directory cache/permission failures
+reported by a worker remain environmental failures under the CLI-coder policy,
+not content failures.
+
 **Resolution when no `--coder` is passed:**
 
 - File absent → probe `PATH` (`command -v`) for `codex`, `agy`, `devin`; `opus`

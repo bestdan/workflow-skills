@@ -26,6 +26,12 @@ command exists and any required auth is valid. Recommend them as
 `<backend>:<model>` specs for `orchestrate-coders`; do not reject them merely
 because Claude Code cannot spawn them through the Agent tool.
 
+When a run is CAO-routed, keep this skill's normal `codex:<model>` or
+`agy:<model>` recommendation for scoring, then select the matching named
+`cao-codex` or `cao-agy` entry from `.coders.yml` for dispatch. Those names
+are pinned backend/model custom commands; this is a routing pointer only, not
+additional scoring logic.
+
 ## Pre-flight: availability probe
 
 Availability is probed once and cached — not on every invocation. The cache
