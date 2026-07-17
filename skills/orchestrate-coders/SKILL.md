@@ -1,6 +1,6 @@
 ---
 name: orchestrate-coders
-description: Use when the user wants the current session to act as an orchestrator that farms coding work out to other coder agents — e.g. "delegate this to codex", "have opus implement these", "orchestrate/supervise coders", or /orchestrate-coders. The orchestrator decomposes the task into packets, dispatches each to a configured coder backend (opus subagent, codex, agy, devin, or a custom CLI), verifies the results, and integrates them. The coder backend and its model are selectable per run.
+description: Use when the user wants the current session to act as an orchestrator that farms coding work out to other coder agents — e.g. "delegate this to codex", "have opus implement these", "orchestrate/supervise coders", or /orchestrate-coders. The orchestrator decomposes the task into packets, dispatches each to a configured coder backend (opus subagent, codex, agy, devin, a custom CLI, or a configured CAO custom coder such as cao-codex / cao-agy), verifies the results, and integrates them. The coder backend and its model are selectable per run.
 ---
 
 # orchestrate-coders — supervise a fleet of coder agents
@@ -14,9 +14,10 @@ external CLI; everything else is driven the same way through a shell contract.
 
 Important distinction for Claude Code sessions: the `Agent` tool only reaches
 registered Claude subagents. Do not treat that as the availability boundary for
-this workflow. `codex`, `agy`, `devin`, and custom coders are valid delegates
-when their CLIs are installed; dispatch them with `Bash` using the CLI contract
-instead of trying to spawn them through `Agent`.
+this workflow. `codex`, `agy`, `devin`, custom coders, and configured CAO
+custom coders (`cao-codex` / `cao-agy`) are valid delegates when their CLIs are
+installed; dispatch them with `Bash` using the CLI contract instead of trying
+to spawn them through `Agent`.
 
 ## Coder spec
 
@@ -27,6 +28,9 @@ A coder is named as `<backend>[:<model>]`:
   [`backends/opus.md`](backends/opus.md).
 - `codex`, `agy`, `devin` — known external coder CLIs, driven through the
   shared shell contract. Mechanics: [`backends/cli-coders.md`](backends/cli-coders.md).
+- `cao-codex`, `cao-agy` (or other named `cao-*` entries) — configured CAO
+  custom coders, routed through the local CAO fleet via
+  `scripts/cao-coder.sh`. See "CAO custom-coder template" below.
 - any other name — must come from config with an explicit `command:`
   (untrusted; see Safety).
 

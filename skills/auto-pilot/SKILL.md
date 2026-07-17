@@ -1,6 +1,6 @@
 ---
 name: auto-pilot
-description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
+description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. Launch, run, and resume all ship; tasks hand off at needs_review — nothing is merged or tracker-completed unattended.
 ---
 
 # auto-pilot — unattended autonomous runs
@@ -14,12 +14,14 @@ battle-tested skills and handler protocols rather than duplicating them.
 
 Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
 
-> **Status:** v1 is being built. This SKILL.md establishes the skill home, the
+> **Status:** v1 has shipped. This SKILL.md establishes the skill home, the
 > references below, the interactive **launch** phase, the unattended **run**
 > loop (which the spawned orchestrator executes), and **`--resume`**'s crash
 > reconciliation. The three phases compose end-to-end: launch spawns an
 > orchestrator that runs the loop, and a crashed or paused run resumes into
-> that same loop.
+> that same loop. Its boundaries remain fixed: sources are a Linear project or
+> a `plan-with-docs` directory, and every task hands off at `needs_review` —
+> nothing is merged or tracker-completed unattended.
 
 ## References
 

@@ -41,11 +41,13 @@ The four hardening tweaks are additive to `run-budget.md` and benefit **all** of
 
 ## Tasks
 
-1. [[cao_usage_task_1]] — CAO coder backend for `orchestrate-coders`: named custom `command:` wrappers mapping `{SPEC}`/`{WORKTREE}` → a CAO worker via `cao-run`.
-2. [[cao_usage_task_2]] — Auto-pilot "less-Claude" run profile: select the CAO named coder + co-review off/dialed + cheaper-tier diff-judgment, threaded launch → `RUN.md` → resume.
-3. [[cao_usage_task_3]] — Pre-invoke reserve check: gate **before** each Claude-heavy turn (claim / verify / co-review), not only after each task (hardening #1); owns the fixed reserve + `--reserve`.
-4. [[cao_usage_task_4]] — Reserve-sized near-cap threshold + per-task usage instrumentation (window-tagged), replacing the fixed % (hardening #2).
-5. [[cao_usage_task_5]] — `reset_epoch` validation + resume grace for clock skew, in `claude-usage.sh` / the pause writer (hardening #3 + #4).
+Tasks 1-5 are **done** and shipped:
+
+1. [[cao_usage_task_1]] (done, #224) — CAO coder backend for `orchestrate-coders`: named custom `command:` wrappers mapping `{SPEC}`/`{WORKTREE}` → a CAO worker via `cao-run`.
+2. [[cao_usage_task_2]] (done, #227) — Auto-pilot "less-Claude" run profile: select the CAO named coder + co-review off/dialed + cheaper-tier diff-judgment, threaded launch → `RUN.md` → resume.
+3. [[cao_usage_task_3]] (done, #225) — Pre-invoke reserve check: gate **before** each Claude-heavy turn (claim / verify / co-review), not only after each task (hardening #1); owns the fixed reserve + `--reserve`.
+4. [[cao_usage_task_4]] (done, #228) — Reserve-sized near-cap threshold + per-task usage instrumentation (window-tagged), replacing the fixed % (hardening #2).
+5. [[cao_usage_task_5]] (done, #226) — `reset_epoch` validation + resume grace for clock skew, in `claude-usage.sh` / the pause writer (hardening #3 + #4).
 6. [[cao_usage_task_6]] — Graduate-then-delete: migrate durable design into `dev_docs/cao_usage.md`, delete the plan scaffolding.
 
 ## Resolved decisions
