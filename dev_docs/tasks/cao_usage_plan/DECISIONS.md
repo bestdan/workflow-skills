@@ -95,6 +95,52 @@ Graduates into `dev_docs/cao_usage.md` via task 6.
     containment gate carries a --cao-fleet exception so a CAO-dispatched agy
     (isolated in CAO's worktree) isn't wrongly dropped, which would collapse
     the fleet to codex-only.
+
+## Post-build smoke test (full stack assembled, user present)
+
+Assembled all five commits on one tree (worktree at the t4 tip) and ran the
+deterministic + contract + one live tier.
+
+- **Deterministic tier — clean.** Full bats suite 50/50, `scripts/check.sh` OK
+  (727 spawn-orchestrator assertions + confinement/settings/status-report),
+  shell lint OK. One emergent failure found + fixed: `dprint check` flagged
+  `skills/select-coder/SKILL.md` (orchestrator's hand-edit used `*before*`
+  where repo style is `_before_`) — coders ran sandboxed without dprint, so
+  formatting was never normalized on any branch and only surfaced assembled.
+  Fixed via `dprint fmt`, amended into t2.
+- **Contract tier — clean.** The t5 `--session-status` raw-`reset_epoch`
+  contract is consumed consistently by all three consumers: the reserve gate
+  (t3, applies grace writer-side only), the usage_deltas instrumentation (t4,
+  tags by raw epoch), and claude-auto-resume.sh (single CAR_BUFFER on the raw
+  epoch — no double-buffer). This is the cross-task property sol's t5 ruling
+  was designed to protect, verified on the assembled tree.
+- **Live tier (Tier 1) — CAO dispatch PASSED, t1's deferred user-run AC now
+  satisfied.** `scripts/cao-coder.sh <spec> <worktree> codex:gpt-5.6-terra`
+  against a real pre-made worktree launched a live codex worker (base
+  dev-codex) that created SMOKE.txt with exact content — Claude wrote none of
+  it — harvested the diff, exit 0, and **created no rogue `cao/` worktree**
+  (the never-`git worktree add` contract held live).
+
+### Live-tier findings
+
+10. **t1 gap — `CAO_ENABLE_WORKING_DIRECTORY=true` was undocumented (FIXED).**
+    cao-run only honors the caller-owned worktree if the daemon was started
+    with this env var exported; without it the worker edits elsewhere and the
+    wrapper harvests an empty diff even on success. t1 documented "cao-server
+    must be running" but not *how*. Added the prerequisite to
+    orchestrate-coders SKILL.md's runtime-prerequisite paragraph; amended into
+    t1 (#224) and the whole chain restacked onto it (all conflict-free).
+11. **cao-run reliability caveat (pre-existing, NOT this change — logged for
+    the autopilot follow-up).** cao-run logged `Error: Timed out after 300s
+    waiting for terminal` yet the task succeeded (file present, exit 0): its
+    worker-completion detection is unreliable and falls through to diff-harvest.
+    Implications for an unattended less-claude run: (a) a *trivial* CAO task
+    took ≥300s wall-clock, so per-task CAO timeouts must be sized well above
+    5 min or every dispatch looks like a hang; (b) the orchestrator must not
+    read cao-run's "Timed out" stderr as failure — the diff is ground truth.
+    t1/orchestrate-coders already treat the diff as ground truth, which is
+    precisely why this succeeded despite the bogus timeout — the smoke test
+    validated that design principle rather than breaking it.
 5. **t3 gate boundaries → RESOLVED (b) by codex gpt-5.6-sol high.** The
    documented claim/verify/co-review gates cannot be enforced from the outer
    loop because /deliver-task is opaque (found by codex + devin in co-review).
