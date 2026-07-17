@@ -61,6 +61,7 @@ orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
 orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
 until: 2026-07-10T06:00:00 # the run's --until deadline
 min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; run-budget.md); only written for a time-boxed (--until) run
+reserve: 15 # minimum session-window headroom percent before claim, verify, or enabled co-review; --reserve overrides this fixed default
 ---
 
 | task    | phase        | branch            | base              | base_sha | pr   | notes                  |

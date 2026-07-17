@@ -12,8 +12,14 @@ stop below; everything else governs the free rate window and per-task time.
 
 ## Rate-window check
 
-Run after every task's state update (the run loop's hook point). Headroom is
-read two ways, layered because neither alone is enough:
+Run at two hook points: **inside `/deliver-task` before each Claude-consuming
+delivery operation** (claim, verify, co-review, every re-verify, and every
+repeated co-review), and **after every task's state update**. `/deliver-task`
+is the enforcement site when auto-pilot supplies `--run-state`; the outer loop
+cannot intercept those opaque lifecycle substeps. The pre-invoke hook prevents
+beginning a large turn without enough window left; the post-task hook remains
+the accounting and backstop check. Headroom is read two ways, layered because
+neither alone is enough:
 
 - **Primary — a direct usage query.** [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh)
   performs it and is the orchestrator's entry point: it queries `GET
@@ -54,6 +60,37 @@ read two ways, layered because neither alone is enough:
   for a rate-limit signal (429 / `rate_limit_error` / overloaded) and owns the
   reschedule. The agent never self-handles a rate-limit — if a subagent dispatch
   returns one, it simply exits non-zero and lets the supervisor classify it.
+
+### Pre-invoke reserve
+
+The run keeps a fixed **reserve** of **15% headroom** by default. Launch and
+resume accept `--reserve <pct>` to replace that floor for this run; require a
+numeric percentage from 0 through 100 and record the resolved value in the
+run's durable configuration. It is a headroom floor, not a consumed-percent
+threshold: for a successful `--session-status` read of `<percent> <reset_epoch>`,
+compute `headroom = 100 - percent`; when `headroom < reserve`, do not start
+the operation.
+
+At the start of a delivery cycle, `/deliver-task` calls
+`scripts/claude-usage.sh --session-status` once and cache its successful
+`percent` and `reset_epoch` for that cycle. Apply that cached reading before
+**claim**, **verify**, enabled **co-review**, and every iterate-round
+**re-verify** and repeated **co-review**; do not make equivalent usage reads
+in one cycle. Discard the cache at the next cycle and read again. A failed
+(non-zero exit) usage read is not permission to proceed: use the existing
+conservative time/dispatch proxy for that hook, and if it crosses its threshold
+take the same near-cap path.
+
+If either the direct reading or that fallback says near-cap, use **exactly**
+the checkpoint-then-exit path below: write the pause state with
+`paused_until` converted from `reset_epoch` to its canonical ISO-8601 form,
+commit it, and exit before the operation. There is no separate pre-invoke
+pause implementation.
+
+The query is predictive and advisory; it cannot make an actual rate-limit
+error safe. A 429 encountered during a turn remains authoritative and is
+classified by `supervisor-check` / `classify-exit`, which owns the supervisor
+pause path.
 
 The same response's `spend.used.amount_minor` feeds the hard-stop below
 ("Hard-stop before paid/overflow credits") — one query serves both checks.

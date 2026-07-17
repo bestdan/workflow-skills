@@ -1,7 +1,7 @@
 ---
 description: Deliver ONE task through its full per-task lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate, and hand off at needs_review (never completed)
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
-argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--handler <h>]"
+argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--run-state <RUN.md>] [--handler <h>]"
 ---
 
 # Deliver Task
@@ -22,6 +22,8 @@ routing; do not re-derive or restate the workflow here.
   calls to; omit standalone (they ride out in the hand-off summary). When passed,
   a deferred finding that is cross-cutting or still open at the 2-round bound is
   also filed via `/add-task` (see the skill's "Iterate (bounded)").
+- `--run-state <RUN.md>` — transparent auto-pilot pass-through for its durable
+  run state; omit for standalone delivery.
 - `--handler <h>` — override handler resolution (`repo-pr | linear | gh-issue |
   jira`); omit to resolve from `.task-config.yml` as today. The `/auto-pilot`
   orchestrator passes its run's effective handler.

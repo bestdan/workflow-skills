@@ -8,13 +8,20 @@ source_branch: worktree-bestdan+cao-usage-adapter
 related_files:
   - skills/auto-pilot/references/run-budget.md
   - skills/auto-pilot/SKILL.md
+  - skills/deliver-task/SKILL.md
+  - commands/deliver-task.md
   - scripts/claude-usage.sh
+  - test/auto-pilot-reserve.bats
 is_blocked_by:
 parent: cao_usage
 tags: [auto-pilot, run-budget, hardening]
 ---
 
 Part of [[cao_usage_plan]].
+
+Approved scope expansion: enforce the reserve gate inside `/deliver-task`,
+which owns claim, verify, co-review, and iterate substeps; auto-pilot passes
+the run state through rather than attempting to intercept opaque substeps.
 
 ## Context
 
