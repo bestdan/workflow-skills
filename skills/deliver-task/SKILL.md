@@ -44,12 +44,43 @@ copied.
   judgment calls to (step 6). The `/auto-pilot` orchestrator passes its run's
   log; standalone, omit it and the calls ride out in the hand-off summary
   instead (this skill never writes run-state files itself).
+- `--run-state <RUN.md>` — the auto-pilot run's durable state. Optional and
+  used only by `/auto-pilot`; when absent, standalone behavior is unchanged.
+  When present, it enables the auto-pilot reserve gate below.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
   ⇒ `repo-pr`, per `references/adapters.md`) so the handler is never
   mis-derived from a repo whose `.task-config.yml` default differs from the
   run's source.
+
+## Auto-pilot reserve gate
+
+Only when `--run-state <RUN.md>` is supplied, read the persisted `reserve`
+from that `RUN.md` and obtain `scripts/claude-usage.sh --session-status` once
+at the start of this delivery cycle. Cache that cycle's successful `<percent>
+<reset_epoch>` status; do not re-read it at later lifecycle boundaries. A
+non-zero usage read is fail-closed: use auto-pilot's existing conservative
+time/dispatch proxy at the boundary instead, never treat the failed query as
+headroom.
+
+Consult the cached status (or that fallback) immediately before each
+Claude-consuming lifecycle boundary:
+
+- step 2, **Claim**;
+- step 3, **Verify**;
+- step 5, **Co-review**; and
+- step 6, **Iterate**, before every **re-verify** and every repeated
+  **co-review**.
+
+For a successful status, compute `headroom = 100 - percent`. When `headroom <
+reserve`, follow auto-pilot's existing [`run-budget.md`](../auto-pilot/references/run-budget.md)
+"Near-cap → pause + relaunch past reset" checkpoint-then-exit protocol,
+including canonical `paused_until` from `reset_epoch`, and stop this lifecycle
+before the boundary. This is an expected auto-pilot pause, **not a delivery
+failure**. The usage query is predictive only; an actual 429 remains
+authoritatively classified by auto-pilot's `supervisor-check` /
+`classify-exit` path.
 
 ## 0. Resolve the handler
 
@@ -125,7 +156,8 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    session's checkout. The orchestrating session then **owns the task branch**:
    read the worker's diff, integrate it onto the task branch, and **clean up the
    worker worktree**.
-3. **Verify.** Run the project's named check command — the caller/config names it;
+3. **Verify.** For an auto-pilot invocation, apply the reserve gate immediately
+   before this verify boundary. Run the project's named check command — the caller/config names it;
    else detect it (a `just check` recipe, an executable `scripts/check.sh` /
    `scripts/check.py`, or `dli check` — locate the actual file before running it,
    don't shell-glob `scripts/check.*`) — **and exercise the feature itself**:
@@ -182,7 +214,8 @@ to **draft** — the safe choice.
 
 ## 5. Co-review
 
-Run `/co-review --non-interactive` on the PR (via the `Skill` tool). Its
+For an auto-pilot invocation, apply the reserve gate immediately before this
+co-review boundary. Run `/co-review --non-interactive` on the PR (via the `Skill` tool). Its
 never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
@@ -193,8 +226,10 @@ advisory).
 ## 6. Iterate (bounded)
 
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
-re-verify (step 3's check), re-push, then **re-run `/co-review --non-interactive`
-on the updated PR** to gather fresh findings. **Judgment calls** (medium findings)
+then, for an auto-pilot invocation, apply the reserve gate immediately before
+the **re-verify** (step 3's check), re-push, and apply it again immediately
+before every repeated **co-review** when re-running `/co-review --non-interactive`
+on the updated PR to gather fresh findings. **Judgment calls** (medium findings)
 are never applied silently:
 
 - append each to the **caller-provided** `--questions <path>` decision log when

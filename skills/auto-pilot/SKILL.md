@@ -57,7 +57,8 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
 
 ## Launch phase (interactive)
 
-Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
+Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
+[--reserve <pct>] [--resume]`
 (`commands/auto-pilot.md`). Launch runs **interactively, tonight, while the human
 can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
@@ -66,8 +67,12 @@ telling the user the run is underway. The unattended **run** loop is what the
 spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
 
-**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`.
-`--until` accepts an absolute ISO-8601 time or a relative `now+<duration>`
+**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--reserve`,
+`--resume`. `--reserve <pct>` is the run's fixed rate-window headroom floor;
+default it to `15`, require a numeric percentage from 0 through 100, and
+persist the resolved value in `RUN.md`. On resume, use that persisted value
+unless an explicit, validated `--reserve` replaces it. `--until` accepts an
+absolute ISO-8601 time or a relative `now+<duration>`
 offset; launch resolves either to the absolute time recorded in `RUN.md`. If
 `--resume` is present, route to the **Resume phase** section below instead of
 running the rest of this launch pre-flight. Detect the source (existing
@@ -319,7 +324,7 @@ while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
-    /deliver-task it (with per-task wall-clock + retry bounds)
+    /deliver-task it --run-state .auto-pilot/RUN.md (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
 declare the exit reason, then exit          # every termination path, no exceptions
@@ -349,6 +354,12 @@ at launch (step 3) and read from `RUN.md` front matter, never a constant; why
 this guard exists and the floor's derivation:
 [`references/run-budget.md`](references/run-budget.md) "Minimum task budget".
 
+**Pre-invoke reserve gate.** The outer loop dispatches each delivery with its
+`RUN.md` path; `/deliver-task`, as lifecycle owner, applies
+[`references/run-budget.md`](references/run-budget.md) "Pre-invoke reserve"
+at its internal claim, verify, co-review, re-verify, and repeated co-review
+boundaries. The loop does not attempt to intercept those opaque substeps.
+
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
 **ready** when every task it is blocked by is at phase `handed-off` — never
@@ -361,7 +372,7 @@ branch) — that distinction drives the stacked-PR handling below.
 **The per-task step.** Dispatch exactly one call per task:
 
 ```
-/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md
+/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md
 ```
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
@@ -369,7 +380,8 @@ run's effective handler resolved from the run's (normalized) source (plan ⇒
 `repo-pr`, linear ⇒ `linear`), never re-derived by `/deliver-task` itself.
 `/deliver-task` ([`commands/deliver-task.md`](../../commands/deliver-task.md))
 owns the entire per-task lifecycle — claim, implement, PR, co-review, iterate,
-hand-off — the run loop does not re-derive any of it; the `--questions` path
+hand-off — including the internal reserve boundaries enabled by `--run-state`;
+the outer loop does not intercept those opaque substeps. The `--questions` path
 is where the non-blocking decision protocol below appends entries. A
 `/deliver-task` call that **fails outright** gets the per-task retry bound
 (one re-dispatch, then **park**;
