@@ -1,6 +1,6 @@
 # Audit: deterministic-code opportunities across the skills/commands prose
 
-**Date:** 2026-07-10 · **Updated:** 2026-07-15 (see "Update" below)
+**Date:** 2026-07-10 · **Updated:** 2026-07-17 (reconciled with PR #119; see "Update" below)
 **Status:** Findings only — no code changed. Each recommendation below is sized
 to become its own task/PR.
 **Scope:** All prose under `skills/`, `commands/` (including
@@ -8,7 +8,7 @@ to become its own task/PR.
 
 > **Read the [Update — 2026-07-15](#update--2026-07-15) section first.** Since
 > this audit was written, main landed the read-extraction pattern it advocated
-> — built as a fast-path/floor design — but on the *Linear* path this audit had
+> — built as a fast-path/floor design — but on the _Linear_ path this audit had
 > written off as
 > unscriptable. Several conclusions below (the "Structural constraint," Finding
 > #1's Linear caveat, §6's fact-reviewer note) are materially refined by what
@@ -27,7 +27,7 @@ Linear GraphQL scripts**. Two of those scripts back the new commands directly
 pre-existing claim and reoptimize flows (`linear-ready.py`,
 `linear-relations.py`).
 
-### The central constraint was too absolute — Linear *reads* are now scripted
+### The central constraint was too absolute — Linear _reads_ are now scripted
 
 The audit's "Structural constraint" claimed any MCP-bound Linear flow "is prose
 no matter how mechanical it looks, because its actual work happens through MCP
@@ -36,22 +36,36 @@ GraphQL route the audit already saw in `linear-archive.py` has been generalized
 into a **fast-path/floor** pattern, and the mechanical Linear reads have been
 extracted into code:
 
-| Script | Lines | Replaces (per-issue MCP loop) | Consumers |
-|---|---|---|---|
-| `commands/handlers/assets/linear-scan.py` | 255 | in-flight scan + linked-PR attachment fetch | `/sweep-for-complete` (row 1), `/reconcile-tasks` (row 2) |
-| `commands/handlers/assets/linear-ready.py` | 310 | ready-selection gates for the claim | `linear-claim.md` |
-| `commands/handlers/assets/linear-relations.py` | 334 | `get_issue includeRelations` per-issue loop — the biggest single token spend in the repo | `/reoptimize-tasks` graph load |
-| `commands/handlers/assets/linear-false-closures.py` | 438 | the entire over-close detection flow | `/find-false-closures` |
+| Script                                              | Lines | Replaces (per-issue MCP loop)                                                            | Consumers                                                 |
+| --------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `commands/handlers/assets/linear-scan.py`           | 255   | in-flight scan + linked-PR attachment fetch                                              | `/sweep-for-complete` (row 1), `/reconcile-tasks` (row 2) |
+| `commands/handlers/assets/linear-ready.py`          | 310   | ready-selection gates for the claim                                                      | `linear-claim.md`                                         |
+| `commands/handlers/assets/linear-relations.py`      | 334   | `get_issue includeRelations` per-issue loop — the biggest single token spend in the repo | `/reoptimize-tasks` graph load                            |
+| `commands/handlers/assets/linear-false-closures.py` | 438   | the entire over-close detection flow                                                     | `/find-false-closures`                                    |
 
-The handler prose no longer *re-derives* these reads — it names one source of
+> **Reconciled 2026-07-17 with PR #119 (`dpegan/linear-mcp-token-cost`).** The
+> `linear-ready.py` fast-path this section frames as an emergent surprise was in
+> fact a _deliberately planned_ build: PR #119 is the plan-only doc
+> (`findings.md` + a 3-task slice) that specified it — task 1 the canonical
+> "Ready-candidate selection" spec, task 2 `linear-ready.py`, task 3 the
+> host-gated `linear-claim.md` wiring. All three shipped on main via **PRE-356
+> (#158)**, hardened by **#161** — so #119 is a plan whose work is **fully
+> realized and can be closed** (nothing left to merge from it; its `findings.md`
+> is the design record). The audit and #119 reach the _same_ conclusion from
+> opposite directions: the surface audit inferred "Linear reads are scriptable"
+> after the fact; #119 argued it first-principles from the token cost of the
+> find-candidates fan-out. Where they agree is the fast-path/floor pattern that
+> now backs `/do-tasks`.
+
+The handler prose no longer _re-derives_ these reads — it names one source of
 truth (`linear-common.md`'s "In-flight scan" / "ready selection" blocks) that
 the script and the MCP floor both implement, and each handler **tries the
 script first (when `Bash` is available), falling back to the MCP floor on any
 non-zero exit.** That fast-path/floor shape is the answer to the audit's
-dilemma: reads over Linear's GraphQL *can* be scripted (raw API key, exactly the
+dilemma: reads over Linear's GraphQL _can_ be scripted (raw API key, exactly the
 `linear-archive.py` precedent), while only **mutations and interactive/auth-bound
-MCP calls** are genuinely prose-only. The refined rule: *Linear read/scan/graph
-paths are scriptable and now mostly are; Linear writes stay MCP.*
+MCP calls** are genuinely prose-only. The refined rule: _Linear read/scan/graph
+paths are scriptable and now mostly are; Linear writes stay MCP._
 
 ### `/find-false-closures` refutes the "ownership judgment resists scripting" presumption
 
@@ -71,16 +85,16 @@ doctrine.
 ### The four new commands already follow the audit's prescription
 
 All four are thin, handler-dispatched dispatchers. The three that do a
-deterministic *read* push it into a script and keep only judgment +
+deterministic _read_ push it into a script and keep only judgment +
 MCP-mutation glue in prose; `/complete-task` is the pure mutation primitive —
 correctly prose-only, since it has no read to extract:
 
-| Command / handler | Command | Handler | Deterministic core |
-|---|---|---|---|
-| `/complete-task` (primitive) | 87 | `linear-complete.md` 108 | one state-transition mutation (MCP write — correctly prose) |
-| `/sweep-for-complete` | 76 | `linear-sweep-complete.md` 279 | `linear-scan.py` fast-path |
-| `/reconcile-tasks` | 85 | `linear-reconcile.md` 269 | `linear-scan.py` fast-path (rows 1–2) |
-| `/find-false-closures` | 79 | `linear-false-closures.md` 146 | `linear-false-closures.py` (whole flow) |
+| Command / handler            | Command | Handler                        | Deterministic core                                          |
+| ---------------------------- | ------- | ------------------------------ | ----------------------------------------------------------- |
+| `/complete-task` (primitive) | 87      | `linear-complete.md` 108       | one state-transition mutation (MCP write — correctly prose) |
+| `/sweep-for-complete`        | 76      | `linear-sweep-complete.md` 279 | `linear-scan.py` fast-path                                  |
+| `/reconcile-tasks`           | 85      | `linear-reconcile.md` 269      | `linear-scan.py` fast-path (rows 1–2)                       |
+| `/find-false-closures`       | 79      | `linear-false-closures.md` 146 | `linear-false-closures.py` (whole flow)                     |
 
 New prose added: ~327 command + ~802 handler lines. New code added: ~1,337
 asset lines across four scripts. The 5:1 prose-to-code ratio the surface audit
@@ -89,15 +103,15 @@ path the audit had marked "prose no matter how mechanical."
 
 ### What this leaves for the original recommendations
 
-- **Finding #1 (`task-scan.py`)** — thesis validated (scan/rank/readiness *is*
-  the hottest re-derivation, and it *is* worth scripting), and its stated
+- **Finding #1 (`task-scan.py`)** — thesis validated (scan/rank/readiness _is_
+  the hottest re-derivation, and it _is_ worth scripting), and its stated
   caveat "only serves the `repo-pr` handler … Linear … isn't covered" is now
   **half-closed**: `linear-scan.py` covers the Linear scan/readiness read. The
   **repo-pr** `task-scan.py` over `dev_docs/tasks/**/*.md` remains **unbuilt**
   and is still the top pick for that handler.
 - **Finding #2 (`plan-graph.py`)** — the `--audit` companion the audit imagined
   for `/reoptimize-tasks` effectively **landed** as `linear-relations.py` (the
-  graph *load*). But `/push-plan`'s own topological ordering + cycle detection
+  graph _load_). But `/push-plan`'s own topological ordering + cycle detection
   is **still hand-executed in prose** (`push-plan.md` line 21, "order the tasks
   topologically") with no script — so the push-side `plan-graph.py`
   recommendation stands.
@@ -127,23 +141,23 @@ from the last run.
 
 Prose volume, plugin-wide:
 
-| Source | Lines |
-|---|---|
-| `skills/*/SKILL.md` | ~2,221 |
-| `skills/*/` reference/support `.md` | ~1,319 |
-| `commands/*.md` (slash commands) | ~2,394 |
-| `commands/handlers/*.md` | ~3,495 |
-| `agents/fact-reviewer.md` | 116 |
-| **Total prose** | **~9,545** |
+| Source                              | Lines      |
+| ----------------------------------- | ---------- |
+| `skills/*/SKILL.md`                 | ~2,221     |
+| `skills/*/` reference/support `.md` | ~1,319     |
+| `commands/*.md` (slash commands)    | ~2,394     |
+| `commands/handlers/*.md`            | ~3,495     |
+| `agents/fact-reviewer.md`           | 116        |
+| **Total prose**                     | **~9,545** |
 
 Existing deterministic code, for comparison:
 
-| Source | Lines |
-|---|---|
-| `scripts/*.py`, `*.sh` (incl. tests) | ~1,565 |
-| `skills/analysis-pipeline/example/*.py` (a worked example, not shipped tooling) | ~203 |
-| `commands/handlers/assets/linear-archive.py` | 206 |
-| **Total code** | **~1,974** |
+| Source                                                                          | Lines      |
+| ------------------------------------------------------------------------------- | ---------- |
+| `scripts/*.py`, `*.sh` (incl. tests)                                            | ~1,565     |
+| `skills/analysis-pipeline/example/*.py` (a worked example, not shipped tooling) | ~203       |
+| `commands/handlers/assets/linear-archive.py`                                    | 206        |
+| **Total code**                                                                  | **~1,974** |
 
 Roughly a 5:1 prose-to-code ratio. Biggest single prose files, by size alone:
 `commands/push-plan.md` (560), `commands/do-tasks.md` (482),
@@ -154,6 +168,7 @@ Roughly a 5:1 prose-to-code ratio. Biggest single prose files, by size alone:
 `commands/deliver-task.md` (215).
 
 **Existing precedent, already in the repo (inconsistently applied):**
+
 - `scripts/probe-coders.sh` — explicitly built to "replace the ad-hoc `command
   -v` / config-grep probes the select-coder skill would otherwise re-derive
   each time."
@@ -170,7 +185,7 @@ Roughly a 5:1 prose-to-code ratio. Biggest single prose files, by size alone:
 ## Structural constraint that shapes every recommendation below
 
 > **Refined 2026-07-15 — see the Update above.** This section overstates the
-> constraint. Linear *reads/scans/graph loads* have since been scripted via the
+> constraint. Linear _reads/scans/graph loads_ have since been scripted via the
 > raw-API-key GraphQL route (`linear-scan.py`, `linear-ready.py`,
 > `linear-relations.py`, `linear-false-closures.py`) behind a fast-path/floor
 > fallback. Only Linear **mutations** and interactive/auth-bound MCP calls are
@@ -199,8 +214,8 @@ and a paired test script wired into `scripts/check.sh`.
 **Verdict: ship it.**
 
 The single most-duplicated, most-frequently-executed deterministic procedure
-in the plugin is *scan `dev_docs/tasks/**/*.md` → parse frontmatter → classify
-→ compute readiness → rank*. It's restated, with local variations, in five
+in the plugin is _scan `dev_docs/tasks/**/*.md` → parse frontmatter → classify
+→ compute readiness → rank_. It's restated, with local variations, in five
 places: `commands/handlers/repo-pr-execute.md` §1–2 (scan, epic-skip,
 multi-blocker readiness, 4-key ranking), `commands/list-tasks.md` §2–3 (same
 scan plus expired flags, dependency-blocked annotation, epic-rollup tally),
@@ -236,7 +251,7 @@ scan/rank runs over MCP/`gh` responses in-session and isn't covered by this.
 **Verdict: ship a script**, `scripts/plan-graph.py`.
 
 **Where:** `commands/push-plan.md` §4.3 (Linear), §5.3 (gh-issue), §5b.3
-(jira) — these are *not* three full re-explanations (§5.3/§5b.3 are ~8-line
+(jira) — these are _not_ three full re-explanations (§5.3/§5b.3 are ~8-line
 deltas noting "same algorithm, only the id-shape regex differs"), so the
 prose duplication itself is modest. The real cost is runtime: on every push
 the agent hand-parses N task files' frontmatter, classifies each
@@ -286,7 +301,7 @@ about.
 **consumer repo** (the plugin's actual deployment target) there is no
 `scripts/validate.py` at the repo root, and `validate.py`'s
 `ROOT = Path(__file__).resolve().parent.parent` means even run from the
-plugin install dir it would validate the *plugin's own*
+plugin install dir it would validate the _plugin's own_
 `dev_docs/tasks/`, not the user's. Check 4.1 only works today inside the
 workflow-skills repo itself. Fix: parameterize the task dir as an argument,
 and have doctor resolve the script via the plugin root, not
@@ -335,7 +350,7 @@ code the design already requires.**
 `run-budget.md` is ~70% rationale and policy ("why exit rather than sleep",
 "two pause kinds", caveats stated rather than hidden), not per-run
 computation — and its one genuinely mechanical read (the usage query,
-percent-consumed semantics) is *already scripted* in `claude-usage.sh`,
+percent-consumed semantics) is _already scripted_ in `claude-usage.sh`,
 exactly per the repo's own precedent. `run-state.md` is a format spec plus a
 G1–G7 crash-reconciliation table; reconciliation requires observing git/
 tracker/PR reality through tool calls and judging non-matching states →
