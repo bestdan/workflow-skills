@@ -2,7 +2,7 @@
 title: CAO coder backend for orchestrate-coders (cao-run custom command)
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:

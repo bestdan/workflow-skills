@@ -2,7 +2,7 @@
 title: Auto-pilot "less-Claude" run profile — CAO coder + co-review/verify knobs
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-07-15
 source_branch: worktree-bestdan+cao-usage-adapter
 related_files:
