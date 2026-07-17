@@ -46,7 +46,9 @@ copied.
   instead (this skill never writes run-state files itself).
 - `--run-state <RUN.md>` — the auto-pilot run's durable state. Optional and
   used only by `/auto-pilot`; when absent, standalone behavior is unchanged.
-  When present, it enables the auto-pilot reserve gate below.
+  When present, it enables the auto-pilot reserve gate below and this skill
+  reads any recorded less-claude profile fields only at their named lifecycle
+  steps; it does not define or rewrite run state.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
@@ -150,15 +152,33 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    slug/id, which carries no signal) to `select-coder --non-interactive` (via the
    `Skill` tool) to pick the coder backend/model. The non-interactive path never
    prompts and reads the resolved `.coders.yml` (`/auto-pilot`'s launch phase
-   populates it). Route mechanical work cheap, judgment-heavy work strong.
+   populates it). Route mechanical work cheap, judgment-heavy work strong. If
+   the same `--run-state` says `run_profile: less-claude`, invoke
+   `select-coder --cao-fleet --non-interactive`, then map its `codex:*` result
+   to the recorded `cao-codex` or its `agy:*` result to `cao-agy`; set
+   `orchestrate-coders`' `default_coder` to that named entry for this dispatch.
+   Do not substitute a model placeholder: the named CAO command pins it. A
+   result outside the recorded mapping is a fail-closed delivery error.
 2. **Dispatch in isolation, then integrate.** Dispatch the implementation to the
    chosen coder **in its own git worktree on its own branch**, per the
    `orchestrate-coders` dispatch + integrate rules — the worker never edits this
    session's checkout. The orchestrating session then **owns the task branch**:
    read the worker's diff, integrate it onto the task branch, and **clean up the
    worker worktree**.
-3. **Verify.** For an auto-pilot invocation, apply the reserve gate immediately
-   before this verify boundary. Run the project's named check command — the caller/config names it;
+3. **Diff judgment, then verify.** For an auto-pilot invocation, apply the
+   reserve gate immediately before this diff-judgment / verify boundary. After
+   integration and before the shell check, inspect the worker diff against the
+   task packet and evidence. By default the
+   orchestrator keeps its existing judgment. If the same `--run-state` says
+   `diff_judgment_tier: sonnet`, the orchestrator **must spawn the judgment
+   subagent with `model: sonnet`** and give it only the packet, changed-file
+   summary/diff, and this bounded checklist: task scope satisfied; no unrelated
+   changes; stated acceptance criteria addressed; verification plan is adequate.
+   Require exactly `accept`, `iterate`, or `escalate` plus short evidence.
+   `accept` proceeds to verify; `iterate` returns bounded feedback to the
+   worker; only `escalate` / park decisions return to the Opus orchestrator.
+   This is the model-override hook; never merely record the tier without
+   spawning the Sonnet judgment subagent. Run the project's named check command — the caller/config names it;
    else detect it (a `just check` recipe, an executable `scripts/check.sh` /
    `scripts/check.py`, or `dli check` — locate the actual file before running it,
    don't shell-glob `scripts/check.*`) — **and exercise the feature itself**:
@@ -216,7 +236,10 @@ to **draft** — the safe choice.
 ## 5. Co-review
 
 For an auto-pilot invocation, apply the reserve gate immediately before this
-co-review boundary. Run `/co-review --non-interactive` on the PR (via the `Skill` tool). Its
+co-review boundary. Read `co_review_mode` from the same `--run-state` at this
+step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
+--non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
+runs `/co-review --non-interactive` exactly as before. Its
 never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**

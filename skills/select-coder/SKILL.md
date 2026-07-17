@@ -26,7 +26,9 @@ command exists and any required auth is valid. Recommend them as
 `<backend>:<model>` specs for `orchestrate-coders`; do not reject them merely
 because Claude Code cannot spawn them through the Agent tool.
 
-When a run is CAO-routed, keep this skill's normal `codex:<model>` or
+When a run is CAO-routed, `--cao-fleet` constrains the candidate set **before
+ranking** to `codex` and `agy`; never emit `opus` or `devin` for that call.
+Keep this skill's normal `codex:<model>` or
 `agy:<model>` recommendation for scoring, then select the matching named
 `cao-codex` or `cao-agy` entry from `.coders.yml` for dispatch. Those names
 are pinned backend/model custom commands; this is a routing pointer only, not
@@ -136,6 +138,10 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    the `cross-vendor` row is a select-coder-only modifier, not an assess-task
    label), filtered to what's available. Produce a ranked list (best first),
    max 3 per task. On `confidence: low`, also consider the `runner_up` row.
+   **When `--cao-fleet` is set**, restrict this candidate list to `codex` and
+   `agy` (the CAO-dispatchable backends) _before_ scoring, so `opus`/`devin`
+   can never rank — a non-CAO winner would have no named `cao-*` coder and
+   force the unattended run into a re-dispatch loop or park.
 
 3. **Run the two gates first** (`matrix.md` → "Secret exposure and containment").
    They filter candidates rather than penalize them, and they are the only
@@ -151,7 +157,11 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
      keep `.env` out of the worktree: that, not the vendor choice, is what
      prevents the leak.
    - **Containment.** Unattended or parallel work near the main checkout rules out
-     `agy`, whose workspace boundary is not enforceable.
+     `agy`, whose workspace boundary is not enforceable. **Exception under
+     `--cao-fleet`:** a CAO-dispatched `agy` runs inside CAO's own isolated
+     worktree (that worktree is the containment boundary, per
+     `orchestrate-coders/SKILL.md`), not the main checkout, so this gate does
+     not fire for it.
    - **Non-interactive runs never prompt** (see above). Check for secrets cheaply
      instead (a present `.env`, an ignored credential file); if inconclusive,
      assume the gate fires and say so. `.coders.yml` can set
@@ -182,7 +192,7 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
 ## Invocation
 
 ```
-/select-coder <task description> [--plan <name>] [--refresh] [-n N] [--non-interactive]
+/select-coder <task description> [--plan <name>] [--refresh] [-n N] [--cao-fleet] [--non-interactive]
 ```
 
 - `<task description>` — the task to route. With `--plan <name>`, score each
@@ -191,6 +201,8 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
   round-robin override.
 - `--refresh` — force a re-probe of availability.
 - `-n N` — return the top N candidates per task (default 3).
+- `--cao-fleet` — constrain candidates to the CAO-dispatchable `codex` and
+  `agy` backends. `/auto-pilot --profile less-claude` passes this flag.
 - `--non-interactive` — never prompt; see "Resolved config (non-interactive
   callers)" above.
 

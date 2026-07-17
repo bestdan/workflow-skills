@@ -1,7 +1,7 @@
 ---
 description: Launch an unattended auto-pilot run — an interactive pre-flight, then spawn a detached orchestrator that advances a whole task graph (a Linear project or a plan-with-docs directory) by taking each task through /deliver-task, with durable crash-resumable run state. Nothing is merged or tracker-completed unattended.
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear
-argument-hint: "<linear-project | plan-dir> [--until <time>] [--reserve <pct>] [--resume]"
+argument-hint: "<linear-project | plan-dir> [--until <time>] [--reserve <pct>] [--profile less-claude] [--resume]"
 ---
 
 # Auto-pilot
@@ -30,6 +30,9 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
   Claude-consuming delivery operation. Defaults to `15`; require a numeric
   percentage from 0 through 100. The launch phase persists the resolved value
   for resume.
+- `--profile less-claude` — opt in to the CAO-backed, lower-Claude run profile.
+  Its resolved settings are persisted in `RUN.md`; on `--resume`, those
+  recorded settings are authoritative, so this flag is not required again.
 - `--resume` — reconcile a crashed or paused run's state against reality, then
   continue the run. Parse it, and if present, dispatch to the SKILL's **Resume
   phase** (`skills/auto-pilot/SKILL.md`, "Resume phase (--resume)", whose

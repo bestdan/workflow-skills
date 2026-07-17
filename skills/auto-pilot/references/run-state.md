@@ -51,6 +51,10 @@ work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
 base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
+run_profile: default # default | less-claude; fixed at launch and authoritative on resume
+cao_coder_mapping: {} # default; less-claude: {codex: cao-codex, agy: cao-agy}
+co_review_mode: default # default | off | cheap-single
+diff_judgment_tier: orchestrator # default | sonnet; model that judges an integrated worker diff
 status: active # run-level: active | paused | systemic | done
 paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; successful session-status pauses write reset_epoch + grace, failed reads that warrant a pause write now + 3600, and it is empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
 pause_observed_at: # epoch seconds when the signal that produced paused_until was observed; atomically write it with paused_until, pause_source, status, and pause_reason
@@ -123,6 +127,14 @@ reserve: 15 # minimum session-window headroom percent before claim, verify, or e
   the resolved co-review reviewer set (it is reviewer-latency-coupled, not a
   constant) and writes it here; formula and defaults live in
   [`run-budget.md`](run-budget.md) "Minimum task budget".
+- `run_profile`, `cao_coder_mapping`, `co_review_mode`, and
+  `diff_judgment_tier` are fixed per-run delivery settings. Defaults preserve
+  ordinary auto-pilot. A `less-claude` run records the named mapping (`codex` →
+  `cao-codex`, `agy` → `cao-agy`), `off` (or the explicitly selected
+  `cheap-single`) co-review, and `sonnet` diff judgment. Ordinary runs omit
+  these optional fields and use the documented defaults, preserving their
+  existing state bytes. Resume reads recorded fields; it does not re-resolve
+  current command-line defaults.
 - `phase` is one of the seven in-flight/terminal values below, or the pre-claim
   `pending` marker (see "Task lifecycle phases"); of those, only the seven
   in-flight/terminal values are what `--resume` reconciles (a `pending` task has
