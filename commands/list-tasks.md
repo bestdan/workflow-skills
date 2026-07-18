@@ -16,11 +16,15 @@ Render tasks in `dev_docs/tasks/` as a vertical kanban view — one section per 
 
 ### 1. Resolve the handler
 
-Read `dev_docs/tasks/.task-config.yml`:
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 2 below (file-based path).
 - `handler: repo-pr` → continue to step 2 below (file-based path).

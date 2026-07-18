@@ -30,9 +30,15 @@ record the created ids back into the files (idempotency).
 
 ## 1. Resolve the handler
 
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `task-config.md` → "Resolving the handler"):
+
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - File absent, no `handler:` key, or `handler: repo-pr` → **no-op** (same default
   resolution as `/add-task`). Print exactly this one line and **stop**:

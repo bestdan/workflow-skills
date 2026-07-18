@@ -41,11 +41,15 @@ lives in whichever of those two wraps it.
 
 ## 1. Resolve the handler
 
-Read `dev_docs/tasks/.task-config.yml`:
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - `handler: linear` → read and follow **`commands/handlers/linear-reconcile.md`**
   (resolves scope, applies row 1 via the `/sweep-for-complete` flow, applies
