@@ -141,7 +141,7 @@ git check-ignore -q dev_docs/tasks/.task-config.local.yml || echo 'dev_docs/task
 
 ### Resolving the handler (merged view)
 
-Every command that dispatches on `handler:` resolves it from the **merged view**, not the committed file alone — otherwise a local override of `handler:` would be silently ignored. The canonical resolution step (pasted identically into each command's "Resolve the handler" section, and matching what `doctor.md` does) is:
+Every command or skill that dispatches on `handler:` resolves it from the **merged view**, not the committed file alone — otherwise a local override of `handler:` would be silently ignored. The canonical resolution step (pasted identically into each dispatching command's and skill's "Resolve the handler" section, and matching what `doctor.md` does) is:
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
@@ -149,7 +149,7 @@ cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
 cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
 
-Overlay the local override on the committed config (mappings merge recursively, local leaf values win, per "Local override" above), then read `handler:` from the result. A missing or empty value → the default `repo-pr`. Commands must not resolve `handler:` from `.task-config.yml` alone.
+Overlay the local override on the committed config (mappings merge recursively, local leaf values win, per "Local override" above), then read `handler:` from the result. A missing or empty value → the default `repo-pr`. Commands and skills must not resolve `handler:` from `.task-config.yml` alone.
 
 ### 5. Confirm
 

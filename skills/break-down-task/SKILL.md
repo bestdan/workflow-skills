@@ -20,11 +20,15 @@ It is the resolution of the `/promote-tasks` size gate, and the sibling of `plan
 
 ## Resolve the handler first
 
-The task store is handler-defined (`dev_docs/tasks/.task-config.yml`; absent → `repo-pr`). Read it the same way `/promote-tasks` does:
+The task store is handler-defined (`dev_docs/tasks/.task-config.yml`; absent → `repo-pr`). Resolve `handler:` from the **merged view** the same way `/promote-tasks` does (see `commands/task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - **`repo-pr`** (default, or file absent / no `handler:`) → the file path below. Fully supported.
 - **`linear`** → the source task is a Linear issue. Do the same analysis, then either (a) **convert the original into a parent issue** and create the components as **child issues** under it — leave the original open, it now tracks the children — or (b) create the components as **independent issues linked by a relation** and cancel the original. Don't cancel an issue that still has children. Use the Linear MCP tools the task commands already use (`<linear-mcp>__list_teams`, `<linear-mcp>__list_issues`, `<linear-mcp>__save_issue`, `<linear-mcp>__save_comment` — substitute the prefix loaded in your session, per `commands/handlers/linear-common.md`). Honor the same HIGH/LOW gate — on LOW, leave the issue intact and comment the proposed split for a human.
