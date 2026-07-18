@@ -101,12 +101,17 @@ authoritatively classified by auto-pilot's `supervisor-check` /
 ## 0. Resolve the handler
 
 If `--handler <h>` was given, it is authoritative — skip the config read and
-map `<h>` directly (below). Otherwise read `dev_docs/tasks/.task-config.yml`
-(absent → `repo-pr`), exactly as `/do-tasks` does:
+map `<h>` directly (below). Otherwise resolve `handler:` from the **merged
+view** (absent → `repo-pr`), exactly as `/do-tasks` does (see
+`commands/task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - absent / `handler: repo-pr` → `commands/handlers/repo-pr-execute.md`
 - `handler: linear` → `commands/handlers/linear-claim.md` (+ `linear-common.md`)
