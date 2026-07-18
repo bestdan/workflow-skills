@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.1] - 2026-07-18
+
+### Fixes
+
+- resolve handler from merged view, not committed file alone (#232) (5c263d2)
+
 ## [1.64.0] - 2026-07-17
 
 ### Features
