@@ -318,6 +318,73 @@ out9="$("$SCRIPT" "$BASE/does-not-exist")" || bad "missing-dir: script should ex
 assert_eq "missing dir: cards is an empty object" "{}" "$(printf '%s' "$out9" | jq -c '.cards')"
 assert_eq "missing dir: epics is an empty array" "[]" "$(printf '%s' "$out9" | jq -c '.epics')"
 
+# --- Fixture 10: a level-1 (# ) section heading is ignored -------------------
+# body_sections keys on ## (or deeper) only, per SKILL.md's section contract.
+# A card whose Acceptance Criteria heading is an h1 must NOT satisfy the gate.
+DIR10="$BASE/heading-level"
+write_task "$DIR10/h1-ac.md" "title: Acceptance Criteria as an h1
+priority: medium
+size: 2
+status: new
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(
+  cat <<'EOF'
+## Context
+
+Fixture.
+
+## Task
+
+1. Do the thing.
+
+# Acceptance Criteria
+
+- It works
+EOF
+)"
+
+out10="$("$SCRIPT" "$DIR10")" || bad "heading-level fixture: script exited non-zero"
+h1_ac="$(printf '%s' "$out10" | jq -r '.cards.new[] | select(.slug=="h1-ac") | .promote_gate.checks.has_acceptance_criteria')"
+assert_eq "h1 '# Acceptance Criteria' is ignored (needs ##)" "false" "$h1_ac"
+
+# --- Fixture 11: a done same-slug duplicate must not clear an active blocker -
+# Slugs resolve by filename stem across the tree, so two files can share one.
+# Readiness must fail toward "still blocked": a later done duplicate cannot
+# overwrite an earlier active status (a/ sorts before b/, so without the guard
+# the done copy would win and wrongly mark the dependent ready).
+DIR11="$BASE/dup-slug"
+write_task "$DIR11/a/dup.md" "title: Active copy of dup (sorts first)
+priority: low
+size: 1
+status: in_progress
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+write_task "$DIR11/b/dup.md" "title: Done copy of dup (sorts last)
+priority: low
+size: 1
+status: done
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+write_task "$DIR11/dependent.md" "title: Depends on dup
+priority: low
+size: 1
+status: ready
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+is_blocked_by: dup
+expires: 2099-01-01" "$(std_body)"
+
+out11="$("$SCRIPT" "$DIR11")" || bad "dup-slug fixture: script exited non-zero"
+dep11_ready="$(printf '%s' "$out11" | jq -r '.cards.ready[] | select(.slug=="dependent") | .dependency_ready')"
+assert_eq "done duplicate does not clear an active same-slug blocker" "false" "$dep11_ready"
+
 echo
 echo "test-task-scan: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1

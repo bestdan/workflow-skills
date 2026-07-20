@@ -70,7 +70,7 @@ TERMINAL_STATUSES = {"done"}
 PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 UNKNOWN_PRIORITY_RANK = len(PRIORITY_ORDER)
 
-HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+HEADING_RE = re.compile(r"^#{2,6}\s+(.*)$")
 BULLET_RE = re.compile(r"^\s*[-*]\s+\S")
 
 
@@ -366,7 +366,13 @@ def main() -> None:
 
         slug = path.stem
         status = data.get("status")
-        slug_status[slug] = status
+        # Slugs resolve globally by filename stem, so two files in different
+        # subdirectories can share one. For blocker readiness, fail toward
+        # "still blocked": never let a later terminal (done) duplicate clear an
+        # already-active status — only overwrite when the slug is new or the
+        # stored status was itself terminal.
+        if slug not in slug_status or slug_status[slug] in TERMINAL_STATUSES:
+            slug_status[slug] = status
         cards.append({"path": path, "slug": slug, "data": data, "body": body})
 
     def resolve_blockers(is_blocked_by) -> list[str]:
