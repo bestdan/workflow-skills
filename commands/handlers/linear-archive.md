@@ -204,6 +204,14 @@ reads the key from `$LINEAR_API_KEY`, else `op read "$LINEAR_API_KEY_REF"`. This
 is the exact script validated against a real workspace (archived 75 issues, 0
 failures).
 
+> **Plain-key fallback.** If the 1Password desktop-app integration doesn't
+> expose an account to the CLI (`op account list` comes back empty even when
+> signed in — a snag seen in practice), skip `op` entirely: open the item in
+> the 1Password **GUI**, copy the field value, and export it directly —
+> `export LINEAR_API_KEY="$(pbpaste)"` or a literal paste into the shell. This is a
+> first-class supported path, not just an aside; both `op item get <uuid>` and
+> `op read` require a working CLI integration that may not be present.
+
 ```bash
 # Dry run (lists candidates, changes nothing):
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10

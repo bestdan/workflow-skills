@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -89,8 +90,13 @@ def gql(key, query, variables=None):
             "Content-Type": "application/json",
         },  # personal key, no "Bearer"
     )
-    with urllib.request.urlopen(req) as r:
-        payload = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req) as r:
+            payload = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        sys.exit(f"Network error: {e.reason}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
     return payload["data"]
