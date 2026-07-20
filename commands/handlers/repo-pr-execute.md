@@ -46,25 +46,29 @@ not depend on the claimer controlling the branch name.
 Every claim path below (remote dispatch, `--local`, and the size-gate **reserve**)
 uses these exact steps:
 
-1. **Pre-claim check.** Query open claim/loop/blocked PRs and bail if this slug is
-   already claimed or parked as blocked. Pass `--limit 100` so an active repo's open
-   PRs aren't truncated past the default 30 (a missed marker would let a second agent
-   double-claim):
+1. **Pre-claim check.** Run the deterministic scanner — it is the single executable
+   implementation of the claim/WIP query, so this whole-line `Claims-task: <slug>`
+   matching rule (see below) lives in one tested place instead of being re-derived by
+   hand at every call site:
 
    ```bash
-   gh pr list --state open --label task-claim   --limit 100 --json number,headRefName,body
-   gh pr list --state open --label task-loop     --limit 100 --json number,headRefName,body
-   gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
+   "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
 
-   A PR claims `<slug>` when one of its body lines is **exactly** `Claims-task: <slug>`
-   **or** its `headRefName` is `task/<slug>`. Match the **whole line**, not a substring
-   (`grep -Fxq` on trimmed body lines, or `^Claims-task: <slug>$`) — a substring test
-   would let slug `task_1` falsely match a `Claims-task: task_13` line and skip a claim
-   it shouldn't. If any open PR (any of the three labels) claims it, **STOP** — report
-   `already claimed by PR #<n>` (or `blocked — see PR #<n>` for a `task-blocked` match)
-   and move to the next candidate. A `task-blocked` match needs a human to resolve the
-   block, so never auto-re-claim it.
+   It runs the three `gh pr list --label task-{claim,loop,blocked} --limit 100` queries
+   for you (pass `--repo <owner/name>` if not running inside the target repo's
+   checkout) and emits one `CLAIMED label=<task-claim|task-loop|task-blocked> pr=<n>
+   slug=<slug> match=<body|branch> updated=<ts>` line per claiming PR. A PR claims
+   `<slug>` when one of its body lines is **exactly** `Claims-task: <slug>` **or** its
+   `headRefName` is `task/<slug>` — the script matches the **whole line**, never a
+   substring (a substring test would let slug `task_1` falsely match a
+   `Claims-task: task_13` line and skip a claim it shouldn't; see the script's header
+   comment for how it provably can't). Check for your candidate slug with
+   `grep -F "slug=<slug> "` (the trailing space matters — it is what keeps `task_1`
+   from matching a `slug=task_13` line). If any `CLAIMED` line names it, **STOP** —
+   report `already claimed by PR #<n>` (or `blocked — see PR #<n>` for a `label=
+   task-blocked` match) and move to the next candidate. A `task-blocked` match needs a
+   human to resolve the block, so never auto-re-claim it.
 
    Also probe for an **in-flight branch with no PR yet** — a `task/<slug>` pushed by a
    session that has not yet opened its claim PR (or whose PR was closed leaving the
@@ -170,22 +174,25 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 2. Count current WIP = the number of **distinct in-flight tasks**, deduped by slug
    across three sources: open `task-claim` PRs (claimed, work underway), open
    `task-loop` PRs (finished, in review), and task files with `status: in_progress` in
-   the current checkout:
+   the current checkout. The same scanner used for the pre-claim check computes this in
+   one pass — read its `WIP_COUNT:`/`WIP_SLUGS:` lines instead of re-deriving the dedupe
+   by hand:
 
    ```bash
-   gh pr list --label task-claim --state open --limit 100 --json number,headRefName,body
-   gh pr list --label task-loop  --state open --limit 100 --json number,headRefName,body
+   "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
 
-   **Dedupe by slug** — a task mid-finish can momentarily appear as both an
-   `in_progress` file and a `task-claim`/`task-loop` PR; count each slug once.
-   Counting open `task-claim` PRs matters because a claim's `in_progress` flip lives on
-   an unmerged branch and is **invisible to a fresh-clone batch scan**, so the open
+   It already **dedupes by slug** — a task mid-finish can momentarily appear as both an
+   `in_progress` file and a `task-claim`/`task-loop` PR; each slug counts once. It
+   counts open `task-claim` PRs because a claim's `in_progress` flip lives on an
+   unmerged branch and is **invisible to a fresh-clone batch scan**, so the open
    `task-claim` PR — not the `in_progress` file — is the reliable in-flight signal for
-   work claimed by other sessions. If the `gh pr list` queries fail (API error or rate
-   limit — step 3 has already confirmed `gh` is installed and authenticated), count only
-   the `in_progress` files and note in the report that the count may undercount open PRs
-   (so the effective cap is looser than intended).
+   work claimed by other sessions (`task-blocked` is excluded from `WIP_COUNT`; a
+   blocked claim is parked for a human, not in flight). If the underlying `gh pr list`
+   queries fail (API error or rate limit — step 3 has already confirmed `gh` is
+   installed and authenticated), the script exits non-zero — fall back to counting only
+   the `in_progress` files yourself and note in the report that the count may
+   undercount open PRs (so the effective cap is looser than intended).
 3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority, then value/effort score, then age — as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
@@ -225,6 +232,13 @@ For each selected task routed to **execute**, read its full content (frontmatter
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported.
+
+**This prompt block stays inline prose — do not wire it to `scripts/claim-scan.sh`.**
+The remote VM does not have this plugin installed, so it cannot call any plugin
+script; the whole-line `Claims-task: <slug>` matching rule below (step 1a) must
+stay spelled out in full for the remote session to follow. `claim-scan.sh` is
+for the orchestrator-side paths only (the pre-claim check and WIP count above,
+`--local` mode, and `/doctor`'s stale-claim check).
 
 ```bash
 claude --remote "You are processing a task for the task plugin system.

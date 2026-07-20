@@ -161,11 +161,19 @@ separate authorities, so `/doctor` calls both.)
   an orphan. Instead surface:
   - **Stale `task-claim` PRs** — an open `task-claim` PR that never advanced to
     `task-loop` (work finished) or `task-blocked` (parked for a human) is a likely
-    abandoned claim. Query it the same way the Claim protocol does and parse the slug
-    from the **whole-line** `Claims-task: <slug>` marker (or `headRefName == task/<slug>`),
-    not a substring — see the Claim protocol in `commands/handlers/repo-pr-execute.md`:
-    `gh pr list --state open --label task-claim --limit 100 --json number,headRefName,body,updatedAt`.
-    Surface ones untouched for a while (stale `updatedAt`).
+    abandoned claim. Use the same scanner the Claim protocol uses (so the whole-line
+    `Claims-task: <slug>` / `headRefName == task/<slug>` matching rule lives in one
+    tested place, not a hand-rolled `gh pr list` here):
+
+    ```bash
+    "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
+    ```
+
+    Its `STALE pr=<n> slug=<slug> updated=<ts>` lines flag task-claim PRs with no
+    matching local `in_progress` task file — a heuristic (see the script's header for
+    why it can't be conclusive from a fresh `main` checkout). Corroborate with the
+    `updated=` timestamp on the matching `CLAIMED` line and surface ones untouched for
+    a while; never auto-delete.
   - **Merged-work local branches** — local `task/<slug>` branches whose PR has already
     merged or closed (`git branch --list 'task/*'` cross-checked against
     `gh pr list --state merged|closed`), safe to delete.
