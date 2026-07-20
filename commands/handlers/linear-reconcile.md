@@ -163,9 +163,12 @@ per scope.
    and one `unstarted`-type state means three calls per scope; union the
    results per scope, same pattern as `linear-sweep-complete.md` step 2.2.
    **Never** pass the synthetic `"__unassigned__"` sentinel as a `projectId`
-   — the Unassigned scope is covered by the client-side exclusion pass
-   (`projectId` omitted, keep only issues outside the configured projects),
-   exactly as `linear-claim.md` "Find candidates" does.
+   — the Unassigned scope is resolved client-side: run one whole-team query
+   with `projectId` omitted, then keep only issues whose `projectId` is `null`
+   (the **sweep/reconcile variant** of `linear-common.md` "The Unassigned
+   bucket", **not** `linear-claim.md`'s wider "null or outside the configured
+   set"). Only the never-pass-the-sentinel guard is shared with
+   `linear-claim.md`; the membership predicate here is narrower.
 
 2. **Resolve each issue's PR(s).** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`

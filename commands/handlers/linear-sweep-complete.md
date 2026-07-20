@@ -163,15 +163,19 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
    two calls; union the results per scope:
    - `teamId`: resolved team id
    - `projectId`: the scope's `id` (omit for the whole-team scope and for
-     `--all`); **never** pass the Unassigned sentinel as a `projectId` — use
-     the same exclusion-pass technique as `linear-claim.md`.
+     `--all`); **never** pass the Unassigned sentinel as a `projectId`. For
+     the Unassigned scope, resolve it client-side with the **sweep/reconcile
+     predicate** — one whole-team query with `projectId` omitted, then keep
+     only issues whose `projectId` is `null` (**not** `linear-claim.md`'s
+     wider "null or outside the configured set"). Only the never-pass-the-
+     sentinel guard is shared with `linear-claim.md`.
    - `state`: one `started`-type state id from step 1 of the MCP floor per call
    - `includeArchived`: `false`
    - Limit: 50 per scope × state. If a query truncates, note it in the
      report — do not paginate.
 3. Union the results across scopes (tag each with its source scope for the
-   report; no dedup needed — the Unassigned exclusion pass is disjoint by
-   construction, same as `linear-claim.md`).
+   report; no dedup needed — the `projectId == null` Unassigned pass is
+   disjoint from every configured-project scope by construction).
 
 On the **MCP floor**, "3. Resolve each issue's PR" step 1 (the per-issue
 `get_issue` attachment read) runs as written below, unchanged.
