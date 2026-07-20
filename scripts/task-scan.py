@@ -31,7 +31,8 @@ canonical source; this script does not invent variants):
   below).
 
 Usage:
-    scripts/task-scan.py [task_dir] [--prs <json>] [--archive-candidates]
+    scripts/task-scan.py [task_dir] [--prs <json>]
+    scripts/task-scan.py [task_dir] --archive-candidates --older-than <N>
 
     task_dir              Directory to scan recursively for *.md task files.
                            Default: dev_docs/tasks (relative to cwd, NOT a
@@ -42,9 +43,15 @@ Usage:
     --prs <json>          Optional path to a JSON file of tracker-issue PRs,
                            for future tracker-issue merge. No-op / passthrough
                            for the repo-pr handler today.
-    --archive-candidates  Extension point stub for a future mode that groups
-                           status: done cards for /archive-tasks. Not
-                           implemented yet — see archive_candidates() below.
+    --archive-candidates  Selection mode for /archive-tasks (repo-pr handler,
+                           commands/handlers/repo-pr-archive.md §2): emit
+                           status: done cards whose resolved completion date
+                           is more than --older-than days before today. See
+                           archive_candidates() below for the exact three-way
+                           completion-date fallback, lifted verbatim from that
+                           prose.
+    --older-than <N>      Required with --archive-candidates. Age threshold in
+                           days.
 
 Emits one JSON document on stdout. Fail-closed: malformed frontmatter (YAML
 that fails to parse) exits non-zero with a clear message on stderr, rather
@@ -57,6 +64,7 @@ import argparse
 import datetime
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -277,12 +285,65 @@ def is_epic_member(
         return False
 
 
-def archive_candidates(cards_by_status: dict) -> None:
-    """Extension point for a future `--archive-candidates` mode that groups
-    status: done cards for /archive-tasks (task 7). Not implemented here —
-    the repo-pr handler currently deletes task files on merge, so there is
-    little to group yet; wire this up when that changes."""
-    raise NotImplementedError("--archive-candidates is not implemented yet (task 7)")
+def git_commit_date(path: Path) -> datetime.date | None:
+    """Last git-commit date for `path` (`git log -1 --format=%cs`), or None if
+    the file has no commit history (uncommitted/untracked) or git is
+    unavailable."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cs", "--", path.name],
+            cwd=path.parent,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    out = result.stdout.strip()
+    return parse_date(out) if out else None
+
+
+def resolve_completion_date(
+    data: dict, path: Path, today: datetime.date
+) -> tuple[datetime.date, str]:
+    """The completion-date fallback from repo-pr-archive.md §2, verbatim:
+    `completed` if present, else the file's last git-commit date, else (if
+    that is empty too — uncommitted/untracked) today's date, so a freshly
+    written not-yet-committed done file has age 0."""
+    completed = parse_date(data.get("completed"))
+    if completed is not None:
+        return completed, "completed"
+    commit_date = git_commit_date(path)
+    if commit_date is not None:
+        return commit_date, "git_commit_date"
+    return today, "today_fallback"
+
+
+def archive_candidates(
+    cards: list[dict], older_than: int, today: datetime.date
+) -> list[dict]:
+    """status: done cards (per repo-pr-archive.md §2) whose resolved
+    completion date is more than `older_than` days before today. Never a
+    non-`done` status, whatever its age."""
+    out = []
+    for card in cards:
+        if card["data"].get("status") != "done":
+            continue
+        completion_date, source = resolve_completion_date(
+            card["data"], card["path"], today
+        )
+        age_days = (today - completion_date).days
+        if age_days > older_than:
+            out.append(
+                {
+                    "slug": card["slug"],
+                    "path": str(card["path"]),
+                    "completion_date": completion_date.isoformat(),
+                    "completion_date_source": source,
+                    "age_days": age_days,
+                }
+            )
+    out.sort(key=lambda e: (-e["age_days"], e["slug"]))
+    return out
 
 
 def main() -> None:
@@ -301,9 +362,21 @@ def main() -> None:
     parser.add_argument(
         "--archive-candidates",
         action="store_true",
-        help="Stub for a future done-card archive-grouping mode. Not implemented yet.",
+        help=(
+            "Emit status: done cards older than --older-than days "
+            "(repo-pr-archive.md §2 candidate selection)."
+        ),
+    )
+    parser.add_argument(
+        "--older-than",
+        type=int,
+        default=None,
+        help="Age threshold in days. Required with --archive-candidates.",
     )
     args = parser.parse_args()
+
+    if args.archive_candidates and args.older_than is None:
+        die("--archive-candidates requires --older-than <N>")
 
     task_dir = Path(args.task_dir)
     today = datetime.date.today()
@@ -311,6 +384,19 @@ def main() -> None:
         # A missing task dir is an empty scan, not an error — consumers report
         # "No tasks found" for an absent/empty tree. Fail-closed is reserved for
         # malformed frontmatter, not a directory a fresh repo simply lacks yet.
+        if args.archive_candidates:
+            print(
+                json.dumps(
+                    {
+                        "task_dir": str(task_dir),
+                        "generated_at": today.isoformat(),
+                        "older_than": args.older_than,
+                        "candidates": [],
+                    },
+                    indent=2,
+                )
+            )
+            return
         print(
             json.dumps(
                 {
@@ -331,12 +417,6 @@ def main() -> None:
         except (OSError, json.JSONDecodeError) as e:
             die(f"--prs '{args.prs}' could not be read as JSON: {e}")
         # No-op / passthrough for repo-pr — see module docstring.
-
-    if args.archive_candidates:
-        try:
-            archive_candidates({})
-        except NotImplementedError as e:
-            die(str(e))
 
     files = sorted(
         p
@@ -374,6 +454,21 @@ def main() -> None:
         if slug not in slug_status or slug_status[slug] in TERMINAL_STATUSES:
             slug_status[slug] = status
         cards.append({"path": path, "slug": slug, "data": data, "body": body})
+
+    if args.archive_candidates:
+        candidates = archive_candidates(cards, args.older_than, today)
+        print(
+            json.dumps(
+                {
+                    "task_dir": str(task_dir),
+                    "generated_at": today.isoformat(),
+                    "older_than": args.older_than,
+                    "candidates": candidates,
+                },
+                indent=2,
+            )
+        )
+        return
 
     def resolve_blockers(is_blocked_by) -> list[str]:
         unresolved = []
