@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.2] - 2026-07-20
+
+### Fixes
+
+- report Linear API HTTP errors readably (#144) (f69a714)
+
 ## [1.64.1] - 2026-07-18
 
 ### Fixes
