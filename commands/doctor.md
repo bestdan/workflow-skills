@@ -135,13 +135,23 @@ Classify the combined findings:
   file and the rule.
 
 No drift → `PASS`. If `uv` is unavailable, fall back to reading the frontmatter shape
-rules from `scripts/validate.py` and applying them yourself.
+rules from `scripts/validate.py` and applying them yourself. (Schema drift stays a
+`validate.py` job — it owns frontmatter **shape**; the `scripts/task-scan.py` scanner
+that check 5 uses for expiry owns **scan/rank/readiness**. They are deliberately
+separate authorities, so `/doctor` calls both.)
 
 **Check 5 — Hygiene.** Lower-stakes cruft:
 
-- **Expired tasks** — files with `expires` < today while `status` is non-terminal
-  (not `done`). These are pruning candidates (see the lifecycle note in
-  `skills/task/SKILL.md`). `FAIL`, prunable under `--fix`.
+- **Expired tasks** — the scanner's `expired: true` cards. It computes expiry per
+  card (`expires` < today while `status` is non-terminal, not `done`), so read the
+  flag rather than recomputing the date arithmetic here:
+
+  ```bash
+  "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
+  ```
+
+  These are pruning candidates (see the lifecycle note in `skills/task/SKILL.md`).
+  `FAIL`, prunable under `--fix`.
 - **Orphan branches / PRs** — cruft from aborted/crashed sessions. **Do not** use
   "open PR with no matching task file" as the signal: by design the task file is
   deleted when the claim PR is converted to the `task-loop` review PR, so an open

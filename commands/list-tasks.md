@@ -51,20 +51,21 @@ If the directory doesn't exist or is empty, report "No tasks found in this repo.
 
 ### 3. Parse and filter
 
-For each file, parse the YAML frontmatter. Split files into two kinds:
+Run the deterministic scanner — the single executable implementation of the file-path scan → parse → classify → **readiness** → **expiry** → **rank** procedure (canonical rules in `skills/task/SKILL.md`), so this view no longer re-derives that arithmetic by hand:
 
-- **Epic files** — `type: epic`. Set these aside for the Epics rollup (step 4); they are **not** task cards and never appear in a status section.
-- **Task cards** — everything else with frontmatter. Extract: `title`, `priority`, `size`, `impact`, `assignee`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `parent`, `human_approval_requested`.
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
+```
 
-Files with no frontmatter (e.g. a legacy plan overview) are neither — skip them.
+It emits one JSON document. From it:
 
-Check for expired tasks: if `expires` < today and `status` is not `done`, mark as expired.
+- **Task cards** come already grouped under `cards` by status, each carrying `title`, `priority`, `size`, `impact`, `status`, `created`, `expires`, `tags`, `is_blocked_by`, `parent`, `human_approval_requested`, plus the computed `rank` (within its status group), `dependency_ready` + `unresolved_blockers`, and `expired`. `type: epic` files and files with no frontmatter are excluded automatically; a malformed frontmatter is a **fail-closed non-zero exit** (a hard stop, not a silent skip). `assignee` is not in the JSON — read it from the card's frontmatter when annotating (step 4).
+- **`expired`** is already computed (`expires` < today while `status` is non-terminal) — no need to recompute it.
+- **Dependency-blocked** is `dependency_ready: false`; the still-active blockers are in `unresolved_blockers` (the script resolves each `is_blocked_by` slug — a string or a list — against `dev_docs/tasks/**/*.md`, satisfied when the target is absent or `done`). This is distinct from `status: blocked`, which means someone tried to process the task and hit a problem. Surface **all** `unresolved_blockers` in the annotation (e.g. `waiting on a, b`).
 
-Also compute whether the task is currently dependency-blocked. `is_blocked_by` may be a single slug or a list of slugs (`[a, b]`); treat a string as a one-element list. For each entry, the blocker is unresolved if a task file with that slug still exists anywhere under `dev_docs/tasks/**/*.md` with a status other than `done`. The task is waiting if **any** blocker is unresolved; surface **all** unresolved blockers in the annotation (e.g. `waiting on a, b`). This is distinct from `status: blocked`, which means someone tried to process the task and hit a problem.
+**Epic rollups.** The script's `epics` array already rolls up each epic's file-based members (by `parent:` and by plan-directory-tree membership, recursive) with `done`/`in_progress`/`blocked`/`member_count` tallies from member **files**. That covers the file side; the PR-derived supplement below (merged/open `task-loop` PRs for deleted-on-merge task files) is **not** in the script — combine it in yourself. For each epic, its slug and members come from two sources, keyed by **task slug** (a member's slug is its task-file stem, and its work-PR branch is `task/<slug>`):
 
-**Epic rollups.** For each epic file, derive its slug (filename stem with a trailing `_plan` removed; a non-`*_plan.md` epic file uses its bare stem). Members come from two sources, keyed by **task slug** (a member's slug is its task-file stem, and its work-PR branch is `task/<slug>`):
-
-- **Task files** — cards whose `parent` equals the epic slug, **or** that live anywhere in the epic's plan directory tree (`<name>_plan/`). Directory membership is **recursive**: tasks under nested `phase_N/` subdirectories count too, not only direct siblings of the overview file.
+- **Task files** — the members the script's `epics[].members` already lists: cards whose `parent` equals the epic slug, **or** that live anywhere in the epic's plan directory tree (`<name>_plan/`, recursive — nested `phase_N/` subdirectories count too), with the script's file-based `done`/`in_progress`/`blocked` tallies.
 - **Epic PRs** — `task-loop` PRs whose head branch matches the prefix `task/<epic_slug>_` (the `plan-with-docs` `<name>_task_N` naming). Reuse the same `gh pr list --label task-loop` results step 4 already fetches (both include `headRefName`). A **merged** matched PR means that member is `done`; an **open** matched PR means it is in flight (in review).
 
 Combine the two sources by slug so each member is counted once, preferring the most-advanced signal (merged PR `done` > open PR in-flight > file status). Then tally:
@@ -103,7 +104,7 @@ gh pr list --label task-loop --state merged --limit 30 --json number,title,headR
 
 Skip those two `gh` calls (and the two sections) if `gh` is unavailable or unauthenticated. When they're skipped, the **Epics rollup degrades to file-only counts**: `done` reflects only member files explicitly `status: done`, and `in_progress`/`blocked`/`total` come from present member files (the PR-derived done/in-flight contributions are simply absent).
 
-Within each section, sort by priority (urgent > high > medium > low), then by **value/effort score** `impact / size` descending (a card with no `impact` set, or a missing/invalid `size`, has no score and sorts last within its priority tier), then age (oldest first). This matches the **Ranking** in `skills/task/SKILL.md` and `/do-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
+Within each section, order cards by the scanner's `rank` (ascending) — it already encodes priority (urgent > high > medium > low), then **value/effort score** `impact / size` descending (a card with no `impact` set, or a missing/invalid `size`, has no score and sorts last within its priority tier), then age (oldest first), matching the **Ranking** in `skills/task/SKILL.md` and `/do-tasks` selection. Render each card as a single line, including its `size` (Fibonacci points), and `assignee` inline as `— @<name>` when present. Separate sections with a horizontal rule (`---`) so they're clearly distinct in a terminal:
 
 ```
 ## ready (2)

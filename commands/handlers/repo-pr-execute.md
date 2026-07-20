@@ -133,26 +133,17 @@ PR's `headRefName`.
 
 ## 1. Scan for tasks
 
+Run the deterministic scanner — it is the single executable implementation of the scan → parse → classify → **readiness** → **rank** procedure (the canonical **Ranking** and multi-blocker readiness rules live in `skills/task/SKILL.md`), so this path no longer re-derives that arithmetic by hand:
+
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
-  -not -path '*/_archive/*' 2>/dev/null
+"${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
 
-The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
-`/archive-tasks` moves stale `done` task files (see
-`commands/handlers/repo-pr-archive.md`), so retired work never re-enters the
-scan. Parse YAML frontmatter from each file. Skip any file with `type: epic` (those are
-epic rollups, not task cards) and any with no frontmatter (e.g. a plan overview).
-Filter to `status: ready`. Sort by:
+It emits one JSON document: `cards` grouped by status, each card carrying a computed `rank` (within its status group), `dependency_ready` + `unresolved_blockers`, and an `expired` flag, plus epic rollups. The script takes the task dir as an **argument** (not a hardcoded root), skips `type: epic` files (epic rollups, not task cards), skips `_archive/` (where `/archive-tasks` parks stale `done` files — see `commands/handlers/repo-pr-archive.md`) and files with no frontmatter, and **fails closed** (non-zero exit) on malformed frontmatter — treat a non-zero exit as a hard stop, not an empty scan.
 
-1. Dependency readiness: a task is eligible only when **every** `is_blocked_by` entry is satisfied (target absent or `done`); a task with any still-active blocker is not
-2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
-3. Value/effort score: `impact / size` descending (`impact` and `size` are both Fibonacci `1`/`2`/`3`/`5`); a task with no `impact` set has no score and ranks **last within its priority tier** (never dropped). See **Ranking** in `skills/task/SKILL.md`.
-4. Age: oldest `created` date first
+Select from `cards.ready`: a card is eligible only when its `dependency_ready` is true (the script resolves every `is_blocked_by` slug — a single string or a list — against `dev_docs/tasks/**/*.md`, marking it satisfied when the target file is absent or `status: done`, and lists any still-active blockers in `unresolved_blockers`). The highest-ranked eligible card is the one with the lowest `rank`; the rank already encodes priority tier (`high` > `medium` > `low`; `urgent` is human-only and never auto-picked here) → value/effort `impact/size` descending (no-`impact`/invalid-`size` cards last within tier, never dropped) → oldest `created` first.
 
-Treat `is_blocked_by` as a reference to another task's slug, **or a list of slugs** (`[a, b]`). A single string behaves exactly as a one-element list. Each slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. A task is dependency-ready only when **all** of its blockers are satisfied; if any referenced blocker file still exists in another state, the dependent task must not be dispatched yet. When reporting a blocked task, list **every** unresolved blocker (e.g. `waiting on b, c`).
-
-If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blockers each one is waiting for.
+If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, name each one's `unresolved_blockers` (e.g. `waiting on b, c`).
 
 ## 2. Select tasks to process
 

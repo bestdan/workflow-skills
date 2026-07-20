@@ -38,6 +38,7 @@ run claude plugin validate . --strict
 run uv run scripts/validate.py
 run scripts/lint-shell.sh
 run scripts/test-shell.sh
+run scripts/test-task-scan.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then
