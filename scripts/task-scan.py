@@ -306,8 +306,23 @@ def main() -> None:
     args = parser.parse_args()
 
     task_dir = Path(args.task_dir)
+    today = datetime.date.today()
     if not task_dir.is_dir():
-        die(f"task dir '{task_dir}' does not exist or is not a directory")
+        # A missing task dir is an empty scan, not an error — consumers report
+        # "No tasks found" for an absent/empty tree. Fail-closed is reserved for
+        # malformed frontmatter, not a directory a fresh repo simply lacks yet.
+        print(
+            json.dumps(
+                {
+                    "task_dir": str(task_dir),
+                    "generated_at": today.isoformat(),
+                    "cards": {},
+                    "epics": [],
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.prs:
         prs_path = Path(args.prs)
@@ -354,13 +369,14 @@ def main() -> None:
         slug_status[slug] = status
         cards.append({"path": path, "slug": slug, "data": data, "body": body})
 
-    today = datetime.date.today()
-
     def resolve_blockers(is_blocked_by) -> list[str]:
         unresolved = []
         for blocker_slug in as_list(is_blocked_by):
-            blocker_status = slug_status.get(blocker_slug)
-            if blocker_status is not None and blocker_status not in TERMINAL_STATUSES:
+            if blocker_slug not in slug_status:
+                continue  # absent file → blocker satisfied
+            # Present but not done (including a card with no `status` field) →
+            # the blocker is unresolved: only "absent or status: done" satisfies.
+            if slug_status[blocker_slug] not in TERMINAL_STATUSES:
                 unresolved.append(blocker_slug)
         return unresolved
 

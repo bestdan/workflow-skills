@@ -288,6 +288,36 @@ low_gate="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="low-tbd")
 assert_eq "promote gate: clean card scores HIGH on deterministic checks" "true" "$high_gate"
 assert_eq "promote gate: card with TBD content scores not-HIGH" "false" "$low_gate"
 
+# --- Fixture 8: a present blocker with no `status` is unresolved -------------
+# (absent OR status: done satisfies a blocker; a present card missing its
+# status field must NOT be treated the same as an absent file).
+DIR8="$BASE/missing-status-blocker"
+write_task "$DIR8/statusless-blocker.md" "title: Blocker with no status field
+priority: low
+size: 1
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+write_task "$DIR8/dependent.md" "title: Depends on a present-but-statusless blocker
+priority: low
+size: 1
+status: ready
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+is_blocked_by: statusless-blocker
+expires: 2099-01-01" "$(std_body)"
+
+out8="$("$SCRIPT" "$DIR8")" || bad "missing-status fixture: script exited non-zero"
+dep8_ready="$(printf '%s' "$out8" | jq -r '.cards.ready[] | select(.slug=="dependent") | .dependency_ready')"
+assert_eq "present blocker with no status is unresolved (not treated as absent)" "false" "$dep8_ready"
+
+# --- Fixture 9: a missing task dir is an empty scan, not an error ------------
+out9="$("$SCRIPT" "$BASE/does-not-exist")" || bad "missing-dir: script should exit 0 on an absent dir"
+assert_eq "missing dir: cards is an empty object" "{}" "$(printf '%s' "$out9" | jq -c '.cards')"
+assert_eq "missing dir: epics is an empty array" "[]" "$(printf '%s' "$out9" | jq -c '.epics')"
+
 echo
 echo "test-task-scan: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1
