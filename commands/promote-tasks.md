@@ -51,34 +51,33 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 ### 1. Find candidates
 
+Run the deterministic scanner and take its `cards.new` group as the candidate set:
+
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
-  -not -path '*/_archive/*' 2>/dev/null
+"${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
 
-The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
-`/archive-tasks` moves stale `done` task files (see
-`commands/handlers/repo-pr-archive.md`), so retired work stays out of the scan.
-Skip any file with `type: epic` in its frontmatter — epic rollup files are never scored (see **Epics** in `skills/task/SKILL.md`). The tracker path applies the analogous skip: backlog issues with sub-issues (children) are treated as **parent rollups** and are never scored — see `commands/handlers/linear-promote.md` step 5. Then filter to files with `status: new` in their YAML frontmatter. Report and exit if none.
+The script excludes `_archive/` (where `/archive-tasks` parks stale `done` files — see `commands/handlers/repo-pr-archive.md`), `type: epic` files (epic rollups are never scored — see **Epics** in `skills/task/SKILL.md`), and files with no frontmatter, and **fails closed** on malformed frontmatter. The tracker path applies the analogous epic skip: backlog issues with sub-issues (children) are treated as **parent rollups** and are never scored — see `commands/handlers/linear-promote.md` step 5. Report and exit if `cards.new` is empty.
 
 ### 2. Score each candidate
 
-For each candidate, run the **confidence check** from `skills/task/SKILL.md`:
+The **confidence check** (from `skills/task/SKILL.md`) is 7 deterministic checks plus 1 judgment call. The scanner already computes the **7 deterministic checks** for every `new` card and reports them under that card's `promote_gate`: `checks` (the per-check booleans below) and `high` (true only when all 7 pass).
 
-**HIGH (→ `ready`)** requires ALL of:
+- `required_fields_present` — `title`, `priority`, `size`, `created`, `source_branch`, `expires` all present
+- `size_valid` — `size` is one of `1` / `2` / `3` / `5` (see **Task size** — `> 5` means the task should be split into sub-tasks)
+- `related_files_or_research` — `related_files` has ≥ 1 entry, OR `tags` includes `scope: research`
+- `has_acceptance_criteria` — body has a `## Acceptance Criteria` section with ≥ 1 bullet
+- `no_open_questions_or_tbd` — body has no `## Open Questions` or `## TBD` section with non-empty content (an empty heading is fine)
+- `priority_not_urgent` — `priority` ≠ `urgent`
+- `human_approval_not_requested` — `human_approval_requested` is unset or false
 
-- `title`, `priority`, `size`, `created`, `source_branch`, `expires` present
-- `size` is one of `1` / `2` / `3` / `5` (see **Task size** — `> 5` means the task should be split into sub-tasks)
-- `related_files` has ≥ 1 entry, OR `tags` includes `scope: research`
-- Body has a `## Acceptance Criteria` section with ≥ 1 bullet
-- Body has no `## Open Questions` or `## TBD` section with non-empty content (an empty heading is fine)
-- `priority` ≠ `urgent`
-- `human_approval_requested` is unset or false
+Then apply the **8th check yourself** — it is deliberately left out of the script because it is model judgment, not a keyword scan:
+
 - **Scope fits size 5 (judgment, not keywords).** Assess whether the task's described scope plausibly fits within size `5` (~300 lines / ~5 files — see **Task size** in `skills/task/SKILL.md`), weighing the stated `size`, the breadth of the `## Task` steps, and the `related_files` count together. A title containing a word like "migrate" or "refactor" is not itself disqualifying ("Migrate one constant to the new config key" is size `1`); a title like "Restructure the auth module" that implies multi-file rework is disqualifying. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-tasks`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) is how that split gets done: it slices the card into PR-sized components and replaces the original. When a card's scope is genuinely hard to eyeball, `/assess-task` (`skills/assess-task/SKILL.md`) gives a structured `complexity` + `scope` read to inform this judgment — advisory input, not a replacement for it.
 
-**LOW (→ `needs_refinement`, set `human_approval_requested: true`)** if any HIGH condition fails.
+**HIGH (→ `ready`)** when `promote_gate.high` is true **and** the scope judgment passes. **LOW (→ `needs_refinement`, set `human_approval_requested: true`)** if any deterministic check fails (`promote_gate.high` is false) or the scope judgment fails.
 
-This scope gate is **model judgment, not a deterministic rule** — acceptable here because `/promote-tasks` is not a blocking CI gate; a misjudged card lands in `needs_refinement` for a human to confirm, never silently lost. Every other HIGH check above stays deterministic.
+This scope gate is **model judgment, not a deterministic rule** — acceptable here because `/promote-tasks` is not a blocking CI gate; a misjudged card lands in `needs_refinement` for a human to confirm, never silently lost. Every other HIGH check above stays deterministic (the scanner computes them).
 
 Note: `is_blocked_by` is intentionally not part of the promotion check — `/do-tasks` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
 
