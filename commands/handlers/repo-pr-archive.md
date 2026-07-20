@@ -36,7 +36,7 @@ correct, conservative scope: it never has to guess at PR state.
    authority for this logic — do not re-derive it here):
 
    ```bash
-   uv run "$(git rev-parse --show-toplevel)/scripts/task-scan.py" \
+   uv run "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" \
      --archive-candidates --older-than N \
      "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
