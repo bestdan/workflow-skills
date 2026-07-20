@@ -1,7 +1,7 @@
 ---
 description: Bounded, schedulable reconciler that fixes issues sitting in the wrong state against a fixed, enumerated rule table (v1 rows 1-2 only, promote/complete-only, never demotes) — composes with /loop and /schedule
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
-argument-hint: "[--apply] [--all]"
+argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
 # Reconcile Tasks
@@ -35,9 +35,14 @@ lives in whichever of those two wraps it.
   command only prints the combined candidate table and changes nothing
   (dry-run is the default posture, mirroring `/archive-tasks` and
   `/sweep-for-complete`).
-- **`--all`** — widen scope to the whole team instead of the configured
-  projects + Unassigned bucket. See the handler file's "Preflight + scope" for
-  exactly what this changes.
+- **`--all`** — widen scope to the whole team instead of the default (the
+  configured projects + project-less Unassigned issues). See the handler
+  file's "Preflight + scope" for exactly what this changes.
+- **`--project <id|name>`** — narrow scope to exactly one project (configured
+  or a live/unconfigured one). Mutually exclusive with `--all`. The **default**
+  (neither flag) is bounded to your configured `linear.projects` plus issues
+  with no project at all — it does **not** include every other project's
+  in-flight work on the team; that requires `--all` or a specific `--project`.
 
 ## 1. Resolve the handler
 
@@ -74,7 +79,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/linear-reconcile.md`) and Read the result. Pass
-`--apply` and `--all` through.
+`--apply`, `--all`, and `--project` through.
 
 ## 2. Report
 
@@ -82,8 +87,9 @@ The handler file owns its report format, but every outcome fits this
 skeleton:
 
 - **Unsupported handler** — the one-line pointer above, nothing mutated.
-- **Dry-run (default)** — the combined candidate table grouped by rule (`→
-  Done` rows, `→ In Review` rows), each with its driving PR, plus the
-  left/skipped lines and an explicit "nothing changed (dry-run)".
-- **Applied (`--apply`)** — the same table, now with each row's outcome, plus
-  the per-rule counts the handler's "Report" step defines.
+- **Dry-run (default)** — the scope line, the combined candidate table
+  grouped by rule (`→ Done` rows, `→ In Review` rows), each with its driving
+  PR, plus the left/skipped lines and an explicit "nothing changed (dry-run)".
+- **Applied (`--apply`)** — the same scope line and table, now with each
+  row's outcome, plus the per-rule counts the handler's "Report" step
+  defines.

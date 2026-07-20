@@ -1,11 +1,11 @@
 # Linear handler — /sweep-for-complete flow
 
-Invoked from `/sweep-for-complete [--apply] [--all]` when `handler: linear` is
-configured. Finds issues sitting in a **started**-type state whose **own**
-linked PR has merged, and completes exactly those by calling the
-`linear-complete.md` phase per verified match — the mechanical transition
-itself is not re-specified here; see that file's "Caller contract" and
-"Steps".
+Invoked from `/sweep-for-complete [--apply] [--all] [--project <id|name>]`
+when `handler: linear` is configured. Finds issues sitting in a **started**-type
+state whose **own** linked PR has merged, and completes exactly those by
+calling the `linear-complete.md` phase per verified match — the mechanical
+transition itself is not re-specified here; see that file's "Caller contract"
+and "Steps".
 
 **Shared reference:** see `linear-common.md` for connection details, the
 config schema (`linear.projects`, the Unassigned bucket), and the preflight
@@ -30,21 +30,35 @@ pattern.
 1. Run the shared preflight from `linear-common.md` (call
    `<linear-mcp>__list_teams`, match `<linear.team>`, capture the team `id`).
    Same failure messages.
-2. **Resolve scope**, mirroring `linear-claim.md` "Find candidates" steps 2–4:
+2. **Resolve scope.** `--all` and `--project <id|name>` are mutually exclusive
+   (one widens, the other narrows) — if both are passed, stop and ask which
+   was meant.
+   - **`--project <id|name>`** → narrow to exactly **one** project, skipping
+     project-list resolution and the Unassigned pass entirely. Resolve the
+     value the same way `linear-common.md` "Resolve claim scope" step 1
+     resolves a specific pin: match against the configured `linear.projects`
+     scopes first (case-insensitive name, or exact id/UUID); if none matches,
+     match against the team's live projects via `<linear-mcp>__list_projects`
+     (a live, unconfigured project is a valid one-run pin). No match anywhere
+     → stop with "`<value>` is not a project in team `<team>`". Step 2 below
+     then runs a **single** query with this project's `id` as `projectId`.
    - **`--all`** → skip project resolution entirely and run a **single
      whole-team query** in step 2 below (no `projectId` filter, no Unassigned
      pass — the whole team already covers everything).
-   - **No `--all`** → call the **"Resolve configured projects"** helper from
-     `linear-common.md` for the configured `linear.projects` scopes, **plus
-     the Unassigned bucket** exactly as `linear-claim.md` "Find candidates"
-     composes it — including its **whole-team-query exclusion rule** (the
-     Unassigned pass runs one extra whole-team query with `projectId`
-     omitted, then keeps only issues whose `projectId` is `null` or not
-     among the configured scopes) and its **50-row truncation caveat** (the
-     cap applies before the exclusion filter, so a full cap with no
-     survivors means "unassigned coverage may be partial," not "no
-     unassigned work"). See `linear-common.md` "The Unassigned bucket" for
-     the exact sentinel shape.
+   - **Neither flag (default)** → call the **"Resolve configured projects"**
+     helper from `linear-common.md` for the configured `linear.projects`
+     scopes, **plus the Unassigned bucket — the sweep/reconcile variant**
+     (`linear-common.md` "The Unassigned bucket"): membership is `projectId
+     == null` **only**, never "any project outside the configured set." This
+     is **narrower** than `/do-tasks`'s claim-path Unassigned bucket by
+     design — see that section for why. The pass still runs **one** extra
+     whole-team query with `projectId` omitted (so the null-project filter
+     has something to filter), subject to the same **50-row truncation
+     caveat** (the cap applies before the filter, so a full cap with no
+     `projectId: null` survivors means "unassigned coverage may be partial,"
+     not "no unassigned work"). A project that exists in Linear but isn't
+     listed under `linear.projects` is simply **not swept by default** —
+     pass `--project <that project>` or `--all` to reach it.
 
 ## 2. Find in-flight issues
 
@@ -81,10 +95,11 @@ gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
 ### Fast path (GraphQL, via `linear-scan.py`)
 
 1. **Resolve scope, unchanged.** Run "1. Preflight + resolve scope" above as
-   normal — `--all` vs. the configured-projects-plus-Unassigned scope list is
-   the same either way. The script's own prelude resolves the team itself, so
-   this **replaces** the floor's `list_workflow_states` call below — do not
-   also call it on this path.
+   normal — `--all`, `--project <id|name>`, and the default
+   configured-projects-plus-Unassigned scope list all resolve the same way
+   regardless of which path executes the query. The script's own prelude
+   resolves the team itself, so this **replaces** the floor's
+   `list_workflow_states` call below — do not also call it on this path.
 
 2. **Call the script**, passing every resolved concrete project scope's `id`
    as a repeated `--project` (omit entirely for the whole-team scope, i.e.
@@ -148,15 +163,19 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
    two calls; union the results per scope:
    - `teamId`: resolved team id
    - `projectId`: the scope's `id` (omit for the whole-team scope and for
-     `--all`); **never** pass the Unassigned sentinel as a `projectId` — use
-     the same exclusion-pass technique as `linear-claim.md`.
+     `--all`); **never** pass the Unassigned sentinel as a `projectId`. For
+     the Unassigned scope, resolve it client-side with the **sweep/reconcile
+     predicate** — one whole-team query with `projectId` omitted, then keep
+     only issues whose `projectId` is `null` (**not** `linear-claim.md`'s
+     wider "null or outside the configured set"). Only the never-pass-the-
+     sentinel guard is shared with `linear-claim.md`.
    - `state`: one `started`-type state id from step 1 of the MCP floor per call
    - `includeArchived`: `false`
    - Limit: 50 per scope × state. If a query truncates, note it in the
      report — do not paginate.
 3. Union the results across scopes (tag each with its source scope for the
-   report; no dedup needed — the Unassigned exclusion pass is disjoint by
-   construction, same as `linear-claim.md`).
+   report; no dedup needed — the `projectId == null` Unassigned pass is
+   disjoint from every configured-project scope by construction).
 
 On the **MCP floor**, "3. Resolve each issue's PR" step 1 (the per-issue
 `get_issue` attachment read) runs as written below, unchanged.
@@ -269,6 +288,9 @@ apply is not destructive.
 
 Print:
 
+- **Scope** — one line stating exactly what this run covered: `scope:
+  configured projects (<names>) + Unassigned (project-less only)` (default),
+  `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
 - **Counts** — `k completed, m open (left), s no-PR skipped, c
   closed-unmerged (left)`.
 - **Per-issue lines** — identifier, the PR resolved (if any) and its merge

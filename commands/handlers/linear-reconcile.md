@@ -1,7 +1,7 @@
 # Linear handler — /reconcile-tasks flow
 
-Invoked from `/reconcile-tasks [--apply] [--all]` when `handler: linear` is
-configured. This is the **bounded reconciler**: it corrects issues sitting in
+Invoked from `/reconcile-tasks [--apply] [--all] [--project <id|name>]` when
+`handler: linear` is configured. This is the **bounded reconciler**: it corrects issues sitting in
 the wrong state against a fixed, enumerated rule table, not open-ended
 judgment about what "looks off." v1 enforces **exactly** these two rows and
 nothing else:
@@ -44,21 +44,22 @@ failure messages.
 
 Resolve scope exactly as `linear-sweep-complete.md` "Preflight + resolve
 scope" step 2 does — do not duplicate the mechanics here, read that file:
-
-- **`--all`** → a single whole-team query, no project resolution.
-- **No `--all`** → the configured `linear.projects` scopes (via
-  `linear-common.md` "Resolve configured projects") **plus** the Unassigned
-  bucket, composed exactly as `linear-claim.md` "Find candidates" does,
-  including its whole-team-query exclusion rule and its 50-row truncation
-  caveat.
+`--all` and `--project <id|name>` are mutually exclusive; `--project` narrows
+to exactly one project (configured or live/unconfigured) with no Unassigned
+pass; `--all` is a single whole-team query with no project resolution;
+neither flag (default) uses the configured `linear.projects` scopes **plus**
+the Unassigned bucket — the **sweep/reconcile variant** from
+`linear-common.md` "The Unassigned bucket" (`projectId == null` only, not
+"any project outside the configured set" — narrower than `/do-tasks`'s claim
+variant by design, since this reconciler is destructive-adjacent).
 
 Both rows below run against this same resolved scope set.
 
 ## 2. Row 1 — merged → Done
 
 Invoke the **`linear-sweep-complete.md`** flow in full (its own "Find
-in-flight issues" through "Report" steps), passing `--apply` and `--all`
-through unchanged. That file is the **single source of truth** for the
+in-flight issues" through "Report" steps), passing `--apply`, `--all`, and
+`--project` through unchanged. That file is the **single source of truth** for the
 completion rule — do not re-specify PR resolution, merge verification, or the
 `linear-complete.md` apply call here. Fold its per-issue candidate lines and
 counts into this command's combined report under the `→ Done` heading.
@@ -162,9 +163,12 @@ per scope.
    and one `unstarted`-type state means three calls per scope; union the
    results per scope, same pattern as `linear-sweep-complete.md` step 2.2.
    **Never** pass the synthetic `"__unassigned__"` sentinel as a `projectId`
-   — the Unassigned scope is covered by the client-side exclusion pass
-   (`projectId` omitted, keep only issues outside the configured projects),
-   exactly as `linear-claim.md` "Find candidates" does.
+   — the Unassigned scope is resolved client-side: run one whole-team query
+   with `projectId` omitted, then keep only issues whose `projectId` is `null`
+   (the **sweep/reconcile variant** of `linear-common.md` "The Unassigned
+   bucket", **not** `linear-claim.md`'s wider "null or outside the configured
+   set"). Only the never-pass-the-sentinel guard is shared with
+   `linear-claim.md`; the membership predicate here is narrower.
 
 2. **Resolve each issue's PR(s).** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`
@@ -250,6 +254,7 @@ explicit "nothing changed (dry-run)."
 
 Print, grouped by rule:
 
+- **Scope** — one line stating exactly what this run covered, same wording as `linear-sweep-complete.md` "Report": `scope: configured projects (<names>) + Unassigned (project-less only)` (default), `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
 - **Counts** — `k completed (row 1), j moved to In Review (row 2)`, plus row
   1's own left/skipped counts and row 2's skipped/anomaly count.
 - **Per-issue lines** — identifier, the PR resolved and its state, the rule

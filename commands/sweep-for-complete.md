@@ -1,7 +1,7 @@
 ---
 description: Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the /complete-task primitive — composes with /loop and /schedule, no new scheduling infra
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
-argument-hint: "[--apply] [--all]"
+argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
 # Sweep for Complete
@@ -26,9 +26,14 @@ wraps it.
 - **`--apply`** — actually complete the verified matches. Without it, the
   command only prints the candidate table and changes nothing (dry-run is the
   default posture, mirroring `/archive-tasks`).
-- **`--all`** — widen scope to the whole team instead of the configured
-  projects + Unassigned bucket. See the handler file's "Preflight + resolve
-  scope" for exactly what this changes.
+- **`--all`** — widen scope to the whole team instead of the default (the
+  configured projects + project-less Unassigned issues). See the handler
+  file's "Preflight + resolve scope" for exactly what this changes.
+- **`--project <id|name>`** — narrow scope to exactly one project (configured
+  or a live/unconfigured one). Mutually exclusive with `--all`. The **default**
+  (neither flag) is bounded to your configured `linear.projects` plus issues
+  with no project at all — it does **not** include every other project's
+  in-flight work on the team; that requires `--all` or a specific `--project`.
 
 ## 1. Resolve the handler
 
@@ -65,7 +70,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/linear-sweep-complete.md`) and Read the result. Pass
-`--apply` and `--all` through.
+`--apply`, `--all`, and `--project` through.
 
 ## 2. Report
 
@@ -73,8 +78,9 @@ The handler file owns its report format, but every outcome fits this
 skeleton:
 
 - **Unsupported handler** — the one-line pointer above, nothing mutated.
-- **Dry-run (default)** — the candidate table (`IDENTIFIER — PR #n (merged
-  <date>) → Done`), the left/skipped lines, and an explicit "nothing changed
-  (dry-run)".
-- **Applied (`--apply`)** — the same table, now with each row's completion
-  outcome, plus the summary counts the handler's "Report" step defines.
+- **Dry-run (default)** — the scope line, the candidate table (`IDENTIFIER —
+  PR #n (merged <date>) → Done`), the left/skipped lines, and an explicit
+  "nothing changed (dry-run)".
+- **Applied (`--apply`)** — the same scope line and table, now with each
+  row's completion outcome, plus the summary counts the handler's "Report"
+  step defines.
