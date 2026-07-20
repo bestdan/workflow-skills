@@ -95,6 +95,8 @@ def gql(key, query, variables=None):
             payload = json.loads(r.read())
     except urllib.error.HTTPError as e:
         sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        sys.exit(f"Network error: {e.reason}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
     return payload["data"]

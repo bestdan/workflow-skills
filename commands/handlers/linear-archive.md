@@ -200,7 +200,7 @@ failures).
 > expose an account to the CLI (`op account list` comes back empty even when
 > signed in — a snag seen in practice), skip `op` entirely: open the item in
 > the 1Password **GUI**, copy the field value, and export it directly —
-> `LINEAR_API_KEY="$(pbpaste)"` or a literal paste into the shell. This is a
+> `export LINEAR_API_KEY="$(pbpaste)"` or a literal paste into the shell. This is a
 > first-class supported path, not just an aside; both `op item get <uuid>` and
 > `op read` require a working CLI integration that may not be present.
 
