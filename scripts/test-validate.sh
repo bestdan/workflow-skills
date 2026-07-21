@@ -103,6 +103,19 @@ assert_contains "expired non-terminal card is flagged" "$out_b" "expired-open.md
 # --- Fixture (c): expired-but-done card is NOT flagged -------------------
 assert_not_contains "expired but done card is not flagged" "$out_b" "expired-done.md: expired:"
 
+# --- Fixture (b2): unquoted timestamp expires is rejected, not crashed -----
+DIR_B2="$BASE/timestamp-expires"
+write_task "$DIR_B2/ts-expires.md" "title: Timestamp expires
+priority: low
+size: 1
+status: new
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2020-02-01T12:00:00"
+out_b2="$(uv run "$SCRIPT" "$DIR_B2" 2>&1)"
+assert_contains "unquoted timestamp expires reported as invalid ISO date" "$out_b2" "ts-expires.md: expires"
+
 # --- Fixture (d): explicit task_dir validates the PASSED dir, not the ----
 # plugin's own dev_docs/tasks (proves the consumer-repo path-bug fix).
 DIR_D="$BASE/consumer-repo-tasks"

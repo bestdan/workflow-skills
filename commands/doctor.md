@@ -123,7 +123,9 @@ epic-shape violations) and missing required fields / `expires` shape — no sepa
 hand-check against the **Field reference** in `skills/task/SKILL.md` is needed; that
 table is `validate.py`'s source of truth for the same rule.
 
-Classify the reported findings (`✘` = error, `⚠` = warning in `validate.py`'s output):
+Classify the reported findings (`✘` = error, `⚠` = warning in `validate.py`'s output),
+but **ignore any `⚠ expired:` warnings here** — those are hygiene, owned by Check 5
+(via `task-scan.py`); classifying them here too would double-report the same card:
 
 - **Defaultable / mechanical** (`missing required field 'expires'`) → `FAIL`, fixable
   under `--fix` (default 30 days from `created`).

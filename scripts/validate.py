@@ -126,6 +126,12 @@ def parse_date(v) -> datetime.date | None:
     """YAML parses unquoted ISO dates (`created: 2026-03-23`) into
     datetime.date already; a quoted string needs an explicit parse. Mirrors
     scripts/task-scan.py's parse_date."""
+    if isinstance(v, datetime.datetime):
+        # PyYAML parses an unquoted timestamp (`expires: 2026-07-20T12:00:00`)
+        # into datetime.datetime, a date subclass — returning it as-is would
+        # make `expires < today` (a date) raise TypeError later. A timestamp is
+        # not a valid task `expires` value, so reject it as a bad date.
+        return None
     if isinstance(v, datetime.date):
         return v
     if isinstance(v, str):
@@ -249,7 +255,7 @@ if task_dir.is_dir():
             est = data.get("status")
             if est is None or est not in EPIC_STATUSES:
                 err(
-                    rel(t),
+                    rel_task(t),
                     f"epic status '{est}' must be one of {sorted(EPIC_STATUSES)}",
                 )
             owner = data.get("owner")
