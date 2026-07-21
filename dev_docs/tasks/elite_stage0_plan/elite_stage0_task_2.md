@@ -29,14 +29,15 @@ Create the spike evidence directory `dev_docs/elite-spike/` (per the plan's bind
 - **Opportunistic — `setsid→execve` topology** ([[elite_stage0_task_4]])
 - **Opportunistic — Max-window coherence** ([[elite_stage0_task_7]])
 
-For each: falsifier, pass threshold, `inconclusive` condition, evidence required, time cap (default half-day per §7a rule 3), dependent work it blocks, and the named redirect (copy the redirect column from §7a's table, sharpened to be executable). Each probe's "evidence required" field quotes the plan's sanitization checklist (§7a rule 4: never persist bearer tokens, credential files, secret-bearing headers, or secret environment values). Also include a **probe-0 self-row**: falsifier = a probe row that cannot yield a binary confirmed/falsified call; redirect = tighten the decision rule before any implementation work (§7a row 0). Record the tranche-1 packing decision: which probes run in the first working day, per the dependency graph (canary ∥ alert skeleton first; topology before process-binding). Record the **push-provider choice** (ntfy vs Pushover) with rationale — probe 3 executes against whichever this sheet names.
+For each: falsifier, pass threshold, `inconclusive` condition, evidence required, time cap (default half-day per §7a rule 3), dependent work it blocks, and the named redirect (copy the redirect column from §7a's table, sharpened to be executable). Each probe's "evidence required" field cites the plan's binding sanitization checklist **in full** (§7a rule 4 plus the plan's additional redactions — account password, push-provider tokens/topics/user keys/device identifiers, hostnames, home paths), never a subset. Also include a **probe-0 self-row** carrying the same seven fields as every other row, with: falsifier = a probe row that cannot yield a binary confirmed/falsified call; redirect = tighten the decision rule before any implementation work (§7a row 0). Record the tranche-1 packing decision: which probes run in the first working day, per the dependency graph (canary ∥ alert skeleton first; topology before process-binding). Record the **push-provider choice** (ntfy vs Pushover) with rationale — probe 3 executes against whichever this sheet names.
 
 Include a `measurements.md` skeleton (probe → fixture command/test → sanitized evidence link → non-secret environment metadata → result → decision) that later probe tasks fill in.
 
 ## Acceptance Criteria
 
 - **Code-enforced:** `dprint check` passes on the new markdown.
-- Kill sheet exists with all seven fields for all five probes, plus the probe-0 self-row.
+- Kill sheet exists with all seven fields for all five probes, plus the probe-0 self-row (same seven fields).
+- Each probe row's redirect quotes or cites its §7a table-row redirect (sharpening permitted, substitution not).
 - `measurements.md` skeleton exists with the six columns above.
 - Push provider (ntfy or Pushover) named with a one-paragraph rationale.
 - Tranche-1 packing recorded.

@@ -37,14 +37,15 @@ All probe tasks are **attended, user-run on the mac mini** — they need real cr
 All spike artifacts live under `dev_docs/elite-spike/`:
 
 - `kill-sheet.md` — probe 0's output ([[elite_stage0_task_2]]); one row per probe.
-- `measurements.md` — one row per probe: probe → fixture command/test → sanitized evidence link → non-secret environment metadata → result → decision.
-- `fixtures/<probe>/` — fixture scripts, plists, and raw captures, one directory per probe (`fixtures/probe1/`, `fixtures/setsid-topology/`, `fixtures/probe2/`, `fixtures/probe3/`).
+- `measurements.md` — **exactly one row per probe**: probe → fixture command/test → sanitized evidence link → non-secret environment metadata → result → decision. Anything larger than a row (fault matrices, per-scenario detail, side-by-side captures) lives under `fixtures/<probe>/` and is linked from the row.
+- `fixtures/<probe>/` — fixture scripts, plists, and raw captures, one directory per probe (`fixtures/probe1/`, `fixtures/setsid-topology/`, `fixtures/probe2/`, `fixtures/probe3/`, `fixtures/max-coherence/`).
 - `provisioning.md` — exact identity-provisioning commands ([[elite_stage0_task_1]]), password redacted.
 - `environment.md` — durable environment facts: spike repo URL, macOS version/build, tool versions.
+- `replan-decision.md` — the re-plan checkpoint's decision record ([[elite_stage0_task_11]]), written only if the checkpoint redirects or stops instead of producing a next-tranche plan.
 
 ### Sanitization (§7a rule 4, binding for every checked-in artifact)
 
-Never persist bearer tokens, credential files, secret-bearing headers, or secret environment values. Additionally redact: the agent account password, push-provider tokens/topics/user keys/device identifiers, hostnames, and absolute home paths (generalize to `~maintainer` / `~agent`). Kept in the clear as required metadata: usage-window percentages/boundaries/`reset_epoch`, macOS version/build, tool versions.
+Never persist bearer tokens, credential files, secret-bearing headers, or secret environment values. Additionally redact: the agent account password, push-provider tokens/topics/user keys/device identifiers, hostnames, and absolute home paths (generalize to `~maintainer` / `~agent`). Kept in the clear as required metadata: usage-window percentages/boundaries/`reset_epoch`, macOS version/build, tool versions. Any per-task restatement of this checklist is non-normative — this list governs in full for every checked-in artifact.
 
 ### Probe close protocol (tasks 3–7)
 
@@ -53,6 +54,11 @@ Every started probe closes as exactly one of `confirmed` / `falsified` / `inconc
 ### Running as `agent` (no sudoers)
 
 Stage 0 installs no sudoers entry. Probes obtain agent execution two ways: (a) an interactive agent shell via the maintainer's own admin sudo — `sudo -u agent -i` or `sudo -u agent <cmd>` from an attended shell (the stock `%admin` rule; nothing installed, and the agent itself still has zero sudo rules); (b) the per-user launchd test job for the no-GUI context (probe 1). Observers always run as the maintainer uid from a separate shell.
+
+### Probe workspaces & reproducibility
+
+- All probe scratch work lives under the agent-owned disposable root `/Users/agent/spike/` — one subdirectory per probe (`/Users/agent/spike/<probe>/`, e.g. `/Users/agent/spike/probe2/`); the spike-repo clone made by [[elite_stage0_task_3]] lives under the same root. Never `/Users/agent/work/` (the production layout) and never `/usr/local/autopilot` (§0a).
+- Where a task's acceptance criteria say a fixture "reproduces from a clean checkout", that means: from a clean checkout of this repo on a host with the task-1 `agent` identity provisioned, invoked per the Running-as-`agent` note above (agent-side commands via `sudo -u agent`, observer as maintainer), with the fixture's documented prerequisites (e.g. tmux) installed.
 
 ## Tasks
 

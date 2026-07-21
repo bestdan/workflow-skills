@@ -21,10 +21,10 @@ Plan: [[elite_stage0_plan]]
 
 ## Task
 
-- Create `bestdan/autopilot-spike-target` (or similar): private, trivial contents (README + a small script + a test runnable via a single documented command), no branch protection initially (probe 4 adds rulesets later, per its own kill sheet).
+- Create `bestdan/autopilot-spike-target` (or similar; e.g. `gh repo create bestdan/autopilot-spike-target --private`): private, trivial contents (README + a small script + a test runnable via a single command documented in the README), no branch protection initially (probe 4 adds rulesets later, per its own kill sheet).
 - Cloning as the agent user is not part of this task: the first probe that needs the checkout ([[elite_stage0_task_3]]) clones it into a disposable spike directory (e.g. `/Users/agent/spike/`) — never `/Users/agent/work/`, which is the production execution layout (§0a: the spike runs from a disposable directory).
 - Append the repo URL, visibility, and creation date to `dev_docs/elite-spike/environment.md`.
 
 ## Acceptance Criteria
 
-- **User-run:** repo exists and is cloneable by the maintainer (`git clone git@github.com:bestdan/<name>` succeeds); URL, visibility, and creation date recorded in `dev_docs/elite-spike/environment.md`; contains README.md, one small script, and one test that passes via a single documented command (e.g. `./test.sh` exits 0).
+- **User-run:** repo exists and is cloneable by the maintainer (`git clone git@github.com:bestdan/<name>` succeeds); URL, visibility, and creation date recorded in `dev_docs/elite-spike/environment.md`; contains README.md, one small script, and one test that passes via a single command documented in the README (e.g. `./test.sh` exits 0); no branch protection or rulesets configured (`gh api repos/bestdan/<name>/rulesets` returns an empty list and the default branch accepts a direct maintainer push).
