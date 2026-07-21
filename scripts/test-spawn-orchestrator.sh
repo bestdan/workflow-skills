@@ -2229,6 +2229,25 @@ if command -v git >/dev/null 2>&1; then
   alwake "$A6B" 0 "$A6B/.auto-pilot/orchestrator.log" >/dev/null
   lack "alarm/deadline: a DONE run's past deadline never alarms" \
     'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  # (6c) REGRESSION (PRE-625): `until` is a UTC timestamp (run-state.md), so the
+  # deadline check must compare it against a UTC `now` — comparing a LOCAL `now`
+  # misfired by the machine's offset, halting a live run hours early east of UTC
+  # ("blew the --until deadline" while it is still in the future). The cases above
+  # use 2020/2099 dates no ±14h offset can flip, so they never caught it. This one
+  # sets `until` 30 min in the FUTURE (UTC) and wakes under a +9h zone: pre-fix the
+  # local-time compare reads it as blown; a UTC compare correctly does not. Force
+  # the zone so the guard is deterministic on any runner, not just a non-UTC one.
+  : >"$OSA_CALLS"
+  A6C="$AL/deadline-tz"
+  un_future="$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  mkrun "$A6C" active "$un_future" 0
+  printf 'ok\n' >"$A6C/.auto-pilot/orchestrator.log"
+  a6cout="$(TZ=Asia/Tokyo alwake "$A6C" 0 "$A6C/.auto-pilot/orchestrator.log")"
+  lack "alarm/deadline: a still-future --until does NOT alarm under a non-UTC TZ (UTC compare)" \
+    'ALARM deadline' "$a6cout"
+  [ -e "$A6C/.auto-pilot/ALARM" ] \
+    && bad "alarm/deadline: spurious deadline sentinel for a future --until under a +9h zone" \
+    || ok "alarm/deadline: no spurious deadline sentinel for a future --until under a non-UTC TZ"
 
   # (7) THE load-bearing one: the alarm fires from the SUPERVISOR with NO model
   # call. Drive the REAL generated launch wrapper with a `claude` that dies on a

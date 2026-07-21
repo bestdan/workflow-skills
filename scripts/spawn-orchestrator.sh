@@ -2361,11 +2361,16 @@ _run_md_parked_count() {
   awk -F'|' '/^\|/ { p=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == "parked") n++ } END { print n+0 }' "$f"
 }
 
-# True (0) iff the run's `--until` deadline is in the past. `until` is a local
-# ISO-8601 timestamp (run-state.md), and so is `date +%Y-%m-%dT%H:%M:%S`, so a
-# LEXICOGRAPHIC compare is a correct time compare — no date-parsing dependency
-# (`date -d` / `date -j` differ across platforms, and a supervisor that can't
-# parse a date must not be the reason nobody gets told). A value that isn't
+# True (0) iff the run's `--until` deadline is in the past. `until` is a UTC
+# ISO-8601 timestamp (run-state.md: "Write the Z form"), so `now` is taken in UTC
+# too (`date -u`) and the trailing `Z` is stripped from `until` — both sides are
+# then the SAME zone, so a LEXICOGRAPHIC compare is a correct time compare with no
+# date-parsing dependency (`date -d` / `date -j` differ across platforms, and a
+# supervisor that can't parse a date must not be the reason nobody gets told).
+# `now` MUST be UTC: comparing a local-time `now` against a UTC `until` misfires by
+# the machine's UTC offset — east of UTC (e.g. BST) it halts a live run hours early
+# ("blew the --until deadline" while the deadline is still in the future); west of
+# it, a genuinely-blown deadline goes undetected for hours. A value that isn't
 # ISO-shaped is not "blown", it's unreadable — never alarm on garbage.
 _deadline_blown() {
   local u="${1%Z}"
@@ -2374,7 +2379,7 @@ _deadline_blown() {
     *) return 1 ;;
   esac
   local now
-  now="$(date +%Y-%m-%dT%H:%M:%S)"
+  now="$(date -u +%Y-%m-%dT%H:%M:%S)"
   [ "$now" \> "$u" ]
 }
 
