@@ -100,3 +100,11 @@ Promoted 4 of 7 candidates:
 ```
 
 Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 5 if it applied.
+
+**Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". For example:
+
+```
+note: scored project Payments revamp only — backlog in other projects / unassigned was not scored. Pass `all` to score all configured projects, or run /promote-tasks with no project scope for the whole team.
+```
+
+This note is **informational only — do not auto-widen** the scope to pull those issues in (widening is always an explicit `all` or a no-project-scope run). Omit the note when the run already covered everything (`scope: whole backlog (no projects)`).
