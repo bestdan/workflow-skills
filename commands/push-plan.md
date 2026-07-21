@@ -170,16 +170,26 @@ deletion on it — **not** on the shape of `tracker_id`.
 ### 4.3 Order the tasks (topological)
 
 Push in dependency order so every blocker is created before its dependents (spike
-§3.3). Build the order from `is_blocked_by` (a string or a list — honor both):
-a task comes after every task it is blocked by. Restrict edges to **slugs that
-name another task file in this plan** — entries that are already tracker ids
-(`/^[A-Z]+-\d+$/`) or point outside the plan are not ordering edges here. A bare
-slug (not a tracker id) that matches **no** task file in the plan is almost always
-a typo of an in-plan slug, not a real external reference — **warn** (name the
-offending slug and the task that references it) so a misspelled blocker isn't
-silently dropped to a footer in §4.4. If the dependencies contain a **cycle**,
-that's a plan bug — **stop** and report the cycle (the slugs involved); do not
-push a partial order.
+§3.3). This is `scripts/plan-graph.py`'s job — it is the ordering authority, not
+a hand-executed Kahn's algorithm:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape linear
+```
+
+It scans the plan dir's task files (a string or list `is_blocked_by` — it honors
+both) and, for each entry, classifies it as `in-plan` (names another task file in
+this plan — becomes an ordering edge), `tracker-id` (already matches Linear's id
+shape `/^[A-Z]+-\d+$/` — not an ordering edge, passed through as-is), or
+`unknown-slug` (matches neither — almost always a typo of an in-plan slug, not a
+real external reference; **warned** on stderr, not dropped silently, so a
+misspelled blocker doesn't fall through to a footer in §4.4). It topologically
+sorts the `in-plan` edges (Kahn's algorithm) and emits one JSON doc: `order`,
+`edges`, the classified `is_blocked_by` map, `cycles`, and a seeded
+`tracker_map`. If the dependencies contain a **cycle**, the script exits
+non-zero and `cycles` names the slugs involved — that's a plan bug: **stop** and
+report it; do not push a partial order. A zero exit means `order` is safe to
+create in.
 
 ### 4.4 Create issues (reuse `linear-add.md`, create-missing-only)
 
@@ -338,12 +348,17 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
 
 ### 5.3 Order the tasks (topological)
 
-Use the same ordering algorithm as **§4.3** (a task comes after every task it is
-blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
-slug — **warn**). The only difference is the "already an id" shape: for gh-issue
-an `is_blocked_by` entry that is already an issue reference matches
+Use `scripts/plan-graph.py`, same as **§4.3** (a task comes after every task it
+is blocked by; a cycle is a plan bug — the script exits non-zero naming the
+slugs — **stop** and report it; an unresolvable bare slug is `unknown-slug` —
+**warn**). The only difference is the "already an id" shape: for gh-issue an
+`is_blocked_by` entry that is already an issue reference matches
 `/^(\S*#)?\d+$/` (`#142`, `142`, or `owner/repo#142`) and is **not** an ordering
-edge.
+edge:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape gh
+```
 
 ### 5.4 Create issues (reuse `gh-issue.md` create-flow, create-missing-only)
 
@@ -452,11 +467,17 @@ nothing new.
 
 ### 5b.3 Order the tasks (topological)
 
-Use the same ordering algorithm as **§4.3** (a task comes after every task it is
-blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
-slug — **warn**). The only difference is the "already an id" shape: for jira an
+Use `scripts/plan-graph.py`, same as **§4.3** (a task comes after every task it
+is blocked by; a cycle is a plan bug — the script exits non-zero naming the
+slugs — **stop** and report it; an unresolvable bare slug is `unknown-slug` —
+**warn**). The only difference is the "already an id" shape: for jira an
 `is_blocked_by` entry that is already an issue key matches `/^[A-Z][A-Z0-9]*-\d+$/`
-(e.g. `PLAT-142`, or a single-letter project key like `X-1`) and is **not** an ordering edge.
+(e.g. `PLAT-142`, or a single-letter project key like `X-1`) and is **not** an
+ordering edge:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape jira
+```
 
 ### 5b.4 Create issues (reuse `jira.md` create-flow, create-missing-only)
 
