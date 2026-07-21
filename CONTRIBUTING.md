@@ -115,6 +115,23 @@ With no `v*` tag yet, the first qualifying merge only creates a
 `v<current-version>` tag (no bump); every merge after that has a boundary to diff
 against and bumps normally.
 
+## Landing a stack of PRs
+
+When you have a stack — PR **B** branched off PR **A**'s branch, **C** off **B** — land them **bottom-up**, one at a time, rebasing each survivor onto the new `main` after every merge. `main` is protected and every qualifying merge **auto-bumps the version** (see [Versioning](#versioning)): the Release workflow pushes a `chore: release vX.Y.Z [skip ci]` commit, so the `main` tip **moves after each landing**. A child still based on the pre-merge tip runs CI against the wrong tree and merges a stale base.
+
+1. **Retarget the bottom PR to `main`.** If it was opened against an intermediate branch, point it at `main`: `gh pr edit <A> --base main`.
+2. **Rebase it onto current `main` and force-push**, so CI runs against the real base:
+   ```sh
+   git fetch origin && git checkout <branch-A> && git rebase origin/main && git push --force-with-lease
+   ```
+3. **Squash-merge once green:** `gh pr merge <A> --squash`. The PR title's Conventional-Commit type drives the version bump, so keep it accurate. The Release workflow may then push a `chore: release … [skip ci]` commit, advancing `main`.
+4. **Rebase the next child onto the new `main` tip**, retarget it to `main`, force-push, and repeat from step 1 for the rest of the stack:
+   ```sh
+   git fetch origin && git checkout <branch-B> && git rebase origin/main && git push --force-with-lease && gh pr edit <B> --base main
+   ```
+
+Always use `--force-with-lease` (never a bare `--force`) so a concurrent push isn't clobbered. Conflicts that were already resolved in the parent usually drop out once the parent is merged and you rebase the child onto the updated `main`.
+
 ## Behavioral evals
 
 `just eval` (and the manual **Evals** GitHub workflow) check that Claude
