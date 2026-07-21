@@ -236,13 +236,20 @@ resolved the PR.)
 Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
 candidate for step 5.
 
-- **`OPEN`** → leave the issue untouched. This is `/reconcile-tasks` row 2's
-  concern (a future command that reconciles open-PR state) — do not add that
-  logic here.
-- **`CLOSED` and unmerged** → leave the issue untouched. Whether a
-  closed-unmerged PR should demote its issue back to backlog is a deferred
-  rule for future work — do not add it here either. Count both cases (open,
-  closed-unmerged) separately in the report as "left."
+**Multi-PR precedence.** An issue can carry more than one resolved PR (a
+stale one plus a newer one). Classify the whole issue by this precedence,
+checked in order:
+
+1. **Any** PR `MERGED` → the issue is a step-5 candidate, regardless of the
+   state of its other PRs.
+2. Else, **any** PR `OPEN` → leave the issue untouched, bucket `left: open`.
+   This is `/reconcile-tasks` row 2's concern — do not add that logic here.
+3. Else (**every** resolved PR is `CLOSED` and unmerged) → leave the issue
+   untouched, bucket `left: closed unmerged`. `/reconcile-tasks` row 3 reads
+   this exact bucket to demote the issue back to Backlog — do not add that
+   logic here either; this file only classifies and reports.
+
+Count `left: open` and `left: closed unmerged` separately in the report.
 
 ## 5. Dry-run (default)
 

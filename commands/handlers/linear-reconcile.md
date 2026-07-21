@@ -3,33 +3,37 @@
 Invoked from `/reconcile-tasks [--apply] [--all] [--project <id|name>]` when
 `handler: linear` is configured. This is the **bounded reconciler**: it corrects issues sitting in
 the wrong state against a fixed, enumerated rule table, not open-ended
-judgment about what "looks off." v1 enforces **exactly** these two rows and
+judgment about what "looks off." v1 enforces **exactly** these three rows and
 nothing else:
 
-| # | Detected drift                                                | Correction  |
-| - | ------------------------------------------------------------- | ----------- |
-| 1 | linked PR **merged**, issue still in a **started**-type state | → Done      |
-| 2 | **open** PR, issue in a **non-started** column (Backlog/Todo) | → In Review |
+| # | Detected drift                                                          | Correction         |
+| - | ----------------------------------------------------------------------- | ------------------ |
+| 1 | linked PR **merged**, issue still in a **started**-type state           | → Done             |
+| 2 | **open** PR, issue in a **non-started** column (Backlog/Todo)           | → In Review        |
+| 3 | linked PR **closed, unmerged**, issue still in a **started**-type state | → Backlog (demote) |
 
 Row 1 is scoped to **started**-type issues because it delegates wholesale to
 `linear-sweep-complete.md`, whose candidate query covers exactly those. A
 merged PR on a **non-started** issue falls between the rows — v1 reports it
-as an anomaly (step 3.3) rather than acting.
+as an anomaly (step 3.3) rather than acting. Row 3 shares that same
+started-type scan (see "4. Row 3" below) — it does not run a second query.
 
 > **Bounded-rule-set doctrine.** This table is deliberately closed, not a
-> starting point. Two more rows are known, deferred follow-ups — **do not add
-> them here**, and do not add any other speculative rule:
+> starting point. One more row is a known, deferred follow-up — **do not add
+> it here**, and do not add any other speculative rule:
 >
-> - A **closed-unmerged PR demoting its issue back to Backlog** — related to
->   PRE-407.
 > - **Orphaned-claim GC** (a stale `auto-claimed` label/assignee with no live
->   claim behind it) — related to PRE-408.
+>   claim behind it) — related to PRE-408. Still tracked in Backlog.
 >
-> Both are tracked in Backlog. Both rows 1 and 2 above only ever **promote or
-> complete** an issue — never demote it — so a mistaken read under this v1
-> rule set can leave an issue ahead of where it should be, but it can never
-> retire live work that isn't actually done. Adding a demoting rule changes
-> that safety property; it is out of scope here.
+> Rows 1 and 2 only ever **promote or complete** an issue; row 3 is v1's
+> first **demote** — it carries more blast radius than a promote/complete
+> (a false-positive read pulls live work back to Backlog), which is exactly
+> why it stayed a deferred follow-up until the promote/complete rules (1-2)
+> were proven in practice. It ships with the same narrow guard the deferred
+> description specified: act only on a PR that is **definitively**
+> closed-unmerged, never on an unresolvable PR state, and never set a
+> `completed`/`canceled` state from it. Do not widen row 3, and do not add
+> the still-deferred orphaned-claim GC rule here.
 
 **Shared reference:** see `linear-common.md` for connection details, the
 config schema (`linear.projects`, the Unassigned bucket), and the kanban
@@ -53,7 +57,7 @@ the Unassigned bucket — the **sweep/reconcile variant** from
 "any project outside the configured set" — narrower than `/do-tasks`'s claim
 variant by design, since this reconciler is destructive-adjacent).
 
-Both rows below run against this same resolved scope set.
+All three rows below run against this same resolved scope set.
 
 ## 2. Row 1 — merged → Done
 
@@ -200,8 +204,10 @@ per scope.
      report instead: `<IDENTIFIER> — PR #<n> merged but issue sits in a
      non-started column — not corrected in v1, see row 1/row 2 scope gap`.
    - A **closed, unmerged** PR on a non-started issue is out of scope
-     entirely (that's the deferred demote rule, related to PRE-407) — leave
-     it untouched, no report line.
+     entirely — row 3 below only demotes issues that are already in a
+     **started**-type state, so a closed-unmerged PR on a backlog/unstarted
+     issue isn't that row's territory either. Leave it untouched, no report
+     line.
 
 4. **Resolve the target state.** Prefer the `started`-type state named
    (case-insensitive) `In Review`; if none exists, use the team's default
@@ -216,7 +222,35 @@ per scope.
    > `backlog`/`unstarted` issues) and never set a `completed`/`canceled`
    > state from this row.
 
-## 4. Dry-run (default)
+## 4. Row 3 — closed-unmerged PR → Backlog demote
+
+This row reuses the **same started-type scan and PR resolution** row 1
+already runs via `linear-sweep-complete.md` above — it is not a second
+query. That file's "Check merge state" step classifies every in-flight issue
+it resolves into exactly one bucket per its precedence rule (a `MERGED` PR
+wins regardless of any other PR on the issue; failing that, any `OPEN` PR
+wins — the issue is still legitimately in flight; only when **every**
+resolved PR is `CLOSED` with `mergedAt == null` does the issue land in
+**`left: closed unmerged`**). Row 3 acts on exactly that bucket:
+
+1. **Take row 1's `left: closed unmerged` set as the candidate list** — no
+   extra `gh pr view` or `get_issue` call. Each candidate already carries its
+   identifier, its resolved PR(s) (`number`/`url`, from the merge-state read),
+   and its current state name (captured by the `get_issue` call in
+   `linear-sweep-complete.md` "Resolve each issue's PR" step 1).
+2. **Guard — act only on a definitive closed-unmerged read.** An issue whose
+   PR state could not be resolved at all lands in row 1's own "no-PR skipped"
+   bucket instead (a deleted PR, a `gh` failure, etc.), never in `left: closed
+   unmerged` — so there is no separate ambiguous case to filter here. If a
+   future change to the shared scan ever makes this classification uncertain,
+   skip the issue rather than guess.
+
+   > **Hard guard.** Row 1's scan already scopes this bucket to **started**-type
+   > issues — never demote a `backlog`/`unstarted` issue (a closed-unmerged PR
+   > there is out of scope entirely, see "Row 2" step 3 above) and never set a
+   > `completed`/`canceled` state from this row.
+
+## 5. Dry-run (default)
 
 Without `--apply`, print the combined table grouped by rule and stop — change
 nothing:
@@ -227,13 +261,16 @@ nothing:
 
 → In Review
 <IDENTIFIER> — PR #<n> (open) → In Review
+
+→ Backlog (closed-unmerged)
+<IDENTIFIER> — PR #<n> (closed, unmerged) → Backlog
 ```
 
-followed by the left/skipped lines from row 1 (open PRs left, closed-unmerged
-PRs left, no-PR issues skipped), row 2's skipped/anomaly lines, and an
-explicit "nothing changed (dry-run)."
+followed by the left/skipped lines from row 1 (open PRs left, no-PR issues
+skipped — closed-unmerged PRs now feed row 3 instead of being left), row 2's
+skipped/anomaly lines, and an explicit "nothing changed (dry-run)."
 
-## 5. Apply (`--apply` only)
+## 6. Apply (`--apply` only)
 
 - **Row 1** — via `linear-sweep-complete.md`'s own apply path (step 6, which
   calls the `linear-complete.md` phase with `assume_verified: true` per
@@ -250,23 +287,48 @@ explicit "nothing changed (dry-run)."
   the issue sat in <old state name>.
   ```
 
-## 6. Report
+- **Row 3** — for each row-3 candidate, mirror `linear-claim.md` "Bail"'s
+  release mechanics (same shape, different caller):
+  1. Resolve the `human-approval-requested` label id (`<linear-mcp>__list_issue_labels`
+     with `teamId`; create it if absent, same pattern as `auto-claimed` in
+     `linear-claim.md` "Claim the issue" step 1).
+  2. Resolve the team's default `backlog`-type state id from the cached
+     state map (prefer the one named `Backlog`).
+  3. **One** `<linear-mcp>__save_issue` call: `id` = the issue's UUID,
+     `state` = the backlog state id, `labels` = the issue's existing labels
+     minus `auto-claimed` plus `human-approval-requested` (the call replaces
+     the label set — include the existing ones), `assignee` = `null`.
+  4. **One** `<linear-mcp>__save_comment` call (`issueId` = the issue's UUID)
+     noting the demote:
+
+     ```
+     Moved back to Backlog by /reconcile-tasks — PR #<n> (<url>) was closed
+     without merging while the issue sat in <old state name>. Flagged for
+     human review.
+     ```
+
+  Unlike `linear-claim.md`'s Bail, row 3 does **not** delete any
+  `do-tasks-claim:` comment — that cleanup is the still-deferred
+  orphaned-claim GC rule's job (related to PRE-408), not row 3's; an issue
+  reaching row 3 may carry a stale claim comment from whatever session
+  abandoned it, and this row only corrects state/labels/assignee.
+
+## 7. Report
 
 Print, grouped by rule:
 
 - **Scope** — one line stating exactly what this run covered, same wording as `linear-sweep-complete.md` "Report": `scope: configured projects (<names>) + Unassigned (project-less only)` (default), `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
-- **Counts** — `k completed (row 1), j moved to In Review (row 2)`, plus row
-  1's own left/skipped counts and row 2's skipped/anomaly count.
+- **Counts** — `k completed (row 1), j moved to In Review (row 2), d demoted (row 3)`, plus row
+  1's own remaining left/skipped counts and row 2's skipped/anomaly count.
 - **Per-issue lines** — identifier, the PR resolved and its state, the rule
   that fired, and the outcome (or the planned transition on dry-run).
 - **Anomaly lines** — the row 1/row 2 scope-gap case from step 3.3 above,
   called out explicitly rather than silently dropped.
-- **Explicitly note what v1 does not enforce** — the closed-unmerged →
-  Backlog demote and orphaned-claim GC rules are **not** applied by this
-  command; they are related to PRE-407 and related to PRE-408 respectively,
-  both still in Backlog. Never write a bare `<TEAM>-NNN` token in this report
-  or anywhere else in this file — see `linear-claim.md` "PR body magic words"
-  for why a bare id auto-closes on merge; every mention here is wrapped in a
+- **Explicitly note what v1 does not enforce** — the orphaned-claim GC rule
+  is **not** applied by this command; it is related to PRE-408, still in
+  Backlog. Never write a bare `<TEAM>-NNN` token in this report or anywhere
+  else in this file — see `linear-claim.md` "PR body magic words" for why a
+  bare id auto-closes on merge; every mention here is wrapped in a
   non-closing phrase (`related to <id>`) for the same reason, even though
   this is a report and not a PR body — the same habit is what keeps the two
   from ever drifting apart.
