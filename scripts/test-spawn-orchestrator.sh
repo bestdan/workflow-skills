@@ -16,12 +16,48 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/spawn-orchestrator.sh"
 
+# --- Caller-repo safety snapshot (PRE-618) ------------------------------------
+# This suite drives REAL git-mutating fixtures. Several deliberately use a run dir
+# that is NOT its own git repo (to exercise the orchestrator's non-git / empty-HEAD
+# paths). git discovers a repo by walking UPWARD from cwd, so a git op against such
+# a dir resolves to the nearest ENCLOSING repo. When BASE lands inside a real repo
+# (the `mktemp` fallback below, or the suite being launched from a live checkout),
+# that enclosing repo is the CALLER's — and a fixture's supervisor-halt / run-state
+# commit then lands on the caller's branch. That is how running `check.sh` from a
+# live worktree once committed fixture files and stray branches onto an in-flight
+# task branch and reverted uncommitted work (PRE-618). Capture the caller's repo
+# now, into a DEDICATED name — the suite reuses the `ROOT` variable for its own
+# fixtures (e.g. the verify-branch `ROOT="$VB/root"` block), so by the end-of-suite
+# assertion $ROOT no longer points here.
+CALLER_REPO="$ROOT"
+CALLER_IS_GIT=0
+if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  CALLER_IS_GIT=1
+  CALLER_HEAD_BEFORE="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  CALLER_REF_BEFORE="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  # Tracked working tree + index only: a repo-local BASE fallback is untracked and
+  # trap-cleaned on exit, so it is not corruption and must not false-fail here.
+  CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  CALLER_BRANCHES_BEFORE="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+fi
+
 # Sandboxed runs may deny the system temp dir — fall back to a repo-local base.
 # Resolve to the physical path (pwd -P): the renderer canonicalizes every path,
 # so fixtures must be canonical too or /var vs /private/var would mismatch.
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.so-test.XXXXXX")"
 BASE="$(cd "$BASE" && pwd -P)"
 trap 'rm -rf "$BASE"' EXIT
+
+# The belt to the snapshot above (the braces): git must NEVER discover a repo at
+# or above BASE. A ceiling at BASE stops the upward repo-discovery walk before it
+# can reach a repo that CONTAINS base — so a fixture whose run dir is not its own
+# git repo gets a clean "not a git repository" (its intended behavior) instead of
+# silently resolving to the caller's repo, even when BASE is repo-local. Fixtures
+# that git-init their own subdir are unaffected: their `.git` sits BELOW the
+# ceiling and is found first. Exported so the spawn-orchestrator.sh subprocesses
+# the fixtures invoke inherit it too. This makes the escape impossible by
+# construction, the same floor-not-ceiling stance as the notifier guard above.
+export GIT_CEILING_DIRECTORIES="$BASE"
 
 # --- The notifier guard: the suite may NEVER reach the real /usr/bin/osascript --
 #
@@ -5359,6 +5395,37 @@ if [ "$guard_hits" -gt 0 ]; then
   ok "notifier guard: the incidental alarms of this suite ($guard_hits) were CAUGHT by the guard, not delivered to a desktop"
 else
   bad "notifier guard: the guard caught ZERO notifications — it is no longer covering the alarm path (the leak can return unseen)"
+fi
+
+# --- PRE-618 caller-repo integrity assertion ----------------------------------
+# The regression test for the fixture escape (see the caller-repo snapshot at the
+# top): after the ENTIRE suite, the caller's repo must be what it was before —
+# same HEAD, same current branch, same tracked working tree + index, and no
+# branches created. If any moved, a fixture reached outside its own temp repo and
+# corrupted the caller's checkout — the exact failure this file exists to make
+# impossible, and the check that was missing when it first happened. (Untracked
+# files are excluded on purpose: a repo-local BASE fallback is trap-cleaned on
+# exit and is not corruption.)
+if [ "$CALLER_IS_GIT" = 1 ]; then
+  caller_head_after="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  caller_ref_after="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  caller_tracked_after="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  caller_branches_after="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+  [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
+    && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
+    || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo" \
+      "before=$CALLER_HEAD_BEFORE after=$caller_head_after"
+  [ "$caller_ref_after" = "$CALLER_REF_BEFORE" ] \
+    && ok "caller-repo safety: current branch unchanged" \
+    || bad "caller-repo safety: current branch changed" "before=$CALLER_REF_BEFORE after=$caller_ref_after"
+  [ "$caller_tracked_after" = "$CALLER_TRACKED_BEFORE" ] \
+    && ok "caller-repo safety: tracked working tree + index unchanged" \
+    || bad "caller-repo safety: tracked files changed under the caller's repo" \
+      "before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after]"
+  [ "$caller_branches_after" = "$CALLER_BRANCHES_BEFORE" ] \
+    && ok "caller-repo safety: no stray branches created" \
+    || bad "caller-repo safety: branch set changed (stray fixture branches leaked)" \
+      "before=[$(printf '%s' "$CALLER_BRANCHES_BEFORE" | tr '\n' ' ')] after=[$(printf '%s' "$caller_branches_after" | tr '\n' ' ')]"
 fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"
