@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.3] - 2026-07-21
+
+### Fixes
+
+- hold dependency-blocked cards in backlog (#246) (08b51d0)
+
 ## [1.64.2] - 2026-07-20
 
 ### Fixes
