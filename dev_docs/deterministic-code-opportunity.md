@@ -1,6 +1,6 @@
 # Audit: deterministic-code opportunities across the skills/commands prose
 
-**Date:** 2026-07-10 · **Updated:** 2026-07-20 (Finding #5 verified delivered; see "Update" below) · 2026-07-17 (reconciled with PR #119)
+**Date:** 2026-07-10 · **Updated:** 2026-07-21 (recommendations #1–#5 all delivered — repo-pr extraction workstream PRE-610/611/612/614 merged; Finding #5 `resume_at` row corrected to delivered-differently) · 2026-07-20 (Finding #5 verified delivered; see "Update" below) · 2026-07-17 (reconciled with PR #119)
 **Status:** Findings only — no code changed. Each recommendation below is sized
 to become its own task/PR.
 **Scope:** All prose under `skills/`, `commands/` (including
@@ -104,31 +104,45 @@ path the audit had marked "prose no matter how mechanical."
 ### What this leaves for the original recommendations
 
 - **Finding #1 (`task-scan.py`)** — thesis validated (scan/rank/readiness _is_
-  the hottest re-derivation, and it _is_ worth scripting), and its stated
-  caveat "only serves the `repo-pr` handler … Linear … isn't covered" is now
-  **half-closed**: `linear-scan.py` covers the Linear scan/readiness read. The
-  **repo-pr** `task-scan.py` over `dev_docs/tasks/**/*.md` remains **unbuilt**
-  and is still the top pick for that handler.
+  the hottest re-derivation, and it _is_ worth scripting). Its stated caveat
+  "only serves the `repo-pr` handler … Linear … isn't covered" is now **fully
+  closed on both sides**: `linear-scan.py` covers the Linear scan/readiness
+  read, and the **repo-pr** `task-scan.py` over `dev_docs/tasks/**/*.md`
+  **shipped** (PRE-609, PR #235), then gained an `--archive-candidates` mode
+  (PRE-614, PR #240) that also absorbed recommendation #6's `repo-pr-archive`
+  selection logic.
 - **Finding #2 (`plan-graph.py`)** — the `--audit` companion the audit imagined
-  for `/reoptimize-tasks` effectively **landed** as `linear-relations.py` (the
-  graph _load_). But `/push-plan`'s own topological ordering + cycle detection
-  is **still hand-executed in prose** (`push-plan.md` line 21, "order the tasks
-  topologically") with no script — so the push-side `plan-graph.py`
-  recommendation stands.
-- **Finding #3 / #4** — unaddressed by this wave (repo-pr scoped);
-  recommendations stand as written.
-- **Finding #5 (auto-pilot supervisor)** — **delivered 2026-07-20** (verified
-  under PRE-613; see "Finding #5 — delivered" below). Unaddressed at the time
-  of this wave, but has since shipped, spread across
+  for `/reoptimize-tasks` landed as `linear-relations.py` (the graph _load_),
+  and `/push-plan`'s own topological ordering + cycle detection — the push-side
+  `plan-graph.py` — **shipped** as `scripts/plan-graph.py` (PRE-610, PR #236),
+  which `push-plan.md` §4.3/§5.3/§5b.3 now call and cite instead of ordering by
+  hand.
+- **Finding #3 (`validate.py` for `/doctor` + path bug)** — **delivered**
+  (PRE-611, PR #237): `validate.py` gained the field/expiry checks `/doctor`
+  had been hand-simulating, and the consumer-repo path bug (validating the
+  plugin's own tasks instead of the consumer's) was fixed.
+- **Finding #4 (`claim-scan.sh`)** — **delivered** (PRE-612, PR #238): the
+  whole-line `Claims-task:` claim/WIP query is now one tested script that every
+  orchestrator-side consumer cites (the remote-dispatch prose copy excepted).
+- **Finding #5 (auto-pilot supervisor)** — **delivered** (verified under
+  PRE-613; see "Finding #5 — delivered" below), spread across
   `scripts/spawn-orchestrator.sh`, `scripts/claude-auto-resume.sh`, and
-  `scripts/claude-usage.sh`, with one residual gap filed as a follow-up
-  (PRE-619).
+  `scripts/claude-usage.sh`. One recommended element (the crash-loop
+  exponential backoff + "4 consecutive pauses" numbers) is a genuine residual
+  gap filed as PRE-619; a second (compute `resume_at`) is delivered via a
+  different, arguably-better design — the resume time is agent-authored
+  (`paused_until`) and the supervisor corroborates + gates on it rather than
+  computing it — see below.
 
 Bottom line: the audit's core bet — extract the re-derived reads, keep the
-judgment and the mutations in prose — is now demonstrated in production on
-Linear, and, as of 2026-07-20, on the auto-pilot supervisor too. The
-remaining open items are the **repo-pr** analogues (`task-scan.py`,
-`plan-graph.py` push side).
+judgment and the mutations in prose — is now demonstrated in production on both
+the Linear path and, via the deterministic-script extraction workstream
+(PRE-610/611/612/614, merged 2026-07-21) plus the earlier PRE-609, the
+**repo-pr** path the audit had marked "prose no matter how mechanical." Every
+"extract this" recommendation (#1–#5) is delivered; #5 is delivered bar the two
+PRE-619 gaps. Recommendation #6's verdict was "mostly _don't_ script," and its
+one deterministic slice (`repo-pr-archive` candidate selection) folded into #1
+and shipped — so no scan/graph/validate/claim extraction remains open.
 
 ### Finding #5 — delivered (2026-07-20, verified under PRE-613)
 
@@ -137,14 +151,14 @@ The exception this audit called out — "no script in `scripts/` implements
 rather than the single `scripts/auto-pilot-supervisor.sh` the finding
 imagined. Point-by-point against the original recommendation:
 
-| Recommended element                                   | Shipped as                                                                                                                                                                                                                                                                                                                |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Relaunch wrapper (no model call, inspects exit codes) | `scripts/spawn-orchestrator.sh classify_exit()` (dispatched via `classify-exit`) — parses the wake's error surface for auth-failure phrases, a context-scoped `401`, and rate-limit signals (`429`, `rate_limit_error`, `overloaded`); returns `done` / `fatal: …` / `retry: …`.                                          |
-| Classify rate-limit errors                            | `classify_exit()` (above) plus `supervisor_check()` (dispatched via `supervisor-check`), which consumes the classification and the agent's declared `exit_reason` (`done`/`deadline`/`systemic`/`paused`/`continuing`) to decide teardown vs. relaunch vs. halt.                                                          |
-| Compute `resume_at` / pause-marker write              | `supervisor_check()` writes the supervisor-side pause marker on an uncorroborated pause/rate-limit exit; the shell-only pre-invoke gate `supervisor_gate()` (`supervisor-gate`) reads `paused_until` off RUN.md before every wake and skips invoking the agent while it's still live.                                     |
-| Exponential backoff (30 m → 1 h → 2 h, cap ~6 h)      | **Not implemented as such — residual gap, see below.**                                                                                                                                                                                                                                                                    |
-| Consecutive-pause stop condition                      | Implemented, but as a **flat no-progress counter** (default limit **3**, not the "4" the run-budget.md prose still states), not a dedicated "N consecutive supervisor pauses" count — see residual gap below.                                                                                                             |
-| `claude-usage.sh --near-cap <pct>` add-on             | No literal `--near-cap` flag was added. `claude-usage.sh --session-status` emits `<percent> <reset_epoch>`; near-cap comparison against a caller-chosen threshold is done by the caller (`scripts/claude-auto-resume.sh` compares it to `CAR_CAP_PCT`) rather than baked into the usage script as a tested exit-0/1 mode. |
+| Recommended element                                   | Shipped as                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Relaunch wrapper (no model call, inspects exit codes) | `scripts/spawn-orchestrator.sh classify_exit()` (dispatched via `classify-exit`) — parses the wake's error surface for auth-failure phrases, a context-scoped `401`, and rate-limit signals (`429`, `rate_limit_error`, `overloaded`); returns `done` / `fatal: …` / `retry: …`.                                                                                                                                                                                                                                                                                                                                                                   |
+| Classify rate-limit errors                            | `classify_exit()` (above) plus `supervisor_check()` (dispatched via `supervisor-check`), which consumes the classification and the agent's declared `exit_reason` (`done`/`deadline`/`systemic`/`paused`/`continuing`) to decide teardown vs. relaunch vs. halt.                                                                                                                                                                                                                                                                                                                                                                                   |
+| Compute `resume_at` / pause-marker write              | **Delivered via a corroboration design, not a supervisor-_computed_ resume time.** The resume time (`paused_until`) is **agent-authored** in RUN.md; the supervisor does not compute its own `resume_at`. `supervisor_check()` writes the no-progress corroboration ledger (`count`/`head`/`exempt_since` in supervisor-state, which the jailed agent cannot forge), and the shell-only pre-invoke gate `supervisor_gate()` (`supervisor-gate`) _reads_ that agent-authored `paused_until` before every wake, skipping invocation while it's still live. Functionally covers the pause, sourcing the time from the agent rather than computing it. |
+| Exponential backoff (30 m → 1 h → 2 h, cap ~6 h)      | **Not implemented as such — residual gap, see below.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Consecutive-pause stop condition                      | Implemented, but as a **flat no-progress counter** (default limit **3**, not the "4" the run-budget.md prose still states), not a dedicated "N consecutive supervisor pauses" count — see residual gap below.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `claude-usage.sh --near-cap <pct>` add-on             | No literal `--near-cap` flag was added. `claude-usage.sh --session-status` emits `<percent> <reset_epoch>`; near-cap comparison against a caller-chosen threshold is done by the caller (`scripts/claude-auto-resume.sh` compares it to `CAR_CAP_PCT`) rather than baked into the usage script as a tested exit-0/1 mode.                                                                                                                                                                                                                                                                                                                          |
 
 Two scripts beyond `spawn-orchestrator.sh` round out the supervisor:
 `scripts/claude-auto-resume.sh` owns the interactive-session 5-hour
@@ -160,7 +174,8 @@ wording: a **cumulative pause-exempt ledger** (`PAUSE_EXEMPT_MAX_SECONDS_DEFAULT
 past that cumulative budget, written to a supervisor-state file the jailed
 agent cannot touch.
 
-**Residual gap (filed as [PRE-619](https://linear.app/prethinkio/issue/PRE-619)):**
+**Residual gap (filed as [PRE-619](https://linear.app/prethinkio/issue/PRE-619),
+part of the Deterministic-script extraction project).**
 `skills/auto-pilot/references/run-budget.md`'s "Crash-loop guard" section
 still describes an attempt-keyed exponential backoff (30 min → 1 h → 2 h,
 capped ~6 h) and a "default 4 consecutive supervisor pauses → halt"
@@ -468,13 +483,15 @@ generalize.**
 
 ## Prioritized recommendations
 
-> **Status as of 2026-07-20 (see Update above):** the Linear analogues of #1
-> and #2 have **shipped** — `linear-scan.py` (scan/readiness) and
-> `linear-relations.py` (reoptimize graph load). What remains open is the
-> **repo-pr** side of each: `task-scan.py` over `dev_docs/tasks/**/*.md` (#1)
-> and `plan-graph.py` for `/push-plan`'s still-in-prose topological ordering
-> (#2). #3–#4 are unaddressed. **#5 (auto-pilot supervisor) is delivered** —
-> see "Finding #5 — delivered" above; one residual gap filed as PRE-619.
+> **Status as of 2026-07-21 (see Update above):** recommendations #1–#5 are all
+> **delivered.** The Linear analogues of #1/#2 shipped earlier (`linear-scan.py`,
+> `linear-relations.py`), and the **repo-pr** side of each now ships too:
+> `task-scan.py` over `dev_docs/tasks/**/*.md` (#1; PR #235 + `--archive-candidates`
+> PR #240), `plan-graph.py` for `/push-plan`'s topological ordering (#2; PR #236),
+> `validate.py`'s `/doctor` checks + path-bug fix (#3; PR #237), and
+> `claim-scan.sh` (#4; PR #238). **#5 (auto-pilot supervisor) is delivered** —
+> see "Finding #5 — delivered" above; one residual gap filed as PRE-619. #6's
+> verdict is "mostly don't script"; its one deterministic slice folded into #1.
 
 1. **`scripts/task-scan.py`** — highest frequency (every `/list-tasks`,
    `/do-tasks`, `/promote-tasks`, `/archive-tasks`, `/doctor` on the default
