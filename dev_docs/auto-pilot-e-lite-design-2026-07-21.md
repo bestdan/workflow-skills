@@ -44,6 +44,52 @@ The delivery loop (`/deliver-task`, adapters, co-review, freeze rule) is
 kept. Run-state/resume references are replaced, not retained (§6). The old
 harness is deleted only after Stage 5 + a dependency audit.
 
+## 0a. Top open question — paper spec vs. implementation spike
+
+Four external review rounds have **settled the architecture** (kill the
+hand-built jail; identity-first; one-way trust) and cleared the
+**identity/broker layer for Stage-1 build** (it is separable and, as of
+round 4, deemed ready). What remains open is not any missing component
+but the **crash-safe concurrency semantics of the control plane** — the
+atomic launch/lease/continuation transactions, the `setsid`/`exec` pane
+identity, mutex-crash reclamation, clock-skew policy, and CAO-worker
+registration (round 4's four blockers; see
+`auto-pilot-e-lite-design-review-codex-r4.md`).
+
+The character of the open items has shifted across rounds: from "the
+design is missing pieces" (rounds 1–2) to "the fixes have edge cases"
+(round 3) to "the edge cases have edge cases" (round 4). **Each round now
+closes blockers by adding mechanism, and finds the next round's blockers
+inside that mechanism** — which is precisely the spiral this document's
+own anti-spiral rule (§0) exists to catch, now operating on the design
+rather than the code.
+
+**The decision the maintainer must make before a v5:** are the remaining
+blockers best closed on paper, or by a spike? Several are **empirical
+facts about macOS**, not design choices — what a pane's PID *is* after
+`setsid → exec claude`; whether a `mkdir` mutex reclaims cleanly on
+owner death; whether a maintainer-user `claude-usage.sh` query reports
+the *same* window as the agent-user session. Prose cannot answer these;
+only a running `ap-launch`/`ap-stop`/`ap-agent-exec` against real tmux,
+launchd, and the Max API can. Round 4 states the same fact from the other
+side: "the repository contains no implementation to validate these
+contracts."
+
+**Recommended resolution (author's position, for maintainer decision):**
+treat the identity/broker layer (§2) as approved-to-build, and move the
+control-plane concurrency contract (§4–§5) into a **time-boxed
+implementation spike** whose deliverables are (a) the measured answers to
+the empirical questions above and (b) a lease/launch/continuation
+protocol validated by fault-injection tests — folding those results back
+into the design as v5, rather than specifying finer and finer detail
+blind. This keeps the design honest to its own rule: load-bearing claims
+get **executed**, not reasoned to. The alternative — a paper v5 closing
+round 4, then a round-5 review — is legitimate if a fully-specified spec
+is wanted before any code, but it risks another round of edge-cases-
+within-fixes with no new ground truth added.
+
+**Not yet decided by the maintainer.** No Stage-1 work has begun.
+
 ## 1. Locked decisions (2026-07-21)
 
 | # | Decision | Consequence |
