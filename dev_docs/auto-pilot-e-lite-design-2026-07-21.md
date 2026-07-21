@@ -1,20 +1,19 @@
 ---
 title: Auto-pilot E-lite — design proposal (identity-first, no-VM substrate)
 created: 2026-07-21
-revised: 2026-07-21 — v3 after second-round external review
-status: proposal v3 — round-2 blockers addressed
-context: v1 incorporated maintainer decisions of 2026-07-21 (Max subscription for everything; trial a dedicated macOS agent user; GitHub App identity; tmux-hosted orchestrator for remote attach). v2 applied the first external review. v3 addresses the second-round review's six Stage-1 blockers (auto-pilot-e-lite-design-review-codex-r2.md) — chiefly by making the entire privileged control plane (launcher, broker, registry, watcher) maintainer-owned, so trust flows one way. §10 records the v1→v2→v3 changes.
+status: proposal — v3
+context: A maintainer-owned control plane paired with an agent-owned execution plane, so trust flows one way (Max subscription for everything; a dedicated macOS agent user; GitHub App identity; tmux-hosted orchestrator for remote attach).
 audience: reviewer, then implementer
 related:
   - ./auto-pilot-architecture-review-2026-07-21.md
   - ./auto-pilot-architecture-review-2026-07-21-codex.md
   - ./auto-pilot-option-e-research-2026-07-21.md
-  - ./auto-pilot-e-lite-design-review-codex.md (round 1, of v1)
-  - ./auto-pilot-e-lite-design-review-codex-r2.md (round 2, of v2)
-  - ./auto-pilot-problem-statement.md (Part I problem statement unchanged)
+  - ./auto-pilot-e-lite-design-review-codex.md
+  - ./auto-pilot-e-lite-design-review-codex-r2.md
+  - ./auto-pilot-problem-statement.md
 ---
 
-# Auto-pilot E-lite: design proposal (v3)
+# Auto-pilot E-lite: design proposal
 
 ## 0. Summary and the one-way trust rule
 
@@ -27,15 +26,15 @@ and an **agent-owned execution plane**:
 | Control | maintainer | launcher (`ap-launch`), stopper (`ap-stop`), token broker, registry, watcher, continuation wrapper (Stage 5+) |
 | Execution | `agent` | tmux server + run shim + Claude session + workers + clones/worktrees |
 
-**The one-way trust rule (v3's organizing principle, from the round-2
-review):** the control plane never executes agent-controlled code, never
-reads agent-controlled *configuration*, and never accepts agent input as
-authoritative. Everything the agent writes (heartbeat, exit files, run
-notes) is a **claim**; only control-plane observations (its own process
-checks, its own API queries) are **facts**. There is no privileged API the
-agent can invoke — no sudo hooks, no on-demand mint. Trust flows one way.
+**The one-way trust rule (the organizing principle):** the control plane
+never executes agent-controlled code, never reads agent-controlled
+*configuration*, and never accepts agent input as authoritative. Everything
+the agent writes (heartbeat, exit files, run notes) is a **claim**; only
+control-plane observations (its own process checks, its own API queries) are
+**facts**. There is no privileged API the agent can invoke — no sudo hooks,
+no on-demand mint. Trust flows one way.
 
-**The standing anti-spiral rule (unchanged):** watcher, broker, launcher,
+**The standing anti-spiral rule:** watcher, broker, launcher,
 and wrapper each have a one-sentence job and are forbidden to interpret,
 classify, repair, or resume. Special cases accumulating in any of them is a
 stop-and-reassess event.
@@ -60,15 +59,15 @@ harness is deleted only after Stage 5 + a dependency audit.
 - **App setup** (one-time): App `bestdan-autopilot`; permissions Contents
   RW, Pull requests RW, Issues RW, Checks Read; installed on target repos
   only.
-- **Broker contract** (round-2 blocker 1): a maintainer-owned script run by
+- **Broker contract**: a maintainer-owned script run by
   a maintainer launchd job every **45 minutes**. Its App ID, installation
   ID, key path, token path, and log path are **hard-coded constants in the
   script**; it takes no arguments, reads no environment beyond PATH-fixed
   absolute binary paths, follows no symlinks (it verifies each path's
   owner, mode, and non-symlink status before use, and refuses otherwise).
-  There is **no agent-invokable mint** — v2's sudo-whitelisted on-demand
-  mint is **withdrawn** (it made the 1-hour TTL meaningless, since the
-  agent could re-invoke at will). With a 45-minute refresh of a 60-minute
+  There is **no agent-invokable mint** — an on-demand mint the agent could
+  trigger would make the 1-hour TTL meaningless, since the agent could
+  re-invoke at will. With a 45-minute refresh of a 60-minute
   token, the published token always has ≥15 minutes of validity; a stale
   token file means the broker is dead, and the run's response is
   stop-and-notify — never a fallback credential.
@@ -89,12 +88,12 @@ harness is deleted only after Stage 5 + a dependency audit.
   with unknown outcome is never re-fired** — reconcile observable
   GitHub/Linear state first (the `pr-fix-guard.sh` discipline). Stale
   token + dead broker → stop-and-notify.
-- **Positive no-fallback evidence** (round-2 §3.1): the Stage-1 gate runs
+- **Positive no-fallback evidence**: the Stage-1 gate runs
   the canary with instrumented helpers — capturing which credential helper
   responded, which `gh` binary resolved, and which token was presented —
   not merely with personal credentials absent.
 
-### 2.2 GitHub authorization policy (round-2 blocker 3)
+### 2.2 GitHub authorization policy
 
 Server-side write control, stated and tested:
 
@@ -112,7 +111,7 @@ Server-side write control, stated and tested:
 
 ### 2.3 Linear + Claude + git config
 
-Unchanged from v2: Linear bot key (team-scoped, Read+Write, no Admin) in
+Linear bot key (team-scoped, Read+Write, no Admin) in
 the agent env file; Claude Max auth established once for the agent user
 (interactive OAuth preferred; `setup-token` fallback; the
 credentials.json + claude.json pairing caveat is a Stage-2 canary item).
@@ -133,47 +132,45 @@ agent-owned clones; per-task worktrees inside them.
 
 ### 3.1 The `agent` user
 
-Unchanged from v2 in substance: non-admin headless account, work under
+Non-admin headless account, work under
 `/Users/agent/work/`, per-user tool caches (Homebrew binaries are shared;
 caches/globals are agent-local — availability is a Stage-2 assertion),
 secrets 0600/0640 with audited ownership, no shared writable directories,
 no ACL leakage from your home.
 
-**sudoers, minimized by v3's structure**: because launch/stop/registry are
-maintainer-owned programs run *by you* (§4), the only remaining rule is
+**sudoers**: because launch/stop/registry are
+maintainer-owned programs run *by you* (§4), the only rule is
 maintainer → `agent` for the fixed launch/attach/exec wrappers (exact
 command paths, NOPASSWD). The agent user has **no sudo rules at all** —
-nothing to invoke, nothing to abuse (round-2 blocker 4 dissolves rather
-than being patched).
+nothing to invoke, nothing to abuse.
 
 ### 3.2 Native sandbox and the `gh` hole
 
-Unchanged from v2: sandboxed Bash `failIfUnavailable`, network allowlist
+Sandboxed Bash `failIfUnavailable`, network allowlist
 (`api.anthropic.com`, `github.com`, `api.linear.app`, loopback). The `gh`
 exclusion remains a named hole bounded server-side (§2.2's policy is the
 compensating control, now with denial tests). Stage 2 tests effective
 policy per execution path (plain Bash, excluded `gh`, each worker
 backend), never trusting sandbox startup success.
 
-### 3.3 CAO (evidence-gated; fallback unchanged)
+### 3.3 CAO (evidence-gated)
 
-As v2: `cao-server` as `agent` via launchd
+`cao-server` as `agent` via launchd
 (`CAO_ENABLE_WORKING_DIRECTORY=true` in the unit); participates only after
 the Stage-2 in-worker canary (uid, HOME, CWD, env inventory, sentinel
-unreadability, sandbox behavior — plus, per round-2, **worker parentage**:
+unreadability, sandbox behavior — plus **worker parentage**:
 record each worker's PID, PPID, and process tree so §4's stop contract
 knows what tmux teardown does *not* kill). Fallback if it fails: disable
 `less-claude` for auto-pilot; workers are sandboxed Claude sessions.
 
-## 4. Run lifecycle (maintainer-owned launcher — restructured in v3)
+## 4. Run lifecycle (maintainer-owned launcher)
 
-v2 had an agent-owned entry script appending to a maintainer registry via
-sudo hooks — the round-2 review correctly called this an un-designed
-privileged API (blockers 4 and 5). v3 inverts it: **the launcher is
+An agent-owned entry script appending to a maintainer registry via sudo
+hooks would be an un-designed privileged API. Instead, **the launcher is
 maintainer-owned and maintainer-run**, and derives every registry fact
 from its own observations.
 
-### 4.1 Process topology (explicit, replacing the PGID assertion)
+### 4.1 Process topology
 
 ```
 you (maintainer shell, local or ssh)
@@ -198,7 +195,7 @@ you (maintainer shell, local or ssh)
   it makes itself, as maintainer).
 - **Incarnation identity**: every recorded process is stored as
   `{pid, starttime}` pairs (from `ps -o lstart=`), never bare PIDs — PID
-  reuse cannot impersonate a recorded process (round-2 blocker 5).
+  reuse cannot impersonate a recorded process.
 - **Lease** (maintainer-owned): atomic `mkdir
   /usr/local/autopilot/lock/<repo-key>` where `<repo-key>` is the
   canonical remote URL hash (not a local path). The lock's owner record
@@ -212,9 +209,9 @@ you (maintainer shell, local or ssh)
   process (else record observed-terminal and exit); signal the shim's
   recorded process group (TERM, grace, KILL); `tmux kill-session`; then
   shut down this run's CAO workers via the CAO API (they are *not* in the
-  pane tree — the round-2 point — so the stop contract names them
-  explicitly). Release the lease last.
-- **Terminal records — two kinds, never conflated** (round-2 blocker 5):
+  pane tree, so the stop contract names them explicitly). Release the lease
+  last.
+- **Terminal records — two kinds, never conflated**:
   - *agent-claimed exit*: the shim writes `{exit_code, end_time}` to the
     runfile on normal exit. The watcher copies it into the registry
     **marked as a claim**.
@@ -236,14 +233,14 @@ write), not asserted.
 
 ### 4.3 Heartbeat and remote workflow
 
-Heartbeat unchanged (agent touches `.heartbeat` per loop turn; liveness
+Heartbeat: agent touches `.heartbeat` per loop turn (liveness
 claim only). Remote workflow: ssh → sudo'd attach wrapper → detach.
 Double-launch refused by the lease; two operators attaching is safe
 (read-only unless they type).
 
 ## 5. Supervision
 
-### 5.1 Watcher (maintainer-owned; liveness semantics per round-2 blocker 6)
+### 5.1 Watcher (maintainer-owned)
 
 Launchd job, `StartInterval` 300s, **single short-lived pass per
 invocation** (no daemon to wedge): non-blocking `flock` (skip if a
@@ -274,7 +271,7 @@ wrapper); heartbeat freshness vs threshold; terminal-record consistency
 - Boot check: registered run with no terminal record after reboot → boot
   notification.
 
-**Hard prohibitions** (unchanged, now including the §4.2 exception stated
+**Hard prohibitions** (including the §4.2 exception stated
 precisely): the watcher writes only observation records and alerts to the
 registry; it never edits run state, clears anything, re-mints, kills, or
 resumes. Interruption is a human running `ap-stop`.
@@ -285,7 +282,7 @@ Stop-the-run event; boot notification; human-initiated `--resume` (§6).
 
 ### 5.3 Usage-limit handling (evidence-based; continuation Stage 5+ only)
 
-- **Authoritative evidence** (round-2 §3.4): a `claude` exit alone is not
+- **Authoritative evidence**: a `claude` exit alone is not
   a rate-limit determination. On any orchestrator exit, the *watcher*
   (maintainer side, same Max subscription) queries usage itself
   (`claude-usage.sh --session-status` as maintainer). Exit + independently
@@ -295,43 +292,43 @@ Stop-the-run event; boot notification; human-initiated `--resume` (§6).
   no continuation.
 - **Stages 1–4: stop-and-notify.** The alert carries `reset_epoch`.
 - **Stage 5+: bounded continuation, control-plane-owned.** Not an
-  agent-side sleeping parent (v2's design — its sleep was
-  indistinguishable from a wedge). Instead, when the watcher records
+  agent-side sleeping parent — its sleep would be indistinguishable from a
+  wedge. Instead, when the watcher records
   `usage_limit`, it writes an `expected_resume {run_id, at: reset_epoch+jitter}`
   record — maintainer-owned durable state, so the run is *known* to be
   intentionally paused (no false stall) and the attempt counter survives
-  crashes and relaunches (round-2: durable counters). At/after `at`, the
+  crashes and relaunches. At/after `at`, the
   continuation step — a maintainer launchd job — re-runs `ap-launch
   --resume <run_id>` (same lease, fresh reserve check, exact run
-  identity — never "most recent conversation", the ambiguity the review
-  flagged in `claude-auto-resume.sh`): **at most once per usage window,
+  identity — never "most recent conversation", an ambiguity that would let
+  the wrong conversation be resumed): **at most once per usage window,
   at most twice per run**, counters read from the registry. Clock changes,
   host sleep past `at`, reboot, or missing usage data → stop-and-alert,
   never a silent extra attempt.
 
 ## 6. Keep / port / delete
 
-Unchanged from v2 (three-way split), with one addition: the ported
-*resume* is invoked as `ap-launch --resume <run_id>` — lease revalidation
+The three-way split, with the ported
+*resume* invoked as `ap-launch --resume <run_id>` — lease revalidation
 and registry continuity come from the control plane; the model-side
 reconciliation prose (git + tracker + run-state comparison) is the ported
 read-only part. Deletion of the old harness: after Stage 5 + grep-clean
-dependency audit (the round-1 verified coupling list: `SKILL.md`,
+dependency audit (the verified coupling list: `SKILL.md`,
 `resume.md`, `run-state.md`, `run-budget.md`, `launch-runtime.md`).
 
-Linear reconciliation as v2 (≈24 issues obsoleted with pointer; PRE-536 →
+Linear reconciliation: ≈24 issues obsoleted with pointer; PRE-536 →
 launcher prompt file; PRE-551 → §2.1/§5.3 protocols; PRE-619 closes with
-the supervisor).
+the supervisor.
 
-## 7. Migration stages and evidence gates (v3 — round-2 gate fixes applied)
+## 7. Migration stages and evidence gates
 
 **Stage 1 — identity + broker.**
 Build: App + rulesets (§2.2), broker, token file, `gh` shim, cred helper,
 agent gitconfig (runnable before the agent user exists).
 **Gate** (all executed): canary performs clone/commit/push/PR
 open+comment+close/Linear read+write **including the GraphQL reads `gh`
-actually issues**; **App key unreadable from every Stage-1 process path**
-(moved here per round-2 blocker 2); broker fixed-config verified (refuses
+actually issues**; **App key unreadable from every Stage-1 process path**;
+broker fixed-config verified (refuses
 symlinked/wrong-owner paths; atomic rename observed under a concurrent
 reader; no arguments/env accepted); mint fault drills (expired token,
 missing key, revoked installation, clock skew) fail loudly; **denial
@@ -347,7 +344,7 @@ registry, watcher + push channel, CAO-as-agent unit.
 **Gate — per execution path** (orchestrator Bash, excluded `gh`, each
 worker backend incl. one real CAO worker) **× launch context**
 (ssh-interactive and launchd/no-GUI): recorded **uid, groups, HOME, PATH,
-TMPDIR, CWD, tool versions, env allowlist** (round-2 additions);
+TMPDIR, CWD, tool versions, env allowlist**;
 sentinels in your home/Keychain/`~/.ssh`/`~/.aws`/personal gitconfig
 unreadable; App key unreadable; Claude auth headless; `kill -9` of the
 orchestrator → remote push (delivery-logged) within the 10-min SLO;
@@ -385,7 +382,7 @@ received at 08:00.
 **After this gate only**: dependency audit → delete old harness → Linear
 reconciliation.
 
-## 8. Risks (v3)
+## 8. Risks
 
 1. **Max runaway** (no server cap): reserve gate + parallelism cap +
    at-most-twice continuation, counters control-plane-durable. Accepted.
@@ -398,57 +395,7 @@ reconciliation.
 5. **Watcher/push blind spots**: bounded, not eliminated — numeric SLOs,
    retry queue, daily end-to-end canary, documented missed-canary
    procedure; sleep-during-run out of contract on the always-on mini.
-6. **Control-plane bloat** (the new #1 spiral risk per round 2): the
+6. **Control-plane bloat** (the #1 spiral risk): the
    one-way trust rule + anti-spiral rule are the tripwire; any
    interpretation/repair logic in launcher/broker/watcher/wrapper is a
    stop-and-reassess event.
-
-## 9. Cut
-
-v2 cuts (CAO-hosted orchestrator; `includeIf`; macOS-notification-primary;
-re-mint-on-401; Docker exclusions; "kept unchanged" claim) — plus, in v3:
-the **agent-invokable on-demand mint** (§2.1) and the **agent-side
-continuation parent** (§5.3), both replaced by control-plane equivalents.
-
-## 10. Changelog
-
-**v1 → v2** (round-1 review): broker split; run contract; keep/port/delete
-correction; CAO evidence-gating + fallback; Stage-2 negative tests;
-external usage-limit handling; watcher registry/alerts/canary; deletion
-moved post-Stage-5; branch protections; overclaims retracted.
-
-**v2 → v3** (round-2 review, six blockers):
-
-1. **Broker fixed-configuration** (blocker 1): hard-coded constants, no
-   args/env/symlinks with owner/mode verification, atomic
-   temp+fsync+rename publication, maintainer-owned `/usr/local/autopilot/`
-   tree with non-agent-writable parents — and the agent-invokable
-   on-demand mint **removed entirely** (45-min refresh makes it
-   unnecessary; its existence made the TTL meaningless).
-2. **Key unreadability moved into the Stage-1 gate** (blocker 2), tested
-   from every Stage-1 process path.
-3. **GitHub authorization policy** (blocker 3): new §2.2 — no-bypass
-   rulesets, `bestdan/ap/**` branch restriction, installation trust
-   separation, four denial tests in the Stage-1 gate.
-4. **Registry authority resolved** (blocker 4): launcher/stopper/watcher
-   are maintainer-owned and derive records from their own observations;
-   the agent writes only claims to its runfile; **no sudo append hooks
-   exist**. Agent-claimed exits are stored marked as claims, distinct
-   from observed-terminal records.
-5. **Process-tree contract** (blocker 5): explicit topology (§4.1),
-   `{pid,starttime}` incarnation identity everywhere, lease keyed to
-   canonical remote URL with atomic takeover, stop semantics that name
-   CAO workers as outside the pane tree, SIGKILL/power-loss handled as
-   observed disappearance, stale-socket procedure.
-6. **Watcher liveness/alert semantics** (blocker 6): short-lived
-   single-pass design with per-operation timeouts, flock skip +
-   `watcher_slow` signal, persisted bounded retry queue,
-   accepted-vs-delivered distinction with the daily canary as the
-   end-to-end test, numeric SLOs (10-min awake alert; 08:00 canary;
-   24h watcher-silence floor with a documented human response).
-7. **Continuation redesigned** (round-2 §3.4): watcher-corroborated
-   usage evidence (fail-closed), `expected_resume` as maintainer-owned
-   durable state (no false stalls, crash-proof counters), resume by exact
-   `run_id` via `ap-launch --resume`, never "most recent conversation."
-8. Stage-2 gate additions (groups, CWD, env allowlist, tool versions,
-   lease-takeover and CAO-parentage drills); Stage-5 made numeric.
