@@ -2229,6 +2229,41 @@ if command -v git >/dev/null 2>&1; then
   alwake "$A6B" 0 "$A6B/.auto-pilot/orchestrator.log" >/dev/null
   lack "alarm/deadline: a DONE run's past deadline never alarms" \
     'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  # (6c) REGRESSION (PRE-625): `until` is a UTC timestamp (run-state.md), so the
+  # deadline check must compare it against a UTC `now` — comparing a LOCAL `now`
+  # misfired by the machine's offset, halting a live run hours early east of UTC
+  # ("blew the --until deadline" while it is still in the future). The cases above
+  # use 2020/2099 dates no ±14h offset can flip, so they never caught it. This one
+  # sets `until` 30 min in the FUTURE (UTC) and wakes under a +9h zone: pre-fix the
+  # local-time compare reads it as blown; a UTC compare correctly does not. Force
+  # the zone so the guard is deterministic on any runner, not just a non-UTC one.
+  : >"$OSA_CALLS"
+  A6C="$AL/deadline-tz"
+  un_future="$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  mkrun "$A6C" active "$un_future" 0
+  printf 'ok\n' >"$A6C/.auto-pilot/orchestrator.log"
+  a6cout="$(TZ=Asia/Tokyo alwake "$A6C" 0 "$A6C/.auto-pilot/orchestrator.log")"
+  lack "alarm/deadline: a still-future --until does NOT alarm under a non-UTC TZ (UTC compare)" \
+    'ALARM deadline' "$a6cout"
+  [ -e "$A6C/.auto-pilot/ALARM" ] \
+    && bad "alarm/deadline: spurious deadline sentinel for a future --until under a +9h zone" \
+    || ok "alarm/deadline: no spurious deadline sentinel for a future --until under a non-UTC TZ"
+  # (6d) REGRESSION (PRE-625, offset form): `until` may carry a numeric zone offset
+  # (--until accepts any absolute ISO-8601 time). The old check only stripped a
+  # trailing `Z`, so an offset was never normalized — it compared the raw offset
+  # string and misread the deadline. Parsing it through _parse_iso8601_utc makes it
+  # a real epoch compare. This value is 30 min in the FUTURE (UTC) written in a
+  # -05:00 zone; a naive read of its wall-clock hour looks already past, a correct
+  # parse does not. The offset lives in the value itself, so no TZ forcing is
+  # needed — deterministic on every runner.
+  : >"$OSA_CALLS"
+  A6D="$AL/deadline-offset"
+  un_offset="$(date -u -v+30M -v-5H +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -d '+30 minutes -5 hours' +%Y-%m-%dT%H:%M:%S)-05:00"
+  mkrun "$A6D" active "$un_offset" 0
+  printf 'ok\n' >"$A6D/.auto-pilot/orchestrator.log"
+  a6dout="$(alwake "$A6D" 0 "$A6D/.auto-pilot/orchestrator.log")"
+  lack "alarm/deadline: a future --until with a numeric zone offset does NOT alarm (normalized, not string-compared)" \
+    'ALARM deadline' "$a6dout"
 
   # (7) THE load-bearing one: the alarm fires from the SUPERVISOR with NO model
   # call. Drive the REAL generated launch wrapper with a `claude` that dies on a
