@@ -8,7 +8,7 @@ source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan
 related_files:
   - dev_docs/auto-pilot-e-lite-design-2026-07-21.md
-is_blocked_by: elite_stage0_task_8
+is_blocked_by: elite_stage0_task_11
 parent: elite_stage0
 tags: [e-lite, stage-0, cleanup]
 ---
@@ -17,7 +17,7 @@ Plan: [[elite_stage0_plan]]
 
 ## Context
 
-Plan-lifecycle rule: `<name>_plan/` folders are temporary tracker scaffolding, not documentation. Once the measured revision is merged and the next tranche is planned, this plan is done.
+Plan-lifecycle rule: `<name>_plan/` folders are temporary tracker scaffolding, not documentation. Once the measured revision is merged and the re-plan checkpoint ([[elite_stage0_task_11]]) has produced the next tranche's plan, this plan is done.
 
 ## Task
 

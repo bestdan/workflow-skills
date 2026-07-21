@@ -33,5 +33,6 @@ In a disposable directory as `agent`, per the kill sheet:
 
 ## Acceptance Criteria
 
-- **User-run:** measurement table row with the observed tuples per step; a written selection (shim calls `setsid` itself vs pinned helper) with rationale; a statement of the strongest stable incarnation identity available, or `falsified`/`inconclusive` with the fail-closed consequence for §4.1 named.
+- **User-run:** measurement table row with the observed tuples per step; a written selection (shim calls `setsid` itself vs pinned helper) with rationale; a statement of the strongest stable incarnation identity available.
+- Redirects are explicit, not softened: self-`setsid` failing selects the pinned-helper variant; **both** variants failing (or no stable incarnation identity found) blocks probe 2 and Stage 2 and redirects to a maintainer-held guardian/process handle or a different session host (§7a probe 2's redirect), recorded in the measurement row.
 - Fixture script checked in and re-runnable.

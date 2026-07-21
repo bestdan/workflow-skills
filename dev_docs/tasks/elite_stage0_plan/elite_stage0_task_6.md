@@ -29,10 +29,11 @@ Per the kill sheet:
 - Wire the watcher's alert path to the kill-sheet-selected push provider and the real device.
 - Drill 1 — **kill**: `kill -9` the heartbeat process; measure wall-clock time to notification on the device.
 - Drill 2 — **wedge**: leave the process alive but stop its heartbeat (SIGSTOP or an intentional hang); measure time to notification.
+- Drill 3 — **launchd lifecycle** (§0a's empirical fact "launchd behavior across crash, sleep, and reboot"): crash the launchd-hosted process and observe relaunch behavior (`KeepAlive` semantics); sleep the host past a watcher tick and record what fires on wake; reboot and record whether/when the per-user jobs return without a GUI login. Record each observation — this is the only Stage-0 probe that owns the sleep/reboot questions.
 - Record provider-side vs device-side receipt ("provider accepted ≠ you received" — §5.1); note any delivery lag or drop.
 - Close against the kill sheet: pass requires device notification within the 10-minute SLO for both drills.
 
 ## Acceptance Criteria
 
-- **User-run:** both drills executed with timestamps (kill/wedge time, watcher detection time, device receipt time); probe closed with a classified result; launchd plists + watcher script checked in as re-runnable fixtures (no provider tokens committed).
+- **User-run:** all three drills executed with timestamps (kill/wedge time, watcher detection time, device receipt time; relaunch/wake/reboot observations for drill 3); probe closed with a classified result; launchd plists + watcher script checked in as re-runnable fixtures (no provider tokens committed).
 - Provider matches the kill sheet's recorded choice.

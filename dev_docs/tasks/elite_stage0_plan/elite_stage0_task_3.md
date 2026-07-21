@@ -26,7 +26,7 @@ Uses the real Max account in the two permitted ways only (§0a): establish the a
 
 From **both** an interactive shell as `agent` and a per-user launchd test job (no-GUI context), per the kill sheet ([[elite_stage0_task_2]]):
 
-- Establish agent Claude Max auth (interactive OAuth preferred; `setup-token` fallback); then verify a **headless** `claude` invocation succeeds.
+- Establish agent Claude Max auth (interactive OAuth preferred; `setup-token` fallback); then verify a **headless** `claude` invocation succeeds. This is the spike's one authorized real-Claude invocation — instrument it for double duty: record the **session UUID** (feeds the coherence probe, [[elite_stage0_task_7]]) and capture the live **shim→Claude process topology** (`{pid, pgid, sid, executable}` before/after — the real-binary observation the process-binding probe, [[elite_stage0_task_5]], cross-checks its surrogate against).
 - Start Claude Code with the native sandbox in `failIfUnavailable` mode; confirm sandbox startup succeeds in both contexts.
 - Dispatch one trivial worker (subagent) against the spike test repo ([[elite_stage0_task_10]]) and confirm it completes.
 - Verify tool/cache access: Homebrew binaries shared, agent-local caches/globals writable.
