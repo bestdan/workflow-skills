@@ -377,6 +377,11 @@ def main() -> None:
 
     if args.archive_candidates and args.older_than is None:
         die("--archive-candidates requires --older-than <N>")
+    if args.archive_candidates and args.older_than < 0:
+        # A negative threshold makes `age_days > older_than` true for age-0
+        # today_fallback cards (0 > -1), archiving freshly-written untracked
+        # done files — the opposite of this mode's safety guarantee.
+        die("--older-than must be a non-negative integer")
 
     task_dir = Path(args.task_dir)
     today = datetime.date.today()
@@ -456,7 +461,15 @@ def main() -> None:
         cards.append({"path": path, "slug": slug, "data": data, "body": body})
 
     if args.archive_candidates:
-        candidates = archive_candidates(cards, args.older_than, today)
+        # Epic rollups marked `status: done` are in-scope for archival too (see
+        # repo-pr-archive.md §"terminal state" — "epic rollups marked status:
+        # done"), even though they're excluded from ranking/execution. Give
+        # them the card shape archive_candidates expects (slug = filename stem).
+        archivable = cards + [
+            {"path": e["path"], "slug": e["path"].stem, "data": e["data"]}
+            for e in epics
+        ]
+        candidates = archive_candidates(archivable, args.older_than, today)
         print(
             json.dumps(
                 {

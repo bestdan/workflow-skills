@@ -471,6 +471,61 @@ assert_eq "archive-candidates: explicit completed field is used when present" "c
 git_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="git-dated-done") | .completion_date_source')"
 assert_eq "archive-candidates: falls through to git-commit date when completed is absent" "git_commit_date" "$git_source"
 
+# --- Fixture 13: exact `> older_than` boundary (today-relative dates) --------
+# age_days > older_than: a card completed EXACTLY N days ago (age N) is NOT
+# selected (N > N is false); N+1 days ago IS. Dates are computed relative to
+# today via python3 (portable across macOS/CI, unlike `date` flag divergence).
+DIR13="$BASE/archive-boundary"
+mkdir -p "$DIR13"
+d30="$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=30)).isoformat())")"
+d31="$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=31)).isoformat())")"
+write_task "$DIR13/exactly-30.md" "title: Completed exactly 30 days ago
+priority: low
+size: 1
+status: done
+completed: $d30
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+write_task "$DIR13/exactly-31.md" "title: Completed 31 days ago
+priority: low
+size: 1
+status: done
+completed: $d31
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+out13="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR13")" || bad "boundary fixture: script exited non-zero"
+boundary_slugs="$(printf '%s' "$out13" | jq -r '.candidates[].slug' | sort)"
+assert_eq "archive-candidates: exactly-N is excluded, N+1 is selected (> not >=)" "exactly-31" "$boundary_slugs"
+
+# --- Fixture 14: a done epic rollup is an archive candidate (repo-pr-archive
+# §terminal-state names "epic rollups marked status: done" as in-scope) -------
+DIR14="$BASE/archive-epic"
+mkdir -p "$DIR14"
+write_task "$DIR14/widget_plan.md" "type: epic
+title: Widget epic
+status: done
+completed: 2020-01-01" "$(std_body)"
+write_task "$DIR14/active_plan.md" "type: epic
+title: Active epic
+status: active
+completed: 2020-01-01" "$(std_body)"
+
+out14="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR14")" || bad "epic archive fixture: script exited non-zero"
+epic_cands="$(printf '%s' "$out14" | jq -r '.candidates[].slug' | sort)"
+assert_eq "archive-candidates: done epic rollup is selected, non-done epic is not" "widget_plan" "$epic_cands"
+
+# --- Fixture 15: a negative --older-than is rejected -------------------------
+if "$SCRIPT" --archive-candidates --older-than -1 "$DIR14" >/dev/null 2>"$BASE/neg.stderr"; then
+  bad "negative --older-than: script should exit non-zero, exited 0"
+else
+  ok "negative --older-than: script exits non-zero"
+fi
+
 echo
 echo "test-task-scan: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1
