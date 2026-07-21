@@ -106,36 +106,36 @@ the handler doc's own remediation.
   it; do not restate the `git mv` steps). This is one check among many — not the
   command's reason to exist.
 
-**Check 4 — Schema drift.** Task files whose frontmatter is invalid. This is **two
-sub-checks** because they have different sources of truth:
+**Check 4 — Schema drift.** Task files whose frontmatter is invalid. Delegate entirely
+to `scripts/validate.py`, passing the **consumer repo's** task dir explicitly (its
+default is this plugin's own `dev_docs/tasks`, which is not what a consumer-repo
+`/doctor` run should validate) and resolving the script via the **plugin install
+dir**, not the consumer repo's git root — a consumer repo has no `scripts/validate.py`
+at its own root:
 
-1. **Present-but-invalid fields** — reuse `scripts/validate.py`'s rules (out-of-range
-   `size`/`impact`, bad `status`/`priority`, malformed `is_blocked_by`, mistyped
-   `assignee`/`parent`, epic-shape violations). Run it and surface its
-   `dev_docs/tasks/**` failures:
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks" 2>&1
+```
 
-   ```bash
-   uv run "$(git rev-parse --show-toplevel)/scripts/validate.py" 2>&1
-   ```
+`validate.py` covers both present-but-invalid fields (out-of-range `size`/`impact`,
+bad `status`/`priority`, malformed `is_blocked_by`, mistyped `assignee`/`parent`,
+epic-shape violations) and missing required fields / `expires` shape — no separate
+hand-check against the **Field reference** in `skills/task/SKILL.md` is needed; that
+table is `validate.py`'s source of truth for the same rule.
 
-2. **Missing required fields** — `validate.py` is deliberately **lenient**: it only
-   validates a field's shape _when present_ and never checks `expires` at all, so it
-   does **not** report a card missing a required field. So `/doctor` must check this
-   itself, against the **Field reference** in `skills/task/SKILL.md` (required:
-   `title`, `priority`, `size`, `status`, `created`, `source_branch`, `related_files`,
-   `expires`). Read each non-epic card's frontmatter and flag any required field that
-   is absent.
+Classify the reported findings (`✘` = error, `⚠` = warning in `validate.py`'s output),
+but **ignore any `⚠ expired:` warnings here** — those are hygiene, owned by Check 5
+(via `task-scan.py`); classifying them here too would double-report the same card:
 
-Classify the combined findings:
-
-- **Defaultable / mechanical** (a missing `expires` — default 30 days from `created`)
-  → `FAIL`, fixable under `--fix`.
+- **Defaultable / mechanical** (`missing required field 'expires'`) → `FAIL`, fixable
+  under `--fix` (default 30 days from `created`).
 - **Needs judgment** (an out-of-range `size`, an unknown `status` value, a missing
   field with no safe default like `title` or `source_branch`) → `WARN`; point at the
   file and the rule.
 
-No drift → `PASS`. If `uv` is unavailable, fall back to reading the frontmatter shape
-rules from `scripts/validate.py` and applying them yourself. (Schema drift stays a
+No drift → `PASS`. If `uv` or the script is unavailable, report this check as
+`WARN`: "Schema drift check skipped — uv/scripts/validate.py unavailable." Do **not**
+fall back to re-deriving the frontmatter rules by hand. (Schema drift stays a
 `validate.py` job — it owns frontmatter **shape**; the `scripts/task-scan.py` scanner
 that check 5 uses for expiry owns **scan/rank/readiness**. They are deliberately
 separate authorities, so `/doctor` calls both.)
