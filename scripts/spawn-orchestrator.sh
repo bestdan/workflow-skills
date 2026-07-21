@@ -2361,26 +2361,22 @@ _run_md_parked_count() {
   awk -F'|' '/^\|/ { p=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == "parked") n++ } END { print n+0 }' "$f"
 }
 
-# True (0) iff the run's `--until` deadline is in the past. `until` is a UTC
-# ISO-8601 timestamp (run-state.md: "Write the Z form"), so `now` is taken in UTC
-# too (`date -u`) and the trailing `Z` is stripped from `until` — both sides are
-# then the SAME zone, so a LEXICOGRAPHIC compare is a correct time compare with no
-# date-parsing dependency (`date -d` / `date -j` differ across platforms, and a
-# supervisor that can't parse a date must not be the reason nobody gets told).
-# `now` MUST be UTC: comparing a local-time `now` against a UTC `until` misfires by
-# the machine's UTC offset — east of UTC (e.g. BST) it halts a live run hours early
-# ("blew the --until deadline" while the deadline is still in the future); west of
-# it, a genuinely-blown deadline goes undetected for hours. A value that isn't
-# ISO-shaped is not "blown", it's unreadable — never alarm on garbage.
+# True (0) iff the run's `--until` deadline is in the past. Normalize `until` to an
+# epoch with the SAME shared parser supervisor_gate uses for `paused_until` on this
+# wake path (_parse_iso8601_utc), then compare against `date -u +%s`. Both fields
+# are RUN.md UTC timestamps, so routing them through one parser keeps them
+# consistent and correct for every ISO form RUN.md may carry — a trailing `Z`, a
+# numeric `+HH:MM`/`-HH:MM` offset, a space separator, omitted seconds, or a
+# zone-less value (which the parser maps to UTC, per its own note). A hand-rolled
+# lexicographic compare could not: it needs both sides in one zone, and only ever
+# stripped `Z` — a local `now` (the original bug) misfired by the machine's offset,
+# halting a live run hours early east of UTC, and an offset-bearing `until` was
+# never normalized at all. A value the parser can't read is not "blown", it's
+# unreadable — return false so we never alarm on garbage.
 _deadline_blown() {
-  local u="${1%Z}"
-  case "$u" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) ;;
-    *) return 1 ;;
-  esac
-  local now
-  now="$(date -u +%Y-%m-%dT%H:%M:%S)"
-  [ "$now" \> "$u" ]
+  local until_epoch
+  until_epoch="$(_parse_iso8601_utc "$1")" || return 1
+  [ "$(date -u +%s)" -gt "$until_epoch" ]
 }
 
 # Set by _supervisor_alarm_scan when the condition it found is TERMINAL (the run
