@@ -15,6 +15,78 @@ to become its own task/PR.
 > shipped. The original 2026-07-10 text is preserved as-is below the update as
 > the historical record.
 
+> **Graduated 2026-07-21 — read [Delivered](#delivered--2026-07-21-plan-graduated-scaffolding-removed) for the durable record.** The
+> **Deterministic-script extraction** project (PRE-609..PRE-615) is complete and
+> its plan scaffolding retired. This doc is now that project's permanent home;
+> the Delivered section below is the consolidated engineering wisdom (final
+> script interfaces + the gotchas that are easy to re-break), so it survives
+> even if the per-Finding narrative is ever trimmed.
+
+## Delivered — 2026-07-21 (plan graduated, scaffolding removed)
+
+The repo-pr deterministic-script workstream shipped in full. The per-Finding
+"delivered" annotations further down cross-reference the merged PRs; this
+section is the load-bearing summary a future maintainer needs before touching
+any of these scripts.
+
+### Shipped scripts (final interfaces)
+
+| Script                           | PR(s)                                             | Interface                                                                                                                                               | Replaces (re-derived prose)                                                                                                                                                         |
+| -------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/task-scan.py`           | PRE-609 #235; `--archive-candidates` PRE-614 #240 | `task-scan.py [task_dir] [--prs <json>]` · `… --archive-candidates --older-than <N>`                                                                    | scan/rank/readiness + per-`new`-card promote gate (repo-pr-execute §1–2, list-tasks §2–3, promote-tasks §1, doctor 4–5) + `/archive-tasks` candidate selection (repo-pr-archive §2) |
+| `scripts/plan-graph.py`          | PRE-610 #236                                      | `plan-graph.py <plan_dir> --id-shape linear\|gh\|jira [--rewrite <slug>=<id>]` · or a `[{slug, is_blocked_by, tracker_id, status}]` JSON array on stdin | `/push-plan` §4.3/§5.3/§5b.3 hand-walked topological order + cycle detection                                                                                                        |
+| `scripts/validate.py` (extended) | PRE-611 #237                                      | `validate.py [task_dir]`                                                                                                                                | `/doctor` check 4's hand-simulated frontmatter field/expiry checks; also fixed the consumer-repo path bug (see below)                                                               |
+| `scripts/claim-scan.sh`          | PRE-612 #238                                      | `claim-scan.sh [--repo <o/n>] [--task-dir <dir>] [--gh <path>] [--limit <n>]`                                                                           | orchestrator-side claim/WIP query + whole-line slug match (repo-pr-execute claim/WIP, do-tasks, doctor stale-claim)                                                                 |
+| Finding #5 supervisor (verified) | PRE-613 #239                                      | `spawn-orchestrator.sh` (`classify-exit`/`supervisor-check`/`supervisor-gate`/`supervisor-scan`), `claude-auto-resume.sh`, `claude-usage.sh`            | the outer relaunch/backoff supervisor the finding said was unbuilt; one residual gap → PRE-619                                                                                      |
+
+### Load-bearing decisions & gotchas (easy to re-break)
+
+1. **Consumer-repo path resolution (task 3 / PRE-611).** The task dir is an
+   explicit **argument**, never `git rev-parse --show-toplevel`. `validate.py`,
+   `task-scan.py`, and `claim-scan.sh` all default to `dev_docs/tasks` **relative
+   to cwd** and accept an override, because a consumer repo has no
+   `scripts/validate.py` at its root and `ROOT = __file__.parent.parent` would
+   validate the _plugin's own_ tasks instead of the consumer's. `/doctor` passes
+   the consumer's resolved dir. Do not "simplify" any of these back to a git-root
+   lookup — that is the exact defect PRE-611 fixed.
+
+2. **Whole-line claim matching (task 4 / PRE-612).** The `Claims-task: <slug>`
+   marker matches a **whole line** (`grep -Fxq`), never a substring — a naive
+   substring test lets slug `task_1` falsely match a `Claims-task: task_13`
+   line, a bug the repo was burned by once. `claim-scan.sh` is the single
+   orchestrator-side home for the rule so it can only be broken (or fixed) once.
+   **Exception:** the remote-dispatch prompt in `repo-pr-execute.md` keeps its
+   inline prose copy — the remote VM has no plugin installed and cannot call the
+   script. Do not wire that block to `claim-scan.sh`.
+
+3. **repo-pr only; Linear was covered separately (the handler boundary).** These
+   scripts serve only the **repo-pr** file path (`dev_docs/tasks/**/*.md`). The
+   Linear handler's equivalent scan/rank/graph _reads_ were extracted
+   independently and earlier into the GraphQL fast-path assets (`linear-scan.py`,
+   `linear-ready.py`, `linear-relations.py`, `linear-false-closures.py`) behind a
+   fast-path/floor fallback — see the [2026-07-15 Update](#update--2026-07-15).
+   jira/gh-issue scan stays MCP/`gh`-response prose. Don't try to unify the two
+   paths: the split — file-path work is scriptable, MCP mutations stay prose — is
+   the whole thesis.
+
+4. **Fail-closed, tested, single-source — the shared mold.** Every script carries
+   an explicit "replaces the ad-hoc X" header, emits structured/parseable stdout,
+   fails closed on malformed input (exit non-zero, never silently skip), and has a
+   paired test wired into `scripts/check.sh`. Note `plan-graph.py` still prints
+   its JSON doc (with a populated `cycles` list) _before_ dying on a cycle, so the
+   caller sees exactly which slugs collide.
+
+### Plan completion
+
+All seven tasks (PRE-609..PRE-615) are delivered. The plan's local scaffolding
+(`dev_docs/tasks/deterministic_scripts_plan/`) was discarded with its branch
+`claude/sleepy-ride-8d4bjx` before graduation, so no residue remains under
+`dev_docs/tasks/`. The one residual item — the auto-pilot backoff /
+consecutive-pause numbers `run-budget.md` still states in prose that don't match
+the shipped code — is tracked independently as
+[PRE-619](https://linear.app/prethinkio/issue/PRE-619) and is **not** in this
+project's scope. This audit is the graduated permanent home for the workstream.
+
 ## Update — 2026-07-15
 
 Five days of work on main (this branch is ~96 commits behind it) shipped the
