@@ -49,7 +49,7 @@ On the fast path, the script's own prelude resolves the team itself, so this
 2. **Call the script.**
 
    ```bash
-   python3 commands/handlers/assets/linear-relations.py --team "<linear.team>" \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-relations.py" --team "<linear.team>" \
      --project "<scope-1-id>" --project "<scope-2-id>" ...
    ```
 

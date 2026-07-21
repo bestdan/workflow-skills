@@ -116,7 +116,7 @@ non-zero when no key is resolvable, so the fallback **is** the gate, same as
    bucket, fall back to the MCP floor for that scope.
 
    ```bash
-   python3 commands/handlers/assets/linear-scan.py --team "<linear.team>" \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
      --project "<scope-id>" --state-type backlog --state-type unstarted
    ```
 

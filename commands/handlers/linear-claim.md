@@ -36,12 +36,12 @@ On the fast path, the script's own prelude resolves the team itself (and exits d
 2. **Call the script.**
 
    ```bash
-   python3 commands/handlers/assets/linear-ready.py --team "<linear.team>" \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-ready.py" --team "<linear.team>" \
      --project "<scope-1-id>:<scope-1-max_estimate>" --project "<scope-2-id>:<scope-2-max_estimate>" ... \
      --max-estimate <linear.max_estimate, default 3>
    ```
 
-   Omit `--project` entirely for the whole-team scope (`id: null`). If the relative path doesn't resolve, Glob `**/handlers/assets/linear-ready.py`. Parse stdout as the `{ meta: { viewer, team, states }, candidates: [...], dropped: [...] }` object described in the script's header comment; a parse failure is itself a fallback trigger (see above).
+   Omit `--project` entirely for the whole-team scope (`id: null`). If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-ready.py`. Parse stdout as the `{ meta: { viewer, team, states }, candidates: [...], dropped: [...] }` object described in the script's header comment; a parse failure is itself a fallback trigger (see above).
 
 3. **Re-attach the resolved scope to each candidate.** The script tags each candidate's `project` with only `{ id, name, max_estimate }` — it does not know `wip_limit`. Match `candidate.project.id` against the scopes resolved in step 1 and merge in that scope's `wip_limit` (and its authoritative `name`, if step 1's is more complete). This merge is **not optional**: `do-tasks.md`'s pre-claim WIP gate reads `candidate.project.wip_limit`, and without the merge the WIP gate has no cap to check on the fast path.
 

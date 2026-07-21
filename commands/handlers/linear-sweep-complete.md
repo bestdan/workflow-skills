@@ -109,12 +109,12 @@ gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
    state-type set this sweep needs, per `linear-common.md` "In-flight scan"):
 
    ```bash
-   python3 commands/handlers/assets/linear-scan.py --team "<linear.team>" \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
      --project "<scope-1-id>" --project "<scope-2-id>" ... \
      --state-type started
    ```
 
-   If the relative path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
    Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
    identifier, title, url, state, attachments, project } ] }` object described
    in the script's header comment; a parse failure is itself a fallback
