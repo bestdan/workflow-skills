@@ -1,7 +1,7 @@
 ---
 title: Auto-pilot E-lite — design proposal (identity-first, no-VM substrate)
 created: 2026-07-21
-status: proposal — v3
+status: proposal — v4
 context: A maintainer-owned control plane paired with an agent-owned execution plane, so trust flows one way (Max subscription for everything; a dedicated macOS agent user; GitHub App identity; tmux-hosted orchestrator for remote attach).
 audience: reviewer, then implementer
 related:
@@ -10,6 +10,7 @@ related:
   - ./auto-pilot-option-e-research-2026-07-21.md
   - ./auto-pilot-e-lite-design-review-codex.md
   - ./auto-pilot-e-lite-design-review-codex-r2.md
+  - ./auto-pilot-e-lite-design-review-codex-r3.md
   - ./auto-pilot-problem-statement.md
 ---
 
@@ -67,10 +68,18 @@ harness is deleted only after Stage 5 + a dependency audit.
   owner, mode, and non-symlink status before use, and refuses otherwise).
   There is **no agent-invokable mint** — an on-demand mint the agent could
   trigger would make the 1-hour TTL meaningless, since the agent could
-  re-invoke at will. With a 45-minute refresh of a 60-minute
-  token, the published token always has ≥15 minutes of validity; a stale
-  token file means the broker is dead, and the run's response is
-  stop-and-notify — never a fallback credential.
+  re-invoke at will. With a 45-minute refresh of a 60-minute token, the
+  published token normally has ≥15 minutes of validity — but a failed
+  refresh makes staleness unbounded, so broker health is monitored
+  independently: the **watcher alerts when the token file's mtime exceeds
+  50 minutes** (i.e. before expiry, not after), and the agent-side helpers
+  apply a **minimum-validity admission rule** — they read the expiry from
+  the broker log and refuse to *start* a push/PR operation with < 5
+  minutes of validity remaining (failing closed to stop-and-notify). A
+  long write that loses authentication mid-flight falls under the
+  unknown-outcome reconciliation rule below. A stale token file means the
+  broker is dead; the response is stop-and-notify — never a fallback
+  credential.
 - **Publication protocol**: all control-plane state lives under a neutral
   maintainer-owned root, `/usr/local/autopilot/` (`maintainer:apagent`,
   dirs 0750 — the agent traverses but cannot write or substitute paths).
@@ -126,7 +135,13 @@ agent-owned clones; per-task worktrees inside them.
 | App private key | maintainer | `~danielegan/.autopilot/app.pem` 0600 | **No** (Stage-1 gate) | mint-only | until rotated | App settings | delete key → next broker run alerts |
 | Installation token | broker | `/usr/local/autopilot/gh-token` 0640 | Yes | installed repos, PR/contents/issues | 1 h (≥15 min fresh) | broker 45 min | uninstall App |
 | Linear bot key | agent | agent env file 0600 | Yes | team-scoped RW | static | manual | revoke in Linear |
-| Claude Max OAuth | agent | agent `~/.claude` | Yes | subscription | long-lived | re-auth | console sign-out |
+| Claude Max OAuth (run) | agent | agent `~/.claude` | Yes | subscription | long-lived | re-auth | console sign-out |
+| Claude Max OAuth (observation) | maintainer | maintainer Keychain / `~/.claude` | No | subscription, usage queries only (§5.3) | long-lived | re-auth | console sign-out |
+
+The observation credential is your existing login — inventoried because
+the watcher's usage queries (§5.3) run as maintainer and would otherwise
+have no credential path (`claude-usage.sh` reads the *invoking* user's
+Keychain), which would make continuation permanently fail closed.
 
 ## 3. Containment layer
 
@@ -175,16 +190,30 @@ from its own observations.
 ```
 you (maintainer shell, local or ssh)
 └─ ap-launch <repo> <source> [flags]          maintainer uid
-   ├─ acquires lease, writes launch record     (control plane)
-   └─ sudo -iu agent tmux -S /usr/local/autopilot/tmux.sock \
-        new-session -d -s ap-<run_id> run-shim <run_id>
-      └─ tmux server                           agent uid (long-lived, all runs)
-         └─ pane: run-shim                     agent uid
-            ├─ setsid → records own {pid, pgid, starttime}
-            │   to /Users/agent/work/<run_id>/.runfile   (a CLAIM)
-            └─ exec claude ... (orchestrator session)
-                └─ workers (subagents; CAO workers live OUTSIDE this tree)
+   ├─ acquires lease                           (control plane)
+   ├─ starts the session via ap-agent-exec (see below)
+   ├─ OBSERVES the pane PID via ap-agent-exec pane-pid,
+   │   resolves {pid, starttime} from the process table itself,
+   │   then writes the launch record + lease incarnation   (facts)
+   └─ session started as:
+      tmux server                              agent uid (long-lived, all runs)
+      └─ pane: run-shim                        agent uid
+         ├─ setsid → records own {pid, pgid, starttime}
+         │   to /Users/agent/work/<run_id>/.runfile   (a CLAIM — corroboration only)
+         └─ exec claude --session-id <uuid> …  (orchestrator session)
+             └─ workers (subagents; CAO workers live OUTSIDE this tree)
 ```
+
+**The agent-side command boundary** is a single narrow wrapper,
+`ap-agent-exec`, with a **fixed verb interface** — `start-session
+<run_id>`, `pane-pid <run_id>`, `list-sessions`, `attach <run_id>`,
+`kill-session <run_id>` — and nothing else. It is maintainer-owned,
+invoked as `sudo -u agent env -i /usr/local/autopilot/bin/ap-agent-exec
+…` (scrubbed environment; absolute maintainer-owned paths for `tmux` and
+`run-shim` hard-coded inside it; fixed working directory; `run_id`
+validated against `^[a-z0-9-]+$` before use). The generic `sudo -iu
+agent <anything>` form exists nowhere in sudoers — the lifecycle boundary
+gets the same fixed-configuration treatment as the broker.
 
 - **Run identity**: `run_id` = timestamp+slug. Session `ap-<run_id>` on
   the single pinned socket `/usr/local/autopilot/tmux.sock` (parent dir
@@ -195,26 +224,46 @@ you (maintainer shell, local or ssh)
   it makes itself, as maintainer).
 - **Incarnation identity**: every recorded process is stored as
   `{pid, starttime}` pairs (from `ps -o lstart=`), never bare PIDs — PID
-  reuse cannot impersonate a recorded process.
-- **Lease** (maintainer-owned): atomic `mkdir
-  /usr/local/autopilot/lock/<repo-key>` where `<repo-key>` is the
-  canonical remote URL hash (not a local path). The lock's owner record
-  `{run_id, launcher pid+starttime, created_at}` is written inside it
-  before the tmux session starts. Takeover exists only as
-  `ap-launch --take-over`, run by you, which verifies the recorded
-  incarnation is dead before replacing the record — two concurrent
-  resumers cannot both pass the atomic mkdir.
-- **Stop semantics** (`ap-stop <run_id>`, maintainer-owned): read registry
-  + runfile; verify the runfile's `{pid,starttime}` still matches a live
-  process (else record observed-terminal and exit); signal the shim's
-  recorded process group (TERM, grace, KILL); `tmux kill-session`; then
-  shut down this run's CAO workers via the CAO API (they are *not* in the
-  pane tree, so the stop contract names them explicitly). Release the lease
-  last.
+  reuse cannot impersonate a recorded process. **The run's incarnation is
+  the pane/shim `{pid, starttime}` the launcher observed itself** — not
+  the launcher's own PID (which exits immediately after launch and would
+  make every live run look takeover-eligible), and not the runfile's
+  claim.
+- **Session identity**: `ap-launch` generates the Claude session UUID,
+  passes it via `--session-id`, and records it in the launch record. Any
+  future resume targets exactly that session — never "the most recent
+  conversation in this directory."
+- **Lease** (maintainer-owned, generation-based): the lock at
+  `/usr/local/autopilot/lock/<repo-key>` (`<repo-key>` = canonical remote
+  URL hash, not a local path) is created by atomic `mkdir` and holds an
+  owner record `{generation, run_id, run incarnation, registered CAO
+  worker ids, created_at}` — the incarnation written by the launcher
+  *after* it observes the started pane. **Release** happens in exactly two
+  places: `ap-stop` (after teardown), or reclamation by the next
+  `ap-launch`/`--resume`. A lease left held after an observed-terminal is
+  expected and harmless — the watcher never releases it (it clears
+  nothing); the next launch reclaims it through the takeover path.
+  **Takeover** (`ap-launch --take-over`, human-run): acquire the exclusive
+  takeover mutex (a second atomic `mkdir`, `takeover.lock` — two
+  concurrent takeovers cannot both hold it); verify the recorded **run
+  incarnation and every registered CAO worker** are dead; increment
+  `generation` and replace the owner record; release the mutex. Records
+  from a superseded generation are recognizable and never acted on.
+- **Stop semantics** (`ap-stop <run_id>`, maintainer-owned): all targets
+  come **from the registry and live process-table observation, never from
+  the runfile** — the runfile corroborates but cannot select a kill
+  target (an agent-writable file must not aim a maintainer-privileged
+  signal). Sequence: read the launch record's incarnation; confirm it in
+  the process table (else record observed-terminal, release lease, exit);
+  signal its process group (TERM, grace, KILL); `ap-agent-exec
+  kill-session`; shut down this run's registered CAO workers via the CAO
+  API (they are *not* in the pane tree, so the stop contract names them
+  explicitly); release the lease last.
 - **Terminal records — two kinds, never conflated**:
   - *agent-claimed exit*: the shim writes `{exit_code, end_time}` to the
     runfile on normal exit. The watcher copies it into the registry
-    **marked as a claim**.
+    **marked as a claim**. A claim **never** releases the lease,
+    suppresses an alert condition, or authorizes resume or cleanup.
   - *observed-terminal*: written by watcher or `ap-stop` from their own
     process checks (session gone, incarnation dead). SIGKILL/power loss
     produce no claim — only an observed-terminal record. The registry
@@ -224,17 +273,29 @@ you (maintainer shell, local or ssh)
 
 `/usr/local/autopilot/registry/` — writers are `ap-launch`, `ap-stop`, and
 the watcher only (all maintainer uid). Schema: versioned JSONL, one file
-per month; record types `launch`, `observed_terminal`, `claimed_exit`
-(marked), `alert`, `canary`, each with `run_id`, `schema`, monotonic
-`seq`, and writer identity. Append serialization via `flock`; duplicate
-`seq` or out-of-order records are a watcher alert, not silently repaired.
+per month; record types (complete): `launch`, `observed_terminal`,
+`claimed_exit` (marked), `alert`, `alert_failed`, `canary`,
+`watcher_slow`, `usage_limit`, `expected_resume`, `continuation_attempt`,
+`takeover` — each with `run_id`, `generation`, `schema`, monotonic `seq`,
+and writer identity. Append serialization via `flock`; duplicate `seq` or
+out-of-order records are a watcher alert, not silently repaired.
 "Append-only" is enforced by uid ownership (agent has group read, no
 write), not asserted.
 
 ### 4.3 Heartbeat and remote workflow
 
-Heartbeat: agent touches `.heartbeat` per loop turn (liveness
-claim only). Remote workflow: ssh → sudo'd attach wrapper → detach.
+Heartbeat: agent touches `.heartbeat` per loop turn. **Staleness
+threshold: 10 minutes** (matching the alert SLO): stale → stall alert.
+Freshness is **non-authoritative**: a fresh heartbeat (or a
+present-looking tmux session) means only "no stall condition" — it never
+cancels, delays, or suppresses any condition raised by a control-plane
+observation (dead incarnation, overdue `expected_resume`, registry
+anomaly, broker-staleness), and it never establishes terminal state. A
+wedged-but-touching run is caught by those other conditions and,
+ultimately, by the human reading the morning report — the heartbeat is a
+liveness tripwire, not a health certificate.
+
+Remote workflow: ssh → `ap-agent-exec attach` wrapper → detach.
 Double-launch refused by the lease; two operators attaching is safe
 (read-only unless they type).
 
@@ -246,13 +307,17 @@ Launchd job, `StartInterval` 300s, **single short-lived pass per
 invocation** (no daemon to wedge): non-blocking `flock` (skip if a
 previous pass is running); every external operation has a timeout —
 process/tmux probes 10s, push delivery 15s, total pass budget 60s. If a
-pass overruns, launchd simply fires the next one; two consecutive
-skipped-by-flock passes append a `watcher_slow` record.
+pass overruns, launchd simply fires the next one. Each successful pass
+records its own timestamp; a pass that finds the previous success **older
+than 2 intervals** appends a `watcher_slow` record covering the gap (the
+realizable form of skipped-pass detection — a skipped pass can't record
+anything itself, so the next successful one accounts for the silence).
 
 Checks per tick (each independent, none authorizes repair): registered-run
-incarnation liveness; tmux session existence (via the sudo'd exec
-wrapper); heartbeat freshness vs threshold; terminal-record consistency
-(runfile claim vs registry); alert-queue state.
+incarnation liveness; tmux session existence (via `ap-agent-exec
+list-sessions`); heartbeat freshness vs the 10-minute threshold;
+broker-token freshness (§2.1's 50-minute deadline); terminal-record
+consistency (runfile claim vs registry); alert-queue state.
 
 **Alert contract (numeric):**
 
@@ -282,39 +347,69 @@ Stop-the-run event; boot notification; human-initiated `--resume` (§6).
 
 ### 5.3 Usage-limit handling (evidence-based; continuation Stage 5+ only)
 
-- **Authoritative evidence**: a `claude` exit alone is not
-  a rate-limit determination. On any orchestrator exit, the *watcher*
-  (maintainer side, same Max subscription) queries usage itself
-  (`claude-usage.sh --session-status` as maintainer). Exit + independently
-  observed exhausted-window = `usage_limit` observed-terminal record with
-  `reset_epoch`; exit + healthy window = ordinary termination alert. If
-  the usage query itself fails: fail closed — ordinary termination alert,
-  no continuation.
+- **Authoritative evidence**: a `claude` exit alone is not a rate-limit
+  determination. On any orchestrator exit, the *watcher* queries usage
+  itself — as maintainer, with the **observation credential** from the
+  §2.3 inventory (same Max subscription; `claude-usage.sh` resolves the
+  invoking user's credentials, so the maintainer side must hold one — its
+  presence is a Stage-2 canary item). **Exhausted-window predicate**
+  (exact): the usage query reports the session window at ≥100%
+  utilization with a `reset_epoch` in the future. Exit + predicate true =
+  `usage_limit` record with `reset_epoch`; exit + predicate false =
+  ordinary termination alert. Usage query fails → fail closed: ordinary
+  termination alert, no continuation.
 - **Stages 1–4: stop-and-notify.** The alert carries `reset_epoch`.
 - **Stage 5+: bounded continuation, control-plane-owned.** Not an
   agent-side sleeping parent — its sleep would be indistinguishable from a
-  wedge. Instead, when the watcher records
-  `usage_limit`, it writes an `expected_resume {run_id, at: reset_epoch+jitter}`
-  record — maintainer-owned durable state, so the run is *known* to be
-  intentionally paused (no false stall) and the attempt counter survives
-  crashes and relaunches. At/after `at`, the
-  continuation step — a maintainer launchd job — re-runs `ap-launch
-  --resume <run_id>` (same lease, fresh reserve check, exact run
-  identity — never "most recent conversation", an ambiguity that would let
-  the wrong conversation be resumed): **at most once per usage window,
-  at most twice per run**, counters read from the registry. Clock changes,
-  host sleep past `at`, reboot, or missing usage data → stop-and-alert,
-  never a silent extra attempt.
+  wedge. When the watcher records `usage_limit`, it also writes
+  `expected_resume {run_id, generation, at: reset_epoch+jitter}` —
+  maintainer-owned durable state, so the run is *known* to be
+  intentionally paused (no false stall; and no agent heartbeat or session
+  state can negate an `expected_resume` or an independently detected
+  failure) and attempt counters survive crashes and relaunches. At/after
+  `at`, a maintainer launchd job re-runs `ap-launch --resume <run_id>` —
+  same lease (via the takeover path), fresh reserve check, resuming the
+  **exact recorded Claude session UUID** from the launch record (§4.1) —
+  writing a `continuation_attempt` record first. Bounds: **at most once
+  per usage window, at most twice per run**, counted by
+  `continuation_attempt` records in the registry (typed, durable,
+  crash-proof). Clock changes, host sleep past `at`, reboot, or missing
+  usage data → stop-and-alert, never a silent extra attempt.
 
 ## 6. Keep / port / delete
 
-The three-way split, with the ported
-*resume* invoked as `ap-launch --resume <run_id>` — lease revalidation
-and registry continuity come from the control plane; the model-side
-reconciliation prose (git + tracker + run-state comparison) is the ported
-read-only part. Deletion of the old harness: after Stage 5 + grep-clean
-dependency audit (the verified coupling list: `SKILL.md`,
-`resume.md`, `run-state.md`, `run-budget.md`, `launch-runtime.md`).
+**Keep as-is**: `/deliver-task` lifecycle + adapters + co-review + freeze
+rule; `task-scan.py`, `plan-graph.py`, `claim-scan.sh`, `validate.py`,
+`probe-coders.sh`, `select-coder`/`orchestrate-coders`/`cao-coder.sh`;
+`pr-fix-guard.sh`; the run-state file formats as the human-readable
+ledger.
+
+**Port small** (new, minimal implementations under this design):
+- *Admission canary* (successor of `preflight.sh`, a rewrite, not a
+  rename): executes the real path as the agent identity — clone, commit,
+  push, PR open/close, Linear read/write, usage query, one worker
+  dispatch — pass/fail on the actual load-bearing operations.
+- *Read-only reconciliation* (successor of doctor's 7 invariants):
+  reports divergence between run-state, git, and tracker; repairs
+  nothing.
+- *Resume*, invoked as `ap-launch --resume <run_id>`: lease revalidation
+  and registry continuity from the control plane; the model-side
+  reconciliation prose (git + tracker + run-state comparison) is the
+  ported read-only part. No alarm-clearing, exit-state, or doctor-repair
+  steps — those concepts no longer exist.
+- *Run-loop prose in `SKILL.md`*: heartbeat touch + reserve gate + §5.3
+  stop semantics replace every legacy harness invocation.
+- *`claude-usage.sh`*: verified (fixed if needed) for both credential
+  contexts — agent (reserve gate) and maintainer (watcher observation).
+
+**Delete, do not port** (after Stage 5 + grep-clean dependency audit;
+until then the old harness remains as an explicitly unsupported
+fallback): `spawn-orchestrator.sh` + its test suite,
+`orchestrator.sb.tmpl`, `orchestrator.plist.tmpl`,
+`smoke-confinement.sh`, the supervisor pause ledger, exit
+classification, in-jail alarm machinery, the verify broker, and
+wrapper-specific doctor repairs. Verified coupling to audit: `SKILL.md`,
+`resume.md`, `run-state.md`, `run-budget.md`, `launch-runtime.md`.
 
 Linear reconciliation: ≈24 issues obsoleted with pointer; PRE-536 →
 launcher prompt file; PRE-551 → §2.1/§5.3 protocols; PRE-619 closes with
@@ -327,7 +422,8 @@ Build: App + rulesets (§2.2), broker, token file, `gh` shim, cred helper,
 agent gitconfig (runnable before the agent user exists).
 **Gate** (all executed): canary performs clone/commit/push/PR
 open+comment+close/Linear read+write **including the GraphQL reads `gh`
-actually issues**; **App key unreadable from every Stage-1 process path**;
+actually issues**; **App key unreadable from every non-broker process
+path**;
 broker fixed-config verified (refuses
 symlinked/wrong-owner paths; atomic rename observed under a concurrent
 reader; no arguments/env accepted); mint fault drills (expired token,
@@ -349,8 +445,12 @@ sentinels in your home/Keychain/`~/.ssh`/`~/.aws`/personal gitconfig
 unreadable; App key unreadable; Claude auth headless; `kill -9` of the
 orchestrator → remote push (delivery-logged) within the 10-min SLO;
 canary alert received on the real device; re-attach after disconnect;
-double-launch refused; lease takeover drill (dead incarnation replaced,
-live one refused); CAO worker parentage recorded and `ap-stop` shown to
+double-launch refused; lease takeover drills (dead incarnation replaced;
+**live incarnation refused** — proving the incarnation is the pane, not
+the exited launcher; **two concurrent takeovers → exactly one wins** the
+mutex); maintainer observation credential present and usage query
+succeeds as maintainer; `ap-agent-exec` rejects an invalid `run_id` and
+an unknown verb; CAO worker parentage recorded and `ap-stop` shown to
 reach it.
 
 **Stage 3 — run #4** (one small real task, non-auto-pilot plan, partially
@@ -372,8 +472,11 @@ supervisor commands, no duplicate PR/claim/comment, no destructive touch
 of a live worker.
 
 **Stage 5 — overnight.** Prerequisites: forced-stall alert through the
-real remote channel; continuation counters proven durable across a wrapper
-crash. Then one genuinely unattended run: starts with no attached
+real remote channel; continuation failure-injection drills — counters
+proven durable across a continuation-job crash, a stale `expected_resume`
+(clock moved / host slept past `at`) producing stop-and-alert, and a
+fresh agent heartbeat shown *not* to cancel an overdue
+`expected_resume`. Then one genuinely unattended run: starts with no attached
 terminal; spans **≥ 4 hours**; crosses ≥ 1 real boundary (worker
 dispatch, broker token renewal mid-run, watcher-corroborated usage-window
 stop or continuation, dependency transition); morning report tied to
