@@ -31,12 +31,12 @@ hooks, session resume) rather than continuing to build the substrate by hand.
 
 ### What exists
 
-| Layer | Artifact | Size |
-| --- | --- | --- |
-| Skill prose (the "program" the agent runs) | `skills/auto-pilot/**`, `skills/deliver-task/SKILL.md`, command routers | ~2,987 lines md |
-| Harness code (jail, spawn, supervisor, doctor, alarm, preflight, budget) | `scripts/*.sh` + `*.py`, non-test | ~9,951 lines |
-| — of which the monolith | `scripts/spawn-orchestrator.sh` (spawn + Seatbelt render + launchd + supervisor + doctor + alarm + restack, pure bash) | 6,323 lines |
-| Harness tests | mostly `test-spawn-orchestrator.sh` | ~7,244 lines |
+| Layer                                                                    | Artifact                                                                                                               | Size            |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------- |
+| Skill prose (the "program" the agent runs)                               | `skills/auto-pilot/**`, `skills/deliver-task/SKILL.md`, command routers                                                | ~2,987 lines md |
+| Harness code (jail, spawn, supervisor, doctor, alarm, preflight, budget) | `scripts/*.sh` + `*.py`, non-test                                                                                      | ~9,951 lines    |
+| — of which the monolith                                                  | `scripts/spawn-orchestrator.sh` (spawn + Seatbelt render + launchd + supervisor + doctor + alarm + restack, pure bash) | 6,323 lines     |
+| Harness tests                                                            | mostly `test-spawn-orchestrator.sh`                                                                                    | ~7,244 lines    |
 
 The supervisor is not a separate program: `classify-exit`, `supervisor-scan`,
 `supervisor-check`, `supervisor-gate`, `doctor`, and the alarm system are all
@@ -69,12 +69,12 @@ subcommands of `spawn-orchestrator.sh`, invoked around each launchd wake.
 
 Across the two Linear projects (50 issues), closure rate by creation cohort:
 
-| Cohort | What it was | Closed |
-| --- | --- | --- |
-| Jul 9 (20 issues) | initial build | 65% |
-| Jul 10 (20 issues) | dry-run fixes + jail hardening plan | 25% |
-| Jul 15 (6 issues) | real-launch blockers | **0%** |
-| Jul 17 (9 issues) | credential-forwarding fix plan | **0%** |
+| Cohort             | What it was                         | Closed |
+| ------------------ | ----------------------------------- | ------ |
+| Jul 9 (20 issues)  | initial build                       | 65%    |
+| Jul 10 (20 issues) | dry-run fixes + jail hardening plan | 25%    |
+| Jul 15 (6 issues)  | real-launch blockers                | **0%** |
+| Jul 17 (9 issues)  | credential-forwarding fix plan      | **0%** |
 
 The `autopilot-harness` project (14 issues, all jail/credential hardening) has
 **zero issues done**. Every issue filed after Jul 13 is open. The backlog is
@@ -125,8 +125,8 @@ Two mechanisms explain why fixes spawn fixes:
 **Mechanism 1 — the jail fights an unbounded state space.** The jail is a
 hand-built boundary (Seatbelt profile + exec allowlist + mount split +
 launchd) that must correctly anticipate every interaction between claude,
-git, gh, coder CLIs, credential helpers, hooks, interpreters, and *whatever
-the host happens to have configured*. Each real host/project reveals a new
+git, gh, coder CLIs, credential helpers, hooks, interpreters, and _whatever
+the host happens to have configured_. Each real host/project reveals a new
 interaction; each is patched individually; the state space does not shrink.
 Smoke tests pass because they test the jail's model of the world, and the next
 real launch fails because the world differs from the model. Five consecutive
@@ -138,8 +138,8 @@ returned a false "go" → an 8-task plan now exists to verify preflight. The
 CAO gate that verifies worker config is explicitly "a proxy, not proof," with
 the real smoke deferred. The supervisor verifies the agent; PRE-619 records
 that the supervisor's own documented behavior (backoff, pause limits) doesn't
-match its code. The Jul-13 doc named this — *"the machinery for trusting the
-machine has been growing faster than the machine"* — and the week since
+match its code. The Jul-13 doc named this — _"the machinery for trusting the
+machine has been growing faster than the machine"_ — and the week since
 confirmed it empirically.
 
 Both mechanisms trace to one root: **the harness hand-builds four things it
@@ -151,26 +151,26 @@ product.
 
 ### 2c. What the evidence says about the design's three premises
 
-| Premise | Verdict from evidence |
-| --- | --- |
-| The delivery loop (deliver-task; compose-never-duplicate; hand-off ≠ done; freeze rule; adapters) | **Validated.** 3 runs, ~20 PRs, zero failures in this layer since Jul 12. Keep. |
-| "Sandboxed yolo": a hand-built Seatbelt+launchd jail on the host is what safely bounds `bypassPermissions` | **Falsified in practice.** Nested Seatbelt can't compose; egress was never actually enforced; the jail blocks the product (interpreters, git, push) more reliably than it blocks threats; 3/3 recent launches dead at this layer; its verification layer produces false greens. |
-| Supervision by bash inside the launchd wake cycle | **Structurally unsound and known to be** (inversion doc, Jul 12): 300s wake vs 2700s task ceiling means ~9/10 intervals are missed by design; no timeout on the claude call → a hung call means no heartbeat, no alarm, forever. The prescribed fix (separate watcher program) was never built. |
+| Premise                                                                                                    | Verdict from evidence                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The delivery loop (deliver-task; compose-never-duplicate; hand-off ≠ done; freeze rule; adapters)          | **Validated.** 3 runs, ~20 PRs, zero failures in this layer since Jul 12. Keep.                                                                                                                                                                                                                 |
+| "Sandboxed yolo": a hand-built Seatbelt+launchd jail on the host is what safely bounds `bypassPermissions` | **Falsified in practice.** Nested Seatbelt can't compose; egress was never actually enforced; the jail blocks the product (interpreters, git, push) more reliably than it blocks threats; 3/3 recent launches dead at this layer; its verification layer produces false greens.                 |
+| Supervision by bash inside the launchd wake cycle                                                          | **Structurally unsound and known to be** (inversion doc, Jul 12): 300s wake vs 2700s task ceiling means ~9/10 intervals are missed by design; no timeout on the claude call → a hung call means no heartbeat, no alarm, forever. The prescribed fix (separate watcher program) was never built. |
 
 The Jul-13 problem statement already reached the corresponding prescription —
-*(a) blast radius is an identity problem before it is a syscall problem
+_(a) blast radius is an identity problem before it is a syscall problem
 (repo-scoped PAT, server-side, immune to every measured failure mode); rent
-the boundary rather than build a fifth generation of it* — and the week since
+the boundary rather than build a fifth generation of it_ — and the week since
 did neither. This review's finding is that the prescription was correct and
 un-executed, and the cost of non-execution is now measured: 25 PRs, 15 new
 issues, zero runs.
 
 ## 3. Problem statement (updated, superseding none of Part I)
 
-> The product problem statement is unchanged: *hand a vetted task graph to an
+> The product problem statement is unchanged: _hand a vetted task graph to an
 > agent; get back verified, reviewable PRs; blast radius capped by
 > credentials; a heartbeat that reaches me when stuck; "done" independently
-> verified.*
+> verified._
 >
 > The engineering problem is now: **the substrate strategy — hand-building
 > containment, supervision, credential plumbing, and scheduling in bash on a
@@ -190,22 +190,22 @@ Stages 1–3, and the Python port — the currently-implied path.)
 orchestrator on Claude Code's own primitives, which now cover most of what
 the 6,323-line script does:
 
-- *Containment*: Claude Code's native sandbox (sandboxed bash with
+- _Containment_: Claude Code's native sandbox (sandboxed bash with
   filesystem/network policy, `allowWrite`/`denyWithinAllow`, loopback rules)
   plus permission rules/hooks — i.e., containment option B from the
   jail-containment plan; maintained by Anthropic, composes with the tool
   shell by construction, no nested-Seatbelt problem.
-- *Run loop / scheduling*: a long-lived session using scheduled wakeups /
+- _Run loop / scheduling_: a long-lived session using scheduled wakeups /
   cron / background tasks instead of launchd wake cycles; the loop is the
   agent's loop, not a plist.
-- *Fan-out / per-task isolation*: native subagents/workflows with worktree
+- _Fan-out / per-task isolation_: native subagents/workflows with worktree
   isolation instead of hand-rolled spawn.
-- *Supervision*: hooks + a minimal external watcher whose only job is
+- _Supervision_: hooks + a minimal external watcher whose only job is
   heartbeat-staleness → notification (the one inherent requirement per the
   Jul-13 analysis).
-- *Identity*: repo-scoped fine-grained PAT + spend cap (server-side blast
+- _Identity_: repo-scoped fine-grained PAT + spend cap (server-side blast
   radius) instead of egress rules that were never on.
-- *Resume*: native session persistence instead of RUN.md crash-reconciliation
+- _Resume_: native session persistence instead of RUN.md crash-reconciliation
   (RUN.md may remain as the durable human-readable ledger).
 
 **C. Rented boundary:** run the orchestrator in a VM / devcontainer / cloud
@@ -239,7 +239,7 @@ insufficient, and then via C, not via more Seatbelt.
 5. What is the minimal migration path that gets a **run #4 on a real,
    non-auto-pilot plan** — the trunk's next commit per the Jul-13 doc — with
    the least new machinery?
-6. What are the strongest arguments *against* the Claude-native option (B/D)?
+6. What are the strongest arguments _against_ the Claude-native option (B/D)?
    E.g., sandbox escape surface of `bypassPermissions` under the native
    sandbox, scheduling reliability of an agent-driven loop vs launchd,
    loss of the hard exit-code contract, vendor coupling.

@@ -24,12 +24,12 @@ two halves of E decompose independently:
 
 ## 1. Identity layer (no VM, server-side enforcement)
 
-| Provider | Mechanism | Key facts |
-| --- | --- | --- |
-| GitHub | **GitHub App installation token** (preferred) | 1-hour TTL, minted on demand by a small script (JWT → `POST /app/installations/{id}/access_tokens`); repo-scoped; not tied to a human user; a leaked token dies in ≤1h. Fewer `gh` CLI surprises than fine-grained PATs (FGPATs still hit GraphQL scope mismatches on `gh pr edit`, labels, reviewers; no Projects support). |
-| Anthropic | **Workspace-scoped API key + spend limit** | Per-workspace spend caps enforced server-side (Spend Limits API). Caveat: `claude setup-token` OAuth draws on the subscription with **no hard spend cap** — unattended hard-capping requires the API-key path. |
-| Linear | **Team-scoped API key under a bot account** (or OAuth w/ refresh) | Personal keys support Read/Write/Create-issues scopes restricted to specific teams; new OAuth apps default to short-lived tokens since Oct 2025. |
-| git | **`includeIf "gitdir:~/agent-worktrees/**"`** → `~/.gitconfig-agent` | Bot author identity, scoped credential helper, per-repo deploy key via `core.sshCommand` — the isolation boundary is just "which directory the repo is checked out into." Zero runtime cost. |
+| Provider  | Mechanism                                                            | Key facts                                                                                                                                                                                                                                                                                                                    |
+| --------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub    | **GitHub App installation token** (preferred)                        | 1-hour TTL, minted on demand by a small script (JWT → `POST /app/installations/{id}/access_tokens`); repo-scoped; not tied to a human user; a leaked token dies in ≤1h. Fewer `gh` CLI surprises than fine-grained PATs (FGPATs still hit GraphQL scope mismatches on `gh pr edit`, labels, reviewers; no Projects support). |
+| Anthropic | **Workspace-scoped API key + spend limit**                           | Per-workspace spend caps enforced server-side (Spend Limits API). Caveat: `claude setup-token` OAuth draws on the subscription with **no hard spend cap** — unattended hard-capping requires the API-key path.                                                                                                               |
+| Linear    | **Team-scoped API key under a bot account** (or OAuth w/ refresh)    | Personal keys support Read/Write/Create-issues scopes restricted to specific teams; new OAuth apps default to short-lived tokens since Oct 2025.                                                                                                                                                                             |
+| git       | **`includeIf "gitdir:~/agent-worktrees/**"`** → `~/.gitconfig-agent` | Bot author identity, scoped credential helper, per-repo deploy key via `core.sshCommand` — the isolation boundary is just "which directory the repo is checked out into." Zero runtime cost.                                                                                                                                 |
 
 The cross-provider pattern: **hand the agent an identity that mints
 short-lived tokens, never a durable broad secret.** This layer alone
@@ -40,8 +40,9 @@ at all — the agent runs with its own env-provisioned, scoped, expiring creds.
 ## 2. Containment layer — three tiers by weight
 
 **Tier 0 (no VM): Claude Code built-in sandbox (`srt`) + separate macOS user.**
-- Anthropic's open-source `sandbox-runtime` is *the same architecture as the
-  hand-built jail* (Seatbelt profiles, proxy-based network allowlist,
+
+- Anthropic's open-source `sandbox-runtime` is _the same architecture as the
+  hand-built jail_ (Seatbelt profiles, proxy-based network allowlist,
   credential masking) but vendor-maintained, versioned, and already powering
   Claude Code's sandboxed Bash (`/sandbox`, `sandbox.*` settings,
   `failIfUnavailable` for unattended fail-closed). Known limits: sandboxes
@@ -56,6 +57,7 @@ at all — the agent runs with its own env-provisioned, scoped, expiring creds.
   reason not to keep hand-building on it.
 
 **Tier 1 (microVM per run, still no Docker Desktop):**
+
 - **Docker Sandboxes (`sbx`, GA Jan 2026)** — one microVM per sandbox via
   Virtualization.framework on Apple Silicon; explicitly marketed for
   unattended Claude Code/Codex with credentials kept out of the agent's
@@ -79,8 +81,8 @@ the weight the constraint excludes.
 CAO (`awslabs/cli-agent-orchestrator`) is confirmed as the upstream. Findings:
 
 - What it is: tmux-session-per-agent + local daemon (REST/MCP/SSE on :9889)
-  + cron-style Flows. Today the repo uses it purely as a **coder dispatch
-  backend** for the `less-claude` profile (`cao-coder.sh` → `cao-run`).
+  - cron-style Flows. Today the repo uses it purely as a **coder dispatch
+    backend** for the `less-claude` profile (`cao-coder.sh` → `cao-run`).
 - What it is not: a supervisor. **No crash-restart, no reboot survival (no
   launchd/systemd unit; a reboot silently kills daemon + all sessions), no
   push alerting (status is poll-only), no credential scoping or sandboxing**
@@ -91,21 +93,21 @@ CAO (`awslabs/cli-agent-orchestrator`) is confirmed as the upstream. Findings:
 
 Verdict: CAO can **host** the orchestrator session (free live `tmux attach`
 visibility, uniform poll API already used for workers), but a small external
-watcher must still exist above it — and that watcher is the *one* piece the
+watcher must still exist above it — and that watcher is the _one_ piece the
 Jul-13 analysis called inherent to unattended operation anyway: heartbeat
 age → notification, plus keep-alive of the daemon itself (a ~dozen-line
 launchd `KeepAlive` job, not a 6,000-line state machine).
 
 ## 4. The proposed stack (E-lite)
 
-| Layer | Today (failing) | Proposed | Weight |
-| --- | --- | --- | --- |
-| Blast radius | Seatbelt egress rules (never actually on) + personal creds in-jail | GitHub App installation tokens, Anthropic workspace key + spend cap, Linear bot key, `includeIf` git identity on `~/agent-worktrees/` | config only |
-| Containment | Hand-rendered Seatbelt profile (6.3k-line renderer) | Claude Code native sandbox (`failIfUnavailable`) + dedicated `agent` macOS user | no VM |
-| Scheduling/run loop | launchd `StartInterval` wake + generated bash wrapper | Long-lived orchestrator session (optionally hosted in CAO); native scheduling primitives validated by canary before overnight reliance | none |
-| Supervision | supervisor/doctor/alarm subcommands of spawn-orchestrator.sh | External watcher: launchd `KeepAlive` for the daemon + heartbeat-staleness → notification (~50 lines) | tiny |
-| Per-task isolation | jail + hand-rolled worktrees | git worktrees under the agent dir (unchanged); CAO workers as today | none |
-| Hard-boundary upgrade | — | Docker Sandboxes (`sbx`) microVM per **run**, only if Tier 0 proves insufficient | deferred |
+| Layer                 | Today (failing)                                                    | Proposed                                                                                                                               | Weight      |
+| --------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Blast radius          | Seatbelt egress rules (never actually on) + personal creds in-jail | GitHub App installation tokens, Anthropic workspace key + spend cap, Linear bot key, `includeIf` git identity on `~/agent-worktrees/`  | config only |
+| Containment           | Hand-rendered Seatbelt profile (6.3k-line renderer)                | Claude Code native sandbox (`failIfUnavailable`) + dedicated `agent` macOS user                                                        | no VM       |
+| Scheduling/run loop   | launchd `StartInterval` wake + generated bash wrapper              | Long-lived orchestrator session (optionally hosted in CAO); native scheduling primitives validated by canary before overnight reliance | none        |
+| Supervision           | supervisor/doctor/alarm subcommands of spawn-orchestrator.sh       | External watcher: launchd `KeepAlive` for the daemon + heartbeat-staleness → notification (~50 lines)                                  | tiny        |
+| Per-task isolation    | jail + hand-rolled worktrees                                       | git worktrees under the agent dir (unchanged); CAO workers as today                                                                    | none        |
+| Hard-boundary upgrade | —                                                                  | Docker Sandboxes (`sbx`) microVM per **run**, only if Tier 0 proves insufficient                                                       | deferred    |
 
 What this deletes or obsoletes: Seatbelt/plist rendering and the exec-grant
 machinery, the egress renderer, the credential-forwarding plan

@@ -98,24 +98,24 @@ The supervisor should therefore live outside the worker process and preferably i
 
 Build the following, in order.
 
-1. **Write the security and operating contract.**  
-   Create a dedicated runner identity, a fine-grained GitHub token limited to the target repository and required PR operations, a spend cap, and no mounted personal credential stores or host worktree.  
+1. **Write the security and operating contract.**\
+   Create a dedicated runner identity, a fine-grained GitHub token limited to the target repository and required PR operations, a spend cap, and no mounted personal credential stores or host worktree.\
    **Gate:** prove the token cannot read or write a second repository; prove the runner cannot read a sentinel secret on the host.
 
-2. **Build one runner canary, not a new supervisor.**  
-   Fresh-clone the target repository in a disposable runner; execute the actual model session under its supported sandbox; perform the exact required git, interpreter, test, push, PR, and API operations. Use one platform job timeout and one external stale-heartbeat notification.  
+2. **Build one runner canary, not a new supervisor.**\
+   Fresh-clone the target repository in a disposable runner; execute the actual model session under its supported sandbox; perform the exact required git, interpreter, test, push, PR, and API operations. Use one platform job timeout and one external stale-heartbeat notification.\
    **Gate:** all operations succeed in the actual runner, and killing the worker produces a notification within the stated bound.
 
-3. **Run #4 as one small real task on a non-auto-pilot plan.**  
-   Use the existing delivery prose and run-state branch. No fan-out, no automatic relaunch, no custom retry policy. On failure, stop and require an explicit human resume.  
+3. **Run #4 as one small real task on a non-auto-pilot plan.**\
+   Use the existing delivery prose and run-state branch. No fan-out, no automatic relaunch, no custom retry policy. On failure, stop and require an explicit human resume.\
    **Gate:** a reviewable PR exists; CI or a clean independent runner verifies the pinned revision; the human receives both normal completion and forced-stall evidence.
 
-4. **Prove recovery before scale.**  
-   Repeat with a three-task dependency chain and deliberately kill one worker between lifecycle steps. Reconcile from Git/tracker state and resume once.  
+4. **Prove recovery before scale.**\
+   Repeat with a three-task dependency chain and deliberately kill one worker between lifecycle steps. Reconcile from Git/tracker state and resume once.\
    **Gate:** no duplicate PR or claim, no unbounded retry, and no unsupported manual state repair.
 
-5. **Only then decide overnight scheduling and fan-out.**  
-   Prefer a platform scheduler/job primitive with documented timeout and cancellation semantics.  
+5. **Only then decide overnight scheduling and fan-out.**\
+   Prefer a platform scheduler/job primitive with documented timeout and cancellation semantics.\
    **Gate:** several clean unattended runs without runner-specific exceptions or new supervision state machines.
 
 ### 6. Strongest arguments against B/D
