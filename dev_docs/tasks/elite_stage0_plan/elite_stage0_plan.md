@@ -30,6 +30,30 @@ Falsifier first, fixture second, production component last (§7a). The kill shee
 
 All probe tasks are **attended, user-run on the mac mini** — they need real credentials, real launchd, and a real device for alerts. None should be promoted into unattended `/do-tasks` or auto-pilot runs.
 
+## Binding conventions (every task cites these instead of restating them)
+
+### Evidence layout
+
+All spike artifacts live under `dev_docs/elite-spike/`:
+
+- `kill-sheet.md` — probe 0's output ([[elite_stage0_task_2]]); one row per probe.
+- `measurements.md` — one row per probe: probe → fixture command/test → sanitized evidence link → non-secret environment metadata → result → decision.
+- `fixtures/<probe>/` — fixture scripts, plists, and raw captures, one directory per probe (`fixtures/probe1/`, `fixtures/setsid-topology/`, `fixtures/probe2/`, `fixtures/probe3/`).
+- `provisioning.md` — exact identity-provisioning commands ([[elite_stage0_task_1]]), password redacted.
+- `environment.md` — durable environment facts: spike repo URL, macOS version/build, tool versions.
+
+### Sanitization (§7a rule 4, binding for every checked-in artifact)
+
+Never persist bearer tokens, credential files, secret-bearing headers, or secret environment values. Additionally redact: the agent account password, push-provider tokens/topics/user keys/device identifiers, hostnames, and absolute home paths (generalize to `~maintainer` / `~agent`). Kept in the clear as required metadata: usage-window percentages/boundaries/`reset_epoch`, macOS version/build, tool versions.
+
+### Probe close protocol (tasks 3–7)
+
+Every started probe closes as exactly one of `confirmed` / `falsified` / `inconclusive` against its pre-written kill-sheet row — no fourth state, no automatic extension (§0a). Time cap: half a working day (§7a rule 3) unless the kill sheet records an override; at the cap, stop and classify. On `falsified` or load-bearing `inconclusive`, take the named redirect **or defer the dependent feature** (§7a rule 5) and record which in the measurement row; a rerun requires a changed kill sheet naming the new discriminating evidence (§7a rule 6).
+
+### Running as `agent` (no sudoers)
+
+Stage 0 installs no sudoers entry. Probes obtain agent execution two ways: (a) an interactive agent shell via the maintainer's own admin sudo — `sudo -u agent -i` or `sudo -u agent <cmd>` from an attended shell (the stock `%admin` rule; nothing installed, and the agent itself still has zero sudo rules); (b) the per-user launchd test job for the no-GUI context (probe 1). Observers always run as the maintainer uid from a separate shell.
+
 ## Tasks
 
 1. [[elite_stage0_task_1]] — Provision the `agent` user + `apagent` group (ops; no sudoers, no production paths).

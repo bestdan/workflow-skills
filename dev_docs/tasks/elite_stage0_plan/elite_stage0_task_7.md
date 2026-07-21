@@ -24,16 +24,18 @@ Design §7a "two cheap probes" + §5.3 coherence prerequisite. Continuation (Sta
 
 ## Task
 
-Per the kill sheet, after [[elite_stage0_task_3]] establishes the agent's Max OAuth:
+Per the kill sheet (`dev_docs/elite-spike/kill-sheet.md`), after [[elite_stage0_task_3]] establishes the agent's Max OAuth:
 
-- **Do not mint a new session** — use the exact test session probe 1 already ran and recorded the UUID for ([[elite_stage0_task_3]]); this probe is read-only (§0a).
-- Query session-window utilization + `reset_epoch` for that session as `agent` (its own credential) and as the maintainer (observation credential) — `scripts/claude-usage.sh` from each identity.
-- Compare: same window boundaries, same utilization (within one query's drift), same `reset_epoch`, attributable to the same subscription.
+- **Do not mint a new session** — use the exact test session probe 1 already ran and recorded the UUID for in `dev_docs/elite-spike/measurements.md` ([[elite_stage0_task_3]]); this probe is read-only (§0a).
+- Query session-window utilization + `reset_epoch` for that session as each identity: maintainer — run `scripts/claude-usage.sh` from your own shell; agent — run the same script from an interactive agent shell (`sudo -u agent -i`, per the plan's agent-access note; no new sudoers).
+- Calibrate the pass threshold first: run `scripts/claude-usage.sh` twice back-to-back under the maintainer credential and record the drift between those two runs as the **control delta**.
+- Compare agent vs maintainer: identical window boundaries and `reset_epoch`; utilization values equal, or differing by no more than the control delta. Record the control measurement in the evidence.
 - Also verify the §2.3 canary item: the maintainer-side credential path actually resolves (Keychain vs `~/.claude`) — record which.
-- Close against the kill sheet.
+- Close per the plan's probe close protocol.
 
 ## Acceptance Criteria
 
-- **User-run:** side-by-side query outputs (sanitized) checked into the measurement table; probe closed as `confirmed` / `falsified` / `inconclusive`.
+- **User-run:** side-by-side query outputs plus the control measurement checked into `dev_docs/elite-spike/measurements.md`, sanitized per the plan checklist (window percentages, boundaries, and `reset_epoch` kept in the clear); probe closed as `confirmed` / `falsified` / `inconclusive` per the plan's probe close protocol.
+- The measurement row names which maintainer-side credential path resolved (Keychain or `~/.claude`).
 - On `falsified`: the measurement row records "automatic continuation deleted from build order" so the measured revision ([[elite_stage0_task_8]]) drops §5.3 Stage-5 continuation from the plannable path.
 - On load-bearing `inconclusive`: continuation stays **disabled and deferred** — it may not be planned or built until a changed kill sheet names discriminating evidence and a rerun confirms coherence (§7a rule 6). Inconclusive never admits continuation.

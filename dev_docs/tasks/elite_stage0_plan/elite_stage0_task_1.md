@@ -26,15 +26,17 @@ This is attended ops work on the always-on mac mini — not a coding task, and n
 - Create the `agent` user: non-admin, headless (no auto-login), home `/Users/agent/`, shell zsh.
 - Create work root `/Users/agent/work/` owned `agent`, mode 0700.
 - Create the `apagent` group with `agent` as a member (the group Stage 1's broker will use for 0640/0750 token/dir modes).
-- Verify no ACL leakage from the maintainer home: as `agent`, attempt to read a sentinel file in `~danielegan/` (e.g. a throwaway `~/.autopilot-sentinel`), `~/.ssh/`, and the Keychain — all must fail.
+- Verify no ACL leakage from the maintainer home: plant a throwaway sentinel (`~danielegan/.autopilot-sentinel`), then from the maintainer shell run `sudo -u agent cat ~danielegan/.autopilot-sentinel`, `sudo -u agent ls ~danielegan/.ssh/`, and `sudo -u agent cat ~danielegan/Library/Keychains/login.keychain-db` — each must exit non-zero with a permission error. Delete the sentinel after the denials are recorded.
+- Verify no directory is writable by both `agent` and the maintainer (§3.1 "no shared writable directories"): check `/Users/Shared` and any group-writable paths in both homes.
 - Confirm the agent user has **zero** sudo rules (`sudo -l -U agent` shows none).
-- Record the exact commands used (sysadminctl/dscl) in the spike evidence directory so the setup is reproducible.
+- Record the exact commands used (sysadminctl/dscl) in `dev_docs/elite-spike/provisioning.md` so the setup is reproducible — with the password argument replaced by `<redacted>`; no password value may appear in checked-in evidence (plan sanitization checklist).
 
 ## Acceptance Criteria
 
 - **User-run:**
-  - `id agent` shows a non-admin user with `apagent` membership; `agent` is absent from the `admin` group.
+  - Output of `id agent` includes `apagent` and does not include `admin`.
   - `sudo -l -U agent` reports no rules.
-  - As `agent`: maintainer-home sentinel, `~danielegan/.ssh/`, and maintainer Keychain reads all denied.
+  - Each read-check command in the Task list exits non-zero with a permission error; transcripts captured in `dev_docs/elite-spike/provisioning.md`.
+  - No shared-writable directory found (or each one found is removed/justified in `provisioning.md`).
   - `/Users/agent/work/` exists, `agent`-owned, 0700.
-  - Provisioning commands checked into the spike evidence directory (see plan open question on its location).
+  - Provisioning commands (password `<redacted>`) checked into `dev_docs/elite-spike/provisioning.md`.

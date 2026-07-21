@@ -17,14 +17,14 @@ Plan: [[elite_stage0_plan]]
 
 ## Context
 
-§0a: the spike runs from a disposable directory and a **dedicated test repository** — probe 1 dispatches a worker against it, probe 2's tmux fixtures want a harmless checkout, and Stage 1's probe 4 (GitHub authority canary, planned later) will install the disposable test App on it. No production repo is ever a spike target.
+§0a: the spike runs from a disposable directory and a **dedicated test repository** — probe 1 dispatches a worker against it, probe 2's tmux fixtures want a harmless checkout, and probe 4 (GitHub authority canary, a later §7a probe whose tests Stage 1's gate reruns against the real App) will install the disposable test App on it. No production repo is ever a spike target.
 
 ## Task
 
-- Create `bestdan/autopilot-spike-target` (or similar): private, trivial contents (README + a small script + a test), no branch protection initially (probe 4 adds rulesets later, per its own kill sheet).
-- Clone it under `/Users/agent/work/` once the agent user exists — but repo creation itself has no dependency and can happen first.
-- Record the repo name in the spike evidence directory (`dev_docs/elite-spike/`).
+- Create `bestdan/autopilot-spike-target` (or similar): private, trivial contents (README + a small script + a test runnable via a single documented command), no branch protection initially (probe 4 adds rulesets later, per its own kill sheet).
+- Cloning as the agent user is not part of this task: the first probe that needs the checkout ([[elite_stage0_task_3]]) clones it into a disposable spike directory (e.g. `/Users/agent/spike/`) — never `/Users/agent/work/`, which is the production execution layout (§0a: the spike runs from a disposable directory).
+- Append the repo URL, visibility, and creation date to `dev_docs/elite-spike/environment.md`.
 
 ## Acceptance Criteria
 
-- **User-run:** repo exists and is cloneable; name recorded in `dev_docs/elite-spike/`; contains enough content for a worker to make a trivial verifiable edit.
+- **User-run:** repo exists and is cloneable by the maintainer (`git clone git@github.com:bestdan/<name>` succeeds); URL, visibility, and creation date recorded in `dev_docs/elite-spike/environment.md`; contains README.md, one small script, and one test that passes via a single documented command (e.g. `./test.sh` exits 0).

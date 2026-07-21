@@ -25,15 +25,17 @@ Uses the run-shim implementation selected by [[elite_stage0_task_4]]. Waits only
 
 ## Task
 
-In a disposable directory with a throwaway tmux socket, per the kill sheet:
+In a disposable directory with a throwaway tmux socket, per the kill sheet (`dev_docs/elite-spike/kill-sheet.md`). The uid split is the boundary under test: the tmux server, shim, and surrogate run as the `agent` user (interactive `sudo -u agent`, per the plan's agent-access note); the observer runs as the maintainer uid — running both sides as one user dissolves the boundary. Time cap: half a working day (§7a rule 3); at the cap, stop and classify.
 
-- Start a trivial shim, then the exec surrogate, through the fixed-wrapper shape (`tmux new-session` → shim → `setsid` → `execve`); measure PID/PPID/PGID/SID/executable continuity end to end. Cross-check the happy-path topology against the real shim→Claude observation recorded by probe 1.
+- Start a trivial shim, then the exec surrogate (e.g. `/bin/sleep 3600`, or any argv-distinctive long-running binary), through the fixed-wrapper shape (`tmux new-session` → shim → `setsid` → `execve`); measure PID/PPID/PGID/SID/executable continuity end to end. Cross-check the happy-path topology against the real shim→Claude observation recorded by probe 1.
 - From a separate (maintainer-side) observer, attempt the §4.1 binding: candidate pane PID from tmux → independent process-table validation against expected topology.
 - Inject the fault matrix: pane death **before** observation; launcher death mid-launch; a replacement pane appearing with the same name; stop races (kill the observed target while a look-alike survives).
 - For each fault, record whether the observer can distinguish "my incarnation" from an impostor or a successor, and what evidence discriminates.
-- Close against the kill sheet.
+- Close per the plan's probe close protocol.
 
 ## Acceptance Criteria
 
-- **User-run:** measurement rows for the happy path and every injected fault; an explicit verdict on whether pane identity + process-table validation suffices as the §4.1 binding, or the redirect is taken; fixtures checked in and re-runnable.
+- **User-run:** measurement rows for the happy path and every injected fault appended to `dev_docs/elite-spike/measurements.md` (one row per scenario: fault injected, observer evidence gathered, discriminated yes/no, discriminating evidence), with raw captures under `dev_docs/elite-spike/fixtures/probe2/` sanitized per the plan checklist (macOS + tmux versions recorded as environment metadata).
+- The probe closes with exactly one of `confirmed`/`falsified`/`inconclusive` against the kill sheet's pre-written falsifier, pass threshold, and inconclusive condition; `inconclusive` triggers §7a rule 6 (changed kill sheet, redirect, or defer). The classification carries an explicit verdict on whether pane identity + process-table validation suffices as the §4.1 binding, or the redirect is taken.
+- Fixtures checked in; a single documented command reproduces the full happy-path + fault matrix from a clean checkout with only tmux installed.
 - The result names the concrete binding procedure (or its impossibility) that the measured revision ([[elite_stage0_task_8]]) will encode.
