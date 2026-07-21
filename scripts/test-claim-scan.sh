@@ -192,6 +192,27 @@ assert_not_contains "$stale_lines" "stale claim: active-slug (has a matching in_
 wip_line3="$(printf '%s\n' "$out" | grep '^WIP_COUNT:')"
 assert_eq "stale claim: WIP_COUNT counts both claimed slugs (orphan still in flight per PR signal)" "WIP_COUNT: 2" "$wip_line3"
 
+# --- Fixture 4: a failing `gh pr list` is a hard, non-zero failure ----------
+# (not a silent WIP_COUNT: 0 — the documented fallback in repo-pr-execute.md
+# depends on the non-zero exit propagating out of the command substitution).
+GH_FAIL="$BASE/gh-fail"
+cat >"$GH_FAIL" <<'EOF'
+#!/usr/bin/env bash
+echo "gh: simulated API failure" >&2
+exit 1
+EOF
+chmod +x "$GH_FAIL"
+T4="$BASE/f4-tasks"
+mkdir -p "$T4"
+out4="$("$SCRIPT" --gh "$GH_FAIL" --repo test/repo --task-dir "$T4" 2>&1)"
+rc4=$?
+if [ "$rc4" -ne 0 ]; then
+  ok "gh failure: script exits non-zero"
+else
+  bad "gh failure: script should exit non-zero, exited 0"
+fi
+assert_not_contains "$out4" "gh failure: does NOT emit a bogus WIP_COUNT: 0" "WIP_COUNT: 0"
+
 echo
 echo "test-claim-scan: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1

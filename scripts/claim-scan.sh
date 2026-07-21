@@ -150,9 +150,13 @@ claimed_for_label() {
   printf '%s' "$json" | jq -r --arg label "$label" "$jq_filter"
 }
 
-claim_lines="$(claimed_for_label task-claim)"
-loop_lines="$(claimed_for_label task-loop)"
-blocked_lines="$(claimed_for_label task-blocked)"
+# `die` inside claimed_for_label runs in this command-substitution subshell, so
+# its exit only kills the subshell — propagate a gh/jq failure to the top-level
+# process (`|| exit $?`) so a failed `gh pr list` is a hard, non-zero failure
+# (the documented fallback in repo-pr-execute.md), never a silent WIP_COUNT: 0.
+claim_lines="$(claimed_for_label task-claim)" || exit $?
+loop_lines="$(claimed_for_label task-loop)" || exit $?
+blocked_lines="$(claimed_for_label task-blocked)" || exit $?
 
 # --- in_progress task files (WIP dedupe + the stale-claim heuristic) ---
 in_progress_slugs=""
