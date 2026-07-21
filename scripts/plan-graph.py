@@ -157,6 +157,15 @@ def main() -> None:
 
     tasks = load_plan_dir(Path(args.plan_dir)) if args.plan_dir else load_stdin()
     id_re = ID_SHAPES[args.id_shape]
+
+    # Slug is the graph's identity key (edges, tracker_map, classified all key on
+    # it), so two files sharing a stem across phase dirs would silently collapse
+    # to one node and drop the other's edges — fail-closed instead (§ contract).
+    seen: set[str] = set()
+    dups = sorted({s for t in tasks if (s := t["slug"]) in seen or seen.add(s)})
+    if dups:
+        die(f"duplicate task slug(s): {', '.join(dups)} — rename so each is unique")
+
     slugs = {t["slug"] for t in tasks}
 
     tracker_map: dict[str, str] = {}

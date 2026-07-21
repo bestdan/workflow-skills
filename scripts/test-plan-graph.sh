@@ -173,8 +173,9 @@ out5j="$("$SCRIPT" "$DIR5" --id-shape jira)" || bad "id-shapes(jira): script exi
 k5_jira="$(printf '%s' "$out5j" | jq -r '.is_blocked_by["jira-dep"][0].kind')"
 assert_eq "id-shape jira: PLAT-7 classified tracker-id" "tracker-id" "$k5_jira"
 
-# Cross-check: under --id-shape linear, the gh-shaped "#7" and jira-shaped
-# "PLAT-7" entries do NOT match the linear regex, so they warn as unknown-slug.
+# Cross-check: under --id-shape linear, the gh-shaped "#7" entry does NOT match
+# the linear regex, so it warns as unknown-slug. (The jira-shaped "PLAT-7" *does*
+# match ^[A-Z]+-\d+$, so under linear it classifies as tracker-id, not checked here.)
 k5_gh_under_linear="$(printf '%s' "$out5" | jq -r '.is_blocked_by["gh-dep"][0].kind')"
 assert_eq "id-shape linear: #7 (gh shape) is NOT a linear id" "unknown-slug" "$k5_gh_under_linear"
 
@@ -215,6 +216,24 @@ status: ready"
 out9="$("$SCRIPT" "$DIR9" --id-shape linear)" || bad "epic-excluded fixture: script exited non-zero"
 order9="$(printf '%s' "$out9" | jq -c '.order')"
 assert_eq "epic-excluded: order contains only the task, not the epic" '["task-a"]' "$order9"
+
+# --- Fixture 10: duplicate slug across phase dirs fails closed --------------
+DIR10="$BASE/dup-slug"
+write_task "$DIR10/phase1/setup.md" "title: Setup one
+status: ready"
+write_task "$DIR10/phase2/setup.md" "title: Setup two
+status: ready"
+
+if "$SCRIPT" "$DIR10" --id-shape linear >/dev/null 2>"$BASE/dup.stderr"; then
+  bad "duplicate slug: script should exit non-zero, exited 0"
+else
+  ok "duplicate slug: script exits non-zero"
+fi
+if grep -q "setup" "$BASE/dup.stderr"; then
+  ok "duplicate slug: names the offending slug"
+else
+  bad "duplicate slug: stderr did not name the slug"
+fi
 
 echo
 echo "test-plan-graph: $pass_count passed, $fail_count failed"
