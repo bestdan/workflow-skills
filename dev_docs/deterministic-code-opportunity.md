@@ -31,24 +31,28 @@ any of these scripts.
 
 ### Shipped scripts (final interfaces)
 
-| Script                           | PR(s)                                             | Interface                                                                                                                                               | Replaces (re-derived prose)                                                                                                                                                         |
-| -------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/task-scan.py`           | PRE-609 #235; `--archive-candidates` PRE-614 #240 | `task-scan.py [task_dir] [--prs <json>]` · `… --archive-candidates --older-than <N>`                                                                    | scan/rank/readiness + per-`new`-card promote gate (repo-pr-execute §1–2, list-tasks §2–3, promote-tasks §1, doctor 4–5) + `/archive-tasks` candidate selection (repo-pr-archive §2) |
-| `scripts/plan-graph.py`          | PRE-610 #236                                      | `plan-graph.py <plan_dir> --id-shape linear\|gh\|jira [--rewrite <slug>=<id>]` · or a `[{slug, is_blocked_by, tracker_id, status}]` JSON array on stdin | `/push-plan` §4.3/§5.3/§5b.3 hand-walked topological order + cycle detection                                                                                                        |
-| `scripts/validate.py` (extended) | PRE-611 #237                                      | `validate.py [task_dir]`                                                                                                                                | `/doctor` check 4's hand-simulated frontmatter field/expiry checks; also fixed the consumer-repo path bug (see below)                                                               |
-| `scripts/claim-scan.sh`          | PRE-612 #238                                      | `claim-scan.sh [--repo <o/n>] [--task-dir <dir>] [--gh <path>] [--limit <n>]`                                                                           | orchestrator-side claim/WIP query + whole-line slug match (repo-pr-execute claim/WIP, do-tasks, doctor stale-claim)                                                                 |
-| Finding #5 supervisor (verified) | PRE-613 #239                                      | `spawn-orchestrator.sh` (`classify-exit`/`supervisor-check`/`supervisor-gate`/`supervisor-scan`), `claude-auto-resume.sh`, `claude-usage.sh`            | the outer relaunch/backoff supervisor the finding said was unbuilt; one residual gap → PRE-619                                                                                      |
+| Script                           | PR(s)                                             | Interface                                                                                                                                                                                                                                | Replaces (re-derived prose)                                                                                                                                                         |
+| -------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/task-scan.py`           | PRE-609 #235; `--archive-candidates` PRE-614 #240 | `task-scan.py [task_dir] [--prs <json>]` · `… --archive-candidates --older-than <N>`                                                                                                                                                     | scan/rank/readiness + per-`new`-card promote gate (repo-pr-execute §1–2, list-tasks §2–3, promote-tasks §1, doctor 4–5) + `/archive-tasks` candidate selection (repo-pr-archive §2) |
+| `scripts/plan-graph.py`          | PRE-610 #236                                      | `plan-graph.py [<plan_dir>] --id-shape linear\|gh\|jira [--rewrite <slug>=<id>]` — input is `<plan_dir>` or, if omitted, a `[{slug, is_blocked_by, tracker_id, status}]` JSON array on stdin; `--id-shape` is **required** in both forms | `/push-plan` §4.3/§5.3/§5b.3 hand-walked topological order + cycle detection                                                                                                        |
+| `scripts/validate.py` (extended) | PRE-611 #237                                      | `validate.py [task_dir]`                                                                                                                                                                                                                 | `/doctor` check 4's hand-simulated frontmatter field/expiry checks; also fixed the consumer-repo path bug (see below)                                                               |
+| `scripts/claim-scan.sh`          | PRE-612 #238                                      | `claim-scan.sh [--repo <o/n>] [--task-dir <dir>] [--gh <path>] [--limit <n>]`                                                                                                                                                            | orchestrator-side claim/WIP query + whole-line slug match (repo-pr-execute claim/WIP, do-tasks, doctor stale-claim)                                                                 |
+| Finding #5 supervisor (verified) | PRE-613 #239                                      | `spawn-orchestrator.sh` (`classify-exit`/`supervisor-check`/`supervisor-gate`/`supervisor-scan`), `claude-auto-resume.sh`, `claude-usage.sh`                                                                                             | the outer relaunch/pause-gating supervisor the finding said was unbuilt (exponential backoff is the one residual gap — **not** shipped → PRE-619)                                   |
 
 ### Load-bearing decisions & gotchas (easy to re-break)
 
-1. **Consumer-repo path resolution (task 3 / PRE-611).** The task dir is an
-   explicit **argument**, never `git rev-parse --show-toplevel`. `validate.py`,
-   `task-scan.py`, and `claim-scan.sh` all default to `dev_docs/tasks` **relative
-   to cwd** and accept an override, because a consumer repo has no
-   `scripts/validate.py` at its root and `ROOT = __file__.parent.parent` would
-   validate the _plugin's own_ tasks instead of the consumer's. `/doctor` passes
-   the consumer's resolved dir. Do not "simplify" any of these back to a git-root
-   lookup — that is the exact defect PRE-611 fixed.
+1. **Consumer-repo path resolution (task 3 / PRE-611).** The task dir is a
+   **passed-in path**, never a `git rev-parse --show-toplevel` lookup — because
+   `ROOT = __file__.parent.parent` resolves to the _plugin's own_ install dir, so
+   a git-root or `__file__`-anchored default validates the plugin's tasks instead
+   of the consumer's. The three scripts split on their **default**, though:
+   `task-scan.py` and `claim-scan.sh` default to `dev_docs/tasks` **relative to
+   cwd** (and accept an override); `validate.py` **deliberately** defaults to
+   `ROOT/dev_docs/tasks` (script-relative — that default is its own CI validating
+   the plugin's tree) and validates a _consumer's_ cards **only** when `/doctor`
+   passes their resolved dir as an explicit argument. Do not "simplify" any of
+   these to a git-root lookup, and do not "unify" validate.py's CI default onto
+   cwd — that path handling is the exact defect PRE-611 fixed.
 
 2. **Whole-line claim matching (task 4 / PRE-612).** The `Claims-task: <slug>`
    marker matches a **whole line** (`grep -Fxq`), never a substring — a naive
@@ -59,22 +63,35 @@ any of these scripts.
    inline prose copy — the remote VM has no plugin installed and cannot call the
    script. Do not wire that block to `claim-scan.sh`.
 
-3. **repo-pr only; Linear was covered separately (the handler boundary).** These
-   scripts serve only the **repo-pr** file path (`dev_docs/tasks/**/*.md`). The
-   Linear handler's equivalent scan/rank/graph _reads_ were extracted
-   independently and earlier into the GraphQL fast-path assets (`linear-scan.py`,
-   `linear-ready.py`, `linear-relations.py`, `linear-false-closures.py`) behind a
-   fast-path/floor fallback — see the [2026-07-15 Update](#update--2026-07-15).
-   jira/gh-issue scan stays MCP/`gh`-response prose. Don't try to unify the two
-   paths: the split — file-path work is scriptable, MCP mutations stay prose — is
-   the whole thesis.
+3. **repo-pr only; Linear was covered separately (the handler boundary).** The
+   **runtime scanners** here — `task-scan.py`, `validate.py`'s task-file checks,
+   and `claim-scan.sh` — serve only the **repo-pr** file path
+   (`dev_docs/tasks/**/*.md`). The Linear handler's equivalent scan/rank/graph
+   _reads_ were extracted independently and earlier into the GraphQL fast-path
+   assets (`linear-scan.py`, `linear-ready.py`, `linear-relations.py`,
+   `linear-false-closures.py`) behind a fast-path/floor fallback — see the
+   [2026-07-15 Update](#update--2026-07-15), and jira/gh-issue _runtime_ scan
+   stays MCP/`gh`-response prose. **`plan-graph.py` is the exception — it is not a
+   repo-pr scanner at all:** it is a **push-time, cross-handler** ordering
+   authority that `/push-plan` runs for the Linear, gh-issue, _and_ jira paths
+   (via `--id-shape linear|gh|jira`; repo-pr `/push-plan` is a no-op), operating
+   on plan-dir files. Keep it out of the repo-pr boundary so a non-repo-pr handler
+   neither skips nor re-derives it. Don't try to unify the _runtime_ paths: that
+   split — file-path work is scriptable, MCP mutations stay prose — is the thesis.
 
-4. **Fail-closed, tested, single-source — the shared mold.** Every script carries
-   an explicit "replaces the ad-hoc X" header, emits structured/parseable stdout,
-   fails closed on malformed input (exit non-zero, never silently skip), and has a
-   paired test wired into `scripts/check.sh`. Note `plan-graph.py` still prints
-   its JSON doc (with a populated `cycles` list) _before_ dying on a cycle, so the
-   caller sees exactly which slugs collide.
+4. **Fail-closed, tested, single-source — the shared mold (with two caveats).**
+   Most of these scripts follow the repo mold: an explicit "replaces the ad-hoc X"
+   header, structured/parseable stdout, fail-closed on malformed input (exit
+   non-zero rather than silently skip), and a paired test wired into
+   `scripts/check.sh`. Two honest exceptions to the blanket version: `validate.py`
+   **predates** the mold (it is the _extended_ pre-existing validator and carries
+   no "replaces" header), and `claim-scan.sh` is a **filter** — it silently
+   ignores non-`in_progress` / malformed frontmatter rather than exiting non-zero,
+   so don't rely on it to _reject_ a bad task file. Where fail-closed genuinely
+   bites it holds: `task-scan.py` and `plan-graph.py` exit non-zero on malformed
+   frontmatter/JSON, and `plan-graph.py` still prints its JSON doc (with a
+   populated `cycles` list) _before_ dying on a cycle, so the caller sees exactly
+   which slugs collide.
 
 ### Plan completion
 
