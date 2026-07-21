@@ -244,12 +244,22 @@ checked in order:
    state of its other PRs.
 2. Else, **any** PR `OPEN` → leave the issue untouched, bucket `left: open`.
    This is `/reconcile-tasks` row 2's concern — do not add that logic here.
-3. Else (**every** resolved PR is `CLOSED` and unmerged) → leave the issue
-   untouched, bucket `left: closed unmerged`. `/reconcile-tasks` row 3 reads
-   this exact bucket to demote the issue back to Backlog — do not add that
-   logic here either; this file only classifies and reports.
+3. Else, **any** resolved PR whose state could **not** be read (the `gh pr
+   view` above errored, returned no `state`, or the PR was deleted after step
+   3 resolved its URL) → leave the issue untouched, bucket `left: unresolved`.
+   The issue does **not** fall through to `left: closed unmerged` on an
+   unread PR — a missing read is not a confirmed closed-unmerged read. This
+   keeps the classification **fail-closed**: `/reconcile-tasks` row 3 demotes
+   only issues in `left: closed unmerged`, so an unreadable PR can never
+   trigger a demote.
+4. Else (**every** resolved PR is `CLOSED` and unmerged, each read
+   successfully) → leave the issue untouched, bucket `left: closed unmerged`.
+   `/reconcile-tasks` row 3 reads this exact bucket to demote the issue back
+   to Backlog — do not add that logic here either; this file only classifies
+   and reports.
 
-Count `left: open` and `left: closed unmerged` separately in the report.
+Count `left: open`, `left: unresolved`, and `left: closed unmerged`
+separately in the report.
 
 ## 5. Dry-run (default)
 
@@ -298,11 +308,11 @@ Print:
 - **Scope** — one line stating exactly what this run covered: `scope:
   configured projects (<names>) + Unassigned (project-less only)` (default),
   `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
-- **Counts** — `k completed, m open (left), s no-PR skipped, c
-  closed-unmerged (left)`.
+- **Counts** — `k completed, m open (left), u unresolved (left), s no-PR
+  skipped, c closed-unmerged (left)`.
 - **Per-issue lines** — identifier, the PR resolved (if any) and its merge
-  state, and the outcome (`completed`, `left: open PR`, `left: closed
-  unmerged`, `skipped: no PR found`, or `already complete` for an idempotent
-  no-op).
+  state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
+  `left: closed unmerged`, `skipped: no PR found`, or `already complete` for
+  an idempotent no-op).
 - On dry-run, the same table with no outcome column, plus "nothing changed
   (dry-run)."

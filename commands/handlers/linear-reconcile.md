@@ -238,12 +238,16 @@ resolved PR is `CLOSED` with `mergedAt == null` does the issue land in
    identifier, its resolved PR(s) (`number`/`url`, from the merge-state read),
    and its current state name (captured by the `get_issue` call in
    `linear-sweep-complete.md` "Resolve each issue's PR" step 1).
-2. **Guard — act only on a definitive closed-unmerged read.** An issue whose
-   PR state could not be resolved at all lands in row 1's own "no-PR skipped"
-   bucket instead (a deleted PR, a `gh` failure, etc.), never in `left: closed
-   unmerged` — so there is no separate ambiguous case to filter here. If a
-   future change to the shared scan ever makes this classification uncertain,
-   skip the issue rather than guess.
+2. **Guard — act only on a definitive closed-unmerged read.** An issue with
+   no resolvable PR URL lands in row 1's "no-PR skipped" bucket, and an issue
+   whose PR URL resolved but whose state could not be read (deleted PR, `gh`
+   failure, etc.) lands in `left: unresolved` (`linear-sweep-complete.md` "Check
+   merge state" precedence step 3) — **neither** feeds `left: closed
+   unmerged`, so a demote never fires on an unread or unresolvable PR. That
+   fail-closed split is enforced by the shared scan, not re-checked here: row 3
+   consumes only `left: closed unmerged`, so there is no separate ambiguous
+   case to filter. If a future change to the shared scan ever makes this
+   classification uncertain, skip the issue rather than guess.
 
    > **Hard guard.** Row 1's scan already scopes this bucket to **started**-type
    > issues — never demote a `backlog`/`unstarted` issue (a closed-unmerged PR
@@ -263,8 +267,13 @@ nothing:
 <IDENTIFIER> — PR #<n> (open) → In Review
 
 → Backlog (closed-unmerged)
-<IDENTIFIER> — PR #<n> (closed, unmerged) → Backlog
+<IDENTIFIER> — PRs #<n1>, #<n2>, … (all closed, unmerged) → Backlog
 ```
+
+Unlike rows 1 and 2 — where the single acting PR (the merged one, the open
+one) is unambiguous — a row-3 candidate qualifies only because **every**
+resolved PR is closed unmerged (§4), so list them **all** on the line rather
+than an arbitrary one.
 
 followed by the left/skipped lines from row 1 (open PRs left, no-PR issues
 skipped — closed-unmerged PRs now feed row 3 instead of being left), row 2's
@@ -288,23 +297,49 @@ skipped/anomaly lines, and an explicit "nothing changed (dry-run)."
   ```
 
 - **Row 3** — for each row-3 candidate, mirror `linear-claim.md` "Bail"'s
-  release mechanics (same shape, different caller):
+  release mechanics (same shape, different caller).
+
+  **First, re-verify the PR state (TOCTOU guard).** Row 3's candidate list is
+  the `left: closed unmerged` bucket from row 1's scan, which may have been
+  read many issues earlier in a long run. A demote is the one
+  irreversible-adjacent transition in this command, so before mutating,
+  re-run `gh pr view <url> --json number,url,state,mergedAt` on **each** of the
+  issue's resolved PRs and re-apply the merge-state precedence. **Skip the
+  issue** (no mutation) and report it as `left: revalidated (<new state>)` if
+  **any** resolved PR now reads `OPEN` or `MERGED`, or if **any** read fails —
+  only a set that is still, definitively, every-PR-closed-unmerged proceeds.
+  This is a deliberate extra `gh` call beyond §4's "reuse row 1's read" rule,
+  scoped to apply-time for the demote row alone, so a PR merged or reopened
+  between the scan and the mutation can never pull freshly-completed or
+  live work back to Backlog. Then, for a candidate that survives:
   1. Resolve the `human-approval-requested` label id (`<linear-mcp>__list_issue_labels`
      with `teamId`; create it if absent, same pattern as `auto-claimed` in
      `linear-claim.md` "Claim the issue" step 1).
   2. Resolve the team's default `backlog`-type state id from the cached
      state map (prefer the one named `Backlog`).
-  3. **One** `<linear-mcp>__save_issue` call: `id` = the issue's UUID,
-     `state` = the backlog state id, `labels` = the issue's existing labels
+  3. **Read the issue's current labels** — **one** `<linear-mcp>__get_issue`
+     call for the candidate's UUID, to capture its live label id set. This is
+     the one place row 3 spends a read beyond the shared scan: §4 step 1's
+     "no extra call" rule governs **candidate selection**, not apply. The
+     `save_issue` below **replaces** the label set, and the existing labels
+     are not in hand at this point — `linear-scan.py`'s skinny fields carry
+     no `labels`, and the fast path skips the per-issue `get_issue`
+     (`linear-sweep-complete.md` §2) — so without this read the demote would
+     clobber every label except `human-approval-requested`. (`linear-claim.md`
+     Bail needs no such read only because the claiming session already
+     fetched labels in its read-before-write guard; row 3 never did.)
+  4. **One** `<linear-mcp>__save_issue` call: `id` = the issue's UUID,
+     `state` = the backlog state id, `labels` = the labels from step 3
      minus `auto-claimed` plus `human-approval-requested` (the call replaces
      the label set — include the existing ones), `assignee` = `null`.
-  4. **One** `<linear-mcp>__save_comment` call (`issueId` = the issue's UUID)
-     noting the demote:
+  5. **One** `<linear-mcp>__save_comment` call (`issueId` = the issue's UUID)
+     noting the demote. Row 3 candidates have **every** resolved PR closed
+     unmerged (§4) — there is no single acting PR, so list them **all**:
 
      ```
-     Moved back to Backlog by /reconcile-tasks — PR #<n> (<url>) was closed
-     without merging while the issue sat in <old state name>. Flagged for
-     human review.
+     Moved back to Backlog by /reconcile-tasks — all resolved PRs (#<n1>
+     <url1>, #<n2> <url2>, …) were closed without merging while the issue sat
+     in <old state name>. Flagged for human review.
      ```
 
   Unlike `linear-claim.md`'s Bail, row 3 does **not** delete any
@@ -319,9 +354,14 @@ Print, grouped by rule:
 
 - **Scope** — one line stating exactly what this run covered, same wording as `linear-sweep-complete.md` "Report": `scope: configured projects (<names>) + Unassigned (project-less only)` (default), `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
 - **Counts** — `k completed (row 1), j moved to In Review (row 2), d demoted (row 3)`, plus row
-  1's own remaining left/skipped counts and row 2's skipped/anomaly count.
+  1's own remaining left/skipped counts (`left: open`, `left: unresolved`,
+  `left: closed unmerged` that were **not** demoted, no-PR skipped), row 2's
+  skipped/anomaly count, and row 3's `r revalidated-skip` count (candidates
+  dropped by the TOCTOU re-verify above).
 - **Per-issue lines** — identifier, the PR resolved and its state, the rule
-  that fired, and the outcome (or the planned transition on dry-run).
+  that fired, and the outcome (or the planned transition on dry-run). For
+  **row 3**, list **every** resolved PR (all are closed unmerged — there is no
+  single acting PR to name, unlike rows 1/2).
 - **Anomaly lines** — the row 1/row 2 scope-gap case from step 3.3 above,
   called out explicitly rather than silently dropped.
 - **Explicitly note what v1 does not enforce** — the orphaned-claim GC rule
