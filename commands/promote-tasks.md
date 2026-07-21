@@ -98,7 +98,7 @@ Do not touch any other fields. Do not move the file. Do not stage or commit — 
 Print a summary table:
 
 ```
-Promoted 4 of 6 candidates:
+Promoted 4 of 7 candidates:
   ready (3):
     - remove-stale-foobar-alias
     - fix-broken-import

@@ -118,7 +118,7 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 
 ```
 scope: milestone v2.0
-Promoted 4 of 6 candidates:
+Promoted 4 of 7 candidates:
   ready (3):
     - #142  Fix broken import
     - #145  Bump eslint config
