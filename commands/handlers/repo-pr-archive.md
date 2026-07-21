@@ -31,20 +31,24 @@ correct, conservative scope: it never has to guess at PR state.
    mkdir -p "$(git rev-parse --show-toplevel)/dev_docs/tasks/_archive"
    ```
 
-2. **Find candidates.** Scan task files and keep only those with `status: done`
-   whose completion age exceeds the threshold:
+2. **Find candidates.** Selection is deterministic and lives in
+   `scripts/task-scan.py --archive-candidates --older-than N` (that script is the
+   authority for this logic — do not re-derive it here):
 
    ```bash
-   find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
-     -not -path '*/_archive/*' 2>/dev/null
+   uv run "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" \
+     --archive-candidates --older-than N \
+     "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
 
-   For each, read the frontmatter; keep it only if `status: done`. Determine its
-   completion date from `completed` if present, else fall back to the file's last
-   git-commit date (`git log -1 --format=%cs -- <file>`); if that is empty too
-   (the file is uncommitted/untracked), fall back to **today's date** — so a
-   freshly written, not-yet-committed `done` file has age 0 and is conservatively
-   left in place until it has a real date. Keep it only if the resolved date is
+   It scans `dev_docs/tasks/` (excluding `_archive/`), keeps only cards with
+   `status: done`, and resolves each one's completion date with the same
+   three-way fallback: `completed` if present, else the file's last git-commit
+   date (`git log -1 --format=%cs -- <file>`), else (if that is empty too — the
+   file is uncommitted/untracked) **today's date** — so a freshly written,
+   not-yet-committed `done` file has age 0 and is conservatively left in place
+   until it has a real date. It emits `candidates: [{slug, path, completion_date,
+   completion_date_source, age_days}, ...]` for cards whose resolved date is
    more than `N` days before today. Never move a file in any non-`done` status,
    whatever its age.
 

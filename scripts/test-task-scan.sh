@@ -12,6 +12,9 @@
 #   - epic rollup (parent: + plan-directory membership)
 #   - expired detection (expires < today AND status non-terminal)
 #   - malformed frontmatter fails closed (non-zero exit)
+#   - --archive-candidates: three-way completion-date fallback (completed
+#     field -> git-commit date -> today), older-than-N selection, non-done
+#     statuses never selected
 #
 # Run directly: bash scripts/test-task-scan.sh
 set -uo pipefail
@@ -384,6 +387,144 @@ expires: 2099-01-01" "$(std_body)"
 out11="$("$SCRIPT" "$DIR11")" || bad "dup-slug fixture: script exited non-zero"
 dep11_ready="$(printf '%s' "$out11" | jq -r '.cards.ready[] | select(.slug=="dependent") | .dependency_ready')"
 assert_eq "done duplicate does not clear an active same-slug blocker" "false" "$dep11_ready"
+
+# --- Fixture 12: --archive-candidates, three-way completion-date fallback --
+# Per repo-pr-archive.md §2: completed field, else the file's last git-commit
+# date, else (uncommitted/untracked) today's date. Only status: done cards
+# whose resolved date is more than N days before today are candidates.
+DIR12="$BASE/archive"
+mkdir -p "$DIR12"
+git -C "$DIR12" init -q
+git -C "$DIR12" config user.email "test@example.com"
+git -C "$DIR12" config user.name "Test"
+
+# Rung 1: explicit `completed` field, far in the past -> selected.
+write_task "$DIR12/old-done.md" "title: Old done, explicit completed
+priority: low
+size: 1
+status: done
+completed: 2020-01-01
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+# Rung 1 (not selected): explicit `completed` field, recent -> NOT selected.
+write_task "$DIR12/new-done.md" "title: New done, explicit completed recent
+priority: low
+size: 1
+status: done
+completed: $(date -v-5d +%Y-%m-%d 2>/dev/null || date -d '5 days ago' +%Y-%m-%d)
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+# Non-done status is never a candidate, whatever its age.
+write_task "$DIR12/old-not-done.md" "title: Old but not done
+priority: low
+size: 1
+status: ready
+completed: 2020-01-01
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+git -C "$DIR12" add -A
+GIT_AUTHOR_DATE="2020-02-01T00:00:00" GIT_COMMITTER_DATE="2020-02-01T00:00:00" \
+  git -C "$DIR12" commit -q -m "rung 1 fixtures"
+
+# Rung 2: no `completed` field -> falls through to the file's last git-commit
+# date, which is old here -> selected.
+write_task "$DIR12/git-dated-done.md" "title: Git-dated done, no completed field
+priority: low
+size: 1
+status: done
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+git -C "$DIR12" add -A
+GIT_AUTHOR_DATE="2020-03-01T00:00:00" GIT_COMMITTER_DATE="2020-03-01T00:00:00" \
+  git -C "$DIR12" commit -q -m "rung 2 fixture"
+
+# Rung 3: no `completed` field AND uncommitted/untracked -> falls through to
+# today's date (age 0) -> NOT selected, even under a large --older-than.
+write_task "$DIR12/untracked-done.md" "title: Untracked done, no completed field
+priority: low
+size: 1
+status: done
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+out12="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR12")" || bad "archive fixture: script exited non-zero"
+cand_slugs="$(printf '%s' "$out12" | jq -r '.candidates[].slug' | sort)"
+expected_slugs="$(printf 'git-dated-done\nold-done')"
+assert_eq "archive-candidates: selects only the older-than-N done cards" "$expected_slugs" "$cand_slugs"
+
+completed_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="old-done") | .completion_date_source')"
+assert_eq "archive-candidates: explicit completed field is used when present" "completed" "$completed_source"
+
+git_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="git-dated-done") | .completion_date_source')"
+assert_eq "archive-candidates: falls through to git-commit date when completed is absent" "git_commit_date" "$git_source"
+
+# --- Fixture 13: exact `> older_than` boundary (today-relative dates) --------
+# age_days > older_than: a card completed EXACTLY N days ago (age N) is NOT
+# selected (N > N is false); N+1 days ago IS. Dates are computed relative to
+# today via python3 (portable across macOS/CI, unlike `date` flag divergence).
+DIR13="$BASE/archive-boundary"
+mkdir -p "$DIR13"
+d30="$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=30)).isoformat())")"
+d31="$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=31)).isoformat())")"
+write_task "$DIR13/exactly-30.md" "title: Completed exactly 30 days ago
+priority: low
+size: 1
+status: done
+completed: $d30
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+write_task "$DIR13/exactly-31.md" "title: Completed 31 days ago
+priority: low
+size: 1
+status: done
+completed: $d31
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+out13="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR13")" || bad "boundary fixture: script exited non-zero"
+boundary_slugs="$(printf '%s' "$out13" | jq -r '.candidates[].slug' | sort)"
+assert_eq "archive-candidates: exactly-N is excluded, N+1 is selected (> not >=)" "exactly-31" "$boundary_slugs"
+
+# --- Fixture 14: a done epic rollup is an archive candidate (repo-pr-archive
+# §terminal-state names "epic rollups marked status: done" as in-scope) -------
+DIR14="$BASE/archive-epic"
+mkdir -p "$DIR14"
+write_task "$DIR14/widget_plan.md" "type: epic
+title: Widget epic
+status: done
+completed: 2020-01-01" "$(std_body)"
+write_task "$DIR14/active_plan.md" "type: epic
+title: Active epic
+status: active
+completed: 2020-01-01" "$(std_body)"
+
+out14="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR14")" || bad "epic archive fixture: script exited non-zero"
+epic_cands="$(printf '%s' "$out14" | jq -r '.candidates[].slug' | sort)"
+assert_eq "archive-candidates: done epic rollup is selected, non-done epic is not" "widget_plan" "$epic_cands"
+
+# --- Fixture 15: a negative --older-than is rejected -------------------------
+if "$SCRIPT" --archive-candidates --older-than -1 "$DIR14" >/dev/null 2>"$BASE/neg.stderr"; then
+  bad "negative --older-than: script should exit non-zero, exited 0"
+else
+  ok "negative --older-than: script exits non-zero"
+fi
 
 echo
 echo "test-task-scan: $pass_count passed, $fail_count failed"
