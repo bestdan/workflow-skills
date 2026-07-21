@@ -36,15 +36,15 @@ When `<scope-milestone>` is set, step 3 adds `--milestone "<scope-milestone>"` t
 ### 3. Query candidates
 
 ```bash
-gh issue list --state open --search "-label:auto-eligible -label:human-approval-requested" --limit 50 --json number,title,body,labels [--milestone "<scope-milestone>"] [--repo <repo>]
+gh issue list --state open --search "-label:auto-eligible -label:human-approval-requested -label:blocked" --limit 50 --json number,title,body,labels [--milestone "<scope-milestone>"] [--repo <repo>]
 ```
 
 - `--state open` only — closed issues are `done` and are never scored.
-- The `--search` filter excludes issues that already carry `auto-eligible` or `human-approval-requested` **at query time** — mirroring how `linear-promote.md` reads candidates only from the `backlog` state — so the 50-item window isn't consumed by already-scored issues. (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
+- The `--search` filter excludes issues that already carry `auto-eligible` or `human-approval-requested` **at query time** — mirroring how `linear-promote.md` reads candidates only from the `backlog` state — so the 50-item window isn't consumed by already-scored issues. It also excludes `blocked`-labeled issues at query time, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
 - `--milestone "<scope-milestone>"` only when step 2a resolved a milestone scope; omit it on an `all`/no-milestone run.
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note possible truncation in the report; do not paginate.
 
-Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Report and exit if no un-scored candidates remain.
+Set aside (do **not** score) — as a backstop to the query filter — any already-`auto-eligible`/`human-approval-requested` issue that still slips through (e.g. label-index lag): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no `gh issue edit`. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is set aside with reason `blocked` (no `gh issue edit`), reported in step 6. Report and exit if no un-scored candidates remain.
 
 ### 3a. Filter parent rollups via GraphQL
 
@@ -125,9 +125,10 @@ Promoted 4 of 6 candidates:
     - #148  Remove stale alias
   needs_refinement (1):
     - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)
-  skipped (2):
+  skipped (3):
     - #109  (already scored)
     - #110  (parent rollup)
+    - #111  (blocked)
 ```
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Append the truncation note from step 3 if it applied. If parent rollup detection was skipped due to the `subIssues` field being unavailable, append that note here too.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 3 if it applied. If parent rollup detection was skipped due to the `subIssues` field being unavailable, append that note here too.

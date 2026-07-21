@@ -50,6 +50,8 @@ Also set aside (do **not** score) any candidate that is a **parent rollup** — 
 
 **Detecting parent rollups:** for each backlog candidate not already set aside as `already scored`, call `<linear-mcp>__list_issues` with `parentId` = candidate `id`, `limit: 1`, `includeArchived: false` (the `parentId` filter is server-side and takes exactly one id, so this is an exact per-candidate existence check that never truncates). A non-empty result means the candidate has at least one child — skip it as a `parent rollup`. Keep all identified parent rollups in the `skipped` list with reason `parent rollup`; they receive no `save_issue` call.
 
+Also set aside (do **not** score) any candidate that is **blocked** — a backlog candidate is **held** (left in Backlog, no `save_issue`, reason `blocked`) when it either (a) carries the `blocked` label, OR (b) has an unresolved native "is blocked by" relation — a blocker issue whose state is not of type `completed` or `canceled`. To detect (b), reuse the same per-candidate `get_issue` you already may call, reading the issue's blocked-by relations; a blocker in a `completed`/`canceled`-type state (or absent) counts as satisfied. This mirrors the file path's "hold blocked cards in Backlog" rule (see `commands/promote-tasks.md`). Keep all identified blocked candidates in the `skipped` list with reason `blocked`; they receive no `save_issue` call.
+
 ### 6. Score each candidate
 
 For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter:
@@ -91,9 +93,10 @@ Promoted 4 of 6 candidates:
     - PRE-18  Remove stale alias
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
-  skipped (2):
+  skipped (3):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
+    - PRE-11  (blocked)
 ```
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Append the truncation note from step 5 if it applied.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 5 if it applied.

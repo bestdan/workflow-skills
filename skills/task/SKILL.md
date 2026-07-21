@@ -264,7 +264,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
 
-Note: `is_blocked_by` is intentionally **not** checked here. `/do-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
+A card with an unresolved `is_blocked_by` entry (target card present and not `done`) is **held** instead of scored: it is left in `status: new`, not promoted to `ready` and not demoted to `needs_refinement`, so it stays in the scanned pool and auto-promotes once the blocker clears. Demoting to `needs_refinement` is deliberately avoided — the promoter only scans `status: new`, so a demoted card would never be re-checked.
 
 ## Lifecycle
 
