@@ -14,6 +14,7 @@ related:
   - ./auto-pilot-e-lite-design-review-codex-r4.md
   - ./auto-pilot-e-lite-design-review-codex-r5.md
   - ./auto-pilot-problem-statement.md
+  - ./nono-evaluation.md
 ---
 
 # Auto-pilot E-lite: design proposal
@@ -236,7 +237,11 @@ nothing to invoke, nothing to abuse.
 Sandboxed Bash `failIfUnavailable`, network allowlist
 (`api.anthropic.com`, `github.com`, `api.linear.app`, loopback). The `gh`
 exclusion remains a named hole bounded server-side (§2.2's policy is the
-compensating control, now with denial tests). Stage 2 tests effective
+compensating control, now with denial tests). A candidate replacement for this
+whole layer — nono's proxy-based domain filtering + credential injection, which
+would close the `gh` hole and hide bearer tokens from the agent — is under
+falsification test in [nono-evaluation.md](./nono-evaluation.md); until that
+probe passes, the hand-rolled Seatbelt layer described here stands. Stage 2 tests effective
 policy per execution path (plain Bash, excluded `gh`, each worker
 backend), never trusting sandbox startup success.
 
@@ -755,7 +760,9 @@ assumption, not evidence that the eventual production component is complete.
    at-most-twice continuation, counters control-plane-durable. Accepted.
 2. **`gh` outside the sandbox**: bounded by §2.2 (no-bypass rulesets,
    branch-pattern restriction, installation scope, 1h tokens, no key
-   access) — each part denial-tested in Stage 1. Accepted.
+   access) — each part denial-tested in Stage 1. Accepted. Candidate closure:
+   nono's domain-filtering proxy (falsification test in
+   [nono-evaluation.md](./nono-evaluation.md)) would remove the hole outright.
 3. **TCC under a headless user**: Stage-2 no-GUI context test; work stays
    out of TCC-protected locations.
 4. **CAO under agent**: disabled in the baseline; enabled only after §3.3's
