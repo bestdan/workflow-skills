@@ -68,29 +68,7 @@ already terminal. See `linear-common.md` "In-flight scan" for the read this
 section implements (state scope, skinny fields, per-scope resolution) — that
 block is the single source of truth; it is not restated here.
 
-**One mechanism: try the fast path, fall back to the floor.** At the top of
-this step, if `Bash` is available, attempt the **GraphQL fast-path** first —
-`commands/handlers/assets/linear-scan.py`, the same script `linear-common.md`
-"In-flight scan" names as one of the read's consumers. On **any** non-zero
-exit, or stdout that doesn't parse as the expected `{ meta, issues }` object,
-log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP
-floor.`) and run the **MCP floor** below instead. There is no separate
-`[ -n "$LINEAR_API_KEY" ]` pre-check gating this — `linear-scan.py` itself
-exits fast and non-zero when no key is resolvable, so the fallback **is** the
-gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
-`Bash` tool falls to the floor by construction.
-
-> **This gate is also the security boundary.** A Linear personal API key
-> (what `linear.api_key_ref` points at) is a full-account bearer token —
-> anyone holding it can read and write everything the key's owner can in
-> Linear. It must **never** be injected into a `claude.ai`/Claude Code
-> **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/
-> `$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and
-> attempts `linear-scan.py`, the script exits non-zero before any GraphQL
-> request (no key resolvable) and the run falls to the MCP floor
-> (OAuth-scoped, no raw key) by design — the guarantee is that the key is
-> never present, not that the script is never invoked. Do not "fix" this by
-> wiring the key into cloud config.
+**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer's fallback granularity is **per resolved scope** — the fast path is attempted per scope, and only a scope the fast path can't serve (the Unassigned scope) falls to the floor, as "Fast path" below details.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 
