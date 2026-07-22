@@ -9,16 +9,16 @@ remaining follow-up.
 
 ## Results
 
-| Check | Outcome |
-| --- | --- |
-| Agent login keychain scoped dump | **only `Claude Code-credentials`** — keychain-clean ✓ |
-| `cat ~maintainer/.autopilot-sentinel` (0600) | denied ✓ |
-| `cat ~maintainer/.config/gh/hosts.yml` (gh token, 0600) | denied ✓ |
-| `ls ~maintainer/.ssh` (0700) | denied ✓ |
-| `cat ~maintainer/.claude.json` (0600) | denied ✓ |
-| read maintainer Claude token via maintainer keychain | denied ✓ |
-| `cat ~maintainer/.gitconfig` (0644, non-secret) | **readable — gap** |
-| `ls ~maintainer` (home 0750, group=staff) | **traversable — gap** |
+| Check                                                   | Outcome                                               |
+| ------------------------------------------------------- | ----------------------------------------------------- |
+| Agent login keychain scoped dump                        | **only `Claude Code-credentials`** — keychain-clean ✓ |
+| `cat ~maintainer/.autopilot-sentinel` (0600)            | denied ✓                                              |
+| `cat ~maintainer/.config/gh/hosts.yml` (gh token, 0600) | denied ✓                                              |
+| `ls ~maintainer/.ssh` (0700)                            | denied ✓                                              |
+| `cat ~maintainer/.claude.json` (0600)                   | denied ✓                                              |
+| read maintainer Claude token via maintainer keychain    | denied ✓                                              |
+| `cat ~maintainer/.gitconfig` (0644, non-secret)         | **readable — gap**                                    |
+| `ls ~maintainer` (home 0750, group=staff)               | **traversable — gap**                                 |
 
 ## Finding
 
@@ -45,10 +45,26 @@ primary group. Not optional; the default macOS `0750`/shared-`staff` setup leaks
 `staff` so it never shares a group with the maintainer. Heavier; the `chmod 700`
 is sufficient.
 
-## Remaining for a complete F5
+## Sandbox layer (Checkpoint A) — CONFIRMED
 
-- **Sandbox layer:** run this same battery from inside `nono run` as agent under
-  the `claude` profile (agent must `nono pull nolabs-ai/claude` first). Expect the
-  same denials **plus** confirmation that the System keychain
-  (`/Library/Keychains`) is unreachable (profile grants only `~/Library/Keychains`).
-- **Re-verify** traversal + `.gitconfig` denied after `chmod 700 ~maintainer`.
+Same battery from inside `nono run --profile claude` as agent:
+
+| Check (inside nono)                      | Outcome                                                                                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cat ~maintainer/.gitconfig`             | DENY ✓ (0700 now also blocks it)                                                                                                                          |
+| `cat ~maintainer/.claude.json`           | DENY ✓                                                                                                                                                    |
+| `ls ~maintainer`                         | DENY ✓                                                                                                                                                    |
+| `cat /Library/Keychains/System.keychain` | **DENY ✓ — System keychain unreachable in the sandbox** (profile grants only `~/Library/Keychains`)                                                       |
+| read agent's own Claude token            | DENY — **locked-keychain artifact**, not a nono denial (fresh `sudo -u agent -i` session; F1/F6 proved Claude reads this token inside nono when unlocked) |
+
+**F5 fully confirmed** across both layers. The `.gitconfig`/traversal gaps are
+closed by the `chmod 700 ~maintainer` applied above; the sandbox layer adds the
+System-keychain-unreachable result the review predicted.
+
+## Operational finding (feeds §3.1 / run-loop)
+
+`nono run` **blocks on an interactive prompt** when invoked with a TTY (it hung
+in the agent shell until fixed with `</dev/null`). The production run-loop must
+invoke nono **non-interactively** (stdin from `/dev/null`), and the agent login
+keychain must be **unlocked** in-session before Claude runs. Both are provisioning/
+run-loop requirements, recorded for the design.
