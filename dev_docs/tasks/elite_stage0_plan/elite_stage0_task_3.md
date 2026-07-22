@@ -15,6 +15,8 @@ tags: [e-lite, spike, stage-0, probe, user-run]
 
 Plan: [[elite_stage0_plan]]
 
+> **Status (2026-07-22): substantially DONE via the nono evaluation.** Confirmed live and recorded under `dev_docs/elite-spike/`: agent provisioned (non-admin, 0700 home, clean login keychain), headless Claude auth, sandbox startup + sentinel unreadability (uid + sandbox layers). **The sandbox is now [nono](../../nono-evaluation.md) (design §3.2, adopted), not a hand-rolled Seatbelt render** — so this probe's "native sandbox startup" means `nono run` with the vendored `claude` profile. Remaining: the full interactive+launchd matrix under one enabled worker. The Max-invocation budget below was already spent by the nono eval's F1.
+
 ## Context
 
 Design §7a priority 1. Key assumption: the no-VM `agent` identity is a usable execution substrate with a real filesystem/Keychain boundary. Falsification redirect: stop the no-VM E-lite substrate; test a microVM-per-run boundary or restrict to attended operation. This is the highest-blast-radius probe — it can kill the whole architecture, so it runs first.

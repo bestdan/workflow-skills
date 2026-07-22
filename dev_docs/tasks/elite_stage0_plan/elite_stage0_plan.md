@@ -14,6 +14,8 @@ Source design: [../../auto-pilot-e-lite-design-2026-07-21.md](../../auto-pilot-e
 
 Provision the minimal `agent` identity and run the Stage-0 measurement spike: falsify the load-bearing substrate assumptions (dedicated-user viability, process binding, alert delivery, `setsid→execve` topology, Max-window coherence) before any control-plane code exists, then fold the results into the measured design revision that gates Stage 2.
 
+> **Update (2026-07-22):** the containment layer is now **nono** (adopted; design §3.2, evaluation in `../../nono-evaluation.md`), not a hand-rolled Seatbelt render. **Probe 1 ([[elite_stage0_task_3]]) is substantially done** via that evaluation — agent identity provisioned, headless Claude auth, sandbox startup, and sentinel unreadability all confirmed under `../../elite-spike/`. Probes 2 (tmux/process binding) and 3 (alert skeleton) — the control-plane substrate nono does not touch — remain the open critical path.
+
 ## Scope / non-goals
 
 - **In scope:** `agent` user + `apagent` group provisioning (no sudoers, no production paths); the kill sheet (probe 0); tranche-1 probes 1–3 and the two opportunistic probes; the measured revision; the re-plan checkpoint (gated on the revision's approval).
