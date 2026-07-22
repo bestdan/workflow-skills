@@ -67,7 +67,7 @@ restating it — the way row 1 already delegates wholesale to `linear-sweep-comp
 ## Two things deliberately NOT unified
 
 1. **`linear-claim.md`'s candidate selection stays separate.** "Find candidates"
-   is a _different_ read — ranked, filtered (WIP/estimate/label/assignee), driven
+   is a _different_ read — ranked, filtered (estimate/label/assignee), driven
    by `linear-ready.py`, and it uses the **claim variant** of the Unassigned
    bucket. It shares only the gate; its selection was never folded into "In-flight
    scan."
@@ -99,8 +99,9 @@ align them, does so as a deliberate behavioral change).
 
 ## Follow-ups noted, not done
 
-- **Sweep's whole-batch floor** means one project's transient GitHub failure
-  floors the _entire_ configured-project sweep to MCP. Pre-existing behavior, now
+- **Sweep's whole-batch floor** means one scope's transient Linear GraphQL failure
+  floors the _entire_ configured-project sweep to MCP (the scan hits only Linear
+  GraphQL; GitHub PR resolution is a separate downstream step). Pre-existing behavior, now
   documented honestly. If per-scope degradation (like reconcile) is wanted, that's
   a deliberate change to `linear-sweep-complete.md`'s invocation, not a doc fix.
 
