@@ -82,9 +82,11 @@ Then, per resolved project, run the asset (dry-run unless the caller passed
 `--apply`), reading the API key exactly as the standalone path does:
 
 ```bash
-python3 commands/handlers/assets/linear-false-closures.py \
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-false-closures.py" \
   --project "<project-id>" --repo "<owner/name>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
 ```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-false-closures.py`.
 
 Pass `--since` through when the caller gave one (`48h`/`2d` shorthand, an ISO
 datetime, or a Linear duration) to limit the scan to recently-closed issues —
