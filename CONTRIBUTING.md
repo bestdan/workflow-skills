@@ -119,16 +119,19 @@ against and bumps normally.
 
 When you have a stack — PR **B** branched off PR **A**'s branch, **C** off **B** — land them **bottom-up**, one at a time, rebasing each survivor onto the new `main` after every merge. `main` is protected and every qualifying merge **auto-bumps the version** (see [Versioning](#versioning)): the Release workflow pushes a `chore: release vX.Y.Z [skip ci]` commit, so the `main` tip **moves after each landing**. A child still based on the pre-merge tip runs CI against the wrong tree and merges a stale base.
 
+> **First, record each child's fork point.** Before you rewrite anything, capture where each child branched off its parent — step 4 needs this exact boundary, and rebasing the parent in step 2 moves the parent's branch ref out from under it: `git merge-base <branch-A> <branch-B>` (save the SHA as `<fork-B>`), one per parent→child edge.
+
 1. **Retarget the bottom PR to `main`.** If it was opened against an intermediate branch, point it at `main`: `gh pr edit <A> --base main`.
 2. **Rebase it onto current `main` and force-push**, so CI runs against the real base:
    ```sh
    git fetch origin && git checkout <branch-A> && git rebase origin/main && git push --force-with-lease
    ```
-3. **Squash-merge once green:** `gh pr merge <A> --squash`. The PR title's Conventional-Commit type drives the version bump, so keep it accurate. The Release workflow may then push a `chore: release … [skip ci]` commit, advancing `main`.
-4. **Rebase the next child onto the new `main` tip**, retarget it to `main`, force-push, and repeat from step 1 for the rest of the stack:
+3. **Squash-merge once green:** `gh pr merge <A> --squash`. The PR title's Conventional-Commit type drives the version bump, so keep it accurate. The Release workflow then pushes a `chore: release … [skip ci]` commit, advancing `main` — **but it runs asynchronously, so wait for it before step 4.** `gh pr merge` returns as soon as the squash lands; fetching immediately grabs the _pre-release_ tip (the stale base this section warns about) and, if `main` requires up-to-date branches, bounces you into a redundant second rebase. Watch the run with `gh run watch $(gh run list --workflow=Release --branch=main --limit=1 --json databaseId --jq '.[0].databaseId')`, or just confirm the bump landed: `git fetch origin && git log origin/main -1 --oneline` should show the `chore: release …` commit.
+4. **Rebase the next child onto the new `main` tip** — replaying _only its own_ commits — retarget it to `main`, force-push, and repeat from step 1 for the rest of the stack:
    ```sh
-   git fetch origin && git checkout <branch-B> && git rebase origin/main && git push --force-with-lease && gh pr edit <B> --base main
+   git fetch origin && git checkout <branch-B> && git rebase --onto origin/main <fork-B> <branch-B> && git push --force-with-lease && gh pr edit <B> --base main
    ```
+   A bare `git rebase origin/main` here is **wrong** once the parent was squash-merged from more than one commit: the squash commit's patch-id doesn't match the parent's individual commits, so Git replays them on top of the child — duplicating the parent's diff or forcing you to re-resolve conflicts you already settled. Rebasing `--onto` the recorded `<fork-B>` replays just the child's commits. Don't substitute the live `<branch-A>` ref for `<fork-B>`: step 2 rewrote it, so its merge-base is now the wrong (older) boundary. (Rebasing the whole stack from one checkout with `git rebase --update-refs` is an equivalent stack-aware alternative.)
 
 Always use `--force-with-lease` (never a bare `--force`) so a concurrent push isn't clobbered. Conflicts that were already resolved in the parent usually drop out once the parent is merged and you rebase the child onto the updated `main`.
 
