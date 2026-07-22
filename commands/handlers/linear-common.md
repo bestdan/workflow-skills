@@ -171,7 +171,7 @@ Either way, resolve state ids by **type only, never display name** (names are us
 
 **Per-scope query count.** MCP's `list_issues` `state` filter is single-valued, so MCP issues one `list_issues` call per resolved scope **per state id**, unioned per scope. GraphQL filters by state type in **one** query per scope (`state: { type: { in: [...] } }`, as `linear-ready.py` does) — never one query per state id.
 
-**Fast-path invocation.** Behind the gate above, the GraphQL fast path is `linear-scan.py`, one call per resolved scope, with a `--state-type` flag per state type in the caller's set (omit `--project` for the whole-team scope). **Never** pass the `"__unassigned__"` sentinel as `--project` — the script has no Unassigned-exclusion mode, so if the resolved scope set includes the Unassigned bucket, that scope floors (per-scope fallback):
+**Fast-path invocation.** Behind the gate above, the GraphQL fast path is `linear-scan.py`, invoked with each resolved concrete scope's id as `--project` (repeatable — batch every scope in one call, or one call per scope; the consumer's choice, since the script unions either way) and a `--state-type` flag per state type in the caller's set (omit `--project` for the whole-team scope). **Never** pass the `"__unassigned__"` sentinel as `--project` — the script has no Unassigned-exclusion mode, so if the resolved scope set includes the Unassigned bucket, that scope floors (per-scope fallback):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
