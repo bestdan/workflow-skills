@@ -17,8 +17,10 @@ alive() { sudo "$PY" "$M" "$1" | "$PY" -c 'import json,sys;print(json.load(sys.s
 
 sudo -v || { echo "sudo auth failed"; exit 1; }
 
-# agent-owned session+group leader (setsid -> pgid==pid==sid), exec /bin/sleep
-sudo -u agent "$PY" -c 'import os;os.setsid();os.execv("/bin/sleep",["sleep","3600"])' &
+# agent-owned process. sudo already starts the command as its own process-group
+# leader (observed: read-drill sleep had pgid==pid), so no setsid is needed and a
+# killpg of that pgid hits only this process.
+sudo -u agent /bin/sleep 3600 &
 sleep 0.6
 APID=$(pgrep -u agent -n -x sleep)
 echo "agent-owned pid = ${APID:-<none>}"
@@ -28,6 +30,14 @@ echo "== root measures the incarnation =="
 ROOT_JSON=$(sudo "$PY" "$M" "$APID"); echo "$ROOT_JSON"
 PGID=$(printf '%s' "$ROOT_JSON" | "$PY" -c 'import json,sys;print(json.load(sys.stdin)["pgid"])')
 echo "pgid = $PGID (uid should be 502)"
+
+# Safety: only killpg a group the agent sleep leads alone (pgid==pid). sudo
+# gives its child its own group; if that ever fails, refuse rather than risk
+# signalling this script's own process group.
+if [ "$PGID" != "$APID" ]; then
+    echo "ABORT: pgid ($PGID) != pid ($APID) — sleep is not a lone group leader; refusing killpg."
+    sudo -u agent kill "$APID" 2>/dev/null; exit 1
+fi
 
 echo "== non-root maintainer (uid $(id -u)) killpg(SIGTERM) -> expect EPERM =="
 "$PY" -c 'import os,signal,sys
