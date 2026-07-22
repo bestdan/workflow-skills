@@ -39,6 +39,8 @@ The cause: a headless run executes under agy's **default "CLI Project" context**
 
 **Fix: pass `--add-dir "<INPUT-DIR>"`** — the directory that contains `<INPUT>`. That adds it to the run's workspace, so agy's read of `<INPUT>` auto-allows. Verified on **1.1.5**: with `--add-dir` the review runs, and **`write_file` stays gated** — a write attempt still auto-denies and creates no file — so agy remains effectively **read-only**. `<INPUT-DIR>` is the parent of the fixed `<INPUT>` path, so it is itself fixed: adding it keeps the command invariant and the approve-once exact-match rule intact.
 
+**`<INPUT-DIR>` must be a _dedicated_ directory holding only co-review input — never the repo root, `$HOME`, or a shared temp dir.** `--add-dir` trusts the **whole** directory, not just `<INPUT>`, and agy is cloud-backed and only _prompt_-restrained from wandering (see the stateful-agent section — it explores despite instructions). Point `<INPUT-DIR>` at a broad or shared tree and untrusted diff content could induce agy to read — and upload — sibling files (secrets, other repos). Give `<INPUT>` its own directory (e.g. a per-run `…/co-review-input/`) so the read-trust `--add-dir` grants covers nothing but the review input. This is also why `<INPUT>` should not simply sit at a repo/`$HOME` path even though the shared contract permits any fixed absolute path.
+
 Two tempting non-fixes, both rejected:
 
 - **`--dangerously-skip-permissions`** makes the read work but is **not read-only**: `--sandbox` restricts only the _terminal_, not the `write_file` tool, so under skip-permissions agy will write files (verified — it created a file on request). Never use it for a reviewer, especially in `--local` mode with uncommitted changes in flight.
@@ -80,6 +82,6 @@ Merge into the `permissions.allow` array (see SKILL.md → Permissions). The fir
 "Bash(agy models)"
 ```
 
-Nothing that varies per PR appears in the command — the rubric and diff live in `<INPUT>`, and both `<INPUT>` and `<INPUT-DIR>` are fixed — so this is a genuine **exact-match, approve-once** rule with no command substitution to trip the matcher. The pointer, flags, and paths must match **byte-for-byte** between the invocation and the rule. If you pin a different `agy --model` or change the `<INPUT>` path, update both.
+Nothing that varies per PR appears in the command — the rubric and diff live in `<INPUT>`, and both `<INPUT>` and `<INPUT-DIR>` are fixed — so this is a genuine **exact-match, approve-once** rule with no command substitution to trip the matcher. The pointer, flags, and paths must match **byte-for-byte** between the invocation and the rule. If you pin a different `agy --model` or change the `<INPUT>` / `<INPUT-DIR>` path, update both.
 
 > These are the same per-coder auth probes the `select-coder` skill's [`scripts/probe-coders.sh`](../../../scripts/probe-coders.sh) runs to populate its availability cache (`agy models`). co-review keeps its own **live** rc-gate rather than reading that cache — the cache is allowed to be 30 days stale, and a stale `agy: logged_in: true` would reintroduce the 30s hang. If you change the probe command, update it in both places so they don't drift.
