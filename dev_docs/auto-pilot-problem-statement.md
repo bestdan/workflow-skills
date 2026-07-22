@@ -125,7 +125,12 @@ the fully-autonomous-at-3am scenario the system keeps being hardened for.
   hand-built, wherever possible.
 - **(b) is a tiny external watcher**, not a state machine. If a component
   exists to decide _for_ the human whether the run is healthy, ask whether a
-  notification would have done.
+  notification would have done. The "heartbeat that reaches me" is **async, not a
+  pager** (design Decision #5): the human is never alarmed to intervene mid-run,
+  so the watcher's job is to _detect and drive the run to a safe stop on its
+  own_, then leave a durable async record (Slack + registry) and a positive
+  daily canary read at leisure. "Reaches me when it's stuck" means the record is
+  waiting when I look — not that I'm woken.
 - **(c) is co-review plus verify-in-an-environment-where-tests-run.** Free
   everywhere except inside a Seatbelt.
 
