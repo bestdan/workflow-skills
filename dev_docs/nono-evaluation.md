@@ -11,6 +11,8 @@ targets:
 related:
   - ./auto-pilot-e-lite-design-2026-07-21.md
   - ./tasks/elite_stage0_plan/elite_stage0_plan.md
+  - ./tasks/elite_stage0_plan/nono_security_review.md
+  - ./nono-evaluation-key-points.md
 ---
 
 # nono evaluation — falsification probe
@@ -78,6 +80,24 @@ A nono pass buys a better containment layer. It does **not** shorten the
 control-plane or supervision work, and this probe must not be reported as if it
 did.
 
+**Load-bearing assumptions (from the code-level security review — see
+`nono-evaluation-key-points.md`):**
+
+- **macOS-only.** The two highest-severity review findings (SR-1 unrestricted
+  UDP egress under Landlock ≥V4; SR-2 proxy egress enforced by port not
+  destination IP) are **Linux-specific**; on the macOS mac mini Seatbelt scopes
+  egress to `localhost:PORT` and neither applies. This holds **only while every
+  execution path is macOS** — if any worker backend runs `nono` on Linux ≥6.7,
+  "network is contained" silently breaks. Pin the platform assumption.
+- **Pin the binary and vendor the profile.** nono is self-declared alpha with a
+  live escape-and-fix cadence, and `nono --profile ns/name` **silently
+  auto-pulls and runs "wiring"** (SR-4) that can drop executable hooks under
+  `$HOME` — unacceptable on a headless unattended box. A blessed result is
+  version-specific: pin the nono binary version and vendor the reviewed profile
+  as checked-in config; do not rely on live registry auto-pull in production.
+  Treat profile provenance as supply chain (SR-6: the `always-further` →
+  `nolabs-ai` rename is a live namespace-hijack surface).
+
 ## 3. Spike contract (inherits §0a discipline)
 
 Disposable directory and the dedicated spike test repository (elite Stage-0
@@ -124,6 +144,20 @@ only to try to trip it.
 - **Default-reject.** An inconclusive result on F1, F2, or F5 is a reject for
   that run (they are parity/liveness claims). An inconclusive on F3/F4/F6
   degrades to the weaker adoption tier, never up.
+- **SR-3 dot-segment deny case (required).** nono's L7 `normalize_path`
+  percent-decodes but does **not** resolve `.`/`..`, so a path-scoped endpoint
+  policy is bypassable — deterministically, with the injected token attached.
+  F2/F3's deny battery **must** include a `..`/dot-segment traversal case (e.g. a
+  request whose path escapes an issues-only allow rule to `/user/emails`). If it
+  succeeds, nono's **path/method-level** endpoint policy is not a boundary; only
+  **host-level** domain allowlisting is. This does not fail F1/F2 host-level
+  liveness, but it caps what F3 can claim.
+- **CA-extraction deny case (F4).** If `--trust-proxy-ca` persistent mode is used,
+  the MITM CA private key is stored **extractable** in the login keychain (and is
+  **not** removed by `security delete-certificate` — it lingers as a
+  `nono-proxy-ca` generic-password, confirmed empirically). F4 must test whether
+  the agent uid can extract that key. Prefer the default **ephemeral** CA
+  (in-memory, 24h, never persisted) and treat persistent-CA mode as out of scope.
 
 ## 5. Time cap & tranche
 
@@ -136,12 +170,19 @@ Classify each falsifier `confirmed` (adoption survives) / `falsified` /
 
 ## 6. Decision rule
 
+- **Keep §2.2's server-side ruleset on ANY adopt tier (SR-3).** Because nono's
+  path/method-level endpoint policy is bypassable (dot-segment traversal),
+  server-side GitHub rulesets remain the real bound on _what the token can do_.
+  No adopt tier — not even full — retires §2.2 in favor of nono's L7 filter;
+  nono's endpoint policy is defense-in-depth only.
 - **ADOPT (full):** F1, F2, F5 confirmed; F3, F4, F6 confirmed. ⇒ nono replaces
   §3.2, closes Risk #2, and closes Decision #1 (agent sees no bearer secret).
   Rewrite §2.1 (broker still _mints_, but the token is injected, never
   agent-readable), §3.2 (delete the `gh` hole), Risk #2 (downgraded to
   "closed"). The broker's "workflow correctness invariant, not a security
-  boundary" caveat is deleted.
+  boundary" caveat is deleted. **§2.2's ruleset stays** (SR-3). Note: nono being
+  self-declared alpha argues against betting a high-value secret on injection at
+  all — full tier should clear a high bar.
 - **ADOPT (degraded — the most likely good outcome):** F1, F2, F5 confirmed;
   F3 confirmed; F4 and/or F6 falsified. ⇒ nono closes the `gh` hole and hides
   github/linear creds, but either injection isn't a boundary against the agent
