@@ -1,0 +1,116 @@
+{
+    "S0_setsid_exec_continuity_and_selective_stop": {
+        "claim_pane_pid": 36421,
+        "recorded_pid": 36421,
+        "claim_eq_recorded_pid": true,
+        "exe_after_exec": "/bin/sleep",
+        "sid_eq_pid_leader": true,
+        "pgid_eq_pid": true,
+        "ppid": 36420,
+        "start_us": [
+            1784718842,
+            283809
+        ],
+        "shim_already_leader": true,
+        "shim_setsid_result": "skipped-already-leader",
+        "shim_claim_pre_sid_eq_pid": true,
+        "stop_decision": {
+            "action": "SIGNALLED",
+            "pgid": 36421,
+            "dead_after": true
+        }
+    },
+    "S1_pane_death_before_observation": {
+        "claim_pane_pid": 36428,
+        "live_after_kill": {
+            "alive": false,
+            "pid": 36428,
+            "errno": 3
+        },
+        "would_publish_active_lease": false,
+        "fail_closed": true
+    },
+    "S2_launcher_death_before_publication": {
+        "recorded_pid": 36435,
+        "ppid_at_launch": 36434,
+        "ppid_now": 36434,
+        "pane_survived_launcher_death": true,
+        "parent_is_persistent_tmux_not_launcher": true,
+        "recovery_pass_reidentifies_by_incarnation": true
+    },
+    "S3_replacement_pane": {
+        "incarnation_a_pid": 36442,
+        "incarnation_b_pid": 36448,
+        "a_dead_after_replacement": true,
+        "distinct_pids": true,
+        "a_uniqueid": 13465463,
+        "b_uniqueid": 13465469,
+        "distinct_uniqueid": true,
+        "distinct_start_us": true,
+        "substitute_B_accepted_as_A": false,
+        "stop_A_decision": {
+            "action": "REFUSE",
+            "reason": "dead",
+            "recorded": {
+                "alive": true,
+                "pid": 36442,
+                "p_uniqueid": 13465463,
+                "p_puniqueid": 13465462,
+                "ppid": 36441,
+                "pgid": 36442,
+                "sid": 36442,
+                "uid": 501,
+                "start_tvsec": 1784718843,
+                "start_tvusec": 169518,
+                "comm": "sleep",
+                "exe": "/bin/sleep"
+            },
+            "live": {
+                "alive": false,
+                "pid": 36442,
+                "errno": 3
+            }
+        }
+    },
+    "S4_stop_race_pid_reuse": {
+        "recorded_A_pid": 36455,
+        "recorded_A_uniqueid": 13465476,
+        "bystander_B_pid": 36458,
+        "bystander_B_uniqueid": 13465479,
+        "reuse_stop_decision": {
+            "action": "REFUSE",
+            "reason": "identity-mismatch",
+            "recorded": {
+                "alive": true,
+                "pid": 36458,
+                "p_uniqueid": 13465476,
+                "p_puniqueid": 13465475,
+                "ppid": 36454,
+                "pgid": 36411,
+                "sid": 36455,
+                "uid": 501,
+                "start_tvsec": 1784718843,
+                "start_tvusec": 494512,
+                "comm": "sleep",
+                "exe": "/bin/sleep"
+            },
+            "live": {
+                "alive": true,
+                "pid": 36458,
+                "p_uniqueid": 13465479,
+                "p_puniqueid": 13465434,
+                "ppid": 36413,
+                "pgid": 36411,
+                "sid": 36411,
+                "uid": 501,
+                "start_tvsec": 1784718843,
+                "start_tvusec": 733391,
+                "comm": "sleep",
+                "exe": "/bin/sleep"
+            }
+        },
+        "bystander_survived_reuse_stop": true,
+        "ps_second_granularity_would_collide": true,
+        "libproc_us_granularity_distinguishes": true
+    }
+}

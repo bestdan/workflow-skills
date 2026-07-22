@@ -346,13 +346,15 @@ validated against `^[a-z0-9-]+$` before use). The generic `sudo -iu
 agent <anything>` form exists nowhere in sudoers — the lifecycle boundary
 gets the same fixed-configuration treatment as the broker.
 
-The run shim either calls `setsid(2)` and `execve(2)` itself or uses a pinned,
-maintainer-owned absolute helper selected by the measurement spike. Stage 2
-cannot begin while that choice or its observed PID/PGID/session invariants are
-unresolved. A candidate PID returned by agent-owned tmux is never sufficient:
-the measured revision must define a unique control-plane binding and rollback
-for start failure, pane death before observation, identity mismatch, and
-launcher crash before active publication.
+The run shim is a bare `execve(2)` wrapper — **no `setsid(2)` and no helper**.
+Probe 2 measured that tmux already creates each pane as its own session leader
+(`sid == pgid == pid` before any setsid call), so the shim inherits leadership
+and `pgid == pid` gives stop a clean process-group target
+(`fixtures/process-binding/`). A candidate PID returned by agent-owned tmux is
+still never sufficient: the measured revision defines the unique control-plane
+binding (below) and rollback for start failure, pane death before observation,
+identity mismatch, and launcher crash before active publication — all
+fault-injected and confirmed in Probe 2.
 
 - **Run identity**: `run_id` = timestamp+slug. Session `ap-<run_id>` on
   the single pinned socket `/Users/agent/.autopilot-runtime/tmux.sock`
@@ -361,14 +363,20 @@ launcher crash before active publication.
   removes a stale socket only after its agent-side process probe finds no tmux
   server. Socket/session results are claims used to operate tmux; they never
   establish lease ownership, process identity, or terminal state.
-- **Incarnation identity**: every recorded process is stored as
-  a measured incarnation rather than a bare PID. `{pid, ps lstart, pgid, sid,
-  executable}` is the initial candidate, but second-granularity wall-clock
-  `lstart` is not by itself a kernel attestation. Stage 0 must establish the
-  strongest stable identity available on the target macOS version, and the
-  measured revision must fail closed if it cannot distinguish reuse or
-  shim-to-Claude transition. The run's incarnation is never the short-lived
-  launcher's PID or the runfile's claim.
+- **Incarnation identity**: every recorded process is stored as a measured
+  incarnation `{pid, p_uniqueid, start_µs, executable}`, keyed on
+  **`p_uniqueid`** — the monotonic, never-reused-within-a-boot kernel process id
+  from `proc_pidinfo(PROC_PIDUNIQIDENTIFINFO)`. Probe 2 confirmed this is
+  available on the target macOS and strictly stronger than the earlier
+  `{pid, ps lstart}` candidate, whose second-granularity `lstart` false-matches a
+  reused PID within the same second; µs `start` corroborates and `p_puniqueid`
+  pins the expected tmux-server parent (`fixtures/process-binding/`). PID reuse
+  is therefore a hard mismatch, not a probabilistic one, and stop fails closed on
+  any mismatch. The run's incarnation is never the short-lived launcher's PID,
+  the runfile's claim, or the agent-owned tmux `pane_pid`. (Cross-uid detail
+  pending on the two-uid mini: a non-root maintainer's `proc_pidinfo` of an
+  agent-owned process may be `EPERM`, so the independent measurement runs
+  privileged alongside the signal — never a fallback to `ps` lstart.)
 - **Session identity**: `ap-launch` generates the Claude session UUID,
   passes it via `--session-id`, and records it in the launch record. Any
   future resume targets exactly that session — never "the most recent
@@ -770,7 +778,7 @@ is never deferred behind probe 2 merely because its priority number is larger.
 | -------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 |        0 | **Kill sheet.** For every item below, record the falsifier, pass threshold, inconclusive condition, evidence required, time cap, dependent work, and redirect before running it.                                                                                                                                                                                                                                                                                                                                                                                                                              | The team shares binary-enough decisions; evidence will end debate rather than create another review round.                                      | Tighten the decision rule before any implementation work.                                                                                             |
 |        1 | **Dedicated-user viability canary — substantially DONE** (`dev_docs/elite-spike/`, nono evaluation). Confirmed live: agent provisioned (non-admin, 0700 home, clean login keychain), headless Claude auth, **nono** sandbox startup + host-level allowlist, sentinel unreadability (uid + sandbox layers), tool/cache access. The sandbox is nono (§3.2), not a hand-rolled Seatbelt render. Remaining: the interactive+launchd matrix under one enabled worker, and the F2 write loop (needs test App).                                                                                                      | The no-VM `agent` identity is a usable execution substrate with a real filesystem/Keychain boundary.                                            | Stop the no-VM E-lite substrate; test a microVM-per-run boundary or restrict the product to attended operation.                                       |
-|        2 | **tmux/process-binding spike.** Start a trivial shim and then a harmless exec surrogate through the fixed-wrapper shape (the real shim→Claude transition is captured once, during probe 1's authorized invocations — §0a's Max allowance admits no `claude` launches beyond probe 1's); measure PID/PPID/PGID/SID/executable continuity; inject pane death before observation, launcher death, replacement panes, and stop races.                                                                                                                                                                             | The maintainer can uniquely bind a requested launch to one live incarnation and stop only that incarnation despite the agent-owned tmux server. | Abandon pane identity as authority; evaluate a directly held maintainer guardian/process handle or a different session host before designing leases.  |
+|        2 | **tmux/process-binding spike — CONFIRMED** (`dev_docs/elite-spike/fixtures/process-binding/`). Shim is a bare `exec` (tmux pane is already session leader); incarnation key is `p_uniqueid`; all four injections held (fail-closed on pre-observation death, benign launcher crash, replacement-pane and PID-reuse both refused). Remaining: two cross-uid confirmations on the mini (privileged measure + signal). Start a trivial shim and then a harmless exec surrogate through the fixed-wrapper shape (the real shim→Claude transition is captured once, during probe 1's authorized invocations — §0a's Max allowance admits no `claude` launches beyond probe 1's); measure PID/PPID/PGID/SID/executable continuity; inject pane death before observation, launcher death, replacement panes, and stop races.                                                                                                                                                                             | The maintainer can uniquely bind a requested launch to one live incarnation and stop only that incarnation despite the agent-owned tmux server. | Abandon pane identity as authority; evaluate a directly held maintainer guardian/process handle or a different session host before designing leases.  |
 |        3 | **Real alert walking skeleton.** A trivial launchd-hosted heartbeat process is killed and wedged; the actual watcher cadence and real push channel must notify the device within ten minutes.                                                                                                                                                                                                                                                                                                                                                                                                                 | The inherent unattended promise—external detection and notification—works without the full registry or launcher.                                | Stop unattended work; change launch context, watcher primitive, cadence, or delivery provider and rerun this probe.                                   |
 |        4 | **GitHub authority canary.** Under the actual agent uid, perform every required git/`gh`/GraphQL operation and all denial tests with instrumented credential resolution — against a **disposable test App** installed only on the test repository; the production App never enters the spike. Stage 1's gate reruns the identical tests against the real App.                                                                                                                                                                                                                                                 | The App identity is both sufficient for the delivery loop and constrained by server-side policy.                                                | Change App permissions/helpers or replace unsupported `gh` paths with fixed API calls; do not build broker hardening around a false permission model. |
 |        5 | **Baseline crash-transaction kernel.** Input: the draft baseline launch/lease/registry state machine from the measured revision — this probe falsifies that draft, preserving §0a's empirical/design boundary; it runs only after the draft exists. In a disposable directory, implement only `prepared → active → terminal`, generation replacement, and registry append using OS-owned locks and atomic publication; kill the writer at every durable boundary and run concurrent contenders. Time cap: two working days (an explicit override of rule 3). Continuation reservation is deliberately absent. | The baseline control-plane state model has one recoverable outcome under crash and concurrency before it is coupled to tmux, GitHub, or Claude. | Simplify the protocol or evaluate a transactional store such as SQLite before writing `ap-launch`, `ap-stop`, or the watcher around it.               |
@@ -791,9 +799,10 @@ Two cheap probes run opportunistically as soon as the agent identity exists:
 - **Max-window coherence**: query the exact same test session as agent and
   maintainer. Failure immediately deletes automatic continuation from the
   build order but does not block Stages 1–4's stop-and-notify baseline.
-- **`setsid(2) → execve` topology**: capture the transition before the broader
-  tmux race matrix. Its result selects the run-shim implementation used by
-  priority 2; it does not by itself establish control-plane identity.
+- **`setsid(2) → execve` topology — RESOLVED** by Probe 2: tmux already makes
+  the pane a session leader, so the run-shim is a bare `exec` with no `setsid`
+  and no helper (`fixtures/process-binding/`). This selected the run-shim
+  implementation; it does not by itself establish control-plane identity.
 
 The delivery rule is therefore **falsifier first, fixture second, production
 component last**. Passing a probe is permission to test the next dependent
