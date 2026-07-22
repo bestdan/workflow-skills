@@ -68,7 +68,7 @@ already terminal. See `linear-common.md` "In-flight scan" for the read this
 section implements (state scope, skinny fields, per-scope resolution) — that
 block is the single source of truth; it is not restated here.
 
-**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer's fallback granularity is **per resolved scope** — the fast path is attempted per scope, and only a scope the fast path can't serve (the Unassigned scope) falls to the floor, as "Fast path" below details.
+**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer **batches all configured projects into one call** (step 2 below), and the script exits non-zero as a whole on any scope's failure, so its fallback granularity is the **whole configured-project batch** — a failure floors all configured projects together, not one scope. The Unassigned scope is a **separate** pass that always floors on its own (the script has no null-project exclusion mode), as "Fast path" below details.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 

@@ -151,7 +151,7 @@ Three GraphQL reads run behind the **same** gate, defined once here: "Ready-cand
 **What the gate does NOT own — kept per consumer.** _Fast-path eligibility_ (which searches attempt the fast path) and _fallback granularity_ (what unit falls to the floor) differ by caller and stay local to each:
 
 - **Ready-candidate selection (`linear-claim.md` "Find candidates")** — attempts the fast path for the **ranked search only**; the direct-identifier path always stays on the MCP floor; and it falls the **whole search** to the floor when a scope the fast path can't serve is needed (the Unassigned bucket, a specific `--project` pin).
-- **In-flight scan (`linear-sweep-complete.md` + `linear-reconcile.md` row 2)** — attempts the fast path **per resolved scope**, falling **only that scope** to the floor (e.g. the Unassigned scope, which the fast-path script has no exclusion mode for).
+- **In-flight scan** — the two consumers differ, because `linear-scan.py` exits non-zero as a whole on any scope's failure (no per-scope isolation), so a **batched** call floors its whole batch: **`linear-reconcile.md` row 2** invokes the script **once per resolved scope**, so a failure floors **only** that scope; **`linear-sweep-complete.md`** **batches all configured projects into one call**, so any failure floors the **whole configured-project batch**. In both, the Unassigned scope is a **separate** pass that always floors on its own (the script has no null-project exclusion mode).
 - **Relation-graph load (`linear-reoptimize.md`)** — loads the whole graph in one pass, so its fallback granularity is the **whole load** (any failure floors the entire load).
 
 ## In-flight scan
