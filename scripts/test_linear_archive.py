@@ -5,7 +5,8 @@ The module talks to Linear over HTTP via ``gql``; these tests stub that seam so
 nothing touches the network. They cover both sweep paths — whole-team (no
 ``--project``) and single-project (``--project <uuid>``) — and assert the
 load-bearing invariant that broke in PRE-567: the GraphQL operation must never
-declare a ``$variable`` it does not pass (Linear rejects that with HTTP 400).
+declare a ``$variable`` it does not *reference in the operation body* (Linear
+rejects a declared-but-unused variable with HTTP 400).
 """
 
 import importlib.util
@@ -60,8 +61,12 @@ class FindQueryTests(unittest.TestCase):
             linear_archive.gql = original
         return seen["query"], seen["variables"]
 
-    def assert_no_undeclared_or_unused_vars(self, query, variables):
-        """The HTTP-400 invariant: declared $vars and passed variables match exactly."""
+    def assert_vars_declared_used_and_passed(self, query, variables):
+        """The HTTP-400 invariant: every declared $var must be *referenced in the
+        operation body* (the condition Linear 400s on), and the passed variables
+        must match the declared set. A declared var appears once in the header;
+        one that is also used appears again in the body, so its ``$name`` token
+        occurs more than once."""
         declared = set(DECLARED_VAR_RE.findall(query))
         passed = set(variables)
         self.assertEqual(
@@ -69,20 +74,27 @@ class FindQueryTests(unittest.TestCase):
             passed,
             f"declared {sorted(declared)} != passed {sorted(passed)}",
         )
+        for var in declared:
+            self.assertGreater(
+                query.count(f"${var}"),
+                1,
+                f"${var} is declared but never referenced in the operation "
+                f"body (Linear rejects a declared-but-unused variable with 400)",
+            )
 
     def test_whole_team_sweep_declares_no_project(self):
         query, variables = self._capture(team="PreThink", project=None)
         self.assertNotIn("$project", query)
         self.assertNotIn("project: {", query)
         self.assertNotIn("project", variables)
-        self.assert_no_undeclared_or_unused_vars(query, variables)
+        self.assert_vars_declared_used_and_passed(query, variables)
 
     def test_single_project_sweep_declares_and_passes_project(self):
         query, variables = self._capture(team="PreThink", project=PROJECT_UUID)
         self.assertIn("$project: ID", query)
         self.assertIn("project: { id: { eq: $project } }", query)
         self.assertEqual(variables.get("project"), PROJECT_UUID)
-        self.assert_no_undeclared_or_unused_vars(query, variables)
+        self.assert_vars_declared_used_and_passed(query, variables)
 
     def test_team_name_vs_uuid_selects_filter_field(self):
         name_query, _ = self._capture(team="PreThink", project=None)
