@@ -41,3 +41,13 @@ Falsifier-first, and **gated on a hard seam**: F1 (can Claude Code even run head
 Task 1 substantially done (preliminary + agent-side). Confirmed: **F1** (Claude through proxy), **F2** tool-compat (git/gh honor proxy; allowlist needs `github.com` + `api.github.com`; write loop pending App), **F5** two-uid boundary for secrets + agent keychain clean + `chmod 700 ~maintainer` hardening applied, **F6a** (Claude works under Anthropic MITM, audit-proven). Agent identity provisioned; agent Max auth working. Standing verdict: **adopt-leaning**, degraded tier at minimum, full tier pending F6b. See `dev_docs/elite-spike/measurements.md`.
 
 **Remaining in task 1:** sandbox-layer F5 (agent inside nono) and the F2 write loop (needs App) — folded into task 2's checkpoints A/B for continuity.
+
+## Decision (2026-07-22): ADOPT — defense-in-depth / network-only tier
+
+After the code-level security review (`../../nono_security_review.md` via `../../nono-evaluation-key-points.md`), the verdict is **adopt nono as the macOS sandbox + host-level domain-allowlist layer** — closing the `gh` hole and keeping the agent off maintainer files — **but not** for credential hiding. SR-3 (L7 path-traversal) makes endpoint-scoped injection unreliable, and nono's alpha status argues against betting secrets on it, so §2.2's server-side rulesets stay as the token boundary and Decision #1 stands. Constraints: pin the binary, vendor the reviewed profile (no live auto-pull), ephemeral CA only, macOS-only.
+
+**Design edits applied** (task 3 partial): design §3.2, Risk #2, Decision #1, §2.1 updated to reflect the adoption (commit `7743516`).
+
+**Task-2 injection checkpoints C/D/E (F3/F4/F6b) — DROPPED** as low-value per this decision (injection is not the value proposition). Checkpoint A (sandbox-layer F5) remains to complete F5; Checkpoint B (test App → F2 write loop) remains to complete F2 — neither expected to change the tier.
+
+**Still open before full close:** Checkpoint A (sandbox-layer F5), F2 write loop (needs test App). Task 3's graduate-then-delete cleanup waits on those.
