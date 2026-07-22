@@ -53,7 +53,7 @@ On the fast path, the script's own prelude resolves the team itself, so this
      --project "<scope-1-id>" --project "<scope-2-id>" ...
    ```
 
-   Omit `--project` entirely for the whole-team scope. Parse stdout as the
+   Omit `--project` entirely for the whole-team scope. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-relations.py`. Parse stdout as the
    `{ meta: { viewer, team, states }, issues: [...] }` object described in the
    script's header comment; a parse failure is itself a fallback trigger (see
    above). The query is **not** filtered by `state` — terminal (`Done`/

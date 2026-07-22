@@ -120,7 +120,7 @@ non-zero when no key is resolvable, so the fallback **is** the gate, same as
      --project "<scope-id>" --state-type backlog --state-type unstarted
    ```
 
-   Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }`
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }`
    object described in the script's header comment; a parse failure is
    itself a fallback trigger (see above).
 
