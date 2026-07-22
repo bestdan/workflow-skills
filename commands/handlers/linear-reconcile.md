@@ -3,37 +3,37 @@
 Invoked from `/reconcile-tasks [--apply] [--all] [--project <id|name>]` when
 `handler: linear` is configured. This is the **bounded reconciler**: it corrects issues sitting in
 the wrong state against a fixed, enumerated rule table, not open-ended
-judgment about what "looks off." v1 enforces **exactly** these three rows and
+judgment about what "looks off." v1 enforces **exactly** these four rows and
 nothing else:
 
-| # | Detected drift                                                          | Correction         |
-| - | ----------------------------------------------------------------------- | ------------------ |
-| 1 | linked PR **merged**, issue still in a **started**-type state           | → Done             |
-| 2 | **open** PR, issue in a **non-started** column (Backlog/Todo)           | → In Review        |
-| 3 | linked PR **closed, unmerged**, issue still in a **started**-type state | → Backlog (demote) |
+| # | Detected drift                                                               | Correction         |
+| - | ---------------------------------------------------------------------------- | ------------------ |
+| 1 | linked PR **merged**, issue still in a **started**-type state                | → Done             |
+| 2 | **open** PR, issue in a **non-started** column (Backlog/Todo)                | → In Review        |
+| 3 | linked PR **closed, unmerged**, issue still in a **started**-type state      | → Backlog (demote) |
+| 4 | `auto-claimed` + **started**-type, no resolvable PR/branch, idle > threshold | → Backlog (demote) |
 
 Row 1 is scoped to **started**-type issues because it delegates wholesale to
 `linear-sweep-complete.md`, whose candidate query covers exactly those. A
 merged PR on a **non-started** issue falls between the rows — v1 reports it
 as an anomaly (step 3.3) rather than acting. Row 3 shares that same
 started-type scan (see "4. Row 3" below) — it does not run a second query.
+Row 4 reuses that scan's `no-PR skipped` bucket (see "5. Row 4" below).
 
 > **Bounded-rule-set doctrine.** This table is deliberately closed, not a
-> starting point. One more row is a known, deferred follow-up — **do not add
-> it here**, and do not add any other speculative rule:
+> starting point. Do not add a fifth row here, and do not add any other
+> speculative rule.
 >
-> - **Orphaned-claim GC** (a stale `auto-claimed` label/assignee with no live
->   claim behind it) — related to PRE-408. Still tracked in Backlog.
->
-> Rows 1 and 2 only ever **promote or complete** an issue; row 3 is v1's
-> first **demote** — it carries more blast radius than a promote/complete
+> Rows 1 and 2 only ever **promote or complete** an issue; rows 3 and 4 are
+> v1's **demotes** — they carry more blast radius than a promote/complete
 > (a false-positive read pulls live work back to Backlog), which is exactly
-> why it stayed a deferred follow-up until the promote/complete rules (1-2)
-> were proven in practice. It ships with the same narrow guard the deferred
-> description specified: act only on a PR that is **definitively**
+> why they stayed deferred follow-ups until the promote/complete rules (1-2)
+> were proven in practice. Row 3 ships with the same narrow guard the
+> deferred description specified: act only on a PR that is **definitively**
 > closed-unmerged, never on an unresolvable PR state, and never set a
-> `completed`/`canceled` state from it. Do not widen row 3, and do not add
-> the still-deferred orphaned-claim GC rule here.
+> `completed`/`canceled` state from it. Row 4 ships with its own narrow
+> guard: act only when **both** no-PR/no-branch **and** the age threshold
+> hold, never on ambiguity. Do not widen either row.
 
 **Shared reference:** see `linear-common.md` for connection details, the
 config schema (`linear.projects`, the Unassigned bucket), and the kanban
@@ -57,7 +57,7 @@ the Unassigned bucket — the **sweep/reconcile variant** from
 "any project outside the configured set" — narrower than `/do-tasks`'s claim
 variant by design, since this reconciler is destructive-adjacent).
 
-All three rows below run against this same resolved scope set.
+All four rows below run against this same resolved scope set.
 
 ## 2. Row 1 — merged → Done
 
@@ -254,7 +254,63 @@ resolved PR is `CLOSED` with `mergedAt == null` does the issue land in
    > there is out of scope entirely, see "Row 2" step 3 above) and never set a
    > `completed`/`canceled` state from this row.
 
-## 5. Dry-run (default)
+## 5. Row 4 — orphaned claim → Backlog demote
+
+Detects an issue left `started` + `auto-claimed` (+ assignee) by a session
+that died after the claim write (`linear-claim.md` "Claim the issue" step 6)
+but before ever pushing a branch or opening a PR — invisible to `/do-tasks`
+(its "Find candidates" gates out anything already `started`+`auto-claimed`)
+and invisible to rows 1–3 (they all require a resolvable PR to act). Left
+alone it is claimed forever.
+
+1. **Take row 1's `no-PR skipped` bucket as the candidate pool** — the
+   started-type issues `linear-sweep-complete.md` step 3 already found no
+   `links` attachment, no `[<IDENTIFIER>]` PR, and no PR on `branchName` for.
+   No extra scan query — same reuse pattern as row 3's `left: closed
+   unmerged` bucket.
+
+2. **Narrow to `auto-claimed`.** The no-PR-skipped bucket carries only the
+   "In-flight scan" skinny fields (`id identifier title url state`), never
+   labels, so read each candidate's labels — reuse the `<linear-mcp>__get_issue`
+   call `linear-sweep-complete.md` "Resolve each issue's PR" step 1 already
+   made for it (it fetches `attachments`, which comes back empty for a no-PR
+   candidate, on the **same** response as `labels` — no second call). Drop
+   any candidate without the `auto-claimed` label; it isn't a live claim to
+   begin with.
+
+3. **Guard — no remote branch.** For each remaining candidate, resolve
+   `branchName` (already fetched in step 2's `get_issue` call) and check:
+
+   ```bash
+   git ls-remote --heads origin "<branchName>"
+   ```
+
+   A **non-empty** result means a branch exists — the claim may be
+   legitimately mid-work with nothing pushed to review yet is still possible
+   only when the branch itself is also absent, so a pushed branch (even with
+   no PR) is **not** a row-4 candidate; leave it untouched, no report line
+   (it's ordinary in-flight work, not drift). Only an **empty** result
+   (no branch) continues to the age guard.
+
+4. **Guard — age threshold.** Resolve `linear.orphan_claim_hours` (see
+   `linear-common.md` config block; default `24`, a sensible middle of the
+   12–24h range). Compute **last activity** as the more recent of the
+   candidate's `updatedAt` (from step 2's `get_issue`) and, if a
+   `do-tasks-claim:` comment exists on it (`<linear-mcp>__list_comments`,
+   filtered to bodies containing that marker — same filter `linear-claim.md`
+   "Claim the issue" step 8 uses), that comment's `createdAt`. A candidate
+   qualifies only when **now − last activity > orphan_claim_hours**. This is
+   the guard against GC-ing a claim that is legitimately mid-work but
+   pre-PR — a fresh claim with no branch yet is normal, not orphaned.
+
+   > **Hard guard.** Skip on any ambiguity — an unreadable `updatedAt`, a
+   > `list_comments` failure, or an age within the threshold all mean
+   > **do not demote**. Row 4 never sets a `completed`/`canceled` state and
+   > never touches an issue already outside a `started`-type state (the
+   > no-PR-skipped bucket is scoped to started-type by construction, same as
+   > row 1).
+
+## 6. Dry-run (default)
 
 Without `--apply`, print the combined table grouped by rule and stop — change
 nothing:
@@ -268,18 +324,23 @@ nothing:
 
 → Backlog (closed-unmerged)
 <IDENTIFIER> — PRs #<n1>, #<n2>, … (all closed, unmerged) → Backlog
+
+→ Backlog (orphaned claim)
+<IDENTIFIER> — auto-claimed, no PR/branch, idle <Nh> (> <orphan_claim_hours>h) → Backlog
 ```
 
 Unlike rows 1 and 2 — where the single acting PR (the merged one, the open
 one) is unambiguous — a row-3 candidate qualifies only because **every**
 resolved PR is closed unmerged (§4), so list them **all** on the line rather
-than an arbitrary one.
+than an arbitrary one. A row-4 line reports the idle duration against the
+configured threshold, not a PR (there is none).
 
 followed by the left/skipped lines from row 1 (open PRs left, no-PR issues
-skipped — closed-unmerged PRs now feed row 3 instead of being left), row 2's
-skipped/anomaly lines, and an explicit "nothing changed (dry-run)."
+skipped — closed-unmerged PRs now feed row 3 and orphaned claims now feed row
+4, instead of being left), row 2's skipped/anomaly lines, and an explicit
+"nothing changed (dry-run)."
 
-## 6. Apply (`--apply` only)
+## 7. Apply (`--apply` only)
 
 - **Row 1** — via `linear-sweep-complete.md`'s own apply path (step 6, which
   calls the `linear-complete.md` phase with `assume_verified: true` per
@@ -343,34 +404,61 @@ skipped/anomaly lines, and an explicit "nothing changed (dry-run)."
      ```
 
   Unlike `linear-claim.md`'s Bail, row 3 does **not** delete any
-  `do-tasks-claim:` comment — that cleanup is the still-deferred
-  orphaned-claim GC rule's job (related to PRE-408), not row 3's; an issue
-  reaching row 3 may carry a stale claim comment from whatever session
-  abandoned it, and this row only corrects state/labels/assignee.
+  `do-tasks-claim:` comment — that cleanup is row 4's job, not row 3's; an
+  issue reaching row 3 has a resolvable PR (that's how it got there), so it
+  isn't row 4's territory anyway, but the two rows stay independent by
+  design. This row only corrects state/labels/assignee.
 
-## 7. Report
+- **Row 4** — for each row-4 candidate, the same release shape as
+  `linear-claim.md` "Bail" and row 3 above, minus the PR-state re-verify
+  (there is no PR to re-check — the re-verify that matters here is the
+  no-branch guard, already re-confirmed live in step 5.3 above since row 4's
+  candidate list is built fresh each run, not carried over from an earlier
+  scan):
+  1. Resolve the `human-approval-requested` label id (same pattern as row 3
+     step 1).
+  2. Resolve the team's default `backlog`-type state id from the cached
+     state map (prefer the one named `Backlog`).
+  3. **One** `<linear-mcp>__save_issue` call: `id` = the issue's UUID,
+     `state` = the backlog state id, `labels` = the labels already read in
+     step 5.2 above minus `auto-claimed` plus `human-approval-requested`
+     (the call replaces the label set — include the existing ones),
+     `assignee` = `null`.
+  4. **Delete the stale `do-tasks-claim:` comment** if step 5.4 found one
+     (`<linear-mcp>__delete_comment`) — this is the one cleanup step row 3
+     explicitly does not do; row 4 exists specifically to GC this orphan.
+  5. **One** `<linear-mcp>__save_comment` call (`issueId` = the issue's UUID)
+     noting the GC:
+
+     ```
+     Moved back to Backlog by /reconcile-tasks — claimed but no PR or branch
+     appeared within <orphan_claim_hours>h. Flagged for human review.
+     ```
+
+## 8. Report
 
 Print, grouped by rule:
 
 - **Scope** — one line stating exactly what this run covered, same wording as `linear-sweep-complete.md` "Report": `scope: configured projects (<names>) + Unassigned (project-less only)` (default), `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
-- **Counts** — `k completed (row 1), j moved to In Review (row 2), d demoted (row 3)`, plus row
-  1's own remaining left/skipped counts (`left: open`, `left: unresolved`,
-  `left: closed unmerged` that were **not** demoted, no-PR skipped), row 2's
-  skipped/anomaly count, and row 3's `r revalidated-skip` count (candidates
-  dropped by the TOCTOU re-verify above).
+- **Counts** — `k completed (row 1), j moved to In Review (row 2), d demoted (row 3), o GC'd (row 4)`,
+  plus row 1's own remaining left/skipped counts (`left: open`, `left:
+  unresolved`, `left: closed unmerged` that were **not** demoted, no-PR
+  skipped that were **not** GC'd by row 4), row 2's skipped/anomaly count,
+  row 3's `r revalidated-skip` count (candidates dropped by the TOCTOU
+  re-verify above), and row 4's own skip counts (dropped for a live branch,
+  dropped for being within the age threshold).
 - **Per-issue lines** — identifier, the PR resolved and its state, the rule
   that fired, and the outcome (or the planned transition on dry-run). For
   **row 3**, list **every** resolved PR (all are closed unmerged — there is no
-  single acting PR to name, unlike rows 1/2).
+  single acting PR to name, unlike rows 1/2). For **row 4**, there is no PR to
+  name — report the idle duration against `orphan_claim_hours` instead.
 - **Anomaly lines** — the row 1/row 2 scope-gap case from step 3.3 above,
   called out explicitly rather than silently dropped.
-- **Explicitly note what v1 does not enforce** — the orphaned-claim GC rule
-  is **not** applied by this command; it is related to PRE-408, still in
-  Backlog. Never write a bare `<TEAM>-NNN` token in this report or anywhere
-  else in this file — see `linear-claim.md` "PR body magic words" for why a
-  bare id auto-closes on merge; every mention here is wrapped in a
-  non-closing phrase (`related to <id>`) for the same reason, even though
-  this is a report and not a PR body — the same habit is what keeps the two
-  from ever drifting apart.
+- Never write a bare `<TEAM>-NNN` token in this report or anywhere else in
+  this file — see `linear-claim.md` "PR body magic words" for why a bare id
+  auto-closes on merge; every mention here is wrapped in a non-closing phrase
+  (`related to <id>`) for the same reason, even though this is a report and
+  not a PR body — the same habit is what keeps the two from ever drifting
+  apart.
 - On dry-run, the same table with no outcome column, plus "nothing changed
   (dry-run)."
