@@ -67,98 +67,50 @@ which is entirely that file's concern; don't duplicate a fast-path gate here.
 ## 3. Row 2 — open PR, wrong column → In Review
 
 The read this row needs — every `backlog`/`unstarted`-type issue plus its PR
-attachment — is defined once in `linear-common.md` "In-flight scan"; this
-section only wires that read behind a try-script-then-floor gate. Do not
-restate the read's field list or state-scope rule here.
-
-**One mechanism: try the fast path, fall back to the floor.** For each scope
-resolved in "1. Preflight + scope" above, attempt the **GraphQL fast-path**
-first via `linear-scan.py`. On **any** non-zero exit, or stdout that doesn't
-parse as the expected JSON object, log one debug line (`Fast-path unavailable
-(<reason>) — falling back to MCP floor.`) and run the **MCP floor** (steps 1–2
-below) for that scope instead. There is no separate mechanism and no
-independent pre-check gating this — `linear-scan.py` itself exits fast and
-non-zero when no key is resolvable, so the fallback **is** the gate, same as
-`linear-claim.md` "Find candidates."
-
-> **This gate is also the security boundary.** The account key
-> (`linear.api_key_ref`) is a full-account bearer token that must **never**
-> reach a `claude.ai`/Claude Code **cloud** sandbox. Cloud sessions set no
-> key, so `linear-scan.py` exits non-zero before any GraphQL request and the
-> run falls to the OAuth-scoped MCP floor by design — the guarantee is that
-> the key is never present, not that the script is never invoked. Don't "fix"
-> this by wiring the key into cloud config. Setup and rationale are
-> **identical to `linear-claim.md` "Find candidates"** (the `api_key_ref`, the
-> launching-terminal `export`, the headless `$OP_SERVICE_ACCOUNT_TOKEN` path)
-> — see there.
+attachment — is `linear-common.md` "In-flight scan", called with state-types
+`backlog` + `unstarted` (the **sweep/reconcile** Unassigned variant). It runs
+behind the shared **fast-path/floor gate** — see `linear-common.md`
+"Fast-path / MCP-floor gate (and the security boundary)" for the mechanism and
+the security boundary (script `linear-scan.py`; **per-scope** fallback
+granularity — a scope the fast path can't serve, i.e. the Unassigned scope,
+floors on its own). Do **not** restate the scan's field list, state-scope, or
+scope-resolution mechanics here; the steps below cover only what is
+**row-2-specific**: resolving each scanned issue's PR(s) and acting on them.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 
-1. **Call the script once per resolved scope**, passing each scope's real
-   project `id` as `--project` (omit for the whole-team scope). **Never**
-   pass the synthetic `"__unassigned__"` sentinel as `--project` —
-   `linear-scan.py` has no Unassigned-bucket exclusion mode, same as
-   `linear-ready.py`; if the resolved scope set includes the Unassigned
-   bucket, fall back to the MCP floor for that scope.
+Run the In-flight scan's **Fast-path invocation** (`linear-common.md`), one call
+per resolved scope with `--state-type backlog --state-type unstarted` (the
+sentinel / Unassigned-per-scope-fallback and `meta.states` caching rules all
+live there — don't restate them). Then apply **row-2-specific PR resolution:**
 
-   ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
-     --project "<scope-id>" --state-type backlog --state-type unstarted
-   ```
+- Each returned issue already carries its `attachments` URL list, so take
+  **every** entry matching a GitHub PR URL (`github.com/.../pull/<n>`), **not
+  just the first** — an issue can carry a stale closed-unmerged PR **and** a
+  newer open one, so a first-hit-only read could mask the open PR that makes it
+  a row-2 candidate (mirrors `linear-sweep-complete.md` step 3's multi-PR rule).
+- An issue with **no** matching attachment is **not** a row-2 candidate on this
+  path; skip it silently. This is a **narrower skip** than the floor below: the
+  fast path resolves only attachment-linked PRs, so an issue whose open PR is
+  discoverable **solely** by `[<IDENTIFIER>]` title-match or `branchName` is
+  picked up only when its scope floors — an accepted edge case (the tracked
+  claim/open flow always writes the PR attachment), not fixed by expanding
+  `linear-scan.py`.
 
-   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }`
-   object described in the script's header comment; a parse failure is
-   itself a fallback trigger (see above).
-
-2. **Consume `meta.states` in place of `list_workflow_states`.**
-   `meta.states` (an array of `{ id, name, type }`) replaces the state-id →
-   type map step 1 below builds via `list_workflow_states` — cache it the
-   same way; step 4's target-state resolution reads this cache on either
-   path.
-
-3. **Skip the per-issue attachment read.** Each returned issue already
-   carries its `attachments` URL list (the "In-flight scan" skinny fields),
-   so resolving its PR needs none of step 2 below's `get_issue` →
-   title-search → `branchName` fallback chain — take **every** `attachments`
-   entry that matches a GitHub PR URL (`github.com/.../pull/<n>`), **not just
-   the first**. This mirrors `linear-sweep-complete.md` step 3's multi-PR
-   rule: an issue can accumulate a stale closed-unmerged PR **and** a newer
-   open one, so picking only the first hit could mask the open PR that makes
-   it a row-2 candidate. An issue with **no** matching attachment is **not a
-   row-2 candidate** on this path; skip it silently. Note this is a **narrower
-   skip** than the floor's step 2 below: the fast path resolves only
-   attachment-linked PRs, so an issue whose open PR is discoverable **solely**
-   by `[<IDENTIFIER>]` title-match or `branchName` (no Linear attachment) is
-   picked up only when its scope falls back to the MCP floor — an accepted
-   trade-off (the tracked claim/open flow always writes the PR attachment, so
-   this is an edge case), not fixed by expanding `linear-scan.py`.
-
-4. **Continue at step 3 below** with the resolved issue + PR list — the PR
-   open/merged check, target-state resolution, and hard guard are identical
-   on both paths.
+Then continue at "Both paths" below with the resolved issue + PR list.
 
 ### MCP floor (fallback)
 
 Runs whenever the fast path isn't attempted or falls back per the gate above,
 per scope.
 
-1. **Query non-started issues.** Call `<linear-mcp>__list_workflow_states`
-   with the team `id` (reuse the cache if row 2 shares a session with row 1).
-   Resolve **every** state id of type `backlog` and every state id of type
-   `unstarted` — **by type only, never display name** (names are
-   user-configurable; this doctrine is load-bearing — see `linear-common.md`
-   "Kanban mapping"). For each resolved scope from step 1, call
-   `<linear-mcp>__list_issues` **once per scope per state id** — the MCP
-   `state` filter is single-valued, so a team with two `backlog`-type states
-   and one `unstarted`-type state means three calls per scope; union the
-   results per scope, same pattern as `linear-sweep-complete.md` step 2.2.
-   **Never** pass the synthetic `"__unassigned__"` sentinel as a `projectId`
-   — the Unassigned scope is resolved client-side: run one whole-team query
-   with `projectId` omitted, then keep only issues whose `projectId` is `null`
-   (the **sweep/reconcile variant** of `linear-common.md` "The Unassigned
-   bucket", **not** `linear-claim.md`'s wider "null or outside the configured
-   set"). Only the never-pass-the-sentinel guard is shared with
-   `linear-claim.md`; the membership predicate here is narrower.
+1. **Query non-started issues** exactly as the In-flight scan's MCP-floor read
+   defines (`linear-common.md`): `backlog`- and `unstarted`-type states **by
+   type only**, one `<linear-mcp>__list_issues` per scope per state id (unioned
+   per scope), and the Unassigned **sweep/reconcile variant** resolved
+   client-side (`projectId == null` only — never the `"__unassigned__"`
+   sentinel as a `projectId`). Reuse the state cache if row 2 shares a session
+   with row 1. Don't restate those mechanics here.
 
 2. **Resolve each issue's PR(s).** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`

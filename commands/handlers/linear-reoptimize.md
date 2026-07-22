@@ -13,23 +13,7 @@ the exact `save_issue` fields documented in `linear-add.md` step 4.
 
 ## Load — build the graph (exhaustive)
 
-**One mechanism: try the fast path, fall back to the floor.** Same shape as
-`linear-claim.md`'s "Find candidates" gate — if `Bash` is available, attempt
-the GraphQL fast-path first; on **any** non-zero exit from
-`linear-relations.py`, or stdout that doesn't parse as the expected
-`{ meta, issues }` object, log one debug line
-(`Fast-path unavailable (<reason>) — falling back to MCP floor.`) and run the
-**MCP floor** instead. There is no separate `[ -n "$LINEAR_API_KEY" ]`
-pre-check gating this — the script itself exits fast and non-zero when no key
-is resolvable, so the fallback **is** the gate.
-
-> **This gate is also the security boundary.** A Linear personal API key is a
-> full-account bearer token and must **never** be injected into a
-> `claude.ai`/Claude Code **cloud** sandbox — see `linear-claim.md`'s "Find
-> candidates" security-boundary note, which applies here verbatim. Cloud
-> sessions never set `$LINEAR_API_KEY`/`$LINEAR_API_KEY_REF`, so `linear-
-> relations.py` exits non-zero before any GraphQL request and the run falls to
-> the MCP floor (OAuth-scoped, no raw key) by design.
+**Fast-path/floor gate.** This load runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the `linear-relations.py` non-zero exit _is_ the gate; **no** `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-relations.py`; this consumer loads the whole relation graph in one pass, so its fallback granularity is the **whole load** (any failure floors the entire load, not a per-scope subset).
 
 ### Fast path (GraphQL, via `linear-relations.py`)
 

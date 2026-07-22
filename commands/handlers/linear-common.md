@@ -140,6 +140,20 @@ The gate and rank rules `/do-tasks` (tracker path) apply when picking claimable 
 
 This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep.
 
+## Fast-path / MCP-floor gate (and the security boundary)
+
+Three GraphQL reads run behind the **same** gate, defined once here: "Ready-candidate selection" (via `linear-ready.py`), "In-flight scan" below (via `linear-scan.py`), and `linear-reoptimize.md`'s relation-graph load (via `linear-relations.py`). Consumers reference this section and pass **which script** they use; everything about failure-handling and the security boundary is identical. Consumers keep their own **fast-path eligibility and fallback granularity** (see "What the gate does not own" below) — the gate owns only what follows.
+
+**The gate.** When `Bash` is available, attempt the GraphQL fast-path first. On **any** non-zero exit from the script, or stdout that doesn't parse as the expected JSON object, log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP floor.`) and run the MCP floor instead. There is **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check — the script itself exits fast and non-zero when no key is resolvable, so the fallback **is** the gate. An explicit env pre-check would misgate the headless case where `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` are set but `$LINEAR_API_KEY` itself is not — that case must still attempt the fast path. A host with no `Bash` tool falls to the floor by construction (nothing to gate).
+
+> **This gate is also the security boundary.** A Linear personal API key (what `linear.api_key_ref` points at) is a full-account bearer token — anyone holding it can read and write everything the key's owner can in Linear. It must **never** be injected into a `claude.ai`/Claude Code **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/`$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and attempts the script, it exits non-zero before any GraphQL request (no key resolvable) and the run falls to the MCP floor (OAuth-scoped, no raw key) by design — the guarantee is that the key is never _present_, not that the script is never _invoked_. Do not "fix" this by wiring the key into cloud config. (Account-key setup — the `api_key_ref`, the launching-terminal `export`, the headless `$OP_SERVICE_ACCOUNT_TOKEN` path — is in `linear-config.md` "Archive key".)
+
+**What the gate does NOT own — kept per consumer.** _Fast-path eligibility_ (which searches attempt the fast path) and _fallback granularity_ (what unit falls to the floor) differ by caller and stay local to each:
+
+- **Ready-candidate selection (`linear-claim.md` "Find candidates")** — attempts the fast path for the **ranked search only**; the direct-identifier path always stays on the MCP floor; and it falls the **whole search** to the floor when a scope the fast path can't serve is needed (the Unassigned bucket, a specific `--project` pin).
+- **In-flight scan** — the two consumers differ, because `linear-scan.py` exits non-zero as a whole on any scope's failure (no per-scope isolation), so a **batched** call floors its whole batch: **`linear-reconcile.md` row 2** invokes the script **once per resolved scope**, so a failure floors **only** that scope; **`linear-sweep-complete.md`** **batches all configured projects into one call**, so any failure floors the **whole configured-project batch**. In both, the Unassigned scope is a **separate** pass that always floors on its own (the script has no null-project exclusion mode).
+- **Relation-graph load (`linear-reoptimize.md`)** — loads the whole graph in one pass, so its fallback granularity is the **whole load** (any failure floors the entire load).
+
 ## In-flight scan
 
 The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks` row 2 ("open PR, wrong column") each run to find in-flight issues within a named state scope. Resolving and merge-checking each issue's PR is a **separate downstream step** — the scan itself does not pre-filter to PR-bearing issues (PR resolution has its own attachment → title → branch fallback; a state-scope match with no attachment is still a candidate).
@@ -156,6 +170,15 @@ Either way, resolve state ids by **type only, never display name** (names are us
 **Scope resolution.** Identical to the other commands: with `--all`, a **single whole-team query**, no project resolution and no Unassigned pass; without `--all`, "Resolve configured projects" **plus** the Unassigned bucket's **sweep/reconcile variant** (`projectId == null` only — see "The Unassigned bucket"), **never** the wide claim variant. This scan's only two consumers are the destructive-adjacent verbs `/sweep-for-complete` and `/reconcile-tasks`, so it never uses the claim-path catch-all. The pass is still one extra whole-team query with `projectId` omitted, after which you keep only issues whose `projectId` is `null`.
 
 **Per-scope query count.** MCP's `list_issues` `state` filter is single-valued, so MCP issues one `list_issues` call per resolved scope **per state id**, unioned per scope. GraphQL filters by state type in **one** query per scope (`state: { type: { in: [...] } }`, as `linear-ready.py` does) — never one query per state id.
+
+**Fast-path invocation.** Behind the gate above, the GraphQL fast path is `linear-scan.py`, invoked with each resolved concrete scope's id as `--project` (repeatable — batch every scope in one call, or one call per scope; the consumer's choice, since the script unions either way) and a `--state-type` flag per state type in the caller's set (omit `--project` for the whole-team scope). **Never** pass the `"__unassigned__"` sentinel as `--project` — the script has no Unassigned-exclusion mode, so if the resolved scope set includes the Unassigned bucket, that scope floors (per-scope fallback):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
+  --project "<scope-id>" --state-type <type> [--state-type <type> …]
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }` object in the script's header; a parse failure is itself a fallback trigger (per the gate). `meta.states` (an array of `{ id, name, type }`) replaces the `list_workflow_states` state-id→type map — cache it the same way.
 
 This block is the single source of truth for the in-flight scan. `linear-sweep-complete.md`, `linear-reconcile.md`, and `commands/handlers/assets/linear-scan.py` (added by the task-2 follow-up) all implement exactly this — change it here and update all consumers in lockstep.
 
