@@ -24,6 +24,8 @@ Key facts about nono that shape the tests (from its docs): it sandboxes via Seat
 
 Spike contract per the plan: disposable dir + spike test repo, disposable/read-only creds, nono via Homebrew, nothing under `/usr/local/autopilot`. Evidence sanitized per the Stage-0 plan checklist; fixtures under `dev_docs/elite-spike/fixtures/nono/`. F2 uses the **single disposable test GitHub App** on the spike repo (the same throwaway App Stage-1's probe 4 stands up — reuse it, don't create a second); never the production App key.
 
+**Preliminary F1 already confirmed** (maintainer uid, not the formal agent-identity close — see `dev_docs/elite-spike/fixtures/nono/f1-preliminary.md`): Claude runs headless behind the proxy (returns output, exit 0); allow path reachable via CONNECT tunnel, deny path blocked. Two findings the formal run must carry: (1) Claude requires nono's registry profile `nolabs-ai/claude` — a **supply-chain input to review**; (2) that profile grants the **whole `$HOME/Library/Keychains`** (with `bypass_protection`) because Claude's OAuth is in the login Keychain — so **F5's sharpest sub-test is whether that Keychain grant exposes other apps' Keychain items**, not just the file-path sentinels.
+
 ## Task
 
 Install nono (Homebrew). Configure a single allow-list: `api.anthropic.com`, `github.com`, `api.linear.app`, loopback; deny all else. Then, all under `nono run` against the spike test repo:
