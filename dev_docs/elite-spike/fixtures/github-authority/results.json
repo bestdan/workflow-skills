@@ -1,0 +1,39 @@
+{
+  "classification": "CONFIRMED (GitHub authority) — Linear leg deferred",
+  "date": "2026-07-22",
+  "host": "mini, agent uid 502",
+  "execution": "attended sudo -u agent; installation token piped on stdin (never argv/env/disk), redacted from all output",
+  "app": {
+    "app_id": 4366511,
+    "installation_id": 148292770,
+    "repo_selection": "selected",
+    "scoped_repos": ["bestdan/autopilot-p4-test"]
+  },
+  "ruleset": {
+    "id": 19562224,
+    "name": "probe4-agent-branch-policy",
+    "allows_push": "refs/heads/autopilot/**",
+    "denies": "creation/update/deletion on every other ref",
+    "bypass_actors": []
+  },
+  "verdicts": {
+    "C1_key_unreadable": {"verdict": "PASS", "evidence": "cat key -> Permission denied (agent cannot traverse the 0700 maintainer home)"},
+    "A1_clone": {"verdict": "PASS"},
+    "A2_push_feature": {"verdict": "PASS", "note": "push to autopilot/probe4-* accepted"},
+    "A3_pr_comment_close": {"verdict": "PASS", "pr": "#2 created, commented, closed", "graphql_ops": ["RepositoryInfo", "PullRequestForBranch"]},
+    "B1_default_branch_denied": {"verdict": "PASS", "evidence": "remote: error: GH013: Repository rule violations found for refs/heads/main"},
+    "B2_nonmatching_branch_denied": {"verdict": "PASS", "evidence": "remote: error: GH013: Repository rule violations found for refs/heads/random/foo-*"},
+    "B3_noninstalled_repo_denied": {"verdict": "PASS", "evidence": "git: remote: Repository not found; gh api repos/bestdan/autopilot-p4-noinstall -> 404 Not Found"},
+    "B4_org_level": {"verdict": "N/A", "reason": "test App is on a personal account; org-level denial deferred to Stage 1 (real App under the org)"},
+    "C2_no_fallback": {"verdict": "PASS", "evidence": "fatal: could not read Username for 'https://github.com': terminal prompts disabled (fail closed; no ambient/personal credential leaked in)"}
+  },
+  "linear_leg": {
+    "status": "DEFERRED",
+    "project_created": "auto-pilot-gh-app-test (PRE team)",
+    "reason": "workspace hit its free-tier issue limit, so no disposable issue could be created; and agent->Linear auth is not provisioned (this session's Linear is the maintainer MCP, not an agent-scoped token). A true agent-identity tracker read+write test belongs in Stage 1."
+  },
+  "not_persisted": [
+    "installation token (stdin only; redacted in output)",
+    "App private key (read maintainer-side by mint.py only; never printed)"
+  ]
+}

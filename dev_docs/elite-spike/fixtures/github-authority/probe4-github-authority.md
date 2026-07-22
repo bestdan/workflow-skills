@@ -1,9 +1,15 @@
 # Probe 4 — GitHub authority canary
 
-**Result: PENDING.** Kill sheet only — no fixture run yet. Execution is **blocked
-on user-provided provisioning** (a disposable test GitHub App + test repo) and an
-**attended agent-uid path** (`sudo -u agent`, maintainer password); see
-**Prerequisites** below. Kill sheet written first per §7a rule 1.
+**Result: CONFIRMED (GitHub authority) — Linear leg deferred.** Under the actual
+`agent` uid (502), every sufficiency operation succeeded via the App
+installation token (clone / commit / push to `autopilot/**` / PR open+comment+
+close, **plus the GraphQL reads `gh` actually issues**), every safety-critical
+denial was **denied server-side** (default-branch and non-matching-branch push
+both `GH013` ruleset violations; non-installed repo `Not Found`/404), and the
+no-fallback evidence held (agent **cannot read the App key**; removing the token
+**fails closed**). The falsification redirect is **not** triggered. The **Linear
+read+write leg is deferred** — see Results. Kill sheet written first per §7a rule
+1; evidence in `results.json`.
 
 **Scope decisions (2026-07-22):** the test App + repo live on the maintainer's
 **personal account** — so the **org-level denial test (B4) is N/A** and defers to
@@ -145,8 +151,69 @@ ruleset** first (this is the Decision #5 safety boundary), not the client.
 
 ## Environment (non-secret)
 
-_To be filled at execution._
+- Host: the mini; commands ran under **agent uid 502** via attended
+  `sudo -u agent` (maintainer password), the token piped on **stdin** — never
+  argv, env, or disk, and **redacted** from all output.
+- **Test App 4366511**, installation **148292770**, `repo_selection: selected`,
+  scoped to **`bestdan/autopilot-p4-test`** only. Second repo
+  `bestdan/autopilot-p4-noinstall` (App **not** installed) for B3.
+- Branch-policy **ruleset 19562224** (`probe4-agent-branch-policy`): push allowed
+  only to `refs/heads/autopilot/**`; creation/update/deletion denied on every
+  other ref; **bypass_actors empty** (App not exempt).
+- Minting: `mint.py` (maintainer-side, `uv run --with 'pyjwt[crypto]'`) reads the
+  App key at 0600 and mints a short-lived installation token. `gh` 2.93 at
+  `/opt/homebrew` (agent-reachable); agent-side `driver.sh` staged to
+  `/Users/Shared/p4/` because the maintainer home is 0700 — which is itself the
+  C1 evidence. No `claude`, no production App, no persisted secret.
 
 ## Results
 
-_To be filled at execution._
+**Classification: CONFIRMED (GitHub authority).** Raw evidence: `results.json`.
+
+| Check | Verdict | Evidence |
+| --- | --- | --- |
+| C1 — agent cannot read App key | ✅ PASS | `cat key → Permission denied` (agent can't traverse the 0700 maintainer home) |
+| A1 — clone via App token | ✅ PASS | cloned |
+| A2 — push to `autopilot/**` | ✅ PASS | `autopilot/probe4-*` accepted (matches the allowed pattern) |
+| A3 — PR open + comment + close | ✅ PASS | PR #2 created, commented, closed |
+| A3 — GraphQL captured | ✅ | `RepositoryInfo`, `PullRequestForBranch` — the actual GraphQL `gh` issues |
+| B1 — default-branch push | ✅ DENIED | `remote: error: GH013: Repository rule violations found for refs/heads/main` |
+| B2 — non-matching branch push | ✅ DENIED | `GH013 … refs/heads/random/foo-*` |
+| B3 — non-installed repo | ✅ DENIED | git `Repository not found`; `gh api → 404 Not Found` |
+| B4 — org-level operation | ⚠️ N/A | personal account — deferred to Stage 1 (real App under the org) |
+| C2 — remove token, no fallback | ✅ PASS | `could not read Username … terminal prompts disabled` — fails closed, no ambient credential |
+
+### Two driver bugs the run surfaced (fixed, re-run clean)
+
+1. **Inherited cwd.** `sudo -u agent` inherits the caller's cwd; when that was
+   inside the 0700 maintainer home the agent couldn't `getcwd()`, so every
+   `git`/`cd` failed with "Unable to read current working directory" — and the
+   naïve denial checks (non-zero exit ⇒ denied) **false-passed** B1/B2. Fixed by
+   `cd`-ing to an agent-safe dir first **and** requiring denial verdicts to match
+   a real policy-denial reason (`GH013`/ruleset/not-found/…), not merely a
+   non-zero exit. The clean re-run shows genuine `GH013` ruleset violations.
+2. **No-cred hang risk.** Added `GIT_TERMINAL_PROMPT=0` so a credential-less
+   clone fails closed instead of prompting — making C2 a clean, non-interactive
+   fail-closed.
+
+### Linear read+write leg — DEFERRED
+
+Project `auto-pilot-gh-app-test` (PRE team) was created, but the Linear
+**workspace hit its free-tier issue limit**, so no disposable issue could be
+created. More fundamentally, **agent→Linear auth is not provisioned** — this
+session's Linear is the maintainer MCP connection, not an agent-scoped token — so
+a true "as the agent" tracker read+write test cannot be run here. Deferred to
+**Stage 1**, where the delivery loop's tracker credential is provisioned and its
+read+write is validated under the agent identity.
+
+### What this closes / does not close
+
+Closes: the App identity is **sufficient** for the GitHub delivery loop and
+**constrained** by server-side policy — the denial tests (the Decision #5 "no
+irreversible action unattended" boundary) are enforced by GitHub, with the App on
+no bypass list, and delivery uses **only** the App token (no personal/ambient
+fallback). Does **not** close: the **org-level** denial (B4, personal-account
+N/A), the **tracker** leg (Linear, deferred), and the broker's mint fault drills
+(expired/missing-key/revoked/clock-skew) — Stage-1-proper work. Stage 1's gate
+reruns these identical tests against the **real** App. Spike code is disposable;
+never promoted by renaming (rule 4).
