@@ -35,3 +35,9 @@ Falsifier-first, and **gated on a hard seam**: F1 (can Claude Code even run head
 
 - **Evidence home:** shared with the Stage-0 spike — fixtures under `dev_docs/elite-spike/fixtures/nono/`, one measurement row per falsifier in `dev_docs/elite-spike/measurements.md`. No separate `dev_docs/nono-spike/` root.
 - **Test App:** reuse the single disposable test GitHub App on the spike repo (the same throwaway App Stage-1's probe 4 stands up); do not create a second. nono's proxy and server-side policy are tested against the one App.
+
+## Progress (2026-07-22)
+
+Task 1 substantially done (preliminary + agent-side). Confirmed: **F1** (Claude through proxy), **F2** tool-compat (git/gh honor proxy; allowlist needs `github.com` + `api.github.com`; write loop pending App), **F5** two-uid boundary for secrets + agent keychain clean + `chmod 700 ~maintainer` hardening applied, **F6a** (Claude works under Anthropic MITM, audit-proven). Agent identity provisioned; agent Max auth working. Standing verdict: **adopt-leaning**, degraded tier at minimum, full tier pending F6b. See `dev_docs/elite-spike/measurements.md`.
+
+**Remaining in task 1:** sandbox-layer F5 (agent inside nono) and the F2 write loop (needs App) — folded into task 2's checkpoints A/B for continuity.

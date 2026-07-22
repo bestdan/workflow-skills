@@ -29,13 +29,17 @@ share primary group `staff` (gid 20) and the maintainer home is `drwxr-x---`
 group-readable (0644) file** in it — here, `.gitconfig` (git identity; not a
 secret, but it is leakage).
 
-## Required hardening (§3.1 "no ACL leakage from your home")
+## Required hardening (§3.1 "no ACL leakage from your home") — APPLIED
 
-`chmod 700 ~maintainer` removes group+other access, so the agent cannot traverse
-the home at all — closing both the traversal and the `.gitconfig` gap in one step.
-Standard, safe for a personal machine (only breaks things that rely on *other*
-users reading your home, which nothing legitimate here does). After it, the
-traversal + `.gitconfig` checks should flip to denied.
+`chmod 700 ~maintainer` was applied (2026-07-22): the maintainer home went
+`drwxr-x---` → `drwx------`. The agent can no longer traverse the home at all,
+closing both the traversal and the `.gitconfig` gap. **F5 uid layer is now
+clean.** (Re-running the agent battery should show traversal + `.gitconfig`
+denied; not re-run yet, but the perms change makes both structurally impossible.)
+
+**Design note:** the design must state this as a provisioning requirement — the
+maintainer home must be `0700`, or the agent must not share the maintainer's
+primary group. Not optional; the default macOS `0750`/shared-`staff` setup leaks.
 
 **Alternative** (defense in depth): give `agent` a primary group other than
 `staff` so it never shares a group with the maintainer. Heavier; the `chmod 700`

@@ -27,6 +27,17 @@ Two subtleties this task must resolve, not gloss:
 
 Default-reject bias: an inconclusive on F3/F4/F6 **degrades to the weaker adoption tier, never up** (unlike task 1's parity claims, which reject on inconclusive).
 
+**Progress from the preliminary session (feeds this task):**
+- **F6a already confirmed** (`fixtures/nono/f6-anthropic-mitm-preliminary.md`): Claude works under nono MITM of `api.anthropic.com` (audit-proven decrypted paths). So F6's *prerequisite* is met; F6b (actually injecting the Max token so `managed_credential_active` is true and Claude never holds it) is the open part.
+- **Open question for F3/F6b:** does nono ship credential providers for GitHub and Anthropic (`nono run --credential <service>`), and do they satisfy the real auth flows (GitHub App installation token; Anthropic OAuth bearer+refresh)? Investigate `nono`'s `--credential`/`--allow-endpoint` and the registry before assuming injection is possible.
+
+**Checkpoints (stop and report at each):**
+- **A — sandbox-layer F5** (no App needed): agent `nono pull nolabs-ai/claude`, then run the F5 battery from *inside* `nono run` as agent; confirm maintainer secrets denied AND the System keychain (`/Library/Keychains`) unreachable (profile grants only `~/Library/Keychains`). Completes F5.
+- **B — test App** (user, browser): create the disposable test GitHub App on the spike repo; enables F2 write loop + F3.
+- **C — F3** github/linear injection + the recovery-attempt battery.
+- **D — F4** the two-uid injection boundary (cross-uid parent/child, or same-uid recovery).
+- **E — F6b** Anthropic credential injection (full-tier gate).
+
 ## Task
 
 Building on task 1's allow-list, all under `nono run` against the spike repo:
