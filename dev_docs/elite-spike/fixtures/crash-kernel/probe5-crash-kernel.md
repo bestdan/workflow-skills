@@ -1,14 +1,17 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Result: PENDING (v3).** Draft + kill sheet **co-reviewed twice** (codex + Fable,
-`coreview-2026-07-22.md`): the first pass falsified v1, codex's second pass
-falsified v2 (auto-reap contradicted the transaction-lock split). **No fixture
-run yet.** The draft is [`draft-state-machine.md`](./draft-state-machine.md) — v3
-resolves the contradiction with a **run-long liveness lock** (`O_CLOEXEC`,
-separate from the short-lived transaction lock) as the sound orphan-proof, plus
-`gen_token`-tagged session containment, a durable generation-reservation record +
-seq-head, an explicit recovery table, and a de-bundled one-crash-point-per-row
-matrix. Several items are **design-doc deltas** (below) awaiting ratification.
+**Result: PENDING (v4).** Draft **co-reviewed three times** (codex + Fable,
+`coreview-2026-07-22.md`): pass 1 falsified v1; codex's pass 2 falsified v2
+(auto-reap contradicted the transaction-lock split); Fable's pass 3 falsified v3
+(3 CRITs — registry torn-interior/dup-seq emission and a prepared-recovery
+permanent wedge — two of which the v3 matrix wouldn't have caught). **No fixture
+run yet.** [`draft-state-machine.md`](./draft-state-machine.md) is **v4**: the
+liveness lock is now **`fcntl`/POSIX `F_SETLK`** (not fork-inherited) held by the
+run-long **supervisor**; registry append does **tail-reconciliation**;
+prepared-recovery **terminalizes the owner**; takeover **reaps live gen-g workers
+first**; and "signal the session" is specified as `-pgid` enumeration. One more
+review is pending before the fixture build. Several items are **design-doc
+deltas** (below) awaiting ratification.
 
 Disposable spike under §0a's contract (rule 4 — never promoted by renaming). Runs
 **in a disposable directory**, not `/usr/local/autopilot`. No tmux, GitHub, or
@@ -37,36 +40,41 @@ conclusion that determines the redirect — it does not gate falsification.
 
 ### Method
 
-In a disposable directory, implement **only** the v3 kernel: `prepared → active →
+In a disposable directory, implement **only** the v4 kernel: `prepared → active →
 terminal`, generation replacement/takeover, the **watcher-triggered `ap-stop
 --reap`** of a crashed-active orphan, and registry append — using three permanent
-`O_CLOEXEC` lock inodes (**liveness** held for the whole run, short-lived
-**transaction**, global **registry**; total order liveness→transaction→registry),
-the `F_FULLFSYNC` atomic-publication primitive for owner/seq-head, **O_APPEND +
-`seq.head`** for registry lines, incarnation identity (`p_uniqueid`+start+exe+`sid`
-+`kern.bootsessionuuid`), `gen_token`-tagged **session** containment, and the
-recovery table. Then run the full **v3 matrix** (draft §Fault-injection matrix),
-**one deterministic crash point per row** via armed crash-points
-(`PROBE5_CRASH_AT=<row>` → `os._exit()`): the boundary crashes (A–E3), contention
-(H, I), the reap paths incl. the **false-reap guard R5**, the session/PID-reuse
-fences (R4a/R4b), the alive-but-hung refusal (R3), `claimed_exit` (K), the
-registry/seq races (S1–S4), and the adversarial/syscall/re-crash/ABA rows
-(X1–X5) — checking every invariant (1–11) after each.
+lock inodes (**liveness** = an `fcntl`/POSIX `F_SETLK` lock held by the run-long
+supervisor, not fork-inherited; short-lived **transaction**; global **registry**;
+total order liveness→transaction→registry), the `F_FULLFSYNC` atomic-publication
+primitive for owner/seq-head, **O_APPEND + `seq.head` with tail-reconciliation**
+for registry lines, incarnation identity (`p_uniqueid`+start+exe+`pgid`+`sid`
++`kern.bootsessionuuid`), `gen_token`-tagged **session** containment signaled by
+`-pgid`, and the recovery table. Then run the full **v4 matrix** (draft
+§Fault-injection matrix), **one deterministic crash point per row** (incl. the
+`+` crash-then-continue rows) via armed crash-points (`PROBE5_CRASH_AT=<row>` →
+`os._exit()`): boundary crashes (A–E3), contention (H, I), the reap paths incl.
+the **false-reap guard R5** and **takeover-with-live-workers Tw**, the
+session/PID-reuse fences (R4a/R4b/Tkr), the refuse-with-reason hang path (R3),
+`claimed_exit` (K), the registry/seq races (S1–S4+), and the
+adversarial/syscall/re-crash/ABA rows (X1–X5) — checking every invariant (1–11)
+after each.
 
 ### Pass threshold
 
-Across the **entire v2 matrix**: all ten invariants hold, and **every**
+Across the **entire v4 matrix**: all **eleven** invariants hold, and **every**
 crash/contention outcome is a **safe terminal or a safe hold that needs no
 mid-run human action** — a crashed-active orphan is **auto-reaped** with no human
-(the only human path is an alive-but-hung launcher → alert). Specifically: no
-torn read; no clobber of a live owner; no untracked live process; fail-closed
-contention; release only after a durable `observed_terminal` **and** run+workers
-proven dead **by incarnation**, idempotently, and a `claimed_exit` never
-releases; generation HWM-derived and superseded records inert; the protocol
-**never emits** a duplicate/gap `seq` (a detected external corruption alerts and
-the reader fails closed); and identity-bound termination never mis-targets a
-reused PID. The best positive result is **"not falsified in the tested
-(process-crash) environment"** — never "proven."
+(the only human path is an alive-but-hung supervisor → watcher alert → sanctioned
+human kill). Specifically: no torn interior read (the append path
+tail-reconciles); no clobber of a live owner; no untracked live process;
+fail-closed contention; release only after a durable `observed_terminal` **and**
+run+workers proven dead **by incarnation**, idempotently, and a `claimed_exit`
+never releases; generation HWM-derived and superseded records inert; the protocol
+**never emits** a duplicate/gap `seq` (external corruption alerts and the reader
+fails closed); identity-bound `-pgid` termination never mis-targets a reused PID;
+and the prepared-recovery path always **terminalizes the owner** (no permanent
+wedge). The best positive result is **"not falsified in the tested (process-crash)
+environment"** — never "proven."
 
 ### Inconclusive condition (rule 3)
 
@@ -102,9 +110,12 @@ spike. Flagged for sign-off:
 
 1. **Multi-lock model (§4.1).** §4.1 currently describes a single lock held
    "through the entire run" *and* per-transition — the contradiction codex found.
-   Ratify the split: a **run-long `O_CLOEXEC` liveness lock** (the orphan-proof)
-   distinct from the short-lived **transaction lock**, plus the global **registry
-   lock**, total order liveness→transaction→registry.
+   Ratify the split: a **run-long `fcntl`/POSIX `F_SETLK` liveness lock** held by
+   the long-lived **supervisor** (Probe 2's run-shim), not fork-inherited (the
+   orphan-proof), distinct from the short-lived **transaction lock**, plus the
+   global **registry lock**; total order liveness→transaction→registry. Ratify
+   the fail-safe semantic: killing the supervisor (logout/SIGHUP) reaps a healthy
+   run.
 2. **Generation-reservation record + seq-head (§4.2).** Add `generation_reserved`
    as a record type (durable `g` source of truth) and a `registry/seq.head` HWM;
    registry appends become **O_APPEND + seq-head**, not whole-file rewrite.
