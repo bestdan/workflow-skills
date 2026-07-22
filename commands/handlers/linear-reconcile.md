@@ -274,27 +274,48 @@ alone it is claimed forever.
    labels, so read each candidate's labels — reuse the `<linear-mcp>__get_issue`
    call `linear-sweep-complete.md` "Resolve each issue's PR" step 1 already
    made for it (it fetches `attachments`, which comes back empty for a no-PR
-   candidate, on the **same** response as `labels` — no second call). Drop
-   any candidate without the `auto-claimed` label; it isn't a live claim to
-   begin with.
+   candidate, on the **same** response as `labels` **and** `assignee` — no
+   second call). Drop any candidate without the `auto-claimed` label, **or
+   with a null assignee**: the orphaned-claim marker is `auto-claimed` **and**
+   a non-null assignee (`linear-claim.md` "Claim the issue"), so an unassigned
+   auto-claimed issue is not the state this row GCs.
 
 3. **Guard — no remote branch.** For each remaining candidate, resolve
-   `branchName` (already fetched in step 2's `get_issue` call) and check:
+   `branchName` (already fetched in step 2's `get_issue` call — a **missing or
+   empty** `branchName` is ambiguity, not "no branch": skip the candidate).
+   Row 4 is **single-repo**: the branch check below queries the current
+   checkout's `origin` only. If the candidate's project declares a per-project
+   `repo` (see `linear-common.md`) that differs from the current origin, the
+   branch would live in **that** repo and this check can't see it — **skip the
+   candidate** (ambiguity → never demote) rather than reading the wrong origin.
+   Otherwise check:
 
    ```bash
    git ls-remote --heads origin "<branchName>"
    ```
 
-   A **non-empty** result means a branch exists — the claim may be
-   legitimately mid-work with nothing pushed to review yet is still possible
-   only when the branch itself is also absent, so a pushed branch (even with
-   no PR) is **not** a row-4 candidate; leave it untouched, no report line
-   (it's ordinary in-flight work, not drift). Only an **empty** result
-   (no branch) continues to the age guard.
+   **Gate on the exit status, not just emptiness** — `git ls-remote` also
+   prints empty stdout when it exits **non-zero** (origin unreachable, auth
+   failure, DNS), and treating that as "no branch" would demote live work
+   during an outage. Only a run that **exits 0** is a definitive read: exit 0
+   with a **non-empty** result means a branch exists — a pushed branch (even
+   with no PR) is **not** a row-4 candidate; leave it untouched, no report line
+   (it's ordinary in-flight work, not drift). Exit 0 with an **empty** result
+   (no branch) continues to the age guard. A **non-zero exit** is ambiguity,
+   not absence — **skip the candidate** (fail closed, same as the age guard's
+   hard guard below), never demote.
 
 4. **Guard — age threshold.** Resolve `linear.orphan_claim_hours` (see
    `linear-common.md` config block; default `24`, a sensible middle of the
-   12–24h range). Compute **last activity** as the more recent of the
+   12–24h range). **It must be a finite number > 0** — the threshold is the
+   only protection for a fresh pre-branch claim, and a configured `0` or
+   negative value makes `now − last activity > orphan_claim_hours` true for
+   every candidate, mass-demoting the whole pool. If the configured value is
+   missing-but-set-invalid, non-numeric, or `≤ 0`, **fail closed**: treat row
+   4 as disabled for this run (skip all candidates) and emit one report line
+   noting the invalid threshold — never fall through to demote, and never
+   silently substitute the default for an out-of-range value. Compute **last
+   activity** as the more recent of the
    candidate's `updatedAt` (from step 2's `get_issue`) and, if a
    `do-tasks-claim:` comment exists on it (`<linear-mcp>__list_comments`,
    filtered to bodies containing that marker — same filter `linear-claim.md`
@@ -404,29 +425,49 @@ skipped — closed-unmerged PRs now feed row 3 and orphaned claims now feed row
      ```
 
   Unlike `linear-claim.md`'s Bail, row 3 does **not** delete any
-  `do-tasks-claim:` comment — that cleanup is row 4's job, not row 3's; an
-  issue reaching row 3 has a resolvable PR (that's how it got there), so it
-  isn't row 4's territory anyway, but the two rows stay independent by
-  design. This row only corrects state/labels/assignee.
+  `do-tasks-claim:` comment — it **knowingly leaves** it. A row-3 issue has a
+  resolvable PR (that's how it got there), so it is never in row 4's no-PR
+  candidate pool; row 4 will **not** clean it up later, and that's fine — the
+  stale comment is harmless once the issue is back in Backlog carrying
+  `human-approval-requested` (`/do-tasks` won't re-claim it). Row 3 only
+  corrects state/labels/assignee; the two rows are independent and neither
+  claims to clean the other's comments.
 
 - **Row 4** — for each row-4 candidate, the same release shape as
-  `linear-claim.md` "Bail" and row 3 above, minus the PR-state re-verify
-  (there is no PR to re-check — the re-verify that matters here is the
-  no-branch guard, already re-confirmed live in step 5.3 above since row 4's
-  candidate list is built fresh each run, not carried over from an earlier
-  scan):
+  `linear-claim.md` "Bail" and row 3 above.
+
+  **First, re-verify eligibility at apply time (TOCTOU guard).** Row 4's
+  candidate reads (labels/assignee in step 5.2, branch in 5.3, age in 5.4)
+  were taken during discovery and may be many issues old in a long run — the
+  same scan→apply gap row 3 guards against, not a "built fresh each run"
+  exemption (both buckets come from the one row-1 scan). A demote is
+  irreversible-adjacent, and between discovery and mutation a worker can push
+  a branch, open a PR, refresh the claim, or change labels. So before
+  mutating, **re-read the candidate live** — one `<linear-mcp>__get_issue` for
+  its UUID — and re-run every guard on the fresh read: it must still be a
+  `started`-type state, still carry `auto-claimed` **and** a non-null
+  assignee, still resolve **no** PR, still have **no** remote branch (re-run
+  step 5.3's `git ls-remote`, honoring its exit-status gate), and still be
+  idle past `orphan_claim_hours` on the refreshed `updatedAt`/claim-comment.
+  **Skip the issue** (no mutation), reporting it as `left: revalidated`, if
+  any guard now fails or any read errors. Only a candidate that survives
+  proceeds — and its label mutation below uses **this fresh read's** labels,
+  never step 5.2's stale set (so a label a worker added in the gap isn't
+  clobbered).
   1. Resolve the `human-approval-requested` label id (same pattern as row 3
      step 1).
   2. Resolve the team's default `backlog`-type state id from the cached
      state map (prefer the one named `Backlog`).
   3. **One** `<linear-mcp>__save_issue` call: `id` = the issue's UUID,
-     `state` = the backlog state id, `labels` = the labels already read in
-     step 5.2 above minus `auto-claimed` plus `human-approval-requested`
-     (the call replaces the label set — include the existing ones),
-     `assignee` = `null`.
-  4. **Delete the stale `do-tasks-claim:` comment** if step 5.4 found one
-     (`<linear-mcp>__delete_comment`) — this is the one cleanup step row 3
-     explicitly does not do; row 4 exists specifically to GC this orphan.
+     `state` = the backlog state id, `labels` = the labels **from the fresh
+     apply-time re-read above** minus `auto-claimed` plus
+     `human-approval-requested` (the call replaces the label set — include the
+     existing ones), `assignee` = `null`.
+  4. **Delete the stale `do-tasks-claim:` comment** on **this** row-4
+     candidate if step 5.4 found one (`<linear-mcp>__delete_comment`) — row 4
+     GC's the claim comment for its **own** candidates (no-PR orphans) only;
+     it does not reach row-3 issues (they carry a resolvable PR), which
+     knowingly keep their harmless stale comment per the row-3 note above.
   5. **One** `<linear-mcp>__save_comment` call (`issueId` = the issue's UUID)
      noting the GC:
 
