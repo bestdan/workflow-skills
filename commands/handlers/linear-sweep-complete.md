@@ -217,9 +217,17 @@ PRs verified as merged (report that one):
    gh pr list --state all --head "<branchName>" --json number,url,state
    ```
 
-If none of the three resolve a PR, **skip the issue** — there is nothing to
-act on. Count it toward the report's "no-PR skipped" bucket; do not treat
-this as an error.
+If none of the three resolve a PR, **skip the issue** — but only when every
+discovery probe **succeeded** and simply returned no match. The `gh pr list`
+probes (steps 2–3) also emit an empty result when they **fail** (network/auth
+error, rate limit), so treat a **non-zero exit** from any attempted probe as
+**`left: unresolved`**, not "no-PR skipped": a discovery failure is not a
+confirmed absence, and `/reconcile-tasks` row 4 GC's the "no-PR skipped"
+bucket, so a failure misfiled there could demote a live-PR issue. Only when
+all attempted probes exited cleanly **and** returned no match is the issue a
+true "no-PR skipped" — count it toward that bucket and do not treat it as an
+error. (This mirrors step 4's fail-closed `left: unresolved` handling for a
+merge-state read that can't be completed.)
 
 ## 4. Check merge state
 

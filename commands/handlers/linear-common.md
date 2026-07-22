@@ -51,6 +51,9 @@ linear:
   # above. Default = top-level wip_limit. Set to 0 to never ranked-claim unassigned work.
   # Only takes effect when 1+ projects are configured — with none, the whole-team scope already
   # covers everything, so there is no "outside".
+  orphan_claim_hours: 24 # optional, used by /reconcile-tasks row 4 (linear-reconcile.md) —
+  # idle-hours threshold before a started+auto-claimed issue with no resolvable PR and no
+  # remote branch is treated as an orphaned claim and demoted back to Backlog. Default 24.
   api_key_ref: op://Private/Linear API/credential # optional, used by /archive-tasks —
 # a 1Password op:// reference to a Linear PERSONAL API key. The MCP has no archive
 # mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key.
@@ -66,6 +69,7 @@ linear:
 - Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global. `api_key_ref` is a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
+- `orphan_claim_hours` is optional and lives under `linear:`. It is read only by `/reconcile-tasks` row 4 (`linear-reconcile.md`) as the idle-hours threshold before an orphaned claim (started + `auto-claimed`, no resolvable PR, no remote branch) is demoted back to Backlog. Default `24`. **Must be a finite number > 0** — it is the sole guard for a fresh pre-branch claim, so row 4 treats a `0`, negative, or non-numeric value as invalid and fails closed (disables the row for that run) rather than mass-demoting.
 - `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).
 
 ### Resolve configured projects
