@@ -1,8 +1,10 @@
 # Probe 2 — tmux / process-binding spike
 
-**Result: CONFIRMED (mechanism + identity primitive selected).** Two narrow
-cross-uid facts are deferred to the two-uid mac mini (below); neither is an open
-architectural risk, and the falsification redirect is **not** triggered.
+**Result: CONFIRMED (mechanism + identity primitive selected).** Of the two
+cross-uid facts, the `libproc` read is now confirmed on the two-uid mini
+(non-root EPERM/fails-closed, root reads the full tuple); only the cross-uid
+signal drill remains. Neither is an open architectural risk, and the
+falsification redirect is **not** triggered.
 
 Disposable spike under §0a's contract. Fixture code (`incarnation.py`,
 `shim.py`, `plane.py`, `scenarios.py`, `results.json`) lives beside this file
@@ -111,22 +113,38 @@ Full JSON: `results.json`.
   `launch_prepared` → incarnation binding to be journaled **before** start so
   recovery knows what to look for (already in the §4.1 draft).
 
-## Deferred to the two-uid mac mini (bounded follow-up, not blocking)
+## Two-uid confirmations on the mac mini
 
 Both reduce to a single, already-implied requirement — **the control plane's
 measure + signal path must run privileged** — which the mini's admin maintainer
-satisfies:
+satisfies. Run on the provisioned host (user `agent` uid 502 + sudo).
 
-1. **Cross-uid `libproc` read.** Confirm a non-root maintainer's
-   `proc_pidinfo`/`proc_pidpath` against an **agent-owned** process. If it is
-   `EPERM` (likely), the independent incarnation measurement must run as root
-   (or matching uid). It must **not** fall back to `ps` lstart — that reintroduces
-   the second-granularity reuse hole S4 closes. Co-locate measurement with the
-   privileged `ap-stop`/watcher.
-2. **Cross-uid signal.** `killpg` of an agent-owned process group requires
-   root/matching-euid; `ap-stop` is already maintainer-owned/privileged, and the
-   agent-side `ap-agent-exec kill-session` handles the tmux-scoped teardown.
-   Confirm the split on the mini.
+### 1. Cross-uid `libproc` read — CONFIRMED
+
+Drill: `crossuid-read-drill.sh` measures one `agent`-owned process three ways.
+
+| Reader                   | Result                                                                 |
+| ------------------------ | --------------------------------------------------------------------- |
+| non-root maintainer (501)| `{"alive": false, "pid": 3875, "errno": 1}` — **EPERM, fails closed** |
+| root (`sudo`)            | full tuple: `p_uniqueid 13532476`, `start_µs`, `exe /bin/sleep`, `uid 502` ✓ |
+| agent (same-uid)         | n/a — file-perm `EACCES` reading the maintainer's checkout, not a `libproc` result; same-uid read already proven by the whole probe running as uid 501 |
+
+**Finding.** A non-root maintainer cannot read an agent-owned process's
+incarnation — and it fails **cleanly closed** (`EPERM`), not the dangerous
+partial-read case (`alive:true` with null `p_uniqueid`/`exe`). Root reads the
+full tuple. So the independent incarnation measurement **runs as root**,
+co-located with the privileged `ap-stop`/watcher. It must **never** fall back to
+`ps` lstart (that reopens the S4 second-granularity reuse hole), and it retains a
+reject-incomplete-tuple check as defense-in-depth even though the partial case
+did not occur here.
+
+### 2. Cross-uid signal — pending
+
+`killpg` of an agent-owned process group requires root/matching-euid; `ap-stop`
+is already maintainer-owned/privileged, and the agent-side `ap-agent-exec
+kill-session` handles the tmux-scoped teardown. Confirm the split on the mini
+(privileged signal terminates the incarnation; agent-side wrapper removes the
+pane/session; no residue).
 
 The agent-owned tmux stays entirely outside the trust path in both cases: it
 provides session names and a candidate pid (claims); the privileged control
