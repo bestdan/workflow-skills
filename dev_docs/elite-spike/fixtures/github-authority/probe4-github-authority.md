@@ -8,7 +8,9 @@ denial was **denied server-side** (default-branch and non-matching-branch push
 both `GH013` ruleset violations; non-installed repo `Not Found`/404), and the
 no-fallback evidence held (agent **cannot read the App key**; removing the token
 **fails closed**). The falsification redirect is **not** triggered. The **Linear
-read+write leg is deferred** — see Results. Kill sheet written first per §7a rule
+read+write operations are confirmed** (read + comment + state change + revert on
+a disposable issue); the **identity-scoping** half (agent-scoped tracker token +
+denials) defers to Stage 1 — see Results. Kill sheet written first per §7a rule
 1; evidence in `results.json`.
 
 **Scope decisions (2026-07-22):** the test App + repo live on the maintainer's
@@ -196,15 +198,20 @@ ruleset** first (this is the Decision #5 safety boundary), not the client.
    clone fails closed instead of prompting — making C2 a clean, non-interactive
    fail-closed.
 
-### Linear read+write leg — DEFERRED
+### Linear read+write leg — operations confirmed; identity-scoping deferred
 
-Project `auto-pilot-gh-app-test` (PRE team) was created, but the Linear
-**workspace hit its free-tier issue limit**, so no disposable issue could be
-created. More fundamentally, **agent→Linear auth is not provisioned** — this
-session's Linear is the maintainer MCP connection, not an agent-scoped token — so
-a true "as the agent" tracker read+write test cannot be run here. Deferred to
-**Stage 1**, where the delivery loop's tracker credential is provisioned and its
-read+write is validated under the agent identity.
+Against disposable issue **PRE-627** (project `auto-pilot-gh-app-test`, PRE
+team), all tracker operations the delivery loop needs succeeded: **read**
+(`get_issue` → Backlog), **write comment** (created, then deleted), **write
+state** (Backlog → In Progress, then reverted). Cleanup left the issue in
+Backlog with no comment.
+
+**Caveat (why it isn't the full leg):** this ran via the **maintainer MCP
+identity**, not an agent-scoped Linear token — **agent→Linear auth is not
+provisioned** in this session. So the tracker *operations* are confirmed, but the
+**identity-scoping and denial** half (agent-scoped token; can it only touch what
+it should?) defers to **Stage 1**, where the delivery loop's tracker credential
+is provisioned and validated under the agent identity.
 
 ### What this closes / does not close
 

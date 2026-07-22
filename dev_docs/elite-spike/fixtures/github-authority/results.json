@@ -28,9 +28,15 @@
     "C2_no_fallback": {"verdict": "PASS", "evidence": "fatal: could not read Username for 'https://github.com': terminal prompts disabled (fail closed; no ambient/personal credential leaked in)"}
   },
   "linear_leg": {
-    "status": "DEFERRED",
-    "project_created": "auto-pilot-gh-app-test (PRE team)",
-    "reason": "workspace hit its free-tier issue limit, so no disposable issue could be created; and agent->Linear auth is not provisioned (this session's Linear is the maintainer MCP, not an agent-scoped token). A true agent-identity tracker read+write test belongs in Stage 1."
+    "status": "OPERATIONS CONFIRMED — identity-scoping deferred to Stage 1",
+    "project": "auto-pilot-gh-app-test (PRE team)",
+    "issue": "PRE-627 (disposable)",
+    "operations": {
+      "read": "get_issue PRE-627 -> status Backlog (PASS)",
+      "write_comment": "save_comment created, then delete_comment success (PASS)",
+      "write_state": "save_issue Backlog -> In Progress (started), then reverted to Backlog (PASS)"
+    },
+    "caveat": "Ran via the maintainer MCP identity, NOT an agent-scoped Linear token — agent->Linear auth is not provisioned in this session. So this confirms the tracker read+write OPERATIONS the delivery loop needs, but the identity-scoping / denial half defers to Stage 1."
   },
   "not_persisted": [
     "installation token (stdin only; redacted in output)",
