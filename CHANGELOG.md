@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.5] - 2026-07-22
+
+### Fixes
+
+- warn up front when task files are gitignored (PRE-603) (#251) (e338832)
+
 ## [1.64.4] - 2026-07-22
 
 ### Fixes
