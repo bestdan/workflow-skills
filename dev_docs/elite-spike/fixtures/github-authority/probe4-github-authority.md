@@ -5,6 +5,12 @@ on user-provided provisioning** (a disposable test GitHub App + test repo) and a
 **attended agent-uid path** (`sudo -u agent`, maintainer password); see
 **Prerequisites** below. Kill sheet written first per §7a rule 1.
 
+**Scope decisions (2026-07-22):** the test App + repo live on the maintainer's
+**personal account** — so the **org-level denial test (B4) is N/A** and defers to
+Stage 1 (no org to act against). Agent-uid commands run **attended via the `!`
+prefix** (`sudo -u agent …`, maintainer password) — **no standing sudo grant**.
+The **Linear read+write leg is IN scope** this pass, against a disposable issue.
+
 Disposable spike under §0a's contract (rule 4: never promoted by renaming). The
 **production App never enters the spike** — a separate, disposable **test App**
 installed on **one disposable test repo** only. No production credentials, no
@@ -44,17 +50,18 @@ the **disposable test App**, installed on the **disposable test repo** only.
 3. Open a **PR**, add a **comment**, then **close** it.
 4. The **GraphQL reads `gh` actually issues** along that path (e.g. `gh pr`
    view/status) — captured, not assumed, since `gh` mixes REST and GraphQL.
-5. (Optional / see Prerequisites) tracker **read + write** — a disposable Linear
-   issue — if the delivery loop's tracker leg is in scope for this pass.
+5. Tracker **read + write** (IN scope) — read a disposable **Linear** issue and
+   write it (comment / state change) as part of the delivery loop.
 
 **B. Denial tests (safety-critical — must all be DENIED):**
 
 1. Push to the **default branch**.
 2. Push to a **non-matching branch** (outside the allowed ruleset pattern).
 3. Any operation on a **non-installed repo**.
-4. An **org-level** operation.
-   For each: confirm the **App is absent from every bypass/allow list** that
-   could let it through (ruleset bypass actors, org/repo admin, branch-protection
+4. ~~An **org-level** operation.~~ **N/A this pass** — test App is on a personal
+   account; org-level denial defers to Stage 1 (real App under the org).
+   For B1–B3: confirm the **App is absent from every bypass/allow list** that
+   could let it through (ruleset bypass actors, repo admin, branch-protection
    exemptions).
 
 **C. No-fallback credential evidence (positive):**
@@ -110,23 +117,30 @@ calls; **do not build broker hardening around a false permission model.** If a
 denial test *fails* (an irreversible action escapes), fix the **server-side
 ruleset** first (this is the Decision #5 safety boundary), not the client.
 
-## Prerequisites (user-provided — execution is blocked until these exist)
+## Prerequisites (execution is blocked until these exist)
 
-1. **Disposable test GitHub App** in your account/org, permissions scoped to the
-   intended production set (**Contents: R/W, Pull requests: R/W, Issues: R/W**;
-   **no** org administration, **no** default-branch bypass), with a generated
-   **private key** placed at a maintainer path (e.g. `~maintainer/.autopilot/
-   test-app.pem`, 0600) — **outside** the repo.
-2. **Disposable test repo**, with the test App **installed on it only**, a
-   branch-protection/ruleset on the default branch, and an allowed feature-branch
-   pattern for the positive push.
-3. **Agent-uid execution path**: attended `sudo -u agent …` (maintainer
-   password), or a temporary shell as `agent`. `sudo` is not available to me
-   sandboxed and the agent has no passwordless path yet (Stage 2 sudoers is not
-   built).
-4. **(Optional this pass)** a disposable **Linear** issue if the tracker leg is
-   in scope now; otherwise the Linear read+write leg defers to Stage 1 proper.
-5. Runs on the mini where `agent` (uid 502) exists — **confirmed present on this
+**User-manual (personal GitHub account):**
+
+1. **Disposable test GitHub App** on your personal account, permissions scoped to
+   the production set (**Contents: R/W, Pull requests: R/W, Issues: R/W**; **no**
+   administration, **no** default-branch bypass). Generate a **private key** and
+   place it at `~/.autopilot/test-app.pem` (0600) — **outside** the repo. Record
+   the App ID + Installation ID (non-secret).
+2. **Install** that App on the test repo **only** (below) — not "All repos".
+
+**Automatable (I can run these via `!`, or you delegate):**
+
+3. **Test repo** `autopilot-p4-test` (private) + a **default-branch ruleset**
+   (block direct pushes / restrict to the App's allowed pattern) + a second
+   **non-installed** repo `autopilot-p4-noinstall` for denial test B3.
+4. **Disposable Linear issue** in a throwaway/sandbox project for the tracker
+   read+write leg.
+
+**Execution access:**
+
+5. **Attended agent-uid path** — you run each command through the `!` prefix as
+   `sudo -u agent …` (maintainer password). No standing sudo grant is made.
+6. Runs on the mini where `agent` (uid 502) exists — **confirmed present on this
    host.**
 
 ## Environment (non-secret)
