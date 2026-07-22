@@ -233,7 +233,14 @@ no ACL leakage from your home.
 maintainer-owned programs run _by you_ (§4), the only rule is
 maintainer → `agent` for the fixed launch/attach/exec wrappers (exact
 command paths, NOPASSWD). The agent user has **no sudo rules at all** —
-nothing to invoke, nothing to abuse.
+nothing to invoke, nothing to abuse. Probe 2 adds one entry to this matrix:
+the **authoritative incarnation measure + signal** in `ap-stop`/watcher need a
+maintainer → **root** NOPASSWD exact-command rule, because cross-uid
+`proc_pidinfo` and `killpg` of an agent-owned process require root
+(`fixtures/process-binding/`) — kept in the maintainer's trust domain rather
+than run as `sudo -u agent`, so a hostile agent cannot ptrace or race the
+process that authorizes its own stop. Neither rule prompts for a password;
+that is why the running harness is unattended.
 
 ### 3.2 Native sandbox and the `gh` hole
 
