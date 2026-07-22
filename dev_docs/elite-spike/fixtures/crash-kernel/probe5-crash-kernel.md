@@ -1,12 +1,14 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Result: PENDING (v2).** Draft + kill sheet written and **co-reviewed** (codex +
-Fable, `coreview-2026-07-22.md`), which falsified v1 on paper; **no fixture run
-yet**. Fixture is built only after this v2 sheet is approved (§7a rule 1). The
-draft is [`draft-state-machine.md`](./draft-state-machine.md) — v2 encodes the
-crashed-active **auto-reap** (decision (b)), the transaction-lock / lease-record
-split, incarnation-fenced termination, idempotent recovery, a global registry
-lock, an explicit process-crash threat model, and the expanded matrix.
+**Result: PENDING (v3).** Draft + kill sheet **co-reviewed twice** (codex + Fable,
+`coreview-2026-07-22.md`): the first pass falsified v1, codex's second pass
+falsified v2 (auto-reap contradicted the transaction-lock split). **No fixture
+run yet.** The draft is [`draft-state-machine.md`](./draft-state-machine.md) — v3
+resolves the contradiction with a **run-long liveness lock** (`O_CLOEXEC`,
+separate from the short-lived transaction lock) as the sound orphan-proof, plus
+`gen_token`-tagged session containment, a durable generation-reservation record +
+seq-head, an explicit recovery table, and a de-bundled one-crash-point-per-row
+matrix. Several items are **design-doc deltas** (below) awaiting ratification.
 
 Disposable spike under §0a's contract (rule 4 — never promoted by renaming). Runs
 **in a disposable directory**, not `/usr/local/autopilot`. No tmux, GitHub, or
@@ -35,19 +37,21 @@ conclusion that determines the redirect — it does not gate falsification.
 
 ### Method
 
-In a disposable directory, implement **only** the v2 kernel: `prepared → active →
+In a disposable directory, implement **only** the v3 kernel: `prepared → active →
 terminal`, generation replacement/takeover, the **watcher-triggered `ap-stop
---reap`** of a crashed-active orphan, and registry append — using separate
-permanent `flock` lock inodes (transaction lock vs durable lease record), the
-`F_FULLFSYNC` atomic-publication primitive, incarnation identity
-(`p_uniqueid`+start+exe+`kern.bootsessionuuid`), and a per-run containment
-process group. Then run the full **v2 matrix** (draft §Fault-injection matrix):
-SIGKILL at every durable boundary (A–G), contention/clobber (H–I), the reap paths
-(R1–R4, incl. the kill-TOCTOU fence and the alive-but-hung refusal),
-`claimed_exit` (K), the global-`seq` races (S1–S3), and the **adversarial /
-syscall-failure / re-crash** rows (X1–X5) — checking every invariant (1–10) after
-each. Boundary crashes are injected **deterministically** via armed crash-points
-(`PROBE5_CRASH_AT=<row>` → `os._exit()` at that exact point).
+--reap`** of a crashed-active orphan, and registry append — using three permanent
+`O_CLOEXEC` lock inodes (**liveness** held for the whole run, short-lived
+**transaction**, global **registry**; total order liveness→transaction→registry),
+the `F_FULLFSYNC` atomic-publication primitive for owner/seq-head, **O_APPEND +
+`seq.head`** for registry lines, incarnation identity (`p_uniqueid`+start+exe+`sid`
++`kern.bootsessionuuid`), `gen_token`-tagged **session** containment, and the
+recovery table. Then run the full **v3 matrix** (draft §Fault-injection matrix),
+**one deterministic crash point per row** via armed crash-points
+(`PROBE5_CRASH_AT=<row>` → `os._exit()`): the boundary crashes (A–E3), contention
+(H, I), the reap paths incl. the **false-reap guard R5**, the session/PID-reuse
+fences (R4a/R4b), the alive-but-hung refusal (R3), `claimed_exit` (K), the
+registry/seq races (S1–S4), and the adversarial/syscall/re-crash/ABA rows
+(X1–X5) — checking every invariant (1–11) after each.
 
 ### Pass threshold
 
@@ -70,11 +74,11 @@ Classify **inconclusive**, not pass, if: a boundary crash can't be injected
 **deterministically** at the intended point; or a contention race can't be
 forced (serialization untested). And — always partially inconclusive by
 construction (co-review #4) — **reboot / power-loss durability is untested**:
-`F_FULLFSYNC` makes the protocol correct, but SIGKILL cannot prove it and the
-fixture runs no real power-fail harness, so those guarantees are **inconclusive,
-never passed**. Also inconclusive if the fixture can't prove **which
-process/descriptor owns the lock** (lockf fd semantics unresolved) or can't force
-**repeated crash-during-recovery** (X4).
+`F_FULLFSYNC` is what the protocol is **designed for**, but SIGKILL cannot prove
+it and the fixture runs no real power-fail harness, so those guarantees are
+**inconclusive, never passed**. Also inconclusive if the fixture can't prove
+**which fd owns the liveness lock** (that `O_CLOEXEC` holds, X3) or can't force
+**repeated crash-during-reap** (X4).
 
 ### Evidence required (rule 4)
 
@@ -87,7 +91,32 @@ persist here.
 
 **Two working days** — an explicit override of §7a rule 3's half-day default,
 per the probe row. At the cap, classify `confirmed` / `falsified` /
-`inconclusive`.
+`inconclusive`. For this probe **`confirmed` means "not falsified in the tested
+process-crash environment"** — the ceiling (reboot/power-loss stays
+`inconclusive`), not "proven correct."
+
+## Design-doc deltas (need §4/§5.1 ratification before the measured revision)
+
+The co-review surfaced items that change the **production** spec, not just the
+spike. Flagged for sign-off:
+
+1. **Multi-lock model (§4.1).** §4.1 currently describes a single lock held
+   "through the entire run" *and* per-transition — the contradiction codex found.
+   Ratify the split: a **run-long `O_CLOEXEC` liveness lock** (the orphan-proof)
+   distinct from the short-lived **transaction lock**, plus the global **registry
+   lock**, total order liveness→transaction→registry.
+2. **Generation-reservation record + seq-head (§4.2).** Add `generation_reserved`
+   as a record type (durable `g` source of truth) and a `registry/seq.head` HWM;
+   registry appends become **O_APPEND + seq-head**, not whole-file rewrite.
+3. **Session-anchored containment + `gen_token` (§4.1, §3).** Runs spawn as
+   session leaders carrying a `gen_token`; state explicitly that **hostile in-run
+   escape is fenced by the Stage-2 uid/sandbox, not the kernel** (the kernel
+   narrows + detects).
+4. **Recovery table (§4.1)** as the normative reconciliation spec the measured
+   revision must enumerate.
+5. **Reap authority (§5.1).** The watcher never signals a process, but **may
+   trigger a generation-scoped `ap-stop --reap`** on kernel-defined conditions;
+   `ap-stop` stays the sole terminalization mechanism.
 
 ### Dependent work gated on this probe
 
