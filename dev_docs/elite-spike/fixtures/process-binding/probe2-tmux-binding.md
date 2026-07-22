@@ -33,7 +33,7 @@ credentials, no network.
 | OS          | macOS, Darwin 25.4.0 (arm64)                                     |
 | tmux        | 3.6b, pinned socket `/tmp/claude/p2.sock`                       |
 | python      | 3.12.13 (ctypes → libproc `proc_pidinfo`)                        |
-| uid context | **single-uid dev box** (uid 501). No `apagent`, no sudo here.   |
+| uid context | ran **single-uid as uid 501**; the two-uid path (user `agent` uid 502 + sudo) was not exercised here. |
 
 The agent-owned tmux server is modeled faithfully: tmux's `#{pane_pid}` is
 treated as an **untrusted claim**; all authority comes from an independent

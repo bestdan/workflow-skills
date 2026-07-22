@@ -17,8 +17,9 @@ formal closes, which need the sandbox layer as agent and the disposable test App
 
 ## Supporting
 
-- Agent identity provisioned (non-admin, `apagent`, zero sudo rules, 0700 home,
-  minimal `~/Library`, no FDA granted): `provisioning.md`.
+- Agent identity provisioned (non-admin **user `agent`**, uid 502, member of
+  group `apagent`; zero sudo rules, 0700 home, minimal `~/Library`, no FDA
+  granted): `provisioning.md`.
 - Agent Claude Max auth (manual OAuth flow, agent keychain created+unlocked):
   `fixtures/nono/step2-agent-auth.md`.
 
