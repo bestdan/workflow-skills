@@ -1,10 +1,9 @@
 # Probe 2 — tmux / process-binding spike
 
-**Result: CONFIRMED (mechanism + identity primitive selected).** Of the two
-cross-uid facts, the `libproc` read is now confirmed on the two-uid mini
-(non-root EPERM/fails-closed, root reads the full tuple); only the cross-uid
-signal drill remains. Neither is an open architectural risk, and the
-falsification redirect is **not** triggered.
+**Result: CONFIRMED — fully closed.** Both cross-uid facts are now confirmed on
+the two-uid mini: the `libproc` read (non-root EPERM/fails-closed, root reads the
+full tuple) and the `killpg` signal (non-root EPERM, root terminates the
+agent-owned group). The falsification redirect is **not** triggered.
 
 Disposable spike under §0a's contract. Fixture code (`incarnation.py`,
 `shim.py`, `plane.py`, `scenarios.py`, `results.json`) lives beside this file
@@ -138,13 +137,21 @@ co-located with the privileged `ap-stop`/watcher. It must **never** fall back to
 reject-incomplete-tuple check as defense-in-depth even though the partial case
 did not occur here.
 
-### 2. Cross-uid signal — pending
+### 2. Cross-uid signal — CONFIRMED
 
-`killpg` of an agent-owned process group requires root/matching-euid; `ap-stop`
-is already maintainer-owned/privileged, and the agent-side `ap-agent-exec
-kill-session` handles the tmux-scoped teardown. Confirm the split on the mini
-(privileged signal terminates the incarnation; agent-side wrapper removes the
-pane/session; no residue).
+Drill: `crossuid-signal-drill.sh` signals one `agent`-owned group leader.
+
+| Signaller                | `killpg(SIGTERM)` result                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| non-root maintainer (501)| `EPERM` — denied; target stays `alive: true`                     |
+| root (`sudo`)            | terminates the group; incarnation `alive: false` ✓               |
+
+**Finding.** `killpg` of an agent-owned process group requires
+root/matching-euid; a non-root maintainer is denied (negative control) and root
+terminates it. `ap-stop` is already maintainer-owned/privileged, so the signal
+runs there. The agent-side `ap-agent-exec kill-session` handles the tmux-scoped
+teardown — that half is **same-uid** and already exercised by S0/S3, so it is
+not a new cross-uid fact and was not repeated in this drill.
 
 The agent-owned tmux stays entirely outside the trust path in both cases: it
 provides session names and a candidate pid (claims); the privileged control
@@ -156,7 +163,8 @@ plane measures and signals.
 bare `exec` wrapper (no `setsid` helper), and the recorded incarnation as
 `{pid, p_uniqueid, start_µs, exe}` with `p_uniqueid` primary and
 `p_puniqueid` pinning the tmux-server parent; specify `ap-stop`/watcher
-re-validation as measure-then-signal, fail-closed on any mismatch. Schedule the
-two cross-uid confirmations on the mini before Stage 2 (they gate _how_ the
-measurement is privileged, not _whether_ the model works). The baseline
-crash-transaction kernel (priority 5) may now consume this process model.
+re-validation as measure-then-signal, fail-closed on any mismatch, both running
+**privileged (root)** — confirmed by the two mini drills (non-root fails closed
+on read and signal; root does both). The agent-owned tmux never enters the trust
+path. Probe 2 is fully closed; the baseline crash-transaction kernel (priority 5)
+may now consume this process model.
