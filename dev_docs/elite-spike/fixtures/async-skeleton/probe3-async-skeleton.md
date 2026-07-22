@@ -1,8 +1,16 @@
 # Probe 3 — Autonomous-safe / async-report walking skeleton
 
-**Result: PENDING.** Kill sheet only — no fixture code written yet. Fixture is
-built only after this sheet is approved (§7a rule 1: falsifier first, fixture
-second, production component last).
+**Result: CONFIRMED — fully closed.** Under real per-user launchd, the watcher
+autonomously detected both a killed and a wedged run, drove each to a **safe
+terminal with no human in the loop**, and emitted a durable async notice
+(authoritative registry record + human-readable Slack mirror). The 08:00 canary
+is **health-coupled**: it reads healthy only when the watcher is fresh, the
+broker is fresh, and no run is unsupervised — and the **load-bearing
+false-positive leg passed** (run wedged **and** watcher killed → `unhealthy`,
+never a host-is-up "healthy"). The falsification redirect is **not** triggered.
+
+The kill sheet below is preserved as written (§7a rule 1: falsifier first,
+fixture second). Evidence and classification follow in **Results**.
 
 Disposable spike under §0a's contract. All fixture code that lands beside this
 file is **never** promoted into `/usr/local/autopilot` by renaming (rule 4). No
@@ -122,8 +130,85 @@ closed on its own.
 
 ## Environment (non-secret)
 
-_To be filled from the fixture run._
+- Host: macOS 26.4.1 (25E253), arm64 mini, single uid (`danielegan`, uid 501).
+  This probe is about the watcher/canary/notice **mechanism**, not the cross-uid
+  boundary — that was closed by Probe 2.
+- Supervision hosted by **real per-user launchd** (`launchctl bootstrap
+  gui/501`, `StartInterval` watcher, `StartCalendarInterval 08:00` canary). The
+  bootstrap/kickstart/bootout calls require running **unsandboxed**: launchd's
+  mach service fails `EIO` under the command sandbox and returns `rc=0` outside
+  it. Recorded so the production watcher install is known to need the same.
+- Python 3.12; no `claude`, no `gh`, no production App, no network except an
+  **optional** Slack POST from `SLACK_WEBHOOK_URL` (unset in this run — the
+  webhook is never written to disk; §7a rule 4).
+- Fixture: `run.py` (dummy heartbeat run, `setsid` leader), `watcher.py`
+  (single-pass §5.1 shape), `canary.py` (coupled health), `common.py` (registry
+  + notice sinks), `incarnation.py` (Probe 2's libproc `p_uniqueid` reader,
+  copied), launchd templates, `scenarios.py` (orchestrator). Runtime state lived
+  in disposable `$TMPDIR` rundirs; only sanitized evidence is checked in.
 
 ## Results
 
-_To be filled from the fixture run._
+**Classification: CONFIRMED.** Cadences: **compressed** (`StartInterval` 5 s,
+staleness 8 s, watcher-fresh 15 s) for mechanism iteration, plus a **production**
+confirmation (`StartInterval` 120 s, staleness 360 s). Raw evidence:
+`results.json`, `evidence-registry.jsonl`, `evidence-slack_outbox.jsonl`.
+
+| Pass criterion | Result |
+| --- | --- |
+| Healthy baseline reads healthy (not trivially always-unhealthy) | ✅ `canary → healthy` with a beating run + live watcher |
+| **Kill** → autonomous detect + safe terminal | ✅ `observed_terminal{stall_kill}`, runfile → `terminal`, detect **9.4 s** (compressed) |
+| **Wedge** (SIGSTOP: alive but heartbeat stale) → detect + safe stop | ✅ `observed_terminal{wedge}`, wedged process **killed** (did not survive), detect **10.7 s** |
+| Durable async notice | ✅ authoritative registry `observed_terminal`+`alert`; Slack mirror line per condition; dedup `run_id+condition` |
+| Canary flips when run is in a bad state | ✅ wedged active run → `unhealthy [active_run_heartbeat_stale]` |
+| **False-positive leg (load-bearing)**: run wedged **and** watcher killed | ✅ `unhealthy [watcher_stale, active_run_heartbeat_stale]` — coupled on **both** clauses, never host-is-up |
+| launchd hosting | ✅ watcher `StartInterval` + canary `StartCalendarInterval 08:00` bootstrapped, fired, kickstarted, booted out (`rc=0`) |
+| **Production cadence** detect-and-stop < 10 min SLO | ✅ kill detect **117 s** < 600 s |
+
+### Safe-stop isolation (a real bug the fixture caught)
+
+First wedge run took out the orchestrator: a `&`-backgrounded run shares its
+shell's process group, so the watcher's `killpg` hit the supervisor too. Fixed
+by making `run.py` a **session leader** (`setsid`, `pid == pgid == sid`) —
+exactly the production topology Probe 2 confirmed for a tmux pane. With the run
+isolated in its own group, `killpg` reaches only the run. This is why the
+production run-shim must remain its own session leader; a run sharing the
+maintainer's group would make safe-stop unsafe.
+
+### launchd relaunch throttle (constraint, not a failure)
+
+At compressed cadence a `watcher_slow` record appears every pass. Cause:
+**launchd enforces a ~10 s minimum between relaunches** of a job, so
+`StartInterval 5` is effectively ~10 s — which equals the `2 × interval` slow
+threshold, so every gap trips it. This is an artifact of pushing cadence below
+launchd's floor, **not** a skipped-pass defect: the detect timings (9.4 s /
+10.7 s) are consistent with a ~10 s effective cadence, and production's 120 s
+`StartInterval` clears the floor with wide margin (the 117 s production detect
+confirms it). **Constraint recorded for production: keep `StartInterval` ≥ ~10 s
+and the slow threshold relative to the effective cadence.**
+
+### Async notice — Slack
+
+The **registry is authoritative** and was exercised end-to-end; the local
+`slack_outbox.jsonl` carried the human-readable mirror for every condition. A
+**live** Slack POST is a present-but-opportunistic code path (`common._post_slack`,
+best-effort, 5 s timeout, no retry-until-acked); it was **not** exercised here
+(no webhook configured, and Slack's host is outside the command sandbox). This
+matches Decision #5: delivery is un-acked and non-load-bearing — a miss is
+recovered by the registry and the 08:00 canary, not by escalation.
+
+### Not required (held out, per Decision #5)
+
+No maintainer wake, no acknowledged/retried delivery, no sub-10-min message
+*arrival*. No off-host dead-man monitor (§7a) — absence of the 08:00 canary is
+the signal.
+
+### What this closes / does not close
+
+Closes: the unattended promise — **autonomous detection + self-safe stop +
+health-coupled async self-report, no human in the loop** — holds on a real
+launchd substrate without the full registry or launcher. Does **not** establish
+the production registry schema, broker, lease/generation kernel (Probe 5),
+runaway containment (Probe 5b), or GitHub authority (Probe 4); those remain
+their own probes. Spike code is disposable and is never promoted by renaming
+(rule 4).

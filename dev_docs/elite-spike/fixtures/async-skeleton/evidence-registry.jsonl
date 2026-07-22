@@ -1,0 +1,11 @@
+{"dedup": null, "kind": "run_start", "p_uniqueid": 13651450, "pid": 23461, "run_id": "killrun", "ts": {"mono": 1579450.824678666, "wall": 1784730553.391687}}
+{"dedup": null, "gap_s": 10.11, "kind": "watcher_slow", "ts": {"mono": 1579459.988220125, "wall": 1784730562.550267}}
+{"dedup": null, "kind": "canary", "reasons": [], "ts": {"mono": 1579460.935750041, "wall": 1784730563.4974341}, "verdict": "healthy"}
+{"dedup": null, "gap_s": 10.14, "kind": "watcher_slow", "ts": {"mono": 1579470.128048125, "wall": 1784730572.6871831}}
+{"dedup": "killrun+stall_kill", "detail": "incarnation_dead pid=23461", "kind": "observed_terminal", "reason": "stall_kill", "run_id": "killrun", "ts": {"mono": 1579470.128862791, "wall": 1784730572.687998}}
+{"condition": "stall_kill", "dedup": null, "kind": "alert", "run_id": "killrun", "ts": {"mono": 1579470.130938708, "wall": 1784730572.690073}}
+{"dedup": null, "kind": "run_start", "p_uniqueid": 13651813, "pid": 23825, "run_id": "wedgerun", "ts": {"mono": 1579470.400992208, "wall": 1784730572.960073}}
+{"dedup": null, "gap_s": 10.18, "kind": "watcher_slow", "ts": {"mono": 1579480.31049475, "wall": 1784730582.868153}}
+{"dedup": null, "gap_s": 10.15, "kind": "watcher_slow", "ts": {"mono": 1579490.461157708, "wall": 1784730593.018097}}
+{"dedup": "wedgerun+wedge", "detail": "heartbeat_stale=11.0s safe_stop=killed", "kind": "observed_terminal", "reason": "wedge", "run_id": "wedgerun", "ts": {"mono": 1579490.84276175, "wall": 1784730593.399683}}
+{"condition": "wedge", "dedup": null, "kind": "alert", "run_id": "wedgerun", "ts": {"mono": 1579490.844263541, "wall": 1784730593.401186}}
