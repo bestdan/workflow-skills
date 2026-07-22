@@ -106,12 +106,12 @@ before privileged code exists. No Stage-1 work has begun.
 
 ## 1. Locked decisions (2026-07-21)
 
-| # | Decision                                                          | Consequence                                                                                                                                                                                                                                                                                                                                                                                                            |
-| - | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 | **Claude Max subscription for everything.**                       | Budget control = usage windows. Reserve gate (`claude-usage.sh`) kept, re-verified under the agent user. Rate-limit exits handled by the control plane (§5.3). No server-side spend cap; parallelism + per-task bounds are client-side substitutes. The Max OAuth credential is an agent-readable bearer secret, explicitly in the threat model (blast radius: the subscription's usage window; revocable in console). |
-| 2 | **Trial a dedicated `agent` macOS user.**                         | Headless service account; workflow §3.1. Permanent only if Stage-2 friction is acceptable.                                                                                                                                                                                                                                                                                                                             |
-| 3 | **GitHub App identity.**                                          | Key never readable by agent (§2.1); authorization policy incl. no-bypass rulesets (§2.2).                                                                                                                                                                                                                                                                                                                              |
-| 4 | **tmux-hosted orchestrator** (remote attach, always-on mac mini). | Plain tmux on a pinned socket; launched by the maintainer-owned launcher (§4).                                                                                                                                                                                                                                                                                                                                         |
+| # | Decision                                                          | Consequence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| - | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 | **Claude Max subscription for everything.**                       | Budget control = usage windows. Reserve gate (`claude-usage.sh`) kept, re-verified under the agent user. Rate-limit exits handled by the control plane (§5.3). No server-side spend cap; parallelism + per-task bounds are client-side substitutes. The Max OAuth credential is an agent-readable bearer secret, explicitly in the threat model (blast radius: the subscription's usage window; revocable in console). nono was **not** adopted to hide it (§3.2 degraded tier), so it stays agent-readable — but nono's network allowlist now blocks exfiltration to non-allowlisted hosts, a partial mitigation. |
+| 2 | **Trial a dedicated `agent` macOS user.**                         | Headless service account; workflow §3.1. Permanent only if Stage-2 friction is acceptable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 3 | **GitHub App identity.**                                          | Key never readable by agent (§2.1); authorization policy incl. no-bypass rulesets (§2.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 4 | **tmux-hosted orchestrator** (remote attach, always-on mac mini). | Plain tmux on a pinned socket; launched by the maintainer-owned launcher (§4).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## 2. Identity layer
 
@@ -162,7 +162,10 @@ before privileged code exists. No Stage-1 work has begun.
   The helpers enforce the five-minute admission rule. Because the agent can
   read the bearer token and invoke another HTTP client, this is a workflow
   correctness invariant, not a security boundary; the server-side App policy
-  remains the security boundary.
+  remains the security boundary. (nono's network allowlist (§3.2) now constrains
+  that "other HTTP client" to allowlisted hosts, so a read token cannot be
+  exfiltrated to an arbitrary endpoint — defense-in-depth, still not the primary
+  boundary.)
 - **Failure protocol**: broker refreshes proactively; the agent never
   triggers minting. On an authenticated failure the orchestrator may retry
   an **idempotent read** once (the file may have just rotated); a **write
@@ -234,16 +237,49 @@ nothing to invoke, nothing to abuse.
 
 ### 3.2 Native sandbox and the `gh` hole
 
-Sandboxed Bash `failIfUnavailable`, network allowlist
-(`api.anthropic.com`, `github.com`, `api.linear.app`, loopback). The `gh`
-exclusion remains a named hole bounded server-side (§2.2's policy is the
-compensating control, now with denial tests). A candidate replacement for this
-whole layer — nono's proxy-based domain filtering + credential injection, which
-would close the `gh` hole and hide bearer tokens from the agent — is under
-falsification test in [nono-evaluation.md](./nono-evaluation.md); until that
-probe passes, the hand-rolled Seatbelt layer described here stands. Stage 2 tests effective
-policy per execution path (plain Bash, excluded `gh`, each worker
-backend), never trusting sandbox startup success.
+**Containment via nono (`nono run`), adopted at the defense-in-depth tier.** The
+evaluation ([nono-evaluation.md](./nono-evaluation.md), evidence in
+`dev_docs/elite-spike/`) selected [nono](https://nono.sh) as the sandbox +
+network layer over a hand-rolled Seatbelt profile. nono wraps the agent's
+`claude` session and its git/`gh`/Linear traffic in a Seatbelt sandbox whose
+**local proxy enforces a host-level domain allowlist** —
+`api.anthropic.com`, `github.com`, **`api.github.com`** (the `gh` REST/GraphQL
+host; both GitHub hosts are required), `api.linear.app`, loopback; default-deny
+otherwise. This **closes the `gh` hole**: `gh` runs _inside_ the sandbox and its
+egress is filtered (confirmed — the proxy blocks non-allowlisted hosts and both
+git and `gh` honor it). The hand-rolled `orchestrator.sb.tmpl` renderer is
+retired.
+
+Three constraints from the code-level security review
+(`tasks/elite_stage0_plan/nono_security_review.md`) bound the adoption:
+
+- **Host-level allowlist only; keep §2.2's server-side rulesets (SR-3).** nono's
+  _path/method-level_ endpoint policy is bypassable (dot-segment traversal), so
+  it is defense-in-depth, never the bound on _what a token can do_. §2.2's GitHub
+  rulesets remain the real token boundary.
+- **Defense-in-depth, not a secret boundary.** nono is self-declared alpha on an
+  active escape-and-fix cadence. Credential injection was **not** adopted (it
+  would not meaningfully out-perform §2.2 given SR-3, and betting a secret on an
+  alpha MITM is unwarranted). **Decision #1 stands** — the Max/Linear bearer
+  tokens remain agent-readable; the network allowlist only limits _where_ the
+  agent can send them, not whether it holds them.
+- **Pin + vendor + ephemeral CA.** Pin the nono binary version; **vendor the
+  reviewed `claude` profile as checked-in config** rather than live registry
+  auto-pull (SR-4 runs profile "wiring" silently); use only the default ephemeral
+  CA (never `--trust-proxy-ca`, which leaves an extractable CA key in the
+  keychain). **macOS-only** assumption is load-bearing — nono's network
+  containment does not hold on Linux (SR-1/SR-2).
+
+**Keychain note (F5):** nono's `claude` profile grants the whole agent login
+Keychain, so the agent Keychain must contain **only** the agent's own Claude
+credential (verified in the spike). This is a provisioning invariant, not
+optional.
+
+Remaining before Stage 2 flips this on: the authenticated write loop
+(clone→push→PR) through the proxy under the disposable test App, and the
+sandbox-layer sentinel battery — neither expected to change the tier. Stage 2
+tests effective policy per execution path (orchestrator Bash, in-sandbox `gh`,
+each worker backend), never trusting sandbox startup success.
 
 ### 3.3 CAO (deferred, evidence-gated extension)
 
@@ -758,11 +794,14 @@ assumption, not evidence that the eventual production component is complete.
 
 1. **Max runaway** (no server cap): reserve gate + parallelism cap +
    at-most-twice continuation, counters control-plane-durable. Accepted.
-2. **`gh` outside the sandbox**: bounded by §2.2 (no-bypass rulesets,
-   branch-pattern restriction, installation scope, 1h tokens, no key
-   access) — each part denial-tested in Stage 1. Accepted. Candidate closure:
-   nono's domain-filtering proxy (falsification test in
-   [nono-evaluation.md](./nono-evaluation.md)) would remove the hole outright.
+2. **`gh` outside the sandbox — closed at the network layer (§3.2).** nono's
+   host-level domain allowlist brings `gh` inside the sandbox with filtered
+   egress (evaluation: [nono-evaluation.md](./nono-evaluation.md)), so `gh` no
+   longer runs unconfined. §2.2's server-side rulesets **stay** as the bound on
+   what the token can do (nono's path-level filter is bypassable — SR-3 — so it
+   is defense-in-depth, not the token boundary). Residual risk is now nono itself
+   (alpha; macOS-only containment; pinned version + vendored profile), not an
+   unfiltered `gh`. Accepted.
 3. **TCC under a headless user**: Stage-2 no-GUI context test; work stays
    out of TCC-protected locations.
 4. **CAO under agent**: disabled in the baseline; enabled only after §3.3's
