@@ -3,9 +3,9 @@
 **Status: CONFIRMED for secrets, with two non-secret isolation gaps to close.**
 Run as the real `agent` uid against the maintainer's real files.
 
-This is the **uid layer** (plain agent shell, no sandbox). The **sandbox layer**
-(same battery from inside `nono run` as agent, under the `claude` profile) is the
-remaining follow-up.
+This is the **uid layer** (plain agent shell, no sandbox); the **sandbox layer**
+(inside `nono run`) is confirmed in the section below. Both layers pass — F5 is
+fully closed.
 
 ## Results
 

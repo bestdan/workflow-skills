@@ -54,6 +54,11 @@ degraded)** — take the domain allowlist to close the `gh` hole and keep the ag
 off the maintainer's files, while §2.2's server-side ruleset stays as the token
 boundary. Full-tier credential injection (F3/F6b) is now _lower_ value: SR-3 makes
 endpoint scoping unreliable and the alpha status argues against betting high-value
-secrets on it. The two-uid boundary holds for secrets (F5, post `chmod 700`).
-Remaining task-2 work (F3/F4/F6b, sandbox-layer F5, F2 write loop) should be run
-to _characterize_ the degraded-tier adoption, not to chase full-tier injection.
+secrets on it. The two-uid boundary is fully closed (F5, both layers, post `chmod 700`).
+
+**Decision locked (2026-07-22): ADOPT — defense-in-depth / network-only.** Design
+edits applied (§3.2, Risk #2, Decision #1, §2.1; commit `7743516`). The injection
+checkpoints (F3/F4/F6b) are **dropped** as low-value per the review. The only
+remaining confirmable item is the **F2 write loop** (clone→push→PR through the
+proxy under the disposable test App) — not tier-changing. Task 3's graduate-then-
+delete cleanup waits on it.
