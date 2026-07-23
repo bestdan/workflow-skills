@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>@LABEL@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PYTHON@</string>
+    <string>@DIR@/supervisor.py</string>
+    <string>daemon</string>
+  </array>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>1</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PROBE5_DB</key><string>@DB@</string>
+    <key>PROBE5_REPO</key><string>@REPO@</string>
+    <key>PROBE5_DOMAIN_MODE</key><string>@DOMAIN_MODE@</string>
+    <key>PROBE5_AGENT_UID</key><string>@AGENT_UID@</string>
+    <key>PROBE5_RECONCILE_LOG</key><string>@RECONCILE_LOG@</string>
+  </dict>
+  <key>StandardOutPath</key><string>@RUNDIR@/supervisor.launchd.out</string>
+  <key>StandardErrorPath</key><string>@RUNDIR@/supervisor.launchd.err</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
