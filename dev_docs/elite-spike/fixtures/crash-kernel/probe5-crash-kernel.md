@@ -1,7 +1,12 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Flat-file kernel: FALSIFIED → storage redirect taken. Now PENDING (v5.1),
-buildable.** Four review rounds falsified the hand-rolled flat-file design (v1–v4)
+**Flat-file kernel: FALSIFIED → storage redirect taken. v5.1 fixture RUN
+2026-07-23 → INCONCLUSIVE** — the transaction kernel held across every injection
+(10/10 boundary crashes, idempotency, admission race, re-adoption, orphan reap),
+but the dedicated `agent` uid the containment half depends on **no longer exists
+on the host**, so invariants 4/5/6 were never exercised and six rows are BLOCKED.
+The fixture also caught a real v5.1 defect: the re-adopt rule false-reaps any run
+that forks a worker (see Results → Finding). Four review rounds falsified the hand-rolled flat-file design (v1–v4)
 on the same two things — exact-once ordered registry sequence under crash, and
 macOS advisory-lock liveness; prior-art research (`prior-art-research.md`)
 confirmed both are **solved wheels**. v5 took the redirect (SQLite + launchd +
@@ -145,8 +150,143 @@ kernel** (falsified four times).
 
 ## Environment (non-secret)
 
-_To be filled at execution._
+Executed 2026-07-23 on the mac mini (macOS 26.4.1), maintainer uid 501.
+
+| Fact | Value |
+| --- | --- |
+| SQLite | **3.53.3, Homebrew stock build** via `/opt/homebrew/opt/python@3.12/bin/python3.12` |
+| Pragmas actually honoured | `journal_mode=wal`, `synchronous=2` (FULL), `fullfsync=1` |
+| Apple system SQLite | **refused** — `kernel.assert_stock_sqlite()` fails closed on the CLT interpreter (3.51.0), per prior-art §1 |
+| launchd | real per-user domain `gui/501`, `KeepAlive`, `bootstrap` rc=0 **unsandboxed** (sandboxed `launchctl` and `ps` both fail; the orchestrator must run unsandboxed) |
+| Incarnation identity | Probe 2's libproc `p_uniqueid` reader, copied in unmodified |
+| `kern.bootsessionuuid` | present |
+| **`agent` uid** | **ABSENT — see the blocker below** |
+| Containment domain used | **`gentoken` (DEGRADED, not escape-proof)** |
+
+### Blocker — the dedicated `agent` uid does not exist
+
+`provisioning.md` and Probe 4's `results.json` both record `uid=502(agent)`
+confirmed on 2026-07-22. On the same host on 2026-07-23:
+
+```
+id agent            → no such user
+dscl . -list /Users → daemon 1, danielegan 501, jennygrange 502, nobody -2, root 0
+/Users/agent        → No such file or directory
+/Groups/apagent     → eDSRecordNotFound
+```
+
+**uid 502 now belongs to `jennygrange`, an unrelated human account.** This is not
+only a missing prerequisite but a hazard: the draft's containment primitive is
+`kill(-1)` executed *as uid 502*, so a fixture that pinned the number rather than
+the name would signal every process of a live user's account. No uid-wide kill
+was run. The fixture pins the domain by configuration and refuses to signal as
+root (row Priv).
+
+Consequence: the fixture carries a second domain mode, `gentoken`, which
+enumerates by scanning argv for the run's token. That is the draft's
+*pre-registration discovery* mechanism, **not a containment boundary** — a
+descendant that `exec`s without the token, or that the scan races, is invisible
+to it. Every row below ran in this degraded mode.
 
 ## Results
 
-_To be filled at execution._
+Full evidence: [`results.json`](./results.json) (sanitized; the fixture handles no
+credentials, so nothing required redaction beyond machine-specific paths).
+Reproduce with `python3.12 scenarios.py` **unsandboxed**.
+
+### Classification: **INCONCLUSIVE**
+
+Not falsified — but not confirmed either, and the gap is not a technicality. The
+pass threshold requires **all eight invariants** to hold. Invariants **4 (earned
+release), 5 (orphan safe-stop, no false kill) and 6 (reap convergence or fence)**
+are all statements about a containment domain being verifiably emptied, and the
+escape-proof domain those invariants are written against was unavailable. What
+the degraded mode can show is that the *logic* gated on `domain == zero` behaves
+correctly; what it cannot show is that `domain == zero` means what the draft needs
+it to mean. Per rule 3, a contention/reap-convergence case that cannot be forced
+is inconclusive, not a pass.
+
+| Row | Verdict | Evidence |
+| --- | --- | --- |
+| T1 `prepare.pre_commit` | PASS | Whole-transaction rollback: **no lease and no event published at all**. Safe terminal by vacuity. |
+| T2 `prepare.post_commit` (G1) | PASS | `prepared` durable, nothing spawned; reconcile scanned zero → `launch_aborted` → terminal. |
+| T3 `spawn.post_spawn` (G2) | PASS | Live blocked *unrecorded* child; supervisor death closed the gate, child exited on **EOF** ("exit, don't go"); reconcile verified zero → terminal. |
+| T4 `activate.pre_commit` | PASS | Rollback; lease stayed `prepared`; recovered as G1. |
+| T5 `activate.post_commit` (G3) | PASS | `active` durable, gate never opened; child exited on EOF; reap-to-zero → terminal. |
+| T6 `stop_intent.pre_commit` | PASS | Rollback left a **healthy `active` run**; reconcile **re-adopted** it. Correctly *not* killed — the stop is simply retried. |
+| T7 `stop_intent.post_commit` (Saga1) | PASS | Intent durable, nothing signalled; reconcile resumed the saga → zero → terminal. |
+| T8 `reap.post_zero` (Saga2) | PASS | Domain empty, `terminal` uncommitted; reconcile re-observed zero and terminalized. No double-release. |
+| T9 `terminalize.pre_commit` | PASS | Rollback; lease stayed fenced in `stop_intent`; retried to terminal. |
+| T10 `terminalize.post_commit` | PASS | Committed terminal; replay inert. |
+| Idem | PASS | Replay returned the **existing seq**, `replayed=True`, and the counter did **not** advance (1→1); the next event took seq 2. No gap. |
+| IdemConflict | PASS | Same `idem_key` with a different payload raised and rolled the whole transaction back; counter unchanged. |
+| Race | PASS | Two concurrent launches, **exactly one** rc=0, exactly one `generation_reserved`. Admission gate + `BEGIN IMMEDIATE`. |
+| Pid | PASS | A recorded tuple bearing a live pid but a foreign `p_uniqueid` was **refused after kqueue attach** ("identity changed after attach"); the genuine tuple adopted. *Real PID wraparound was not forced* — this exercises the guard the reuse would trip. |
+| Priv | PASS | `signal_all` raises `ReaperRefused` when euid is 0. Exercised with a mocked euid; the fixture never acquires root. |
+| NoConv | PASS | A domain that never empties → `converged=False`, `terminalize()` **refused**, lease left fenced in `stop_intent`. Never terminalized on non-convergence. |
+| Io | **INCONCLUSIVE** | Only a *read-only-database* refusal was injected, which fails before the first byte. That sub-case failed atomically (counter and event count unchanged), but genuine **ENOSPC/EIO fail mid-write**, potentially after the WAL has been extended — a different class, and untested. No small-disk-image or fault-injecting VFS harness was built. |
+| Sup-readopt | PASS | Supervisor SIGKILLed, launchd `KeepAlive` restarted it, reconciliation chose `readopt`; **run and its forked descendant both still alive**, lease still `active`, `stop_intent=0`. No false kill. |
+| Sup-orphan | PASS | Run SIGKILLed leaving a live descendant; reconciliation chose `reap_dead_run`, reaped to zero, terminalized. **Dead run ≠ dead workers** confirmed. |
+| Esc | **BLOCKED** | A `setsid` + double-fork descendant escapes gen_token scanning by construction. Only uid-wide `kill(-1)` catches it. |
+| Churn | **BLOCKED** | Fork-churn convergence is only meaningful against an escape-proof domain; "converged" would otherwise be an artifact of the scan. |
+| Writer | **BLOCKED** | Proving the run *cannot* write `state.db` needs a second uid. Same-uid, sole-writer is architectural here, not enforced. |
+| Uid | **BLOCKED** | The uid-changing-helper limitation is not observable without the dedicated uid. |
+| Tw | **BLOCKED** | Takeover's reap-before-publish leg needs an escape-proof domain. |
+| PL | **BLOCKED / inconclusive by construction** | Reboot/power-loss. `SIGKILL` cannot prove it; no VM or loopback power-fail harness. Per the kill sheet this is **never** passed. |
+
+### Finding — a real defect in draft v5.1, caught by the fixture
+
+The first `Sup-orphan` run failed, and it was the draft, not the harness. On the
+supervisor's **first, entirely benign** reconciliation pass — before anything had
+been killed — it logged:
+
+```
+domain_live=[23139, 23140]  alive_verified=true
+unexpected_domain_procs=[23140]  →  action="reap_unaccounted_procs"
+```
+
+23140 was the healthy run's own forked child. v5.1's re-adopt condition requires
+"the uid-scan shows no *unexpected* extra agent processes" — but **a uid-wide scan
+cannot distinguish a live run's legitimate descendants from a dead run's orphans**;
+both are simply processes of the uid. Gating adoption on an empty scan therefore
+false-reaps **every run that forks a worker**, on the first supervisor start —
+exactly the failure monitored re-adoption was introduced (fifth pass, HIGH) to
+prevent. Any real run forks workers, so this would fire essentially always.
+
+**Fix applied (proposed as v5.2):** drop the "no unexpected extras" conjunct. The
+recorded incarnation is the discriminator — if the run is alive and
+`p_uniqueid`-verified, the extras are its children; if it is not, every process in
+the domain is an orphan and is reaped regardless of how the roster looks (which
+is the existing `reap_dead_run` path and preserves "dead run ≠ dead workers"). The
+one-globally-active-lease admission gate is what makes this sound: no prior
+generation can still be running. With the conjunct removed, Sup-readopt and
+Sup-orphan both pass, and Sup-readopt was strengthened to fork a descendant so it
+can no longer pass vacuously.
+
+### What this does and does not establish
+
+**Established** (in the tested process-crash environment, degraded containment):
+invariants **1** (atomic transitions — 10/10 boundary crashes were a clean
+rollback or a clean commit), **2** (gapless monotonic seq + idempotent replay),
+**3** (admission gate), **7** (generation monotonic), and the *logic* of 4/5/6.
+The v5.1 transaction kernel is buildable as specified and the old flat-file
+failure class — exact-once ordered sequence under crash — did not reappear in any
+row. `BEGIN IMMEDIATE` made it structural, as the redirect predicted.
+
+**Not established:** invariants **4, 5, 6** in the sense the kill sheet requires,
+because the containment boundary they quantify over was never exercised; **8**
+(sole writer) as an *enforced* property; power-loss durability (untestable here by
+construction); and genuine mid-write IO failure.
+
+### Required to close this probe
+
+1. Re-provision the `agent` account — **by name, not uid 502**, which is taken —
+   and re-verify Probe 1's and Probe 4's evidence, both of which asserted an
+   account that has since vanished.
+2. Add the scoped `sudo -u agent` spawn/reap helper (Stage-2 sudoers) and pin the
+   exact invocation; it is a runtime privileged-mediation dependency.
+3. Re-run with `PROBE5_DOMAIN_MODE=uid`, which turns on the real `kill(-1)` path,
+   and complete Esc, Churn, Writer, Uid, Tw.
+4. Ratify the v5.2 reconciliation fix above.
+
+Until (1)–(4), **no dependent Stage-2 work should be built on invariants 4/5/6.**

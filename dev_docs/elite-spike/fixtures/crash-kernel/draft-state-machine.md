@@ -1,4 +1,19 @@
-# Baseline launch/lease/registry state machine (Probe 5 input) — **v5.1**
+# Baseline launch/lease/registry state machine (Probe 5 input) — **v5.2**
+
+> **v5.2 (2026-07-23) — one fix, found by running the fixture.** v5.1's re-adopt
+> condition also required that "the uid-scan shows no *unexpected* extra agent
+> processes." That conjunct is **removed**: a uid-wide scan cannot distinguish a
+> live run's own descendants from a dead run's orphans, so it false-reaped every
+> run that forks a worker on the first benign supervisor start — the exact failure
+> monitored re-adoption exists to prevent. The recorded incarnation is the
+> discriminator; the `reap` branch below still catches the dead-run case
+> unconditionally, so "dead run ≠ dead workers" is unaffected. See
+> `probe5-crash-kernel.md` → Results → Finding.
+>
+> Probe 5 classified **INCONCLUSIVE**: the transaction half of this spec held
+> across every injection, but the dedicated `agent` uid is absent from the host,
+> so invariants 4/5/6 — everything quantified over the containment domain — were
+> never exercised.
 
 v5.1 applies codex's fifth-pass fixes to the v5 redirect (`coreview-2026-07-22.md`
 §Fifth pass), which found the **redirect sound — no architectural pivot** — but
@@ -97,8 +112,7 @@ terminalize**.
 **Startup reconciliation (every supervisor (re)start — re-adopt ratified):**
 For the (≤1) non-terminal lease, **always uid-scan first**, then:
 - **Re-adopt** iff the recorded run incarnation is **alive and `p_uniqueid`-verified**,
-  `stop_intent==0`, not stalled (Probe 3), **and** the uid-scan shows no
-  *unexpected* extra agent processes: register `EVFILT_PROC/NOTE_EXIT` by pid,
+  `stop_intent==0`, and not stalled (Probe 3): register `EVFILT_PROC/NOTE_EXIT` by pid,
   **then re-read `p_uniqueid`** to close the attach/PID-reuse race, and resume
   monitoring (observation, **not** parenthood — never `wait()` a nonchild). A
   benign supervisor restart therefore does **not** kill healthy work.
