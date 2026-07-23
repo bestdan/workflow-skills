@@ -20,13 +20,16 @@ idempotency is a `UNIQUE(repo_key, generation, kind)` constraint, not a conventi
 - Serious tools persist to embedded transactional stores, not flat files (Nomad →
   BoltDB).
 
-**macOS gotcha 1 (critical):** power-loss durability needs `PRAGMA synchronous=FULL`
-+ `PRAGMA fullfsync=ON` (fullfsync defaults OFF) — but **Apple's *system* SQLite
-silently replaces `F_FULLFSYNC` with `F_BARRIERFSYNC`** even when asked, so a
-**self-compiled/bundled** stock SQLite is required for the real guarantee.
-([mjtsai/Johnson](https://mjtsai.com/blog/2025/09/05/sqlite-on-macos-not-acid/),
-[agwa durability settings](https://www.agwa.name/blog/post/sqlite_durability),
-[avi.im](https://avi.im/blag/2025/sqlite-fsync/))
+**macOS gotcha 1 (corrected by codex):** power-loss durability needs `PRAGMA
+synchronous=FULL` + `PRAGMA fullfsync=ON` (fullfsync defaults OFF). There is
+credible **reverse-engineered** evidence that a *particular* macOS 12 **system**
+SQLite build mapped requested `F_FULLFSYNC` to `F_BARRIERFSYNC`
+([bonsaidb ACID-on-Apple](https://bonsaidb.io/blog/acid-on-apple/),
+[mjtsai/Johnson](https://mjtsai.com/blog/2025/09/05/sqlite-on-macos-not-acid/)) —
+but that is not a stable public macOS contract, and Apple itself describes
+`F_FULLFSYNC` as **best-effort** ([Apple disk-write guidance](https://developer.apple.com/documentation/xcode/reducing-disk-writes)).
+Correct conclusion: **bundle and pin a known-good stock SQLite; avoid unverified
+Apple-patched builds** — not "all Apple SQLite silently downgrades."
 
 **macOS gotcha 2:** same epistemic ceiling — SIGKILL still can't prove power-loss
 durability ([howtocorrupt](https://www.sqlite.org/howtocorrupt.html)); the win is
@@ -116,3 +119,72 @@ killing by uid — not a filesystem + lock manager + process-containment kernel
 hand-rolled at once. The four review rounds were the market signaling this
 partition; this is a legitimate Probe 5 result (the falsification-redirect the
 kill sheet named, now evidenced).
+
+## codex review (2026-07-23): corrections + off-the-shelf verdict + containment fork
+
+An independent codex pass (web search) confirmed the direction but corrected
+three overclaims and answered "is there really nothing off-the-shelf."
+
+**Corrections to the partition:**
+- **SQLite — right, with caveats.** Do **not** equate `AUTOINCREMENT` with a
+  gapless sequence (failed inserts leave gaps) — use an explicit singleton counter
+  in the same transaction. SQLite gives exactly-once *durable state recording*,
+  **not** exactly-once *worker execution* (idempotent side-effects stay the app's
+  job). `BEGIN IMMEDIATE` takes the write position up front.
+- **launchd restarts the supervisor; it does NOT re-adopt workers.** The restarted
+  supervisor must reconcile its durable roster against live incarnations itself.
+  launchd removes "who restarts the supervisor," nothing more.
+- **Dedicated uid is strong but NOT escape-proof and NOT no-root.** `kill(-1)` as
+  the uid is **uid-wide** (kills every worker of that uid across every repo — not
+  per-repo/per-generation), catastrophic under the ordinary desktop uid; a
+  per-user LaunchAgent **cannot** switch uid (`UserName` only applies in the
+  privileged system domain), so it needs **one-time admin provisioning**; and it
+  doesn't contain credential-changing helpers/XPC/remote subprocesses. So "no
+  root" must mean "no root in normal operation, after one-time privileged setup."
+- **"~40% bespoke" understates it.** SQLite deletes much *code*, but most of the
+  *safety argument* — generation fencing, takeover, identity, reconciliation,
+  stopping convergence, containment — stays bespoke.
+
+**Off-the-shelf verdict (answers the "surely something exists" question):** no
+product satisfies the **full conjunction** — {durable fenced ownership + arbitrary
+native macOS subprocess supervision + automatic orphan safe-stop + escape-resistant
+tree-kill + no root + no external server}. Every category fails on one axis:
+Temporal/Cadence/Prefect/Dagster/Airflow/Windmill (cooperative cancellation, don't
+prove a subprocess tree is dead; add a server); River/Faktory (in-language, need
+Postgres/server); OTP/Akka/Ray (must move execution into their runtime; an OS
+`Port` process survives a VM crash); Nomad (`exec` isolation is Linux-only,
+`raw_exec` unisolated); k3s/k0s/Quadlet/Compose (Linux/VM/systemd/cgroups or paid);
+runit/s6/daemontools/immortal (no transactional registry/lease/incarnation;
+`setsid` escapes); PM2/circus/overmind/hivemind (operational managers, not
+crash-atomic ownership). **Research misses codex flagged:** **Pueue** (closest
+generic local-job daemon — but no fencing/incarnation/escape-safe stop) and, most
+notably, **Claude Code Agent View** (purpose-built per-user supervisor with
+persistent sessions + respawn — but a research preview, Claude-specific, manual
+stall recovery, resume-favoring, no lease/generation/incarnation/reaping contract).
+Relaxing **any** constraint changes the answer (Prefect for cooperative jobs, Pueue
+for human queues, Agent View for Claude-only, containers for strong containment) —
+which is exactly *why* nothing packages it: the **conjunction**, not the pieces.
+
+**Verdict: (c) a corrected Fable assembly** — bundled/pinned SQLite for all
+authoritative state + one launchd-managed global supervisor + the bespoke
+generation/takeover/recovery state machine. **Containment is now an explicit fork**
+(pick one, don't assume uid):
+1. one-time privileged provisioning of an **exclusive service uid**, then uid-wide
+   `kill(-1)` — *aligns with the already-provisioned `agent` uid (Probe 1)*;
+2. workers inside a **Linux VM / container** boundary;
+3. native no-root host processes with the guarantee **weakened** to "cooperative
+   process-group containment + escape detection" (arbitrary hostile descendants +
+   absolute escape-proof reaping are **not** simultaneously achievable on Darwin
+   no-root).
+
+**Probe 5 reclassification: "flat-file crash kernel falsified → storage redirect
+taken"** — but *redirect taken ≠ replacement validated*. The SQLite/launchd
+assembly still needs the fixture. **Smallest build+test target:** one SQLite DB
+(lease/current-generation, append-only events, worker incarnations, unique
+idempotency keys); one transaction per transition (seq allocation + lease/gen
+movement); one launchd-owned supervisor + one IPC mutation path; startup
+reconciliation that fences stale generations, records stop-intent, drives
+TERM→bounded-wait→KILL, verifies absence, then terminalizes+releases; a containment
+decision from the three above; fault injection at every transaction boundary +
+supervisor SIGKILL with live workers + concurrent launch/takeover + PID reuse +
+fork/setsid escape + fork churn + ENOSPC/IO + a real VM power-loss test.
