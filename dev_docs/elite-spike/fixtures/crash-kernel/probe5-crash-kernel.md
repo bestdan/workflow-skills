@@ -231,7 +231,7 @@ is inconclusive, not a pass.
 | Churn | **BLOCKED** | Fork-churn convergence is only meaningful against an escape-proof domain; "converged" would otherwise be an artifact of the scan. |
 | Writer | **BLOCKED** | Proving the run *cannot* write `state.db` needs a second uid. Same-uid, sole-writer is architectural here, not enforced. |
 | Uid | **BLOCKED** | The uid-changing-helper limitation is not observable without the dedicated uid. |
-| Tw | **BLOCKED** | Takeover's reap-before-publish leg needs an escape-proof domain. |
+| Tw | **BLOCKED ×2** | Needs an escape-proof domain **and** the TAKEOVER transition, which is not implemented (`kernel.py` has no `takeover_publish`). |
 | PL | **BLOCKED / inconclusive by construction** | Reboot/power-loss. `SIGKILL` cannot prove it; no VM or loopback power-fail harness. Per the kill sheet this is **never** passed. |
 
 ### Finding — a real defect in draft v5.1, caught by the fixture
@@ -280,13 +280,25 @@ construction); and genuine mid-write IO failure.
 
 ### Required to close this probe
 
-1. Re-provision the `agent` account — **by name, not uid 502**, which is taken —
-   and re-verify Probe 1's and Probe 4's evidence, both of which asserted an
+Full resume instructions, written to be machine-portable (the work may continue on
+a different Mac, where none of Probes 1–4's evidence carries over):
+**[`probe5-todo.md`](./probe5-todo.md)** — host provisioning and the agent checks,
+the fixture changes each blocked row needs, per-row pass bars, and teardown.
+
+In brief:
+
+1. Re-provision the `agent` account — **by name, and not uid 502**, which is taken
+   — then re-verify Probe 1's and Probe 4's evidence, both of which certify an
    account that has since vanished.
 2. Add the scoped `sudo -u agent` spawn/reap helper (Stage-2 sudoers) and pin the
-   exact invocation; it is a runtime privileged-mediation dependency.
-3. Re-run with `PROBE5_DOMAIN_MODE=uid`, which turns on the real `kill(-1)` path,
-   and complete Esc, Churn, Writer, Uid, Tw.
-4. Ratify the v5.2 reconciliation fix above.
+   exact invocation; it is a runtime privileged-mediation dependency. Note `sudo`
+   closes fds ≥3 by default, which would destroy the inherited report pipe and
+   start gate — `closefrom_override` is required.
+3. Implement the TAKEOVER transition (absent from `kernel.py`).
+4. Re-run with `PROBE5_DOMAIN_MODE=uid` to turn on the real `kill(-1)` path, and
+   complete Esc, Churn, Writer, Uid, Tw — **plus the 19 passing rows**, whose
+   evidence was gathered under a different domain implementation and does not
+   transfer unexamined.
+5. Ratify the v5.2 reconciliation fix above.
 
-Until (1)–(4), **no dependent Stage-2 work should be built on invariants 4/5/6.**
+Until (1)–(5), **no dependent Stage-2 work should be built on invariants 4/5/6.**
