@@ -13,8 +13,8 @@ Working branch: `bestdan/elite-probe5-crash-kernel` (a worktree under
 ## 0. Read first (required, in order)
 
 All paths relative to `dev_docs/elite-spike/fixtures/crash-kernel/`:
-1. **`draft-state-machine.md` (v5)** — the design you are falsifying (the spec:
-   SQLite schema, state machine, startup reconciliation, invariants 1–7, matrix).
+1. **`draft-state-machine.md` (v5.1)** — the design you are falsifying (the spec:
+   SQLite schema, state machine, startup reconciliation, invariants 1–8, matrix).
 2. **`probe5-crash-kernel.md`** — the kill sheet: falsifier, method, **pass /
    inconclusive / falsify bar**, the matrix, the two-working-day cap, and the
    design-doc deltas.
@@ -57,7 +57,7 @@ crash-point + orchestrator patterns, and the **Probe 4 fixture**
 - Everything is **disposable**: a temp dir + a disposable `state.db`. Nothing under
   `/usr/local/autopilot`. Rule 4: spike code is **never promoted by renaming**.
 
-## 2. Build the fixture (only the v5 assembly)
+## 2. Build the fixture (only the v5.1 assembly)
 
 - **`state.db`** — schema per the draft: `lease`, `meta` (the explicit gapless
   `seq` counter), `events` (append-only, `UNIQUE(repo_key,generation,kind,idem_key)`),
@@ -88,20 +88,29 @@ crash-point + orchestrator patterns, and the **Probe 4 fixture**
   start-gate.
 - **`scenarios.py`** — orchestrator over the matrix → sanitized `results.json`.
 
-## 3. Open questions to resolve before/while building (from the reviews)
+## 3. Settled decisions (v5.1 — codex's fifth pass, already in the draft)
 
-The latest coreview (read it) is expected to press these — settle each explicitly
-in the fixture and record the decision:
-1. **Re-adopt vs reap on supervisor restart.** A launchd restart leaves the new
-   supervisor parentless, so *every* active lease looks orphaned. Reaping a
-   **healthy** run on a benign restart is likely a defect — reconciliation should
-   **re-adopt** a live, `p_uniqueid`-verified run (monitor by kqueue) and reap
-   only the dead/wedged. Implement and test both a genuine orphan and a benign
-   restart.
-2. **DB↔side-effect atomicity.** A SQLite commit followed by a spawn/kill is not
-   one atomic unit. Enumerate and inject the crash windows (§2) and prove
-   reconciliation makes each a safe terminal or safe re-adopt.
-3. **Privilege path** for uid-kill (root/sudo) — pin it and note the dependency.
+These were open in v5 and are now **decided** in `draft-state-machine.md` v5.1 —
+implement them as written (don't re-litigate):
+1. **Monitored re-adoption on supervisor restart (ratified).** Reconciliation
+   **re-adopts** a live, `p_uniqueid`-verified run (register `EVFILT_PROC/NOTE_EXIT`
+   by pid, then **re-read `p_uniqueid`** to close the attach/PID-reuse race —
+   observation, never `wait()` a nonchild) and **reaps** only the dead / wedged /
+   `stop_intent` case. A benign restart must **not** kill healthy work — test both
+   Sup-readopt (healthy) and Sup-orphan (dead run, live descendants).
+2. **DB↔side-effect atomicity** is closed by (a) the **start-gate EOF = "exit,
+   don't go"** rule, and (b) **every recovery uid-scans + reaps + verifies zero
+   before terminalizing** — terminalization is gated on `uid==zero`, never on the
+   recorded run's liveness. Inject G1–G3 + Sup-orphan and prove each.
+3. **Privilege:** spawn and reap run **as the agent uid** via a scoped
+   `sudo -u agent` helper (Stage-2 sudoers); **never root `kill(-1)`**. Pin the
+   exact helper invocation; it's a runtime privileged-mediation dependency.
+4. **Termination is a saga** (`stop_intent` commit → kill/rescan **outside** any
+   txn → `terminal` after uid==zero); non-convergence stays fenced in `stop_intent`
+   (retry+alert), never terminalizes.
+5. **Sole writer:** the agent run reports its incarnation over an inherited pipe;
+   the maintainer supervisor is the only `state.db` writer (never inherit SQLite
+   fds). **One globally-active lease** (admission gate) makes uid-wide kill correct.
 
 ## 4. Run the matrix (kill sheet §Fault-injection matrix)
 

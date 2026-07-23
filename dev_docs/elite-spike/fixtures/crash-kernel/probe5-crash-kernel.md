@@ -1,15 +1,19 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Flat-file kernel: FALSIFIED → storage redirect taken. Now PENDING (v5).** Four
-review rounds (codex + Fable, `coreview-2026-07-22.md`) repeatedly falsified the
-hand-rolled flat-file design (v1–v4) on the same two things — an exact-once
-ordered registry sequence under crash, and macOS advisory-lock liveness. Prior-art
-research (`prior-art-research.md`) confirmed these are **solved wheels**. v5 takes
-the redirect: [`draft-state-machine.md`](./draft-state-machine.md) is a **SQLite**
-state machine, a **launchd**-supervised supervisor, and **dedicated-`agent`-uid**
-`kill(-1)` containment — with the bespoke remainder (lease/generation/takeover +
-incarnation identity + startup reconciliation) the actual fixture target.
-**Redirect taken ≠ replacement validated** — the v5 fixture still runs.
+**Flat-file kernel: FALSIFIED → storage redirect taken. Now PENDING (v5.1),
+buildable.** Four review rounds falsified the hand-rolled flat-file design (v1–v4)
+on the same two things — exact-once ordered registry sequence under crash, and
+macOS advisory-lock liveness; prior-art research (`prior-art-research.md`)
+confirmed both are **solved wheels**. v5 took the redirect (SQLite + launchd +
+dedicated-uid); **codex's fifth pass judged the redirect sound — no architectural
+pivot** — and named a bounded spec pass, now applied as **v5.1**
+([`draft-state-machine.md`](./draft-state-machine.md)): uid-scan-gated recovery
+(terminalize only after `uid==zero`), a `stop_intent → kill → terminal` **saga**
+outside the transaction, **one-globally-active-lease** admission gate (uid-wide
+kill is correct), a scoped `sudo -u agent` privilege path (never root `kill(-1)`),
+sole-writer IPC, `idem_key` idempotency, and **monitored re-adoption** on
+supervisor restart (a benign restart does not kill healthy work). **Redirect taken
+≠ validated** — the v5.1 fixture still runs; see `v5-fixture-brief.md`.
 
 Disposable spike under §0a's contract (rule 4 — never promoted by renaming). Runs
 **in a disposable directory** against a disposable `state.db`. Surrogate "runs"
@@ -39,38 +43,43 @@ conclusion that determines the redirect — it does not gate falsification.
 
 ### Method
 
-In a disposable directory, implement **only** the v5 assembly: a **bundled stock
-SQLite** `state.db` (WAL, `synchronous=FULL`, `fullfsync=ON`) holding the
-`lease`/`meta`(seq)/`events`/`incarnations` tables; **one `BEGIN IMMEDIATE`
-transaction per transition** (`prepared → active → terminal`, generation
-replace/takeover) that atomically allocates the gapless seq, enforces the `UNIQUE`
-idempotency key, moves the lease/generation, and appends the event; a **launchd
-`KeepAlive`** supervisor with **startup reconciliation**; and **dedicated-`agent`-
-uid** termination (`kill(-1)` TERM→bounded-wait→KILL→re-scan-until-zero), with
-`p_uniqueid` incarnation identity used to *verify* liveness (not to select kills).
-Then run the **v5 matrix** (draft §Fault-injection matrix) via armed crash-points
-(`PROBE5_CRASH_AT=<point>` → `os._exit()`): SIGKILL at **every** transition
-boundary (T1–Tn), replay/idempotency (Idem), **supervisor SIGKILL with live
-workers** (Sup), crash-during-reconciliation repeated (Rec), concurrent
-launch/takeover (Race, Tw), PID-reuse (Pid), `fork`/`setsid` escape (Esc), fork
-churn (Churn), disk-full/IO (Io), the documented uid-changing limitation (Uid),
-and — if a VM/loopback harness is available — real power-loss (PL). Check every
-invariant (1–7) after each.
+In a disposable directory, implement **only** the v5.1 assembly: a **bundled stock
+SQLite** `state.db` (WAL, `synchronous=FULL`, `fullfsync=ON`) — **sole writer** the
+maintainer supervisor; **one `BEGIN IMMEDIATE` transaction per transition** with
+`idem_key` idempotency (duplicate → existing seq, never a gap); the run spawned
+**as the agent uid** via a scoped `sudo -u agent` helper, reporting its incarnation
+over an **inherited pipe** and blocking on a **start-gate** (EOF = "exit, don't
+go"); a **launchd `KeepAlive`** supervisor whose startup **reconciliation
+re-adopts** an identity-verified healthy run (`NOTE_EXIT` + `p_uniqueid` reverify)
+and **reaps** a dead/wedged/`stop_intent` one; termination as a **saga** —
+`stop_intent` commit → `kill(-1)` (as agent uid) TERM→wait→KILL→**rescan-to-zero**
+*outside* the transaction → `terminal` commit **only after uid==zero**; and a
+**one-globally-active-lease** admission gate. Then run the **v5.1 matrix** (draft
+§Fault-injection matrix) via armed crash-points (`PROBE5_CRASH_AT=<point>` →
+`os._exit()`): every transition boundary (T1–Tn), the DB↔spawn gate windows
+(G1–G3), idempotency replay (Idem), supervisor-kill with a **dead** run + live
+descendants (Sup-orphan), supervisor-kill/restart with a **healthy** run
+(Sup-readopt, Sup-benign), the saga crash points (Saga1/2), races (Race, Tw),
+PID-reuse (Pid), escape (Esc), churn (Churn), non-convergence fencing (NoConv),
+IO (Io), the never-root-`kill(-1)` guard (Priv), sole-writer (Writer), the
+uid-changing limitation (Uid), and power-loss (PL, else inconclusive). Check every
+invariant (1–8) after each.
 
 ### Pass threshold
 
-Across the **v5 matrix**: all seven invariants hold, and **every** crash/contention
-outcome is a **safe terminal or a safe hold needing no mid-run human** — a
-supervisor death with live workers is auto-detected on launchd restart and
-**uid-reaped to zero** before terminalizing, no human. Specifically: no transition
-is ever split across more than one SQLite transaction (so a crash is always a clean
-rollback or commit — no torn/half-applied state); the seq is gapless+monotonic and
-a replayed transition is inert; no clobber of a live lease; `terminal`/release only
-after the uid re-scan returns **zero** live agent processes; reap **converges**
-(TERM→KILL→re-scan) despite `fork`/`setsid`/churn; PID reuse is rejected by
-`p_uniqueid`; generation is fenced with no ABA. The best positive result is **"not
-falsified in the tested (process-crash) environment"** — never "proven"
-(reboot/power-loss stays inconclusive without the VM harness).
+Across the **v5.1 matrix**: all eight invariants hold, and **every**
+crash/contention outcome is a **safe terminal or a safe hold needing no mid-run
+human**. Specifically: no transition split across two SQLite transactions (crash =
+clean rollback/commit); gapless+monotonic seq and an idempotent replay (existing
+seq, no gap); admission gate blocks a second active lease; **`terminal`/release
+only after the agent-uid rescan returns zero** (dead run ≠ dead workers); a benign
+supervisor restart **re-adopts** the healthy run (no false kill); reap either
+**converges** to zero or stays **fenced** in `stop_intent` (never terminalizes on
+non-convergence); PID reuse rejected by `p_uniqueid`; reaping runs **as the agent
+uid** (never root `kill(-1)`); the supervisor is the sole `state.db` writer;
+generation fenced, no ABA. Best positive result: **"not falsified in the tested
+process-crash environment"** — reboot/power-loss stays inconclusive without a VM
+harness.
 
 ### Inconclusive condition (rule 3)
 
