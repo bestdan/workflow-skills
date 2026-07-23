@@ -1,92 +1,87 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Result: PENDING (v4).** Draft **co-reviewed three times** (codex + Fable,
-`coreview-2026-07-22.md`): pass 1 falsified v1; codex's pass 2 falsified v2
-(auto-reap contradicted the transaction-lock split); Fable's pass 3 falsified v3
-(3 CRITs — registry torn-interior/dup-seq emission and a prepared-recovery
-permanent wedge — two of which the v3 matrix wouldn't have caught). **No fixture
-run yet.** [`draft-state-machine.md`](./draft-state-machine.md) is **v4**: the
-liveness lock is now **`fcntl`/POSIX `F_SETLK`** (not fork-inherited) held by the
-run-long **supervisor**; registry append does **tail-reconciliation**;
-prepared-recovery **terminalizes the owner**; takeover **reaps live gen-g workers
-first**; and "signal the session" is specified as `-pgid` enumeration. One more
-review is pending before the fixture build. Several items are **design-doc
-deltas** (below) awaiting ratification.
+**Flat-file kernel: FALSIFIED → storage redirect taken. Now PENDING (v5).** Four
+review rounds (codex + Fable, `coreview-2026-07-22.md`) repeatedly falsified the
+hand-rolled flat-file design (v1–v4) on the same two things — an exact-once
+ordered registry sequence under crash, and macOS advisory-lock liveness. Prior-art
+research (`prior-art-research.md`) confirmed these are **solved wheels**. v5 takes
+the redirect: [`draft-state-machine.md`](./draft-state-machine.md) is a **SQLite**
+state machine, a **launchd**-supervised supervisor, and **dedicated-`agent`-uid**
+`kill(-1)` containment — with the bespoke remainder (lease/generation/takeover +
+incarnation identity + startup reconciliation) the actual fixture target.
+**Redirect taken ≠ replacement validated** — the v5 fixture still runs.
 
 Disposable spike under §0a's contract (rule 4 — never promoted by renaming). Runs
-**in a disposable directory**, not `/usr/local/autopilot`. No tmux, GitHub, or
-Claude coupling — this probe falsifies the state model **in isolation**, before
-those seams exist. Surrogate "runs" are trivial processes; no real credentials.
+**in a disposable directory** against a disposable `state.db`. Surrogate "runs"
+are trivial processes under the `agent` uid; no tmux/GitHub/Claude coupling.
 
 ## Kill sheet (from §7a, priority 5)
 
 ### Key assumption / falsifier
 
-> _The baseline control-plane state model has **one recoverable outcome under
-> crash and concurrency** — every outcome a **safe terminal or a safe hold
-> needing no mid-run human action** (Decision #5) — before it is coupled to tmux,
-> GitHub, or Claude._
+> _The **SQLite + launchd + dedicated-uid** assembly gives the lease/registry
+> control-plane **one recoverable outcome under crash and concurrency** — every
+> outcome a **safe terminal or a safe hold needing no mid-run human action**
+> (Decision #5) — with only the lease/generation/takeover state machine,
+> incarnation identity, and startup reconciliation hand-written._
 
-**Any invariant failure falsifies this draft** — decoupled from the redirect
-question (co-review pass-bar fix). Concretely, falsified if any matrix injection
-yields: a torn read; a clobber of a live owner; an untracked live process; a
-double-release; a **protocol-emitted** duplicate/gap `seq` (not merely detected —
-emitted); a superseded generation acted on; a mis-targeted kill (PID reuse
-escaping the containment fence); a crash-persistent lock needing manual removal;
-or any outcome that requires a human **mid-run** (an *alive-but-hung* launcher
-escalating to a human **alert** is a hang, not a crash outcome, and is allowed).
-Whether a *revised* flat-file design can hold the invariants is a **separate**
+**Any invariant failure falsifies v5.** Concretely, falsified if any matrix
+injection yields: a torn/half-applied transition (a transition split across more
+than one SQLite transaction); a duplicate/gap `seq` or a double state-move; a
+clobber of a live lease; a release before run+workers are **verified dead**
+(uid re-scan ≠ zero); an **orphan that needs a human** (supervisor death not
+auto-detected+reaped); a **non-converging reap** (uid-wide TERM→KILL→re-scan never
+reaches zero — e.g. a within-uid escape); a superseded generation acted on; or a
+`p_uniqueid` liveness check fooled by PID reuse. A **uid-changing** helper
+escaping containment is a *documented limitation* (→ option 2), not a falsifier.
+Whether the assembly can be tightened, or must move to containment option 2, is a
 conclusion that determines the redirect — it does not gate falsification.
 
 ### Method
 
-In a disposable directory, implement **only** the v4 kernel: `prepared → active →
-terminal`, generation replacement/takeover, the **watcher-triggered `ap-stop
---reap`** of a crashed-active orphan, and registry append — using three permanent
-lock inodes (**liveness** = an `fcntl`/POSIX `F_SETLK` lock held by the run-long
-supervisor, not fork-inherited; short-lived **transaction**; global **registry**;
-total order liveness→transaction→registry), the `F_FULLFSYNC` atomic-publication
-primitive for owner/seq-head, **O_APPEND + `seq.head` with tail-reconciliation**
-for registry lines, incarnation identity (`p_uniqueid`+start+exe+`pgid`+`sid`
-+`kern.bootsessionuuid`), `gen_token`-tagged **session** containment signaled by
-`-pgid`, and the recovery table. Then run the full **v4 matrix** (draft
-§Fault-injection matrix), **one deterministic crash point per row** (incl. the
-`+` crash-then-continue rows) via armed crash-points (`PROBE5_CRASH_AT=<row>` →
-`os._exit()`): boundary crashes (A–E3), contention (H, I), the reap paths incl.
-the **false-reap guard R5** and **takeover-with-live-workers Tw**, the
-session/PID-reuse fences (R4a/R4b/Tkr), the refuse-with-reason hang path (R3),
-`claimed_exit` (K), the registry/seq races (S1–S4+), and the
-adversarial/syscall/re-crash/ABA rows (X1–X5) — checking every invariant (1–11)
-after each.
+In a disposable directory, implement **only** the v5 assembly: a **bundled stock
+SQLite** `state.db` (WAL, `synchronous=FULL`, `fullfsync=ON`) holding the
+`lease`/`meta`(seq)/`events`/`incarnations` tables; **one `BEGIN IMMEDIATE`
+transaction per transition** (`prepared → active → terminal`, generation
+replace/takeover) that atomically allocates the gapless seq, enforces the `UNIQUE`
+idempotency key, moves the lease/generation, and appends the event; a **launchd
+`KeepAlive`** supervisor with **startup reconciliation**; and **dedicated-`agent`-
+uid** termination (`kill(-1)` TERM→bounded-wait→KILL→re-scan-until-zero), with
+`p_uniqueid` incarnation identity used to *verify* liveness (not to select kills).
+Then run the **v5 matrix** (draft §Fault-injection matrix) via armed crash-points
+(`PROBE5_CRASH_AT=<point>` → `os._exit()`): SIGKILL at **every** transition
+boundary (T1–Tn), replay/idempotency (Idem), **supervisor SIGKILL with live
+workers** (Sup), crash-during-reconciliation repeated (Rec), concurrent
+launch/takeover (Race, Tw), PID-reuse (Pid), `fork`/`setsid` escape (Esc), fork
+churn (Churn), disk-full/IO (Io), the documented uid-changing limitation (Uid),
+and — if a VM/loopback harness is available — real power-loss (PL). Check every
+invariant (1–7) after each.
 
 ### Pass threshold
 
-Across the **entire v4 matrix**: all **eleven** invariants hold, and **every**
-crash/contention outcome is a **safe terminal or a safe hold that needs no
-mid-run human action** — a crashed-active orphan is **auto-reaped** with no human
-(the only human path is an alive-but-hung supervisor → watcher alert → sanctioned
-human kill). Specifically: no torn interior read (the append path
-tail-reconciles); no clobber of a live owner; no untracked live process;
-fail-closed contention; release only after a durable `observed_terminal` **and**
-run+workers proven dead **by incarnation**, idempotently, and a `claimed_exit`
-never releases; generation HWM-derived and superseded records inert; the protocol
-**never emits** a duplicate/gap `seq` (external corruption alerts and the reader
-fails closed); identity-bound `-pgid` termination never mis-targets a reused PID;
-and the prepared-recovery path always **terminalizes the owner** (no permanent
-wedge). The best positive result is **"not falsified in the tested (process-crash)
-environment"** — never "proven."
+Across the **v5 matrix**: all seven invariants hold, and **every** crash/contention
+outcome is a **safe terminal or a safe hold needing no mid-run human** — a
+supervisor death with live workers is auto-detected on launchd restart and
+**uid-reaped to zero** before terminalizing, no human. Specifically: no transition
+is ever split across more than one SQLite transaction (so a crash is always a clean
+rollback or commit — no torn/half-applied state); the seq is gapless+monotonic and
+a replayed transition is inert; no clobber of a live lease; `terminal`/release only
+after the uid re-scan returns **zero** live agent processes; reap **converges**
+(TERM→KILL→re-scan) despite `fork`/`setsid`/churn; PID reuse is rejected by
+`p_uniqueid`; generation is fenced with no ABA. The best positive result is **"not
+falsified in the tested (process-crash) environment"** — never "proven"
+(reboot/power-loss stays inconclusive without the VM harness).
 
 ### Inconclusive condition (rule 3)
 
 Classify **inconclusive**, not pass, if: a boundary crash can't be injected
-**deterministically** at the intended point; or a contention race can't be
-forced (serialization untested). And — always partially inconclusive by
-construction (co-review #4) — **reboot / power-loss durability is untested**:
-`F_FULLFSYNC` is what the protocol is **designed for**, but SIGKILL cannot prove
-it and the fixture runs no real power-fail harness, so those guarantees are
-**inconclusive, never passed**. Also inconclusive if the fixture can't prove
-**which fd owns the liveness lock** (that `O_CLOEXEC` holds, X3) or can't force
-**repeated crash-during-reap** (X4).
+**deterministically** at the intended transaction boundary; or a
+contention/reap-convergence race can't be forced. And — always partially
+inconclusive by construction — **reboot / power-loss durability is untested**:
+a bundled SQLite with `fullfsync=ON` is what durability is **designed for**, but
+SIGKILL cannot prove it and (absent a VM/loopback power-fail harness) those
+guarantees are **inconclusive, never passed** — for SQLite exactly as for flat
+files; the win is inheriting SQLite's crash-VFS test corpus, not a hand-built one.
 
 ### Evidence required (rule 4)
 
@@ -103,43 +98,41 @@ per the probe row. At the cap, classify `confirmed` / `falsified` /
 process-crash environment"** — the ceiling (reboot/power-loss stays
 `inconclusive`), not "proven correct."
 
-## Design-doc deltas (need §4/§5.1 ratification before the measured revision)
+## Design-doc deltas (the redirect changes the production spec — need ratification)
 
-The co-review surfaced items that change the **production** spec, not just the
-spike. Flagged for sign-off:
+v5 is a larger change to §3/§4/§5.1 than the flat-file drafts. Flagged for sign-off:
 
-1. **Multi-lock model (§4.1).** §4.1 currently describes a single lock held
-   "through the entire run" *and* per-transition — the contradiction codex found.
-   Ratify the split: a **run-long `fcntl`/POSIX `F_SETLK` liveness lock** held by
-   the long-lived **supervisor** (Probe 2's run-shim), not fork-inherited (the
-   orphan-proof), distinct from the short-lived **transaction lock**, plus the
-   global **registry lock**; total order liveness→transaction→registry. Ratify
-   the fail-safe semantic: killing the supervisor (logout/SIGHUP) reaps a healthy
-   run.
-2. **Generation-reservation record + seq-head (§4.2).** Add `generation_reserved`
-   as a record type (durable `g` source of truth) and a `registry/seq.head` HWM;
-   registry appends become **O_APPEND + seq-head**, not whole-file rewrite.
-3. **Session-anchored containment + `gen_token` (§4.1, §3).** Runs spawn as
-   session leaders carrying a `gen_token`; state explicitly that **hostile in-run
-   escape is fenced by the Stage-2 uid/sandbox, not the kernel** (the kernel
-   narrows + detects).
-4. **Recovery table (§4.1)** as the normative reconciliation spec the measured
-   revision must enumerate.
-5. **Reap authority (§5.1).** The watcher never signals a process, but **may
-   trigger a generation-scoped `ap-stop --reap`** on kernel-defined conditions;
-   `ap-stop` stays the sole terminalization mechanism.
+1. **Registry & lease → SQLite (§4.1–4.2).** Replace the flat-file registry,
+   `seq.head`, lease files, and atomic-publish protocol with a bundled/pinned
+   SQLite `state.db` (WAL, `synchronous=FULL`, `fullfsync=ON`); one `BEGIN
+   IMMEDIATE` transaction per transition; gapless seq via an explicit counter;
+   idempotency via `UNIQUE`. **New dependency** (bundled SQLite) — approved as the
+   redirect substrate; must not be Apple's system build.
+2. **Supervision → launchd (§5.1).** The watcher/supervisor is a launchd
+   `KeepAlive` job; there is **no liveness lock**. Orphan detection is **startup
+   reconciliation** (roster in SQLite vs live incarnations), not a lock probe.
+   launchd restarts the supervisor; the supervisor reaps + terminalizes.
+3. **Containment → dedicated `agent` uid (§3, §5.1).** Termination is uid-wide
+   `kill(-1)` (TERM→bounded-wait→KILL→re-scan-until-zero) as the agent uid — the
+   containment **primitive**, not a footnote. Ratify: uid-wide = "stop all agent
+   work" (single-agent-per-host baseline), needs the one-time admin-provisioned
+   `agent` uid (Probe 1), and does **not** contain a uid-changing helper (→
+   option 2 if that's ever in scope).
+4. **Reconciliation is the normative recovery spec (§4.1)** — the measured
+   revision enumerates the startup-reconciliation table, not a lock-recovery table.
 
 ### Dependent work gated on this probe
 
-The Stage-2 control plane: `ap-launch`, `ap-stop`, the watcher's lease/registry
-transitions, and the typed registry writer are built **around** this proven
-kernel. A falsified kernel blocks that build.
+The Stage-2 control plane (`ap-launch`, `ap-stop`, the watcher, the state writer)
+is built **around** this proven assembly.
 
 ### Redirect if falsified
 
-Simplify the protocol, or evaluate a **transactional store (SQLite** with its own
-WAL/atomic commit) before writing `ap-launch`/`ap-stop`/the watcher. Do not build
-the control plane around a flat-file protocol that can't hold the invariants.
+If the SQLite/launchd/uid assembly still can't give one recoverable outcome, the
+remaining redirect is **containment option 2** — move workers into a Linux
+VM/container boundary (cgroup-kill + namespaces make tree-kill and power-fail
+testing first-class), accepting the weight. **Do not return to the flat-file
+kernel** (falsified four times).
 
 ## Environment (non-secret)
 
