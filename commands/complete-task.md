@@ -1,6 +1,6 @@
 ---
 description: Explicitly transition one identified work item to its tracker's completed state — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
 argument-hint: "<identifier> [--dry-run]"
 ---
 
@@ -65,11 +65,14 @@ Overlay the local override on the committed config — mappings merge recursivel
   comment). GitHub still closes issues natively on merge via `Closes #<n>` in
   the PR body; this handler is the explicit escape hatch for when that
   auto-close didn't fire.
-- File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
-  handler repo-pr — repo-pr has no separate completion step to drive. Its done
-  signal **is** the merged PR (and/or the task file's `status: done`
-  frontmatter, set by hand or by whatever closed the loop). There is nothing
-  for `/complete-task` to transition." Do not silently no-op without this line.
+- File absent, or `handler: repo-pr` → read and follow
+  **`commands/handlers/repo-pr-complete.md`** (resolves the task file by slug,
+  checks idempotence via `status: done` or a missing file, confirms before
+  mutating, flips the frontmatter via `Edit`, optionally appends a completion
+  note under `## Consumer Notes`). A merged PR (and the claim protocol's
+  file-delete on review) is still the **primary** done signal for `repo-pr` —
+  this handler only covers the residual case of a task file left behind in a
+  non-terminal status whose work landed some other way.
 - `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
   Jira's completion path is its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
@@ -80,7 +83,8 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/linear-complete.md` or
-`**/commands/handlers/gh-issue-complete.md`) and Read the result. Pass the
+`**/commands/handlers/gh-issue-complete.md`, or
+`**/commands/handlers/repo-pr-complete.md`) and Read the result. Pass the
 identifier and the `--dry-run` flag through.
 
 ## 2. Report
