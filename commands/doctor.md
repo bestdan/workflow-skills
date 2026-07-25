@@ -73,6 +73,20 @@ its `handler:` is a known value (`repo-pr` / `gh-issue` / `jira` / `linear`).
 
 Either WARN means Check 1 did **not** resolve a known handler — Check 2 keys off that.
 
+**Check 1 (linear only) — `projects` shape.** When the resolved handler is `linear`,
+also validate the `linear:` block's project config (see `linear-common.md` → "Config
+block" for the full schema):
+
+- A lingering scalar `linear.default_project` → `WARN`: "scalar `default_project` is
+  deprecated — run `/task-config` to migrate to `linear.projects`." (`/task-config`
+  performs the rewrite itself — see `linear-config.md` "Migrate an existing scalar
+  `default_project` first" — so this is never auto-fixed here.)
+- `linear.projects`, when present, must be a list; each entry must have a string
+  `id`; each entry's `wip_limit` / `max_estimate`, when present, must be positive
+  integers. A malformed entry → `FAIL`: "`.task-config.yml` — `linear.projects[<n>]`
+  <what's wrong> — run `/task-config` to fix it." An absent or empty `projects: []`
+  is a legitimate whole-team scope, not an error → `PASS`.
+
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler
 unresolved — fix Check 1 first") rather than defaulting to `repo-pr` prerequisites,
