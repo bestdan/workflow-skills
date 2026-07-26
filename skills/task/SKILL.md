@@ -52,7 +52,7 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The reconciler verbs — `/complete-task`, `/sweep-for-complete`, and `/reconcile-tasks` — are `linear`-only in v1. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. Of the reconciler verbs, `/complete-task` supports both `linear` and `gh-issue` in v1 (`repo-pr`/`jira` unsupported); `/sweep-for-complete` and `/reconcile-tasks` remain `linear`-only in v1. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
