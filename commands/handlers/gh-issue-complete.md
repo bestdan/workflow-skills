@@ -16,9 +16,12 @@ branch, stop — that is not this file's job, and gh-issue has no
 structural template this file mirrors over the `gh` CLI instead of the Linear
 MCP.
 
-**Repo.** If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass
-it as `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act
-on the current repo, matching the create/list/claim/promote flows.
+**Repo.** If `gh-issue.repo` is set in the **merged** config — the committed
+`dev_docs/tasks/.task-config.yml` overlaid with the optional
+`.task-config.local.yml` (per `commands/task-config.md` "Local override"),
+already resolved by `/complete-task`'s "Resolve the handler" step — pass it as
+`--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the
+current repo, matching the create/list/claim/promote flows.
 
 > **Hard rule: this file only closes the one issue it was given.** It never
 > searches for other issues, never touches labels or assignees, and never
