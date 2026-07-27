@@ -337,6 +337,39 @@ def terminalize(c, *, repo_key, kind="observed_terminal", reap_evidence=None):
     crash("terminalize.post_commit")
 
 
+def takeover_publish(c, *, repo_key, run_id, gen_token, reap_evidence=None):
+    """TAKEOVER step 2 — publish `g+1/prepared` AFTER generation g is verified dead.
+
+    ONE transaction, and it is deliberately NOT the whole takeover: the caller
+    must have already run the reap saga against generation g and proven the
+    containment domain empty. Publishing first and reaping after is the v1
+    live-orphan hazard arriving through the side door (third pass, HIGH-6) —
+    g+1 would be admitted while g's workers were still mutating the repo.
+
+    Unlike LAUNCH there is no zero-non-terminal-lease gate: a takeover exists
+    precisely to replace the one live lease. The verified-zero reap is what
+    stands in for the admission gate here.
+    """
+    if not (reap_evidence or {}).get("converged"):
+        raise KernelError("takeover refused: generation g was not reaped to zero")
+    with txn(c):
+        lease = get_lease(c, repo_key)
+        if lease is None:
+            raise KernelError("takeover: no lease to take over")
+        g = lease["generation"] + 1
+        seq, _ = append_event(c, idem_key=f"generation_reserved:{repo_key}:{g}",
+                              kind="generation_reserved", repo_key=repo_key,
+                              generation=g, run_id=run_id,
+                              payload={"takeover_from": lease["generation"]})
+        c.execute(
+            "UPDATE lease SET generation=?, run_id=?, gen_token=?, state='prepared',"
+            " stop_intent=0, updated_seq=? WHERE repo_key=?",
+            (g, run_id, gen_token, seq, repo_key))
+        crash("takeover.pre_commit")
+    crash("takeover.post_commit")
+    return g
+
+
 def claimed_exit(c, *, repo_key, generation, run_id):
     """An agent-authored 'I finished' record. Appended, INERT: it never releases
     the lease. Only a verified-zero reap does (invariant 4)."""

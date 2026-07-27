@@ -27,6 +27,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import incarnation  # noqa: E402
+import supervisor  # noqa: E402
 import kernel  # noqa: E402
 import reaper  # noqa: E402
 
@@ -35,6 +36,7 @@ UID = os.getuid()
 DOMAIN = f"gui/{UID}"
 REPO = "repo-a"
 DOMAIN_MODE = os.environ.get("PROBE5_DOMAIN_MODE", "gentoken")
+AGENT_UID = os.environ.get("PROBE5_AGENT_UID", "")
 
 
 # --- plumbing -----------------------------------------------------------------
@@ -51,6 +53,7 @@ def env_for(rundir, **extra):
         "PROBE5_DOMAIN_MODE": DOMAIN_MODE,
         "PROBE5_CRASH_LOG": os.path.join(rundir, "crashes.jsonl"),
         "PROBE5_RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl"),
+        "PROBE5_AGENT_UID": str(AGENT_UID) if AGENT_UID else "",
     })
     e.update({k: str(v) for k, v in extra.items() if v is not None})
     return e
@@ -63,6 +66,15 @@ def sup(rundir, cmd, *, crash_at=None, run_flags=None, timeout=60):
     r = subprocess.run([PY, os.path.join(HERE, "supervisor.py"), cmd],
                        env=env, capture_output=True, text=True, timeout=timeout)
     return {"rc": r.returncode, "stdout": r.stdout, "stderr": r.stderr[-2000:]}
+
+
+def domain_for(gen_token):
+    """The containment domain as configured. Every survivor check must go
+    through this — a row that scanned with the degraded scanner while the run
+    lived in the uid domain would report a false zero."""
+    if DOMAIN_MODE == "uid":
+        return reaper.Domain("uid", agent_uid=int(AGENT_UID))
+    return reaper.Domain("gentoken", gen_token=gen_token)
 
 
 def db(rundir):
@@ -116,11 +128,16 @@ def check_invariants(rundir, *, expect_domain_empty=True, gen_token=None):
     # 4 — earned release: `terminal` only with the domain verified empty, and a
     # claimed_exit never accompanies a release it caused.
     if lease and lease["state"] == "terminal" and expect_domain_empty:
-        dom = (reaper.Domain("gentoken", gen_token=gen_token) if gen_token
-               else None)
-        survivors = dom.scan() if dom else []
-        out["inv4_earned_release"] = {"ok": not survivors,
-                                      "detail": {"survivors": survivors}}
+        scan = domain_for(gen_token).scan() if (gen_token or DOMAIN_MODE == "uid") else []
+        # Split the scan: macOS respawns per-user daemons on demand, so a
+        # non-empty post-hoc scan does not by itself mean the RUN survived. The
+        # reap still drove the domain to absolute zero — this only keeps the
+        # evidence honest about what is left standing afterwards.
+        run_survivors, sys_daemons = reaper.partition_survivors(scan)
+        out["inv4_earned_release"] = {
+            "ok": not run_survivors,
+            "detail": {"run_survivors": run_survivors,
+                       "system_daemons_respawned": sys_daemons}}
     else:
         out["inv4_earned_release"] = {"ok": True, "detail": "not in terminal state"}
 
@@ -461,7 +478,10 @@ def row_sup(kind):
     # BOTH kinds fork a descendant. A run with no children makes the re-adopt
     # row vacuous: it would pass under a rule that reaps any run whose domain
     # contains an extra process, which is exactly the bug this row must catch.
-    flags = "--descendant"
+    # The orphan kind additionally self-terminates, since the harness cannot
+    # kill one agent-uid process from the maintainer (EPERM) and the only
+    # privileged kill available is uid-wide.
+    flags = "--descendant" + (" --die-after 6" if kind == "orphan" else "")
     launched = sup(rundir, "launch", run_flags=flags)
     try:
         info = json.loads(launched["stdout"].strip().splitlines()[-1])
@@ -470,7 +490,7 @@ def row_sup(kind):
         res["detail"] = {"reason": "launch produced no parsable result",
                          "stderr": launched["stderr"][-500:]}
         return res
-    gen_token, run_pid = info["gen_token"], info["pid"]
+    gen_token, run_pid = info["gen_token"], info["run_pid"]
     res["run_pid"], res["gen_token_present"] = run_pid, bool(gen_token)
     time.sleep(1.0)
 
@@ -485,14 +505,15 @@ def row_sup(kind):
     res["passes_before"] = len(read_reconcile_log(rundir))
 
     if kind == "orphan":
-        # Kill ONLY the recorded run. Its forked descendant survives, so the
-        # roster says "run dead" while work is still live.
-        try:
-            os.kill(run_pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        time.sleep(0.5)
-        res["domain_after_run_kill"] = reaper.Domain("gentoken", gen_token=gen_token).scan()
+        # Wait for the run to self-terminate. Its forked descendant survives, so
+        # the roster says "run dead" while work is still live.
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if not supervisor.measure_run(run_pid).get("alive"):
+                break
+            time.sleep(0.5)
+        res["run_died"] = not supervisor.measure_run(run_pid).get("alive")
+        res["domain_after_run_kill"] = domain_for(gen_token).scan()
 
     # SIGKILL the supervisor; launchd KeepAlive must restart it, and the restart
     # must reconcile from durable state alone.
@@ -517,7 +538,8 @@ def row_sup(kind):
     actions = [d.get("action") for d in decisions]
     res["actions"] = actions
 
-    run_still_alive = incarnation.measure(run_pid).get("alive", False)
+    # Cross-uid identity needs the privileged helper (see supervisor.measure_run).
+    run_still_alive = supervisor.measure_run(run_pid).get("alive", False)
     res["run_still_alive"] = run_still_alive
     st = state_of(rundir)
     res["lease_after"] = st["lease"]
@@ -526,12 +548,12 @@ def row_sup(kind):
         # The whole point: a benign restart must not kill healthy work — and
         # "healthy work" includes the run's forked descendant, which must also
         # still be alive.
-        survivors = reaper.Domain("gentoken", gen_token=gen_token).scan()
+        survivors = domain_for(gen_token).scan()
         res["domain_after_restart"] = survivors
         ok = ("readopt" in actions and run_still_alive and len(survivors) >= 2
               and st["lease"]["state"] == "active" and st["lease"]["stop_intent"] == 0)
     else:
-        survivors = reaper.Domain("gentoken", gen_token=gen_token).scan()
+        survivors = domain_for(gen_token).scan()
         res["survivors_after"] = survivors
         ok = (st["lease"]["state"] == "terminal" and not survivors
               and any(a and a.startswith("reap") for a in actions))
@@ -603,25 +625,215 @@ def row_io():
                     "failure class this row exists to test is untested."}
 
 
+# --- containment rows (require the dedicated uid) -----------------------------
+
+def _launch_for(rundir, flags, timeout=90):
+    r = sup(rundir, "launch", run_flags=flags, timeout=timeout)
+    try:
+        return json.loads(r["stdout"].strip().splitlines()[-1]), r
+    except (json.JSONDecodeError, IndexError):
+        return None, r
+
+
+def row_escape():
+    """A `setsid` + double-fork + EXEC descendant must still be reaped.
+
+    The exec is what makes this real: the escapee replaces its image and no
+    longer carries gen_token, so token scanning cannot see it. Only the uid-wide
+    kill can. This row is therefore meaningless in degraded mode and says so.
+    """
+    rundir = fresh_rundir()
+    res = {"row": "Esc", "rundir": rundir, "escape_proof_domain": DOMAIN_MODE == "uid"}
+    if DOMAIN_MODE != "uid":
+        res["verdict"] = "BLOCKED"
+        res["reason"] = "needs the uid domain; the escapee is invisible to token scanning"
+        return res
+
+    info, raw = _launch_for(rundir, "--escape")
+    if not info or not info.get("activated"):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "launch did not activate", "stderr": raw["stderr"][-400:]}
+        return res
+    time.sleep(1.5)
+    gen_token = info["gen_token"]
+
+    # Prove the escape actually happened AND actually escaped: identify the
+    # escapee by its exec'd image, then confirm the token scan cannot see it.
+    # Comparing scan sizes would not do — the `sudo` parent carries the token in
+    # argv without being in the uid domain at all.
+    uid_view = domain_for(gen_token).scan()
+    described = reaper.describe(uid_view)
+    escapees = [d for d in described if "/bin/sleep" in d["command"]]
+    token_view = reaper.list_gentoken_pids(gen_token)
+    res["uid_domain"] = described
+    res["escapees"] = escapees
+    res["token_visible_pids"] = token_view
+    res["escapee_hidden_from_token_scan"] = bool(escapees) and all(
+        e["pid"] not in token_view for e in escapees)
+
+    sup(rundir, "stop", timeout=120)
+    run_survivors, sys_daemons = reaper.partition_survivors(domain_for(gen_token).scan())
+    res["run_survivors_after_reap"] = run_survivors
+    res["system_daemons_after_reap"] = sys_daemons
+    st = state_of(rundir)
+    ok = (not run_survivors and st["lease"]["state"] == "terminal"
+          and res["escapee_hidden_from_token_scan"])
+    checks = check_invariants(rundir, gen_token=gen_token)
+    res["invariants"] = checks
+    res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=ok)
+    cleanup_domain(gen_token)
+    return res
+
+
+def row_churn():
+    """Continuous fork churn must not prevent convergence.
+
+    A reaper that signals only the set it enumerated would never finish here;
+    convergence has to come from re-scanning until the domain is empty.
+    """
+    rundir = fresh_rundir()
+    res = {"row": "Churn", "rundir": rundir}
+    if DOMAIN_MODE != "uid":
+        res["verdict"] = "BLOCKED"
+        res["reason"] = "convergence against a non-escape-proof domain proves nothing"
+        return res
+
+    info, raw = _launch_for(rundir, "--churn")
+    if not info or not info.get("activated"):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "launch did not activate", "stderr": raw["stderr"][-400:]}
+        return res
+    time.sleep(2.0)
+    gen_token = info["gen_token"]
+    res["domain_before_reap"] = len(domain_for(gen_token).scan())
+
+    r = sup(rundir, "stop", timeout=180)
+    survivors, sys_daemons = reaper.partition_survivors(domain_for(gen_token).scan())
+    st = state_of(rundir)
+    res["survivors_after_reap"] = survivors
+    res["system_daemons_after_reap"] = sys_daemons
+    res["lease_state"] = st["lease"]["state"]
+    # Either it converged and terminalized, or it stayed fenced. Never released
+    # with survivors.
+    converged = not survivors and st["lease"]["state"] == "terminal"
+    fenced = bool(survivors) and st["lease"]["state"] != "terminal" \
+        and st["lease"]["stop_intent"] == 1
+    res["outcome"] = "converged" if converged else ("fenced" if fenced else "unsafe")
+    checks = check_invariants(rundir, gen_token=gen_token,
+                              expect_domain_empty=converged)
+    res["invariants"] = checks
+    res["verdict"], res["failed_checks"] = verdict_from(checks,
+                                                        extra_ok=(converged or fenced))
+    cleanup_domain(gen_token)
+    return res
+
+
+def row_writer():
+    """The run must be UNABLE to open state.db — invariant 8, enforced not asserted."""
+    rundir = fresh_rundir()
+    res = {"row": "Writer", "rundir": rundir}
+    if DOMAIN_MODE != "uid":
+        res["verdict"] = "BLOCKED"
+        res["reason"] = ("same-uid, the filesystem permits the write; sole-writer "
+                         "is architectural without a second uid")
+        return res
+
+    dbpath = os.path.join(rundir, "state.db")
+    info, raw = _launch_for(rundir, f"--try-write-db {dbpath}")
+    if not info or not info.get("activated"):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "launch did not activate", "stderr": raw["stderr"][-400:]}
+        return res
+    probe = (info.get("run_report") or {}).get("write_probe")
+    res["write_probe"] = probe
+    gen_token = info["gen_token"]
+    # EACCES (no permission) or ENOENT (cannot even traverse to it) both mean
+    # the run could not write. "OPENED" would falsify invariant 8 outright.
+    ok = probe in ("EACCES", "EPERM", "ENOENT")
+    sup(rundir, "stop", timeout=120)
+    checks = check_invariants(rundir, gen_token=gen_token)
+    res["invariants"] = checks
+    res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=ok)
+    cleanup_domain(gen_token)
+    return res
+
+
+def row_takeover():
+    """Takeover must reap generation g to VERIFIED ZERO before publishing g+1."""
+    rundir = fresh_rundir()
+    res = {"row": "Tw", "rundir": rundir}
+    if DOMAIN_MODE != "uid":
+        res["verdict"] = "BLOCKED"
+        res["reason"] = "reap-before-publish is only verifiable against an escape-proof domain"
+        return res
+
+    info, raw = _launch_for(rundir, "--descendant")
+    if not info or not info.get("activated"):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "launch did not activate", "stderr": raw["stderr"][-400:]}
+        return res
+    old_token = info["gen_token"]
+    time.sleep(1.0)
+    res["domain_before_takeover"] = domain_for(old_token).scan()
+
+    r = sup(rundir, "takeover", timeout=180)
+    try:
+        tk = json.loads(r["stdout"].strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "takeover produced no parsable result",
+                         "stderr": r["stderr"][-400:]}
+        return res
+    res["takeover"] = {k: tk.get(k) for k in
+                       ("converged", "published", "old_generation", "new_generation",
+                        "domain_at_publish")}
+
+    st = state_of(rundir)
+    gens = [e["generation"] for e in st["events"] if e["kind"] == "generation_reserved"]
+    res["generations_reserved"] = gens
+    ok = (tk.get("published") and tk.get("new_generation") == 2
+          and tk.get("domain_at_publish") == []
+          and gens == [1, 2] and st["lease"]["state"] == "prepared")
+
+    sup(rundir, "reconcile", timeout=120)
+    checks = check_invariants(rundir, gen_token=tk.get("gen_token"))
+    res["invariants"] = checks
+    res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=ok)
+    cleanup_domain(tk.get("gen_token"))
+    cleanup_domain(old_token)
+    return res
+
+
+def row_uid_limitation():
+    """A uid-changing helper is a DOCUMENTED LIMITATION, not a falsifier.
+
+    Records honestly whether it is detectable rather than claiming a guarantee.
+    """
+    res = {"row": "Uid", "verdict": "DOCUMENTED-LIMITATION"}
+    res["detail"] = {
+        "claim": "A worker that acquires a different credential leaves the uid "
+                 "containment domain and is not reaped by kill(-1) as the agent.",
+        "reachable_in_this_fixture": False,
+        "why": "The agent has zero sudo rules (verified: `sudo -l -U agent` -> "
+               "not allowed), so it cannot change credential at all here. The "
+               "limitation is therefore real but UNREACHABLE from the agent's "
+               "own authority — it needs an external privileged spawner.",
+        "detection": "proc_listpids over other uids plus a gen_token argv scan "
+                     "could surface a suspect process, but a helper that execs "
+                     "and drops the token is undetectable by that means. Treated "
+                     "as admitted-undetectable rather than claimed-detected.",
+        "redirect_if_ever_in_scope": "containment option 2 (Linux VM/container)",
+    }
+    return res
+
+
 # --- blocked rows -------------------------------------------------------------
 
 BLOCKED = {
-    "Esc": "A `setsid` + double-fork descendant escapes the degraded gen_token "
-           "scan by construction. Only uid-wide `kill(-1)` as a dedicated uid "
-           "catches it, and that uid does not exist on this host.",
-    "Churn": "Fork-churn convergence is only meaningful against an escape-proof "
-             "domain; under gen_token scanning a churned child that execs is "
-             "invisible, so 'converged' would be an artifact of the scan.",
-    "Writer": "Proving the run CANNOT write state.db requires a second uid with "
-              "no write permission. Same-uid, the filesystem permits it, so the "
-              "sole-writer property is architectural here, not enforced.",
-    "Uid": "A uid-changing helper is a documented limitation (not a falsifier) "
-           "and needs the dedicated uid to even be observable.",
     "PL": "Reboot / power-loss durability. SIGKILL cannot prove it; a VM or "
           "loopback power-fail harness was out of scope. INCONCLUSIVE BY "
-          "CONSTRUCTION, per the kill sheet — never passed.",
-    "Tw": "Takeover with live generation-g workers: the reap-before-publish leg "
-          "is only verifiable against an escape-proof domain.",
+          "CONSTRUCTION, per the kill sheet — never passed. This is the one row "
+          "the dedicated uid does not unblock.",
 }
 
 
@@ -629,9 +841,9 @@ BLOCKED = {
 
 def cleanup_domain(gen_token):
     """Leave no surrogate behind (guardrail 6)."""
-    if not gen_token:
+    if not gen_token and DOMAIN_MODE != "uid":
         return
-    dom = reaper.Domain("gentoken", gen_token=gen_token)
+    dom = domain_for(gen_token)
     for _ in range(3):
         pids = dom.scan()
         if not pids:
@@ -713,7 +925,10 @@ def main():
 
         for name, fn in (("Idem", row_idem), ("IdemConflict", row_idem_conflict),
                          ("Race", row_race), ("Pid", row_pid), ("Priv", row_priv),
-                         ("NoConv", row_noconv), ("Io", row_io)):
+                         ("NoConv", row_noconv), ("Io", row_io),
+                         ("Esc", row_escape), ("Churn", row_churn),
+                         ("Writer", row_writer), ("Tw", row_takeover),
+                         ("Uid", row_uid_limitation)):
             if not want(name):
                 continue
             print(f"== {name} ==", flush=True)

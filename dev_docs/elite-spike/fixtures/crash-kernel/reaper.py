@@ -37,6 +37,13 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 
 PROC_UID_ONLY = 4
 
+# The Stage-2 privileged path. Root-owned, agent-unwritable, and scoped in
+# sudoers to exactly these commands with runas=(agent) — never root.
+REAP_AS_USER = os.environ.get("PROBE5_AGENT_USER", "agent")
+REAP_HELPER = os.environ.get("PROBE5_REAP_HELPER", "/usr/local/probe5/p5-reap")
+SPAWN_HELPER = os.environ.get("PROBE5_SPAWN_HELPER", "/usr/local/probe5/p5-spawn")
+MEASURE_HELPER = os.environ.get("PROBE5_MEASURE_HELPER", "/usr/local/probe5/p5-measure")
+
 
 class ReaperRefused(Exception):
     pass
@@ -97,7 +104,40 @@ class Domain:
     def scan(self):
         pids = (list_uid_pids(self.agent_uid) if self.mode == "uid"
                 else list_gentoken_pids(self.gen_token))
-        return [p for p in pids if p not in self.exclude]
+        # In uid mode nothing is excluded: the supervisor is a different uid, so
+        # it is not in this set, and excluding anything here could mask a real
+        # survivor and let a reap "verify zero" while work is still running.
+        excl = () if self.mode == "uid" else self.exclude
+        return [p for p in pids if p not in excl]
+
+    def _sudo_reap(self, sig):
+        """Reap via the scoped `sudo -u agent` helper (Stage-2 sudoers).
+
+        THE HELPER IS INSIDE THE DOMAIN IT REAPS. `kill(-1)` as the agent hits
+        every process of that uid, including the shell running the helper, so
+        the helper routinely dies of its own signal and exits 128+n. That is the
+        primitive working, not a failure — and it is exactly why the exit status
+        is NOT the authority here. Convergence is decided solely by the
+        maintainer-side `proc_listpids` rescan in `reap()`, which cannot be
+        fooled by a helper that died mid-flight.
+
+        cwd is forced to "/": sudo inherits the caller's directory, and with the
+        maintainer home at 0700 the agent cannot getcwd() there — /bin/sh then
+        fails at startup, before any in-script `cd` could run. This already bit
+        Probe 4 (see driver.sh) and would bite the launchd-hosted path where
+        there is no interactive shell to work around it.
+        """
+        name = "TERM" if sig == signal.SIGTERM else "KILL"
+        r = subprocess.run(
+            ["sudo", "-n", "-C", "5", "-u", REAP_AS_USER, REAP_HELPER, name],
+            capture_output=True, text=True, cwd="/")
+        # subprocess reports a signal death as a NEGATIVE returncode (-9), not
+        # the shell's 128+n. Check both so the helper's own death by the signal
+        # it just sent is recognised rather than read as an ordinary failure.
+        self_killed = r.returncode < 0 or r.returncode >= 128
+        return {"method": f"sudo {REAP_HELPER} {name}", "targets": None,
+                "rc": r.returncode, "helper_self_killed": self_killed,
+                "stderr": r.stderr.strip()[-200:] or None}
 
     def signal_all(self, sig):
         """Send `sig` to the whole domain.
@@ -113,6 +153,8 @@ class Domain:
         if self.mode == "uid" and os.geteuid() == self.agent_uid:
             os.kill(-1, sig)
             return {"method": "kill(-1)", "targets": None}
+        if self.mode == "uid":
+            return self._sudo_reap(sig)
         targets = self.scan()
         for p in targets:
             try:
@@ -169,6 +211,44 @@ def reap(domain, *, term_grace=2.0, kill_grace=2.0, max_rounds=15, poll=0.1):
     ev["survivors"] = domain.scan()
     ev["converged"] = not ev["survivors"]
     return ev
+
+
+# macOS starts per-user system daemons for ANY uid that runs anything (observed:
+# /usr/sbin/distnoted). They are in the containment domain but are not the run's
+# work, and they respawn on demand — so a scan taken after a converged reap can
+# be non-empty for reasons unrelated to the run. The reap itself still drives the
+# domain to ABSOLUTE zero (no allowlist); this list exists only so post-hoc
+# evidence can distinguish "the run survived" from "macOS restarted a daemon".
+# Narrowing caveat: a hostile run could exec one of these paths to hide.
+SYSTEM_DAEMON_EXES = ("/usr/sbin/distnoted", "/usr/libexec/trustd",
+                      "/usr/sbin/cfprefsd", "/usr/libexec/secinitd")
+
+
+def describe(pids):
+    """(pid, command) for each pid. `ps` reads cross-uid where proc_pidinfo does not."""
+    if not pids:
+        return []
+    r = subprocess.run(["ps", "-o", "pid=,command=", *[f"-p{p}" for p in pids]],
+                       capture_output=True, text=True)
+    out = []
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, cmd = line.partition(" ")
+        if pid_s.isdigit():
+            out.append({"pid": int(pid_s), "command": cmd.strip()})
+    return out
+
+
+def partition_survivors(pids):
+    """Split a scan into (run_attributable, system_daemons)."""
+    described = describe(pids)
+    sysd, run = [], []
+    for d in described:
+        (sysd if any(d["command"].startswith(e) for e in SYSTEM_DAEMON_EXES)
+         else run).append(d)
+    return run, sysd
 
 
 def verify_incarnation_dead(recorded):

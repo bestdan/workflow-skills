@@ -39,6 +39,34 @@ def log(msg):
     print(f"[sup {os.getpid()} {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def measure_run(pid):
+    """Measure an incarnation INSIDE the containment domain.
+
+    `proc_pidinfo` is EPERM across uids for a non-root caller (Probe 2 recorded
+    this; confirmed again here — a maintainer measuring a live agent-uid pid gets
+    `alive: False, errno: EPERM`). So a maintainer supervisor cannot verify an
+    agent-uid run directly: it would read EVERY healthy run as dead and reap it,
+    which is the same false-reap class as the v5.2 defect by another route.
+
+    Measurement therefore joins spawn and reap on the scoped `sudo -u agent`
+    path — run AS the agent, which can read its own uid's processes, and never
+    as root. Enumeration (`proc_listpids`) and `kqueue NOTE_EXIT` both DO work
+    cross-uid, so only identity needs the helper.
+    """
+    if os.environ.get("PROBE5_DOMAIN_MODE") != "uid":
+        return incarnation.measure(pid)
+    r = subprocess.run(
+        ["sudo", "-n", "-u", reaper.REAP_AS_USER, reaper.MEASURE_HELPER, str(pid)],
+        capture_output=True, text=True, cwd="/")
+    try:
+        return json.loads(r.stdout)
+    except (json.JSONDecodeError, ValueError):
+        # Fail CLOSED: an unreadable identity is "not verified", which routes to
+        # reap, never to adopt.
+        return {"alive": False, "pid": pid,
+                "error": (r.stderr or r.stdout).strip()[-200:]}
+
+
 def make_domain(gen_token=None):
     mode = os.environ.get("PROBE5_DOMAIN_MODE", "gentoken")
     if mode == "uid":
@@ -58,13 +86,23 @@ def spawn_run(gen_token, run_flags):
     """
     report_r, report_w = os.pipe()
     gate_r, gate_w = os.pipe()
-    argv = [sys.executable, os.path.join(HERE, "runsurrogate.py"), gen_token, *run_flags]
+    if os.environ.get("PROBE5_DOMAIN_MODE") == "uid":
+        # Spawn INTO the containment domain via the scoped sudo helper. `-C 5`
+        # is what stops sudo closing every fd >= 3, which would destroy the
+        # report pipe and the start gate the recovery design depends on; it
+        # requires `closefrom_override` on this command in sudoers.
+        exe = "/usr/bin/sudo"
+        argv = [exe, "-n", "-C", "5", "-u", reaper.REAP_AS_USER,
+                reaper.SPAWN_HELPER, gen_token, *run_flags]
+    else:
+        exe = sys.executable
+        argv = [exe, os.path.join(HERE, "runsurrogate.py"), gen_token, *run_flags]
     # The run must not inherit our stdio: a surrogate that blocks for an hour
     # would hold the orchestrator's output pipe open long after the supervisor
     # exits, and every scenario would read as a hang.
     devnull = os.open(os.devnull, os.O_RDWR)
     pid = os.posix_spawn(
-        sys.executable, argv, os.environ,
+        exe, argv, os.environ,
         file_actions=[(os.POSIX_SPAWN_DUP2, devnull, 0),
                       (os.POSIX_SPAWN_DUP2, devnull, 1),
                       (os.POSIX_SPAWN_DUP2, devnull, 2),
@@ -79,22 +117,35 @@ def spawn_run(gen_token, run_flags):
 
 
 def read_reported_pid(report_r):
-    """Read the child's pid, bounded. A child that never reports must not wedge
-    the supervisor — the reconciliation path handles it."""
+    """Read the child's report, bounded. Returns (pid, extras).
+
+    Reads until the child's explicit "END" terminator rather than to EOF: under
+    the uid domain the intermediate `sudo` process also inherited fd 3, so the
+    child closing its end does NOT produce EOF here, and waiting for one would
+    stall every launch until the read timeout. A child that never reports must
+    not wedge the supervisor — the reconciliation path handles it.
+    """
     deadline = time.monotonic() + REPORT_TIMEOUT_S
     buf = b""
     while time.monotonic() < deadline:
         r, _, _ = select.select([report_r], [], [], 0.2)
         if r:
-            chunk = os.read(report_r, 64)
+            chunk = os.read(report_r, 256)
             if not chunk:
                 break
             buf += chunk
-            if b"\n" in buf:
+            if b"END\n" in buf:
                 break
     os.close(report_r)
-    line = buf.decode(errors="replace").strip()
-    return int(line) if line.isdigit() else None
+    pid, extras = None, {}
+    for line in buf.decode(errors="replace").splitlines():
+        line = line.strip()
+        if line.isdigit() and pid is None:
+            pid = int(line)
+        elif "=" in line:
+            k, v = line.split("=", 1)
+            extras[k] = v
+    return pid, extras
 
 
 def launch(run_id=None, run_flags=()):
@@ -109,25 +160,32 @@ def launch(run_id=None, run_flags=()):
     log(f"spawned run pid={pid}")
     kernel.crash("spawn.post_spawn")  # G2: live blocked child, nothing recorded
 
-    reported = read_reported_pid(report_r)
+    reported, extras = read_reported_pid(report_r)
     if reported is None:
         log("run never reported; leaving lease for reconciliation")
-        return {"generation": g, "gen_token": gen_token, "pid": pid, "activated": False}
+        return {"generation": g, "gen_token": gen_token, "spawn_pid": pid,
+                "run_pid": None, "activated": False}
 
     # Measure the identity ourselves. The child told us WHICH pid; the kernel
     # tells us WHAT it is.
-    inc = incarnation.measure(reported)
+    inc = measure_run(reported)
     if not inc.get("alive"):
         log(f"reported pid {reported} already gone; leaving for reconciliation")
-        return {"generation": g, "gen_token": gen_token, "pid": pid, "activated": False}
+        return {"generation": g, "gen_token": gen_token, "spawn_pid": pid,
+                "run_pid": None, "activated": False}
 
     kernel.launch_activate(c, repo_key=REPO, generation=g, run_id=run_id, incarnation=inc)
     log(f"activated generation {g} p_uniqueid={inc['p_uniqueid']}")
 
     os.write(gate_w, b"go")
     log("gate opened")
-    return {"generation": g, "gen_token": gen_token, "pid": pid, "activated": True,
-            "p_uniqueid": inc["p_uniqueid"], "gate_fd": gate_w}
+    # `spawn_pid` is what we launched; under the uid domain that is the `sudo`
+    # process, NOT the run. `run_pid` is the process that actually reported and
+    # whose incarnation is recorded — always the one to signal or verify.
+    return {"generation": g, "gen_token": gen_token, "spawn_pid": pid,
+            "run_pid": reported, "activated": True,
+            "p_uniqueid": inc["p_uniqueid"], "gate_fd": gate_w,
+            "run_report": extras}
 
 
 # --- the termination saga -----------------------------------------------------
@@ -163,6 +221,42 @@ def stop(reason="requested", gen_token=None):
     return {"converged": True, "reap": ev, "terminalized": True}
 
 
+def takeover(run_id=None):
+    """TAKEOVER — reap generation g to VERIFIED ZERO, then publish g+1.
+
+    The ordering is the whole point. Publishing g+1 first and reaping after
+    would re-admit work while generation g's processes were still live and
+    still mutating the repo — the v1 live-orphan hazard arriving through the
+    side door (third pass, HIGH-6). `takeover_publish` refuses without
+    converged reap evidence, so the order cannot be got wrong by accident.
+    """
+    c = kernel.init_db(DB)
+    lease = kernel.get_lease(c, REPO)
+    if lease is None:
+        raise kernel.KernelError("takeover: no lease")
+    old_gen = lease["generation"]
+
+    kernel.commit_stop_intent(c, repo_key=REPO, reason="takeover")
+    ev = reaper.reap(make_domain(lease["gen_token"]))
+    log(f"takeover reap converged={ev['converged']} rounds={ev['rounds']}")
+    if not ev["converged"]:
+        log("takeover ABORTED — generation not reaped to zero; lease stays fenced")
+        return {"converged": False, "published": False, "reap": ev,
+                "old_generation": old_gen}
+
+    # Observed at the moment of publication, so the evidence shows the domain
+    # was empty BEFORE g+1 existed rather than merely at some point during.
+    domain_at_publish = make_domain(lease["gen_token"]).scan()
+    run_id = run_id or f"takeover-{int(time.time())}"
+    new_token = f"P5TOKEN-{run_id}-{os.getpid()}"
+    g = kernel.takeover_publish(c, repo_key=REPO, run_id=run_id,
+                                gen_token=new_token, reap_evidence=ev)
+    log(f"takeover published generation {g}")
+    return {"converged": True, "published": True, "reap": ev,
+            "old_generation": old_gen, "new_generation": g,
+            "domain_at_publish": domain_at_publish, "gen_token": new_token}
+
+
 # --- startup reconciliation ---------------------------------------------------
 
 def readopt(pid, recorded):
@@ -185,7 +279,7 @@ def readopt(pid, recorded):
     except (ProcessLookupError, OSError) as e:
         kq.close()
         return None, f"kqueue attach failed: {e}"
-    live = incarnation.measure(pid)
+    live = measure_run(pid)
     if not incarnation.same_incarnation(recorded, live):
         kq.close()
         return None, "identity changed after attach (PID reuse) — refusing to adopt"
@@ -222,7 +316,7 @@ def reconcile():
 
         # state == 'active'
         alive_verified = bool(rec) and incarnation.same_incarnation(
-            rec, incarnation.measure(rec["pid"]))
+            rec, measure_run(rec["pid"]))
         d["alive_verified"] = alive_verified
         # Processes in the domain other than the recorded run. NOT evidence of a
         # fault: a healthy run's own workers live here too.
@@ -282,6 +376,11 @@ def dump():
 
 
 def main():
+    # sudo inherits our cwd, and with the maintainer home at 0700 the agent
+    # cannot getcwd() there — /bin/sh in the helper then fails at startup,
+    # before any in-script `cd` runs. The supervisor uses absolute paths
+    # throughout, so it has no reason to sit anywhere else.
+    os.chdir("/")
     cmd = sys.argv[1] if len(sys.argv) > 1 else "dump"
     flags = os.environ.get("PROBE5_RUN_FLAGS", "").split()
     if cmd == "launch":
@@ -290,6 +389,8 @@ def main():
         print(json.dumps(reconcile(), default=str, indent=2))
     elif cmd == "stop":
         print(json.dumps(stop(), default=str, indent=2))
+    elif cmd == "takeover":
+        print(json.dumps(takeover(), default=str))
     elif cmd == "daemon":
         daemon()
     elif cmd == "dump":
