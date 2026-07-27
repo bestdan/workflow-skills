@@ -17,6 +17,7 @@ in the sense the kill sheet requires.
 """
 import json
 import os
+import plistlib
 import pwd
 import shutil
 import signal
@@ -662,6 +663,170 @@ def read_reconcile_log(rundir):
         return [json.loads(x) for x in f if x.strip()]
 
 
+def row_sup_smoke():
+    """First contact with a launchd-hosted supervisor on a new host, DISARMED.
+
+    Run this before any KeepAlive row. `keepalive=False` means launchd will not
+    relaunch the job if it dies, so a misconfiguration costs one dead process
+    instead of a relaunch loop — that difference is the whole incident. Note what
+    `keepalive=False` does NOT mean: `supervisor.daemon()` reconciles once and then
+    idles forever, so the job still runs continuously. What is disarmed is the
+    RESTART, not the run.
+
+    Three things this establishes that no earlier check does:
+
+    1. `readopt` on a healthy forking run, decided by a launchd-hosted supervisor.
+       That exercises `supervisor.measure_run` -> `sudo p5-measure` across the uid
+       boundary from a launchd job. `proc_pidinfo` is EPERM across uids, so without
+       a working helper every healthy run measures as dead and gets reaped — and it
+       fails CLOSED, so the symptom is "nothing ever adopts" rather than an error.
+       Rows Esc/Churn/Writer never touch this path; they scan and reap directly.
+    2. The run and its descendant survive a benign supervisor start (the v5.1
+       false-reap defect, from the supervisor's real hosting environment).
+    3. `keepalive=false` genuinely suppresses the relaunch. Verified by killing the
+       supervisor and proving launchd leaves it dead past the throttle window. This
+       is the safety property the disarmed-first-contact procedure RESTS on, so it
+       is measured here rather than assumed from a plist key.
+    """
+    if os.geteuid() != os.getuid() or os.geteuid() == 0:
+        raise RuntimeError(
+            f"refusing to run Sup-smoke with euid={os.geteuid()} uid={os.getuid()}: "
+            "the harness must be the plain maintainer, never root and never "
+            "setuid — a reap decided from here is scoped by who we are")
+
+    rundir = fresh_rundir()
+    label = f"{LABEL_PREFIX}smoke"
+    res = {"row": "Sup-smoke", "rundir": rundir, "keepalive": False,
+           "throttle_interval": THROTTLE_INTERVAL}
+
+    launched = sup(rundir, "launch", run_flags="--descendant")
+    try:
+        info = json.loads(launched["stdout"].strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": "launch produced no parsable result",
+                         "stderr": launched["stderr"][-500:]}
+        return res
+    gen_token, run_pid = info["gen_token"], info["run_pid"]
+    res["run_pid"], res["gen_token_present"] = run_pid, bool(gen_token)
+    time.sleep(1.0)
+
+    rc, err, deadman = install_supervisor(rundir, label, keepalive=False)
+    res["bootstrap_rc"] = rc
+    if rc != 0:
+        # install_supervisor already disarmed the dead-man on a failed bootstrap.
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": f"launchd bootstrap failed: {err}"}
+        cleanup_domain(gen_token)
+        return res
+
+    # Everything from here MUST tear down, or an exception leaks uid-502
+    # processes. The dead-man covers the launchd job; nothing but this covers the
+    # run and its descendant.
+    try:
+        # Read the flag off the PLIST WE ACTUALLY INSTALLED. `keepalive=False` in
+        # this call is an intention; the plist is the artifact launchd obeys, and
+        # the no-relaunch conclusion below is only as good as this being true.
+        with open(os.path.join(rundir, f"{label}.plist"), "rb") as f:
+            pl = plistlib.load(f)
+        res["plist_keepalive"] = pl.get("KeepAlive")
+        res["plist_throttle"] = pl.get("ThrottleInterval")
+        if pl.get("KeepAlive") is not False:
+            res["verdict"] = "INCONCLUSIVE"
+            res["detail"] = {"reason": "installed plist is not KeepAlive=false; "
+                                       "refusing to call this a disarmed contact"}
+            return res
+        if pl.get("ThrottleInterval") != THROTTLE_INTERVAL:
+            # The post-kill wait is derived from THROTTLE_INTERVAL; if the plist
+            # disagrees, the wait may be shorter than launchd's respawn floor and
+            # "no relaunch" would mean "we did not wait long enough".
+            res["verdict"] = "INCONCLUSIVE"
+            res["detail"] = {"reason": f"plist ThrottleInterval "
+                                       f"{pl.get('ThrottleInterval')} != harness "
+                                       f"{THROTTLE_INTERVAL}"}
+            return res
+
+        deadline = time.monotonic() + max(30.0, THROTTLE_INTERVAL * 6)
+        while time.monotonic() < deadline:
+            if read_reconcile_log(rundir):
+                break
+            time.sleep(0.5)
+        log = read_reconcile_log(rundir)
+        res["reconcile_passes"] = len(log)
+        decisions = log[-1]["decisions"] if log else []
+        res["decisions"] = decisions
+        actions = [d.get("action") for d in decisions]
+        res["actions"] = actions
+        # The cross-uid measurement, as the supervisor itself saw it.
+        res["alive_verified"] = [d.get("alive_verified") for d in decisions]
+
+        res["run_still_alive"] = supervisor.measure_run(run_pid).get("alive", False)
+        # A RAW scan is the wrong denominator: macOS respawns per-user daemons on
+        # demand, so `len(scan) >= 2` is satisfiable by two system daemons with
+        # both the run AND its descendant dead. Partition the way invariant 4
+        # does, and require the recorded run to be among what is left.
+        survivors = domain_for(gen_token).scan()
+        run_survivors, sys_daemons = reaper.partition_survivors(survivors)
+        res["domain_after_pass"] = survivors
+        res["run_survivors_after_pass"] = run_survivors
+        res["system_daemons_after_pass"] = sys_daemons
+        st = state_of(rundir)
+        res["lease_after_pass"] = st["lease"]
+
+        # Now prove the relaunch really is disarmed.
+        sup_pid = supervisor_pid(label)
+        res["supervisor_pid"] = sup_pid
+        res["print_before_kill"] = _lc("print", f"{DOMAIN}/{label}").stdout[-1500:]
+        if sup_pid is None:
+            # Without a pid there is nothing to kill, and a supervisor that only
+            # reconciles once writes no further log lines — so both disarm
+            # assertions below would pass having tested NOTHING. Refuse to draw
+            # the conclusion instead of drawing it vacuously.
+            res["verdict"] = "INCONCLUSIVE"
+            res["detail"] = {"reason": "could not read the supervisor pid from "
+                                       "`launchctl print`; the no-relaunch check "
+                                       "would pass without being exercised"}
+            return res
+        try:
+            os.kill(sup_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        # Past the throttle window by a wide margin: launchd cannot respawn sooner
+        # than ThrottleInterval, so waiting less would prove nothing.
+        time.sleep(THROTTLE_INTERVAL * 3)
+        res["passes_after_kill"] = len(read_reconcile_log(rundir))
+        res["relaunched_after_kill"] = res["passes_after_kill"] > res["reconcile_passes"]
+        res["pid_after_kill"] = supervisor_pid(label)
+        res["print_after_kill"] = _lc("print", f"{DOMAIN}/{label}").stdout[-1500:]
+
+        ok = (len(log) == 1
+              and actions == ["readopt"]
+              and all(res["alive_verified"])
+              and res["run_still_alive"]
+              # the run itself AND its descendant, neither of them a daemon
+              and run_pid in run_survivors
+              and len(run_survivors) >= 2
+              and st["lease"]["state"] == "active"
+              and st["lease"]["stop_intent"] == 0
+              and not res["relaunched_after_kill"]
+              and res["pid_after_kill"] is None)
+
+        _lc("bootout", f"{DOMAIN}/{label}")
+        res["deadman_disarmed"] = disarm_deadman(deadman)
+        res["kill_switch_emitted"] = os.path.exists(
+            os.path.join(rundir, "KILL-SWITCH.sh"))
+        sup(rundir, "stop", timeout=90)
+        checks = check_invariants(rundir, gen_token=gen_token,
+                                  expect_domain_empty=True)
+        res["invariants"] = checks
+        res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=ok)
+        return res
+    finally:
+        _lc("bootout", f"{DOMAIN}/{label}")
+        disarm_deadman(deadman)
+        cleanup_domain(gen_token)
+
+
 def row_sup(kind):
     """kind='readopt': healthy run, supervisor SIGKILLed, launchd restarts it —
     reconciliation must RE-ADOPT and leave the run untouched.
@@ -1180,7 +1345,12 @@ def main():
                          ("NoConv", row_noconv), ("Io", row_io),
                          ("Esc", row_escape), ("Churn", row_churn),
                          ("Writer", row_writer), ("Tw", row_takeover),
-                         ("Uid", row_uid_limitation)):
+                         ("Uid", row_uid_limitation),
+                         # Before Sup-readopt/Sup-orphan on purpose: this is the
+                         # disarmed first contact, and it is ordered ahead of the
+                         # two KeepAlive rows so a full run cannot arm the relaunch
+                         # loop before the disarmed path has been shown to work.
+                         ("Sup-smoke", row_sup_smoke)):
             if not want(name):
                 continue
             print(f"== {name} ==", flush=True)
