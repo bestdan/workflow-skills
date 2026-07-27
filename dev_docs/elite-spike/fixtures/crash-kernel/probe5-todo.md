@@ -474,6 +474,23 @@ and recreating it is what produced the uid-reassignment hazard in the first plac
   which re-arms exactly those labels. `install_supervisor` now refuses to
   bootstrap any label it finds in `launchctl print-disabled`. Do not enable them;
   pick a fresh prefix if you ever need another generation.
+
+  **That rule is about the INCIDENT's labels, and does not generalise.** The kill
+  switch is `bootout; disable`, so *every* use of it — including a drill — ends
+  with the `r2` labels disabled and the next bootstrap refused. Applied literally,
+  "never enable, take a fresh prefix" would burn a label generation each time the
+  safety net is exercised, and worse, it would silently invalidate the kill switch
+  the maintainer has pre-typed: those commands name the old labels. A stale kill
+  switch during a real incident is a much worse failure than an `enable`.
+
+  So: `com.probe5.sup.*` stay disabled forever (they are evidence). Labels you
+  disabled yourself in a drill may be re-enabled, after confirming provenance —
+  `launchctl print-disabled` shows the entry, `launchctl list` shows it was never
+  loaded, and you know when you disabled it. Done on the MacBook 2026-07-27 after
+  a kill-switch drill; both r2 labels read `=> enabled` again.
+
+  Prefer keeping the prefix stable for exactly this reason. If you do bump it,
+  re-issue the kill switch to the maintainer in the same breath.
 - **uid mode + `KeepAlive` is a loaded gun.** `PROBE5_AGENT_UID` must be the
   dedicated account, resolved by name — never the maintainer's uid, never root.
   `reaper.Domain` and `scenarios.install_supervisor` both refuse it now, but a
