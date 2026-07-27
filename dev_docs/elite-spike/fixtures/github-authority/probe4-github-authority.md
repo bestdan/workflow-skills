@@ -1,5 +1,49 @@
 # Probe 4 — GitHub authority canary
 
+> **RE-VERIFICATION ATTEMPTED 2026-07-27 — NOT POSSIBLE. The result below stands
+> as a historical record and is NOT currently reproducible.**
+>
+> Probe 5 flagged this probe as asserting something untrue: it certifies work done
+> under `agent` **uid 502 on the mac mini**, where that account later vanished and
+> **502 was reassigned to an unrelated human**. Re-verification was attempted and
+> found the entire test surface gone:
+>
+> | Prerequisite                                      | State on 2026-07-27                                      |
+> | ------------------------------------------------- | -------------------------------------------------------- |
+> | `~/.autopilot/test-app.pem` (App private key)     | **absent** — `~/.autopilot/` does not exist on this host |
+> | `bestdan/autopilot-p4-test`                       | **deleted** — "Could not resolve to a Repository"        |
+> | `bestdan/autopilot-p4-noinstall` (denial test B3) | **deleted** — same                                       |
+> | Test App 4366511 / installation 148292770         | not listable with the current token                      |
+> | Branch ruleset 19562224                           | gone with its repo                                       |
+> | Host: the mini, `agent` uid 502                   | that account no longer exists there                      |
+>
+> This is disposable spike infrastructure behaving as designed — it was meant to
+> be torn down. The consequence is simply that the GitHub-side findings **cannot
+> be re-run without re-provisioning** a new App, key, two repos and a ruleset,
+> which is an attended task on the maintainer's GitHub account.
+>
+> **Separate the two kinds of claim, because the uid problem does not touch them
+> equally:**
+>
+> - **Host-dependent (C1: the agent cannot read the App key).** This rests on the
+>   maintainer home being `0700`, which is **verified true on the current host**
+>   (`drwx------ danielegan:staff`), and was exercised for real by Probe 5's
+>   `Writer` row under the escape-proof uid domain (`write_probe=EACCES`). The
+>   structural claim holds here; the literal `cat key → Permission denied` cannot
+>   be re-run because there is no key.
+> - **GitHub-dependent (sufficiency ops, B1–B4 denials, ruleset behaviour).** These
+>   are properties of the App, the ruleset and GitHub's server-side policy, **not
+>   of which local uid invoked them**. The uid reassignment does not falsify them;
+>   it only means the run cannot be repeated as recorded. They were true of that
+>   App at that time and should be treated as evidence about a configuration, not
+>   about a machine.
+>
+> **This does not need re-running to unblock anything.** The kill sheet already
+> states that Stage 1's gate re-runs the identical tests against the **real** App
+> — which is a stronger check than reconstructing a disposable one, and is where
+> the evidence should be re-earned. What must not happen is this document
+> continuing to read as a live certification of an account that no longer exists.
+
 **Result: CONFIRMED (GitHub authority) — Linear leg deferred.** Under the actual
 `agent` uid (502), every sufficiency operation succeeded via the App
 installation token (clone / commit / push to `autopilot/**` / PR open+comment+
@@ -41,7 +85,7 @@ the **real** App (§7a row 4).
 > **safety-critical**, not merely correctness._
 
 Falsified if any required delivery operation is impossible under the App
-identity, **or** any denial test is *not* denied (an irreversible/out-of-scope
+identity, **or** any denial test is _not_ denied (an irreversible/out-of-scope
 action escapes server-side policy), **or** credential instrumentation shows the
 delivery only worked by falling back to an ambient/personal token.
 
@@ -122,7 +166,7 @@ model here would misdirect broker/ruleset design.
 
 Change App permissions/helpers, or replace unsupported `gh` paths with fixed API
 calls; **do not build broker hardening around a false permission model.** If a
-denial test *fails* (an irreversible action escapes), fix the **server-side
+denial test _fails_ (an irreversible action escapes), fix the **server-side
 ruleset** first (this is the Decision #5 safety boundary), not the client.
 
 ## Prerequisites (execution is blocked until these exist)
@@ -172,18 +216,18 @@ ruleset** first (this is the Decision #5 safety boundary), not the client.
 
 **Classification: CONFIRMED (GitHub authority).** Raw evidence: `results.json`.
 
-| Check | Verdict | Evidence |
-| --- | --- | --- |
-| C1 — agent cannot read App key | ✅ PASS | `cat key → Permission denied` (agent can't traverse the 0700 maintainer home) |
-| A1 — clone via App token | ✅ PASS | cloned |
-| A2 — push to `autopilot/**` | ✅ PASS | `autopilot/probe4-*` accepted (matches the allowed pattern) |
-| A3 — PR open + comment + close | ✅ PASS | PR #2 created, commented, closed |
-| A3 — GraphQL captured | ✅ | `RepositoryInfo`, `PullRequestForBranch` — the actual GraphQL `gh` issues |
-| B1 — default-branch push | ✅ DENIED | `remote: error: GH013: Repository rule violations found for refs/heads/main` |
-| B2 — non-matching branch push | ✅ DENIED | `GH013 … refs/heads/random/foo-*` |
-| B3 — non-installed repo | ✅ DENIED | git `Repository not found`; `gh api → 404 Not Found` |
-| B4 — org-level operation | ⚠️ N/A | personal account — deferred to Stage 1 (real App under the org) |
-| C2 — remove token, no fallback | ✅ PASS | `could not read Username … terminal prompts disabled` — fails closed, no ambient credential |
+| Check                          | Verdict   | Evidence                                                                                    |
+| ------------------------------ | --------- | ------------------------------------------------------------------------------------------- |
+| C1 — agent cannot read App key | ✅ PASS   | `cat key → Permission denied` (agent can't traverse the 0700 maintainer home)               |
+| A1 — clone via App token       | ✅ PASS   | cloned                                                                                      |
+| A2 — push to `autopilot/**`    | ✅ PASS   | `autopilot/probe4-*` accepted (matches the allowed pattern)                                 |
+| A3 — PR open + comment + close | ✅ PASS   | PR #2 created, commented, closed                                                            |
+| A3 — GraphQL captured          | ✅        | `RepositoryInfo`, `PullRequestForBranch` — the actual GraphQL `gh` issues                   |
+| B1 — default-branch push       | ✅ DENIED | `remote: error: GH013: Repository rule violations found for refs/heads/main`                |
+| B2 — non-matching branch push  | ✅ DENIED | `GH013 … refs/heads/random/foo-*`                                                           |
+| B3 — non-installed repo        | ✅ DENIED | git `Repository not found`; `gh api → 404 Not Found`                                        |
+| B4 — org-level operation       | ⚠️ N/A     | personal account — deferred to Stage 1 (real App under the org)                             |
+| C2 — remove token, no fallback | ✅ PASS   | `could not read Username … terminal prompts disabled` — fails closed, no ambient credential |
 
 ### Two driver bugs the run surfaced (fixed, re-run clean)
 
@@ -208,7 +252,7 @@ Backlog with no comment.
 
 **Caveat (why it isn't the full leg):** this ran via the **maintainer MCP
 identity**, not an agent-scoped Linear token — **agent→Linear auth is not
-provisioned** in this session. So the tracker *operations* are confirmed, but the
+provisioned** in this session. So the tracker _operations_ are confirmed, but the
 **identity-scoping and denial** half (agent-scoped token; can it only touch what
 it should?) defers to **Stage 1**, where the delivery loop's tracker credential
 is provisioned and validated under the agent identity.

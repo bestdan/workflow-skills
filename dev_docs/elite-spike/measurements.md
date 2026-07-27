@@ -17,9 +17,13 @@ formal closes, which need the sandbox layer as agent and the disposable test App
 
 ## Supporting
 
-- Agent identity provisioned (non-admin **user `agent`**, uid 502, member of
-  group `apagent`; zero sudo rules, 0700 home, minimal `~/Library`, no FDA
-  granted): `provisioning.md`.
+- Agent identity provisioned (non-admin **user `agent`**, member of group
+  `apagent`; zero sudo rules, 0700 home, minimal `~/Library`, no FDA granted):
+  `provisioning.md`. **The uid is deliberately not stated here** — it is 502 on
+  the MacBook and was 503 on the mac mini, and on the mini the original 502 was
+  later reassigned to an unrelated human. Resolve the account **by name**; a uid
+  written into a document becomes a trap the moment it stops being true. Probe 1
+  was re-verified on the MacBook 2026-07-27.
 - Agent Claude Max auth (manual OAuth flow, agent keychain created+unlocked):
   `fixtures/nono/step2-agent-auth.md`.
 
