@@ -25,6 +25,7 @@ Never `root` `kill(-1)` — root's target set is every process on the machine.
 import ctypes
 import ctypes.util
 import os
+import pwd
 import re
 import signal
 import subprocess
@@ -56,19 +57,46 @@ class ReaperRefused(Exception):
     pass
 
 
+class ScanFailed(Exception):
+    """The domain could not be enumerated. NOT the same as "the domain is empty"."""
+
+
 def list_uid_pids(uid):
-    """Every live pid whose effective uid is `uid`, straight from libproc."""
+    """Every live pid whose effective uid is `uid`, straight from libproc.
+
+    A FAILED SCAN RAISES; it never returns []. `proc_listpids` signals error with
+    -1 and a genuinely empty set with 0, and collapsing those two into [] is a
+    silent falsification of the whole containment claim: `reap()` decides
+    `converged` from this coming back empty, and `terminalize` is gated on
+    `converged`, so one transient libproc failure would "verify zero" and release
+    the lease while the run is still alive — invariant 4 (earned release) and 6
+    (convergence) broken by a scan bug rather than by anything the design says.
+    Fencing on an unreadable domain is the safe outcome; claiming zero is not.
+    """
+    ctypes.set_errno(0)
     n = libc.proc_listpids(PROC_UID_ONLY, ctypes.c_uint32(uid), None, 0)
-    if n <= 0:
+    if n < 0:
+        raise ScanFailed(f"proc_listpids(sizing, uid={uid}) failed: "
+                         f"errno={ctypes.get_errno()}")
+    if n == 0:
         return []
     # Size up generously: the process table can grow between the sizing call and
     # the fetch, and a truncated buffer would silently under-report survivors —
     # which would let a reap "verify zero" while processes are still alive.
     cap = n * 4 + 4096
     buf = (ctypes.c_int32 * (cap // 4))()
+    ctypes.set_errno(0)
     got = libc.proc_listpids(PROC_UID_ONLY, ctypes.c_uint32(uid), buf, cap)
-    if got <= 0:
+    if got < 0:
+        raise ScanFailed(f"proc_listpids(fetch, uid={uid}) failed: "
+                         f"errno={ctypes.get_errno()}")
+    if got == 0:
         return []
+    # A full buffer means the answer was probably truncated -> under-reported
+    # survivors, which is the same false-zero hazard as an outright error.
+    if got >= cap:
+        raise ScanFailed(f"proc_listpids(uid={uid}) filled the buffer "
+                         f"({got} >= {cap}); result may be truncated")
     return sorted({p for p in buf[:got // 4] if p > 0})
 
 
@@ -82,6 +110,10 @@ def list_gentoken_pids(gen_token):
     enumerated-kill counterpart to uid mode's refusal to target its own uid.
     """
     r = subprocess.run(["ps", "-axo", "pid=,uid=,command="], capture_output=True, text=True)
+    # Same false-zero hazard as list_uid_pids: a failed `ps` yields empty stdout,
+    # which would read as "the domain is empty" and authorize terminalization.
+    if r.returncode != 0:
+        raise ScanFailed(f"ps failed (rc={r.returncode}): {r.stderr.strip()[-200:]}")
     own_uid = os.getuid()
     out = []
     for line in r.stdout.splitlines():
@@ -173,6 +205,29 @@ class Domain:
         there is no interactive shell to work around it.
         """
         name = "TERM" if sig == signal.SIGTERM else "KILL"
+        # The domain we ENUMERATE (agent_uid, a number) and the identity we
+        # REAP AS (REAP_AS_USER, a name) are configured through two independent
+        # env vars — PROBE5_AGENT_UID and PROBE5_AGENT_USER — and nothing else
+        # ties them together. If they disagree, the scan verifies one uid while
+        # kill(-1) empties another: convergence would be measured against a
+        # domain that was never signalled, and the signal would land somewhere
+        # unaudited. Setting PROBE5_AGENT_USER to the maintainer is the incident
+        # again by a different route. sudoers currently permits only runas=agent,
+        # but that is the deployment's protection, not the code's. Bind them here,
+        # at the moment of use.
+        try:
+            runas_uid = pwd.getpwnam(REAP_AS_USER).pw_uid
+        except KeyError:
+            raise ReaperRefused(f"reap user {REAP_AS_USER!r} does not exist")
+        if runas_uid != self.agent_uid:
+            raise ReaperRefused(
+                f"refusing to reap: domain uid is {self.agent_uid} but the helper "
+                f"would run as {REAP_AS_USER!r} (uid {runas_uid}). The scanned "
+                "domain and the signalled domain must be the same uid.")
+        if runas_uid in (0, os.getuid(), os.geteuid()):
+            raise ReaperRefused(
+                f"refusing to reap as {REAP_AS_USER!r} (uid {runas_uid}): root or "
+                "the caller's own uid")
         r = subprocess.run(
             ["sudo", "-n", "-C", "5", "-u", REAP_AS_USER, REAP_HELPER, name],
             capture_output=True, text=True, cwd="/")
@@ -221,7 +276,21 @@ def reap(domain, *, term_grace=2.0, kill_grace=2.0, max_rounds=15, poll=0.1):
     """
     ev = {"mode": domain.mode, "escape_proof": domain.escape_proof,
           "rounds": 0, "converged": False, "survivors": [], "signals": []}
-    before = domain.scan()
+
+    # An unreadable domain is NOT an empty one. Every scan below is funnelled
+    # through here so a ScanFailed anywhere in the loop lands as
+    # converged=False + scan_failed, i.e. the lease stays FENCED in stop_intent —
+    # the designed safe hold (invariant 6) — instead of a false "verified zero".
+    def scan_or_fence():
+        try:
+            return domain.scan(), None
+        except ScanFailed as e:
+            return None, str(e)
+
+    before, err = scan_or_fence()
+    if err:
+        ev["scan_failed"] = err
+        return ev
     ev["initial"] = before
     if not before:
         ev["converged"] = True
@@ -230,7 +299,11 @@ def reap(domain, *, term_grace=2.0, kill_grace=2.0, max_rounds=15, poll=0.1):
     ev["signals"].append({"sig": "TERM", **domain.signal_all(signal.SIGTERM)})
     deadline = time.monotonic() + term_grace
     while time.monotonic() < deadline:
-        if not domain.scan():
+        live, err = scan_or_fence()
+        if err:
+            ev["scan_failed"] = err
+            return ev
+        if not live:
             ev["converged"] = True
             ev["rounds"] = 1
             return ev
@@ -241,19 +314,31 @@ def reap(domain, *, term_grace=2.0, kill_grace=2.0, max_rounds=15, poll=0.1):
         # Re-scan every round: fork churn means the survivor set at round N is
         # not the set we signalled at round N-1. Converging requires the SCAN to
         # come back empty, not the signal to have been sent.
-        if not domain.scan():
+        live, err = scan_or_fence()
+        if err:
+            ev["scan_failed"] = err
+            return ev
+        if not live:
             ev["converged"] = True
             return ev
         ev["signals"].append({"sig": "KILL", "round": rnd,
                               **domain.signal_all(signal.SIGKILL)})
         deadline = time.monotonic() + kill_grace
         while time.monotonic() < deadline:
-            if not domain.scan():
+            live, err = scan_or_fence()
+            if err:
+                ev["scan_failed"] = err
+                return ev
+            if not live:
                 ev["converged"] = True
                 return ev
             time.sleep(poll)
 
-    ev["survivors"] = domain.scan()
+    survivors, err = scan_or_fence()
+    if err:
+        ev["scan_failed"] = err
+        return ev
+    ev["survivors"] = survivors
     ev["converged"] = not ev["survivors"]
     return ev
 

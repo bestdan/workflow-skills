@@ -461,7 +461,16 @@ def _dedicated_agent_uid():
     return pwd.getpwnam(reaper.REAP_AS_USER).pw_uid
 
 
-def install_supervisor(rundir, label):
+def install_supervisor(rundir, label, *, keepalive=True):
+    """Install and bootstrap the supervisor.
+
+    `keepalive=False` writes `KeepAlive=false` so the job runs ONCE and stays
+    dead. That is the only safe way to make first contact with a uid-mode
+    supervisor on a new host: KeepAlive is what turned the incident's
+    misconfiguration from a single bad reap into a 1-2s relaunch loop that ran
+    for four days. Prove reconciliation behaves with the loop disarmed, then
+    enable it for the rows that actually need a restart (Sup-readopt/orphan).
+    """
     with open(os.path.join(HERE, "supervisor.plist.tmpl")) as f:
         txt = f.read()
     if DOMAIN_MODE == "uid":
@@ -479,6 +488,7 @@ def install_supervisor(rundir, label):
     subs = {"LABEL": label, "PYTHON": PY, "DIR": HERE, "RUNDIR": rundir,
             "DB": os.path.join(rundir, "state.db"), "REPO": REPO,
             "DOMAIN_MODE": DOMAIN_MODE, "AGENT_UID": agent_uid_sub,
+            "KEEPALIVE": "true" if keepalive else "false",
             "RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl")}
     for k, v in subs.items():
         txt = txt.replace(f"@{k}@", str(v))
@@ -486,7 +496,15 @@ def install_supervisor(rundir, label):
     # reads as a spurious failure whose obvious "fix" is `launchctl enable` — and
     # the disabled labels on this host are precisely the incident's two. Fail
     # loudly instead of producing evidence about a supervisor that never started.
-    if f'"{label}" => disabled' in _lc("print-disabled", DOMAIN).stdout:
+    # Fail CLOSED: if print-disabled itself fails, stdout is empty and a
+    # substring test would silently conclude "not disabled" — the check would
+    # pass hardest exactly when it can see least.
+    pd = _lc("print-disabled", DOMAIN)
+    if pd.returncode != 0:
+        raise RuntimeError(
+            f"cannot verify {label} is enabled: `launchctl print-disabled "
+            f"{DOMAIN}` failed rc={pd.returncode}: {pd.stderr.strip()[-200:]}")
+    if f'"{label}" => disabled' in pd.stdout:
         raise RuntimeError(
             f"refusing to bootstrap {label}: it is DISABLED in the launchd "
             f"override database for {DOMAIN}. It would bootstrap rc=0 and never "
