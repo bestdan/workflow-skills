@@ -3066,9 +3066,90 @@
       "verdict": "PASS"
     },
     "Tw": {
-      "reason": "Takeover with live generation-g workers: the reap-before-publish leg is only verifiable against an escape-proof domain.",
+      "domain_before_takeover": [
+        2018,
+        19574,
+        19577
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "generations_reserved": [
+        1,
+        2
+      ],
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
       "row": "Tw",
-      "verdict": "BLOCKED"
+      "run_at": "2026-07-27T13:31:49+0100",
+      "rundir": "<TMPDIR>/probe5.242qkniu",
+      "takeover": {
+        "converged": true,
+        "domain_at_publish": [],
+        "new_generation": 2,
+        "old_generation": 1,
+        "published": true
+      },
+      "verdict": "PASS"
     },
     "Uid": {
       "detail": {
