@@ -29,7 +29,8 @@ All paths relative to `dev_docs/elite-spike/fixtures/crash-kernel/`:
    and the containment fork.
 5. **`../process-binding/incarnation.py`** — reuse Probe 2's libproc `p_uniqueid`
    incarnation reader (copy it in; it is the identity primitive).
-6. **`../../provisioning.md`** — the `agent` uid (502) facts.
+6. **`../../provisioning.md`** — the `agent` account facts, and its 2026-07-27
+   re-verification note. Read the uid there as per-host, not as a constant.
 
 Look at the **Probe 3 fixture** (`../async-skeleton/`) for the launchd + armed-
 crash-point + orchestrator patterns, and the **Probe 4 fixture**
