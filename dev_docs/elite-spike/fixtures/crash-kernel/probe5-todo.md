@@ -483,14 +483,64 @@ and recreating it is what produced the uid-reassignment hazard in the first plac
   the maintainer has pre-typed: those commands name the old labels. A stale kill
   switch during a real incident is a much worse failure than an `enable`.
 
-  So: `com.probe5.sup.*` stay disabled forever (they are evidence). Labels you
-  disabled yourself in a drill may be re-enabled, after confirming provenance —
-  `launchctl print-disabled` shows the entry, `launchctl list` shows it was never
-  loaded, and you know when you disabled it. Done on the MacBook 2026-07-27 after
-  a kill-switch drill; both r2 labels read `=> enabled` again.
+  **The criterion is load history, not anyone's memory.** "I disabled that one
+  myself" is the kind of justification that erodes into "I'm fairly sure I did",
+  so the rule is written against observable state instead: a label with **no load
+  history cannot be evidence of anything**, because nothing has ever run under it.
+  A label that *has* run may be disabled precisely because it misbehaved, and must
+  stay that way until a human has looked. `launchctl list <label>` is the
+  discriminator (rc=0 → known to launchd), and `INCIDENT_LABELS` in `scenarios.py`
+  is the never-ever list — named in the repo deliberately, since the override
+  database is host-local and does not travel between machines.
 
-  Prefer keeping the prefix stable for exactly this reason. If you do bump it,
-  re-issue the kill switch to the maintainer in the same breath.
+  This is enforced, not advisory: `install_supervisor` refuses an incident label
+  outright, and for any other disabled label it reports whether it has load
+  history and only offers the `launchctl enable` line when it does not.
+
+  Corollary — **do not drill against live labels.** The kill switch is
+  `bootout; disable`, so a drill against the real labels disarms the very
+  mechanism it is rehearsing; that happened on the MacBook 2026-07-27 and blocked
+  the next bootstrap. Use a sacrificial label. Both r2 labels were re-enabled
+  after confirming zero load history.
+
+  Prefer keeping the prefix stable. If you do bump it, re-issue the kill switch in
+  the same breath — but note that `install_supervisor` now **emits the kill switch
+  for the label it is about to arm** (stdout plus `<rundir>/KILL-SWITCH.sh`), so
+  the correct practice is "copy the one it just printed", not "keep one pre-typed".
+  A hand-kept kill switch names whatever label was current when it was typed.
+- **There is deliberately NO respawn circuit breaker in the supervisor.** This was
+  considered and rejected on advice (2026-07-27), and the reasoning should survive,
+  because "add a breaker" is the obvious-looking fix someone will propose again.
+  Two reasons. First, the guards already downgrade a misconfiguration from a reap
+  loop to a *crash* loop — the job refuses at construction and exits, so the
+  residual harm is log volume on a machine with console access. Second and
+  decisive: a breaker counts rapid restarts, and rapid restart after `SIGKILL` is
+  **exactly what `Sup-readopt` and `Sup-orphan` provoke on purpose**. It cannot
+  distinguish the mechanism under test from a runaway, so leaked counter state or a
+  retry would trip it just before the row checks reconciliation — a false failure in
+  the very rows the breaker was supposed to protect.
+
+  Nor should the job boot *itself* out: self-bootout has domain-authorization
+  problems, launchd may kill the caller before cleanup finishes, and the `disable`
+  it leaves behind poisons later rows.
+
+  What replaces it is an **external dead-man** (`scenarios._arm_deadman`): an
+  independent process, in its own session, armed *before* the bootstrap and
+  cancelled at teardown, which runs the label's own kill switch after
+  `DEADMAN_SECONDS`. It covers what no in-process guard can — the supervisor is a
+  launchd job, so if it wedges, nothing inside the orchestrator is running to
+  notice. Forgetting to disarm it is safe by construction: the job just gets booted
+  out a few minutes later, which is why it is armed inside `install_supervisor`
+  rather than left to each caller. When it fires, the label is left disabled *with*
+  load history — so the rule above correctly refuses to re-enable it until someone
+  has looked.
+
+  `ThrottleInterval` is **5**, not 1. At 1 a refusing supervisor relaunches at
+  1 Hz; 5 makes that 0.2 Hz and costs nothing, since the rows that need a respawn
+  provoke exactly one. Any wait that spans a launchd respawn is derived from
+  `THROTTLE_INTERVAL` — raising the throttle while leaving a hardcoded deadline is
+  how a slower restart turns into "launchd never relaunched it".
+
 - **uid mode + `KeepAlive` is a loaded gun.** `PROBE5_AGENT_UID` must be the
   dedicated account, resolved by name — never the maintainer's uid, never root.
   `reaper.Domain` and `scenarios.install_supervisor` both refuse it now, but a

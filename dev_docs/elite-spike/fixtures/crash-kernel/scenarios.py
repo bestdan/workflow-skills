@@ -49,6 +49,33 @@ AGENT_UID = os.environ.get("PROBE5_AGENT_UID", "")
 # row failure whose obvious "fix" is `launchctl enable`.
 LABEL_PREFIX = "com.probe5r2.sup."
 
+# Labels that may NEVER be enabled or reused on any host, wherever they turn up
+# disabled. The launchd override database is host-local and does not travel with
+# the repo, so the tripwire has to be named HERE to survive a move to a new
+# machine — on the mac mini these are disabled, on the MacBook they are absent
+# and would bootstrap happily.
+INCIDENT_LABELS = ("com.probe5.sup.orphan", "com.probe5.sup.readopt")
+
+# launchd will not respawn a job more than once per ThrottleInterval seconds.
+# The incident ran at 1: a supervisor that refuses at construction exits
+# immediately, so 1 means a 1 Hz relaunch loop. 5 cuts that to 0.2 Hz without
+# changing any outcome, since the only rows that need a respawn (Sup-readopt,
+# Sup-orphan) provoke exactly ONE of them.
+#
+# Every wait that spans a launchd-initiated respawn MUST be derived from this,
+# not written as a literal — raising the throttle while leaving a hardcoded
+# deadline is how you turn a slower restart into a row that reads as "launchd
+# never relaunched it".
+THROTTLE_INTERVAL = 5
+
+# How long an armed supervisor may live before an independent timer boots it out.
+# This is the backstop for the failure mode the in-process guards CANNOT cover:
+# the supervisor is a launchd job, so if it wedges or loops, nothing inside this
+# process is running to notice. Deliberately NOT a respawn-counting circuit
+# breaker inside the supervisor — that would observe the same rapid restart
+# Sup-readopt/Sup-orphan intentionally provoke and could fail them spuriously.
+DEADMAN_SECONDS = 300
+
 
 # --- plumbing -----------------------------------------------------------------
 
@@ -472,8 +499,52 @@ def _dedicated_agent_uid():
     return pwd.getpwnam(reaper.REAP_AS_USER).pw_uid
 
 
+def kill_switch_for(label):
+    """The exact commands that disarm `label`, as one shell line.
+
+    Semicolon, NOT `&&`: if the bootout fails (job not loaded, wrong domain) the
+    disable must still run. `&&` there means a typo'd domain leaves the job armed
+    while the operator reads a success-shaped error.
+    """
+    return (f"launchctl bootout {DOMAIN}/{label}; "
+            f"launchctl disable {DOMAIN}/{label}")
+
+
+def _arm_deadman(label, seconds=DEADMAN_SECONDS):
+    """Start an INDEPENDENT process that will disarm `label` after `seconds`.
+
+    Armed before the bootstrap and cancelled at teardown. It has to be a separate
+    process in its own session: the whole point is to survive this process dying,
+    hanging, or losing the plot, none of which an in-process timer survives.
+
+    Failing to cancel it is safe by construction — the job simply gets booted out
+    a few minutes later. That is the correct direction for a forgotten backstop,
+    and it is why this is armed inside install_supervisor rather than left to each
+    caller to remember.
+    """
+    cmd = f"sleep {int(seconds)}; {kill_switch_for(label)}"
+    return subprocess.Popen(["/bin/sh", "-c", cmd], start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def disarm_deadman(p):
+    """Cancel a dead-man. Kills the process GROUP, so the `sleep` dies too."""
+    if p is None or p.poll() is not None:
+        return False
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        p.wait(timeout=5)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        return False
+    return True
+
+
 def install_supervisor(rundir, label, *, keepalive=True):
     """Install and bootstrap the supervisor.
+
+    Returns `(rc, stderr, deadman)`. The caller MUST pass `deadman` to
+    `disarm_deadman()` at teardown; if it does not, the job is booted out after
+    DEADMAN_SECONDS, which is the safe direction.
 
     `keepalive=False` writes `KeepAlive=false` so the job runs ONCE and stays
     dead. That is the only safe way to make first contact with a uid-mode
@@ -482,6 +553,15 @@ def install_supervisor(rundir, label, *, keepalive=True):
     for four days. Prove reconciliation behaves with the loop disarmed, then
     enable it for the rows that actually need a restart (Sup-readopt/orphan).
     """
+    # First, before reading or writing anything: the never-ever list. This does
+    # not depend on the override database, so it must not sit behind a check that
+    # can raise for unrelated reasons (a failing print-disabled would otherwise
+    # mask it with the wrong error).
+    if label in INCIDENT_LABELS:
+        raise RuntimeError(
+            f"refusing to touch {label}: it is one of the incident's labels "
+            f"({', '.join(INCIDENT_LABELS)}). These are never bootstrapped, "
+            "enabled, or reused on any host. Use a fresh prefix.")
     with open(os.path.join(HERE, "supervisor.plist.tmpl")) as f:
         txt = f.read()
     if DOMAIN_MODE == "uid":
@@ -500,6 +580,7 @@ def install_supervisor(rundir, label, *, keepalive=True):
             "DB": os.path.join(rundir, "state.db"), "REPO": REPO,
             "DOMAIN_MODE": DOMAIN_MODE, "AGENT_UID": agent_uid_sub,
             "KEEPALIVE": "true" if keepalive else "false",
+            "THROTTLE": THROTTLE_INTERVAL,
             "RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl")}
     for k, v in subs.items():
         txt = txt.replace(f"@{k}@", str(v))
@@ -516,16 +597,52 @@ def install_supervisor(rundir, label, *, keepalive=True):
             f"cannot verify {label} is enabled: `launchctl print-disabled "
             f"{DOMAIN}` failed rc={pd.returncode}: {pd.stderr.strip()[-200:]}")
     if f'"{label}" => disabled' in pd.stdout:
+        # Disabled means "bootstraps rc=0 and never runs", so every row hosted by
+        # it would report on a supervisor that never started. Whether it may be
+        # re-enabled is decided by OBSERVABLE STATE, not by anyone's memory of
+        # having disabled it: a label with no load history cannot be evidence of
+        # anything, whereas one that has run may be disabled because it misbehaved
+        # and must stay that way until a human has looked. `launchctl list` is the
+        # discriminator; INCIDENT_LABELS is the never-ever list above.
+        ever_loaded = _lc("list", label).returncode == 0
         raise RuntimeError(
             f"refusing to bootstrap {label}: it is DISABLED in the launchd "
-            f"override database for {DOMAIN}. It would bootstrap rc=0 and never "
-            "run. Use a fresh label — do not `launchctl enable` this one.")
+            f"override database for {DOMAIN}, so it would bootstrap rc=0 and "
+            f"never run. It {'HAS' if ever_loaded else 'has never'} been loaded "
+            f"on this host. "
+            + ("It has load history, so its disabled state may be a tripwire from "
+               "something that went wrong — investigate before enabling, and "
+               "prefer a fresh prefix."
+               if ever_loaded else
+               "With no load history it cannot be evidence of anything, so if you "
+               f"disabled it yourself (e.g. a kill-switch drill) it is safe to "
+               f"re-enable:\n    launchctl enable {DOMAIN}/{label}"))
     plist = os.path.join(rundir, f"{label}.plist")
     with open(plist, "w") as f:
         f.write(txt)
+
+    # Emit the kill switch for the label we are ABOUT to arm, before arming it.
+    # This replaces "the maintainer keeps one pre-typed": a hand-kept kill switch
+    # names whatever label was current when it was typed, so bumping LABEL_PREFIX
+    # silently invalidates it, and a stale kill switch during a real incident is a
+    # failure of the safety system itself. Generated per bootstrap, it cannot go
+    # stale.
+    ks = kill_switch_for(label)
+    ks_path = os.path.join(rundir, "KILL-SWITCH.sh")
+    with open(ks_path, "w") as f:
+        f.write(f"#!/bin/sh\n# Disarms {label}. Semicolon, not && — see "
+                f"scenarios.kill_switch_for.\n{ks}\n")
+    os.chmod(ks_path, 0o755)
+    print(f"  KILL SWITCH  {ks}\n  (also {ks_path})", flush=True)
+
+    deadman = _arm_deadman(label)
     _lc("bootout", f"{DOMAIN}/{label}")
     r = _lc("bootstrap", DOMAIN, plist)
-    return r.returncode, r.stderr.strip()
+    if r.returncode != 0:
+        # Nothing is armed, so the backstop has nothing to guard.
+        disarm_deadman(deadman)
+        deadman = None
+    return r.returncode, r.stderr.strip(), deadman
 
 
 def supervisor_pid(label):
@@ -574,7 +691,7 @@ def row_sup(kind):
     res["run_pid"], res["gen_token_present"] = run_pid, bool(gen_token)
     time.sleep(1.0)
 
-    rc, err = install_supervisor(rundir, label)
+    rc, err, deadman = install_supervisor(rundir, label)
     res["bootstrap_rc"] = rc
     if rc != 0:
         res["verdict"] = "INCONCLUSIVE"
@@ -605,7 +722,11 @@ def row_sup(kind):
         except ProcessLookupError:
             pass
 
-    deadline = time.monotonic() + 45
+    # launchd will not respawn inside ThrottleInterval, so the restart cannot be
+    # observed sooner than that — the budget is derived from it rather than left as
+    # a literal 45, which would quietly become the binding constraint if the
+    # throttle were raised again.
+    deadline = time.monotonic() + max(45.0, THROTTLE_INTERVAL * 8)
     while time.monotonic() < deadline:
         if len(read_reconcile_log(rundir)) > res["passes_before"]:
             break
@@ -639,6 +760,10 @@ def row_sup(kind):
               and any(a and a.startswith("reap") for a in actions))
 
     _lc("bootout", f"{DOMAIN}/{label}")
+    # Only now, with the job actually gone. Disarming earlier would drop the
+    # backstop while the supervisor was still armed. If the row raised before
+    # reaching here, the dead-man fires instead — which is the point of it.
+    res["deadman_disarmed"] = disarm_deadman(deadman)
     if kind == "readopt":
         sup(rundir, "stop", timeout=90)
     checks = check_invariants(rundir, gen_token=gen_token,
