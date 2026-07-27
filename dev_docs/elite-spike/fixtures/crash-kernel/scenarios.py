@@ -19,6 +19,7 @@ import json
 import os
 import plistlib
 import pwd
+import re
 import shutil
 import signal
 import subprocess
@@ -1408,9 +1409,50 @@ def environment():
     }
 
 
+# The kill sheet names rows that this fixture implements under other names. Kept
+# explicit so a coverage audit does not conclude they are missing — that ambiguity
+# is part of why the takeover gap below went unnoticed for so long.
+ROW_ALIASES = {
+    "G1": "T2", "G2": "T3", "G3": "T5",          # DB<->spawn gate windows
+    "Saga1": "T7", "Saga2": "T8",                # saga crash points
+    "Sup-benign": "Sup-readopt + Sup-smoke",     # benign restart / benign first start
+}
+
+
+def assert_crash_point_coverage():
+    """Every armed crash point must have a row driving it.
+
+    `kernel.takeover_publish` armed takeover.pre_commit and takeover.post_commit
+    from the day it was written and NOTHING drove either, which left two named
+    falsifiers (torn transition, superseded generation acted on) untested while the
+    matrix read as complete. It was found by hand. This makes the next one fail
+    loudly instead: an armed point with no row is a silent hole in the matrix, and
+    a matrix with a silent hole is worse than a short one, because it reads as
+    coverage.
+    """
+    armed = set()
+    for fn in ("kernel.py", "supervisor.py"):
+        with open(os.path.join(HERE, fn)) as f:
+            armed |= set(re.findall(r'crash\("([^"]+)"\)', f.read()))
+    driven = {point for _, point, _ in CRASH_POINTS}
+    undriven = sorted(armed - driven)
+    if undriven:
+        raise RuntimeError(
+            f"armed crash points with no row: {undriven}. Add a CRASH_POINTS entry "
+            "for each, or remove the crash() call. An armed-but-undriven point "
+            "makes the matrix look complete when it is not.")
+    orphan_rows = sorted(driven - armed)
+    if orphan_rows:
+        raise RuntimeError(
+            f"rows driving crash points that are not armed anywhere: {orphan_rows}. "
+            "The row would inject nothing and pass vacuously.")
+    return {"armed_crash_points": sorted(armed), "aliases": ROW_ALIASES}
+
+
 def main():
     only = sys.argv[1:] or None
-    results = {"environment": environment(), "rows": {}}
+    coverage = assert_crash_point_coverage()
+    results = {"environment": {**environment(), "coverage": coverage}, "rows": {}}
 
     def want(name):
         return only is None or name in only

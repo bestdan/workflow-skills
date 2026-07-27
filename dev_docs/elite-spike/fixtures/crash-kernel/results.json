@@ -3,6 +3,30 @@
     "agent_uid_provisioned": true,
     "boot_session_present": true,
     "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "coverage": {
+      "aliases": {
+        "G1": "T2",
+        "G2": "T3",
+        "G3": "T5",
+        "Saga1": "T7",
+        "Saga2": "T8",
+        "Sup-benign": "Sup-readopt + Sup-smoke"
+      },
+      "armed_crash_points": [
+        "activate.post_commit",
+        "activate.pre_commit",
+        "prepare.post_commit",
+        "prepare.pre_commit",
+        "reap.post_zero",
+        "spawn.post_spawn",
+        "stop_intent.post_commit",
+        "stop_intent.pre_commit",
+        "takeover.post_commit",
+        "takeover.pre_commit",
+        "terminalize.post_commit",
+        "terminalize.pre_commit"
+      ]
+    },
     "domain_mode": "uid",
     "macos": "26.4.1",
     "pragmas": {
@@ -271,8 +295,8 @@
         }
       },
       "row": "Idem",
-      "run_at": "2026-07-27T13:38:03+0100",
-      "rundir": "<TMPDIR>/probe5.r0zsxmr1",
+      "run_at": "2026-07-27T15:03:55+0100",
+      "rundir": "<TMPDIR>/probe5.ambp97rp",
       "verdict": "PASS"
     },
     "IdemConflict": {
