@@ -102,6 +102,20 @@ def gql(key, query, variables=None):
     return payload["data"]
 
 
+def terminal_passes(include_canceled):
+    """(state_type, timestamp_field) pairs to sweep.
+
+    "duplicate" is its own terminal state type in Linear, not a flavour of
+    "canceled" — an issue closed as a duplicate matches neither of the other two
+    filters. Omitting it means duplicate-closed issues can never be archived and
+    consume the workspace cap permanently. They carry canceledAt like a cancel does.
+    """
+    passes = [("completed", "completedAt")]
+    if include_canceled:
+        passes += [("canceled", "canceledAt"), ("duplicate", "canceledAt")]
+    return passes
+
+
 def find(key, team, project, state_type, ts_field, cutoff):
     team_field = "id" if UUID_RE.match(team) else "name"  # UUID team id, else name
     var_decl = ", $project: ID" if project else ""
@@ -146,7 +160,7 @@ def main():
     ap.add_argument(
         "--include-canceled",
         action="store_true",
-        help="Also sweep Canceled issues (by canceledAt). Default: Done only.",
+        help="Also sweep Canceled and Duplicate issues (by canceledAt). Default: Done only.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."
@@ -162,9 +176,7 @@ def main():
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
-    passes = [("completed", "completedAt")]
-    if args.include_canceled:
-        passes.append(("canceled", "canceledAt"))
+    passes = terminal_passes(args.include_canceled)
 
     candidates = []
     for state_type, ts_field in passes:
@@ -173,7 +185,7 @@ def main():
             candidates.append(issue)
 
     scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
-    types = "Done + Canceled" if args.include_canceled else "Done"
+    types = "Done + Canceled + Duplicate" if args.include_canceled else "Done"
     print(f"Cutoff: {cutoff}  ({scope}, {types})\n")
 
     if not candidates:

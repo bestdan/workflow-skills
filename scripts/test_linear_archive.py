@@ -103,5 +103,28 @@ class FindQueryTests(unittest.TestCase):
         self.assertIn("team: { id: { eq: $team } }", uuid_query)
 
 
+class TerminalPassesTests(unittest.TestCase):
+    def test_default_sweeps_done_only(self):
+        self.assertEqual(
+            linear_archive.terminal_passes(False), [("completed", "completedAt")]
+        )
+
+    def test_include_canceled_also_sweeps_duplicate(self):
+        """Linear's `duplicate` is a distinct terminal state type, not a flavour of
+        `canceled`. Omitting it strands duplicate-closed issues: they match neither
+        the completed nor the canceled filter, so they can never be archived and
+        consume the workspace issue cap forever."""
+        passes = linear_archive.terminal_passes(True)
+        self.assertIn(("duplicate", "canceledAt"), passes)
+        self.assertEqual(
+            passes,
+            [
+                ("completed", "completedAt"),
+                ("canceled", "canceledAt"),
+                ("duplicate", "canceledAt"),
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

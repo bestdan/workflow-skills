@@ -1,7 +1,7 @@
 # linear handler — /archive-tasks flow
 
 Invoked from `/archive-tasks` when `handler: linear` is configured. Retires
-terminal-state Linear issues (`completed`/`canceled` state types) older than the
+terminal-state Linear issues (`completed`/`canceled`/`duplicate` state types) older than the
 resolved threshold so the workspace stays under Linear's **free-plan cap of 250
 _active_ issues** — archived issues are unlimited and excluded from the cap.
 
@@ -149,10 +149,15 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
 5. **Cutoff & the canceled pass.** `$cutoff` is `now − N days` as an ISO-8601
    string (`DateTimeOrDuration`). Run the query once per terminal type **× per
    configured project** (§3's loop): `completed` filtered on `completedAt`, and —
-   only if the user wants canceled work swept too — `canceled` filtered on
-   `canceledAt`. An issue missing the relevant timestamp is skipped (never archive
-   on an unknown date). Collect each match's UUID `id` and `identifier` into the
-   unioned candidate set (dedupe by `id`).
+   only if the user wants canceled work swept too — `canceled` **and `duplicate`**,
+   both filtered on `canceledAt`. An issue missing the relevant timestamp is skipped
+   (never archive on an unknown date). Collect each match's UUID `id` and
+   `identifier` into the unioned candidate set (dedupe by `id`).
+
+   > **`duplicate` is a distinct state type, not a flavour of `canceled`.** An issue
+   > closed as a duplicate matches neither the `completed` nor the `canceled` filter,
+   > so omitting this pass means duplicate-closed issues can never be archived and
+   > consume the workspace cap permanently. They carry `canceledAt` like a cancel does.
 
 > **In-session alternative (no key for the query).** If you are already in an
 > agent session with the Linear MCP, you _can_ do the read half over the MCP:
@@ -219,7 +224,7 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
 # Archive them:
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10 --apply
 
-# Scope to a project and also sweep Canceled:
+# Scope to a project and also sweep Canceled + Duplicate:
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
   --project <uuid> --include-canceled --apply
 ```
