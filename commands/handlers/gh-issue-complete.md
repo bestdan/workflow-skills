@@ -52,24 +52,31 @@ This phase takes, in addition to the identifier:
    otherwise report the auth failure. Either way **stop** — do not fall back
    to another handler.
 
-2. **Resolve the issue.** Call:
+2. **Resolve the issue.** Normalize the identifier first — strip a leading `#`
+   so both `142` and `#142` work — and pass it quoted; an unquoted `#`-leading
+   token turns the rest of the shell line into a comment. Then call:
 
    ```bash
-   gh issue view <n> --json number,title,state,stateReason [--repo <repo>]
+   gh issue view "<n>" --json number,title,state,stateReason [--repo <repo>]
    ```
 
-   If the identifier doesn't resolve, stop and report "no issue found for
-   `<identifier>`".
+   If `gh` reports the issue does not exist, stop and report "no issue found
+   for `<identifier>`". On any **other** non-zero exit — permission, wrong
+   repo, network, rate limit — stop and surface `gh`'s own error verbatim; do
+   not report it as not-found.
 
 3. **Idempotence check.** GitHub issues carry a `state` (`OPEN`/`CLOSED`) and,
-   when closed, a `stateReason` (`COMPLETED` or `NOT_PLANNED`). If `state` is
-   already `CLOSED`, **stop here** — do not write. The two closed reasons get
-   **distinct** reports (a not-planned issue is not complete, and this flow
-   never silently resurrects one):
+   when closed, a `stateReason` (`COMPLETED`, `NOT_PLANNED`, or `DUPLICATE`).
+   If `state` is already `CLOSED`, **stop here** — do not write. The closed
+   reasons get **distinct** reports (a not-planned or duplicate issue is not
+   complete, and this flow never silently resurrects one):
    - `stateReason: COMPLETED` (or absent/null on an older closed issue — treat
      as completed) → "`#<n>` is already complete — no change made."
    - `stateReason: NOT_PLANNED` → "`#<n>` is closed as not planned — not
-     changing it. Reopen it first (`gh issue reopen <n>`) if you really mean
+     changing it. Reopen it first (`gh issue reopen "<n>"`) if you really mean
+     to complete it."
+   - `stateReason: DUPLICATE` → "`#<n>` is closed as a duplicate — not
+     changing it. Reopen it first (`gh issue reopen "<n>"`) if you really mean
      to complete it."
 
 4. **`--dry-run` and confirmation.**
@@ -93,7 +100,7 @@ This phase takes, in addition to the identifier:
    the caller contract:
 
    ```bash
-   gh issue close <n> --reason completed [--comment "<comment_body>"] [--repo <repo>]
+   gh issue close "<n>" --reason completed [--comment "<comment_body>"] [--repo <repo>]
    ```
 
    - `comment_body` omitted → pass `--comment "Completed via /complete-task"`.
@@ -101,6 +108,12 @@ This phase takes, in addition to the identifier:
    - `comment_body` set to the explicit no-comment signal (`""`) → omit
      `--comment` entirely; `gh issue close` still closes the issue with no
      comment posted.
+
+   When `comment_body` is multi-line or may contain quotes, backticks, or
+   `$(...)`, write it to a temp file first and interpolate from there rather
+   than inlining it into the command — same reason as `gh-issue.md` step 2.
+   (`gh issue close` has no `--comment-file`, so the temp file feeds
+   `--comment`; it does not replace the flag.)
 
    `--reason completed` is what makes this a genuine completion rather than a
    plain close — it is the mechanical analogue of `linear-complete.md` setting

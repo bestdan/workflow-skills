@@ -38,7 +38,8 @@ drift.
 ## Arguments
 
 - **`<identifier>`** (required) — the tracker's issue identifier (e.g. `PRE-123`
-  for Linear). No default; the command trusts exactly the id it is given.
+  for Linear, `142` or `#142` for gh-issue). No default; the command trusts
+  exactly the id it is given.
 - **`--dry-run`** — print the planned transition and stop. Change nothing.
 
 ## 1. Resolve the handler
