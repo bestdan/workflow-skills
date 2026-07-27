@@ -1,17 +1,23 @@
 # Probe 5 — Baseline crash-transaction kernel
 
-**Flat-file kernel: FALSIFIED → storage redirect taken. v5.1 fixture RE-RUN
-2026-07-27 under the real uid domain → still INCONCLUSIVE, but for a different
-and much smaller reason.** The 2026-07-23 run was inconclusive because the
-dedicated `agent` uid did not exist, so invariants 4/5/6 were never exercised and
-six rows were BLOCKED. That gap is now closed: a dedicated agent account was
-provisioned on a second machine and **all 28 rows were re-earned against the
-escape-proof uid domain** — 25 PASS, and no degraded-mode evidence remains in
-`results.json`. What still blocks confirmation is narrower: **mid-write ENOSPC/EIO
-is untested**, and **reboot/power-loss is untested by construction and can never
-be passed here**. See Results → Classification; do not read 25/28 as covering
-durability. The fixture also caught a real v5.1 defect: the re-adopt rule
-false-reaps any run that forks a worker (see Results → Finding).
+**Flat-file kernel: FALSIFIED → storage redirect taken. v5.1 fixture →
+CONFIRMED 2026-07-27, in the kill sheet's specific and limited sense: _not
+falsified in the tested process-crash environment_. That is the ceiling, not
+"proven correct", and it is explicitly NOT a power-loss durability claim.**
+
+The 2026-07-23 run was INCONCLUSIVE because the dedicated `agent` uid did not
+exist, so invariants 4/5/6 were never exercised and six rows were BLOCKED. All 28
+rows have since been earned against the real escape-proof uid domain, in **one
+pass at a single clean fixture revision (`c5eb8fd`)**: **26 PASS, 1
+DOCUMENTED-LIMITATION (`Uid`, explicitly not a falsifier), 1 BLOCKED (`PL`, never
+passable here)**.
+
+**Reboot/power-loss durability is untested and remains inconclusive by
+construction.** So is EIO proper (bad media). Do not read 26/28 as covering
+either. See Results → Classification.
+
+The fixture also caught a real v5.1 defect: the re-adopt rule false-reaps any run
+that forks a worker (see Results → Finding).
 Four review rounds falsified the hand-rolled flat-file design (v1–v4)
 on the same two things — exact-once ordered registry sequence under crash, and
 macOS advisory-lock liveness; prior-art research (`prior-art-research.md`)
@@ -161,17 +167,17 @@ kernel** (falsified four times).
 produced here. The 2026-07-23 mac mini run is superseded and retained only as
 history below.
 
-| Fact                      | Value                                                                                                                                                           |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fixture revision          | `3ea2d0f` on `bestdan/elite-probe5-crash-kernel`                                                                                                                |
-| Interpreter / SQLite      | Python **3.12.13**, SQLite **3.53.4**, Homebrew stock build via `/opt/homebrew/opt/python@3.12/bin/python3.12`                                                  |
-| Pragmas actually honoured | `journal_mode=wal`, `synchronous=2` (FULL), `fullfsync=1` — read from an on-disk DB                                                                             |
-| Apple system SQLite       | **refused** — `kernel.assert_stock_sqlite()` fails closed on the CLT interpreter, per prior-art §1                                                              |
-| launchd                   | real per-user domain `gui/501`, `KeepAlive`, `bootstrap` rc=0 **unsandboxed** (sandboxed `launchctl` and `ps` both fail; the orchestrator must run unsandboxed) |
-| Incarnation identity      | Probe 2's libproc `p_uniqueid` reader, copied in unmodified; non-null on this host                                                                              |
-| `kern.bootsessionuuid`    | present                                                                                                                                                         |
-| **`agent` uid**           | **PRESENT — `uid=502(agent) gid=20(staff) groups=staff,apagent`, not `admin`, zero sudo**                                                                       |
-| Containment domain used   | **`uid` — the real, escape-proof primitive**                                                                                                                    |
+| Fact                      | Value                                                                                                                                                                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fixture revision          | **`c5eb8fd`** on `bestdan/elite-probe5-crash-kernel`, clean tree — the revision that PRODUCED the evidence, not HEAD. Recorded per row in `results.json` as `fixture_revision`/`fixture_dirty`, so the binding is checkable rather than asserted here. |
+| Interpreter / SQLite      | Python **3.12.13**, SQLite **3.53.4**, Homebrew stock build via `/opt/homebrew/opt/python@3.12/bin/python3.12`                                                                                                                                         |
+| Pragmas actually honoured | `journal_mode=wal`, `synchronous=2` (FULL), `fullfsync=1` — read from an on-disk DB                                                                                                                                                                    |
+| Apple system SQLite       | **refused** — `kernel.assert_stock_sqlite()` fails closed on the CLT interpreter, per prior-art §1                                                                                                                                                     |
+| launchd                   | real per-user domain `gui/501`, `KeepAlive`, `bootstrap` rc=0 **unsandboxed** (sandboxed `launchctl` and `ps` both fail; the orchestrator must run unsandboxed)                                                                                        |
+| Incarnation identity      | Probe 2's libproc `p_uniqueid` reader, copied in unmodified; non-null on this host                                                                                                                                                                     |
+| `kern.bootsessionuuid`    | present                                                                                                                                                                                                                                                |
+| **`agent` uid**           | **PRESENT — `uid=502(agent) gid=20(staff) groups=staff,apagent`, not `admin`, zero sudo**                                                                                                                                                              |
+| Containment domain used   | **`uid` — the real, escape-proof primitive**                                                                                                                                                                                                           |
 
 The interpreter is not incidental. `python3.12` on this host first resolved to a
 `mise` build under the maintainer's `0700` home, which the agent cannot traverse
@@ -181,10 +187,12 @@ path.
 
 ### The privileged surface (trust boundary)
 
-All root-owned and not agent-writable, verified with `stat` rather than `ls`
-(a token-compressing `ls` wrapper on this host drops the owner column, which is
-the one field this check exists to read — that is how the mac mini's boundary went
-unnoticed):
+Owner, mode and **sha256** per helper — all root-owned and not agent-writable,
+verified with `stat` rather than `ls` (a token-compressing `ls` wrapper on this
+host drops the owner column, which is the one field this check exists to read —
+that is how the mac mini's boundary went unnoticed). The same values are recorded
+per run under `environment.provenance.helpers` in `results.json`, so the surface
+that produced the evidence is checkable and not merely transcribed here:
 
 ```
 root:wheel drwxr-xr-x  /usr/local/probe5
@@ -235,33 +243,67 @@ Full evidence: [`results.json`](./results.json) (sanitized; the fixture handles 
 credentials, so nothing required redaction beyond machine-specific paths).
 Reproduce with `python3.12 scenarios.py` **unsandboxed**.
 
-### Classification: **INCONCLUSIVE**
+### Classification: **CONFIRMED** — with the kill sheet's meaning, not the word's
 
-> **INCONCLUSIVE.** Twenty-five executed process-crash/concurrency rows passed in
-> the real uid containment domain. Mid-write ENOSPC/EIO remains untested. Reboot/
-> power-loss durability is untested and remains inconclusive by construction; this
-> result makes no power-loss durability claim.
+> **CONFIRMED**, defined by the kill sheet as **"not falsified in the tested
+> process-crash environment"** and nothing more. Twenty-six executed
+> process-crash/concurrency rows passed in the real uid containment domain, in one
+> pass at fixture revision `c5eb8fd` with a clean tree. `Uid` is a documented
+> limitation, not a falsifier. **Reboot/power-loss durability is untested and
+> remains inconclusive by construction; this result makes no power-loss durability
+> claim.** EIO proper (bad media) is likewise not injected.
 
-Not falsified, and no longer inconclusive for the 07-23 reason. Invariants **4
-(earned release), 5 (orphan safe-stop, no false kill), 6 (reap convergence or
-fence)** and **8 (sole writer)** now have real evidence: they quantify over a
-containment domain being verifiably emptied, and that domain was exercised for
-real — `Esc` reaped an `exec`'d escapee invisible to token scanning, `Churn`
-converged from 38 live processes, `Writer` got `EACCES` from a genuinely separate
-uid. Under the degraded mode none of those were reachable.
+Verdicts: **26 PASS / 1 DOCUMENTED-LIMITATION / 1 BLOCKED.**
 
-**What still holds it open**, per the kill sheet as written rather than as we
-would like it:
+Invariants **4 (earned release), 5 (orphan safe-stop, no false kill), 6 (reap
+convergence or fence)** and **8 (sole writer)** have real evidence for the first
+time: they quantify over a containment domain being verifiably emptied, and that
+domain was exercised for real — `Esc` reaped an `exec`'d escapee invisible to
+token scanning, `Churn` converged from 38 live processes, `Writer` got `EACCES`
+from a genuinely separate uid. Under the degraded mode none were reachable.
 
-1. **`Io`.** The Method names IO as a required matrix row. Only a _read-only
-   database_ refusal was injected, which fails before the first byte. Genuine
-   ENOSPC/EIO fails **mid-write**, potentially after the WAL has been extended —
-   a different class. Only power-loss carries an explicit permanent exemption, so
-   this should be either tested or excluded by a **ratified scope amendment**, not
-   silently downgraded to a caveat.
-2. **`PL`.** Inconclusive by construction and **never** passed. `SIGKILL` cannot
-   prove power-loss durability, for SQLite exactly as for flat files. The win is
-   inheriting SQLite's crash-VFS corpus, not a hand-built one.
+#### What CONFIRMED here does not mean
+
+1. **Not power-loss durable.** `PL` is inconclusive by construction and **never**
+   passed. `SIGKILL` cannot prove power-loss durability, for SQLite exactly as for
+   flat files. The win is inheriting SQLite's crash-VFS corpus, not a hand-built
+   one. A green matrix says nothing about this row.
+2. **Not full IO coverage.** `Io` now injects a genuine ENOSPC that struck _after_
+   the WAL had been extended, and the transaction was atomic with
+   `integrity_check` clean. Precisely scoped, that establishes
+   **failure-after-writing-began** — _not_ that an individual `write(2)` was
+   partial, since an earlier write may have succeeded and a later write, sync or
+   allocation failed. Localising to a syscall needs a fault-injecting VFS or a
+   trace. **EIO (bad media) follows distinct SQLite error paths and is untested.**
+3. **Not portable evidence.** Every row is machine-specific. None of this
+   transfers to another host; Part A must be redone per machine.
+4. **Not a uid-changing containment claim.** A helper that acquires a different
+   credential leaves the domain. Documented limitation → containment option 2.
+
+#### Why the verdicts can be trusted more than the previous run's
+
+The first pass at this classification was rejected twice on review, and the
+rejections were right. Three specific weaknesses were fixed before this run:
+
+- **`T11`/`T12` could not tell their boundary from its opposite.** Both used the
+  generic "reached a safe shape" predicate, so a `takeover.pre_commit` crash that
+  wrongly published g+1 — and a `takeover.post_commit` crash that wrongly rolled
+  it back — would both still reach a safe terminal and both still PASS. They now
+  assert the durable post-crash generation, lease state and full
+  `generation_reserved` list, and were verified by feeding each row the other's
+  outcome (both reject).
+- **Reconciliation was never checked for inertness.** It runs at every supervisor
+  start; a second pass that moved state would mean every launchd restart mutates
+  the record, and the crash rows would never have seen it. All 12 now reconcile
+  twice and require seq, event count and lease unchanged.
+- **Recorded ≠ gated.** `Io` reported `wal_grew` without gating on it, so a future
+  ENOSPC striking before any WAL write would still have passed while claiming the
+  mid-write class. Now gated, with the filler's errno checked and verification
+  reopening the database from disk.
+
+An armed crash point with no row is now a hard error (`assert_crash_point_coverage`,
+AST-based across every fixture module), because two takeover boundaries sat armed
+and undriven from the day they were written and were found only by hand.
 
 `Uid` (a uid-changing helper escaping containment) is explicitly a **documented
 limitation pointing at containment option 2, not a falsifier**, and does not hold
@@ -270,36 +312,36 @@ the probe open.
 A reader in a hurry should take this away: **25/28 is not a durability result.**
 Nothing here tests power loss, and one required IO fault class was never injected.
 
-| Row                                  | Verdict                                    | Evidence                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------ | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1 `prepare.pre_commit`              | PASS                                       | Whole-transaction rollback: **no lease and no event published at all**. Safe terminal by vacuity.                                                                                                                                                                                                                                                                                                               |
-| T2 `prepare.post_commit` (G1)        | PASS                                       | `prepared` durable, nothing spawned; reconcile scanned zero → `launch_aborted` → terminal.                                                                                                                                                                                                                                                                                                                      |
-| T3 `spawn.post_spawn` (G2)           | PASS                                       | Live blocked _unrecorded_ child; supervisor death closed the gate, child exited on **EOF** ("exit, don't go"); reconcile verified zero → terminal.                                                                                                                                                                                                                                                              |
-| T4 `activate.pre_commit`             | PASS                                       | Rollback; lease stayed `prepared`; recovered as G1.                                                                                                                                                                                                                                                                                                                                                             |
-| T5 `activate.post_commit` (G3)       | PASS                                       | `active` durable, gate never opened; child exited on EOF; reap-to-zero → terminal.                                                                                                                                                                                                                                                                                                                              |
-| T6 `stop_intent.pre_commit`          | PASS                                       | Rollback left a **healthy `active` run**; reconcile **re-adopted** it. Correctly _not_ killed — the stop is simply retried.                                                                                                                                                                                                                                                                                     |
-| T7 `stop_intent.post_commit` (Saga1) | PASS                                       | Intent durable, nothing signalled; reconcile resumed the saga → zero → terminal.                                                                                                                                                                                                                                                                                                                                |
-| T8 `reap.post_zero` (Saga2)          | PASS                                       | Domain empty, `terminal` uncommitted; reconcile re-observed zero and terminalized. No double-release.                                                                                                                                                                                                                                                                                                           |
-| T9 `terminalize.pre_commit`          | PASS                                       | Rollback; lease stayed fenced in `stop_intent`; retried to terminal.                                                                                                                                                                                                                                                                                                                                            |
-| T10 `terminalize.post_commit`        | PASS                                       | Committed terminal; replay inert.                                                                                                                                                                                                                                                                                                                                                                               |
-| Idem                                 | PASS                                       | Replay returned the **existing seq**, `replayed=True`, and the counter did **not** advance (1→1); the next event took seq 2. No gap.                                                                                                                                                                                                                                                                            |
-| IdemConflict                         | PASS                                       | Same `idem_key` with a different payload raised and rolled the whole transaction back; counter unchanged.                                                                                                                                                                                                                                                                                                       |
-| Race                                 | PASS                                       | Two concurrent launches, **exactly one** rc=0, exactly one `generation_reserved`. Admission gate + `BEGIN IMMEDIATE`.                                                                                                                                                                                                                                                                                           |
-| Pid                                  | PASS                                       | A recorded tuple bearing a live pid but a foreign `p_uniqueid` was **refused after kqueue attach** ("identity changed after attach"); the genuine tuple adopted. Now exercised against a subject **inside the real containment domain** (an agent-uid run measured through `p5-measure`), not a maintainer-owned sleeper. _Real PID wraparound was not forced_ — this exercises the guard the reuse would trip. |
-| Priv                                 | PASS                                       | `signal_all` raises `ReaperRefused` when euid is 0. Exercised with a mocked euid; the fixture never acquires root.                                                                                                                                                                                                                                                                                              |
-| NoConv                               | PASS                                       | A domain that never empties → `converged=False`, `terminalize()` **refused**, lease left fenced in `stop_intent`. Never terminalized on non-convergence.                                                                                                                                                                                                                                                        |
-| Io                                   | **INCONCLUSIVE**                           | Only a _read-only-database_ refusal was injected, which fails before the first byte. That sub-case failed atomically (counter and event count unchanged), but genuine **ENOSPC/EIO fail mid-write**, potentially after the WAL has been extended — a different class, and untested. No small-disk-image or fault-injecting VFS harness was built.                                                               |
-| Sup-readopt                          | PASS                                       | Supervisor SIGKILLed, launchd `KeepAlive` restarted it, reconciliation chose `readopt`; **run and its forked descendant both still alive**, lease still `active`, `stop_intent=0`. No false kill.                                                                                                                                                                                                               |
-| Sup-orphan                           | PASS                                       | Run SIGKILLed leaving a live descendant; reconciliation chose `reap_dead_run`, reaped to zero, terminalized. **Dead run ≠ dead workers** confirmed.                                                                                                                                                                                                                                                             |
-| T11 `takeover.pre_commit`            | PASS                                       | Rollback: `stop_intent` had committed but **generation 2 was never published** (`generations_reserved=[1]`). Reconcile reaped to convergence → terminal.                                                                                                                                                                                                                                                        |
-| T12 `takeover.post_commit`           | PASS                                       | `gen=2/prepared` durable, `generations_reserved=[1,2]`; reconcile took the `prepared` branch → `launch_aborted` → terminal. g+1 published but never activated, so no superseded generation was acted on.                                                                                                                                                                                                        |
-| Esc                                  | PASS                                       | A `setsid` + double-fork + **`exec`** descendant, invisible to token scanning (`escapee_hidden_from_token_scan=true`), was still reaped to zero by uid-wide `kill(-1)`. **The result degraded mode cannot produce.**                                                                                                                                                                                            |
-| Churn                                | PASS                                       | 38 live processes at reap time → converged to zero, lease terminal. A reaper that only signalled the set it enumerated would never finish.                                                                                                                                                                                                                                                                      |
-| Writer                               | PASS                                       | `write_probe=EACCES` from the agent uid. **Sole-writer is now enforced, not architectural.**                                                                                                                                                                                                                                                                                                                    |
-| Uid                                  | **DOCUMENTED-LIMITATION**                  | A uid-changing helper leaves the domain. Not reachable from the agent's own authority here (`sudo -l -U agent` → not allowed), so it needs an external privileged spawner. Recorded as admitted-undetectable rather than claimed-detected. **Not a falsifier** (kill sheet) → containment option 2 if ever in scope.                                                                                            |
-| Tw                                   | PASS                                       | Three live processes in; reap converged; **`domain_at_publish=[]`** — generation g verified empty _at the moment_ g+1 was published, not merely afterwards. Order checked in `state.db`, not just end state.                                                                                                                                                                                                    |
-| Sup-smoke                            | PASS                                       | Disarmed first contact (`KeepAlive=false`): one reconcile pass, `readopt`, run and descendant alive; supervisor then SIGKILLed and launchd confirmed **not** to relaunch it. Exercises the cross-uid `p5-measure` path from a real launchd job — which no other row touches.                                                                                                                                    |
-| PL                                   | **BLOCKED / inconclusive by construction** | Reboot/power-loss. `SIGKILL` cannot prove it; no VM or loopback power-fail harness. Per the kill sheet this is **never** passed.                                                                                                                                                                                                                                                                                |
+| Row                                  | Verdict                                    | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 `prepare.pre_commit`              | PASS                                       | Whole-transaction rollback: **no lease and no event published at all**. Safe terminal by vacuity.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| T2 `prepare.post_commit` (G1)        | PASS                                       | `prepared` durable, nothing spawned; reconcile scanned zero → `launch_aborted` → terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| T3 `spawn.post_spawn` (G2)           | PASS                                       | Live blocked _unrecorded_ child; supervisor death closed the gate, child exited on **EOF** ("exit, don't go"); reconcile verified zero → terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| T4 `activate.pre_commit`             | PASS                                       | Rollback; lease stayed `prepared`; recovered as G1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| T5 `activate.post_commit` (G3)       | PASS                                       | `active` durable, gate never opened; child exited on EOF; reap-to-zero → terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| T6 `stop_intent.pre_commit`          | PASS                                       | Rollback left a **healthy `active` run**; reconcile **re-adopted** it. Correctly _not_ killed — the stop is simply retried.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T7 `stop_intent.post_commit` (Saga1) | PASS                                       | Intent durable, nothing signalled; reconcile resumed the saga → zero → terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| T8 `reap.post_zero` (Saga2)          | PASS                                       | Domain empty, `terminal` uncommitted; reconcile re-observed zero and terminalized. No double-release.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| T9 `terminalize.pre_commit`          | PASS                                       | Rollback; lease stayed fenced in `stop_intent`; retried to terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| T10 `terminalize.post_commit`        | PASS                                       | Committed terminal; replay inert.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Idem                                 | PASS                                       | Replay returned the **existing seq**, `replayed=True`, and the counter did **not** advance (1→1); the next event took seq 2. No gap.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| IdemConflict                         | PASS                                       | Same `idem_key` with a different payload raised and rolled the whole transaction back; counter unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Race                                 | PASS                                       | Two concurrent launches, **exactly one** rc=0, exactly one `generation_reserved`. Admission gate + `BEGIN IMMEDIATE`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Pid                                  | PASS                                       | A recorded tuple bearing a live pid but a foreign `p_uniqueid` was **refused after kqueue attach** ("identity changed after attach"); the genuine tuple adopted. Now exercised against a subject **inside the real containment domain** (an agent-uid run measured through `p5-measure`), not a maintainer-owned sleeper. _Real PID wraparound was not forced_ — this exercises the guard the reuse would trip.                                                                                                                                                                             |
+| Priv                                 | PASS                                       | `signal_all` raises `ReaperRefused` when euid is 0. Exercised with a mocked euid; the fixture never acquires root.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| NoConv                               | PASS                                       | A domain that never empties → `converged=False`, `terminalize()` **refused**, lease left fenced in `stop_intent`. Never terminalized on non-convergence.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Io                                   | PASS                                       | Two sub-cases. (a) read-only dir: refusal before the first byte, atomic. (b) **genuine ENOSPC** on a 6MB HFS+ `hdiutil` volume filled to 40960 bytes (filler `errno=28` verified), then a transaction far larger than the remaining space: **WAL 70072 → 110592 bytes before the failure**, so the write had begun; transaction atomic (events 1→1, seq 1→1) and `integrity_check` **ok**, verified from a reopened connection. Gated on `wal_grew`, not merely reporting it. **Scope: establishes failure-after-writing-began, not a partial `write(2)`. EIO (bad media) still untested.** |
+| Sup-readopt                          | PASS                                       | Supervisor SIGKILLed, launchd `KeepAlive` restarted it, reconciliation chose `readopt`; **run and its forked descendant both still alive**, lease still `active`, `stop_intent=0`. No false kill.                                                                                                                                                                                                                                                                                                                                                                                           |
+| Sup-orphan                           | PASS                                       | Run SIGKILLed leaving a live descendant; reconciliation chose `reap_dead_run`, reaped to zero, terminalized. **Dead run ≠ dead workers** confirmed.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| T11 `takeover.pre_commit`            | PASS                                       | Rollback: `stop_intent` had committed but **generation 2 was never published** (`generations_reserved=[1]`). Reconcile reaped to convergence → terminal.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| T12 `takeover.post_commit`           | PASS                                       | `gen=2/prepared` durable, `generations_reserved=[1,2]`; reconcile took the `prepared` branch → `launch_aborted` → terminal. g+1 published but never activated, so no superseded generation was acted on.                                                                                                                                                                                                                                                                                                                                                                                    |
+| Esc                                  | PASS                                       | A `setsid` + double-fork + **`exec`** descendant, invisible to token scanning (`escapee_hidden_from_token_scan=true`), was still reaped to zero by uid-wide `kill(-1)`. **The result degraded mode cannot produce.**                                                                                                                                                                                                                                                                                                                                                                        |
+| Churn                                | PASS                                       | 38 live processes at reap time → converged to zero, lease terminal. A reaper that only signalled the set it enumerated would never finish.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Writer                               | PASS                                       | `write_probe=EACCES` from the agent uid. **Sole-writer is now enforced, not architectural.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Uid                                  | **DOCUMENTED-LIMITATION**                  | A uid-changing helper leaves the domain. Not reachable from the agent's own authority here (`sudo -l -U agent` → not allowed), so it needs an external privileged spawner. Recorded as admitted-undetectable rather than claimed-detected. **Not a falsifier** (kill sheet) → containment option 2 if ever in scope.                                                                                                                                                                                                                                                                        |
+| Tw                                   | PASS                                       | Three live processes in; reap converged; **`domain_at_publish=[]`** — generation g verified empty _at the moment_ g+1 was published, not merely afterwards. Order checked in `state.db`, not just end state.                                                                                                                                                                                                                                                                                                                                                                                |
+| Sup-smoke                            | PASS                                       | Disarmed first contact (`KeepAlive=false`): one reconcile pass, `readopt`, run and descendant alive; supervisor then SIGKILLed and launchd confirmed **not** to relaunch it. Exercises the cross-uid `p5-measure` path from a real launchd job — which no other row touches.                                                                                                                                                                                                                                                                                                                |
+| PL                                   | **BLOCKED / inconclusive by construction** | Reboot/power-loss. `SIGKILL` cannot prove it; no VM or loopback power-fail harness. Per the kill sheet this is **never** passed.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Finding — a real defect in draft v5.1, caught by the fixture
 
@@ -345,10 +387,12 @@ The v5.1 transaction kernel is buildable as specified and the old flat-file
 failure class — exact-once ordered sequence under crash — did not reappear in any
 row. `BEGIN IMMEDIATE` made it structural, as the redirect predicted.
 
-**Not established:** genuine **mid-write IO failure** (`Io` injected only a
-pre-write refusal), and **power-loss durability**, which is untestable here by
-construction and is _never_ passed. A uid-changing helper remains outside the
-containment domain — a documented limitation, not a gap in the evidence.
+**Not established:** **power-loss durability**, untestable here by construction and
+_never_ passed; **EIO (bad media)**, which follows distinct SQLite error paths and
+is not injected; and **syscall-level localisation** of the IO failure — `Io`
+establishes that the failure came after writing began, not that a particular
+`write(2)` was torn. A uid-changing helper remains outside the containment domain
+— a documented limitation, not a gap in the evidence.
 
 **Caveats a future reader should not lose:**
 
@@ -377,24 +421,25 @@ per-machine provisioning record): the `agent` account, the three scoped
 (`kernel.takeover_publish`, with crash points either side now driven by T11/T12),
 and the full 28-row re-run under `PROBE5_DOMAIN_MODE=uid`.
 
-**Still required to close:**
+**Done since:** the `Io` ENOSPC harness; the armed-crash-point coverage check
+(AST-based, aliases mapped: G1–G3 = T2/T3/T5, Saga1/2 = T7/T8, Sup-benign =
+Sup-readopt + Sup-smoke); the takeover boundary rows T11/T12; per-row revision and
+helper provenance in `results.json`; and the single-revision run of record.
 
-1. **`Io`** — build a genuine mid-write ENOSPC/EIO harness (`hdiutil` image or a
-   fault-injecting VFS), **or** ratify a scope amendment excluding it. It is a
-   named matrix row; only power-loss carries an explicit permanent exemption, so
-   it must not be silently downgraded to a caveat.
-2. **A coverage check that fails when an armed crash point has no row.** The
-   takeover boundaries sat armed and undriven from the day they were written and
-   were found by hand. Aliases should be mapped explicitly: G1–G3 = T2/T3/T5,
-   Saga1/2 = T7/T8, Sup-benign = Sup-readopt + Sup-smoke.
-3. **Ratify the v5.2 reconciliation fix** above. `Sup-readopt` now gives it real
-   evidence under the uid domain: the domain held three processes at reconcile
-   time and the supervisor adopted anyway, which is the whole content of the fix.
-4. **Re-verify Probes 1 and 4.** Both certify an `agent` account on a host where
+**Still open — these do not gate the classification but are not done:**
+
+1. **Ratify the v5.2 reconciliation fix** in `draft-state-machine.md`.
+   `Sup-readopt` now gives it real uid-domain evidence: the domain held three
+   processes at reconcile time and the supervisor adopted anyway, which is the
+   entire content of the fix.
+2. **§7a row 5** of `dev_docs/auto-pilot-e-lite-design-2026-07-21.md` still
+   records the old state.
+3. **Re-verify Probes 1 and 4.** Both certify an `agent` account on a host where
    that uid was later reassigned to a human; their evidence currently asserts
    something untrue of that machine.
-5. **Part E teardown** — see `probe5-todo.md`. Leave the `agent` account in place.
+4. **Part E teardown** — see `probe5-todo.md`. Leave the `agent` account in place.
 
-Until (1)–(3), **no dependent Stage-2 work should assume power-loss durability or
-mid-write IO atomicity.** Invariants 4/5/6/8 are now supported by real uid-domain
-evidence and are no longer the blocker they were on 07-23.
+**Standing constraint for dependent Stage-2 work:** nothing here licenses an
+assumption of power-loss durability or of EIO behaviour. Invariants 4/5/6/8 are
+supported by real uid-domain evidence and are no longer the blocker they were on
+07-23.
