@@ -448,19 +448,58 @@ not transfer unexamined.
 
 ## Part E — teardown
 
+**DONE on Daniel's MacBook Pro, 2026-07-27.** Verified after each step; see the
+notes below for the two places the commands as written are wrong.
+
 This is a disposable spike (§0a rule 4 — spike code is never promoted by renaming).
 None of it should outlive the probe.
 
 ```sh
 launchctl list | grep probe5     # expect nothing (matches both label generations)
 pkill -f runsurrogate.py; pkill -f 'supervisor.py daemon'
+sudo rm -rf /usr/local/probe5    # helper tree BEFORE the sudoers fragment
 sudo rm -f /etc/sudoers.d/probe5
-sudo rm -rf /usr/local/probe5
 rm -rf "$TMPDIR"/probe5.*
 ```
 
+**Order matters, and the original snippet had it backwards.** Removing
+`/etc/sudoers.d/probe5` first takes the NOPASSWD helper path with it, so anything
+still depending on it to reach `/usr/local/probe5` is stranded. Remove the helper
+tree first, or both in one invocation. (A maintainer with their own admin sudo
+gets away with either order — which is exactly why the wrong one survives review.)
+
+**Do not `launchctl disable` the `com.probe5r2.sup.*` labels at teardown.** The
+instinct is to disable them as a tripwire the way the incident's `com.probe5.sup.*`
+labels were, but these have load history from the passing rows, and the rule in
+Gotchas below then forbids re-enabling them without investigation. Boot out only
+and leave the override database alone. `com.probe5r2.drill` is a sacrificial decoy
+and stays `disabled` — that is its correct final state.
+
 Leave the `agent` account in place — Stage 1 and Stage 2 both need it, and deleting
 and recreating it is what produced the uid-reassignment hazard in the first place.
+
+### What was actually removed, 2026-07-27
+
+- Booted out `com.probe5r2.sup.{readopt,orphan,smoke}`; all three returned
+  `rc=3 No such process` (already unloaded). Override DB left untouched:
+  `readopt`/`orphan` still `enabled`, `drill` still `disabled`.
+- `/usr/local/probe5` (root:wheel 755, five files) and `/etc/sudoers.d/probe5`
+  (root:wheel 0440) removed by the maintainer at a real tty. `/etc/sudoers.d` is
+  now empty.
+- All 57 `$TMPDIR/probe5.*` rundirs (2.2 MB) deleted **without archiving**. The
+  raw `state.db`/`crashes.jsonl` are redundant against `results.json`, which
+  embeds the full `events` and `lease` dumps per row; the only columns not already
+  committed are per-run host noise (pids, proc uniqueids, boot-session UUIDs). And
+  the process-domain invariants (inv4, escapee containment, launchd relaunch) were
+  measured live and are not re-auditable from a SQLite file regardless. Only 24 of
+  the 57 dirs backed a committed row anyway.
+- Verified after: nothing in `launchctl list`, both paths gone, no rundirs, no
+  probe5 processes, `id agent` intact (uid 502, `staff`+`apagent`, no `admin`)
+  with only `cfprefsd`/`distnoted` running under it, maintainer sessions intact.
+
+Homebrew `python@3.12` was left installed — it is a general tool, not something
+this probe installed for itself. `dev_docs/tasks/probe5-incident-evidence/` also
+stays; it is the incident record and outlives the spike.
 
 ---
 
