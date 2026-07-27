@@ -960,6 +960,25 @@ def environment():
     c.close()
     shutil.rmtree(envdir, ignore_errors=True)
     agent_exists = subprocess.run(["id", "agent"], capture_output=True).returncode == 0
+    # Compute the caveat from what is actually true right now. This used to be a
+    # hardcoded string asserting the agent uid was absent; once the account was
+    # provisioned that text became a lie embedded in every future results.json,
+    # claiming the containment rows had run degraded when they had not.
+    if DOMAIN_MODE == "uid" and agent_exists:
+        caveat = (
+            f"Escape-proof uid domain, agent uid "
+            f"{pwd.getpwnam(reaper.REAP_AS_USER).pw_uid}. Rows recorded under "
+            "domain_mode=uid exercise the real kill(-1) containment primitive; "
+            "rows still marked gentoken do NOT and cannot establish invariants "
+            "4/5/6.")
+    elif not agent_exists:
+        caveat = ("The dedicated `agent` uid does NOT exist on this host. Rows ran "
+                  "in the DEGRADED gen_token domain, which is not escape-proof. "
+                  "Invariants 4, 5 and 6 are NOT established.")
+    else:
+        caveat = ("DOMAIN_MODE=gentoken: degraded, not escape-proof, even though "
+                  "an agent account exists. Invariants 4, 5 and 6 are NOT "
+                  "established by rows run in this mode.")
     return {
         "python": PY,
         "sqlite_version": pragmas["sqlite_version"],
@@ -970,11 +989,7 @@ def environment():
         "boot_session_present": bool(kernel.boot_session()),
         "domain_mode": DOMAIN_MODE,
         "agent_uid_provisioned": agent_exists,
-        "containment_caveat": (
-            "The dedicated `agent` uid does NOT exist on this host; uid 502 now "
-            "belongs to an unrelated human account. All rows ran in the DEGRADED "
-            "gen_token domain, which is not escape-proof. Invariants 4, 5 and 6 "
-            "are therefore NOT established in the sense the kill sheet requires."),
+        "containment_caveat": caveat,
     }
 
 
@@ -1016,10 +1031,44 @@ def main():
     finally:
         final_cleanup()
 
+    # MERGE, never replace. `scenarios.py Esc Tw` used to rewrite results.json
+    # with just those two rows: the 25-row evidence from the full run was
+    # silently destroyed that way in c6cf804 and had to be recovered from git.
+    # A partial run must add to the record, not become it.
+    #
+    # Each row carries the domain mode it actually ran under, because that is
+    # what decides whether it says anything about invariants 4/5/6 — a gentoken
+    # row and a uid row are different claims and must not blur together just by
+    # sharing a file.
     out = os.path.join(HERE, "results.json")
-    with open(out, "w") as f:
-        json.dump(sanitize(results), f, indent=2, sort_keys=True, default=str)
-    print(f"\nwrote {out}")
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    for row in results["rows"].values():
+        row.setdefault("domain_mode", DOMAIN_MODE)
+        row.setdefault("run_at", stamp)
+
+    merged = {"environment": results["environment"], "rows": {}}
+    if os.path.exists(out):
+        try:
+            with open(out) as f:
+                prior = json.load(f)
+            merged["rows"] = prior.get("rows", {})
+            merged["prior_environment"] = prior.get("environment")
+        except (json.JSONDecodeError, OSError) as e:
+            # Do not silently start a fresh file over an unreadable one.
+            raise RuntimeError(
+                f"{out} exists but could not be read ({e}); refusing to "
+                "overwrite it. Move it aside deliberately if that is intended.")
+    replaced = sorted(set(merged["rows"]) & set(results["rows"]))
+    merged["rows"].update(results["rows"])
+
+    tmp = out + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sanitize(merged), f, indent=2, sort_keys=True, default=str)
+    os.replace(tmp, out)
+    print(f"\nwrote {out}  ({len(results['rows'])} row(s) this run, "
+          f"{len(merged['rows'])} total)")
+    if replaced:
+        print(f"  replaced prior evidence for: {', '.join(replaced)}")
 
     print("\n-- summary --")
     for k, v in results["rows"].items():
