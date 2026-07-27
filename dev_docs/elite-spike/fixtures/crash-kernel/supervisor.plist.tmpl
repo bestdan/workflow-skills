@@ -9,6 +9,13 @@
     <string>@DIR@/supervisor.py</string>
     <string>daemon</string>
   </array>
+  <!-- REQUIRED, and not redundant with KeepAlive. KeepAlive=true starts the job
+       implicitly, so this was invisible until the first keepalive=false install:
+       with KeepAlive=false, no RunAtLoad, and no socket/watchpath to launch it on
+       demand, launchd loads the job and never starts it (`state = not running`,
+       `runs = 0`). The disarmed first-contact procedure was therefore not
+       implementable without this key. -->
+  <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><@KEEPALIVE@/>
   <key>ThrottleInterval</key><integer>@THROTTLE@</integer>
   <key>EnvironmentVariables</key>

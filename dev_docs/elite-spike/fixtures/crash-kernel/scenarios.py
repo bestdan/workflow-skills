@@ -731,6 +731,16 @@ def row_sup_smoke():
             pl = plistlib.load(f)
         res["plist_keepalive"] = pl.get("KeepAlive")
         res["plist_throttle"] = pl.get("ThrottleInterval")
+        res["plist_runatload"] = pl.get("RunAtLoad")
+        if pl.get("RunAtLoad") is not True:
+            # Without this launchd loads the job and never starts it, and the row
+            # then fails with "could not read the supervisor pid" — a symptom two
+            # steps from the cause. Name it here instead.
+            res["verdict"] = "INCONCLUSIVE"
+            res["detail"] = {"reason": "installed plist has no RunAtLoad; with "
+                                       "KeepAlive=false nothing would ever start "
+                                       "the job"}
+            return res
         if pl.get("KeepAlive") is not False:
             res["verdict"] = "INCONCLUSIVE"
             res["detail"] = {"reason": "installed plist is not KeepAlive=false; "
@@ -767,8 +777,13 @@ def row_sup_smoke():
         # does, and require the recorded run to be among what is left.
         survivors = domain_for(gen_token).scan()
         run_survivors, sys_daemons = reaper.partition_survivors(survivors)
+        # partition_survivors returns DESCRIBED processes ({"pid", "command"}),
+        # not bare pids — `run_pid in run_survivors` on the dicts is silently
+        # always False.
+        run_survivor_pids = [d["pid"] for d in run_survivors]
         res["domain_after_pass"] = survivors
         res["run_survivors_after_pass"] = run_survivors
+        res["run_survivor_pids"] = run_survivor_pids
         res["system_daemons_after_pass"] = sys_daemons
         st = state_of(rundir)
         res["lease_after_pass"] = st["lease"]
@@ -804,8 +819,8 @@ def row_sup_smoke():
               and all(res["alive_verified"])
               and res["run_still_alive"]
               # the run itself AND its descendant, neither of them a daemon
-              and run_pid in run_survivors
-              and len(run_survivors) >= 2
+              and run_pid in run_survivor_pids
+              and len(run_survivor_pids) >= 2
               and st["lease"]["state"] == "active"
               and st["lease"]["stop_intent"] == 0
               and not res["relaunched_after_kill"]

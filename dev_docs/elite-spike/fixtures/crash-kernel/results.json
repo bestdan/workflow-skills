@@ -18,18 +18,18 @@
   "prior_environment": {
     "agent_uid_provisioned": true,
     "boot_session_present": true,
-    "containment_caveat": "Escape-proof uid domain, agent uid 503. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
     "domain_mode": "uid",
     "macos": "26.4.1",
     "pragmas": {
       "fullfsync": 1,
       "journal_mode": "wal",
-      "sqlite_version": "3.53.3",
+      "sqlite_version": "3.53.4",
       "synchronous": 2
     },
     "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
     "sqlite_build": "Homebrew stock (NOT Apple's system build)",
-    "sqlite_version": "3.53.3"
+    "sqlite_version": "3.53.4"
   },
   "rows": {
     "Churn": {
@@ -735,6 +735,154 @@
       "run_still_alive": true,
       "rundir": "<TMPDIR>/probe5.jnpujdj8",
       "supervisor_pid": 27682,
+      "verdict": "PASS"
+    },
+    "Sup-smoke": {
+      "actions": [
+        "readopt"
+      ],
+      "alive_verified": [
+        true
+      ],
+      "bootstrap_rc": 0,
+      "deadman_disarmed": true,
+      "decisions": [
+        {
+          "action": "readopt",
+          "alive_verified": true,
+          "domain_live": [
+            96933,
+            98752,
+            98773
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "other_domain_procs": [
+            96933,
+            98773
+          ],
+          "recorded_incarnation": true,
+          "repo_key": "repo-a",
+          "state": "active",
+          "stop_intent": 0
+        }
+      ],
+      "domain_after_pass": [
+        96933,
+        98752,
+        98773
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "gen_token_present": true,
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "keepalive": false,
+      "kill_switch_emitted": true,
+      "lease_after_pass": {
+        "gen_token": "P5TOKEN-run-1785153386-98749",
+        "generation": 1,
+        "manifest_digest": "",
+        "repo_key": "repo-a",
+        "run_id": "run-1785153386",
+        "state": "active",
+        "stop_intent": 0,
+        "updated_seq": 2
+      },
+      "passes_after_kill": 1,
+      "pid_after_kill": null,
+      "plist_keepalive": false,
+      "plist_runatload": true,
+      "plist_throttle": 5,
+      "print_after_kill": "worktrees/workflow-skills/probe5-crash-kernel/dev_docs/elite-spike/fixtures/crash-kernel/supervisor.py\n\t\tdaemon\n\t}\n\n\tstdout path = <TMPDIR>/probe5.np0b6449/supervisor.launchd.out\n\tstderr path = <TMPDIR>/probe5.np0b6449/supervisor.launchd.err\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/com.apple.launchd.e0LjUS8L4m/Listeners\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPROBE5_AGENT_UID => 502\n\t\tPROBE5_RECONCILE_LOG => <TMPDIR>/probe5.np0b6449/reconcile.jsonl\n\t\tPROBE5_DB => <TMPDIR>/probe5.np0b6449/state.db\n\t\tPROBE5_REPO => repo-a\n\t\tPROBE5_DOMAIN_MODE => uid\n\t\tXPC_SERVICE_NAME => com.probe5r2.sup.smoke\n\t}\n\n\tdomain = gui/501 [100023]\n\tasid = 100023\n\tminimum runtime = 5\n\texit timeout = 5\n\truns = 1\n\tlast terminating signal = Killed: 9\n\n\tresource coalition = {\n\t\tID = 177660\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tjetsam coalition = {\n\t\tID = 177661\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tspawn type = background (5)\n\tjetsam priority = 40\n\tjetsam memory limit (active) = (unlimited)\n\tjetsam memory limit (inactive) = (unlimited)\n\tjetsamproperties category = daemon\n\tjetsam thread limit = 32\n\tcpumon = default\n\n\tproperties = runatload | inferred program\n}\n",
+      "print_before_kill": "3dblprtb8hl1mpr0000gn/T/probe5.np0b6449/supervisor.launchd.err\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/com.apple.launchd.e0LjUS8L4m/Listeners\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPROBE5_AGENT_UID => 502\n\t\tPROBE5_RECONCILE_LOG => <TMPDIR>/probe5.np0b6449/reconcile.jsonl\n\t\tPROBE5_DB => <TMPDIR>/probe5.np0b6449/state.db\n\t\tPROBE5_REPO => repo-a\n\t\tPROBE5_DOMAIN_MODE => uid\n\t\tXPC_SERVICE_NAME => com.probe5r2.sup.smoke\n\t}\n\n\tdomain = gui/501 [100023]\n\tasid = 100023\n\tminimum runtime = 5\n\texit timeout = 5\n\truns = 1\n\tpid = 98824\n\timmediate reason = speculative\n\tforks = 2\n\texecs = 2\n\tinitialized = 1\n\ttrampolined = 1\n\tstarted suspended = 0\n\tproxy started suspended = 0\n\tchecked allocations = 0 (queried = 1)\n\tchecked allocations reason = no host\n\tchecked allocations flags = 0x0\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 177660\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tjetsam coalition = {\n\t\tID = 177661\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tspawn type = background (5)\n\tjetsam priority = 40\n\tjetsam memory limit (active) = (unlimited)\n\tjetsam memory limit (inactive) = (unlimited)\n\tjetsamproperties category = daemon\n\tjetsam thread limit = 32\n\tcpumon = default\n\n\tproperties = runatload | inferred program\n}\n",
+      "reconcile_passes": 1,
+      "relaunched_after_kill": false,
+      "row": "Sup-smoke",
+      "run_at": "2026-07-27T12:56:46+0100",
+      "run_pid": 98752,
+      "run_still_alive": true,
+      "run_survivor_pids": [
+        98752,
+        98773
+      ],
+      "run_survivors_after_pass": [
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785153386-98749 --descendant",
+          "pid": 98752
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785153386-98749 --descendant",
+          "pid": 98773
+        }
+      ],
+      "rundir": "<TMPDIR>/probe5.np0b6449",
+      "supervisor_pid": 98824,
+      "system_daemons_after_pass": [
+        {
+          "command": "/usr/sbin/distnoted agent",
+          "pid": 96933
+        }
+      ],
+      "throttle_interval": 5,
       "verdict": "PASS"
     },
     "T1": {
