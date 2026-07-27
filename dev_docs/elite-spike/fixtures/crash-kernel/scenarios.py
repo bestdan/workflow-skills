@@ -232,6 +232,14 @@ CRASH_POINTS = [
     ("T8", "reap.post_zero", "stop"),             # == Saga2
     ("T9", "terminalize.pre_commit", "stop"),
     ("T10", "terminalize.post_commit", "stop"),
+    # TAKEOVER is a transition too, and the kill sheet asks for EVERY transition
+    # boundary. kernel.takeover_publish has armed both of these since it was
+    # written, and no row drove either until now: the Tw row tests reap-before-
+    # publish ORDERING and never crashes. That left two named falsifiers
+    # unexercised — a torn transition at pre_commit, and a superseded generation
+    # acted on at post_commit (g+1 published while g's fate is only half-recorded).
+    ("T11", "takeover.pre_commit", "takeover"),
+    ("T12", "takeover.post_commit", "takeover"),
 ]
 
 
@@ -243,6 +251,14 @@ def row_transition_crash(row_id, point, phase):
 
     if phase == "launch":
         crashed = sup(rundir, "launch", crash_at=point)
+        res["crashed_op"] = {"rc": crashed["rc"]}
+    elif phase == "takeover":
+        # A takeover needs something to take over FROM, so launch first. The
+        # timeout matches the Tw row: takeover reaps generation g before it
+        # publishes, and a reap is TERM -> wait -> KILL -> rescan.
+        launched = sup(rundir, "launch")
+        res["launch_rc"] = launched["rc"]
+        crashed = sup(rundir, "takeover", crash_at=point, timeout=180)
         res["crashed_op"] = {"rc": crashed["rc"]}
     else:
         launched = sup(rundir, "launch")

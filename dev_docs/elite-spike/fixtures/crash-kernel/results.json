@@ -1332,6 +1332,515 @@
       },
       "verdict": "PASS"
     },
+    "T11": {
+      "crash_point": "takeover.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 1
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "takeover",
+      "reconcile": "[sup 23726 14:00:57] stop_intent committed (reap_stop_intent)\n[sup 23726 14:00:57] reap converged=True rounds=0\n[sup 23726 14:00:57] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T11",
+      "run_at": "2026-07-27T14:00:57+0100",
+      "rundir": "<TMPDIR>/probe5.jarom3x7",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157255",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157255",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785157255-22883",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785157255",
+          "state": "active",
+          "stop_intent": 1,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157255",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157255",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_stop_intent",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785157255-22883",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785157255",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "T12": {
+      "crash_point": "takeover.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 4,
+            "seqs": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "takeover",
+      "reconcile": [
+        {
+          "action": "launch_aborted",
+          "domain_live": [],
+          "escape_proof": true,
+          "generation": 2,
+          "reap": {
+            "converged": true,
+            "escape_proof": true,
+            "initial": [],
+            "mode": "uid",
+            "rounds": 0,
+            "signals": [],
+            "survivors": []
+          },
+          "recorded_incarnation": false,
+          "repo_key": "repo-a",
+          "state": "prepared",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T12",
+      "run_at": "2026-07-27T14:00:57+0100",
+      "rundir": "<TMPDIR>/probe5.t6ymbi66",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157257",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157257",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 2,
+            "idem_key": "generation_reserved:repo-a:2",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "takeover-1785157257",
+            "seq": 4
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-takeover-1785157257-23929",
+          "generation": 2,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "takeover-1785157257",
+          "state": "prepared",
+          "stop_intent": 0,
+          "updated_seq": 4
+        },
+        "meta_seq": 4
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157257",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785157257",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 2,
+            "idem_key": "generation_reserved:repo-a:2",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "takeover-1785157257",
+            "seq": 4
+          },
+          {
+            "generation": 2,
+            "idem_key": "launch_aborted:repo-a:2",
+            "kind": "launch_aborted",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 2,
+            "idem_key": "lease_release:repo-a:2",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-takeover-1785157257-23929",
+          "generation": 2,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "takeover-1785157257",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
     "T2": {
       "crash_point": "prepare.post_commit",
       "crashed_op": {
