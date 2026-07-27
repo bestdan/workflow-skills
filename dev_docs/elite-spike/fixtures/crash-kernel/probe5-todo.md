@@ -254,14 +254,26 @@ this point that is just `cfprefsd`/`distnoted`, which respawn).
 ```sh
 echo "== reap runs as agent ==";  sudo -u agent /usr/local/probe5/p5-reap TERM; echo "rc=$?"
 echo "== root path refused ==";   sudo /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 64)"
-echo "== fd 3 survives sudo ==";  sudo -C 5 -u agent /bin/sh -c 'ls /dev/fd/' 3</dev/null
-echo "== agent cannot read fixture =="; sudo -u agent cat "$P5_FIXTURE/kernel.py"
+echo "== fd 3 survives sudo ==";  sudo -n -C 5 -u agent /usr/local/probe5/p5-measure $$ >/dev/null; echo "rc=$? (expect 0)"
+echo "== agent cannot read fixture =="; ls -ld "$HOME"   # 0700 => agent cannot traverse
 ```
 
-The last **must** fail with permission denied. If `sudo -C 5` errors with
-*"you are not permitted to use the -C option"*, `closefrom_override` did not take —
-fix A6 before continuing, or fall back to the socket design in Part B note 3 and
-record it as a deviation from the draft.
+**Test `-C 5` on a command that is inside `P5CMDS`.** `Defaults!P5CMDS
+closefrom_override` scopes the privilege to those three commands, so
+`sudo -C 5 -u agent /bin/sh …` (an earlier version of this check) fails with
+*"you are not permitted to use the -C option"* even when A6 is perfectly correct —
+and sends you off to fix a working sudoers file. Only conclude
+`closefrom_override` did not take if `-C 5` is refused on `p5-measure`/`p5-spawn`
+itself; then fix A6, or fall back to the socket design in Part B note 3 and record
+it as a deviation from the draft.
+
+The other checks not to misread: `sudo -u agent <anything not in P5CMDS>` prompts
+for a password and, non-interactively, just fails — so it proves nothing about the
+agent's own permissions. Read those off the filesystem instead (a `0700` home the
+agent cannot traverse; a root-owned `755` helper dir it cannot write). Likewise
+`sudo /usr/local/probe5/p5-reap` as **root** is refused by sudo itself, because A6
+grants only `(agent)`; `p5-reap`'s internal `id -u -eq 0` guard is the second
+layer, not the first.
 
 ### A8 — if this is a fresh machine
 
