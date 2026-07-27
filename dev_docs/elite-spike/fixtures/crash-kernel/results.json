@@ -523,17 +523,20 @@
         "reap_dead_run"
       ],
       "bootstrap_rc": 0,
+      "deadman_disarmed": true,
       "decisions": [
         {
           "action": "reap_dead_run",
           "alive_verified": false,
           "domain_live": [
-            27716
+            86619,
+            98211
           ],
-          "escape_proof": false,
+          "escape_proof": true,
           "generation": 1,
           "other_domain_procs": [
-            27716
+            86619,
+            98211
           ],
           "recorded_incarnation": true,
           "repo_key": "repo-a",
@@ -545,9 +548,14 @@
           "stop_intent": 0
         }
       ],
-      "domain_after_run_kill": [
-        27716
+      "domain_after": [
+        99261
       ],
+      "domain_after_run_kill": [
+        86619,
+        98211
+      ],
+      "domain_mode": "uid",
       "failed_checks": [],
       "gen_token_present": true,
       "invariants": {
@@ -584,7 +592,13 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": [
+              {
+                "command": "/usr/sbin/distnoted agent",
+                "pid": 99261
+              }
+            ]
           },
           "ok": true
         },
@@ -610,11 +624,11 @@
         }
       },
       "lease_after": {
-        "gen_token": "P5TOKEN-run-1784798202-27695",
+        "gen_token": "P5TOKEN-run-1785154931-98117",
         "generation": 1,
         "manifest_digest": "",
         "repo_key": "repo-a",
-        "run_id": "run-1784798202",
+        "run_id": "run-1785154931",
         "state": "terminal",
         "stop_intent": 0,
         "updated_seq": 5
@@ -623,11 +637,23 @@
       "reconcile_passes": 2,
       "relaunched_by_launchd": true,
       "row": "Sup-orphan",
-      "run_pid": 27704,
+      "run_at": "2026-07-27T13:22:19+0100",
+      "run_died": true,
+      "run_pid": 98136,
       "run_still_alive": false,
-      "rundir": "<TMPDIR>/probe5.zmtxmu_r",
-      "supervisor_pid": 27743,
-      "survivors_after": [],
+      "run_survivor_pids": [],
+      "run_survivors_after": [],
+      "rundir": "<TMPDIR>/probe5.w3khcun4",
+      "supervisor_pid": 98365,
+      "survivors_after": [
+        99261
+      ],
+      "system_daemons_after": [
+        {
+          "command": "/usr/sbin/distnoted agent",
+          "pid": 99261
+        }
+      ],
       "verdict": "PASS"
     },
     "Sup-readopt": {
@@ -641,15 +667,15 @@
           "action": "readopt",
           "alive_verified": true,
           "domain_live": [
-            6176,
-            6179,
-            99472
+            238,
+            1341,
+            1367
           ],
           "escape_proof": true,
           "generation": 1,
           "other_domain_procs": [
-            6179,
-            99472
+            238,
+            1367
           ],
           "recorded_incarnation": true,
           "repo_key": "repo-a",
@@ -657,10 +683,15 @@
           "stop_intent": 0
         }
       ],
+      "domain_after": [
+        238,
+        1341,
+        1367
+      ],
       "domain_after_restart": [
-        6176,
-        6179,
-        99472
+        238,
+        1341,
+        1367
       ],
       "domain_mode": "uid",
       "failed_checks": [],
@@ -723,11 +754,11 @@
         }
       },
       "lease_after": {
-        "gen_token": "P5TOKEN-run-1785154366-6173",
+        "gen_token": "P5TOKEN-run-1785154965-1314",
         "generation": 1,
         "manifest_digest": "",
         "repo_key": "repo-a",
-        "run_id": "run-1785154366",
+        "run_id": "run-1785154965",
         "state": "active",
         "stop_intent": 0,
         "updated_seq": 2
@@ -736,11 +767,31 @@
       "reconcile_passes": 2,
       "relaunched_by_launchd": true,
       "row": "Sup-readopt",
-      "run_at": "2026-07-27T13:12:56+0100",
-      "run_pid": 6176,
+      "run_at": "2026-07-27T13:22:55+0100",
+      "run_pid": 1341,
       "run_still_alive": true,
-      "rundir": "<TMPDIR>/probe5.fmnf69an",
-      "supervisor_pid": 6185,
+      "run_survivor_pids": [
+        1341,
+        1367
+      ],
+      "run_survivors_after": [
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785154965-1314 --descendant",
+          "pid": 1341
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785154965-1314 --descendant",
+          "pid": 1367
+        }
+      ],
+      "rundir": "<TMPDIR>/probe5.641do46s",
+      "supervisor_pid": 1440,
+      "system_daemons_after": [
+        {
+          "command": "/usr/sbin/distnoted agent",
+          "pid": 238
+        }
+      ],
       "verdict": "PASS"
     },
     "Sup-smoke": {

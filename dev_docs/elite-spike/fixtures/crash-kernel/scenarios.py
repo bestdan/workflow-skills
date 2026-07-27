@@ -925,18 +925,35 @@ def row_sup(kind):
     st = state_of(rundir)
     res["lease_after"] = st["lease"]
 
+    # A RAW post-hoc scan is the wrong evidence in BOTH directions. macOS respawns
+    # per-user daemons (distnoted/cfprefsd/trustd/secinitd) on demand, so after a
+    # converged reap the domain refills with processes that were never ours:
+    #   - orphan  : `not survivors` reads a respawned daemon as a failed reap,
+    #               even though reap() already verified zero (see `stop.converged`,
+    #               which is the authority — this scan happens strictly later).
+    #   - readopt : `len(survivors) >= 2` is satisfiable by two daemons with the
+    #               run and its descendant both dead.
+    # Partition the way invariant 4 and the Esc/Churn rows do, and speak about the
+    # run's own processes by pid.
+    survivors = domain_for(gen_token).scan()
+    run_survivors, sys_daemons = reaper.partition_survivors(survivors)
+    run_survivor_pids = [d["pid"] for d in run_survivors]
+    res["domain_after"] = survivors
+    res["run_survivors_after"] = run_survivors
+    res["run_survivor_pids"] = run_survivor_pids
+    res["system_daemons_after"] = sys_daemons
+
     if kind == "readopt":
         # The whole point: a benign restart must not kill healthy work — and
         # "healthy work" includes the run's forked descendant, which must also
         # still be alive.
-        survivors = domain_for(gen_token).scan()
         res["domain_after_restart"] = survivors
-        ok = ("readopt" in actions and run_still_alive and len(survivors) >= 2
+        ok = ("readopt" in actions and run_still_alive
+              and run_pid in run_survivor_pids and len(run_survivor_pids) >= 2
               and st["lease"]["state"] == "active" and st["lease"]["stop_intent"] == 0)
     else:
-        survivors = domain_for(gen_token).scan()
         res["survivors_after"] = survivors
-        ok = (st["lease"]["state"] == "terminal" and not survivors
+        ok = (st["lease"]["state"] == "terminal" and not run_survivors
               and any(a and a.startswith("reap") for a in actions))
 
     _lc("bootout", f"{DOMAIN}/{label}")
