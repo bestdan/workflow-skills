@@ -408,12 +408,14 @@ establishes that the failure came after writing began, not that a particular
   future failure there showing only system daemons is that confound, not a broken
   ordering guarantee.
 
-### Required to close this probe
+### Closing this probe — done
 
-Full resume instructions, written to be machine-portable (the work may continue on
-a different Mac, where none of Probes 1–4's evidence carries over):
-**[`probe5-todo.md`](./probe5-todo.md)** — host provisioning and the agent checks,
-the fixture changes each blocked row needs, per-row pass bars, and teardown.
+**The probe is closed as of 2026-07-27, teardown included.** The record of how it
+was run — host provisioning, the agent checks, per-row pass bars, and teardown —
+is **[`probe5-todo.md`](./probe5-todo.md)**. That file is history now, not
+instructions: Part E removed the helper tree, the sudoers fragment and every
+rundir, so none of it is runnable without redoing Part A from scratch on a fresh
+host.
 
 **Done as of 2026-07-27** (all on the MacBook; see `probe5-todo.md` Part A for the
 per-machine provisioning record): the `agent` account, the three scoped
@@ -426,18 +428,20 @@ and the full 28-row re-run under `PROBE5_DOMAIN_MODE=uid`.
 Sup-readopt + Sup-smoke); the takeover boundary rows T11/T12; per-row revision and
 helper provenance in `results.json`; and the single-revision run of record.
 
-**Still open — these do not gate the classification but are not done:**
+**Also done — the four items that were open at classification time:**
 
-1. **Ratify the v5.2 reconciliation fix** in `draft-state-machine.md`.
-   `Sup-readopt` now gives it real uid-domain evidence: the domain held three
-   processes at reconcile time and the supervisor adopted anyway, which is the
-   entire content of the fix.
-2. **§7a row 5** of `dev_docs/auto-pilot-e-lite-design-2026-07-21.md` still
-   records the old state.
-3. **Re-verify Probes 1 and 4.** Both certify an `agent` account on a host where
-   that uid was later reassigned to a human; their evidence currently asserts
-   something untrue of that machine.
-4. **Part E teardown** — see `probe5-todo.md`. Leave the `agent` account in place.
+1. **The v5.2 reconciliation fix is ratified** in `draft-state-machine.md`
+   (`37fcf01`). `Sup-readopt` gave it real uid-domain evidence: the domain held
+   three processes at reconcile time and the supervisor adopted anyway, which is
+   the entire content of the fix.
+2. **§7a row 5** of `dev_docs/auto-pilot-e-lite-design-2026-07-21.md` was brought
+   in line with the probe it describes (`95e906c`).
+3. **Probes 1 and 4 no longer assert the reassigned uid as fact** (`e96a046`,
+   `73ef132`). Both had certified an `agent` account on a host where that uid was
+   later reassigned to a human.
+4. **Part E teardown is complete** (2026-07-27). The `agent` account was left in
+   place, deliberately — deleting and recreating it is what produced the
+   uid-reassignment hazard in the first place.
 
 **Standing constraint for dependent Stage-2 work:** nothing here licenses an
 assumption of power-loss durability or of EIO behaviour. Invariants 4/5/6/8 are

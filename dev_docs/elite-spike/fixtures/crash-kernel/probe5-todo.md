@@ -1,41 +1,52 @@
-# Probe 5 — remaining work to close the probe
+# Probe 5 — closed
 
-Probe 5 is **INCONCLUSIVE** ([`probe5-crash-kernel.md`](./probe5-crash-kernel.md)).
-The transaction kernel held across every injection; the **containment half was
-never exercised** because the dedicated `agent` uid is absent from the host the
-2026-07-23 run used. This file is the resume point.
+**CLOSED 2026-07-27, Part E teardown included. Nothing here is outstanding work.**
+This file is kept as the record of how the probe was run. It is no longer a
+resume point, and the paste-me handoff prompts that used to live beside it have
+been deleted rather than left to rot.
 
-**Written to be machine-portable.** Nothing below assumes the mac mini. If you
-pick this up on a different Mac, start at Part A — the host prerequisites are the
-whole reason the probe is open, and no evidence from the original host carries
-over.
+Probe 5 is **CONFIRMED** ([`probe5-crash-kernel.md`](./probe5-crash-kernel.md)) —
+in the kill sheet's specific sense of *"not falsified in the tested process-crash
+environment"*, and nothing wider. Read that file's **"What CONFIRMED here does
+not mean"** before quoting the verdict anywhere; the claim is narrower than the
+word.
+
+**The evidence is machine-specific and the host surface no longer exists.** Every
+row ran on Daniel's MacBook Pro, and §Results is explicit that none of it
+transfers to another machine. Part E removed `/usr/local/probe5`,
+`/etc/sudoers.d/probe5` and every rundir, so **nothing below is runnable as-is** —
+Part A would have to be redone from scratch first. Read Parts A–D as a historical
+account of what was done, not as instructions.
 
 ---
 
 ## Status
 
-**Updated 2026-07-27.** Two things changed since this file was written on 07-23:
-**Part B is done** (landed in the `c6cf804` WIP checkpoint, after this file was
-drafted), and an **incident** wiped the Part A surface off the host — see
-[`dev_docs/tasks/probe5-incident-evidence/`](../../../tasks/probe5-incident-evidence/).
-A supervisor was bootstrapped in uid mode against the *maintainer's* uid and
-reaped every SSH login for four days. Read the safety notes in Part A before
-provisioning anything.
+**Final, 2026-07-27.** All 28 rows ran under the real uid containment domain
+(`domain_mode=uid`), in one pass at fixture revision `c5eb8fd` with a clean tree.
+
+**Verdicts: 26 PASS / 1 DOCUMENTED-LIMITATION (`Uid`) / 1 BLOCKED (`PL`).**
 
 | | |
 | --- | --- |
-| **Done** | v5.1 fixture built; 19 rows PASS; v5.2 reconcile defect found and fixed |
-| **Done (Part B, `c6cf804`)** | sudo-mediated spawn/reap/measure, `takeover_publish`, `--try-write-db`, and **all five blocked rows promoted** — `BLOCKED` now holds only `PL` |
-| **Done (`396bd02`)** | fail-closed reaper guards; verified empirically on this host 07-27 |
-| **Blocked on host** | Esc, Churn, Writer, Uid, Tw — all now need **only** Part A |
-| **Inconclusive, needs a harness** | Io (real ENOSPC/EIO), PL (power-loss) |
 | **Established** | invariants 1, 2, 3, 7 |
-| **Not established** | invariants 4, 5, 6 (containment), 8 (enforced sole-writer) |
+| **Established — containment, first real evidence** | invariants 4 (earned release), 5 (orphan safe-stop, no false kill), 6 (reap convergence or fence), 8 (sole writer). `Esc` reaped an `exec`'d escapee invisible to token scanning; `Churn` converged from 38 live processes; `Writer` took `EACCES` from a genuinely separate uid. **None of these were reachable under the degraded mode** — which is why the probe stayed open until a host with a dedicated `agent` account was available. |
+| **Never passed, by construction** | `PL` (power-loss). `SIGKILL` cannot prove power-loss durability, for SQLite exactly as for flat files. **A green matrix says nothing about this row.** |
+| **Documented limitation, not a falsifier** | `Uid` — a helper that acquires a different credential leaves the domain. |
+| **Still untested** | **EIO (bad media)**, which follows distinct SQLite error paths. `Io` injects a genuine ENOSPC striking *after* the WAL was extended, which establishes failure-after-writing-began — **not** that any individual `write(2)` was partial. |
 
-### The remaining sequence
+Two things carry forward past this probe. The **four-day incident** that shaped
+every safety rule below — a supervisor bootstrapped in uid mode against the
+*maintainer's* uid, reaping every SSH login for four days — is recorded at
+[`dev_docs/tasks/probe5-incident-evidence/`](../../../tasks/probe5-incident-evidence/),
+which outlives the spike. And the `agent` account was deliberately **left in
+place** at teardown: deleting and recreating it is what produced the
+uid-reassignment hazard that caused the outage.
 
-Part A (attended, below) → run the matrix in uid mode → Part D → Part E.
-**Part B is no longer work.**
+### The sequence, as it was actually run
+
+Part A (attended) → the matrix in uid mode → Part D → Part E. All complete.
+Part B stopped being a separate step once it landed in `c6cf804`.
 
 ---
 
