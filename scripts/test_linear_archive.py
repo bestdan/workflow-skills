@@ -131,7 +131,9 @@ class TerminalPassesTests(unittest.TestCase):
             "duplicate": "canceledAt",
         }
         for state_type, ts_field in linear_archive.terminal_passes():
-            self.assertEqual(expected[state_type], ts_field, f"wrong ts for {state_type}")
+            self.assertEqual(
+                expected[state_type], ts_field, f"wrong ts for {state_type}"
+            )
 
 
 if __name__ == "__main__":
