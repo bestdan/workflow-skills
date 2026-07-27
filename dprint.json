@@ -16,7 +16,8 @@
   "excludes": [
     "**/node_modules",
     "**/*-lock.json",
-    "test/vendor/**"
+    "test/vendor/**",
+    "dev_docs/elite-spike/fixtures/**"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.96.0.wasm",

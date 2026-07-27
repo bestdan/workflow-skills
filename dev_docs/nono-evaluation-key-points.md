@@ -43,7 +43,7 @@ only**, not destination IP) are **Linux-specific**. The E-lite substrate is a **
 mini**, where Seatbelt scopes egress to `remote tcp "localhost:PORT"` — neither applies. The
 eval's F1/F2/F5 liveness tests run on macOS and should still pass.
 
-**Caveat to record as an eval non-goal:** this holds only while *every* execution path is
+**Caveat to record as an eval non-goal:** this holds only while _every_ execution path is
 macOS. If any worker backend runs `nono` on Linux ≥6.7 (a container, CI runner, devcontainer),
 the "network is contained" claim silently breaks (SR-1: full HTTP/3-over-UDP egress; SR-2:
 raw TCP to any host on the proxy port). Pin the platform assumption explicitly.
@@ -59,7 +59,7 @@ path, with the injected token attached. Consequences for the eval and design:
   **Path/method-level** endpoint policy is **not** a reliable boundary.
 - A full **ADOPT** must **not** retire [§2.2](./auto-pilot-e-lite-design-2026-07-21.md)'s
   server-side GitHub ruleset in favour of nono's L7 path filter. Keep the ruleset as the real
-  bound on *what the token can do*; treat nono's endpoint policy as defense-in-depth only.
+  bound on _what the token can do_; treat nono's endpoint policy as defense-in-depth only.
 - **Add a `..`/dot-segment traversal case to F2/F3's deny-path battery.** The eval already
   says "verify the deny path, don't just verify the allow path" — this is a concrete deny case
   it currently omits.
@@ -69,7 +69,7 @@ path, with the injected token attached. Consequences for the eval and design:
 [f5-keychain-preliminary.md](./elite-spike/fixtures/nono/f5-keychain-preliminary.md) ("the
 `claude` profile's Keychain grant is keychain-wide; a sandboxed child read a non-Claude
 secret") is the **same defect** the review found independently, and the review supplies the
-mechanism: **any keychain-DB file grant disables *all* keychain Mach-service denies**, plus a
+mechanism: **any keychain-DB file grant disables _all_ keychain Mach-service denies**, plus a
 blanket `(allow mach-lookup)`. So F5 ("containment does not regress below raw Seatbelt") is a
 **confirmed regression**: headless Claude auth needs keychain access, and nono's stock profile
 grants it wholesale where raw Seatbelt could deny it.
