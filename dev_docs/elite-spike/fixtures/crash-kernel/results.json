@@ -1,5 +1,21 @@
 {
   "environment": {
+    "agent_uid_provisioned": true,
+    "boot_session_present": true,
+    "containment_caveat": "Escape-proof uid domain, agent uid 503. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "domain_mode": "uid",
+    "macos": "26.4.1",
+    "pragmas": {
+      "fullfsync": 1,
+      "journal_mode": "wal",
+      "sqlite_version": "3.53.3",
+      "synchronous": 2
+    },
+    "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
+    "sqlite_build": "Homebrew stock (NOT Apple's system build)",
+    "sqlite_version": "3.53.3"
+  },
+  "prior_environment": {
     "agent_uid_provisioned": false,
     "boot_session_present": true,
     "containment_caveat": "The dedicated `agent` uid does NOT exist on this host; uid 502 now belongs to an unrelated human account. All rows ran in the DEGRADED gen_token domain, which is not escape-proof. Invariants 4, 5 and 6 are therefore NOT established in the sense the kill sheet requires.",
@@ -2687,14 +2703,91 @@
       "verdict": "BLOCKED"
     },
     "Uid": {
-      "reason": "A uid-changing helper is a documented limitation (not a falsifier) and needs the dedicated uid to even be observable.",
+      "detail": {
+        "claim": "A worker that acquires a different credential leaves the uid containment domain and is not reaped by kill(-1) as the agent.",
+        "detection": "proc_listpids over other uids plus a gen_token argv scan could surface a suspect process, but a helper that execs and drops the token is undetectable by that means. Treated as admitted-undetectable rather than claimed-detected.",
+        "reachable_in_this_fixture": false,
+        "redirect_if_ever_in_scope": "containment option 2 (Linux VM/container)",
+        "why": "The agent has zero sudo rules (verified: `sudo -l -U agent` -> not allowed), so it cannot change credential at all here. The limitation is therefore real but UNREACHABLE from the agent's own authority \u2014 it needs an external privileged spawner."
+      },
+      "domain_mode": "uid",
       "row": "Uid",
-      "verdict": "BLOCKED"
+      "run_at": "2026-07-27T05:00:35-0400",
+      "verdict": "DOCUMENTED-LIMITATION"
     },
     "Writer": {
-      "reason": "Proving the run CANNOT write state.db requires a second uid with no write permission. Same-uid, the filesystem permits it, so the sole-writer property is architectural here, not enforced.",
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": [
+              {
+                "command": "/usr/sbin/distnoted agent",
+                "pid": 91290
+              }
+            ]
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
       "row": "Writer",
-      "verdict": "BLOCKED"
+      "run_at": "2026-07-27T05:00:35-0400",
+      "rundir": "<TMPDIR>/probe5.fd_24k2r",
+      "verdict": "PASS",
+      "write_probe": "EACCES"
     }
   }
 }

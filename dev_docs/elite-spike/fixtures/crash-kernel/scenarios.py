@@ -64,7 +64,11 @@ def env_for(rundir, **extra):
         "PROBE5_DOMAIN_MODE": DOMAIN_MODE,
         "PROBE5_CRASH_LOG": os.path.join(rundir, "crashes.jsonl"),
         "PROBE5_RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl"),
-        "PROBE5_AGENT_UID": str(AGENT_UID) if AGENT_UID else "",
+        # In uid mode the supervisor does int(os.environ["PROBE5_AGENT_UID"]),
+        # so an empty value here is a crash in the child, not a default. Resolve
+        # it the same way everything else does.
+        "PROBE5_AGENT_UID": (str(_dedicated_agent_uid()) if DOMAIN_MODE == "uid"
+                             else (str(AGENT_UID) if AGENT_UID else "")),
     })
     e.update({k: str(v) for k, v in extra.items() if v is not None})
     return e
@@ -84,7 +88,14 @@ def domain_for(gen_token):
     through this — a row that scanned with the degraded scanner while the run
     lived in the uid domain would report a false zero."""
     if DOMAIN_MODE == "uid":
-        return reaper.Domain("uid", agent_uid=int(AGENT_UID))
+        # Resolve by NAME (via _dedicated_agent_uid) rather than demanding
+        # PROBE5_AGENT_UID. Requiring the number here meant `PROBE5_DOMAIN_MODE=uid`
+        # alone crashed mid-row with `int('')`, after the run had already been
+        # spawned — leaving a live agent-uid surrogate behind because the crash
+        # landed inside the cleanup path. Pinning by name is also the standing
+        # rule: the uid is an implementation detail that has already been
+        # reassigned once on this host.
+        return reaper.Domain("uid", agent_uid=_dedicated_agent_uid())
     return reaper.Domain("gentoken", gen_token=gen_token)
 
 
@@ -909,10 +920,24 @@ BLOCKED = {
 # --- cleanup ------------------------------------------------------------------
 
 def cleanup_domain(gen_token):
-    """Leave no surrogate behind (guardrail 6)."""
+    """Leave no surrogate behind (guardrail 6).
+
+    In UID MODE this must go through the privileged reaper. A direct
+    `os.kill(pid)` from the maintainer against an agent-uid process is EPERM,
+    and the PermissionError was being swallowed — so this loop loudly did
+    nothing, three times, and returned as if the domain were clean. Every uid-mode
+    row whose own stop() did not reap was leaking a live surrogate.
+    """
     if not gen_token and DOMAIN_MODE != "uid":
         return
     dom = domain_for(gen_token)
+    if DOMAIN_MODE == "uid":
+        ev = reaper.reap(dom, term_grace=1.0, kill_grace=1.0, max_rounds=5)
+        if not ev.get("converged"):
+            print(f"  !! cleanup did not converge: survivors="
+                  f"{ev.get('survivors')} scan_failed={ev.get('scan_failed')}",
+                  flush=True)
+        return
     for _ in range(3):
         pids = dom.scan()
         if not pids:
@@ -926,10 +951,28 @@ def cleanup_domain(gen_token):
 
 
 def final_cleanup():
+    """Backstop after the whole run, including after an exception.
+
+    `pkill` has the same EPERM blindness as cleanup_domain: it cannot touch an
+    agent-uid process from the maintainer. In uid mode the only thing that can
+    is the privileged reap, so do that too — otherwise a row that dies partway
+    (as Writer did on the int('') crash) leaves a live surrogate on the host.
+    """
     for kind in ("readopt", "orphan"):
         _lc("bootout", f"{DOMAIN}/{LABEL_PREFIX}{kind}")
     subprocess.run(["pkill", "-f", "runsurrogate.py"], capture_output=True)
     subprocess.run(["pkill", "-f", "supervisor.py daemon"], capture_output=True)
+    if DOMAIN_MODE == "uid":
+        try:
+            ev = reaper.reap(domain_for(None), term_grace=1.0, kill_grace=1.0,
+                             max_rounds=5)
+            leftovers, _sysd = reaper.partition_survivors(ev.get("survivors") or [])
+            if leftovers:
+                print(f"  !! LEFTOVER agent-uid processes after final cleanup: "
+                      f"{leftovers}", flush=True)
+        except Exception as e:          # never mask the row's own failure
+            print(f"  !! final uid cleanup failed: {type(e).__name__}: {e}",
+                  flush=True)
 
 
 # --- main ---------------------------------------------------------------------
