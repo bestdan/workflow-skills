@@ -214,6 +214,7 @@
         "seq_first": 1,
         "seq_replay": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants": {
         "inv1_no_orphan_events": {
@@ -270,7 +271,8 @@
         }
       },
       "row": "Idem",
-      "rundir": "<TMPDIR>/probe5.b02a5edr",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.r0zsxmr1",
       "verdict": "PASS"
     },
     "IdemConflict": {
@@ -278,6 +280,7 @@
         "counter_unchanged": true,
         "raised": "idem_key 'k:1' replayed with a different payload"
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants": {
         "inv1_no_orphan_events": {
@@ -333,7 +336,8 @@
         }
       },
       "row": "IdemConflict",
-      "rundir": "<TMPDIR>/probe5.hqb2_l3k",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.ez33894o",
       "verdict": "PASS"
     },
     "Io": {
@@ -344,9 +348,11 @@
         "events": 1,
         "readonly_subcase_atomic": true
       },
+      "domain_mode": "uid",
       "note": "Only a read-only-database refusal was injected, which fails before any write. Genuine ENOSPC / EIO (a small disk image or a fault-injecting VFS) was NOT built, so the mid-write failure class this row exists to test is untested.",
       "row": "Io",
-      "rundir": "<TMPDIR>/probe5.rk9032kr",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.88jxp5l9",
       "verdict": "INCONCLUSIVE"
     },
     "NoConv": {
@@ -356,6 +362,7 @@
         "rounds": 2,
         "terminalize_refused": "terminalize refused: reap did not verify zero survivors"
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants": {
         "inv1_no_orphan_events": {
@@ -414,12 +421,15 @@
         }
       },
       "row": "NoConv",
-      "rundir": "<TMPDIR>/probe5.rpnfq2jj",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.6fnngydf",
       "verdict": "PASS"
     },
     "PL": {
-      "reason": "Reboot / power-loss durability. SIGKILL cannot prove it; a VM or loopback power-fail harness was out of scope. INCONCLUSIVE BY CONSTRUCTION, per the kill sheet \u2014 never passed.",
+      "domain_mode": "uid",
+      "reason": "Reboot / power-loss durability. SIGKILL cannot prove it; a VM or loopback power-fail harness was out of scope. INCONCLUSIVE BY CONSTRUCTION, per the kill sheet \u2014 never passed. This is the one row the dedicated uid does not unblock.",
       "row": "PL",
+      "run_at": "2026-07-27T13:38:03+0100",
       "verdict": "BLOCKED"
     },
     "Pid": {
@@ -447,8 +457,10 @@
         "reason": "refusing to signal as root: kill(-1) as root targets every process on the host",
         "refused_as_root": true
       },
+      "domain_mode": "uid",
       "note": "guard exercised with a mocked euid; not run as real root (the fixture must never acquire root)",
       "row": "Priv",
+      "run_at": "2026-07-27T13:38:03+0100",
       "verdict": "PASS"
     },
     "Race": {
@@ -463,6 +475,7 @@
         ],
         "winners": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants": {
         "inv1_no_orphan_events": {
@@ -498,7 +511,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -524,7 +538,8 @@
         }
       },
       "row": "Race",
-      "rundir": "<TMPDIR>/probe5.uza3sezl",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.eapt7nbz",
       "verdict": "PASS"
     },
     "Sup-orphan": {
@@ -1077,6 +1092,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -1169,7 +1185,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -1199,7 +1216,8 @@
       "reconcile": [],
       "reconcile_rc": 0,
       "row": "T10",
-      "rundir": "<TMPDIR>/probe5.xelgvkb1",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.fy7m6qy_",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -1209,7 +1227,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798197",
+            "run_id": "run-1785155880",
             "seq": 1
           },
           {
@@ -1217,7 +1235,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798197",
+            "run_id": "run-1785155880",
             "seq": 2
           },
           {
@@ -1246,11 +1264,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798197-27652",
+          "gen_token": "P5TOKEN-run-1785155880-28558",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798197",
+          "run_id": "run-1785155880",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 5
@@ -1264,7 +1282,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798197",
+            "run_id": "run-1785155880",
             "seq": 1
           },
           {
@@ -1272,7 +1290,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798197",
+            "run_id": "run-1785155880",
             "seq": 2
           },
           {
@@ -1301,11 +1319,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798197-27652",
+          "gen_token": "P5TOKEN-run-1785155880-28558",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798197",
+          "run_id": "run-1785155880",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 5
@@ -1319,6 +1337,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -1408,7 +1427,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -1437,16 +1457,38 @@
       "reconcile": [
         {
           "action": "launch_aborted",
-          "domain_live": [],
-          "escape_proof": false,
+          "domain_live": [
+            27403
+          ],
+          "escape_proof": true,
           "generation": 1,
           "reap": {
             "converged": true,
-            "escape_proof": false,
-            "initial": [],
-            "mode": "gentoken",
-            "rounds": 0,
-            "signals": [],
+            "escape_proof": true,
+            "initial": [
+              27403
+            ],
+            "mode": "uid",
+            "rounds": 1,
+            "signals": [
+              {
+                "helper_self_killed": true,
+                "method": "sudo /usr/local/probe5/p5-reap TERM",
+                "rc": -15,
+                "sig": "TERM",
+                "stderr": null,
+                "targets": null
+              },
+              {
+                "helper_self_killed": true,
+                "method": "sudo /usr/local/probe5/p5-reap KILL",
+                "rc": -9,
+                "round": 1,
+                "sig": "KILL",
+                "stderr": null,
+                "targets": null
+              }
+            ],
             "survivors": []
           },
           "recorded_incarnation": false,
@@ -1457,7 +1499,8 @@
       ],
       "reconcile_rc": 0,
       "row": "T2",
-      "rundir": "<TMPDIR>/probe5.gfmqxbny",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.ccmrn919",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -1467,16 +1510,16 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798194",
+            "run_id": "run-1785155875",
             "seq": 1
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798194-27449",
+          "gen_token": "P5TOKEN-run-1785155875-28334",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798194",
+          "run_id": "run-1785155875",
           "state": "prepared",
           "stop_intent": 0,
           "updated_seq": 1
@@ -1490,7 +1533,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798194",
+            "run_id": "run-1785155875",
             "seq": 1
           },
           {
@@ -1511,11 +1554,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798194-27449",
+          "gen_token": "P5TOKEN-run-1785155875-28334",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798194",
+          "run_id": "run-1785155875",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 3
@@ -1529,6 +1572,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -1618,7 +1662,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -1648,13 +1693,13 @@
         {
           "action": "launch_aborted",
           "domain_live": [],
-          "escape_proof": false,
+          "escape_proof": true,
           "generation": 1,
           "reap": {
             "converged": true,
-            "escape_proof": false,
+            "escape_proof": true,
             "initial": [],
-            "mode": "gentoken",
+            "mode": "uid",
             "rounds": 0,
             "signals": [],
             "survivors": []
@@ -1667,7 +1712,8 @@
       ],
       "reconcile_rc": 0,
       "row": "T3",
-      "rundir": "<TMPDIR>/probe5.fixcr3dw",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.xewmbxgs",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -1677,16 +1723,16 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798194",
+            "run_id": "run-1785155877",
             "seq": 1
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798194-27457",
+          "gen_token": "P5TOKEN-run-1785155877-28387",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798194",
+          "run_id": "run-1785155877",
           "state": "prepared",
           "stop_intent": 0,
           "updated_seq": 1
@@ -1700,7 +1746,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798194",
+            "run_id": "run-1785155877",
             "seq": 1
           },
           {
@@ -1721,11 +1767,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798194-27457",
+          "gen_token": "P5TOKEN-run-1785155877-28387",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798194",
+          "run_id": "run-1785155877",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 3
@@ -1739,6 +1785,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -1828,7 +1875,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -1858,13 +1906,13 @@
         {
           "action": "launch_aborted",
           "domain_live": [],
-          "escape_proof": false,
+          "escape_proof": true,
           "generation": 1,
           "reap": {
             "converged": true,
-            "escape_proof": false,
+            "escape_proof": true,
             "initial": [],
-            "mode": "gentoken",
+            "mode": "uid",
             "rounds": 0,
             "signals": [],
             "survivors": []
@@ -1877,7 +1925,8 @@
       ],
       "reconcile_rc": 0,
       "row": "T4",
-      "rundir": "<TMPDIR>/probe5.b9fwxcau",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.fsu8yxei",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -1887,16 +1936,16 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27466",
+          "gen_token": "P5TOKEN-run-1785155878-28393",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "prepared",
           "stop_intent": 0,
           "updated_seq": 1
@@ -1910,7 +1959,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           },
           {
@@ -1931,11 +1980,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27466",
+          "gen_token": "P5TOKEN-run-1785155878-28393",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 3
@@ -1949,6 +1998,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -2041,7 +2091,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -2067,10 +2118,11 @@
         }
       },
       "phase": "launch",
-      "reconcile": "[sup 27478 05:16:35] stop_intent committed (reap_dead_run)\n[sup 27478 05:16:35] reap converged=True rounds=0\n[sup 27478 05:16:35] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 0,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": false,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_dead_run\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile": "[sup 28449 13:37:58] stop_intent committed (reap_dead_run)\n[sup 28449 13:37:58] reap converged=True rounds=0\n[sup 28449 13:37:58] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 0,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_dead_run\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
       "reconcile_rc": 0,
       "row": "T5",
-      "rundir": "<TMPDIR>/probe5.b7s5p5ni",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.ucalslby",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -2080,7 +2132,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           },
           {
@@ -2088,16 +2140,16 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 2
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27475",
+          "gen_token": "P5TOKEN-run-1785155878-28412",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "active",
           "stop_intent": 0,
           "updated_seq": 2
@@ -2111,7 +2163,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           },
           {
@@ -2119,7 +2171,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 2
           },
           {
@@ -2148,11 +2200,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27475",
+          "gen_token": "P5TOKEN-run-1785155878-28412",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 5
@@ -2166,6 +2218,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -2288,9 +2341,9 @@
           "action": "readopt",
           "alive_verified": true,
           "domain_live": [
-            27486
+            28456
           ],
-          "escape_proof": false,
+          "escape_proof": true,
           "generation": 1,
           "other_domain_procs": [],
           "recorded_incarnation": true,
@@ -2301,7 +2354,8 @@
       ],
       "reconcile_rc": 0,
       "row": "T6",
-      "rundir": "<TMPDIR>/probe5.6uydnwk5",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.ufbw4oek",
       "safe_outcome": true,
       "safe_outcome_reason": "safe hold: healthy run re-adopted, stop retried",
       "state_after_crash": {
@@ -2311,7 +2365,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           },
           {
@@ -2319,16 +2373,16 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 2
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27484",
+          "gen_token": "P5TOKEN-run-1785155878-28453",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "active",
           "stop_intent": 0,
           "updated_seq": 2
@@ -2342,7 +2396,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 1
           },
           {
@@ -2350,16 +2404,16 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798195",
+            "run_id": "run-1785155878",
             "seq": 2
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798195-27484",
+          "gen_token": "P5TOKEN-run-1785155878-28453",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798195",
+          "run_id": "run-1785155878",
           "state": "active",
           "stop_intent": 0,
           "updated_seq": 2
@@ -2373,6 +2427,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -2467,7 +2522,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -2494,10 +2550,11 @@
       },
       "launch_rc": 0,
       "phase": "stop",
-      "reconcile": "[sup 27537 05:16:36] stop_intent committed (reap_stop_intent)\n[sup 27537 05:16:36] reap converged=True rounds=1\n[sup 27537 05:16:36] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [\n      27534\n    ],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": false,\n    \"alive_verified\": true,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile": "[sup 28518 13:37:59] stop_intent committed (reap_stop_intent)\n[sup 28518 13:37:59] reap converged=True rounds=1\n[sup 28518 13:37:59] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [\n      28513\n    ],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": true,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
       "reconcile_rc": 0,
       "row": "T7",
-      "rundir": "<TMPDIR>/probe5.mf_75ouu",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.0xrvp248",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -2507,7 +2564,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -2515,7 +2572,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -2528,11 +2585,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27513",
+          "gen_token": "P5TOKEN-run-1785155879-28510",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "active",
           "stop_intent": 1,
           "updated_seq": 3
@@ -2546,7 +2603,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -2554,7 +2611,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -2591,11 +2648,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27513",
+          "gen_token": "P5TOKEN-run-1785155879-28510",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 6
@@ -2609,6 +2666,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -2703,7 +2761,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -2730,10 +2789,11 @@
       },
       "launch_rc": 0,
       "phase": "stop",
-      "reconcile": "[sup 27593 05:16:36] stop_intent committed (reap_stop_intent)\n[sup 27593 05:16:36] reap converged=True rounds=0\n[sup 27593 05:16:36] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": false,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile": "[sup 28538 13:37:59] stop_intent committed (reap_stop_intent)\n[sup 28538 13:37:59] reap converged=True rounds=0\n[sup 28538 13:37:59] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
       "reconcile_rc": 0,
       "row": "T8",
-      "rundir": "<TMPDIR>/probe5.n4j6ko45",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.5c3d4css",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -2743,7 +2803,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -2751,7 +2811,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -2764,11 +2824,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27545",
+          "gen_token": "P5TOKEN-run-1785155879-28526",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "active",
           "stop_intent": 1,
           "updated_seq": 3
@@ -2782,7 +2842,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -2790,7 +2850,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -2827,11 +2887,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27545",
+          "gen_token": "P5TOKEN-run-1785155879-28526",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 6
@@ -2845,6 +2905,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -2939,7 +3000,8 @@
         },
         "inv4_earned_release": {
           "detail": {
-            "survivors": []
+            "run_survivors": [],
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -2966,10 +3028,11 @@
       },
       "launch_rc": 0,
       "phase": "stop",
-      "reconcile": "[sup 27646 05:16:36] stop_intent committed (reap_stop_intent)\n[sup 27646 05:16:36] reap converged=True rounds=0\n[sup 27646 05:16:36] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": false,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile": "[sup 28554 13:38:00] stop_intent committed (reap_stop_intent)\n[sup 28554 13:38:00] reap converged=True rounds=0\n[sup 28554 13:38:00] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
       "reconcile_rc": 0,
       "row": "T9",
-      "rundir": "<TMPDIR>/probe5.wi624rr6",
+      "run_at": "2026-07-27T13:38:03+0100",
+      "rundir": "<TMPDIR>/probe5.jc2h1bkk",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
       "state_after_crash": {
@@ -2979,7 +3042,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -2987,7 +3050,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -3000,11 +3063,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27638",
+          "gen_token": "P5TOKEN-run-1785155879-28542",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "active",
           "stop_intent": 1,
           "updated_seq": 3
@@ -3018,7 +3081,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 1
           },
           {
@@ -3026,7 +3089,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1784798196",
+            "run_id": "run-1785155879",
             "seq": 2
           },
           {
@@ -3063,11 +3126,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1784798196-27638",
+          "gen_token": "P5TOKEN-run-1785155879-28542",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1784798196",
+          "run_id": "run-1785155879",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 6
