@@ -22,7 +22,7 @@ own terminal, or headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
 Usage:
   python3 linear-archive.py --team PreThink --older-than 10
   python3 linear-archive.py --team PreThink --older-than 10 --apply
-  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --include-canceled --apply
+  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --apply
 """
 
 import argparse
@@ -161,12 +161,6 @@ def main():
     )
     ap.add_argument(
         "--project", default=None, help="Optional project UUID to scope to."
-    )
-    ap.add_argument(
-        "--include-canceled",
-        action="store_true",
-        help="No-op: every terminal state (Done, Canceled, Duplicate) is always swept. "
-        "Accepted so existing runbooks and cron invocations keep working.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."

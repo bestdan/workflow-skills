@@ -158,8 +158,8 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    > be archived and consumes the workspace cap permanently. That is exactly what
    > happened to `duplicate` while the canceled sweep was opt-in: `duplicate` is its
    > own state type, not a flavour of `canceled`, so it matched neither filter and
-   > accumulated invisibly. `--include-canceled` is retained as an accepted no-op so
-   > existing runbooks don't break.
+   > accumulated invisibly. There is no flag to narrow this — archiving completed
+   > work while deliberately retaining canceled work is not a thing anyone wants.
 
 > **In-session alternative (no key for the query).** If you are already in an
 > agent session with the Linear MCP, you _can_ do the read half over the MCP:
