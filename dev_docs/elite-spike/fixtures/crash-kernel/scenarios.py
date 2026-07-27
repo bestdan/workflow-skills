@@ -39,6 +39,16 @@ REPO = "repo-a"
 DOMAIN_MODE = os.environ.get("PROBE5_DOMAIN_MODE", "gentoken")
 AGENT_UID = os.environ.get("PROBE5_AGENT_UID", "")
 
+# The supervisor labels. NOT `com.probe5.sup.*` — those two labels are the ones
+# that were bootstrapped in uid mode against the maintainer's own uid and reaped
+# every SSH login for four days (dev_docs/tasks/probe5-incident-evidence/). They
+# were booted out and left DISABLED in the launchd override database on purpose,
+# as a permanent tripwire. Re-enabling them to reuse the names would re-arm the
+# exact labels of the incident; a fresh prefix costs nothing. A `bootstrap` of a
+# disabled label silently does not run, so reuse would also read as a spurious
+# row failure whose obvious "fix" is `launchctl enable`.
+LABEL_PREFIX = "com.probe5r2.sup."
+
 
 # --- plumbing -----------------------------------------------------------------
 
@@ -472,6 +482,15 @@ def install_supervisor(rundir, label):
             "RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl")}
     for k, v in subs.items():
         txt = txt.replace(f"@{k}@", str(v))
+    # A disabled label bootstraps rc=0 but never runs, so every row hosted by it
+    # reads as a spurious failure whose obvious "fix" is `launchctl enable` — and
+    # the disabled labels on this host are precisely the incident's two. Fail
+    # loudly instead of producing evidence about a supervisor that never started.
+    if f'"{label}" => disabled' in _lc("print-disabled", DOMAIN).stdout:
+        raise RuntimeError(
+            f"refusing to bootstrap {label}: it is DISABLED in the launchd "
+            f"override database for {DOMAIN}. It would bootstrap rc=0 and never "
+            "run. Use a fresh label — do not `launchctl enable` this one.")
     plist = os.path.join(rundir, f"{label}.plist")
     with open(plist, "w") as f:
         f.write(txt)
@@ -504,7 +523,7 @@ def row_sup(kind):
     reconciliation must reap to zero and terminalize (dead run ≠ dead workers).
     """
     rundir = fresh_rundir()
-    label = f"com.probe5.sup.{kind}"
+    label = f"{LABEL_PREFIX}{kind}"
     res = {"row": f"Sup-{kind}", "rundir": rundir}
 
     # BOTH kinds fork a descendant. A run with no children makes the re-adopt
@@ -889,8 +908,8 @@ def cleanup_domain(gen_token):
 
 
 def final_cleanup():
-    for label in ("com.probe5.sup.readopt", "com.probe5.sup.orphan"):
-        _lc("bootout", f"{DOMAIN}/{label}")
+    for kind in ("readopt", "orphan"):
+        _lc("bootout", f"{DOMAIN}/{LABEL_PREFIX}{kind}")
     subprocess.run(["pkill", "-f", "runsurrogate.py"], capture_output=True)
     subprocess.run(["pkill", "-f", "supervisor.py daemon"], capture_output=True)
 
