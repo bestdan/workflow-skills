@@ -1062,20 +1062,110 @@ def row_io():
                                      "was not built",
                            "counter": after, "events": n_events}}
     atomic = after == before and n_events == 1
-    # A read-only-database error is NOT the injection this row names. ENOSPC and
-    # EIO fail mid-write, potentially after the WAL has already been extended;
-    # a permissions refusal fails before the first byte. The sub-case that ran
-    # did fail atomically, but rule 3 says an injection that could not be made
-    # deterministically at the intended boundary is inconclusive, not a pass.
-    return {"row": "Io", "rundir": rundir,
-            "verdict": "INCONCLUSIVE" if atomic else "FAIL",
-            "detail": {"error": raised, "counter_before": before,
-                       "counter_after": after, "events": n_events,
-                       "readonly_subcase_atomic": atomic},
-            "note": "Only a read-only-database refusal was injected, which fails "
-                    "before any write. Genuine ENOSPC / EIO (a small disk image "
-                    "or a fault-injecting VFS) was NOT built, so the mid-write "
-                    "failure class this row exists to test is untested."}
+    # A read-only-database error is NOT the injection this row names: it fails
+    # before the first byte, where ENOSPC/EIO fail mid-write, potentially after
+    # the WAL has already been extended. Kept as evidence for its own (weaker)
+    # class; the mid-write case is below and is what decides the verdict.
+    res = {"row": "Io", "rundir": rundir,
+           "readonly_subcase": {"error": raised, "counter_before": before,
+                                "counter_after": after, "events": n_events,
+                                "atomic": atomic}}
+    res["enospc_subcase"] = enospc = _io_enospc_subcase()
+
+    if not enospc.get("induced"):
+        res["verdict"] = "INCONCLUSIVE"
+        res["detail"] = {"reason": enospc.get("reason",
+                                              "could not induce a real ENOSPC")}
+        return res
+    ok = atomic and enospc["atomic"] and enospc["integrity_ok"]
+    res["verdict"] = "PASS" if ok else "FAIL"
+    res["note"] = ("Both sub-cases: a pre-write refusal (read-only dir) and a "
+                   "GENUINE mid-write ENOSPC on a filled hdiutil volume, the "
+                   "latter with the WAL demonstrably extended before the failure. "
+                   "EIO proper (bad media) is still not injected; ENOSPC is the "
+                   "reachable member of the mid-write class without a "
+                   "fault-injecting VFS.")
+    return res
+
+
+def _io_enospc_subcase():
+    """A REAL mid-write ENOSPC, on a real filesystem.
+
+    A small HFS+ disk image is filled to a sliver, then a transaction far larger
+    than the remaining space is attempted. SQLite necessarily writes WAL pages and
+    then hits ENOSPC partway — which is the failure class this row exists to test
+    and which the read-only-directory injection cannot reach.
+
+    `wal_grew` is the evidence that it really was mid-write: if the WAL is larger
+    at failure than before the transaction, bytes were written before the error.
+    """
+    img = os.path.join(os.environ.get("TMPDIR", "/tmp"), "probe5-io.dmg")
+    vol, mnt = "probe5io", "/Volumes/probe5io"
+
+    def sh(*a):
+        return subprocess.run(a, capture_output=True, text=True)
+
+    sh("hdiutil", "detach", mnt, "-force")
+    if os.path.exists(img):
+        os.remove(img)
+    if sh("hdiutil", "create", "-size", "6m", "-fs", "HFS+", "-volname", vol,
+          "-layout", "NONE", img).returncode != 0:
+        return {"induced": False, "reason": "hdiutil create failed"}
+    if sh("hdiutil", "attach", img).returncode != 0:
+        os.remove(img)
+        return {"induced": False, "reason": "hdiutil attach failed"}
+    try:
+        dbp = os.path.join(mnt, "state.db")
+        c = kernel.init_db(dbp)
+        with kernel.txn(c):
+            kernel.append_event(c, idem_key="seed:1", kind="generation_reserved",
+                                repo_key=REPO, generation=1)
+        before_events = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        before_seq = c.execute("SELECT v FROM meta WHERE k='seq'").fetchone()[0]
+        wal = dbp + "-wal"
+        wal_before = os.path.getsize(wal) if os.path.exists(wal) else 0
+
+        filler = os.path.join(mnt, "filler")
+        with open(filler, "wb") as f:
+            try:
+                while True:
+                    f.write(b"\0" * 65536)
+                    f.flush()
+            except OSError:
+                pass  # ENOSPC: the volume is now full, which is the point
+        free_at_failure = os.statvfs(mnt).f_bavail * os.statvfs(mnt).f_frsize
+
+        raised = None
+        try:
+            with kernel.txn(c):
+                for i in range(2000):
+                    kernel.append_event(c, idem_key=f"bulk:{i}",
+                                        kind="run_registered", repo_key=REPO,
+                                        generation=1, payload={"pad": "x" * 400})
+        except Exception as e:
+            raised = f"{type(e).__name__}: {e}"
+        wal_at_failure = os.path.getsize(wal) if os.path.exists(wal) else 0
+
+        os.remove(filler)  # free space so the verification itself can run
+        after_events = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        after_seq = c.execute("SELECT v FROM meta WHERE k='seq'").fetchone()[0]
+        integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
+        c.close()
+
+        return {"induced": raised is not None and "full" in raised.lower(),
+                "error": raised,
+                "free_bytes_at_failure": free_at_failure,
+                "wal_bytes_before": wal_before,
+                "wal_bytes_at_failure": wal_at_failure,
+                "wal_grew": wal_at_failure > wal_before,
+                "events_before": before_events, "events_after": after_events,
+                "seq_before": before_seq, "seq_after": after_seq,
+                "atomic": after_events == before_events and after_seq == before_seq,
+                "integrity_ok": integrity == "ok"}
+    finally:
+        sh("hdiutil", "detach", mnt, "-force")
+        if os.path.exists(img):
+            os.remove(img)
 
 
 # --- containment rows (require the dedicated uid) -----------------------------

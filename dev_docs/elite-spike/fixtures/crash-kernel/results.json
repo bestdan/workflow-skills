@@ -43,6 +43,30 @@
     "agent_uid_provisioned": true,
     "boot_session_present": true,
     "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "coverage": {
+      "aliases": {
+        "G1": "T2",
+        "G2": "T3",
+        "G3": "T5",
+        "Saga1": "T7",
+        "Saga2": "T8",
+        "Sup-benign": "Sup-readopt + Sup-smoke"
+      },
+      "armed_crash_points": [
+        "activate.post_commit",
+        "activate.pre_commit",
+        "prepare.post_commit",
+        "prepare.pre_commit",
+        "reap.post_zero",
+        "spawn.post_spawn",
+        "stop_intent.post_commit",
+        "stop_intent.pre_commit",
+        "takeover.post_commit",
+        "takeover.pre_commit",
+        "terminalize.post_commit",
+        "terminalize.pre_commit"
+      ]
+    },
     "domain_mode": "uid",
     "macos": "26.4.1",
     "pragmas": {
@@ -365,19 +389,33 @@
       "verdict": "PASS"
     },
     "Io": {
-      "detail": {
+      "domain_mode": "uid",
+      "enospc_subcase": {
+        "atomic": true,
+        "error": "OperationalError: database or disk is full",
+        "events_after": 1,
+        "events_before": 1,
+        "free_bytes_at_failure": 40960,
+        "induced": true,
+        "integrity_ok": true,
+        "seq_after": 1,
+        "seq_before": 1,
+        "wal_bytes_at_failure": 110592,
+        "wal_bytes_before": 70072,
+        "wal_grew": true
+      },
+      "note": "Both sub-cases: a pre-write refusal (read-only dir) and a GENUINE mid-write ENOSPC on a filled hdiutil volume, the latter with the WAL demonstrably extended before the failure. EIO proper (bad media) is still not injected; ENOSPC is the reachable member of the mid-write class without a fault-injecting VFS.",
+      "readonly_subcase": {
+        "atomic": true,
         "counter_after": 1,
         "counter_before": 1,
         "error": "OperationalError: attempt to write a readonly database",
-        "events": 1,
-        "readonly_subcase_atomic": true
+        "events": 1
       },
-      "domain_mode": "uid",
-      "note": "Only a read-only-database refusal was injected, which fails before any write. Genuine ENOSPC / EIO (a small disk image or a fault-injecting VFS) was NOT built, so the mid-write failure class this row exists to test is untested.",
       "row": "Io",
-      "run_at": "2026-07-27T13:38:03+0100",
-      "rundir": "<TMPDIR>/probe5.88jxp5l9",
-      "verdict": "INCONCLUSIVE"
+      "run_at": "2026-07-27T15:14:19+0100",
+      "rundir": "<TMPDIR>/probe5.ja4cu3w9",
+      "verdict": "PASS"
     },
     "NoConv": {
       "detail": {
