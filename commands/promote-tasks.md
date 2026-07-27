@@ -79,7 +79,7 @@ Then apply the **8th check yourself** — it is deliberately left out of the scr
 
 This scope gate is **model judgment, not a deterministic rule** — acceptable here because `/promote-tasks` is not a blocking CI gate; a misjudged card lands in `needs_refinement` for a human to confirm, never silently lost. Every other HIGH check above stays deterministic (the scanner computes them).
 
-Note: `is_blocked_by` is intentionally not part of the promotion check — `/do-tasks` filters dependency-blocked cards at runtime, and re-checking here would permanently strand otherwise-ready cards in `needs_refinement` (the promoter only scans `status: new`).
+**Hold blocked cards.** Independently of the HIGH/LOW score, **hold** any card with an unresolved blocker — an `is_blocked_by` entry whose target card is still present and not `done`. A blocker whose target is **absent or `done`** counts as satisfied (the same readiness rule `/do-tasks` applies at runtime; see `commands/do-tasks.md` and the Field reference in `skills/task/SKILL.md`). A held card is **left in `status: new`** — not promoted to `ready`, not demoted to `needs_refinement` — so it stays in the scanned pool and is re-evaluated next run, promoting automatically once every blocker resolves. Resolve each blocker slug against the scanned card set (the scan reports every `dev_docs/tasks/**` card): a blocker is satisfied when no present card carries that slug, or the present card's `status` is `done`. Holding in `new` rather than `needs_refinement` is deliberate — the promoter only scans `status: new`, so a demoted card would never be re-checked when its blocker clears. Report held cards under `held (N, blocked)`.
 
 ### 3. Apply
 
@@ -89,6 +89,7 @@ Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter 
 
 - HIGH: set `status: ready`
 - LOW: set `status: needs_refinement`, set `human_approval_requested: true` (add the field if missing). Append a one-line `# promoter:` comment to the frontmatter naming which check failed (e.g., `# promoter: missing acceptance_criteria`) so the human can fix quickly.
+- Held (blocked): no write at all. Leave the card untouched in `status: new`.
 
 Do not touch any other fields. Do not move the file. Do not stage or commit — the next git operation (manual or `/do-tasks`) will pick up the changes.
 
@@ -97,13 +98,15 @@ Do not touch any other fields. Do not move the file. Do not stage or commit — 
 Print a summary table:
 
 ```
-Promoted 4 of 6 candidates:
+Promoted 4 of 7 candidates:
   ready (3):
     - remove-stale-foobar-alias
     - fix-broken-import
     - bump-eslint-config
   needs_refinement (1):
     - restructure-auth-module  (scope exceeds size 5 — split into sub-tasks)
+  held (1, blocked):
+    - some-slug  (blocked by other-slug)
   skipped (2, already past new):
     - <slug>
     - <slug>

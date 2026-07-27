@@ -71,7 +71,33 @@ its `handler:` is a known value (`repo-pr` / `gh-issue` / `jira` / `linear`).
 - A parsed but unknown `handler:` value → `WARN`: "Unknown handler `<value>` — run
   `/task-config` to fix it."
 
-Either WARN means Check 1 did **not** resolve a known handler — Check 2 keys off that.
+Either WARN **above** means Check 1 did **not** resolve a known handler — Check 2 keys
+off that. Check 1b below never affects it: it runs only once the handler already
+resolved to `linear`, so its statuses say nothing about handler resolution.
+
+**Check 1b (linear only) — `projects` shape.** When the resolved handler is `linear`,
+also validate the `linear:` block's project config (see `linear-common.md` → "Config
+block" for the full schema). It reports its own status line, separate from Check 1,
+carrying the **worst** status among the bullets below (`WARN` beats `PASS`) — a
+config can trip more than one:
+
+- A lingering scalar `linear.default_project` → `WARN`: "scalar `default_project` is
+  deprecated — run `/task-config` to migrate to `linear.projects`." (`/task-config`
+  performs the rewrite itself — see `linear-config.md` "Migrate an existing scalar
+  `default_project` first" — so this is never auto-fixed here.)
+- `linear.projects`, when present, must be a list; each entry must have a string
+  `id`; the `id` values must be **unique** across the list (consumers query once per
+  resolved scope and assume the scopes are disjoint — a duplicate fires redundant
+  `list_issues` queries and subtracts the same in-flight count twice, see
+  `linear-common.md` → "Resolve configured projects"); each entry's `wip_limit` /
+  `max_estimate`, when present, must be positive integers.
+- `linear.global_wip_limit`, when set, must be a positive integer. When it is **less
+  than** the largest per-project `wip_limit` it silently masks that cap — flag it.
+- Any of the above → `WARN` (never `FAIL`: the repair is a config rewrite that only
+  the interactive `/task-config` can make, and every `FAIL` must be repairable under
+  `--fix`): "`.task-config.yml` — `linear.projects[<n>]` <what's wrong> — run
+  `/task-config` to fix it." An absent or empty `projects: []` is a legitimate
+  whole-team scope, not an error → `PASS`.
 
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler

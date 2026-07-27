@@ -24,16 +24,13 @@ Row 4 reuses that scan's `no-PR skipped` bucket (see "5. Row 4" below).
 > starting point. Do not add a fifth row here, and do not add any other
 > speculative rule.
 >
-> Rows 1 and 2 only ever **promote or complete** an issue; rows 3 and 4 are
-> v1's **demotes** — they carry more blast radius than a promote/complete
-> (a false-positive read pulls live work back to Backlog), which is exactly
-> why they stayed deferred follow-ups until the promote/complete rules (1-2)
-> were proven in practice. Row 3 ships with the same narrow guard the
-> deferred description specified: act only on a PR that is **definitively**
-> closed-unmerged, never on an unresolvable PR state, and never set a
-> `completed`/`canceled` state from it. Row 4 ships with its own narrow
-> guard: act only when **both** no-PR/no-branch **and** the age threshold
-> hold, never on ambiguity. Do not widen either row.
+> Rows 1–2 only **promote or complete**; rows 3–4 are the **demotes** — a
+> false-positive read pulls live work back to Backlog, which is why they
+> stayed deferred until the promote/complete rules were proven in practice.
+> Each demote acts only on a **definitive** read (row 3: a PR conclusively
+> closed-unmerged; row 4: no-PR/no-branch **and** past the age threshold),
+> never on ambiguity, and never sets a `completed`/`canceled` state. Do not
+> widen either row.
 
 **Shared reference:** see `linear-common.md` for connection details, the
 config schema (`linear.projects`, the Unassigned bucket), and the kanban
@@ -47,15 +44,12 @@ Run the shared preflight from `linear-common.md` (call
 failure messages.
 
 Resolve scope exactly as `linear-sweep-complete.md` "Preflight + resolve
-scope" step 2 does — do not duplicate the mechanics here, read that file:
-`--all` and `--project <id|name>` are mutually exclusive; `--project` narrows
-to exactly one project (configured or live/unconfigured) with no Unassigned
-pass; `--all` is a single whole-team query with no project resolution;
-neither flag (default) uses the configured `linear.projects` scopes **plus**
-the Unassigned bucket — the **sweep/reconcile variant** from
-`linear-common.md` "The Unassigned bucket" (`projectId == null` only, not
-"any project outside the configured set" — narrower than `/do-tasks`'s claim
-variant by design, since this reconciler is destructive-adjacent).
+scope" step 2 does — the `--all`/`--project`/default mechanics live there,
+don't restate them. The one reconcile-specific detail: the default scope uses
+the **sweep/reconcile variant** of `linear-common.md` "The Unassigned bucket"
+(`projectId == null` only, not "any project outside the configured set" —
+narrower than `/do-tasks`'s claim variant by design, since this reconciler is
+destructive-adjacent).
 
 All four rows below run against this same resolved scope set.
 
@@ -66,113 +60,57 @@ in-flight issues" through "Report" steps), passing `--apply`, `--all`, and
 `--project` through unchanged. That file is the **single source of truth** for the
 completion rule — do not re-specify PR resolution, merge verification, or the
 `linear-complete.md` apply call here. Fold its per-issue candidate lines and
-counts into this command's combined report under the `→ Done` heading.
-
-**Row 1 needs no separate wiring in this file.** Any GraphQL fast-path
-`linear-sweep-complete.md` uses for its own in-flight scan is entirely that
-file's concern — row 1 inherits it automatically by delegating wholesale, the
-same way it inherits everything else about the completion rule. Do not
-duplicate a fast-path gate here for row 1.
+counts into this command's combined report under the `→ Done` heading. Row 1
+needs **no separate wiring** in this file — including any GraphQL fast-path,
+which is entirely that file's concern; don't duplicate a fast-path gate here.
 
 ## 3. Row 2 — open PR, wrong column → In Review
 
 The read this row needs — every `backlog`/`unstarted`-type issue plus its PR
-attachment — is defined once in `linear-common.md` "In-flight scan"; this
-section only wires that read behind a try-script-then-floor gate. Do not
-restate the read's field list or state-scope rule here.
-
-**One mechanism: try the fast path, fall back to the floor.** For each scope
-resolved in "1. Preflight + scope" above, attempt the **GraphQL fast-path**
-first via `linear-scan.py`. On **any** non-zero exit, or stdout that doesn't
-parse as the expected JSON object, log one debug line (`Fast-path unavailable
-(<reason>) — falling back to MCP floor.`) and run the **MCP floor** (steps 1–2
-below) for that scope instead. There is no separate mechanism and no
-independent pre-check gating this — `linear-scan.py` itself exits fast and
-non-zero when no key is resolvable, so the fallback **is** the gate, same as
-`linear-claim.md` "Find candidates."
-
-> **This gate is also the security boundary.** A Linear personal API key
-> (what `linear.api_key_ref` points at) is a full-account bearer token —
-> anyone holding it can read and write everything the key's owner can in
-> Linear. It must **never** be injected into a `claude.ai`/Claude Code
-> **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/
-> `$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and
-> attempts `linear-scan.py`, the script exits non-zero before any GraphQL
-> request (no key resolvable) and the run falls to the MCP floor
-> (OAuth-scoped, no raw key) by design — the guarantee is that the key is
-> never present, not that the script is never invoked. Do not "fix" this by
-> wiring the key into cloud config. See `linear-claim.md` "Find candidates"
-> for the full account-key setup (`linear.api_key_ref`, the launching-terminal
-> `export`, the headless `$OP_SERVICE_ACCOUNT_TOKEN` path) — it is identical
-> here.
+attachment — is `linear-common.md` "In-flight scan", called with state-types
+`backlog` + `unstarted` (the **sweep/reconcile** Unassigned variant). It runs
+behind the shared **fast-path/floor gate** — see `linear-common.md`
+"Fast-path / MCP-floor gate (and the security boundary)" for the mechanism and
+the security boundary (script `linear-scan.py`; **per-scope** fallback
+granularity — a scope the fast path can't serve, i.e. the Unassigned scope,
+floors on its own). Do **not** restate the scan's field list, state-scope, or
+scope-resolution mechanics here; the steps below cover only what is
+**row-2-specific**: resolving each scanned issue's PR(s) and acting on them.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 
-1. **Call the script once per resolved scope**, passing each scope's real
-   project `id` as `--project` (omit for the whole-team scope). **Never**
-   pass the synthetic `"__unassigned__"` sentinel as `--project` —
-   `linear-scan.py` has no Unassigned-bucket exclusion mode, same as
-   `linear-ready.py`; if the resolved scope set includes the Unassigned
-   bucket, fall back to the MCP floor for that scope.
+Run the In-flight scan's **Fast-path invocation** (`linear-common.md`), one call
+per resolved scope with `--state-type backlog --state-type unstarted` (the
+sentinel / Unassigned-per-scope-fallback and `meta.states` caching rules all
+live there — don't restate them). Then apply **row-2-specific PR resolution:**
 
-   ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
-     --project "<scope-id>" --state-type backlog --state-type unstarted
-   ```
+- Each returned issue already carries its `attachments` URL list, so take
+  **every** entry matching a GitHub PR URL (`github.com/.../pull/<n>`), **not
+  just the first** — an issue can carry a stale closed-unmerged PR **and** a
+  newer open one, so a first-hit-only read could mask the open PR that makes it
+  a row-2 candidate (mirrors `linear-sweep-complete.md` step 3's multi-PR rule).
+- An issue with **no** matching attachment is **not** a row-2 candidate on this
+  path; skip it silently. This is a **narrower skip** than the floor below: the
+  fast path resolves only attachment-linked PRs, so an issue whose open PR is
+  discoverable **solely** by `[<IDENTIFIER>]` title-match or `branchName` is
+  picked up only when its scope floors — an accepted edge case (the tracked
+  claim/open flow always writes the PR attachment), not fixed by expanding
+  `linear-scan.py`.
 
-   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }`
-   object described in the script's header comment; a parse failure is
-   itself a fallback trigger (see above).
-
-2. **Consume `meta.states` in place of `list_workflow_states`.**
-   `meta.states` (an array of `{ id, name, type }`) replaces the state-id →
-   type map step 1 below builds via `list_workflow_states` — cache it the
-   same way; step 4's target-state resolution reads this cache on either
-   path.
-
-3. **Skip the per-issue attachment read.** Each returned issue already
-   carries its `attachments` URL list (the "In-flight scan" skinny fields),
-   so resolving its PR needs none of step 2 below's `get_issue` →
-   title-search → `branchName` fallback chain — take **every** `attachments`
-   entry that matches a GitHub PR URL (`github.com/.../pull/<n>`), **not just
-   the first**. This mirrors `linear-sweep-complete.md` step 3's multi-PR
-   rule: an issue can accumulate a stale closed-unmerged PR **and** a newer
-   open one, so picking only the first hit could mask the open PR that makes
-   it a row-2 candidate. An issue with **no** matching attachment is **not a
-   row-2 candidate** on this path; skip it silently. Note this is a **narrower
-   skip** than the floor's step 2 below: the fast path resolves only
-   attachment-linked PRs, so an issue whose open PR is discoverable **solely**
-   by `[<IDENTIFIER>]` title-match or `branchName` (no Linear attachment) is
-   picked up only when its scope falls back to the MCP floor — an accepted
-   trade-off (the tracked claim/open flow always writes the PR attachment, so
-   this is an edge case), not fixed by expanding `linear-scan.py`.
-
-4. **Continue at step 3 below** with the resolved issue + PR list — the PR
-   open/merged check, target-state resolution, and hard guard are identical
-   on both paths.
+Then continue at "Both paths" below with the resolved issue + PR list.
 
 ### MCP floor (fallback)
 
 Runs whenever the fast path isn't attempted or falls back per the gate above,
 per scope.
 
-1. **Query non-started issues.** Call `<linear-mcp>__list_workflow_states`
-   with the team `id` (reuse the cache if row 2 shares a session with row 1).
-   Resolve **every** state id of type `backlog` and every state id of type
-   `unstarted` — **by type only, never display name** (names are
-   user-configurable; this doctrine is load-bearing — see `linear-common.md`
-   "Kanban mapping"). For each resolved scope from step 1, call
-   `<linear-mcp>__list_issues` **once per scope per state id** — the MCP
-   `state` filter is single-valued, so a team with two `backlog`-type states
-   and one `unstarted`-type state means three calls per scope; union the
-   results per scope, same pattern as `linear-sweep-complete.md` step 2.2.
-   **Never** pass the synthetic `"__unassigned__"` sentinel as a `projectId`
-   — the Unassigned scope is resolved client-side: run one whole-team query
-   with `projectId` omitted, then keep only issues whose `projectId` is `null`
-   (the **sweep/reconcile variant** of `linear-common.md` "The Unassigned
-   bucket", **not** `linear-claim.md`'s wider "null or outside the configured
-   set"). Only the never-pass-the-sentinel guard is shared with
-   `linear-claim.md`; the membership predicate here is narrower.
+1. **Query non-started issues** exactly as the In-flight scan's MCP-floor read
+   defines (`linear-common.md`): `backlog`- and `unstarted`-type states **by
+   type only**, one `<linear-mcp>__list_issues` per scope per state id (unioned
+   per scope), and the Unassigned **sweep/reconcile variant** resolved
+   client-side (`projectId == null` only — never the `"__unassigned__"`
+   sentinel as a `projectId`). Reuse the state cache if row 2 shares a session
+   with row 1. Don't restate those mechanics here.
 
 2. **Resolve each issue's PR(s).** Use the **same priority order** as
    `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`
@@ -363,6 +301,17 @@ skipped — closed-unmerged PRs now feed row 3 and orphaned claims now feed row
 
 ## 7. Apply (`--apply` only)
 
+> **Demote rows re-verify at apply time (TOCTOU guard).** Rows 3 and 4 both
+> demote from row 1's scan, possibly read many issues earlier in a long run.
+> A demote is the one irreversible-adjacent transition here, and a worker can
+> act between the scan and the mutation (merge/reopen a PR, push a branch,
+> refresh the claim, change labels). So before mutating, each demote row
+> **re-reads the candidate live and re-runs its own guards** (specifics per
+> row below), **skips** it — reporting `left: revalidated` — on any failed
+> guard or read, and writes labels from the **fresh** read, never the
+> scan-time snapshot. Only a candidate that still, definitively, qualifies is
+> mutated.
+
 - **Row 1** — via `linear-sweep-complete.md`'s own apply path (step 6, which
   calls the `linear-complete.md` phase with `assume_verified: true` per
   verified match). Do not re-implement it here.
@@ -381,19 +330,12 @@ skipped — closed-unmerged PRs now feed row 3 and orphaned claims now feed row
 - **Row 3** — for each row-3 candidate, mirror `linear-claim.md` "Bail"'s
   release mechanics (same shape, different caller).
 
-  **First, re-verify the PR state (TOCTOU guard).** Row 3's candidate list is
-  the `left: closed unmerged` bucket from row 1's scan, which may have been
-  read many issues earlier in a long run. A demote is the one
-  irreversible-adjacent transition in this command, so before mutating,
-  re-run `gh pr view <url> --json number,url,state,mergedAt` on **each** of the
-  issue's resolved PRs and re-apply the merge-state precedence. **Skip the
-  issue** (no mutation) and report it as `left: revalidated (<new state>)` if
-  **any** resolved PR now reads `OPEN` or `MERGED`, or if **any** read fails —
-  only a set that is still, definitively, every-PR-closed-unmerged proceeds.
-  This is a deliberate extra `gh` call beyond §4's "reuse row 1's read" rule,
-  scoped to apply-time for the demote row alone, so a PR merged or reopened
-  between the scan and the mutation can never pull freshly-completed or
-  live work back to Backlog. Then, for a candidate that survives:
+  **Apply-time re-verify (per §7's demote-row guard).** Re-run `gh pr view
+  <url> --json number,url,state,mergedAt` on **each** resolved PR and re-apply
+  the merge-state precedence — only a set that is still, definitively,
+  every-PR-closed-unmerged proceeds (any `OPEN`/`MERGED`, or any failed read,
+  → skip as `left: revalidated (<new state>)`). This is a deliberate extra
+  `gh` call beyond §4's "reuse row 1's read" rule. Then, for a survivor:
   1. Resolve the `human-approval-requested` label id (`<linear-mcp>__list_issue_labels`
      with `teamId`; create it if absent, same pattern as `auto-claimed` in
      `linear-claim.md` "Claim the issue" step 1).
@@ -436,24 +378,14 @@ skipped — closed-unmerged PRs now feed row 3 and orphaned claims now feed row
 - **Row 4** — for each row-4 candidate, the same release shape as
   `linear-claim.md` "Bail" and row 3 above.
 
-  **First, re-verify eligibility at apply time (TOCTOU guard).** Row 4's
-  candidate reads (labels/assignee in step 5.2, branch in 5.3, age in 5.4)
-  were taken during discovery and may be many issues old in a long run — the
-  same scan→apply gap row 3 guards against, not a "built fresh each run"
-  exemption (both buckets come from the one row-1 scan). A demote is
-  irreversible-adjacent, and between discovery and mutation a worker can push
-  a branch, open a PR, refresh the claim, or change labels. So before
-  mutating, **re-read the candidate live** — one `<linear-mcp>__get_issue` for
-  its UUID — and re-run every guard on the fresh read: it must still be a
-  `started`-type state, still carry `auto-claimed` **and** a non-null
-  assignee, still resolve **no** PR, still have **no** remote branch (re-run
-  step 5.3's `git ls-remote`, honoring its exit-status gate), and still be
-  idle past `orphan_claim_hours` on the refreshed `updatedAt`/claim-comment.
-  **Skip the issue** (no mutation), reporting it as `left: revalidated`, if
-  any guard now fails or any read errors. Only a candidate that survives
-  proceeds — and its label mutation below uses **this fresh read's** labels,
-  never step 5.2's stale set (so a label a worker added in the gap isn't
-  clobbered).
+  **Apply-time re-verify (per §7's demote-row guard).** Re-read the candidate
+  live — one `<linear-mcp>__get_issue` for its UUID — and re-run **every**
+  step-5 guard on the fresh read: still a `started`-type state, still
+  `auto-claimed` **and** a non-null assignee, still **no** resolvable PR, still
+  **no** remote branch (re-run step 5.3's `git ls-remote`, honoring its
+  exit-status gate), and still idle past `orphan_claim_hours` on the refreshed
+  `updatedAt`/claim-comment. Skip as `left: revalidated` on any failed guard or
+  read. The label mutation below uses **this fresh read's** labels.
   1. Resolve the `human-approval-requested` label id (same pattern as row 3
      step 1).
   2. Resolve the team's default `backlog`-type state id from the cached

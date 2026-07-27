@@ -22,7 +22,7 @@ own terminal, or headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
 Usage:
   python3 linear-archive.py --team PreThink --older-than 10
   python3 linear-archive.py --team PreThink --older-than 10 --apply
-  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --include-canceled --apply
+  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --apply
 """
 
 import argparse
@@ -102,6 +102,25 @@ def gql(key, query, variables=None):
     return payload["data"]
 
 
+def terminal_passes():
+    """(state_type, timestamp_field) pairs to sweep — every terminal state.
+
+    Linear has three terminal state types and all of them mean "this issue is
+    settled": `completed` (timestamped by completedAt), `canceled`, and
+    `duplicate` (both timestamped by canceledAt). `duplicate` is its own type,
+    not a flavour of `canceled`.
+
+    All three are swept unconditionally. Anything left unswept can never be
+    archived and consumes the workspace issue cap permanently — which is exactly
+    what happened to duplicate-closed issues while this was opt-in.
+    """
+    return [
+        ("completed", "completedAt"),
+        ("canceled", "canceledAt"),
+        ("duplicate", "canceledAt"),
+    ]
+
+
 def find(key, team, project, state_type, ts_field, cutoff):
     team_field = "id" if UUID_RE.match(team) else "name"  # UUID team id, else name
     var_decl = ", $project: ID" if project else ""
@@ -144,11 +163,6 @@ def main():
         "--project", default=None, help="Optional project UUID to scope to."
     )
     ap.add_argument(
-        "--include-canceled",
-        action="store_true",
-        help="Also sweep Canceled issues (by canceledAt). Default: Done only.",
-    )
-    ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."
     )
     args = ap.parse_args()
@@ -162,9 +176,7 @@ def main():
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
-    passes = [("completed", "completedAt")]
-    if args.include_canceled:
-        passes.append(("canceled", "canceledAt"))
+    passes = terminal_passes()
 
     candidates = []
     for state_type, ts_field in passes:
@@ -173,7 +185,7 @@ def main():
             candidates.append(issue)
 
     scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
-    types = "Done + Canceled" if args.include_canceled else "Done"
+    types = "Done + Canceled + Duplicate"
     print(f"Cutoff: {cutoff}  ({scope}, {types})\n")
 
     if not candidates:

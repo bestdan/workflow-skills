@@ -52,7 +52,7 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The reconciler verbs — `/complete-task`, `/sweep-for-complete`, and `/reconcile-tasks` — are `linear`-only in v1. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. Of the reconciler verbs, `/complete-task` supports both `linear` and `gh-issue` in v1 (`repo-pr`/`jira` unsupported); `/sweep-for-complete` and `/reconcile-tasks` remain `linear`-only in v1. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -255,7 +255,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 > **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The task file is deleted as part of readying the review PR, so it cannot carry these statuses in the file system. `/list-tasks` populates these two columns by querying `gh pr list --label task-loop --state open` (needs_review) and `--state merged` (recent done). An in-flight **claim** uses the separate `task-claim` label (and keeps its `in_progress` file), so it does **not** appear in `needs_review` — the claim PR only becomes a `task-loop` PR once the work is done and the file is deleted. For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
 >
-> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr` and `gh-issue` paths keep their native merge-derived completion; `jira` completion stays with Jira's GitHub integration or smart commits where configured (it has no execute path here yet).
+> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr` and `gh-issue` paths keep their native merge-derived completion, with `/complete-task` as the explicit fallback for `gh-issue` when that auto-close doesn't fire; `jira` completion stays with Jira's GitHub integration or smart commits where configured (it has no execute path here yet).
 
 ### Confidence check (used by `/promote-tasks`)
 
@@ -264,7 +264,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
 
-Note: `is_blocked_by` is intentionally **not** checked here. `/do-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
+A card with an unresolved `is_blocked_by` entry (target card present and not `done`) is **held** instead of scored: it is left in `status: new`, not promoted to `ready` and not demoted to `needs_refinement`, so it stays in the scanned pool and auto-promotes once the blocker clears. Demoting to `needs_refinement` is deliberately avoided — the promoter only scans `status: new`, so a demoted card would never be re-checked.
 
 ## Lifecycle
 

@@ -68,29 +68,7 @@ already terminal. See `linear-common.md` "In-flight scan" for the read this
 section implements (state scope, skinny fields, per-scope resolution) — that
 block is the single source of truth; it is not restated here.
 
-**One mechanism: try the fast path, fall back to the floor.** At the top of
-this step, if `Bash` is available, attempt the **GraphQL fast-path** first —
-`commands/handlers/assets/linear-scan.py`, the same script `linear-common.md`
-"In-flight scan" names as one of the read's consumers. On **any** non-zero
-exit, or stdout that doesn't parse as the expected `{ meta, issues }` object,
-log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP
-floor.`) and run the **MCP floor** below instead. There is no separate
-`[ -n "$LINEAR_API_KEY" ]` pre-check gating this — `linear-scan.py` itself
-exits fast and non-zero when no key is resolvable, so the fallback **is** the
-gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
-`Bash` tool falls to the floor by construction.
-
-> **This gate is also the security boundary.** A Linear personal API key
-> (what `linear.api_key_ref` points at) is a full-account bearer token —
-> anyone holding it can read and write everything the key's owner can in
-> Linear. It must **never** be injected into a `claude.ai`/Claude Code
-> **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/
-> `$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and
-> attempts `linear-scan.py`, the script exits non-zero before any GraphQL
-> request (no key resolvable) and the run falls to the MCP floor
-> (OAuth-scoped, no raw key) by design — the guarantee is that the key is
-> never present, not that the script is never invoked. Do not "fix" this by
-> wiring the key into cloud config.
+**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer **batches all configured projects into one call** (step 2 below), and the script exits non-zero as a whole on any scope's failure, so its fallback granularity is the **whole configured-project batch** — a failure floors all configured projects together, not one scope. The Unassigned scope is a **separate** pass that always floors on its own (the script has no null-project exclusion mode), as "Fast path" below details.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 
@@ -109,12 +87,12 @@ gate (same mechanism as `linear-claim.md` "Find candidates"). A host with no
    state-type set this sweep needs, per `linear-common.md` "In-flight scan"):
 
    ```bash
-   python3 commands/handlers/assets/linear-scan.py --team "<linear.team>" \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
      --project "<scope-1-id>" --project "<scope-2-id>" ... \
      --state-type started
    ```
 
-   If the relative path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
    Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
    identifier, title, url, state, attachments, project } ] }` object described
    in the script's header comment; a parse failure is itself a fallback
@@ -217,9 +195,17 @@ PRs verified as merged (report that one):
    gh pr list --state all --head "<branchName>" --json number,url,state
    ```
 
-If none of the three resolve a PR, **skip the issue** — there is nothing to
-act on. Count it toward the report's "no-PR skipped" bucket; do not treat
-this as an error.
+If none of the three resolve a PR, **skip the issue** — but only when every
+discovery probe **succeeded** and simply returned no match. The `gh pr list`
+probes (steps 2–3) also emit an empty result when they **fail** (network/auth
+error, rate limit), so treat a **non-zero exit** from any attempted probe as
+**`left: unresolved`**, not "no-PR skipped": a discovery failure is not a
+confirmed absence, and `/reconcile-tasks` row 4 GC's the "no-PR skipped"
+bucket, so a failure misfiled there could demote a live-PR issue. Only when
+all attempted probes exited cleanly **and** returned no match is the issue a
+true "no-PR skipped" — count it toward that bucket and do not treat it as an
+error. (This mirrors step 4's fail-closed `left: unresolved` handling for a
+merge-state read that can't be completed.)
 
 ## 4. Check merge state
 
@@ -236,13 +222,30 @@ resolved the PR.)
 Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
 candidate for step 5.
 
-- **`OPEN`** → leave the issue untouched. This is `/reconcile-tasks` row 2's
-  concern (a future command that reconciles open-PR state) — do not add that
-  logic here.
-- **`CLOSED` and unmerged** → leave the issue untouched. Whether a
-  closed-unmerged PR should demote its issue back to backlog is a deferred
-  rule for future work — do not add it here either. Count both cases (open,
-  closed-unmerged) separately in the report as "left."
+**Multi-PR precedence.** An issue can carry more than one resolved PR (a
+stale one plus a newer one). Classify the whole issue by this precedence,
+checked in order:
+
+1. **Any** PR `MERGED` → the issue is a step-5 candidate, regardless of the
+   state of its other PRs.
+2. Else, **any** PR `OPEN` → leave the issue untouched, bucket `left: open`.
+   This is `/reconcile-tasks` row 2's concern — do not add that logic here.
+3. Else, **any** resolved PR whose state could **not** be read (the `gh pr
+   view` above errored, returned no `state`, or the PR was deleted after step
+   3 resolved its URL) → leave the issue untouched, bucket `left: unresolved`.
+   The issue does **not** fall through to `left: closed unmerged` on an
+   unread PR — a missing read is not a confirmed closed-unmerged read. This
+   keeps the classification **fail-closed**: `/reconcile-tasks` row 3 demotes
+   only issues in `left: closed unmerged`, so an unreadable PR can never
+   trigger a demote.
+4. Else (**every** resolved PR is `CLOSED` and unmerged, each read
+   successfully) → leave the issue untouched, bucket `left: closed unmerged`.
+   `/reconcile-tasks` row 3 reads this exact bucket to demote the issue back
+   to Backlog — do not add that logic here either; this file only classifies
+   and reports.
+
+Count `left: open`, `left: unresolved`, and `left: closed unmerged`
+separately in the report.
 
 ## 5. Dry-run (default)
 
@@ -291,11 +294,11 @@ Print:
 - **Scope** — one line stating exactly what this run covered: `scope:
   configured projects (<names>) + Unassigned (project-less only)` (default),
   `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
-- **Counts** — `k completed, m open (left), s no-PR skipped, c
-  closed-unmerged (left)`.
+- **Counts** — `k completed, m open (left), u unresolved (left), s no-PR
+  skipped, c closed-unmerged (left)`.
 - **Per-issue lines** — identifier, the PR resolved (if any) and its merge
-  state, and the outcome (`completed`, `left: open PR`, `left: closed
-  unmerged`, `skipped: no PR found`, or `already complete` for an idempotent
-  no-op).
+  state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
+  `left: closed unmerged`, `skipped: no PR found`, or `already complete` for
+  an idempotent no-op).
 - On dry-run, the same table with no outcome column, plus "nothing changed
   (dry-run)."

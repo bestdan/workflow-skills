@@ -16,12 +16,48 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/spawn-orchestrator.sh"
 
+# --- Caller-repo safety snapshot (PRE-618) ------------------------------------
+# This suite drives REAL git-mutating fixtures. Several deliberately use a run dir
+# that is NOT its own git repo (to exercise the orchestrator's non-git / empty-HEAD
+# paths). git discovers a repo by walking UPWARD from cwd, so a git op against such
+# a dir resolves to the nearest ENCLOSING repo. When BASE lands inside a real repo
+# (the `mktemp` fallback below, or the suite being launched from a live checkout),
+# that enclosing repo is the CALLER's — and a fixture's supervisor-halt / run-state
+# commit then lands on the caller's branch. That is how running `check.sh` from a
+# live worktree once committed fixture files and stray branches onto an in-flight
+# task branch and reverted uncommitted work (PRE-618). Capture the caller's repo
+# now, into a DEDICATED name — the suite reuses the `ROOT` variable for its own
+# fixtures (e.g. the verify-branch `ROOT="$VB/root"` block), so by the end-of-suite
+# assertion $ROOT no longer points here.
+CALLER_REPO="$ROOT"
+CALLER_IS_GIT=0
+if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  CALLER_IS_GIT=1
+  CALLER_HEAD_BEFORE="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  CALLER_REF_BEFORE="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  # Tracked working tree + index only: a repo-local BASE fallback is untracked and
+  # trap-cleaned on exit, so it is not corruption and must not false-fail here.
+  CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  CALLER_BRANCHES_BEFORE="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+fi
+
 # Sandboxed runs may deny the system temp dir — fall back to a repo-local base.
 # Resolve to the physical path (pwd -P): the renderer canonicalizes every path,
 # so fixtures must be canonical too or /var vs /private/var would mismatch.
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.so-test.XXXXXX")"
 BASE="$(cd "$BASE" && pwd -P)"
 trap 'rm -rf "$BASE"' EXIT
+
+# The belt to the snapshot above (the braces): git must NEVER discover a repo at
+# or above BASE. A ceiling at BASE stops the upward repo-discovery walk before it
+# can reach a repo that CONTAINS base — so a fixture whose run dir is not its own
+# git repo gets a clean "not a git repository" (its intended behavior) instead of
+# silently resolving to the caller's repo, even when BASE is repo-local. Fixtures
+# that git-init their own subdir are unaffected: their `.git` sits BELOW the
+# ceiling and is found first. Exported so the spawn-orchestrator.sh subprocesses
+# the fixtures invoke inherit it too. This makes the escape impossible by
+# construction, the same floor-not-ceiling stance as the notifier guard above.
+export GIT_CEILING_DIRECTORIES="$BASE"
 
 # --- The notifier guard: the suite may NEVER reach the real /usr/bin/osascript --
 #
@@ -2193,6 +2229,41 @@ if command -v git >/dev/null 2>&1; then
   alwake "$A6B" 0 "$A6B/.auto-pilot/orchestrator.log" >/dev/null
   lack "alarm/deadline: a DONE run's past deadline never alarms" \
     'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+  # (6c) REGRESSION (PRE-625): `until` is a UTC timestamp (run-state.md), so the
+  # deadline check must compare it against a UTC `now` — comparing a LOCAL `now`
+  # misfired by the machine's offset, halting a live run hours early east of UTC
+  # ("blew the --until deadline" while it is still in the future). The cases above
+  # use 2020/2099 dates no ±14h offset can flip, so they never caught it. This one
+  # sets `until` 30 min in the FUTURE (UTC) and wakes under a +9h zone: pre-fix the
+  # local-time compare reads it as blown; a UTC compare correctly does not. Force
+  # the zone so the guard is deterministic on any runner, not just a non-UTC one.
+  : >"$OSA_CALLS"
+  A6C="$AL/deadline-tz"
+  un_future="$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  mkrun "$A6C" active "$un_future" 0
+  printf 'ok\n' >"$A6C/.auto-pilot/orchestrator.log"
+  a6cout="$(TZ=Asia/Tokyo alwake "$A6C" 0 "$A6C/.auto-pilot/orchestrator.log")"
+  lack "alarm/deadline: a still-future --until does NOT alarm under a non-UTC TZ (UTC compare)" \
+    'ALARM deadline' "$a6cout"
+  [ -e "$A6C/.auto-pilot/ALARM" ] \
+    && bad "alarm/deadline: spurious deadline sentinel for a future --until under a +9h zone" \
+    || ok "alarm/deadline: no spurious deadline sentinel for a future --until under a non-UTC TZ"
+  # (6d) REGRESSION (PRE-625, offset form): `until` may carry a numeric zone offset
+  # (--until accepts any absolute ISO-8601 time). The old check only stripped a
+  # trailing `Z`, so an offset was never normalized — it compared the raw offset
+  # string and misread the deadline. Parsing it through _parse_iso8601_utc makes it
+  # a real epoch compare. This value is 30 min in the FUTURE (UTC) written in a
+  # -05:00 zone; a naive read of its wall-clock hour looks already past, a correct
+  # parse does not. The offset lives in the value itself, so no TZ forcing is
+  # needed — deterministic on every runner.
+  : >"$OSA_CALLS"
+  A6D="$AL/deadline-offset"
+  un_offset="$(date -u -v+30M -v-5H +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -d '+30 minutes -5 hours' +%Y-%m-%dT%H:%M:%S)-05:00"
+  mkrun "$A6D" active "$un_offset" 0
+  printf 'ok\n' >"$A6D/.auto-pilot/orchestrator.log"
+  a6dout="$(alwake "$A6D" 0 "$A6D/.auto-pilot/orchestrator.log")"
+  lack "alarm/deadline: a future --until with a numeric zone offset does NOT alarm (normalized, not string-compared)" \
+    'ALARM deadline' "$a6dout"
 
   # (7) THE load-bearing one: the alarm fires from the SUPERVISOR with NO model
   # call. Drive the REAL generated launch wrapper with a `claude` that dies on a
@@ -5359,6 +5430,37 @@ if [ "$guard_hits" -gt 0 ]; then
   ok "notifier guard: the incidental alarms of this suite ($guard_hits) were CAUGHT by the guard, not delivered to a desktop"
 else
   bad "notifier guard: the guard caught ZERO notifications — it is no longer covering the alarm path (the leak can return unseen)"
+fi
+
+# --- PRE-618 caller-repo integrity assertion ----------------------------------
+# The regression test for the fixture escape (see the caller-repo snapshot at the
+# top): after the ENTIRE suite, the caller's repo must be what it was before —
+# same HEAD, same current branch, same tracked working tree + index, and no
+# branches created. If any moved, a fixture reached outside its own temp repo and
+# corrupted the caller's checkout — the exact failure this file exists to make
+# impossible, and the check that was missing when it first happened. (Untracked
+# files are excluded on purpose: a repo-local BASE fallback is trap-cleaned on
+# exit and is not corruption.)
+if [ "$CALLER_IS_GIT" = 1 ]; then
+  caller_head_after="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  caller_ref_after="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  caller_tracked_after="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  caller_branches_after="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+  [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
+    && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
+    || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo" \
+      "before=$CALLER_HEAD_BEFORE after=$caller_head_after"
+  [ "$caller_ref_after" = "$CALLER_REF_BEFORE" ] \
+    && ok "caller-repo safety: current branch unchanged" \
+    || bad "caller-repo safety: current branch changed" "before=$CALLER_REF_BEFORE after=$caller_ref_after"
+  [ "$caller_tracked_after" = "$CALLER_TRACKED_BEFORE" ] \
+    && ok "caller-repo safety: tracked working tree + index unchanged" \
+    || bad "caller-repo safety: tracked files changed under the caller's repo" \
+      "before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after]"
+  [ "$caller_branches_after" = "$CALLER_BRANCHES_BEFORE" ] \
+    && ok "caller-repo safety: no stray branches created" \
+    || bad "caller-repo safety: branch set changed (stray fixture branches leaked)" \
+      "before=[$(printf '%s' "$CALLER_BRANCHES_BEFORE" | tr '\n' ' ')] after=[$(printf '%s' "$caller_branches_after" | tr '\n' ' ')]"
 fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"

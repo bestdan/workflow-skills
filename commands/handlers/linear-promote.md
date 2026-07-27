@@ -50,6 +50,8 @@ Also set aside (do **not** score) any candidate that is a **parent rollup** — 
 
 **Detecting parent rollups:** for each backlog candidate not already set aside as `already scored`, call `<linear-mcp>__list_issues` with `parentId` = candidate `id`, `limit: 1`, `includeArchived: false` (the `parentId` filter is server-side and takes exactly one id, so this is an exact per-candidate existence check that never truncates). A non-empty result means the candidate has at least one child — skip it as a `parent rollup`. Keep all identified parent rollups in the `skipped` list with reason `parent rollup`; they receive no `save_issue` call.
 
+Also set aside (do **not** score) any candidate that is **blocked** — a backlog candidate carrying the `blocked` label is **held** (left in Backlog, no `save_issue`, reason `blocked`), mirroring the file path's "hold blocked cards in Backlog" rule (see `commands/promote-tasks.md`). Keep all identified blocked candidates in the `skipped` list with reason `blocked`; they receive no `save_issue` call. (Honoring native Linear "is blocked by" **relations** here — not only the `blocked` label — needs a per-candidate `<linear-mcp>__get_issue` with `includeRelations: true` (not currently in this command's allowed tools), where a `Canceled` blocker is **never-satisfiable** so only an absent or `Done`/`completed`-type blocker satisfies the dependency — see `commands/handlers/linear-reoptimize.md`. That, plus wiring the same relation gate into the claim path (`commands/handlers/assets/linear-ready.py` / `linear-claim.md`), is deferred to a follow-up.)
+
 ### 6. Score each candidate
 
 For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter:
@@ -84,16 +86,33 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 
 ```
 scope: project Payments revamp
-Promoted 4 of 6 candidates:
+Promoted 4 of 7 candidates:
   ready (3):
     - PRE-12  Fix broken import
     - PRE-15  Bump eslint config
     - PRE-18  Remove stale alias
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
-  skipped (2):
+  skipped (3):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
+    - PRE-11  (blocked)
 ```
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Append the truncation note from step 5 if it applied.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 5 if it applied.
+
+**Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". Make the remediation **scope-aware**, and note that the whole-team backlog has **no per-run override** — it is scored only when **no** projects are configured (step 4 cases 1–2), a config-level state, not a flag. For example:
+
+- Single project scored:
+
+  ```
+  note: scored project Payments revamp only — backlog in other configured projects / unassigned was not scored. Pass `all` to score the union of all configured projects; the whole-team backlog (incl. unconfigured projects / unassigned) is scored only when no projects are configured.
+  ```
+
+- All configured projects scored (the `all` union):
+
+  ```
+  note: scored all configured projects — backlog in unconfigured projects / unassigned was not scored. Those are reached only when no projects are configured (whole-team scope); there is no per-run flag for it.
+  ```
+
+This note is **informational only — do not auto-widen** the scope to pull those issues in. Omit the note when the run already covered everything (`scope: whole backlog (no projects)`).

@@ -4,6 +4,42 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.8] - 2026-07-27
+
+### Fixes
+
+- sweep every terminal state when archiving (#263) (60ef9b7)
+
+## [1.64.7] - 2026-07-22
+
+### Fixes
+
+- add --add-dir to agy so headless read_file auto-allows (#259) (d9378d4)
+
+## [1.64.6] - 2026-07-22
+
+### Fixes
+
+- note out-of-scope backlog instead of silent skip (PRE-607) (#252) (80c17fe)
+
+## [1.64.5] - 2026-07-22
+
+### Fixes
+
+- warn up front when task files are gitignored (PRE-603) (#251) (e338832)
+
+## [1.64.4] - 2026-07-22
+
+### Fixes
+
+- resolve agent-run asset scripts via $CLAUDE_PLUGIN_ROOT (PRE-598) (#250) (05a1e75)
+
+## [1.64.3] - 2026-07-21
+
+### Fixes
+
+- hold dependency-blocked cards in backlog (#246) (08b51d0)
+
 ## [1.64.2] - 2026-07-20
 
 ### Fixes
