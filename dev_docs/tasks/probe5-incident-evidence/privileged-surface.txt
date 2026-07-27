@@ -1,0 +1,8 @@
+=== /usr/local/probe5 ===
+.rwxr-xr-x@ 4.4k danielegan 23 Jul 07:51 incarnation.py
+.rwxr-xr-x   128 danielegan 23 Jul 07:47 p5-measure
+.rwxr-xr-x   233 danielegan 23 Jul 07:32 p5-reap
+.rwxr-xr-x   129 danielegan 23 Jul 07:32 p5-spawn
+.rwxr-xr-x@ 4.9k danielegan 23 Jul 07:55 runsurrogate.py
+=== sudoers frag stat ===
+/etc/sudoers.d/probe5 owner=root:wheel mode=-r--r-----

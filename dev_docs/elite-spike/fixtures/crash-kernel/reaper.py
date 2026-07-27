@@ -25,6 +25,7 @@ Never `root` `kill(-1)` — root's target set is every process on the machine.
 import ctypes
 import ctypes.util
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -36,6 +37,12 @@ import incarnation  # noqa: E402
 libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 
 PROC_UID_ONLY = 4
+
+# A gen_token must be non-blank, whitespace-free, and long enough that it cannot
+# match unrelated command lines by accident. A blank or too-broad token in
+# gentoken mode would make the argv scan select every process — the enumerated
+# analogue of the uid-mode kill(-1) blast radius.
+_VALID_GEN_TOKEN = re.compile(r"^[A-Za-z0-9._-]{12,}$")
 
 # The Stage-2 privileged path. Root-owned, agent-unwritable, and scoped in
 # sudoers to exactly these commands with runas=(agent) — never root.
@@ -66,16 +73,28 @@ def list_uid_pids(uid):
 
 
 def list_gentoken_pids(gen_token):
-    """DEGRADED enumeration: processes carrying `gen_token` in argv."""
-    r = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True)
+    """DEGRADED enumeration: processes carrying `gen_token` in argv.
+
+    Never selects a process owned by the CALLER's own uid. A legitimate run
+    lives under the dedicated agent uid (spawned via p5-spawn/sudo), never the
+    maintainer's uid — so even a token that happens to appear in one of the
+    maintainer's own command lines can never become a kill target. This is the
+    enumerated-kill counterpart to uid mode's refusal to target its own uid.
+    """
+    r = subprocess.run(["ps", "-axo", "pid=,uid=,command="], capture_output=True, text=True)
+    own_uid = os.getuid()
     out = []
     for line in r.stdout.splitlines():
         line = line.strip()
         if not line or gen_token not in line:
             continue
-        pid_s = line.split(None, 1)[0]
-        if pid_s.isdigit():
-            out.append(int(pid_s))
+        parts = line.split(None, 2)
+        if len(parts) < 3 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        pid, uid = int(parts[0]), int(parts[1])
+        if uid == own_uid:
+            continue
+        out.append(pid)
     me = os.getpid()
     return sorted(p for p in out if p != me)
 
@@ -86,10 +105,36 @@ class Domain:
     def __init__(self, mode, *, agent_uid=None, gen_token=None, exclude=()):
         if mode not in ("uid", "gentoken"):
             raise ValueError(f"unknown domain mode {mode!r}")
-        if mode == "uid" and agent_uid is None:
-            raise ValueError("uid mode needs agent_uid")
-        if mode == "gentoken" and not gen_token:
-            raise ValueError("gentoken mode needs gen_token")
+        if mode == "uid":
+            if agent_uid is None:
+                raise ValueError("uid mode needs agent_uid")
+            # A uid-mode reap is kill(-1) against agent_uid. If agent_uid is root
+            # it targets the whole host; if it is the uid that owns this process
+            # (the maintainer / the daemon), it reaps every SSH login and shell
+            # that uid owns — the exact defect that took the host down. The
+            # domain MUST be a dedicated, non-privileged uid distinct from
+            # whoever constructs the reaper. Enforced here, at the one point
+            # where agent_uid is bound, so a misconfigured plist fails closed at
+            # reconcile instead of nuking the maintainer's sessions.
+            #
+            # This is not hypothetical: a supervisor was bootstrapped with
+            # agent_uid = the maintainer's own uid (scenarios.install_supervisor
+            # wrote str(UID)), and under launchd KeepAlive it self-killed and
+            # relaunched ~every 1-2s, reaping every SSH login for four days
+            # (~242k reap cycles). Incident evidence and the log summary live in
+            #   dev_docs/tasks/probe5-incident-evidence/
+            if int(agent_uid) == 0:
+                raise ValueError("uid mode refuses root: kill(-1) as root is host-wide")
+            if int(agent_uid) in (os.getuid(), os.geteuid()):
+                raise ValueError(
+                    f"uid mode refuses agent_uid={agent_uid}: it is the caller's "
+                    "own uid, so kill(-1) would reap the caller's own logins — "
+                    "provision a dedicated agent uid")
+        if mode == "gentoken" and not (gen_token and _VALID_GEN_TOKEN.match(gen_token)):
+            raise ValueError(
+                "gentoken mode needs a well-formed, whitespace-free token of "
+                f"length >= 12; got {gen_token!r} (a blank or too-broad token "
+                "would match unrelated processes)")
         self.mode = mode
         self.agent_uid = agent_uid
         self.gen_token = gen_token

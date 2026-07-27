@@ -17,6 +17,7 @@ in the sense the kill sheet requires.
 """
 import json
 import os
+import pwd
 import shutil
 import signal
 import subprocess
@@ -431,12 +432,43 @@ def _lc(*args):
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
+def _dedicated_agent_uid():
+    """The dedicated, non-maintainer uid a uid-mode reap is allowed to target.
+
+    A uid-mode reap is `kill(-1)` against this uid (reaper.Domain.signal_all).
+    It MUST NOT be the maintainer's own uid: this line previously read
+    `str(UID)` (== os.getuid()), so the bootstrapped supervisor reaped every
+    process the maintainer owned — every SSH login — and, under launchd
+    KeepAlive, looped for four days (~242k reap cycles). Full incident evidence
+    and the smoking-gun log summary:
+        dev_docs/tasks/probe5-incident-evidence/
+    Resolve the provisioned agent account instead. reaper.Domain now
+    independently refuses agent_uid ∈ {0, caller's uid}, so a mistake here can
+    no longer take the host down — it fails closed at reconcile.
+    """
+    if AGENT_UID:
+        return int(AGENT_UID)
+    return pwd.getpwnam(reaper.REAP_AS_USER).pw_uid
+
+
 def install_supervisor(rundir, label):
     with open(os.path.join(HERE, "supervisor.plist.tmpl")) as f:
         txt = f.read()
+    if DOMAIN_MODE == "uid":
+        agent_uid = _dedicated_agent_uid()
+        if agent_uid in (0, os.getuid(), os.geteuid()):
+            raise RuntimeError(
+                f"refusing to install a uid-mode supervisor with agent_uid={agent_uid}: "
+                "it must be a dedicated, non-root uid distinct from the caller "
+                "(otherwise kill(-1) reaps the caller's own logins)")
+        agent_uid_sub = str(agent_uid)
+    else:
+        # gentoken mode ignores AGENT_UID (supervisor.make_domain only reads it
+        # in uid mode); never write the maintainer's uid into the plist.
+        agent_uid_sub = str(AGENT_UID) if AGENT_UID else ""
     subs = {"LABEL": label, "PYTHON": PY, "DIR": HERE, "RUNDIR": rundir,
             "DB": os.path.join(rundir, "state.db"), "REPO": REPO,
-            "DOMAIN_MODE": DOMAIN_MODE, "AGENT_UID": str(UID),
+            "DOMAIN_MODE": DOMAIN_MODE, "AGENT_UID": agent_uid_sub,
             "RECONCILE_LOG": os.path.join(rundir, "reconcile.jsonl")}
     for k, v in subs.items():
         txt = txt.replace(f"@{k}@", str(v))
