@@ -13,6 +13,14 @@ recovery nearly impossible. The remaining rows want a machine with console acces
 
 Branch `bestdan/elite-probe5-crash-kernel`, pushed through `7b7c670`. Clean tree.
 
+**Update 2026-07-27 — the move happened.** Work is now on Daniel's MacBook Pro, a
+console machine. **Part A is provisioned and verified here** (A1–A7 green, A8 half
+done — see the MacBook blockquote in `probe5-todo.md` § Part A for the full record
+and the two corrections it forced). `agent` is **uid 502** on this host; leave
+`PROBE5_AGENT_UID` unset and let the name lookup resolve it. The mac mini's rows
+still stand as mac mini evidence; none of it transfers, so Part C re-runs
+Esc/Churn/Writer/Uid here before anything new is claimed.
+
 **Established under the real escape-proof uid domain (`domain_mode=uid`):**
 
 | Row | Verdict | What it establishes |
@@ -98,10 +106,11 @@ previous host is SSH-only, and this workstream's known failure mode kills every
 SSH login ~0.6s after auth, so remote recovery is not realistic. Confirm this
 machine has console/physical access before bootstrapping anything.
 
-STATE: Esc, Churn, Writer, Uid PASS under the real uid domain. The other 21 rows
-hold gentoken evidence from 2026-07-23 that does NOT transfer. Part A host
-prereqs are NOT provisioned here — they are per-machine and none of the mac
-mini's evidence carries over.
+STATE: Esc, Churn, Writer, Uid PASS under the real uid domain ON THE MAC MINI.
+The other 21 rows hold gentoken evidence from 2026-07-23 that does NOT transfer.
+Part A host prereqs ARE now provisioned and verified on the MacBook (A1-A7; A8
+pending its launchctl half) — but row evidence is per-machine, so nothing from
+the mini carries over and Part C re-runs those four here.
 
 SAFETY RULES (non-negotiable):
 1. NEVER let PROBE5_AGENT_UID be the maintainer's uid or root. Pin the dedicated

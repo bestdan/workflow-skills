@@ -58,6 +58,33 @@ no tty for the password prompt.
 > (`scenarios._dedicated_agent_uid`), and `reaper.Domain` independently refuses
 > `agent_uid ∈ {0, caller's uid}`.
 
+> **On Daniel's MacBook Pro as of 2026-07-27:** A1–A7 are **all satisfied**; A8 is
+> half done. This is the console machine the launchd rows moved to. Maintainer is
+> `danielegan` (uid 501); `agent` exists at **uid 502**, in `staff` + `apagent`,
+> not `admin`, zero sudo, `0700` home and work dir, no autologin.
+>
+> **`agent` is 502 here and 503 on the mac mini.** That is not a contradiction and
+> nothing needs reconciling — the two hosts were provisioned independently and the
+> fixture resolves by name. It does mean `PROBE5_AGENT_UID` must stay **unset** on
+> this machine: `_dedicated_agent_uid()` returns `int(AGENT_UID)` when it is set,
+> so exporting it overrides the name lookup and reintroduces exactly the class of
+> mistake the incident came from. The mini's 502-was-reassigned-to-a-human hazard
+> is specific to that host; here 502 *is* `agent` and no other account claims it.
+>
+> The interpreter needed installing. `python3.12` resolved to a `mise` build under
+> the maintainer's `0700` home, which the agent cannot traverse — `p5-spawn` and
+> `p5-measure` exec the interpreter *as agent*, so it would have failed. Fixed by
+> `brew install python@3.12`; `/opt/homebrew/opt/python@3.12/bin/python3.12` is
+> 3.12.13 / SQLite 3.53.4, world-`r-x` along the whole chain, and is already
+> `scenarios.PY`'s default, so no env override is needed.
+>
+> Ownership was verified with `stat -f '%Su:%Sg'`, not `ls -l` — a token-compressing
+> `ls` wrapper on this host silently drops the owner column, which is the single
+> field A7 exists to check. Everything reads `root:wheel`, **including the
+> directory itself**: the `chown root:wheel` here now covers `/usr/local/probe5`
+> and not just its contents, since a maintainer-owned `755` dir still lets the
+> maintainer swap the helpers out from under `sudo`.
+
 Set these once per shell; everything below uses them.
 
 ```sh
@@ -270,6 +297,20 @@ fired in this probe:
 The reap emptied its own uid and **did not cross the uid boundary** — the
 containment primitive invariants 4/5/6 quantify over, working as specified.
 
+Reproduced on Daniel's MacBook Pro 2026-07-27 (agent = uid 502), `rc=143`:
+
+| | Before | After |
+| --- | --- | --- |
+| uid 502 procs | `distnoted` 66840, `mdbulkimport` 66842, `lsd` 66846 | all three gone; fresh `containermanagerd` 80455, `distnoted` 86233 |
+| uid 501 procs | 274 | 295 (grew; nothing died) |
+| login sessions | 11 | **11** |
+
+Read the "after" row correctly: uid 501 going **up** is the expected shape, since
+the surrounding session keeps spawning processes. The falsifier would be a *drop*.
+The survivors on 502 are respawned daemons with new pids, not survivors of the
+signal — check pids, not counts. Evidence is per-machine and this table does not
+transfer either way.
+
 ```sh
 echo "== reap runs as agent ==";  sudo -n -u agent /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 143, NOT 0)"
 echo "== root path refused ==";   sudo /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 64)"
@@ -290,9 +331,17 @@ The other checks not to misread: `sudo -u agent <anything not in P5CMDS>` prompt
 for a password and, non-interactively, just fails — so it proves nothing about the
 agent's own permissions. Read those off the filesystem instead (a `0700` home the
 agent cannot traverse; a root-owned `755` helper dir it cannot write). Likewise
-`sudo /usr/local/probe5/p5-reap` as **root** is refused by sudo itself, because A6
-grants only `(agent)`; `p5-reap`'s internal `id -u -eq 0` guard is the second
-layer, not the first.
+`sudo /usr/local/probe5/p5-reap` as **root** may or may not be refused by sudo —
+**do not count on A6 for this.** Measured on the MacBook 2026-07-27, sudo let it
+through and the helper's own `id -u -eq 0` guard printed `refusing to run as root`
+and exited 64. A6 grants `(agent)` NOPASSWD, but a maintainer in `admin` already
+holds `%admin ALL=(ALL) ALL`, so the root invocation is permitted on any password
+prompt; the P5CMDS entry only makes the *agent* path passwordless, it takes
+nothing away. So on an admin maintainer account the internal guard is the **first**
+and only layer standing between a fat-fingered `sudo p5-reap` and a host-wide
+`kill(-1)` as root. It is load-bearing. Never "simplify" it out of the shebang
+block, and run this check with a real tty (`sudo -n` fails at the password prompt
+and proves nothing about the guard).
 
 ### A8 — if this is a fresh machine
 
