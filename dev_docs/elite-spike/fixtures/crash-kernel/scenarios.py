@@ -392,30 +392,64 @@ def row_pid():
     the state the kernel would be in after a reuse.
     """
     import supervisor
-    p = subprocess.Popen([PY, "-c", "import time; time.sleep(60)"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(0.3)
-    live = incarnation.measure(p.pid)
-    forged = dict(live)
-    forged["p_uniqueid"] = (live["p_uniqueid"] or 0) + 999999  # a different incarnation
+    res = {"row": "Pid"}
 
-    kq_bad, err_bad = supervisor.readopt(p.pid, forged)
-    kq_good, err_good = supervisor.readopt(p.pid, live)
-    if kq_good:
-        kq_good.close()
-    p.kill()
-    p.wait()
+    # The SUBJECT must live in the domain being measured. `readopt` re-verifies
+    # via supervisor.measure_run, which in uid mode routes through
+    # `sudo -u agent p5-measure` — so a maintainer-owned probe process measures
+    # EPERM -> alive:False -> "identity changed", and the row fails on its
+    # GENUINE adopt while the forgery is correctly refused. That is a false
+    # failure about who spawned the subject, not about the guard.
+    rundir = cleanup = None
+    if DOMAIN_MODE == "uid":
+        rundir = fresh_rundir()
+        info, raw = _launch_for(rundir, None)
+        if not info or not info.get("run_pid"):
+            res["verdict"] = "INCONCLUSIVE"
+            res["detail"] = {"reason": "could not launch an agent-uid subject",
+                             "stderr": raw["stderr"][-400:]}
+            return res
+        pid, cleanup = info["run_pid"], info["gen_token"]
+        res["subject"] = {"uid_mode": True, "pid": pid, "spawned_as": "agent"}
+    else:
+        p = subprocess.Popen([PY, "-c", "import time; time.sleep(60)"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
+        pid = p.pid
+        res["subject"] = {"uid_mode": False, "pid": pid, "spawned_as": "maintainer"}
 
-    # And the identity predicate itself must reject the same tuple.
-    pred_rejects = not incarnation.same_incarnation(forged, live)
-    ok = kq_bad is None and err_bad is not None and kq_good is not None and pred_rejects
-    return {"row": "Pid", "verdict": "PASS" if ok else "FAIL",
-            "detail": {"forged_adopt_refused": kq_bad is None,
-                       "refusal_reason": err_bad,
-                       "genuine_adopt_succeeded": kq_good is not None,
-                       "identity_predicate_rejects_forgery": pred_rejects},
-            "note": "real PID wraparound not forced; this exercises the guard the "
-                    "reuse would trip, not the wraparound itself"}
+    try:
+        # Measure the way readopt will, so the recorded tuple and the re-read
+        # come from the same authority.
+        live = supervisor.measure_run(pid)
+        forged = dict(live)
+        forged["p_uniqueid"] = (live["p_uniqueid"] or 0) + 999999  # another incarnation
+
+        kq_bad, err_bad = supervisor.readopt(pid, forged)
+        kq_good, err_good = supervisor.readopt(pid, live)
+        if kq_good:
+            kq_good.close()
+
+        # And the identity predicate itself must reject the same tuple.
+        pred_rejects = not incarnation.same_incarnation(forged, live)
+        ok = (kq_bad is None and err_bad is not None
+              and kq_good is not None and pred_rejects)
+        res["verdict"] = "PASS" if ok else "FAIL"
+        res["detail"] = {"forged_adopt_refused": kq_bad is None,
+                         "refusal_reason": err_bad,
+                         "genuine_adopt_succeeded": kq_good is not None,
+                         "genuine_adopt_error": err_good,
+                         "subject_measured_alive": live.get("alive"),
+                         "identity_predicate_rejects_forgery": pred_rejects}
+        res["note"] = ("real PID wraparound not forced; this exercises the guard "
+                       "the reuse would trip, not the wraparound itself")
+        return res
+    finally:
+        if DOMAIN_MODE == "uid":
+            cleanup_domain(cleanup)
+        else:
+            p.kill()
+            p.wait()
 
 
 # --- row: never-root kill(-1) (Priv) -----------------------------------------

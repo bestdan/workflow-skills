@@ -425,12 +425,21 @@
     "Pid": {
       "detail": {
         "forged_adopt_refused": true,
+        "genuine_adopt_error": null,
         "genuine_adopt_succeeded": true,
         "identity_predicate_rejects_forgery": true,
-        "refusal_reason": "identity changed after attach (PID reuse) \u2014 refusing to adopt"
+        "refusal_reason": "identity changed after attach (PID reuse) \u2014 refusing to adopt",
+        "subject_measured_alive": true
       },
+      "domain_mode": "uid",
       "note": "real PID wraparound not forced; this exercises the guard the reuse would trip, not the wraparound itself",
       "row": "Pid",
+      "run_at": "2026-07-27T13:36:59+0100",
+      "subject": {
+        "pid": 27297,
+        "spawned_as": "agent",
+        "uid_mode": true
+      },
       "verdict": "PASS"
     },
     "Priv": {
@@ -947,6 +956,7 @@
       "crashed_op": {
         "rc": 1
       },
+      "domain_mode": "uid",
       "failed_checks": [],
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
@@ -1046,7 +1056,8 @@
       "reconcile": [],
       "reconcile_rc": 0,
       "row": "T1",
-      "rundir": "<TMPDIR>/probe5.g738x9pa",
+      "run_at": "2026-07-27T13:35:39+0100",
+      "rundir": "<TMPDIR>/probe5.z130ocfn",
       "safe_outcome": true,
       "safe_outcome_reason": "clean rollback: no lease was ever published",
       "state_after_crash": {
