@@ -635,18 +635,21 @@
         "readopt"
       ],
       "bootstrap_rc": 0,
+      "deadman_disarmed": true,
       "decisions": [
         {
           "action": "readopt",
           "alive_verified": true,
           "domain_live": [
-            27678,
-            27679
+            6176,
+            6179,
+            99472
           ],
-          "escape_proof": false,
+          "escape_proof": true,
           "generation": 1,
           "other_domain_procs": [
-            27679
+            6179,
+            99472
           ],
           "recorded_incarnation": true,
           "repo_key": "repo-a",
@@ -655,9 +658,11 @@
         }
       ],
       "domain_after_restart": [
-        27678,
-        27679
+        6176,
+        6179,
+        99472
       ],
+      "domain_mode": "uid",
       "failed_checks": [],
       "gen_token_present": true,
       "invariants": {
@@ -718,11 +723,11 @@
         }
       },
       "lease_after": {
-        "gen_token": "P5TOKEN-run-1784798198-27676",
+        "gen_token": "P5TOKEN-run-1785154366-6173",
         "generation": 1,
         "manifest_digest": "",
         "repo_key": "repo-a",
-        "run_id": "run-1784798198",
+        "run_id": "run-1785154366",
         "state": "active",
         "stop_intent": 0,
         "updated_seq": 2
@@ -731,10 +736,11 @@
       "reconcile_passes": 2,
       "relaunched_by_launchd": true,
       "row": "Sup-readopt",
-      "run_pid": 27678,
+      "run_at": "2026-07-27T13:12:56+0100",
+      "run_pid": 6176,
       "run_still_alive": true,
-      "rundir": "<TMPDIR>/probe5.jnpujdj8",
-      "supervisor_pid": 27682,
+      "rundir": "<TMPDIR>/probe5.fmnf69an",
+      "supervisor_pid": 6185,
       "verdict": "PASS"
     },
     "Sup-smoke": {
