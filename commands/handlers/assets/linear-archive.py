@@ -102,18 +102,23 @@ def gql(key, query, variables=None):
     return payload["data"]
 
 
-def terminal_passes(include_canceled):
-    """(state_type, timestamp_field) pairs to sweep.
+def terminal_passes():
+    """(state_type, timestamp_field) pairs to sweep — every terminal state.
 
-    "duplicate" is its own terminal state type in Linear, not a flavour of
-    "canceled" — an issue closed as a duplicate matches neither of the other two
-    filters. Omitting it means duplicate-closed issues can never be archived and
-    consume the workspace cap permanently. They carry canceledAt like a cancel does.
+    Linear has three terminal state types and all of them mean "this issue is
+    settled": `completed` (timestamped by completedAt), `canceled`, and
+    `duplicate` (both timestamped by canceledAt). `duplicate` is its own type,
+    not a flavour of `canceled`.
+
+    All three are swept unconditionally. Anything left unswept can never be
+    archived and consumes the workspace issue cap permanently — which is exactly
+    what happened to duplicate-closed issues while this was opt-in.
     """
-    passes = [("completed", "completedAt")]
-    if include_canceled:
-        passes += [("canceled", "canceledAt"), ("duplicate", "canceledAt")]
-    return passes
+    return [
+        ("completed", "completedAt"),
+        ("canceled", "canceledAt"),
+        ("duplicate", "canceledAt"),
+    ]
 
 
 def find(key, team, project, state_type, ts_field, cutoff):
@@ -160,7 +165,8 @@ def main():
     ap.add_argument(
         "--include-canceled",
         action="store_true",
-        help="Also sweep Canceled and Duplicate issues (by canceledAt). Default: Done only.",
+        help="No-op: every terminal state (Done, Canceled, Duplicate) is always swept. "
+        "Accepted so existing runbooks and cron invocations keep working.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."
@@ -176,7 +182,7 @@ def main():
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
-    passes = terminal_passes(args.include_canceled)
+    passes = terminal_passes()
 
     candidates = []
     for state_type, ts_field in passes:
@@ -185,7 +191,7 @@ def main():
             candidates.append(issue)
 
     scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
-    types = "Done + Canceled + Duplicate" if args.include_canceled else "Done"
+    types = "Done + Canceled + Duplicate"
     print(f"Cutoff: {cutoff}  ({scope}, {types})\n")
 
     if not candidates:

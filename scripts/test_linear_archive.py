@@ -104,26 +104,34 @@ class FindQueryTests(unittest.TestCase):
 
 
 class TerminalPassesTests(unittest.TestCase):
-    def test_default_sweeps_done_only(self):
-        self.assertEqual(
-            linear_archive.terminal_passes(False), [("completed", "completedAt")]
-        )
+    def test_sweeps_every_terminal_state(self):
+        """All three of Linear's terminal state types are swept unconditionally.
 
-    def test_include_canceled_also_sweeps_duplicate(self):
-        """Linear's `duplicate` is a distinct terminal state type, not a flavour of
-        `canceled`. Omitting it strands duplicate-closed issues: they match neither
-        the completed nor the canceled filter, so they can never be archived and
-        consume the workspace issue cap forever."""
-        passes = linear_archive.terminal_passes(True)
-        self.assertIn(("duplicate", "canceledAt"), passes)
+        A state left unswept can never be archived and consumes the workspace
+        issue cap forever — which is what happened to `duplicate` while the
+        canceled pass was opt-in. `duplicate` is its own type, not a flavour of
+        `canceled`, so it needs its own pass; both are timestamped by canceledAt.
+        """
         self.assertEqual(
-            passes,
+            linear_archive.terminal_passes(),
             [
                 ("completed", "completedAt"),
                 ("canceled", "canceledAt"),
                 ("duplicate", "canceledAt"),
             ],
         )
+
+    def test_every_pass_uses_a_timestamp_the_state_actually_sets(self):
+        """A pass filtering on a timestamp its state never sets matches nothing —
+        a silent no-op rather than an error. completed sets completedAt; canceled
+        and duplicate both set canceledAt."""
+        expected = {
+            "completed": "completedAt",
+            "canceled": "canceledAt",
+            "duplicate": "canceledAt",
+        }
+        for state_type, ts_field in linear_archive.terminal_passes():
+            self.assertEqual(expected[state_type], ts_field, f"wrong ts for {state_type}")
 
 
 if __name__ == "__main__":

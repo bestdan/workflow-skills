@@ -108,9 +108,9 @@ standalone script uses, and it ran cleanly against a real workspace:
 query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!) {
   issues(first: 100, after: $cursor, filter: {
     team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
-    state: { type: { eq: $type } },         # "completed" (Done) — repeat for "canceled"
+    state: { type: { eq: $type } },         # repeat for "completed", "canceled", "duplicate"
     # project: { id: { eq: $projectId } },  # per §3: loop once per configured project (omit for whole-team) — also declare $projectId: String in the signature above
-    completedAt: { lt: $cutoff }            # use canceledAt for the canceled pass
+    completedAt: { lt: $cutoff }            # canceledAt for the canceled + duplicate passes
   }) {
     nodes { id identifier title completedAt }
     pageInfo { hasNextPage endCursor }
@@ -146,22 +146,24 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    `issues` query **excludes archived issues by default**, so re-running is
    idempotent: already-archived items simply don't come back. (No `archivedAt`
    filter needed.)
-5. **Cutoff & the canceled pass.** `$cutoff` is `now − N days` as an ISO-8601
+5. **Cutoff & the terminal passes.** `$cutoff` is `now − N days` as an ISO-8601
    string (`DateTimeOrDuration`). Run the query once per terminal type **× per
-   configured project** (§3's loop): `completed` filtered on `completedAt`, and —
-   only if the user wants canceled work swept too — `canceled` **and `duplicate`**,
-   both filtered on `canceledAt`. An issue missing the relevant timestamp is skipped
-   (never archive on an unknown date). Collect each match's UUID `id` and
-   `identifier` into the unioned candidate set (dedupe by `id`).
+   configured project** (§3's loop) — **all three types, always**: `completed`
+   filtered on `completedAt`, and `canceled` and `duplicate` both filtered on
+   `canceledAt`. An issue missing the relevant timestamp is skipped (never archive
+   on an unknown date). Collect each match's UUID `id` and `identifier` into the
+   unioned candidate set (dedupe by `id`).
 
-   > **`duplicate` is a distinct state type, not a flavour of `canceled`.** An issue
-   > closed as a duplicate matches neither the `completed` nor the `canceled` filter,
-   > so omitting this pass means duplicate-closed issues can never be archived and
-   > consume the workspace cap permanently. They carry `canceledAt` like a cancel does.
+   > **Sweep every terminal state, unconditionally.** A state left unswept can never
+   > be archived and consumes the workspace cap permanently. That is exactly what
+   > happened to `duplicate` while the canceled sweep was opt-in: `duplicate` is its
+   > own state type, not a flavour of `canceled`, so it matched neither filter and
+   > accumulated invisibly. `--include-canceled` is retained as an accepted no-op so
+   > existing runbooks don't break.
 
 > **In-session alternative (no key for the query).** If you are already in an
 > agent session with the Linear MCP, you _can_ do the read half over the MCP:
-> resolve `completed`/`canceled` state ids with `<linear-mcp>__list_workflow_states`,
+> resolve `completed`/`canceled`/`duplicate` state ids with `<linear-mcp>__list_workflow_states`,
 > then call `<linear-mcp>__list_issues` (`teamId`, optional `projectId`,
 > `includeArchived: false`, those state ids) and filter by age client-side. But
 > the mutation still needs the key in a non-agent shell, so for anything but a
@@ -224,9 +226,9 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
 # Archive them:
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10 --apply
 
-# Scope to a project and also sweep Canceled + Duplicate:
+# Scope to a project (all terminal states are swept either way):
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
-  --project <uuid> --include-canceled --apply
+  --project <uuid> --apply
 ```
 
 `--team`/`--older-than` also read `$LINEAR_TEAM`/`$ARCHIVE_AFTER`, so a cron entry
