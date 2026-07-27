@@ -2,18 +2,18 @@
   "environment": {
     "agent_uid_provisioned": true,
     "boot_session_present": true,
-    "containment_caveat": "Escape-proof uid domain, agent uid 503. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
     "domain_mode": "uid",
     "macos": "26.4.1",
     "pragmas": {
       "fullfsync": 1,
       "journal_mode": "wal",
-      "sqlite_version": "3.53.3",
+      "sqlite_version": "3.53.4",
       "synchronous": 2
     },
     "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
     "sqlite_build": "Homebrew stock (NOT Apple's system build)",
-    "sqlite_version": "3.53.3"
+    "sqlite_version": "3.53.4"
   },
   "prior_environment": {
     "agent_uid_provisioned": true,
@@ -33,7 +33,7 @@
   },
   "rows": {
     "Churn": {
-      "domain_before_reap": 40,
+      "domain_before_reap": 38,
       "domain_mode": "uid",
       "failed_checks": [],
       "invariants": {
@@ -99,8 +99,8 @@
       "lease_state": "terminal",
       "outcome": "converged",
       "row": "Churn",
-      "run_at": "2026-07-27T05:02:04-0400",
-      "rundir": "<TMPDIR>/probe5.lre_8lxy",
+      "run_at": "2026-07-27T10:56:13+0100",
+      "rundir": "<TMPDIR>/probe5.s5fp2df3",
       "survivors_after_reap": [],
       "system_daemons_after_reap": [],
       "verdict": "PASS"
@@ -112,7 +112,7 @@
       "escapees": [
         {
           "command": "/bin/sleep 3600",
-          "pid": 91932
+          "pid": 94083
         }
       ],
       "failed_checks": [],
@@ -151,12 +151,7 @@
         "inv4_earned_release": {
           "detail": {
             "run_survivors": [],
-            "system_daemons_respawned": [
-              {
-                "command": "/usr/sbin/distnoted agent",
-                "pid": 91942
-              }
-            ]
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -182,31 +177,30 @@
         }
       },
       "row": "Esc",
-      "run_at": "2026-07-27T05:01:32-0400",
+      "run_at": "2026-07-27T10:56:13+0100",
       "run_survivors_after_reap": [],
-      "rundir": "<TMPDIR>/probe5.t16shizz",
-      "system_daemons_after_reap": [
-        {
-          "command": "/usr/sbin/distnoted agent",
-          "pid": 91942
-        }
-      ],
+      "rundir": "<TMPDIR>/probe5.98qb27hn",
+      "system_daemons_after_reap": [],
       "token_visible_pids": [
-        91927,
-        91928
+        94078,
+        94079
       ],
       "uid_domain": [
         {
-          "command": "/usr/sbin/distnoted agent",
-          "pid": 91471
+          "command": "/usr/libexec/containermanagerd --runmode=agent --user-container-mode=current --bundle-container-mode=proxy --system-container-mode=none",
+          "pid": 80455
         },
         {
-          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785142890-91925 --escape",
-          "pid": 91928
+          "command": "/usr/sbin/distnoted agent",
+          "pid": 86233
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785146166-94076 --escape",
+          "pid": 94079
         },
         {
           "command": "/bin/sleep 3600",
-          "pid": 91932
+          "pid": 94083
         }
       ],
       "verdict": "PASS"
@@ -2881,7 +2875,7 @@
       },
       "domain_mode": "uid",
       "row": "Uid",
-      "run_at": "2026-07-27T05:00:35-0400",
+      "run_at": "2026-07-27T10:56:13+0100",
       "verdict": "DOCUMENTED-LIMITATION"
     },
     "Writer": {
@@ -2922,12 +2916,7 @@
         "inv4_earned_release": {
           "detail": {
             "run_survivors": [],
-            "system_daemons_respawned": [
-              {
-                "command": "/usr/sbin/distnoted agent",
-                "pid": 91290
-              }
-            ]
+            "system_daemons_respawned": []
           },
           "ok": true
         },
@@ -2953,8 +2942,8 @@
         }
       },
       "row": "Writer",
-      "run_at": "2026-07-27T05:00:35-0400",
-      "rundir": "<TMPDIR>/probe5.fd_24k2r",
+      "run_at": "2026-07-27T10:56:13+0100",
+      "rundir": "<TMPDIR>/probe5.g3pe53_8",
       "verdict": "PASS",
       "write_probe": "EACCES"
     }
