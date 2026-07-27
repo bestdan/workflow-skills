@@ -25,6 +25,13 @@
         "takeover.pre_commit",
         "terminalize.post_commit",
         "terminalize.pre_commit"
+      ],
+      "modules_scanned": [
+        "incarnation.py",
+        "kernel.py",
+        "reaper.py",
+        "runsurrogate.py",
+        "supervisor.py"
       ]
     },
     "domain_mode": "uid",
@@ -34,6 +41,43 @@
       "journal_mode": "wal",
       "sqlite_version": "3.53.4",
       "synchronous": 2
+    },
+    "provenance": {
+      "branch": "bestdan/elite-probe5-crash-kernel",
+      "dirty": true,
+      "dirty_paths": [
+        "ev_docs/elite-spike/fixtures/crash-kernel/scenarios.py"
+      ],
+      "fixture_revision": "ce136b344442bb0a34b4cde0740f9daa9c480e30",
+      "fixture_revision_short": "ce136b3",
+      "helpers": {
+        "incarnation.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "1d3da09c2b55741b4ee3b702c0e964107f841439fb9ed96f60a0440594dc4731"
+        },
+        "p5-measure": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "df17c472563cd791ea69b7dd9d622c03333004e58e8db1a4e5b940bd08a76172"
+        },
+        "p5-reap": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "ed20fe8ce6168ae6e5159e4763932a8870e50221694b759d6e4d959689e90812"
+        },
+        "p5-spawn": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "352b1c6bce3d2b1b45c11390850f78c1e9e7bf72b8816dfd92abf5a8df5ebc2e"
+        },
+        "runsurrogate.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "a384d0300be8dd6edd905d63752d735b133736178ffc492fbb221946b542bd73"
+        }
+      },
+      "python": "/opt/homebrew/opt/python@3.12/bin/python3.12"
     },
     "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
     "sqlite_build": "Homebrew stock (NOT Apple's system build)",
@@ -1395,12 +1439,31 @@
       "verdict": "PASS"
     },
     "T11": {
+      "boundary_expectation": {
+        "checks": {
+          "generation": true,
+          "generation_not_published": true,
+          "generations_reserved": true
+        },
+        "observed": {
+          "generation": 1,
+          "generations_reserved": [
+            1
+          ],
+          "state": "active",
+          "stop_intent": 1
+        },
+        "ok": true,
+        "why": "crash BEFORE the takeover publish commits: g+1 must not exist"
+      },
       "crash_point": "takeover.pre_commit",
       "crashed_op": {
         "rc": 1
       },
       "domain_mode": "uid",
       "failed_checks": [],
+      "fixture_dirty": true,
+      "fixture_revision": "ce136b3",
       "invariants_after_crash": {
         "inv1_no_orphan_events": {
           "detail": {
@@ -1522,13 +1585,22 @@
       },
       "launch_rc": 0,
       "phase": "takeover",
-      "reconcile": "[sup 23726 14:00:57] stop_intent committed (reap_stop_intent)\n[sup 23726 14:00:57] reap converged=True rounds=0\n[sup 23726 14:00:57] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile": "[sup 47732 18:45:35] stop_intent committed (reap_stop_intent)\n[sup 47732 18:45:35] reap converged=True rounds=0\n[sup 47732 18:45:35] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
       "reconcile_rc": 0,
       "row": "T11",
-      "run_at": "2026-07-27T14:00:57+0100",
-      "rundir": "<TMPDIR>/probe5.jarom3x7",
+      "run_at": "2026-07-27T18:45:35+0100",
+      "rundir": "<TMPDIR>/probe5.xo995pr6",
       "safe_outcome": true,
       "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
       "state_after_crash": {
         "events": [
           {
@@ -1536,7 +1608,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1785157255",
+            "run_id": "run-1785174333",
             "seq": 1
           },
           {
@@ -1544,7 +1616,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1785157255",
+            "run_id": "run-1785174333",
             "seq": 2
           },
           {
@@ -1557,11 +1629,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1785157255-22883",
+          "gen_token": "P5TOKEN-run-1785174333-47715",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1785157255",
+          "run_id": "run-1785174333",
           "state": "active",
           "stop_intent": 1,
           "updated_seq": 3
@@ -1575,7 +1647,7 @@
             "idem_key": "generation_reserved:repo-a:1",
             "kind": "generation_reserved",
             "repo_key": "repo-a",
-            "run_id": "run-1785157255",
+            "run_id": "run-1785174333",
             "seq": 1
           },
           {
@@ -1583,7 +1655,7 @@
             "idem_key": "run_registered:repo-a:1",
             "kind": "run_registered",
             "repo_key": "repo-a",
-            "run_id": "run-1785157255",
+            "run_id": "run-1785174333",
             "seq": 2
           },
           {
@@ -1620,11 +1692,11 @@
           }
         ],
         "lease": {
-          "gen_token": "P5TOKEN-run-1785157255-22883",
+          "gen_token": "P5TOKEN-run-1785174333-47715",
           "generation": 1,
           "manifest_digest": "",
           "repo_key": "repo-a",
-          "run_id": "run-1785157255",
+          "run_id": "run-1785174333",
           "state": "terminal",
           "stop_intent": 0,
           "updated_seq": 6

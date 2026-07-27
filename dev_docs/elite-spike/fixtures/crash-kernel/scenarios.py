@@ -16,6 +16,9 @@ passed, and no combination of the rows that DID run can establish invariants 4/5
 in the sense the kill sheet requires.
 """
 import json
+import ast
+import errno
+import hashlib
 import os
 import plistlib
 import pwd
@@ -244,6 +247,54 @@ CRASH_POINTS = [
 ]
 
 
+# What durable state each boundary must leave BEFORE recovery runs, asserted per
+# row rather than inferred from "it ended up safe". Only the boundaries where the
+# opposite outcome is also safe-shaped need this; for the others the generic
+# predicate plus the invariants is the whole claim.
+#
+# `generations` is the full `generation_reserved` list, which is what makes the
+# takeover pair discriminating: publishing g+1 is precisely the difference
+# between the two boundaries, and it is visible nowhere else.
+BOUNDARY_EXPECT = {
+    "T11": {"why": "crash BEFORE the takeover publish commits: g+1 must not exist",
+            "generation": 1, "generations": [1], "forbid_generation": 2},
+    "T12": {"why": "crash AFTER the takeover publish commits: g+1 must be durable, "
+                   "prepared, and never activated",
+            "generation": 2, "state": "prepared", "generations": [1, 2],
+            "forbid_incarnation_for_generation": 2},
+}
+
+
+def _check_boundary_expectation(row_id, rundir, st):
+    """Assert the boundary-specific post-crash state. Returns None if unspecified."""
+    exp = BOUNDARY_EXPECT.get(row_id)
+    if not exp:
+        return None
+    lease, ev = st["lease"], st["events"]
+    gens = [e["generation"] for e in ev if e["kind"] == "generation_reserved"]
+    checks, out = {}, {"why": exp["why"], "observed": {
+        "generation": lease and lease["generation"], "state": lease and lease["state"],
+        "stop_intent": lease and lease["stop_intent"], "generations_reserved": gens}}
+
+    if "generation" in exp:
+        checks["generation"] = bool(lease) and lease["generation"] == exp["generation"]
+    if "state" in exp:
+        checks["state"] = bool(lease) and lease["state"] == exp["state"]
+    if "generations" in exp:
+        checks["generations_reserved"] = gens == exp["generations"]
+    if "forbid_generation" in exp:
+        checks["generation_not_published"] = exp["forbid_generation"] not in gens
+    if "forbid_incarnation_for_generation" in exp:
+        g = exp["forbid_incarnation_for_generation"]
+        rec = kernel.get_incarnation(db(rundir), REPO, g, "run")
+        checks["no_incarnation_for_new_generation"] = rec is None
+        out["observed"]["incarnation_for_g%d" % g] = bool(rec)
+
+    out["checks"] = checks
+    out["ok"] = all(checks.values())
+    return out
+
+
 def row_transition_crash(row_id, point, phase):
     """SIGKILL-equivalent (`os._exit`) at one transition boundary, then let the
     supervisor reconcile and check we reached a safe terminal with no human."""
@@ -271,6 +322,15 @@ def row_transition_crash(row_id, point, phase):
     # The crash must have left durable state consistent BEFORE any recovery ran.
     res["invariants_after_crash"] = check_invariants(rundir, expect_domain_empty=False)
 
+    # BOUNDARY-SPECIFIC oracle. The generic "did we reach a safe shape" check
+    # below is necessary but nowhere near sufficient: a crash at
+    # takeover.pre_commit that WRONGLY published g+1, and one at
+    # takeover.post_commit that WRONGLY rolled it back, both still reach a safe
+    # terminal and would both pass on shape alone. That is a test that cannot
+    # distinguish the transition it is named after from its opposite.
+    res["boundary_expectation"] = _check_boundary_expectation(row_id, rundir,
+                                                              res["state_after_crash"])
+
     rec = sup(rundir, "reconcile", timeout=120)
     res["reconcile_rc"] = rec["rc"]
     try:
@@ -278,6 +338,24 @@ def row_transition_crash(row_id, point, phase):
     except json.JSONDecodeError:
         res["reconcile"] = rec["stdout"][-800:]
     res["state_after_reconcile"] = state_of(rundir)
+
+    # Reconciliation must be INERT on replay. It runs at every supervisor start,
+    # so a second pass that moves state or burns a seq would mean every launchd
+    # restart mutates the record — and the crash rows would never see it, since
+    # they only ever reconcile once.
+    st1 = res["state_after_reconcile"]
+    sup(rundir, "reconcile", timeout=120)
+    st2 = state_of(rundir)
+    l1, l2 = st1["lease"], st2["lease"]
+    res["second_reconcile_inert"] = {
+        "seq_unchanged": st1["meta_seq"] == st2["meta_seq"],
+        "event_count_unchanged": len(st1["events"]) == len(st2["events"]),
+        "lease_unchanged": (l1 is None and l2 is None) or (
+            l1 is not None and l2 is not None
+            and (l1["generation"], l1["state"], l1["stop_intent"])
+            == (l2["generation"], l2["state"], l2["stop_intent"])),
+        "meta_seq": [st1["meta_seq"], st2["meta_seq"]]}
+    res["state_after_reconcile"] = st2
 
     gen_token = (res["state_after_reconcile"]["lease"] or {}).get("gen_token")
     checks = check_invariants(rundir, gen_token=gen_token)
@@ -305,7 +383,22 @@ def row_transition_crash(row_id, point, phase):
     else:
         safe, why = False, f"unrecovered lease {lease['state']}/{lease['stop_intent']}"
     res["safe_outcome"], res["safe_outcome_reason"] = safe, why
-    res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=safe)
+    # Everything recorded must also GATE. A measurement that is reported but not
+    # required is decoration: it makes a reader believe the property was tested
+    # when a regression would sail straight past it.
+    be = res["boundary_expectation"]
+    inert = res["second_reconcile_inert"]
+    extra_ok = (safe
+                and (be is None or be["ok"])
+                and inert["seq_unchanged"] and inert["event_count_unchanged"]
+                and inert["lease_unchanged"])
+    res["verdict"], res["failed_checks"] = verdict_from(checks, extra_ok=extra_ok)
+    if res["verdict"] == "FAIL":
+        res["failure_attribution"] = {
+            "invariants": res["failed_checks"],
+            "safe_outcome": safe,
+            "boundary_expectation": None if be is None else be["checks"],
+            "second_reconcile_inert": inert}
     cleanup_domain(gen_token)
     return res
 
@@ -1072,19 +1165,30 @@ def row_io():
                                 "atomic": atomic}}
     res["enospc_subcase"] = enospc = _io_enospc_subcase()
 
-    if not enospc.get("induced"):
+    if not (enospc.get("induced") and enospc.get("filler_hit_enospc")):
         res["verdict"] = "INCONCLUSIVE"
         res["detail"] = {"reason": enospc.get("reason",
                                               "could not induce a real ENOSPC")}
         return res
-    ok = atomic and enospc["atomic"] and enospc["integrity_ok"]
+    # `wal_grew` GATES the verdict, it is not merely recorded. Without it this row
+    # would pass on an ENOSPC that struck before a single WAL byte was written —
+    # i.e. on exactly the pre-write class the read-only sub-case already covers,
+    # while claiming to have tested the mid-write one.
+    ok = (atomic and enospc["atomic"] and enospc["integrity_ok"]
+          and enospc["wal_grew"])
     res["verdict"] = "PASS" if ok else "FAIL"
-    res["note"] = ("Both sub-cases: a pre-write refusal (read-only dir) and a "
-                   "GENUINE mid-write ENOSPC on a filled hdiutil volume, the "
-                   "latter with the WAL demonstrably extended before the failure. "
-                   "EIO proper (bad media) is still not injected; ENOSPC is the "
-                   "reachable member of the mid-write class without a "
-                   "fault-injecting VFS.")
+    res["note"] = ("Two sub-cases: a pre-write refusal (read-only dir), and an "
+                   "ENOSPC that struck AFTER the WAL had been extended on a "
+                   "filled hdiutil volume, verified by re-opening the DB from "
+                   "disk. Scope, precisely: this establishes failure-after-"
+                   "writing-began, NOT that an individual write(2) was partial — "
+                   "an earlier WAL write may have succeeded and a later write, "
+                   "sync or allocation failed. Localising to a syscall needs a "
+                   "fault-injecting VFS or a trace. EIO proper (bad media) is "
+                   "NOT injected and follows distinct SQLite error paths; it "
+                   "remains untested.")
+    res["untested"] = ["EIO (bad media) — distinct SQLite error paths",
+                       "syscall-level localisation of the failing write"]
     return res
 
 
@@ -1125,14 +1229,19 @@ def _io_enospc_subcase():
         wal = dbp + "-wal"
         wal_before = os.path.getsize(wal) if os.path.exists(wal) else 0
 
+        # Fill the volume. The errno is CHECKED: any other OSError means the
+        # filler stopped for an unrelated reason and the disk may not be full, so
+        # a later "database or disk is full" would not be evidence of what we
+        # think it is.
         filler = os.path.join(mnt, "filler")
+        filler_errno = None
         with open(filler, "wb") as f:
             try:
                 while True:
                     f.write(b"\0" * 65536)
                     f.flush()
-            except OSError:
-                pass  # ENOSPC: the volume is now full, which is the point
+            except OSError as e:
+                filler_errno = e.errno
         free_at_failure = os.statvfs(mnt).f_bavail * os.statvfs(mnt).f_frsize
 
         raised = None
@@ -1147,6 +1256,11 @@ def _io_enospc_subcase():
         wal_at_failure = os.path.getsize(wal) if os.path.exists(wal) else 0
 
         os.remove(filler)  # free space so the verification itself can run
+        # Verify from a FRESH connection against the file on disk. Reading back
+        # through the same handle that just failed would partly be reading this
+        # process's own view; the claim is about what survived durably.
+        c.close()
+        c = kernel.connect(dbp)
         after_events = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         after_seq = c.execute("SELECT v FROM meta WHERE k='seq'").fetchone()[0]
         integrity = c.execute("PRAGMA integrity_check").fetchone()[0]
@@ -1154,6 +1268,8 @@ def _io_enospc_subcase():
 
         return {"induced": raised is not None and "full" in raised.lower(),
                 "error": raised,
+                "filler_errno": filler_errno,
+                "filler_hit_enospc": filler_errno == errno.ENOSPC,
                 "free_bytes_at_failure": free_at_failure,
                 "wal_bytes_before": wal_before,
                 "wal_bytes_at_failure": wal_at_failure,
@@ -1457,6 +1573,45 @@ def sanitize(obj):
     return json.loads(s)
 
 
+def provenance():
+    """What code and what privileged surface produced this evidence.
+
+    Without this, results.json is a set of verdicts with no way to say WHICH
+    fixture produced them — and because subset runs MERGE, a single file can hold
+    rows from many revisions with nothing recording that. `dirty` matters as much
+    as the revision: a commit id identifies the code only if the tree is clean,
+    and the honest answer when it is not is to say so rather than imply a binding
+    that does not hold.
+    """
+    def git(*a):
+        r = subprocess.run(["git", "-C", HERE, *a], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    dirty = git("status", "--porcelain", "--", HERE)
+    helpers = {}
+    for name in ("p5-spawn", "p5-reap", "p5-measure", "runsurrogate.py",
+                 "incarnation.py"):
+        p = os.path.join("/usr/local/probe5", name)
+        if not os.path.exists(p):
+            continue
+        st = os.stat(p)
+        with open(p, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        helpers[name] = {
+            "sha256": digest, "mode": oct(st.st_mode & 0o777),
+            "owner": f"{pwd.getpwuid(st.st_uid).pw_name}:{st.st_gid}"}
+    return {
+        "fixture_revision": git("rev-parse", "HEAD"),
+        "fixture_revision_short": git("rev-parse", "--short", "HEAD"),
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        # True means the revision above does NOT fully identify what ran.
+        "dirty": bool(dirty),
+        "dirty_paths": [ln[3:] for ln in (dirty or "").splitlines()][:20],
+        "helpers": helpers,
+        "python": PY,
+    }
+
+
 def environment():
     # Must be an ON-DISK database: an in-memory one cannot use WAL and would
     # report journal_mode=memory, understating the durability actually configured.
@@ -1520,10 +1675,32 @@ def assert_crash_point_coverage():
     a matrix with a silent hole is worse than a short one, because it reads as
     coverage.
     """
-    armed = set()
-    for fn in ("kernel.py", "supervisor.py"):
+    # AST, not regex. A regex for `crash("...")` verifies TODAY'S SPELLING, not
+    # "any armed crash point": it misses single quotes, a space before the paren,
+    # and anything armed in a module the pattern list forgot. A coverage check
+    # that silently under-reports is worse than none, because its green is taken
+    # as proof. Parsing sees the call however it is written, and every fixture
+    # module is scanned rather than a hand-kept pair.
+    armed, scanned = set(), []
+    for fn in sorted(os.listdir(HERE)):
+        if not fn.endswith(".py") or fn == os.path.basename(__file__):
+            continue
+        scanned.append(fn)
         with open(os.path.join(HERE, fn)) as f:
-            armed |= set(re.findall(r'crash\("([^"]+)"\)', f.read()))
+            tree = ast.parse(f.read(), filename=fn)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            # BOTH call shapes. kernel.py arms via a bare `crash(...)` while
+            # supervisor.py uses `kernel.crash(...)` — an Attribute, not a Name.
+            # The old regex caught both only by accident, because it was not
+            # anchored; matching Name alone silently loses two armed points.
+            fn_name = (node.func.id if isinstance(node.func, ast.Name)
+                       else node.func.attr if isinstance(node.func, ast.Attribute)
+                       else None)
+            if (fn_name == "crash" and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                armed.add(node.args[0].value)
     driven = {point for _, point, _ in CRASH_POINTS}
     undriven = sorted(armed - driven)
     if undriven:
@@ -1536,13 +1713,27 @@ def assert_crash_point_coverage():
         raise RuntimeError(
             f"rows driving crash points that are not armed anywhere: {orphan_rows}. "
             "The row would inject nothing and pass vacuously.")
-    return {"armed_crash_points": sorted(armed), "aliases": ROW_ALIASES}
+    # An alias pointing at a row that does not exist is a coverage claim with
+    # nothing behind it — the failure mode the alias table was added to prevent.
+    known_rows = ({r for r, _, _ in CRASH_POINTS} | set(BLOCKED)
+                  | {"Idem", "IdemConflict", "Race", "Pid", "Priv", "NoConv", "Io",
+                     "Esc", "Churn", "Writer", "Tw", "Uid",
+                     "Sup-smoke", "Sup-readopt", "Sup-orphan"})
+    bad = {k: v for k, v in ROW_ALIASES.items()
+           if not all(part.strip() in known_rows for part in v.split("+"))}
+    if bad:
+        raise RuntimeError(
+            f"ROW_ALIASES point at rows that do not exist: {bad}. The alias claims "
+            "coverage that nothing provides.")
+    return {"armed_crash_points": sorted(armed), "aliases": ROW_ALIASES,
+            "modules_scanned": scanned}
 
 
 def main():
     only = sys.argv[1:] or None
     coverage = assert_crash_point_coverage()
-    results = {"environment": {**environment(), "coverage": coverage}, "rows": {}}
+    results = {"environment": {**environment(), "coverage": coverage,
+                               "provenance": provenance()}, "rows": {}}
 
     def want(name):
         return only is None or name in only
@@ -1594,9 +1785,18 @@ def main():
     # sharing a file.
     out = os.path.join(HERE, "results.json")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    prov = results["environment"]["provenance"]
     for row in results["rows"].values():
         row.setdefault("domain_mode", DOMAIN_MODE)
         row.setdefault("run_at", stamp)
+        # Per-row, not just per-file. Subset runs MERGE, so without this a
+        # results.json can hold rows produced by several different revisions of
+        # the fixture while presenting as one result — which is what it did
+        # across the 07-27 session. `setdefault` is wrong here: a row re-run at a
+        # new revision must carry the NEW revision, and these keys are rewritten
+        # on every run that touches the row.
+        row["fixture_revision"] = prov["fixture_revision_short"]
+        row["fixture_dirty"] = prov["dirty"]
 
     merged = {"environment": results["environment"], "rows": {}}
     if os.path.exists(out):
