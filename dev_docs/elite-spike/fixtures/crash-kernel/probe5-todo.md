@@ -251,8 +251,27 @@ The next line is the **first live firing of the uid-wide kill**. It reaps
 everything owned by `agent`, so run it only when no agent work is in flight (at
 this point that is just `cfprefsd`/`distnoted`, which respawn).
 
+**`rc=143` is the success case, not a failure.** `p5-reap` is inside the domain it
+reaps, so it dies of its own `SIGTERM` and exits `128+15`. `reaper._sudo_reap`
+records this as `helper_self_killed` and deliberately does **not** treat the exit
+status as authoritative — convergence is decided only by the maintainer-side
+`proc_listpids` rescan. Two lines of `getcwd: … Permission denied` on **stderr**
+are also expected when invoking it by hand from a directory the agent cannot read;
+the real path forces `cwd="/"`, and stdout stays clean either way.
+
+Measured on the mac mini 2026-07-27, the first time this primitive has ever been
+fired in this probe:
+
+| | Before | After |
+| --- | --- | --- |
+| uid 503 procs | `cfprefsd` 38576, `distnoted` 44047 | both gone; fresh `distnoted` 80127 |
+| uid 501 procs | 346 | **346** |
+
+The reap emptied its own uid and **did not cross the uid boundary** — the
+containment primitive invariants 4/5/6 quantify over, working as specified.
+
 ```sh
-echo "== reap runs as agent ==";  sudo -u agent /usr/local/probe5/p5-reap TERM; echo "rc=$?"
+echo "== reap runs as agent ==";  sudo -n -u agent /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 143, NOT 0)"
 echo "== root path refused ==";   sudo /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 64)"
 echo "== fd 3 survives sudo ==";  sudo -n -C 5 -u agent /usr/local/probe5/p5-measure $$ >/dev/null; echo "rc=$? (expect 0)"
 echo "== agent cannot read fixture =="; ls -ld "$HOME"   # 0700 => agent cannot traverse
