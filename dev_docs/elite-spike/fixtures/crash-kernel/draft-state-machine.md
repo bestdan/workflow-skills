@@ -1,7 +1,7 @@
 # Baseline launch/lease/registry state machine (Probe 5 input) — **v5.2**
 
 > **v5.2 (2026-07-23) — one fix, found by running the fixture.** v5.1's re-adopt
-> condition also required that "the uid-scan shows no *unexpected* extra agent
+> condition also required that "the uid-scan shows no _unexpected_ extra agent
 > processes." That conjunct is **removed**: a uid-wide scan cannot distinguish a
 > live run's own descendants from a dead run's orphans, so it false-reaped every
 > run that forks a worker on the first benign supervisor start — the exact failure
@@ -10,10 +10,27 @@
 > unconditionally, so "dead run ≠ dead workers" is unaffected. See
 > `probe5-crash-kernel.md` → Results → Finding.
 >
-> Probe 5 classified **INCONCLUSIVE**: the transaction half of this spec held
-> across every injection, but the dedicated `agent` uid is absent from the host,
-> so invariants 4/5/6 — everything quantified over the containment domain — were
-> never exercised.
+> **RATIFIED 2026-07-27.** When v5.2 was written the fixture ran in the degraded
+> `gentoken` domain, so the fix rested on a defect observed in a **weaker** domain
+> than the one the rule is written against — adequate to justify the change, not
+> to close it. It now has evidence from the real escape-proof uid domain:
+>
+> - **`Sup-readopt`** — supervisor SIGKILLed, launchd restarted it, and at
+>   reconcile time the scan showed `alive_verified=true` with
+>   **`other_domain_procs` non-empty**. The supervisor **adopted anyway**; the run
+>   and its forked descendant both survived, lease `active`, `stop_intent=0`. That
+>   non-empty set is the entire point: under v5.1's rule it is exactly what would
+>   have triggered the false reap.
+> - **`Sup-smoke`** — the same on a _benign first start_ under `KeepAlive=false`,
+>   which is where v5.1's defect fired earliest and hardest.
+> - **`Sup-orphan`** — the converse still holds: run dead, descendant live →
+>   `reap_dead_run`, reaped to verified zero, terminalized. Removing the conjunct
+>   did **not** weaken "dead run ≠ dead workers".
+>
+> Probe 5 is **CONFIRMED** in the kill sheet's sense — _not falsified in the tested
+> process-crash environment_, which is the ceiling and **not** a power-loss
+> durability claim. Invariants 4/5/6 are established and 8 is enforced. See
+> `probe5-crash-kernel.md` → Results → Classification for what that does not cover.
 
 v5.1 applies codex's fifth-pass fixes to the v5 redirect (`coreview-2026-07-22.md`
 §Fifth pass), which found the **redirect sound — no architectural pivot** — but
@@ -22,7 +39,7 @@ the **draft the fixture falsifies** (see `v5-fixture-brief.md`).
 
 Assembly: **SQLite** state machine + **launchd** supervisor + **dedicated-`agent`-
 uid** containment. Bespoke: lease/generation/takeover semantics, `p_uniqueid`
-incarnation identity, and startup reconciliation. *Redirect taken ≠ validated.*
+incarnation identity, and startup reconciliation. _Redirect taken ≠ validated._
 
 ## Threat model (unchanged)
 
@@ -54,7 +71,7 @@ event with this `idem_key`; if present, assert identical payload and return its
 `seq` (no allocation — a duplicate must **not** consume a sequence number); else
 `UPDATE meta SET v=v+1 WHERE k='seq'`, read it back, insert. A `UNIQUE(idem_key)`
 violation **rolls the whole transaction back** (never `INSERT OR IGNORE`, which
-would gap the seq). Gapless, monotonic, exactly-once durable *recording* (not
+would gap the seq). Gapless, monotonic, exactly-once durable _recording_ (not
 exactly-once side effects — those stay the caller's job).
 
 **Sole writer.** The agent-uid run **never** opens `state.db`. It reports its
@@ -70,11 +87,11 @@ persists it. SQLite connection fds are `O_CLOEXEC` / never inherited across spaw
   **scoped `sudo -u agent` helper** (exact-command sudoers, maintainer→agent —
   the Stage-2 sudoers already in the design), so both run **as the agent uid**.
   **Never `root` `kill(-1)`** (its target set is everything) — reaping always runs
-  *as* the agent uid, whose `kill(-1)` hits only that uid's processes.
+  _as_ the agent uid, whose `kill(-1)` hits only that uid's processes.
 - **Termination = uid-wide, bounded, verified** (as the agent uid): `kill(-1,
   SIGTERM)` → bounded wait → `kill(-1, SIGKILL)` → **re-scan the uid until zero
-  remain**. Converges past `fork`/`setsid`/pgid escape (no escape *within* the
-  uid). `p_uniqueid` *verifies* a specific process; it does not select the kill.
+  remain**. Converges past `fork`/`setsid`/pgid escape (no escape _within_ the
+  uid). `p_uniqueid` _verifies_ a specific process; it does not select the kill.
 - **One globally-active lease (admission gate).** Because `kill(-1)` is uid-wide,
   the baseline permits **at most one non-terminal lease across all repos** at a
   time: a fresh LAUNCH requires zero non-terminal leases anywhere. (Generalization
@@ -100,27 +117,43 @@ before writing "go" (owner `prepared` or `active` with a blocked child), the chi
 exits on EOF; and any child still alive is caught by the uid-scan in reconciliation.
 
 **STOP / TERMINATE / REAP — a saga, NOT one transaction (fixes "reap inside txn"):**
+
 1. `txn`: set `lease.stop_intent = 1` (commit).
 2. **outside any txn**, as the agent uid: `kill(-1)` TERM → wait → KILL → **re-scan
    until the uid has zero processes**.
 3. `txn`: only after verified-zero — `append_event(observed_terminal)`;
    `lease{state=terminal}`; `append_event(lease_release)` (idempotent).
-On **non-convergence** (rescan never reaches zero — uninterruptible proc, external
-privileged spawner): remain in `stop_intent`, **retry next pass + alert, never
-terminalize**.
+   On **non-convergence** (rescan never reaches zero — uninterruptible proc, external
+   privileged spawner): remain in `stop_intent`, **retry next pass + alert, never
+   terminalize**.
 
 **Startup reconciliation (every supervisor (re)start — re-adopt ratified):**
 For the (≤1) non-terminal lease, **always uid-scan first**, then:
+
 - **Re-adopt** iff the recorded run incarnation is **alive and `p_uniqueid`-verified**,
   `stop_intent==0`, and not stalled (Probe 3): register `EVFILT_PROC/NOTE_EXIT` by pid,
   **then re-read `p_uniqueid`** to close the attach/PID-reuse race, and resume
   monitoring (observation, **not** parenthood — never `wait()` a nonchild). A
   benign supervisor restart therefore does **not** kill healthy work.
 - **Reap** (the saga above, terminalize only after uid-scan == zero) iff: the run
-  is dead **or** identity fails **or** `stop_intent==1` **or** stalled **or** the
-  uid-scan finds live processes the recorded run doesn't account for (a run that
-  died after daemonizing descendants — "dead run ≠ dead workers": terminalization
-  is gated on uid==zero, **never** on the recorded run's liveness alone).
+  is dead **or** identity fails **or** `stop_intent==1` **or** stalled.
+  **The discriminator is the recorded incarnation, never the contents of the
+  uid-scan.** Once reaping is entered, it reaps the **whole domain** and
+  terminalizes only at uid==zero — so a run that died after daemonizing
+  descendants is fully handled ("dead run ≠ dead workers": terminalization is
+  gated on uid==zero, **never** on the recorded run's liveness alone).
+
+  > **v5.2, ratified.** Until 2026-07-27 this branch also read "…**or** the
+  > uid-scan finds live processes the recorded run doesn't account for". That is
+  > the deleted v5.1 conjunct wearing a different hat: a **healthy** run that forks
+  > a worker satisfies it, so the spec still ordered the false-reap its own header
+  > note says to avoid, and anyone implementing from this text would have
+  > reintroduced the defect. The parenthetical made it read as being about dead
+  > runs, which is why it survived the v5.2 edit. Extra processes in the domain are
+  > **not** evidence of a fault: a live run's workers and a dead run's orphans are
+  > indistinguishable to a uid-wide scan. Liveness of the recorded incarnation is
+  > the only sound discriminator, and one-globally-active-lease is what makes it
+  > sound — no prior generation can still be running.
 - `prepared` with a gated child: EOF the gate (child exits) + reap + verify zero →
   `launch_aborted`; terminal.
 
@@ -151,29 +184,29 @@ a takeover targets the single active lease.
 
 ## Fault-injection matrix (v5.1)
 
-| # | Injection | Required outcome |
-|---|---|---|
-| T1–Tn | SIGKILL at **every** transition boundary | clean rollback/commit; no half-applied transition |
-| G1 | crash after `prepared` commit, before spawn | reconcile: uid-scan (zero) → launch_aborted → terminal |
-| G2 | crash after spawn, before `active` commit (child blocked, unrecorded) | uid-scan finds child (gen_token) → reap → verify zero → terminal |
-| G3 | crash after `active` commit, before "go" | child exits on gate EOF; uid-scan/reap → terminal |
-| Idem | replay a transition (same idem_key) | returns existing seq; no new event, no gap |
-| Sup-orphan | supervisor SIGKILL, run **dead**, descendants alive | reconcile: uid-scan nonzero → reap → verify zero → terminal (dead run ≠ dead workers) |
-| Sup-readopt | supervisor SIGKILL/restart, run **healthy** | reconcile: identity-verified alive → **re-adopt** (NOTE_EXIT + p_uniqueid reverify); **run untouched** |
-| Sup-benign | launchd throttles/updates the supervisor, run healthy | re-adopt; healthy work not killed |
-| Saga1 | crash after `stop_intent`, before/during kill | resume kill → verify zero → terminal |
-| Saga2 | crash after uid==zero, before terminal commit | reconcile observes zero → terminalize; no dup acted on |
-| Race | concurrent LAUNCH vs LAUNCH / LAUNCH vs TAKEOVER | admission gate + `BEGIN IMMEDIATE`: exactly one proceeds |
-| Tw | takeover with live gen-g workers | reap gen g (verify zero) before publishing g+1 |
-| Pid | PID reuse during a liveness/adopt check | `p_uniqueid` (re-read after NOTE_EXIT register) rejects |
-| Esc | run child `fork`/`setsid`-escapes | uid-wide `kill(-1)` still reaps; rescan→zero |
-| Churn | fork churn during reap | TERM/KILL/rescan converges; else fenced in stop_intent |
-| NoConv | uninterruptible / externally-spawned uid process | stays `stop_intent` + alert; **never** terminalizes |
-| Io | ENOSPC/EIO on `state.db` | transaction fails atomically; no partial state |
-| Priv | reap attempted as root (should be refused) | reaper runs **as agent uid**, never root `kill(-1)` |
-| Writer | agent run attempts to write `state.db` | denied (perms) / never happens; supervisor is sole writer |
-| Uid | worker spawns a helper under a **different uid** | documented **limitation** → detect (privileged uid/token scan) or admit undetectable; not a falsifier |
-| PL | reboot/power-loss (VM harness) | complete prior/next state, else **inconclusive** |
+| #           | Injection                                                             | Required outcome                                                                                       |
+| ----------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| T1–Tn       | SIGKILL at **every** transition boundary                              | clean rollback/commit; no half-applied transition                                                      |
+| G1          | crash after `prepared` commit, before spawn                           | reconcile: uid-scan (zero) → launch_aborted → terminal                                                 |
+| G2          | crash after spawn, before `active` commit (child blocked, unrecorded) | uid-scan finds child (gen_token) → reap → verify zero → terminal                                       |
+| G3          | crash after `active` commit, before "go"                              | child exits on gate EOF; uid-scan/reap → terminal                                                      |
+| Idem        | replay a transition (same idem_key)                                   | returns existing seq; no new event, no gap                                                             |
+| Sup-orphan  | supervisor SIGKILL, run **dead**, descendants alive                   | reconcile: uid-scan nonzero → reap → verify zero → terminal (dead run ≠ dead workers)                  |
+| Sup-readopt | supervisor SIGKILL/restart, run **healthy**                           | reconcile: identity-verified alive → **re-adopt** (NOTE_EXIT + p_uniqueid reverify); **run untouched** |
+| Sup-benign  | launchd throttles/updates the supervisor, run healthy                 | re-adopt; healthy work not killed                                                                      |
+| Saga1       | crash after `stop_intent`, before/during kill                         | resume kill → verify zero → terminal                                                                   |
+| Saga2       | crash after uid==zero, before terminal commit                         | reconcile observes zero → terminalize; no dup acted on                                                 |
+| Race        | concurrent LAUNCH vs LAUNCH / LAUNCH vs TAKEOVER                      | admission gate + `BEGIN IMMEDIATE`: exactly one proceeds                                               |
+| Tw          | takeover with live gen-g workers                                      | reap gen g (verify zero) before publishing g+1                                                         |
+| Pid         | PID reuse during a liveness/adopt check                               | `p_uniqueid` (re-read after NOTE_EXIT register) rejects                                                |
+| Esc         | run child `fork`/`setsid`-escapes                                     | uid-wide `kill(-1)` still reaps; rescan→zero                                                           |
+| Churn       | fork churn during reap                                                | TERM/KILL/rescan converges; else fenced in stop_intent                                                 |
+| NoConv      | uninterruptible / externally-spawned uid process                      | stays `stop_intent` + alert; **never** terminalizes                                                    |
+| Io          | ENOSPC/EIO on `state.db`                                              | transaction fails atomically; no partial state                                                         |
+| Priv        | reap attempted as root (should be refused)                            | reaper runs **as agent uid**, never root `kill(-1)`                                                    |
+| Writer      | agent run attempts to write `state.db`                                | denied (perms) / never happens; supervisor is sole writer                                              |
+| Uid         | worker spawns a helper under a **different uid**                      | documented **limitation** → detect (privileged uid/token scan) or admit undetectable; not a falsifier  |
+| PL          | reboot/power-loss (VM harness)                                        | complete prior/next state, else **inconclusive**                                                       |
 
 ## Falsification redirect (from v5.1)
 
