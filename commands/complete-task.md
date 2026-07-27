@@ -38,7 +38,8 @@ drift.
 ## Arguments
 
 - **`<identifier>`** (required) — the tracker's issue identifier (e.g. `PRE-123`
-  for Linear). No default; the command trusts exactly the id it is given.
+  for Linear, `142` or `#142` for gh-issue). No default; the command trusts
+  exactly the id it is given.
 - **`--dry-run`** — print the planned transition and stop. Change nothing.
 
 ## 1. Resolve the handler
@@ -57,15 +58,18 @@ Overlay the local override on the committed config — mappings merge recursivel
   (resolves the team's `completed`-type state, checks idempotence, confirms
   before mutating, applies the transition via `save_issue`, optionally posts a
   comment).
+- `handler: gh-issue` → read and follow **`commands/handlers/gh-issue-complete.md`**
+  (resolves the issue via `gh issue view`, checks idempotence — including the
+  `NOT_PLANNED` closed-reason distinction — confirms before mutating, applies
+  the transition via `gh issue close --reason completed`, optionally posts a
+  comment). GitHub still closes issues natively on merge via `Closes #<n>` in
+  the PR body; this handler is the explicit escape hatch for when that
+  auto-close didn't fire.
 - File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
   handler repo-pr — repo-pr has no separate completion step to drive. Its done
   signal **is** the merged PR (and/or the task file's `status: done`
   frontmatter, set by hand or by whatever closed the loop). There is nothing
   for `/complete-task` to transition." Do not silently no-op without this line.
-- `handler: gh-issue` → **UNSUPPORTED.** Print: "unsupported for handler
-  gh-issue — GitHub already closes the issue natively on merge via
-  `Closes #<n>` in the PR body. `/complete-task` has nothing to add; if that
-  auto-close didn't fire, close the issue directly with `gh issue close <n>`."
 - `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
   Jira's completion path is its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
@@ -75,7 +79,8 @@ Overlay the local override on the committed config — mappings merge recursivel
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative path doesn't resolve, find the handler file with **Glob**
-(`**/commands/handlers/linear-complete.md`) and Read the result. Pass the
+(`**/commands/handlers/linear-complete.md` or
+`**/commands/handlers/gh-issue-complete.md`) and Read the result. Pass the
 identifier and the `--dry-run` flag through.
 
 ## 2. Report
