@@ -5,6 +5,27 @@ the two-uid mini: the `libproc` read (non-root EPERM/fails-closed, root reads th
 full tuple) and the `killpg` signal (non-root EPERM, root terminates the
 agent-owned group). The falsification redirect is **not** triggered.
 
+> **Note added 2026-07-27 — the `uid 502` in this document is a mac mini
+> particular, not a fact about the agent account.** On that host the `agent`
+> account later vanished and **502 was reassigned to an unrelated human**; on the
+> MacBook the agent is **502** by coincidence of ordering, and on the mini it was
+> re-provisioned as **503**. Read every `502` below as "the agent uid _on that
+> host, that day_". Resolve the account **by name** — pinning the number is what
+> produced the four-day incident recorded in
+> `dev_docs/tasks/probe5-incident-evidence/`.
+>
+> **The finding itself is unaffected and has since been independently
+> corroborated.** This probe's load-bearing result is that `libproc` reads are
+> **EPERM across uids for a non-root caller and fail closed**. That is a kernel
+> property, uid-invariant, and Probe 5 measured it again on different hardware
+> with different uids: a maintainer measuring a live agent-uid pid gets
+> `{"alive": false, "errno": 1}` while the same pid measured _as_ the agent
+> returns the full tuple. It is the entire reason Probe 5 needs the privileged
+> `p5-measure` helper — without it the supervisor reads every healthy run as dead
+> and reaps it. So this probe needed no re-run: unlike Probe 1 (host state, which
+> can rot) and Probe 4 (disposable GitHub infrastructure, now gone), its claim is
+> about the kernel and does not decay with an account.
+
 Disposable spike under §0a's contract. Fixture code (`incarnation.py`,
 `shim.py`, `plane.py`, `scenarios.py`, `results.json`) lives beside this file
 and is **never** promoted into `/usr/local/autopilot` by renaming (rule 4). No
@@ -29,12 +50,12 @@ credentials, no network.
 
 ## Environment (non-secret)
 
-| Item        | Value                                                            |
-| ----------- | --------------------------------------------------------------- |
-| OS          | macOS, Darwin 25.4.0 (arm64)                                     |
-| tmux        | 3.6b, pinned socket `/tmp/claude/p2.sock`                       |
-| python      | 3.12.13 (ctypes → libproc `proc_pidinfo`)                        |
-| uid context | ran **single-uid as uid 501**; the two-uid path (user `agent` uid 502 + sudo) was not exercised here. |
+| Item        | Value                                                                                                                                                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OS          | macOS, Darwin 25.4.0 (arm64)                                                                                                                                                                                                              |
+| tmux        | 3.6b, pinned socket `/tmp/claude/p2.sock`                                                                                                                                                                                                 |
+| python      | 3.12.13 (ctypes → libproc `proc_pidinfo`)                                                                                                                                                                                                 |
+| uid context | ran **single-uid as the maintainer (501)**; the two-uid path (the `agent` account + sudo) was not exercised in this section — see the cross-uid confirmations below, which were run on the mini where the agent held uid 502 at the time. |
 
 The agent-owned tmux server is modeled faithfully: tmux's `#{pane_pid}` is
 treated as an **untrusted claim**; all authority comes from an independent
@@ -81,13 +102,13 @@ Raw output captured in `results.json`.
 
 ## Fault-injection results
 
-| Scenario                                    | Injection                                                                       | Outcome                                                                                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **S0** bind + selective stop (positive)     | none                                                                            | `pane_pid` claim == measured pid; exe→`/bin/sleep`; leader (`sid==pgid==pid`); `stop` SIGNALLED the bound pgid, `dead_after: true` ✓ |
-| **S1** pane death **before** observation    | `SIGKILL` the pane before the post-start liveness recheck                        | measure → `alive:false` (ESRCH); `would_publish_active_lease: false` → **fail-closed**, no active lease published ✓                  |
-| **S2** launcher death before publication    | launcher never publishes; recovery pass returns later                            | pane's parent is the **persistent tmux server**, not the launcher (`ppid` stable); pane survives; recovery re-identifies by incarnation ✓ |
-| **S3** replacement pane (same session name) | agent kills pane A, starts pane B reusing `ap-s3`                                | A dead; B has distinct `pid` **and** `p_uniqueid`; B **not** accepted as A; `stop(A)` → **REFUSE (dead)** — B never inherits A's authority ✓ |
-| **S4** stop race / PID reuse                | stop request carries A's recorded identity but points at a live bystander pid    | `stop` → **REFUSE (identity-mismatch)**; bystander survives; `p_uniqueid` differs (hard), µs start differs, `ps`-second would have collided ✓ |
+| Scenario                                    | Injection                                                                     | Outcome                                                                                                                                       |
+| ------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S0** bind + selective stop (positive)     | none                                                                          | `pane_pid` claim == measured pid; exe→`/bin/sleep`; leader (`sid==pgid==pid`); `stop` SIGNALLED the bound pgid, `dead_after: true` ✓          |
+| **S1** pane death **before** observation    | `SIGKILL` the pane before the post-start liveness recheck                     | measure → `alive:false` (ESRCH); `would_publish_active_lease: false` → **fail-closed**, no active lease published ✓                           |
+| **S2** launcher death before publication    | launcher never publishes; recovery pass returns later                         | pane's parent is the **persistent tmux server**, not the launcher (`ppid` stable); pane survives; recovery re-identifies by incarnation ✓     |
+| **S3** replacement pane (same session name) | agent kills pane A, starts pane B reusing `ap-s3`                             | A dead; B has distinct `pid` **and** `p_uniqueid`; B **not** accepted as A; `stop(A)` → **REFUSE (dead)** — B never inherits A's authority ✓  |
+| **S4** stop race / PID reuse                | stop request carries A's recorded identity but points at a live bystander pid | `stop` → **REFUSE (identity-mismatch)**; bystander survives; `p_uniqueid` differs (hard), µs start differs, `ps`-second would have collided ✓ |
 
 Full JSON: `results.json`.
 
@@ -116,17 +137,25 @@ Full JSON: `results.json`.
 
 Both reduce to a single, already-implied requirement — **the control plane's
 measure + signal path must run privileged** — which the mini's admin maintainer
-satisfies. Run on the provisioned host (user `agent` uid 502 + sudo).
+satisfies. Run on the provisioned host, where the `agent` account held uid 502 on
+that date. **To repeat this on any host: resolve `agent` by name, never by
+number** — the uid differs per machine and 502 was later reassigned to a human on
+the mini.
+
+Probe 5 reached the same requirement from the other direction and had to build
+the privileged path this section implies: `sudo -u agent /usr/local/probe5/p5-measure`
+exists precisely because a non-root maintainer cannot measure an agent-uid
+process, and its reap helper exists because the same is true of signalling.
 
 ### 1. Cross-uid `libproc` read — CONFIRMED
 
 Drill: `crossuid-read-drill.sh` measures one `agent`-owned process three ways.
 
-| Reader                   | Result                                                                 |
-| ------------------------ | --------------------------------------------------------------------- |
-| non-root maintainer (501)| `{"alive": false, "pid": 3875, "errno": 1}` — **EPERM, fails closed** |
-| root (`sudo`)            | full tuple: `p_uniqueid 13532476`, `start_µs`, `exe /bin/sleep`, `uid 502` ✓ |
-| agent (same-uid)         | n/a — file-perm `EACCES` reading the maintainer's checkout, not a `libproc` result; same-uid read already proven by the whole probe running as uid 501 |
+| Reader                    | Result                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| non-root maintainer (501) | `{"alive": false, "pid": 3875, "errno": 1}` — **EPERM, fails closed**                                                                                  |
+| root (`sudo`)             | full tuple: `p_uniqueid 13532476`, `start_µs`, `exe /bin/sleep`, `uid 502` ✓                                                                           |
+| agent (same-uid)          | n/a — file-perm `EACCES` reading the maintainer's checkout, not a `libproc` result; same-uid read already proven by the whole probe running as uid 501 |
 
 **Finding.** A non-root maintainer cannot read an agent-owned process's
 incarnation — and it fails **cleanly closed** (`EPERM`), not the dangerous
@@ -141,10 +170,10 @@ did not occur here.
 
 Drill: `crossuid-signal-drill.sh` signals one `agent`-owned group leader.
 
-| Signaller                | `killpg(SIGTERM)` result                                          |
-| ------------------------ | ---------------------------------------------------------------- |
-| non-root maintainer (501)| `EPERM` — denied; target stays `alive: true`                     |
-| root (`sudo`)            | terminates the group; incarnation `alive: false` ✓               |
+| Signaller                 | `killpg(SIGTERM)` result                           |
+| ------------------------- | -------------------------------------------------- |
+| non-root maintainer (501) | `EPERM` — denied; target stays `alive: true`       |
+| root (`sudo`)             | terminates the group; incarnation `alive: false` ✓ |
 
 **Finding.** `killpg` of an agent-owned process group requires
 root/matching-euid; a non-root maintainer is denied (negative control) and root

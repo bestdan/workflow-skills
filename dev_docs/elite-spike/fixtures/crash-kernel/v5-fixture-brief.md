@@ -4,8 +4,8 @@ You are executing **Probe 5** of the auto-pilot E-lite spike. The flat-file cras
 kernel was falsified across four review rounds; **v5 takes the redirect** — a
 SQLite state machine + a launchd supervisor + dedicated-uid containment. Your job:
 **build the disposable v5 fixture, run the fault matrix, classify the result, and
-record evidence**, following the §7a spike rules. *Redirect taken ≠ replacement
-validated* — this fixture is the validation.
+record evidence**, following the §7a spike rules. _Redirect taken ≠ replacement
+validated_ — this fixture is the validation.
 
 Working branch: `bestdan/elite-probe5-crash-kernel` (a worktree under
 `~/src/worktrees/workflow-skills/probe5-crash-kernel`). Do the write-work there.
@@ -13,6 +13,7 @@ Working branch: `bestdan/elite-probe5-crash-kernel` (a worktree under
 ## 0. Read first (required, in order)
 
 All paths relative to `dev_docs/elite-spike/fixtures/crash-kernel/`:
+
 1. **`draft-state-machine.md` (v5.1)** — the design you are falsifying (the spec:
    SQLite schema, state machine, startup reconciliation, invariants 1–8, matrix).
 2. **`probe5-crash-kernel.md`** — the kill sheet: falsifier, method, **pass /
@@ -20,8 +21,8 @@ All paths relative to `dev_docs/elite-spike/fixtures/crash-kernel/`:
    design-doc deltas.
 3. **`coreview-2026-07-22.md`** — the full 4-round review history **plus the
    latest codex v5 pass**. **Before building, apply any still-open v5 fixes it
-   names** (in particular, resolve *re-adopt vs reap on supervisor restart*, the
-   *DB-commit→side-effect* crash windows, and the *privilege path* for uid-kill —
+   names** (in particular, resolve _re-adopt vs reap on supervisor restart_, the
+   _DB-commit→side-effect_ crash windows, and the _privilege path_ for uid-kill —
    see §3 below). Do not build against a spec the last review already faulted.
 4. **`prior-art-research.md`** — why this shape (SQLite/launchd/uid), the macOS
    gotchas (Apple system-SQLite `F_FULLFSYNC` downgrade; no cgroups; `kill(-1)`),
@@ -34,11 +35,18 @@ Look at the **Probe 3 fixture** (`../async-skeleton/`) for the launchd + armed-
 crash-point + orchestrator patterns, and the **Probe 4 fixture**
 (`../github-authority/`) for the attended-`sudo -u agent` execution pattern.
 
-## 1. Environment & prerequisites (this is the mini)
+## 1. Environment & prerequisites (written for the mini; now per-host)
 
-- **agent uid 502** exists (non-admin, zero sudo); maintainer = `danielegan`.
+- A dedicated **`agent` account** exists (non-admin, zero sudo); maintainer =
+  `danielegan`. **Resolve it by name, never by uid** — it was 502 on the mini when
+  this was written, is 502 on the MacBook, and is 503 on the re-provisioned mini,
+  where the original 502 was reassigned to an unrelated human. Pinning the number
+  is what caused the incident in `dev_docs/tasks/probe5-incident-evidence/`.
   `/Users/danielegan` is `0700` — the agent **cannot** read it, so stage any
-  agent-side scripts somewhere agent-readable (`/Users/Shared/p5/…`, `1777`).
+  agent-side scripts somewhere agent-readable. **Use a root-owned staging dir
+  (`/usr/local/probe5`), not the `1777 /Users/Shared/p5` this brief originally
+  suggested:** a world-writable directory on a path invoked through `sudo` lets
+  any local account swap the executable out from under it.
 - **launchd** per-user jobs must run **unsandboxed** (`launchctl bootstrap
   gui/$(id -u) …` fails `EIO` under the command sandbox; `rc=0` unsandboxed).
 - **Running as the agent uid needs attended `sudo -u agent …`** entered in a
@@ -92,6 +100,7 @@ crash-point + orchestrator patterns, and the **Probe 4 fixture**
 
 These were open in v5 and are now **decided** in `draft-state-machine.md` v5.1 —
 implement them as written (don't re-litigate):
+
 1. **Monitored re-adoption on supervisor restart (ratified).** Reconciliation
    **re-adopts** a live, `p_uniqueid`-verified run (register `EVFILT_PROC/NOTE_EXIT`
    by pid, then **re-read `p_uniqueid`** to close the attach/PID-reuse race —
@@ -155,7 +164,8 @@ each row.
 ## Deliverable
 
 A committed disposable fixture (`state.db` schema + `kernel.py` + `supervisor.py`
-+ reaper + plist + `scenarios.py` + `incarnation.py`), a sanitized `results.json`,
-the filled-in `probe5-crash-kernel.md` Environment/Results, an updated §7a row 5,
-and a one-line classification: **confirmed / falsified / inconclusive**, with the
-process-crash-ceiling and power-loss-inconclusive caveats stated.
+
+- reaper + plist + `scenarios.py` + `incarnation.py`), a sanitized `results.json`,
+  the filled-in `probe5-crash-kernel.md` Environment/Results, an updated §7a row 5,
+  and a one-line classification: **confirmed / falsified / inconclusive**, with the
+  process-crash-ceiling and power-loss-inconclusive caveats stated.
