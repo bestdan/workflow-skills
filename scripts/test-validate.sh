@@ -18,7 +18,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/validate.py"
 
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.validate-test.XXXXXX")"
+# Canonicalize to the physical path (mktemp -d can land under macOS's
+# /var -> /private/var symlink) and stop git's upward repo-discovery walk at
+# BASE, so a git op inside a fixture dir can never resolve to the caller's
+# repo when the mktemp fallback above lands BASE inside this checkout.
+BASE="$(cd "$BASE" && pwd -P)"
 trap 'rm -rf "$BASE"' EXIT
+export GIT_CEILING_DIRECTORIES="$BASE"
 
 fail=0
 pass_count=0

@@ -10,6 +10,11 @@ make_worktree() {
   git -C "$dir" init -q
   git -C "$dir" config user.email test@example.com
   git -C "$dir" config user.name Test
+  # A developer's global core.hooksPath applies to every repo, including this
+  # throwaway fixture; if it blocks commits to `main` (git init's default
+  # branch), the commit below is silently vetoed and the fixture is left
+  # commit-less for reasons unrelated to cao-coder.
+  git -C "$dir" config core.hooksPath /dev/null
   touch "$dir/tracked"
   git -C "$dir" add tracked
   git -C "$dir" commit -qm initial

@@ -610,6 +610,10 @@ if command -v git >/dev/null 2>&1; then
   git init -q "$GIROOT" 2>/dev/null
   git -C "$GIROOT" config user.email t@t
   git -C "$GIROOT" config user.name t
+  # A developer's global core.hooksPath (whose pre-commit hook blocks commits
+  # to `main`, git init's default branch) applies to every repo, throwaway
+  # fixtures included — isolate this one.
+  git -C "$GIROOT" config core.hooksPath /dev/null
   git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
   : >"$GIROOT/gi.log"
   (cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
@@ -1119,6 +1123,9 @@ mkdir -p "$HEAD_REPO"
 git -C "$HEAD_REPO" init -q -b main
 git -C "$HEAD_REPO" config user.email test@example.com
 git -C "$HEAD_REPO" config user.name test
+# A developer's global core.hooksPath (whose pre-commit hook blocks commits
+# to `main`) applies to every repo, throwaway fixtures included — isolate.
+git -C "$HEAD_REPO" config core.hooksPath /dev/null
 : >"$HEAD_REPO/seed"
 git -C "$HEAD_REPO" add seed
 git -C "$HEAD_REPO" commit -q -m seed
@@ -1309,10 +1316,15 @@ have "classify-exit: plain-prose OAuth-expiry on stderr -> fatal" 'fatal:' \
 
 # --- supervisor-check: fatal halt writes systemic status + REPORT alarm + teardown
 # (task 10) — fixture is a real git checkout so the run-state commit is observable.
+# Every fixture below sets core.hooksPath /dev/null right after `git init`: a
+# developer's global core.hooksPath applies to every repo, and its pre-commit
+# hook blocking commits to `main` (git init's default branch) would otherwise
+# veto these fixtures' commits for reasons unrelated to spawn-orchestrator.sh.
 if command -v git >/dev/null 2>&1; then
   SC="$BASE/sc-fatal"
   mkdir -p "$SC/.auto-pilot"
   (cd "$SC" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -1335,6 +1347,7 @@ if command -v git >/dev/null 2>&1; then
   SC2="$BASE/sc-noprogress"
   mkdir -p "$SC2/.auto-pilot"
   (cd "$SC2" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -1374,6 +1387,7 @@ if command -v git >/dev/null 2>&1; then
   SC3="$BASE/sc-paused"
   mkdir -p "$SC3/.auto-pilot"
   (cd "$SC3" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: paused\n'
@@ -1394,6 +1408,7 @@ if command -v git >/dev/null 2>&1; then
   SC4="$BASE/sc-progress"
   mkdir -p "$SC4/.auto-pilot"
   (cd "$SC4" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -1552,6 +1567,7 @@ if command -v git >/dev/null 2>&1; then
   git -C "$WORK" remote add origin "$ORIGIN"
   git -C "$WORK" config user.email test@example.com
   git -C "$WORK" config user.name "Test"
+  git -C "$WORK" config core.hooksPath /dev/null
   git -C "$WORK" checkout -q -b main
   echo root >"$WORK/root.txt"
   git -C "$WORK" add root.txt
@@ -1849,6 +1865,7 @@ GHEOF
   git -C "$C_WORK" remote add origin "$C_ORIGIN"
   git -C "$C_WORK" config user.email t@e
   git -C "$C_WORK" config user.name T
+  git -C "$C_WORK" config core.hooksPath /dev/null
   git -C "$C_WORK" checkout -q -b main
   echo r >"$C_WORK/r.txt"
   git -C "$C_WORK" add r.txt
@@ -2096,7 +2113,11 @@ if command -v git >/dev/null 2>&1; then
   mkrun() {
     local d="$1" st="$2" un="$3" np="$4" i=0
     mkdir -p "$d/.auto-pilot"
-    (cd "$d" && git init -q && git config user.email t@e && git config user.name t)
+    # core.hooksPath /dev/null: isolate from a developer's global hooks, whose
+    # pre-commit veto of `main` (git init's default branch) would otherwise
+    # block this fixture's commit for reasons unrelated to spawn-orchestrator.
+    (cd "$d" && git init -q && git config user.email t@e && git config user.name t \
+      && git config core.hooksPath /dev/null)
     {
       printf -- '---\n'
       printf 'status: %s\n' "$st"
@@ -2378,7 +2399,8 @@ if command -v git >/dev/null 2>&1; then
   mkgaterun() {
     local d="$1"
     mkdir -p "$d/.auto-pilot"
-    (cd "$d" && git init -q && git config user.email t@e && git config user.name t)
+    (cd "$d" && git init -q && git config user.email t@e && git config user.name t \
+      && git config core.hooksPath /dev/null)
     {
       printf -- '---\n'
       printf 'status: %s\n' "$2"
@@ -2571,7 +2593,7 @@ CLEOF
       printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
     } >"$EC_DIR/.auto-pilot/RUN.md"
     printf '# report\n' >"$EC_DIR/.auto-pilot/REPORT.md"
-    (cd "$EC_DIR" && git init -q && git add -A \
+    (cd "$EC_DIR" && git init -q && git config core.hooksPath /dev/null && git add -A \
       && git -c user.name=t -c user.email=t@t commit -q -m init)
     : >"$EC_DIR/.auto-pilot/orchestrator.log"
     : >"$EC_LC"
@@ -2873,6 +2895,7 @@ CLEOF
   WSN="$EC/wake-start-noprogress"
   mkdir -p "$WSN/.auto-pilot"
   (cd "$WSN" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -2916,7 +2939,7 @@ CLEOF
   } >"$CES/.auto-pilot/RUN.md"
   printf 'com.autopilot.ec.ces deadline 1970-01-01T00:00:00Z\nreason: deadline\n' \
     >"$CES/.auto-pilot/orchestrator.done"
-  (cd "$CES" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
+  (cd "$CES" && git init -q && git config core.hooksPath /dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
   have "clear-exit-state: precondition — the stale terminal state reads back as NO relaunch" \
     'relaunch=no' "$("$SCRIPT" status --label com.autopilot.ec.ces --dir "$CES" 2>&1)"
   "$SCRIPT" clear-exit-state --dir "$CES" >/dev/null 2>&1
@@ -3019,7 +3042,7 @@ LCFEOF
   # --- the SYSTEMIC HALT path survives a die-capable teardown ---------------
   HB="$EC/halt-unwritable-sentinel"
   mkdir -p "$HB/.auto-pilot"
-  (cd "$HB" && git init -q)
+  (cd "$HB" && git init -q && git config core.hooksPath /dev/null)
   {
     printf -- '---\n'
     printf 'status: active\n'
@@ -3052,7 +3075,7 @@ LCFEOF
   # done|deadline branch, not the halt).
   DS="$EC/done-unwritable-sentinel"
   mkdir -p "$DS/.auto-pilot"
-  (cd "$DS" && git init -q)
+  (cd "$DS" && git init -q && git config core.hooksPath /dev/null)
   {
     printf -- '---\n'
     printf 'status: active\n'
@@ -3092,7 +3115,7 @@ LCFEOF
   # fixed for the same function; this is the call site that was missed.
   NP26="$EC/noprogress-unwritable"
   mkdir -p "$NP26/.auto-pilot"
-  (cd "$NP26" && git init -q)
+  (cd "$NP26" && git init -q && git config core.hooksPath /dev/null)
   # status active, and NO exit_reason: an agent that crashed without declaring.
   {
     printf -- '---\n'
@@ -3268,6 +3291,7 @@ LCFEOF
   NP="$EC/stale-pause-reason-noprogress"
   mkdir -p "$NP/.auto-pilot"
   (cd "$NP" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -3297,6 +3321,7 @@ LCFEOF
   PB="$EC/paused-uncorroborated"
   mkdir -p "$PB/.auto-pilot"
   (cd "$PB" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -3324,6 +3349,7 @@ LCFEOF
   PC="$EC/paused-corroborated"
   mkdir -p "$PC/.auto-pilot"
   (cd "$PC" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: paused\n'
@@ -3358,6 +3384,7 @@ LCFEOF
   PT="$EC/paused-until-comment"
   mkdir -p "$PT/.auto-pilot"
   (cd "$PT" && git init -q \
+    && git config core.hooksPath /dev/null \
     && {
       printf -- '---\n'
       printf 'status: active\n'
@@ -3420,7 +3447,7 @@ LCFEOF
     } >"$T23_DIR/.auto-pilot/RUN.md"
     printf '# report\n' >"$T23_DIR/.auto-pilot/REPORT.md"
     : >"$T23_DIR/.auto-pilot/orchestrator.log"
-    (cd "$T23_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
+    (cd "$T23_DIR" && git init -q && git config core.hooksPath /dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
     "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
       --workdir "$T23_DIR" --log "$T23_DIR/.auto-pilot/orchestrator.log" \
       --prompt-file "$BASE/prompt.txt" --label "com.autopilot.t23.$1" \
@@ -3513,7 +3540,7 @@ LCFEOF
     pel_write_runmd active ''
     printf '# report\n' >"$PEL_DIR/.auto-pilot/REPORT.md"
     : >"$PEL_DIR/.auto-pilot/orchestrator.log"
-    (cd "$PEL_DIR" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
+    (cd "$PEL_DIR" && git init -q && git config core.hooksPath /dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
     "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
       --workdir "$PEL_DIR" --log "$PEL_DIR/.auto-pilot/orchestrator.log" \
       --prompt-file "$BASE/prompt.txt" --label "com.autopilot.pel.$1" \
@@ -3792,6 +3819,9 @@ GHFAILEOF
     git -C "$root/run" remote add origin "$root/origin.git"
     git -C "$root/run" config user.email t@example.com
     git -C "$root/run" config user.name T
+    # A developer's global core.hooksPath (whose pre-commit hook blocks commits
+    # to `main`) applies to every repo, throwaway fixtures included — isolate.
+    git -C "$root/run" config core.hooksPath /dev/null
     git -C "$root/run" checkout -q -b main
     echo r >"$root/run/r.txt"
     git -C "$root/run" add r.txt
@@ -4803,6 +4833,9 @@ if command -v git >/dev/null 2>&1; then
   git init -q "$SR_REPO"
   git -C "$SR_REPO" config user.email test@example.com
   git -C "$SR_REPO" config user.name "Test"
+  # A developer's global core.hooksPath (whose pre-commit hook blocks commits
+  # to `main`) applies to every repo, throwaway fixtures included — isolate.
+  git -C "$SR_REPO" config core.hooksPath /dev/null
   git -C "$SR_REPO" checkout -q -b main
   echo root >"$SR_REPO/root.txt"
   git -C "$SR_REPO" add root.txt
