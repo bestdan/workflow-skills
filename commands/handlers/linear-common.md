@@ -148,15 +148,27 @@ Three GraphQL reads run behind the **same** gate, defined once here: "Ready-cand
 
 1. If `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF` is **already set** in the environment, change nothing — an inherited value always wins (this is the headless `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case, and the launching-terminal export).
 2. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
-3. If it holds a value, export it for the script invocation:
+3. If it holds a value, pass it **as a one-shot environment prefix on the same command that runs the script**, in a **single Bash call**:
    ```bash
-   export LINEAR_API_KEY_REF="<linear.api_key_ref from merged config>"
+   LINEAR_API_KEY_REF='<linear.api_key_ref from merged config>' \
+     python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<script>.py" --team "<linear.team>" …
    ```
-4. If it is unset, export nothing and invoke the script anyway. It exits non-zero, and the run floors **silently** — the correct behavior for a keyless host.
+   Two rules, both load-bearing:
+   - **Same call.** Each Bash tool call is a **fresh shell**, so a standalone `export` in an earlier call is gone by the time the script runs — the bridge would be silently inert, which is the exact bug this step exists to fix. Never split the assignment and the invocation across two calls.
+   - **Single quotes.** The value comes from a config file; inside double quotes a ref containing `$(…)`, backticks, or `"` would be evaluated by the shell rather than passed literally. Single-quote it. If the value itself contains a single quote, it is not a valid `op://` reference — treat it as a config error and floor rather than trying to escape it.
+4. If it is unset, pass nothing and invoke the script anyway. It exits non-zero and the run floors — the correct behavior for a keyless host. That fallback still logs the gate's ordinary one-line debug message (see "The gate"); what it must **not** add is any further "your key didn't resolve" explanation, since there was no key to resolve.
 
 `op read` needs an authorized 1Password session. `op signin` **in the user's own terminal** establishes one that _is_ visible to the agent's tool-spawned subshell — `op` holds the session in its per-user cache daemon (`--cache`, on by default on UNIX), so it crosses the process boundary. Sessions lapse after roughly 30 minutes of inactivity, at which point the fast path floors until the next `op signin`.
 
-**Make a configured-but-unresolvable key legible.** When step 3 **did** export a ref and the script still exits non-zero, surface the script's stderr line verbatim once (e.g. `Could not read key from 1Password (op://…): …`) instead of the generic fallback line — the usual cause is a lapsed `op` session, and the fix is one `op signin`. This stays **non-fatal**: the run still floors to MCP and still succeeds. Say it once per run, not per scope. When step 3 exported nothing (no `api_key_ref` anywhere), stay silent — that host simply has no key.
+**Make a configured-but-unresolvable key legible.** When step 3 **did** pass a ref and the script still exits non-zero, add **one** line beyond the gate's debug message, naming the cause and the fix — the usual cause is a lapsed `op` session, and the fix is one `op signin`.
+
+**Do not copy the script's stderr verbatim**: it contains the full `op://vault/item/field` pointer, which `linear-config.md` → "Keep `api_key_ref` out of the committed config" classifies as sensitive (it advertises which vault and item hold a full-account bearer token). Report `op`'s reason with the pointer reduced to its vault segment:
+
+```
+Configured linear.api_key_ref (op://<vault>/…) did not resolve: <op's reason>. If your op session has lapsed, run `op signin` in your own terminal.
+```
+
+This stays **non-fatal**: the run floors to MCP and still succeeds. Say it once per run, not per scope. When step 3 passed nothing (no `api_key_ref` anywhere), add nothing — that host simply has no key, and the gate's own debug line already covers it.
 
 **The gate.** When `Bash` is available, attempt the GraphQL fast-path first. On **any** non-zero exit from the script, or stdout that doesn't parse as the expected JSON object, log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP floor.`) and run the MCP floor instead. There is **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check — the script itself exits fast and non-zero when no key is resolvable, so the fallback **is** the gate. An explicit env pre-check would misgate the headless case where `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` are set but `$LINEAR_API_KEY` itself is not — that case must still attempt the fast path. A host with no `Bash` tool falls to the floor by construction (nothing to gate).
 
@@ -188,9 +200,12 @@ Either way, resolve state ids by **type only, never display name** (names are us
 **Fast-path invocation.** Behind the gate above, the GraphQL fast path is `linear-scan.py`, invoked with each resolved concrete scope's id as `--project` (repeatable — batch every scope in one call, or one call per scope; the consumer's choice, since the script unions either way) and a `--state-type` flag per state type in the caller's set (omit `--project` for the whole-team scope). **Never** pass the `"__unassigned__"` sentinel as `--project` — the script has no Unassigned-exclusion mode, so if the resolved scope set includes the Unassigned bucket, that scope floors (per-scope fallback):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
+LINEAR_API_KEY_REF='<from merged config — omit entirely if unset or already in env>' \
+  python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
   --project "<scope-id>" --state-type <type> [--state-type <type> …]
 ```
+
+The `LINEAR_API_KEY_REF=` prefix is the "Key resolution" step above, and it must ride on **this same command** — a separate `export` in an earlier Bash call does not survive into this one. Consumers that show a bare `python3 …` invocation are abbreviating; the prefix still applies.
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }` object in the script's header; a parse failure is itself a fallback trigger (per the gate). `meta.states` (an array of `{ id, name, type }`) replaces the `list_workflow_states` state-id→type map — cache it the same way.
 
