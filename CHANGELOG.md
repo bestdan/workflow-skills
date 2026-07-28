@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.10] - 2026-07-28
+
+### Fixes
+
+- make a configured api_key_ref actually reach the read fast paths (#269) (3b335eb)
+
 ## [1.64.9] - 2026-07-28
 
 ### Fixes
