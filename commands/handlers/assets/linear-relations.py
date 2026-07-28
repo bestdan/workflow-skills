@@ -41,11 +41,14 @@ The API key is read, in order, from:
   1. $LINEAR_API_KEY, else
   2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
 
-IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
-authorized terminal — NOT in an agent's tool-spawned subshell. Run this from
-your own terminal, or headless with $LINEAR_API_KEY set directly, or
-$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the
-key).
+`op read` needs an authorized 1Password session. Running `op signin` in your own
+terminal establishes one that IS visible to an agent's tool-spawned subshell — op
+holds the session in a per-user cache daemon — and it lapses after roughly 30
+minutes of inactivity. Headless runs instead set $LINEAR_API_KEY directly, or
+$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
+
+A configured `linear.api_key_ref` reaches step 2 only because the caller exports
+it — see linear-common.md's "Key resolution" step. This script reads no config.
 
 On any failure (missing key, GraphQL error, team not found) this exits
 non-zero with the reason on stderr, so the caller can fall back to the MCP
@@ -121,8 +124,8 @@ def get_key():
     if not ref:
         sys.exit(
             "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
+            "full op://vault/item/field reference. (A configured linear.api_key_ref "
+            "is exported by the caller — see this file's header.)"
         )
     try:
         out = subprocess.run(
@@ -134,14 +137,16 @@ def get_key():
             "directly (see this file's header)."
         )
     except subprocess.TimeoutExpired:
-        # A locked 1Password desktop session can block `op read` on a biometric
-        # prompt this non-interactive subshell can't answer. Exit non-zero (not
-        # a hang) so the caller falls back to the MCP floor per this script's
-        # contract.
+        # `op read` can block — a locked desktop session, or a prompt this
+        # non-interactive subshell can't answer. Exit non-zero (not a hang) so
+        # the caller falls back to the MCP floor per this script's contract.
         sys.exit(f"Timed out reading key from 1Password ({ref}).")
     key = out.stdout.strip()
     if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
+        sys.exit(
+            f"Could not read key from 1Password ({ref}): {out.stderr.strip()} "
+            "— if the op session has lapsed, run `op signin` in your own terminal."
+        )
     return key
 
 

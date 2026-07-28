@@ -19,15 +19,16 @@ mapping this file reuses.
 > whole thing — query **and** mutate — in GraphQL with one key. This is the one
 > handler whose retire op is not MCP-native.
 
-> **Gotcha (learned in practice): the agent usually can't read the key from its
-> own shell.** With 1Password **desktop-app integration**, only your authorized
-> terminal apps can unlock `op`. The agent's tool-spawned subshell is not one of
-> them, so `op read` / `op item get` there usually returns `account is not
-> signed in` even while you are signed in interactively — **but not always**: an
-> authorized environment or a `OP_SERVICE_ACCOUNT_TOKEN` in the shell can make it
-> succeed. **Test once** with a non-revealing probe (`op read "<ref>" >/dev/null
-> 2>&1`); if it resolves (exit 0), use it. If it returns `account is not signed
-> in`, fall back to one of these two paths:
+> **Gotcha: `account is not signed in` means no session, not a forbidden shell.**
+> `op read` needs an authorized 1Password session, and that message says one has
+> not been established — it is **not** a statement that the agent's tool-spawned
+> subshell is disallowed. Once `op signin` has run in **your own** terminal (with
+> desktop-app integration that raises the biometric prompt), `op` keeps the
+> session in a per-user cache daemon and `op read` works from the agent's subshell
+> too. Sessions lapse after roughly 30 minutes of inactivity. **Test once** with a
+> non-revealing probe (`op read "<ref>" >/dev/null 2>&1`); if it resolves (exit 0),
+> use it. If it returns `account is not signed in`, run `op signin` in your
+> terminal and probe again — or fall back to one of these two paths:
 >
 > - **Interactive:** run the archive step in _your_ terminal via the session's
 >   `!` prefix (e.g. `! python3 …`), where `op` is authorized. The agent prepares
@@ -89,9 +90,9 @@ native window, or needs to drain a workspace that has already hit the cap.
    # LINEAR_API_KEY="$(op item get <uuid> --fields label=<field> --reveal)"
    ```
 
-   Per the gotcha above, run this in an `op`-authorized shell (your terminal via
-   `!`, or a headless shell with `OP_SERVICE_ACCOUNT_TOKEN`) — not the agent's own
-   subshell. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
+   Per the gotcha above, this needs an authorized `op` session — establish one with
+   `op signin` in your own terminal (it then works from the agent's subshell too),
+   or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
    needs a personal API key. Add `linear.api_key_ref` (a 1Password `op://`
    reference) to the gitignored `dev_docs/tasks/.task-config.local.yml` — see
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a

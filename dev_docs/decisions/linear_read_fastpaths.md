@@ -113,9 +113,13 @@ reused verbatim by every sibling):
 
 1. `$LINEAR_API_KEY` — a raw key already in the environment.
 2. `op read "$LINEAR_API_KEY_REF"` — a full `op://vault/item/field`
-   reference, resolved via the 1Password CLI. This only works
-   non-interactively when `op` is signed in an authorized terminal, or
-   `$OP_SERVICE_ACCOUNT_TOKEN` is set.
+   reference, resolved via the 1Password CLI. This needs an authorized `op`
+   session (established by `op signin` in the user's own terminal, and then
+   shared across their processes), or `$OP_SERVICE_ACCOUNT_TOKEN` set.
+
+`$LINEAR_API_KEY_REF` itself is exported by the caller from the merged config's
+`linear.api_key_ref` — see `linear-common.md`'s "Key resolution" step. The
+scripts read no config of their own.
 
 Neither source is ever a literal key in a config file — `linear.api_key_ref`
 holds an `op://` reference, never a raw secret.
@@ -132,11 +136,14 @@ not that the script is never invoked, and not something `get_key()` verifies.
 So the policy is load-bearing: do **not** "fix" the fallback by wiring the key
 into cloud config; that silently defeats the entire boundary.
 
-**Under 1Password desktop-app integration**, `op` only unlocks in an
-authorized terminal, never in an agent's tool-spawned subshell — so an
-interactive session exports the resolved key into the _launching_ terminal
-before starting the agent (inheriting an already-resolved env var is fine),
-and a headless run instead sets `$OP_SERVICE_ACCOUNT_TOKEN` alongside
+**`op` needs an authorized session, not a particular shell.** An earlier version
+of this note claimed `op` unlocks only in an authorized terminal and never in an
+agent's tool-spawned subshell. That is wrong: `account is not signed in` means no
+session has been established. `op signin` in the user's own terminal creates one
+that `op` shares across their processes via its cache daemon, so the agent's
+subshell resolves `op read` fine — until the session lapses (~30 min idle).
+Exporting an already-resolved key into the _launching_ terminal still works and
+takes precedence; a headless run sets `$OP_SERVICE_ACCOUNT_TOKEN` alongside
 `$LINEAR_API_KEY_REF` so the script can resolve it itself.
 
 ## The opt-in live-smoke-test convention
