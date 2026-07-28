@@ -2,7 +2,7 @@
 title: Write the Probe 5b kill sheet and breaker-gap inventory
 priority: high
 size: 2
-status: new
+status: done
 created: 2026-07-27
 expires: 2026-08-26
 source_branch: bestdan/autopilot-e-lite-design

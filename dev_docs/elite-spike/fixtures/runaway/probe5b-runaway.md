@@ -613,5 +613,8 @@ running something, not by arguing:
 
 ## Results
 
-_Not yet run. The kill sheet is the approval gate: no fixture code exists until
-the maintainer approves this document (plan task 1)._
+**Kill sheet APPROVED by the maintainer 2026-07-28**, after the review round
+above. Plan task 1 is closed and the approval gate is open: fixture code may now
+be written, starting at task 2.
+
+_No leg has run. Nothing below this line is evidence yet._
