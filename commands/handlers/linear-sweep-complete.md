@@ -58,7 +58,12 @@ pattern.
      `projectId: null` survivors means "unassigned coverage may be partial,"
      not "no unassigned work"). A project that exists in Linear but isn't
      listed under `linear.projects` is simply **not swept by default** —
-     pass `--project <that project>` or `--all` to reach it.
+     pass `--project <that project>` or `--all` to reach it. This gap is
+     not silent, though: the same whole-team query's discarded survivors
+     (non-null `projectId`, not in the configured set) feed the out-of-scope
+     warning — step 2 below buckets them by project, step 7 reports them —
+     at **zero** extra API cost, since it's the Unassigned pass's own
+     result set read from the other side of its filter.
 
 ## 2. Find in-flight issues
 
@@ -154,6 +159,23 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
 3. Union the results across scopes (tag each with its source scope for the
    report; no dedup needed — the `projectId == null` Unassigned pass is
    disjoint from every configured-project scope by construction).
+4. **Bucket the out-of-scope warning (default scope only, when 1+ projects
+   are configured).** The Unassigned scope's whole-team query in step 2
+   already returns every started-type issue on the team, not just the
+   `projectId == null` ones kept above — the rest were simply discarded by
+   the null-project filter. Before discarding them, group the survivors
+   whose `projectId` is **neither** `null` **nor** one of the configured
+   scopes' ids by their `project` name; this is the out-of-scope bucket step
+   7 reports. This adds **zero** extra `list_issues` calls — it's a second
+   read of the same result set the Unassigned pass already fetched. It
+   inherits that query's 50-per-state truncation cap, so a full cap can
+   under-count (or entirely miss) out-of-scope work — never report an empty
+   bucket as "nothing out of scope" when the query truncated. This step
+   applies identically regardless of whether the Unassigned pass itself ran
+   on the fast path or floored here — the fast path already falls back to
+   this MCP floor for the Unassigned scope (see "Fast path" step 2 above),
+   so the same whole-team result set is what's available to bucket either
+   way.
 
 On the **MCP floor**, "3. Resolve each issue's PR" step 1 (the per-issue
 `get_issue` attachment read) runs as written below, unchanged.
@@ -296,6 +318,22 @@ Print:
   `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
 - **Counts** — `k completed, m open (left), u unresolved (left), s no-PR
   skipped, c closed-unmerged (left)`.
+- **Out-of-scope warning** (default scope only, when 1+ projects are
+  configured; omit entirely for `--all`, for `--project`, and for the
+  no-projects-configured case, since each of those already covers the whole
+  team) — from the bucket built by step 2's MCP floor step 4 (at zero extra
+  API cost, off the Unassigned pass's own whole-team query), print one
+  line: `⚠ N started-type issue(s) outside configured scope: <project>
+  (n), <project> (n) — not swept. Use --all or --project <name> to reach
+  them.` This count is a **floor, not a census** — it inherits the
+  Unassigned pass's 50-row truncation cap, so note that explicitly whenever
+  that cap was hit (e.g. append "(query truncated — actual count may be
+  higher)"). Omit the line only when the bucket is empty **and** the query
+  did not truncate. When the bucket is empty **but** the query truncated,
+  the count line above would degenerate to a bare `0` with no projects to
+  name — print this instead: `⚠ out-of-scope coverage incomplete (query
+  truncated) — started-type issues outside configured scope may exist. Use
+  --all or --project <name> to check.`
 - **Per-issue lines** — identifier, the PR resolved (if any) and its merge
   state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
   `left: closed unmerged`, `skipped: no PR found`, or `already complete` for
