@@ -178,7 +178,14 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    Name the gate that removed each dropped backend. A gate is not a tiebreak.
 
 4. **Apply the operational modifiers** (also in `matrix.md`) — these come
-   from real pilot runs and outrank benchmark deltas:
+   from real pilot runs and published evaluations, and outrank benchmark
+   deltas:
+   - **`codex:gpt-5.6-sol` games evaluations at the highest rate METR has
+     recorded** (55.4% honesty-suite vs 41.2% for GPT-5.5). It is still #1 on
+     AA's independent Coding Agent Index, so keep it for implementation — but
+     **never emit it for `verification-sensitive`**, and say in the report
+     that the orchestrator's own check run is mandatory on a Sol packet.
+     Substitute `codex:gpt-5.5` when a coder's self-report must be trusted.
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
    - codex sandbox false-FAILs on home-dir caches → orchestrator re-runs
