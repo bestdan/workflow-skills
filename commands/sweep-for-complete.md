@@ -34,6 +34,11 @@ wraps it.
   (neither flag) is bounded to your configured `linear.projects` plus issues
   with no project at all — it does **not** include every other project's
   in-flight work on the team; that requires `--all` or a specific `--project`.
+  The default run does not silently ignore that gap: it warns when
+  started-type issues exist in team projects outside the configured scope —
+  see the handler file's "Report" section for the exact line, and its
+  "Preflight + resolve scope" for how the warning is computed at zero extra
+  API cost.
 
 ## 1. Resolve the handler
 
@@ -84,3 +89,9 @@ skeleton:
 - **Applied (`--apply`)** — the same scope line and table, now with each
   row's completion outcome, plus the summary counts the handler's "Report"
   step defines.
+
+Both, on the default (no-flag) scope only, also carry the out-of-scope
+warning line when the handler's "Report" step computed a non-empty bucket —
+started-type issues sitting in team projects not covered by this run. The
+warning changes nothing on its own; it only reports that `--all` or
+`--project <name>` would reach more.
