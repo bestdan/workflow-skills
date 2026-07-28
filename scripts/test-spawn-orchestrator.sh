@@ -5467,6 +5467,10 @@ USEOF
   # property under test — observed flapping pass/fail across runs with no code
   # change. The claim is "eventually reaped", so bound the wait instead: still
   # matching after 10s is a real leaked reaper, which is what this should catch.
+  # Note the match is argv-based, and every fork of the report-tick process
+  # inherits that argv — so this also covers _run_bounded's job and watchdog and
+  # anything its TERM handler does. The 10s is a budget for that teardown as
+  # well as for the reap; spend against it knowingly.
   srl_reaped=0
   srl_tries=0
   while [ "$srl_tries" -lt 50 ]; do
@@ -5512,11 +5516,15 @@ fi
 # exit and is not corruption.)
 if [ "$CALLER_IS_GIT" = 1 ]; then
   # The after-probes must observe the caller's repo the way the caller's own
-  # git does — the same env the before-snapshot saw, before GIT_CONFIG_GLOBAL/
-  # SYSTEM/CEILING_DIRECTORIES were pinned below. Otherwise a pinned-config
-  # view of a tree checked out under the developer's own config (core.autocrlf,
-  # core.fileMode, core.attributesFile all affect `status --porcelain`) can
-  # report phantom modifications that were never there.
+  # git does — otherwise a pinned-config view of a tree checked out under the
+  # developer's own config (core.autocrlf, core.fileMode, core.attributesFile
+  # all affect `status --porcelain`) can report phantom modifications that were
+  # never there. `env -u` CLEARS the three rather than restoring them, so this
+  # reproduces the before-snapshot exactly when the caller had none of them set
+  # — the normal case — and diverges for a caller who exports them in their own
+  # shell. That divergence fails loud and safe (a false positive in this
+  # assertion, never a missed escape), which is why it is not worth carrying the
+  # save/restore machinery to close.
   caller_head_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
   caller_ref_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
   caller_tracked_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
