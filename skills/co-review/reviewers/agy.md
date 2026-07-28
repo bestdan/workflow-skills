@@ -52,17 +52,17 @@ It persists every session to a per-conversation SQLite store and keeps cross-ses
 
 - **Always start a fresh conversation.** Never pass `--continue` / `--conversation` for a review — each review must depend only on the current diff, never on accumulated memory.
 - **Treat `agy` as advisory-only, always reconciled.** It emits confidently-wrong findings on substance (in testing it invented a non-existent `BashUnsandboxed` permission prefix), and being agentic it explores/writes state even under `--sandbox -p`. Never let it be the sole reviewer; its output must always pass through the reconciler.
-- **Pin `--model`** for a reproducible reviewer identity (the unpinned default drifts between runs) **and** to exploit agy's real edge — a non-Claude voice. The built-in invocation defaults to `"Gemini 3.5 Flash (High)"`: vendor diversity at low quota cost, and in testing it caught the highest-value finding in ~14s. Reserve the heavier `"Gemini 3.1 Pro (High)"` for deep or high-stakes reviews — it consumes quota faster.
+- **Pin `--model`** for a reproducible reviewer identity (the unpinned default drifts between runs) **and** to exploit agy's real edge — a non-Claude voice. The built-in invocation defaults to `"Gemini 3.6 Flash (High)"`: vendor diversity at low quota cost, and in testing it caught the highest-value finding in ~14s. Reserve the heavier `"Gemini 3.1 Pro (High)"` for deep or high-stakes reviews — it consumes quota faster.
 
 ## Invocation (assemble + dispatch in one shell call)
 
 **GitHub mode, with requests** — note the `&&` between every step: dispatch happens only if the diff actually landed.
 
 ```sh
-cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <n> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" --model "Gemini 3.5 Flash (High)" -p "<AGY-POINTER>"
+cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <n> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" --model "Gemini 3.6 Flash (High)" -p "<AGY-POINTER>"
 ```
 
-`--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.5 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review, but doing so changes the command string and re-prompts the approval. `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
+`--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.6 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review, but doing so changes the command string and re-prompts the approval. `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
 
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument from the assembling `cat`; the dispatch tail is unchanged.
 - **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.

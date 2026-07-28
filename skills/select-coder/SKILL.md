@@ -94,8 +94,9 @@ script can't know, fill in yourself before merging:
 - `opus.models` — the script emits `[]`; populate from the session's
   `availableModels` (opus itself is always available).
 
-A devin `tier: unknown` still resolves on first use (an `/upgrade to access
-this model` error means free tier → `swe-1.6-slow` only).
+A devin `tier: unknown` resolves with `devin models list`, which enumerates
+exactly what the account can reach; an `/upgrade to access this model` error on
+a listed model means the tier is gated below it.
 
 Write the block back after probing. Create
 `dev_docs/orchestrate-coders/.coders.yml` if absent — the file may then hold

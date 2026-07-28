@@ -95,5 +95,5 @@ availability:
   devin:
     installed: $devin_installed
     logged_in: $devin_logged_in
-    tier: $devin_tier # unknown → verify with a cheap swe-1.6 call; /upgrade error → free
+    tier: $devin_tier # unknown → verify with 'devin models list'; /upgrade error on a listed model → free
 EOF

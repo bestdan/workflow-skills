@@ -54,7 +54,7 @@ local_reviewers:
   - devin # known agent (Cognition Devin CLI) → built-in default invocation
   - copilot # known agent (GitHub Copilot CLI) → built-in default invocation
   - name: devin # object form for a built-in agent → optional model override
-    model: swe-1.6 # override devin's --model (defaults to swe-1.6); use swe-1.6-slow on the Free tier
+    model: swe-1.6 # override devin's --model (defaults to swe-1.6); check `devin models list` for your tier
   - name: my-agent # custom agent → explicit invocation
     command: "my-agent review --stdin"
 ```
