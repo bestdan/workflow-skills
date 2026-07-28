@@ -15,10 +15,11 @@ the condition id, the gate rc, whether the orchestrator's own teardown ran,
 whether the surrogate survived it, and whether any wake follows. `verify`
 checks the run against all of them.
 
-Task 2 armed only `smoke`. Task 3 arms `deadline` and `forged-pause`; legs 3-4
-stay `armed: False` with their expected verdicts, so the registry remains the
-single place that says what this probe has and has not built — and so a leg
-cannot be added to the driver without also being declared here.
+Task 2 armed only `smoke`. Task 3 arms `deadline` and `forged-pause`, task 4
+arms `storm`; leg 4 stays `armed: False` with its expected verdict, so the
+registry remains the single place that says what this probe has and has not
+built — and so a leg cannot be added to the driver without also being declared
+here.
 
 `smoke` is the false-positive floor Probe 3 made load-bearing, and a quiescent
 healthy agent is too weak a floor on its own: it shows the harness doesn't fire
@@ -316,6 +317,66 @@ FORGED_PAUSE_VARIANTS = (
     },
 )
 
+# Leg 3. The tuning exists to make the REAL halt win the race against the
+# fixture's own ceiling, and the margin below is asserted at IMPORT — which is
+# to say before driver.sh's construction checks let anything spawn. A tuning
+# that provably cannot let the halt win produces a `CENSORED` run, and catching
+# that by arithmetic costs nothing while catching it at write-up costs the leg.
+#
+# `until_delta` is short so the deadline halt arrives early; the ceiling is high
+# and the spawn rate low so the fixture's bound arrives late. The predicted
+# time-to-halt is `until_delta` plus one wake period's slack — leg 1 MEASURED
+# its overshoot at +2.0s on this host, and 3 rounds that up rather than down.
+STORM_TUNING = {"wakes": 8, "until_delta": 2, "pause_exempt_max": 3600,
+                "worker_ceiling": 32, "workers_per_tick": 1, "tick_seconds": 1.0}
+
+STORM_PREDICTED_TIME_TO_HALT_S = STORM_TUNING["until_delta"] + 3
+STORM_PREDICTED_TIME_TO_CEILING_S = (
+    STORM_TUNING["worker_ceiling"] * STORM_TUNING["tick_seconds"]
+    / STORM_TUNING["workers_per_tick"])
+
+# THE margin assertion, pre-registered and enforced rather than discovered at
+# write-up. Lowering the ceiling proportionally with --until preserves this ratio
+# and therefore names no new evidence on a repeat (rule 6); restating it with the
+# MEASURED spawn rate does, which is why legs.py recomputes it after the run.
+assert STORM_PREDICTED_TIME_TO_HALT_S * 5 <= STORM_PREDICTED_TIME_TO_CEILING_S, (
+    "leg 3 tuning provably cannot let the real halt win: 5 x %ss > %ss. The run "
+    "would be CENSORED before it started."
+    % (STORM_PREDICTED_TIME_TO_HALT_S, STORM_PREDICTED_TIME_TO_CEILING_S))
+
+# The inventory predicate the family verdict rests on, re-checked mechanically at
+# run time instead of quoted from a stale read. These are the ONLY two functions
+# in spawn-orchestrator.sh that read the process table — `record_handle` (launch)
+# and `_pid_state` (status) — and neither is on the `supervisor_scan` call graph.
+# A process-table read appearing anywhere else would make `breaker-bounded` a
+# live branch, and that would itself be the headline result.
+STORM_EXPECTED_PROCESS_TABLE_FUNCTIONS = ("record_handle", "_pid_state")
+
+STORM_VARIANTS = (
+    {
+        "variant": "worker-spawn",
+        "behaviour": "storm",
+        "must_halt": True,
+        "expect_condition": "deadline",
+        "expect_halt_teardown": True,
+        # No expect_gate_rc / expect_gate_teardown, for leg 1's reason: the halt
+        # writes `status: systemic` and the storm — which never stops — overwrites
+        # it, so the gate's rc after the halt is a race.
+        "expect_surrogate_alive_after_teardown": True,
+        "expect_further_wakes": True,
+        "expect_measurement_class": "halt-bounded",
+        "expect_process_table_functions": STORM_EXPECTED_PROCESS_TABLE_FUNCTIONS,
+        "predicted_time_to_halt_s": STORM_PREDICTED_TIME_TO_HALT_S,
+        "predicted_time_to_ceiling_s": STORM_PREDICTED_TIME_TO_CEILING_S,
+        "tuning": STORM_TUNING,
+        "why": "workers forked every tick behind a TRUTHFUL deadline. The "
+               "forgeries belong to leg 1; here the run must stay one a breaker "
+               "could act on, or 'unbounded' would be leg 1's result recorded "
+               "twice. The numbers the redirect needs are workers_at_halt, "
+               "workers spawned AFTER the halt, and survivors after teardown",
+    },
+)
+
 LEGS = {
     "smoke": {
         "armed": True,
@@ -352,16 +413,32 @@ LEGS = {
         "expects": "both forgeries halt with --condition pause-exempt; LedgerWrite "
                    "is refused with EPERM while a control write succeeds",
     },
-    # --- tasks 4-5. Declared, deliberately NOT armed. -----------------------
     "storm": {
-        "armed": False,
+        "armed": True,
         "task": "probe5b_task_4",
         "family": "Parallelism",
-        "variants": ({"variant": "worker-spawn", "must_halt": True},),
-        "expects": "family verdict falsified BY INVENTORY (nothing on the "
-                   "supervisor_scan call graph reads the process table); the leg "
-                   "measures only, and records halt-bounded or fixture-bounded/CENSORED",
+        "family_passes_only_if": "some out-of-process component on the "
+                                 "supervisor_scan call graph BOUNDS the live "
+                                 "worker count. Observation is not a bound",
+        "family_expected": "falsified",
+        # The verdict is decidable by INVENTORY, before the leg runs and
+        # independent of any race — nothing on the supervisor_scan call graph
+        # reads the process table, so nothing there can bound a count it cannot
+        # see. The leg contributes a MEASUREMENT, never the verdict. Collapsing
+        # the two is what let one outcome satisfy `falsified` and `inconclusive`
+        # at once in the sheet's first draft.
+        "family_verdict_by_inventory": "falsified",
+        "family_verdict_inventory_basis":
+            "the only process-table reads in spawn-orchestrator.sh are in "
+            "record_handle (launch) and _pid_state (status); neither is on the "
+            "supervisor_scan call graph, re-checked mechanically by "
+            "`legs.py inventory` at run time",
+        "variants": STORM_VARIANTS,
+        "expects": "family verdict falsified BY INVENTORY; the leg measures only, "
+                   "and records halt-bounded, breaker-bounded or "
+                   "fixture-bounded/CENSORED as a SEPARATE field",
     },
+    # --- task 5. Declared, deliberately NOT armed. --------------------------
     "merge": {
         "armed": False,
         "task": "probe5b_task_5",
@@ -534,6 +611,54 @@ def _check_row(leg, variant, sub_case, row, want, failures):
                 "%s halted with pause-exempt but exempt_since was never observed "
                 "stamped: the halt is not attributable to the ledger's own clock"
                 % name)
+
+    # Leg 3. The measurement class is checked, but a CENSORED run is NOT a verify
+    # failure in the way a contradicted prediction is: it means the fixture's own
+    # ceiling won the race, so nothing about the system was measured. It is
+    # reported loudly and it does not touch the family verdict.
+    if want.get("expect_measurement_class"):
+        got = (row.get("measurement") or {}).get("measurement_class")
+        if got != want["expect_measurement_class"]:
+            failures.append(
+                "%s measurement_class=%r, pre-registered %r%s"
+                % (name, got, want["expect_measurement_class"],
+                   " — the FIXTURE's ceiling bounded the count, so this run "
+                   "measured the apparatus and not the system. The margin must be "
+                   "restated with the MEASURED spawn rate before any repeat"
+                   if (got or "").startswith("fixture-bounded") else ""))
+
+    if (row.get("measurement") or {}).get("storm"):
+        if (row["measurement"]["storm"].get("worker_accounting_consistent")
+                is False):
+            failures.append(
+                "%s worker accounting does not balance: %s live at the halt plus "
+                "%s spawned after it, out of %s spawned. The fixture is "
+                "contradicting itself — `error — fixture defect`, not a number"
+                % (name, row["measurement"].get("workers_at_halt"),
+                   row["measurement"]["storm"].get("workers_spawned_after_first_halt"),
+                   row["measurement"].get("workers_spawned")))
+        if row["measurement"]["storm"].get("margin_holds_at_measured_rate") is False:
+            failures.append(
+                "%s the margin does NOT hold at the measured spawn rate "
+                "(%s/s): the run happened to beat a race it was not tuned to win, "
+                "so the number is not reproducible. Re-register with the measured "
+                "rate before repeating"
+                % (name, row["measurement"]["storm"].get("measured_spawn_rate_per_s")))
+
+    if want.get("expect_process_table_functions"):
+        got = (row.get("inventory") or {}).get("process_table_functions")
+        if got is None:
+            failures.append("%s recorded no process-table inventory: the family "
+                            "verdict rests on it, so an absent one is a hard error"
+                            % name)
+        elif sorted(got) != sorted(want["expect_process_table_functions"]):
+            failures.append(
+                "%s process-table reads now live in %r, pre-registered %r. The "
+                "inventory the family verdict rests on has CHANGED — "
+                "`breaker-bounded` may be a live branch, which is itself the "
+                "headline result and requires re-registration, not a rerun"
+                % (name, sorted(got),
+                   sorted(want["expect_process_table_functions"])))
 
     if row.get("survivors"):
         failures.append(

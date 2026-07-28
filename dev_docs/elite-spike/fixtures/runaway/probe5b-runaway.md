@@ -508,9 +508,15 @@ construction record under Results). An override earned by a defect the rules
 exist to surface is not the same act as an override requested to rescue an
 oversized plan, and this sheet declines the second while taking the first.
 
-**No further extension is authorized.** A second one would be the concession the
-paragraph above refuses, and the degradation order below already makes truncation
-safe.
+**Extended by a further 8 hours by the maintainer, 2026-07-28, after task 3.**
+The paragraph above had declared no further extension authorized, so this one is
+recorded as what it is rather than re-justified: it is **not** earned by a
+construction-time defect the way the first was — legs 2 and 1 ran clean against
+their pre-registration, and the three defects task 3 found were caught and fixed
+inside the original cap. It is the second kind of override, taken deliberately
+by the maintainer to buy legs 3 and 4 rather than degrade them. The degradation
+order below still makes truncation safe, so the honest reading is that this
+extension buys coverage the plan could have shed, not coverage it needed.
 
 - The clock covers **fixture build + legs + classification** (plan tasks 2–6).
   This kill sheet is rule-1 pre-work and the scaffolding-hygiene task sits
@@ -633,7 +639,7 @@ running something, not by arguing:
 above. Plan task 1 is closed and the approval gate is open: fixture code may now
 be written, starting at task 2.
 
-_Legs 1 and 2 have run (task 3). Legs 3 and 4 remain unrun._
+_Legs 1, 2 and 3 have run (tasks 3-4). Leg 4 remains unrun._
 
 ### Task 2 — construction record (2026-07-28)
 
@@ -799,3 +805,73 @@ never checked again.
 None of this bears on §7a row 5b, which was falsified by inventory before any
 leg ran. Leg 2's `confirmed` means only "not falsified in the tested
 unprivileged shell environment on this host".
+
+### Task 4 — leg 3, the worker-spawn storm (2026-07-28)
+
+**Family verdict: `falsified`, decided by INVENTORY and not by this run.**
+Nothing on the `supervisor_scan` call graph reads the process table, so nothing
+there can bound a count it cannot see. The predicate is re-derived mechanically
+at run time rather than quoted from a stale read — `legs.py inventory` scans
+`spawn-orchestrator.sh` for every process-table call site and records the
+enclosing function. Measured this run: exactly two, `record_handle` (launch,
+`:1584`) and `_pid_state` (status, `:5178`), matching the pre-registration. A
+read appearing anywhere else would make `breaker-bounded` a live branch and
+would itself be the headline result; the row records
+`breaker_bounded_candidate: false`.
+
+The leg therefore contributes a **measurement only**, and the row says so in
+those words rather than reporting `consistent-with-pass` — a halted storm scored
+as a pass would have let a falsified family read as a family that passed.
+
+**Measurement class: `halt-bounded`** — the useful one, and the one the tuning
+was built to obtain.
+
+| | |
+|---|---|
+| Halt | wake 3, `deadline`, fixture-clock overshoot **+1.0s** |
+| Workers live at the halt | **4** |
+| Workers spawned **after** the halt | **8** |
+| Workers spawned in total | 12 |
+| Survivors after teardown | **0** |
+| Escaped descendants | 0 |
+| Fixture worker ceiling | 32, **not reached** |
+
+**The number that sizes the redirect is 8, not 4.** The deadline halt fired,
+wrote its ALARM section, ran `teardown --label` — and the storm kept spawning
+through it, adding twice as many workers after the halt as existed when it
+fired. `teardown` boots a launchd job; the workers are not one, and nothing on
+the halt path enumerates them. A ceiling that halts without enumerating what the
+run has spawned bounds the supervisor, not the damage.
+
+**The margin, asserted at construction and restated at measurement.** Predicted
+time-to-halt 5s (`until_delta` 2 plus one wake period's slack, rounded up from
+leg 1's measured +2.0s), predicted time-to-ceiling 32s (32 workers ÷ 1 per 1s
+tick); `5 × 5 ≤ 32` is asserted at `scenarios.py` import, so a tuning that
+provably cannot let the real halt win never starts a run. Measured spawn rate
+**0.99/s → time-to-ceiling 32.3s**, so the margin holds at the measured rate too
+— which is the rule-6 discriminator for any repeat: lowering the ceiling
+proportionally with `--until` preserves the predicted ratio and names no new
+evidence, restating it with the measured rate does.
+
+**What running it caught that review did not.** The first run reported 4 workers
+live at the halt **plus 8 spawned after it, out of 12 spawned in total** — 13
+workers' worth of accounting for 12 workers. Cause: the halt was stamped with
+the driver's whole-second clock (`date +%s`) while each worker's spawn carried
+milliseconds, so a worker spawned inside the halt's own second was counted on
+both sides. Fixed by stamping the halt twice, each stamp with one job — the
+driver's clock stays the overshoot's reference, because the deadline it is
+subtracted from was set on that same clock, and a sub-second stamp taken at the
+moment of observation is what worker spawn times are compared against.
+`worker_accounting_consistent` is now a standing check, and `verify` fails on a
+false. This is the same failure mode as task 3's conflated teardowns: two
+different quantities sharing one name.
+
+**Check suite.** Run unsandboxed, twice. The first run reported **58 failing vs
+the 57 baseline**, the new name being `status-report [in-wake]: the reporter loop
+is reaped when claude exits`; the second reported 57 with no new failures, and
+that same test passed. It is recorded as a **flake, not a regression**, on two
+grounds: the change set is confined to `dev_docs/elite-spike/fixtures/runaway/`,
+which no orchestrator test consumes, and the failing test is itself
+timing-sensitive reaping behaviour run immediately after leg 3 had loaded the
+machine with a dozen spawning processes. Recorded rather than resolved by
+reporting only the green run.

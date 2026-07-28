@@ -338,7 +338,8 @@ run_variant() {
   # one long enough that the deadline halt cannot win the race and be misread as
   # the ledger's. Pre-registered there, applied here.
   local variant="$1" behaviour="$2" sub_case="$3" wakes="$4" until_delta="$5" \
-    forge_after="$6" pause_exempt_max="$7" workers="$8" enforce_exempt="$9"
+    forge_after="$6" pause_exempt_max="$7" workers="$8" enforce_exempt="$9" \
+    worker_ceiling="${10}" workers_per_tick="${11}"
   local rowname="$variant"
   [ -n "$sub_case" ] && rowname="$variant/$sub_case"
   echo "driver: === leg=$LEG variant=$rowname behaviour=$behaviour wakes=$wakes until_delta=$until_delta pause_exempt_max=$pause_exempt_max workers=$workers ==="
@@ -402,6 +403,7 @@ run_variant() {
     --behaviour "$behaviour" --until "$until_iso" \
     --pause-seconds "$PAUSE_SECONDS" --complete-after "$COMPLETE_AFTER" \
     --forge-after "$forge_after" --workers "$workers" \
+    --worker-ceiling "$worker_ceiling" --workers-per-tick "$workers_per_tick" \
     --heartbeat-every "$HEARTBEAT_EVERY" --parent-death-fifo "$FIFO" \
     --driver-incarnation-file "$DRIVER_INC" 9>&- &
   local surr_pid=$!
@@ -489,6 +491,7 @@ run_variant() {
     --surrogate-inc "$SURR_INC" --wakes "$wakes" --final-gate-rc "$gate_rc" \
     --real-until-epoch "$until_epoch" --pause-exempt-max "$pause_exempt_max" \
     --surrogate-alive-after-orchestrator-teardown "$alive_after_orch" \
+    --orchestrator "$ORCH" \
     || die "legs.py finish failed for $rowname"
 }
 
@@ -516,12 +519,14 @@ print(" ".join(str(x) for x in (
     t.get("pause_exempt_max", '"$PAUSE_EXEMPT_MAX"'),
     t.get("workers", 0),
     1 if s.get("require_exempt_since_before_cap") else 0,
+    t.get("worker_ceiling", 0),
+    t.get("workers_per_tick", 0),
 )))' >>"$SCRATCH/rows.txt"
 done < <("$FIXDIR/scenarios.py" variants --leg "$LEG")
 
-while read -r v b sc wk ud fa pem wrk eew; do
+while read -r v b sc wk ud fa pem wrk eew wc wpt; do
   [ "$sc" = "-" ] && sc=""
-  run_variant "$v" "$b" "$sc" "$wk" "$ud" "$fa" "$pem" "$wrk" "$eew"
+  run_variant "$v" "$b" "$sc" "$wk" "$ud" "$fa" "$pem" "$wrk" "$eew" "$wc" "$wpt"
 done <"$SCRATCH/rows.txt"
 
 # The family verdict — a SEPARATE record from every measurement above, per the

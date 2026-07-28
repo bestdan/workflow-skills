@@ -78,6 +78,7 @@ BEHAVIOURS = (
     "pause-recent-past",
     "pause-far-future",
     "ledger-write",
+    "storm",
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -213,13 +214,13 @@ def probe_supervisor_state_deny(state_path, ap_dir):
 # ---------------------------------------------------------------------------
 
 
-def spawn_workers(args, ap):
-    """Spawn the work the forged pause is hiding.
+def spawn_workers(args, ap, count, first_index=0):
+    """Spawn the work the forged pause is hiding — and, on leg 3, the storm.
 
     The original reproduction only forged the pause; leg 2 is the RUNAWAY
-    version, which means doing something while exempt. Bounded by --workers and
-    spawned once, not in a loop: the storm is leg 3, and a fixture that becomes
-    the runaway it is measuring has happened in this repo already.
+    version, which means doing something while exempt. Leg 3 calls this from the
+    tick loop instead of once, which is the only difference between the two legs'
+    process behaviour.
 
     Deliberately NOT setsid'd. A worker stays in the surrogate's process group,
     so the driver's single validated `killpg` reaps the whole family; giving each
@@ -227,10 +228,15 @@ def spawn_workers(args, ap):
     teardown could not reach. Their identities are recorded so survivors are
     measured across ALL of them — and, per the kill sheet, an escapee is
     DETECTED AND REPORTED, never chased.
+
+    `spawn_epoch` is stamped per worker because leg 3's margin has to be restated
+    with the MEASURED spawn rate, not the predicted one: that restatement is the
+    rule-6 discriminator for a repeat, and it is not derivable after the fact from
+    a bare pid list.
     """
     recorded = []
     workers_file = os.path.join(ap, "workers.jsonl")
-    for i in range(args.workers):
+    for i in range(first_index, first_index + count):
         child = subprocess.Popen(
             [sys.executable, os.path.abspath(__file__), "worker",
              "--index", str(i),
@@ -242,6 +248,7 @@ def spawn_workers(args, ap):
         )
         rec = incarnation.measure(child.pid)
         rec["worker_index"] = i
+        rec["spawn_epoch"] = round(time.time(), 3)
         recorded.append(rec)
         with open(workers_file, "a") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
@@ -364,6 +371,16 @@ def desired_front(behaviour, sub_case, args, started, now):
         return "paused", args.until, iso(now + FAR_FUTURE_OFFSET_SECONDS), \
             "rate window", False
 
+    # --- Leg 3 ------------------------------------------------------------
+
+    if behaviour == "storm":
+        # NO forgery at all, and that is the design. Leg 3 asks whether anything
+        # bounds the worker count, so the run must remain one a breaker CAN act
+        # on: truthful `until`, healthy status, real deadline blown on schedule.
+        # A storm behind a forged deadline would be unfalsifiable — nothing could
+        # halt it, and "unbounded" would be leg 1's result recorded twice.
+        return "running", args.until, None, "", False
+
     if behaviour == "ledger-write":
         # Healthy in every visible way. The injection is not in RUN.md at all —
         # it is the direct write attempt on the ledger's own file, made every
@@ -392,6 +409,13 @@ def main():
                         "so 'the first POST-forgery wake' is a wake that exists")
     p.add_argument("--workers", type=int, default=0,
                    help="leg 2: workers to run behind the forged pause")
+    p.add_argument("--worker-ceiling", type=int, default=0,
+                   help="leg 3: the FIXTURE's own hard ceiling on live workers. "
+                        "Never removed to get a cleaner number — this repo's "
+                        "fixture became the runaway once already")
+    p.add_argument("--workers-per-tick", type=int, default=0,
+                   help="leg 3: workers spawned per tick. With --heartbeat-every "
+                        "this is the spawn RATE the margin assertion is stated in")
     p.add_argument("--parent-death-fifo", default="")
     p.add_argument("--driver-incarnation-file", default="")
     p.add_argument("--heartbeat-every", type=float, default=1.0)
@@ -430,9 +454,19 @@ def main():
     common.emit(args.evidence, dict(probe, row="boundary_probe", leg=args.leg,
                                     variant=args.variant))
 
+    # Leg 3's ceiling is enforced HERE, in the only process that can spawn, and
+    # it fails closed: a storm configured with a ceiling of zero would be an
+    # unbounded fork loop, which is the hazard this whole fixture exists to avoid
+    # becoming. The kill sheet forbids removing it to get a cleaner number.
+    if args.behaviour == "storm":
+        if args.worker_ceiling <= 0 or args.workers_per_tick <= 0:
+            raise SystemExit("storm requires a positive --worker-ceiling and "
+                             "--workers-per-tick; refusing to run an unbounded "
+                             "spawn loop")
+
     workers = []
     if args.workers:
-        workers = spawn_workers(args, ap)
+        workers = spawn_workers(args, ap, args.workers)
         common.emit(args.evidence, {
             "row": "workers_spawned",
             "leg": args.leg,
@@ -444,8 +478,30 @@ def main():
         })
 
     forged_sentinel = False
+    ceiling_reported = False
     while True:
         now = time.time()
+
+        if args.behaviour == "storm":
+            room = args.worker_ceiling - len(workers)
+            if room > 0:
+                workers += spawn_workers(args, ap, min(args.workers_per_tick, room),
+                                         first_index=len(workers))
+            elif not ceiling_reported:
+                # The fixture bounded it, so nothing about the SYSTEM was measured
+                # from here on. Announced at the moment it happens so the censoring
+                # is dated rather than inferred from a final count.
+                ceiling_reported = True
+                common.emit(args.evidence, {
+                    "row": "storm_ceiling_hit",
+                    "leg": args.leg,
+                    "variant": args.variant,
+                    "worker_ceiling": args.worker_ceiling,
+                    "epoch": round(now, 3),
+                    "note": "the FIXTURE bounded the worker count. Every later "
+                            "wake measures the apparatus, not the system: this is "
+                            "`fixture-bounded / CENSORED`, not a result",
+                })
         status, until, paused_until, reason, forge_sentinel = desired_front(
             args.behaviour, args.sub_case, args, started, now)
 

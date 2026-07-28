@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common      # noqa: E402
@@ -73,6 +74,42 @@ CONDITION_MARKERS = (
 #   * the GATE's `teardown --label` on a done/systemic RUN.md, which announces
 #     itself with this exact phrase on stdout.
 GATE_TEARDOWN_MARKER = "tearing down"
+
+# Leg 3's family verdict rests on an INVENTORY claim — that nothing on the
+# `supervisor_scan` call graph reads the process table — and a claim quoted from
+# a stale read is not evidence. So the claim is re-derived from the orchestrator
+# at run time: every process-table call site, with the function enclosing it.
+# `scenarios.py` pre-registers the function names; a read appearing anywhere else
+# means `breaker-bounded` may be a live branch, which is the headline result
+# rather than a reason to rerun.
+PROCESS_TABLE_RE = re.compile(r"(?<![\w./-])(?:ps\s+-|pgrep|pkill|proc_pidinfo)")
+BASH_FUNC_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)")
+
+
+def process_table_inventory(orchestrator_path):
+    """Every process-table read in the orchestrator, with its enclosing function.
+
+    Deliberately a whole-file scan rather than a reachability analysis: a fixture
+    that tried to compute bash call graphs would be trusting its own parser on the
+    one predicate the verdict rests on. Enumerating every site and pre-registering
+    the permitted ones is weaker in theory and far harder to get quietly wrong.
+    """
+    sites = []
+    fn = None
+    for n, line in enumerate(_read(orchestrator_path).splitlines(), 1):
+        m = BASH_FUNC_RE.match(line)
+        if m:
+            fn = m.group(1)
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if PROCESS_TABLE_RE.search(line):
+            sites.append({"line": n, "function": fn, "text": stripped[:160]})
+    return {
+        "orchestrator_sha256": common.sha256_file(orchestrator_path),
+        "process_table_call_sites": sites,
+        "process_table_functions": sorted({s["function"] for s in sites}),
+    }
 
 
 def _read(path):
@@ -156,6 +193,7 @@ def _load_acc(path):
         "halt_count": 0,
         "first_halt_wake": None,
         "first_halt_epoch": None,
+        "first_halt_measured_epoch": None,
         "halt_conditions": [],
         "gate_rc_by_wake": {},
         "exempt_since_by_wake": {},
@@ -258,7 +296,20 @@ def _cmd_wake(args):
 
     if halts_this_wake and acc["first_halt_wake"] is None:
         acc["first_halt_wake"] = args.wake
+        # TWO stamps, each with one job, because they answer different questions
+        # at different resolutions and mixing them made the fixture contradict
+        # itself: leg 3's first run recorded 4 workers live at the halt PLUS 9
+        # spawned after it, out of 12 spawned in total.
+        #
+        # `first_halt_epoch` is the DRIVER's clock (`date +%s`, whole seconds) and
+        # stays the overshoot's reference: the overshoot is measured against a
+        # deadline the driver set on that same clock, and re-basing one side of a
+        # subtraction is how drift gets in.
+        # `first_halt_measured_epoch` is this process's clock at the moment the
+        # halt was observed, to sub-second resolution — the only stamp that can be
+        # compared against a worker's `spawn_epoch` without an off-by-one-second.
         acc["first_halt_epoch"] = args.now_epoch
+        acc["first_halt_measured_epoch"] = round(time.time(), 3)
         acc["workers_at_first_halt"] = live_workers
 
     acc["halt_count"] += halts_this_wake
@@ -288,6 +339,11 @@ def _cmd_wake(args):
         "supervisor_state": sup,
         "exempt_since": exempt_since or None,
         "live_workers": live_workers,
+        # Leg 3's "did any supervisor component observe the count at all". This
+        # is the WEAK co-measurement and is labelled as such: the decidable
+        # predicate is the static inventory recorded on the leg_result row, and
+        # observation would not be a bound even if it were found here.
+        "supervisor_output_mentions_workers": "worker" in combined.lower(),
         "alarm_sentinel_present": os.path.exists(os.path.join(ap, "ALARM")),
         "done_sentinel_present": done_sentinel,
         # The fixture's OWN clock against the deadline the DRIVER set. RUN.md's
@@ -409,6 +465,95 @@ def _cmd_finish(args):
             "corroboration": "no halt: nothing decided",
         }
 
+    # --- leg 3's storm numbers, and the class of bound that produced them -----
+    #
+    # Three classes, never two. The naive version — "bounded" vs "not bounded" —
+    # is unfalsifiable here, because the FIXTURE imposes its own ceiling: "nothing
+    # bounded the count" would be trivially true while the recorded number was an
+    # artifact of the apparatus. So a run the fixture bounded first is CENSORED,
+    # and censoring the measurement never touches the family verdict.
+    tuning = want.get("tuning") or {}
+    ceiling = tuning.get("worker_ceiling") or 0
+    inventory = None
+    storm = None
+    measurement_class = None
+    if ceiling:
+        inventory = process_table_inventory(args.orchestrator)
+        spawn_epochs = sorted(w["spawn_epoch"] for w in workers
+                              if w.get("spawn_epoch") is not None)
+        span = (spawn_epochs[-1] - spawn_epochs[0]) if len(spawn_epochs) > 1 else 0
+        measured_rate = round((len(spawn_epochs) - 1) / span, 3) if span > 0 else None
+        ceiling_hit = len(workers) >= ceiling
+        ceiling_hit_epoch = spawn_epochs[-1] if (ceiling_hit and spawn_epochs) else None
+        # The sub-second stamp, never the driver's whole-second one: both sides of
+        # every comparison below are spawn/observation times on the same clock.
+        halt_epoch = acc["first_halt_measured_epoch"]
+
+        if ceiling_hit and (halt_epoch is None or ceiling_hit_epoch < halt_epoch):
+            measurement_class = "fixture-bounded (CENSORED)"
+            censored_by = "worker-ceiling"
+        elif halted:
+            measurement_class = "halt-bounded"
+            censored_by = None
+        elif ceiling_hit:
+            measurement_class = "fixture-bounded (CENSORED)"
+            censored_by = "worker-ceiling"
+        else:
+            # No halt, and the fixture's worker ceiling was never reached: the
+            # wake loop simply ended. Still the apparatus, not the system — but a
+            # DIFFERENT apparatus, so the sub-reason is recorded rather than
+            # smoothed into the worker-ceiling case.
+            measurement_class = "fixture-bounded (CENSORED)"
+            censored_by = "wake-ceiling"
+
+        # `breaker-bounded` is statically unreachable at this revision, and the
+        # branch stays honest by asking the inventory rather than the run: it goes
+        # live ONLY if a process-table read has appeared somewhere the
+        # pre-registration does not permit. Observation would still not be a bound,
+        # which is why this records a CANDIDATE and refuses to award the class.
+        inventory_changed = (
+            sorted(inventory["process_table_functions"])
+            != sorted(want.get("expect_process_table_functions") or []))
+
+        storm = {
+            "worker_ceiling": ceiling,
+            "workers_per_tick": tuning.get("workers_per_tick"),
+            "tick_seconds": tuning.get("tick_seconds"),
+            "worker_ceiling_hit": ceiling_hit,
+            "censored_by": censored_by,
+            "workers_spawned_after_first_halt": (
+                sum(1 for e in spawn_epochs if halt_epoch is not None and e > halt_epoch)
+                if halt_epoch is not None else None),
+            "predicted_time_to_halt_s": want.get("predicted_time_to_halt_s"),
+            "predicted_time_to_ceiling_s": want.get("predicted_time_to_ceiling_s"),
+            "margin_asserted_at_construction":
+                "predicted_time_to_halt_s * 5 <= predicted_time_to_ceiling_s, "
+                "asserted at scenarios.py import — a failing margin means the run "
+                "is never started",
+            "measured_spawn_rate_per_s": measured_rate,
+            # The margin RESTATED with the measured rate. This is the rule-6
+            # discriminator for any repeat: lowering the ceiling proportionally
+            # with --until preserves the predicted ratio and so names no new
+            # evidence, while this number does.
+            "measured_time_to_ceiling_s": (
+                round(ceiling / measured_rate, 3) if measured_rate else None),
+            "margin_holds_at_measured_rate": (
+                bool(want.get("predicted_time_to_halt_s") * 5
+                     <= ceiling / measured_rate)
+                if measured_rate and want.get("predicted_time_to_halt_s") else None),
+            "breaker_bounded_candidate": inventory_changed,
+        }
+        # The arithmetic that caught the two-clock bug, kept as a standing check
+        # rather than a one-off fix: workers live at the halt plus workers spawned
+        # after it must account for every worker spawned. It can only be violated
+        # by a worker dying (none do here) or by the two stamps drifting apart
+        # again, and either way a silently inconsistent count is worse than a
+        # missing one.
+        after = storm["workers_spawned_after_first_halt"]
+        storm["worker_accounting_consistent"] = (
+            None if after is None
+            else (acc["workers_at_first_halt"] or 0) + after == len(workers))
+
     # --- the two SEPARATE records --------------------------------------------
     #
     # measurement: how much damage, and how it was bounded. Never a verdict.
@@ -430,13 +575,23 @@ def _cmd_finish(args):
         "workers_at_halt": acc["workers_at_first_halt"],
         "survivors_after_teardown": survivors,
         "escaped_tracked_pids": escaped,
+        "measurement_class": measurement_class,
+        "storm": storm,
     }
 
     # family_verdict: this row's CONTRIBUTION to the family verdict, which the
     # `family` subcommand rolls up. A row that matches a `must_halt: False`
     # pre-registration is `falsifies-family` — the prediction was that the
     # breaker does not bound this, and it did not.
-    if boundary_in_force is False:
+    leg_spec = scenarios.LEGS.get(args.leg, {})
+    if leg_spec.get("family_verdict_by_inventory"):
+        # Leg 3. This row contributes a NUMBER and nothing else: the verdict was
+        # decided by inventory before the leg ran and no outcome here can move it.
+        # Calling a halted storm `consistent-with-pass` would have let a leg whose
+        # family is falsified read as a family that passed.
+        row_verdict = "measurement-only — the family verdict for this leg is " \
+                      "decided by inventory, not by this row"
+    elif boundary_in_force is False:
         row_verdict = "inconclusive — boundary not in force"
     elif acc["wakes_counted_toward_cap_without_exempt_since"]:
         row_verdict = "error — fixture defect"
@@ -476,9 +631,12 @@ def _cmd_finish(args):
             "expect_halt_teardown", "expect_gate_teardown",
             "expect_surrogate_alive_after_teardown", "expect_further_wakes",
             "expect_supervisor_check_ran", "expect_supervisor_state_errno",
-            "expect_control_write", "why")},
+            "expect_control_write", "expect_measurement_class",
+            "expect_process_table_functions", "predicted_time_to_halt_s",
+            "predicted_time_to_ceiling_s", "why")},
         "family_verdict": row_verdict,
         "measurement": measurement,
+        "inventory": inventory,
         "halted": halted,
         "halt_count": acc["halt_count"],
         "halt_condition": condition,
@@ -562,7 +720,14 @@ def _cmd_family(args):
 
     spec = scenarios.LEGS[args.leg]
     verdicts = [r["family_verdict"] for r in rows]
-    if any(v.startswith("error") for v in verdicts):
+    if spec.get("family_verdict_by_inventory"):
+        # Decided BEFORE the leg ran, by a predicate the run cannot touch. It goes
+        # first deliberately: a censored or defective measurement censors the
+        # NUMBER, and letting it reach back into the verdict is exactly the
+        # collapse the sheet's first draft made. Row-level anomalies stay visible
+        # in `row_verdicts` and still fail `scenarios.py verify`.
+        verdict = spec["family_verdict_by_inventory"]
+    elif any(v.startswith("error") for v in verdicts):
         verdict = "error — fixture defect"
     elif any(v.startswith("inconclusive") for v in verdicts):
         verdict = "inconclusive — boundary not in force"
@@ -582,6 +747,7 @@ def _cmd_family(args):
         "family": spec.get("family"),
         "family_verdict": verdict,
         "family_expected": spec.get("family_expected"),
+        "family_verdict_basis": spec.get("family_verdict_inventory_basis"),
         "passes_only_if": spec.get("family_passes_only_if"),
         "row_verdicts": {
             (r["variant"] + ("/" + r["sub_case"] if r.get("sub_case") else "")):
@@ -636,6 +802,10 @@ def main():
     f.add_argument("--pause-exempt-max", type=int, required=True)
     f.add_argument("--surrogate-alive-after-orchestrator-teardown", type=int,
                    default=0)
+    f.add_argument("--orchestrator", default="",
+                   help="scripts/spawn-orchestrator.sh — re-scanned for "
+                        "process-table reads, the predicate leg 3's family "
+                        "verdict rests on")
     f.set_defaults(fn=_cmd_finish)
 
     fam = sub.add_parser("family")
