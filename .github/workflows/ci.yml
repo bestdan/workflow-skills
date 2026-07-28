@@ -30,31 +30,26 @@ jobs:
           # disabling avoids a spurious "no cache dependency matched" warning.
           enable-cache: false
 
-      - name: Install dprint + claude CLI
-        # dprint is pinned to match the local toolchain; claude provides
-        # `plugin validate`. Node/npm are preinstalled on ubuntu-latest.
-        run: npm install -g dprint@0.54.0 @anthropic-ai/claude-code
+      - name: Install shell + format tools
+        # dprint, shellcheck and shfmt all come from mise.toml, so CI and a
+        # contributor's laptop resolve identical versions instead of drifting
+        # between npm, tarballs and a local mise. cache: true keeps the
+        # installed toolchain across runs.
+        #
+        # This replaced a hand-rolled curl + sha256sum block that pinned exact
+        # bytes. mise's aqua backend does verify a checksum per download, but
+        # against the aqua registry rather than a sha committed here, so the
+        # trust root moved from this file to that registry. Commit a mise.lock
+        # (`mise settings lockfile=true`) if that tradeoff stops being
+        # acceptable.
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
 
-      - name: Install shell tools
-        # Both artifacts are download-then-verify: the checksums pin the exact
-        # bytes, so a retagged or tampered release fails the gate instead of
-        # executing. Bump the sha alongside the version on every upgrade.
-        env:
-          SHELLCHECK_VERSION: v0.10.0
-          SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
-          SHFMT_VERSION: v3.10.0
-          SHFMT_SHA256: 1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc
-        run: |
-          curl -fsSL -o /tmp/shellcheck.tar.xz \
-            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-          echo "${SHELLCHECK_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
-          sudo tar -xJ --strip-components=1 -C /usr/local/bin \
-            -f /tmp/shellcheck.tar.xz "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
-
-          curl -fsSL -o /tmp/shfmt \
-            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
-          echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum -c -
-          sudo install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
+      - name: Install claude CLI
+        # Still npm: claude provides `plugin validate` and has no mise plugin.
+        # Node/npm are preinstalled on ubuntu-latest.
+        run: npm install -g @anthropic-ai/claude-code
 
       # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
       # `claude plugin validate` works headless (no auth) on a GitHub runner. If

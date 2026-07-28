@@ -2,6 +2,18 @@
 
 ## Local dev loop
 
+The gate's tools — `dprint`, `shellcheck`, `shfmt` — are pinned in `mise.toml`,
+which is the single source CI and your laptop both install from. Get `mise`
+itself from <https://mise.jdx.dev/getting-started.html>, then:
+
+```sh
+mise trust && mise install
+```
+
+Don't install them any other way — a separately-installed `dprint` will disagree
+with the gate the moment the pin changes. The pins are hand-bumped; edit
+`mise.toml` and run `just check` before pushing.
+
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 
