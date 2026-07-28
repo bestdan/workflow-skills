@@ -42,10 +42,11 @@ a claude.ai/Claude Code cloud sandbox. The key is read, in order, from:
   1. $LINEAR_API_KEY, else
   2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
 
-Under 1Password desktop-app integration, `op` only unlocks in an authorized
-terminal, not in an agent's tool-spawned subshell -- see the "Gotcha" note in
-commands/handlers/linear-archive.md. Run this from your own terminal, or
-headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
+`op read` needs an authorized 1Password session. Running `op signin` in your own
+terminal establishes one that IS visible to an agent's tool-spawned subshell — op
+holds the session in a per-user cache daemon — and it lapses after roughly 30
+minutes of inactivity. Headless runs instead set $LINEAR_API_KEY directly, or
+$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
 
 Usage:
   python3 linear-false-closures.py --project <uuid> --repo owner/name
@@ -124,13 +125,16 @@ def get_key():
     if not ref:
         sys.exit(
             "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
+            "full op://vault/item/field reference. (A configured linear.api_key_ref "
+            "is exported by the caller — see this file's header.)"
         )
     out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
     key = out.stdout.strip()
     if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
+        sys.exit(
+            f"Could not read key from 1Password ({ref}): {out.stderr.strip()} "
+            "— if the op session has lapsed, run `op signin` in your own terminal."
+        )
     return key
 
 

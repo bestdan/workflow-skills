@@ -97,20 +97,25 @@ likely tripped the close (the one bare-mentioning the id, merged just before the
 completion instant), so the report is actionable without hand-tracing history.
 
 Fold each project's `ok`/`skip`/`FALSE CLOSURES` output into the command's
-combined report. The op-in-agent-shell key gotcha below applies here too — the
-asset resolves the key itself, so run the command from an `op`-authorized shell
-(or a headless one with `$OP_SERVICE_ACCOUNT_TOKEN`).
+combined report. The key note below applies here too — the asset resolves the key
+itself, so make sure an `op` session exists (`op signin` in your own terminal) or
+run headless with `$OP_SERVICE_ACCOUNT_TOKEN`.
 
-## Security boundary + the op-in-agent-shell gotcha
+## Security boundary + the op session requirement
 
 Same as `linear-archive.md`: the script needs a Linear **personal API
 key** — a full-account bearer token — which must never enter a claude.ai/
 Claude Code cloud sandbox. It reads the key from `$LINEAR_API_KEY`, else
-`op read "$LINEAR_API_KEY_REF"`. `op` only unlocks in an authorized terminal
-under 1Password desktop-app integration, not in an agent's tool-spawned
-subshell — see `linear-archive.md`'s "Gotcha" note for the full explanation
-and the interactive/headless fallbacks. Run this script from your own
-terminal, or headless with `$OP_SERVICE_ACCOUNT_TOKEN` set.
+`op read "$LINEAR_API_KEY_REF"`. That needs an authorized `op` **session**, not a
+particular shell: `op signin` in your own terminal establishes one the agent's
+subshell can use too (it lapses after ~30 min idle) — see `linear-archive.md`'s
+"Gotcha" note for the full explanation and the headless
+`$OP_SERVICE_ACCOUNT_TOKEN` fallback.
+
+Unlike the read fast paths, this command has **no MCP floor** — the key is
+required, not an optimization — so it does not run behind `linear-common.md`'s
+gate and does **not** inherit that section's "Key resolution" step. Export
+`$LINEAR_API_KEY_REF` (or `$LINEAR_API_KEY`) yourself before invoking.
 
 ## Dry-run-default posture
 

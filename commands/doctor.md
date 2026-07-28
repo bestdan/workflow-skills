@@ -248,14 +248,15 @@ auto-archive, store an API key). Report against the resolved handler:
     exported, `PASS` (the script will use it directly). Else probe the ref with
     `op read "<ref>" >/dev/null 2>&1` (redirect — never print the key). Exit 0 →
     `PASS` "backstop wired; key resolves." Non-zero → `WARN`: "`api_key_ref` is
-    set but did not resolve from this shell. This may be the `op`-in-agent-shell
-    gotcha (1Password desktop-app integration) rather than a bad ref — verify with
-    `! op read <ref>` in your own terminal, or set `OP_SERVICE_ACCOUNT_TOKEN`. If
-    it fails there too, fix the `op://vault/item/field` reference." (Still a
+    set but did not resolve. The usual cause is no authorized `op` session (the error
+    reads `account is not signed in`) rather than a bad ref — run `op signin` in your
+    own terminal and re-run, or set `OP_SERVICE_ACCOUNT_TOKEN`. If it fails after
+    signing in, fix the `op://vault/item/field` reference." (Still a
     `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
-    The same key, when set, also enables the `/do-tasks` read-only GraphQL fast-path
-    for find-candidates (see `linear-claim.md` "Find candidates") — informational
-    only, no separate check.
+    The same key, when set, also enables the read-only GraphQL fast paths
+    (`/do-tasks` find-candidates, `/sweep-for-complete`, `/reconcile-tasks`,
+    `/reoptimize-tasks`) via `linear-common.md`'s "Key resolution" step —
+    informational only, no separate check.
 - **`jira` specifics** — if `jira.archive_status` is unset, note `/archive-tasks`
   is a no-op for jira (native archival is Premium) — informational `WARN`.
 - **`gh-issue`** — informational `PASS`: GitHub has no cap; archiving is hygiene
