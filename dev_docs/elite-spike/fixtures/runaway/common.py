@@ -50,6 +50,7 @@ FIXTURE_FILES = (
     "common.py",
     "driver.sh",
     "incarnation.py",
+    "legs.py",
     "parent-death-drill.sh",
     "runaway.py",
     "scenarios.py",

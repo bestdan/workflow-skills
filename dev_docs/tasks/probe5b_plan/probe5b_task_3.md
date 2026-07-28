@@ -2,7 +2,7 @@
 title: "Legs 1 and 2 — deadline escape and forged-pause runaway"
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-07-27
 expires: 2026-08-26
 source_branch: bestdan/autopilot-e-lite-design

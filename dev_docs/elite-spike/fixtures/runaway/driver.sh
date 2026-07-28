@@ -52,7 +52,12 @@ PARK_LIMIT=3
 PAUSE_SECONDS=4
 COMPLETE_AFTER=3
 HEARTBEAT_EVERY=1
-ABSOLUTE_DEADLINE_SECONDS=180
+# The watchdog's absolute bound, and a real one — not a formality. Legs 1 and 2
+# run six and three rows respectively, each of which drives its own wake loop, so
+# the smoke leg's 180s would fire mid-leg and be indistinguishable from a
+# containment failure. Raised, never removed: this is the mechanism that keeps
+# the runaway probe from becoming the runaway.
+ABSOLUTE_DEADLINE_SECONDS=900
 EVIDENCE=""
 SCRATCH=""
 KEEP_SCRATCH=0
@@ -319,13 +324,24 @@ fi
 # One variant
 # ---------------------------------------------------------------------------
 
-iso_in() { date -u -v+"${1}"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+${1} seconds" +%Y-%m-%dT%H:%M:%SZ; }
+# The REAL deadline is derived from an epoch the driver computes and keeps, and
+# the ISO string handed to the surrogate is rendered FROM that same epoch. Two
+# independent renderings could disagree by a second, and the fixture-clock
+# overshoot — the one number leg 1 exists to produce — would inherit the drift.
+iso_at() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 
 emit_row() { "$FIXDIR/common.py" emit --evidence "$EVIDENCE" --row "$1"; }
 
 run_variant() {
-  local variant="$1" behaviour="$2"
-  echo "driver: === leg=$LEG variant=$variant behaviour=$behaviour ==="
+  # Tuning arrives per VARIANT from the registry, not from this file's defaults:
+  # leg 1 needs a deadline short enough to blow inside the wake loop, leg 2 needs
+  # one long enough that the deadline halt cannot win the race and be misread as
+  # the ledger's. Pre-registered there, applied here.
+  local variant="$1" behaviour="$2" sub_case="$3" wakes="$4" until_delta="$5" \
+    forge_after="$6" pause_exempt_max="$7" workers="$8" enforce_exempt="$9"
+  local rowname="$variant"
+  [ -n "$sub_case" ] && rowname="$variant/$sub_case"
+  echo "driver: === leg=$LEG variant=$rowname behaviour=$behaviour wakes=$wakes until_delta=$until_delta pause_exempt_max=$pause_exempt_max workers=$workers ==="
 
   # A fresh rundir per variant: the supervisor-state ledger and the ALARM
   # sentinel are both one-per-run, so a shared dir would let one variant's
@@ -361,7 +377,11 @@ run_variant() {
   git -C "$RUNDIR" config user.name "probe5b fixture"
   git -C "$RUNDIR" checkout -q -b "auto-pilot/probe5b-$variant" 2>/dev/null || true
 
-  local until_iso; until_iso="$(iso_in "$UNTIL_DELTA")"
+  local until_epoch until_iso
+  until_epoch=$(( $(date +%s) + until_delta ))
+  until_iso="$(iso_at "$until_epoch")"
+  local acc="$SCRATCH/acc-$variant${sub_case:+-$sub_case}.json"
+  rm -f "$acc"
   local fake_log="$SCRATCH/claude-$variant.log"
   # The canned stream-json shape scripts/test-spawn-orchestrator.sh already
   # fakes (:4893) rather than a new one. classify-exit reads this; no `claude`
@@ -378,8 +398,10 @@ run_variant() {
   "$FIXDIR/common.py" spawn --incarnation-file "$SURR_INC" -- \
     sandbox-exec -f "$PROFILE" "$PYBIN" "$FIXDIR/runaway.py" \
     --rundir "$RUNDIR" --evidence "$jail_evidence" --leg "$LEG" \
+    --variant "$variant" --sub-case "$sub_case" \
     --behaviour "$behaviour" --until "$until_iso" \
     --pause-seconds "$PAUSE_SECONDS" --complete-after "$COMPLETE_AFTER" \
+    --forge-after "$forge_after" --workers "$workers" \
     --heartbeat-every "$HEARTBEAT_EVERY" --parent-death-fifo "$FIFO" \
     --driver-incarnation-file "$DRIVER_INC" 9>&- &
   local surr_pid=$!
@@ -398,12 +420,12 @@ run_variant() {
   # RUN.md measures the fixture's startup race, not the supervisor.
   for i in $(seq 1 50); do [ -f "$RUNDIR/.auto-pilot/RUN.md" ] && break; sleep 0.1; done
 
-  local halts=0 gate_rc=0 wake
+  local gate_rc=0 wake
   local state="$RUNDIR/.auto-pilot/supervisor-state"
-  for wake in $(seq 1 "$WAKES"); do
+  for wake in $(seq 1 "$wakes"); do
     local scan_out gate_out check_out
     scan_out="$("$ORCH" supervisor-scan --dir "$RUNDIR" --label "$LABEL" \
-      --park-limit "$PARK_LIMIT" --pause-exempt-max "$PAUSE_EXEMPT_MAX" 2>&1 || true)"
+      --park-limit "$PARK_LIMIT" --pause-exempt-max "$pause_exempt_max" 2>&1 || true)"
 
     gate_rc=0
     gate_out="$("$ORCH" supervisor-gate --dir "$RUNDIR" --label "$LABEL" 2>&1)" || gate_rc=$?
@@ -415,50 +437,37 @@ run_variant() {
         --park-limit "$PARK_LIMIT" 2>&1 || true)"
     fi
 
-    case "$scan_out$check_out" in *"supervisor halt"*) halts=$((halts + 1)) ;; esac
-
-    emit_row "$(SCAN="$scan_out" GATE="$gate_out" CHECK="$check_out" \
-      "$PYBIN" -c '
-import json, os, sys
-rundir, leg, variant, wake, gate_rc = sys.argv[1:6]
-ap = os.path.join(rundir, ".auto-pilot")
-def read(p):
-    try:
-        with open(os.path.join(ap, p)) as fh: return fh.read()
-    except OSError: return None
-front = {}
-run_md = read("RUN.md") or ""
-seen = 0
-for line in run_md.splitlines():
-    if line.strip() == "---":
-        seen += 1
-        if seen == 2: break
-        continue
-    if seen == 1 and ":" in line:
-        k, _, v = line.partition(":")
-        front[k.strip()] = v.strip()
-sup = {}
-for line in (read("supervisor-state") or "").splitlines():
-    if ":" in line:
-        k, _, v = line.partition(":")
-        sup[k.strip()] = v.strip()
-print(json.dumps({
-    "row": "wake", "leg": leg, "variant": variant, "wake": int(wake),
-    "gate_rc": int(gate_rc),
-    "run_md_front": front,
-    "supervisor_state": sup,
-    "alarm_sentinel_present": os.path.exists(os.path.join(ap, "ALARM")),
-    "scan_out": os.environ.get("SCAN", "")[-2000:],
-    "gate_out": os.environ.get("GATE", "")[-2000:],
-    "check_out": os.environ.get("CHECK", "")[-2000:],
-}, sort_keys=True))
-' "$RUNDIR" "$LEG" "$variant" "$wake" "$gate_rc")"
+    # legs.py owns the measurement, and the accumulator is how it stays
+    # consistent across wakes: first-halt index, the ledger's exempt_since
+    # stamping and the live worker count are all stateful, and re-deriving them
+    # from the evidence file on every wake is how a fixture starts disagreeing
+    # with itself. Halts are detected from REPORT.md's per-halt section rather
+    # than by grepping stdout for "supervisor halt" — that string also appears in
+    # the halt's own best-effort FAILURE messages, so a broken write would have
+    # counted as a phantom halt.
+    SCAN="$scan_out" GATE="$gate_out" CHECK="$check_out" \
+      "$PYBIN" "$FIXDIR/legs.py" wake --evidence "$EVIDENCE" --acc "$acc" \
+      --rundir "$RUNDIR" --leg "$LEG" --variant "$variant" --sub-case "$sub_case" \
+      --wake "$wake" --gate-rc "$gate_rc" --now-epoch "$(date +%s)" \
+      --real-until-epoch "$until_epoch" \
+      --enforce-exempt-window "$enforce_exempt" \
+      || die "legs.py wake failed on wake $wake of $rowname"
 
     sleep 1
   done
 
+  # Measured BEFORE the fixture signals anything: leg 1's `done-forgery`
+  # prediction is that the ORCHESTRATOR's own `teardown --label` ran and the
+  # surrogate is still alive afterwards — it is not a launchd job, so nothing in
+  # that teardown reaches it. Taking this after the fixture's own reap would
+  # measure the fixture instead of the finding.
+  local alive_after_orch
+  alive_after_orch="$("$PYBIN" "$FIXDIR/legs.py" alive --incarnation-file "$SURR_INC")"
+
   # Teardown, then measure survivors AFTER it. Every signal re-validates
   # identity first; a mismatch is recorded escaped/already-dead and NOT chased.
+  # One killpg reaps the workers too: they are deliberately left in the
+  # surrogate's group rather than given their own.
   "$FIXDIR/common.py" signal --incarnation-file "$SURR_INC" \
     --driver-pgid "$DRIVER_PGID" --evidence "$EVIDENCE" --leg "$LEG" \
     --signal TERM >/dev/null
@@ -467,15 +476,7 @@ print(json.dumps({
     --driver-pgid "$DRIVER_PGID" --evidence "$EVIDENCE" --leg "$LEG" \
     --signal KILL >/dev/null 2>&1 || true
   wait "$surr_pid" 2>/dev/null || true
-
-  local survivors
-  survivors="$("$PYBIN" -c '
-import json, sys
-sys.path.insert(0, sys.argv[1])
-import incarnation
-rec = json.load(open(sys.argv[2]))
-print(1 if incarnation.same_incarnation(rec, incarnation.measure(int(rec["pid"]))) else 0)
-' "$FIXDIR" "$SURR_INC")"
+  sleep 1
 
   # Merge before the scratch dir is measured or removed — the in-jail rows carry
   # the boundary probe, which is what says whether the profile was in force at
@@ -483,39 +484,58 @@ print(1 if incarnation.same_incarnation(rec, incarnation.measure(int(rec["pid"])
   "$FIXDIR/common.py" merge --evidence "$EVIDENCE" --source "$jail_evidence" \
     --leg "$LEG" >/dev/null || die "could not merge the surrogate's in-jail evidence"
 
-  local alarms=0
-  if [ -f "$RUNDIR/.auto-pilot/ALARM" ]; then
-    alarms="$(grep -c '^condition: ' "$RUNDIR/.auto-pilot/ALARM" || true)"
-  fi
-
-  emit_row "$("$PYBIN" -c '
-import json, os, sys
-leg, variant, halts, alarms, survivors, rundir, gate_rc = sys.argv[1:8]
-print(json.dumps({
-    "row": "leg_result", "leg": leg, "variant": variant,
-    "halted": int(halts) > 0, "halt_count": int(halts),
-    "alarms": int(alarms),
-    "alarm_sentinel_present": os.path.exists(os.path.join(rundir, ".auto-pilot", "ALARM")),
-    "survivors": int(survivors), "final_gate_rc": int(gate_rc),
-}, sort_keys=True))
-' "$LEG" "$variant" "$halts" "$alarms" "$survivors" "$RUNDIR" "$gate_rc")"
-
-  echo "driver: leg=$LEG variant=$variant halts=$halts alarms=$alarms survivors=$survivors"
+  "$PYBIN" "$FIXDIR/legs.py" finish --evidence "$EVIDENCE" --acc "$acc" \
+    --rundir "$RUNDIR" --leg "$LEG" --variant "$variant" --sub-case "$sub_case" \
+    --surrogate-inc "$SURR_INC" --wakes "$wakes" --final-gate-rc "$gate_rc" \
+    --real-until-epoch "$until_epoch" --pause-exempt-max "$pause_exempt_max" \
+    --surrogate-alive-after-orchestrator-teardown "$alive_after_orch" \
+    || die "legs.py finish failed for $rowname"
 }
 
 # ---------------------------------------------------------------------------
 # Run every variant the registry declares for this leg
 # ---------------------------------------------------------------------------
 
+> "$SCRATCH/rows.txt"
 while IFS= read -r spec; do
-  v="$("$PYBIN" -c 'import json,sys; print(json.loads(sys.argv[1])["variant"])' "$spec")"
-  b="$("$PYBIN" -c 'import json,sys; print(json.loads(sys.argv[1])["behaviour"])' "$spec")"
-  run_variant "$v" "$b"
+  # One line of fields per ROW, rendered in Python rather than picked apart in
+  # shell: every value here is a tuning parameter the registry pre-registered,
+  # and a field silently defaulting to this file's smoke-leg value would run a
+  # leg at the wrong deadline and record the number as if it were pinned.
+  SPEC="$spec" "$PYBIN" -c '
+import json, os
+s = json.loads(os.environ["SPEC"])
+t = s.get("tuning") or {}
+print(" ".join(str(x) for x in (
+    s["variant"],
+    s["behaviour"],
+    s.get("sub_case") or "-",
+    t.get("wakes", '"$WAKES"'),
+    t.get("until_delta", '"$UNTIL_DELTA"'),
+    t.get("forge_after", 0),
+    t.get("pause_exempt_max", '"$PAUSE_EXEMPT_MAX"'),
+    t.get("workers", 0),
+    1 if s.get("require_exempt_since_before_cap") else 0,
+)))' >>"$SCRATCH/rows.txt"
 done < <("$FIXDIR/scenarios.py" variants --leg "$LEG")
+
+while read -r v b sc wk ud fa pem wrk eew; do
+  [ "$sc" = "-" ] && sc=""
+  run_variant "$v" "$b" "$sc" "$wk" "$ud" "$fa" "$pem" "$wrk" "$eew"
+done <"$SCRATCH/rows.txt"
+
+# The family verdict — a SEPARATE record from every measurement above, per the
+# kill sheet: a censored measurement never censors a verdict, and collapsing the
+# two is what let the sheet's first draft assign one outcome to both `falsified`
+# and `inconclusive` at once.
+if [ "$LEG" != "smoke" ]; then
+  "$PYBIN" "$FIXDIR/legs.py" family --evidence "$EVIDENCE" --leg "$LEG" \
+    || die "could not record the family verdict for leg $LEG"
+fi
 
 # The hard-error check: an armed injection point with no recorded row fails
 # here, read back from the evidence rather than from the driver's own memory of
 # what it ran.
-"$FIXDIR/scenarios.py" verify --evidence "$EVIDENCE"
+"$FIXDIR/scenarios.py" verify --evidence "$EVIDENCE" --leg "$LEG"
 
 echo "driver: OK — evidence at $EVIDENCE"
