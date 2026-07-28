@@ -2,7 +2,7 @@
 title: "probe 1: dedicated-user viability canary — headless Claude auth, sandbox, worker, sentinel unreadability (shell + launchd)"
 priority: urgent
 size: 3
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

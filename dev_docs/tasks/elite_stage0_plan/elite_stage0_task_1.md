@@ -2,7 +2,7 @@
 title: "identity: provision the non-admin `agent` macOS user + `apagent` group — no sudoers, no production paths"
 priority: urgent
 size: 2
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

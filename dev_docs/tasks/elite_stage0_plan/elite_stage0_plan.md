@@ -10,6 +10,50 @@ created: 2026-07-21
 
 Source design: [../../auto-pilot-e-lite-design-2026-07-21.md](../../auto-pilot-e-lite-design-2026-07-21.md) (§0a, §7 Stage 0, §7a).
 
+## State as of 2026-07-28 — Stage 0 is complete; this plan is at its re-plan checkpoint
+
+Every task file in this folder still read `status: new` until today, while probes
+1–5b had in fact been run and classified. That drift is corrected below. Statuses
+cite §7a, which is the authority — this folder is scaffolding.
+
+| Task | State | Basis |
+| ---- | ----- | ----- |
+| 1 — provision `agent` + `apagent` | **done** | §7a row 1; `../../elite-spike/provisioning.md` |
+| 2 — kill sheet (probe 0) | **done, in a different shape** | one sheet per probe (e.g. `../../elite-spike/fixtures/runaway/probe5b-runaway.md`) rather than the single `kill-sheet.md` this plan specified |
+| 3 — probe 1, dedicated-user canary | **done** | §7a row 1 (substantially; the remainder is tracked there, not here) |
+| 4 — `setsid→execve` topology | **done** | §7a row 2 — the shim is a bare `exec` |
+| 5 — probe 2, tmux/process binding | **done** | §7a row 2 CONFIRMED; `../../elite-spike/fixtures/process-binding/` |
+| 6 — probe 3, alert walking skeleton | **done** | §7a row 3 CONFIRMED; `../../elite-spike/fixtures/async-skeleton/` |
+| 7 — Max-window coherence | **NOT RUN** | no fixture directory and no evidence file exists. Recorded as an absence, not inferred as a failure |
+| 8 — measured design revision | **done** | design v2, with the external Codex review's nine ranked changes applied |
+| 9 — graduate findings, delete scaffolding | **open, and superseded** | the repo split decides where the findings graduate *to* |
+| 10 — dedicated spike test repository | **no evidence either way** | nothing in `../../elite-spike/` records it. Probes used local bare repos and a disposable App; whether task 10 was done or routed around is simply not recorded |
+| 11 — re-plan checkpoint | **in progress** | this is where the work now sits; see below |
+
+Two probes ran that this plan never encoded, because it deliberately did not
+pre-plan past the checkpoint: **probe 5** (crash-transaction kernel — falsified
+four rounds, redirect taken, v5.1 CONFIRMED) and **probe 5b** (autonomous runaway
+containment — **FALSIFIED** by inventory before any fixture ran; probe
+classification `falsified`, recorded in
+`../../elite-spike/fixtures/runaway/results.json`).
+
+**This plan's own conventions diverged from what happened**, and the divergence is
+the useful part. It specified a single `kill-sheet.md` and a `measurements.md`
+carrying exactly one row per probe. In practice each probe grew its own kill sheet
+and fixture directory, and `measurements.md` stayed nono-specific. The per-probe
+shape won because a kill sheet is only useful adjacent to the fixture it governs.
+
+### What task 11 now resolves
+
+Not "plan Stage 1 and probe 5" as written — probe 5 was classified long ago. The
+checkpoint is now a **repo boundary decision**. Stage 0 ended with §7a rows 0–5b
+all closed and row 6 blocked on exactly one artifact: row 5b's redirect, the hard
+control-plane ceiling. That artifact is the first component of a control plane
+that does not exist yet, and none of the E-lite corpus has landed on `main`.
+
+See `../../aiutopilot-split-handoff.md` for the decision, the evidence behind it,
+and what the next session is asked to settle.
+
 ## Goal
 
 Provision the minimal `agent` identity and run the Stage-0 measurement spike: falsify the load-bearing substrate assumptions (dedicated-user viability, process binding, alert delivery, `setsid→execve` topology, Max-window coherence) before any control-plane code exists, then fold the results into the measured design revision that gates Stage 2.

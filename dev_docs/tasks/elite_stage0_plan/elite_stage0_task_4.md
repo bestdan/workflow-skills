@@ -2,7 +2,7 @@
 title: "probe: capture `setsid(2) → execve` topology — select the run-shim implementation"
 priority: high
 size: 2
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

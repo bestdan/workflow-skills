@@ -2,7 +2,7 @@
 title: "probe 2: tmux/process-binding spike — bind a launch to one live incarnation despite the agent-owned tmux server"
 priority: urgent
 size: 3
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

@@ -2,7 +2,7 @@
 title: "spike: write the kill sheet (probe 0) — falsifier, thresholds, caps, and redirects for every Stage-0 probe"
 priority: urgent
 size: 3
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

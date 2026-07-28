@@ -2,7 +2,7 @@
 title: "spike: fold probe results into the measured design revision"
 priority: urgent
 size: 5
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan

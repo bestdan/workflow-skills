@@ -2,7 +2,7 @@
 title: "probe 3: real alert walking skeleton — kill/wedge a launchd heartbeat, device notified within 10 minutes"
 priority: urgent
 size: 3
-status: new
+status: done
 created: 2026-07-21
 source_branch: bestdan/autopilot-e-lite-design
 assignee: bestdan
