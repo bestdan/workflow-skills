@@ -22,7 +22,7 @@ instead of trying to spawn them through `Agent`.
 
 A coder is named as `<backend>[:<model>]`:
 
-- `opus` — native Claude subagent (default model `claude-opus-4-8`). The
+- `opus` — native Claude subagent (default model `claude-opus-5`). The
   special case: dispatched with the Agent tool, no external process. Mechanics:
   [`backends/opus.md`](backends/opus.md).
 - `codex`, `agy`, `devin` — known external coder CLIs, driven through the
@@ -90,7 +90,7 @@ coders:
   - name: cao-codex
     command: "scripts/cao-coder.sh {SPEC} {WORKTREE} codex:gpt-5.6-terra"
   - name: cao-agy
-    command: "scripts/cao-coder.sh {SPEC} {WORKTREE} 'agy:Gemini 3.5 Flash (High)'"
+    command: "scripts/cao-coder.sh {SPEC} {WORKTREE} 'agy:Gemini 3.6 Flash (High)'"
 ```
 
 `command:` substitutes only `{SPEC}` and `{WORKTREE}`; it has no model

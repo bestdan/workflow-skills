@@ -78,11 +78,11 @@ learned in co-review:
 - Guard against empty input: on empty stdin agy silently resumes a **prior
   conversation** and works on stale code with full confidence. Always
   `[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy ...`.
-- Pin `--model` (default `"Gemini 3.5 Flash (High)"`; the `agy:<model>` suffix
+- Pin `--model` (default `"Gemini 3.6 Flash (High)"`; the `agy:<model>` suffix
   overrides) so the coder identity doesn't drift between runs.
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy --model "Gemini 3.5 Flash (High)" -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop."
+[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy --model "Gemini 3.6 Flash (High)" -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop."
 ```
 
 Run it with cwd `<dir>`. Do **not** pass `--sandbox` here (unlike co-review's
@@ -105,8 +105,28 @@ Use `--prompt-file`, **not** piped stdin — `devin -p` with piped stdin panics.
 Under `accept-edits`, devin makes edits but **cannot run the verify command**
 (permission restrictions), so **devin packets always return unverified** — the
 orchestrator's check run (SKILL.md step 5) is the verification, not optional.
-(Open: whether a permission mode grants worktree verify access, and whether
-`swe-1.6` is the right pinned default.)
+(Open: whether a permission mode grants worktree verify access.)
+
+**Always pin `--model` explicitly on devin.** As of 2026-07 the CLI exposes a
+**model marketplace** — 37 families across Anthropic, OpenAI, Google, xAI,
+Moonshot, Zhipu, DeepSeek, NVIDIA, and Thinking Machines — so the model suffix
+selects a _vendor and jurisdiction_, not merely a capability tier. Two traps
+that follow from that:
+
+- **The bare `swe` alias now resolves to `swe-1.7-lightning`, which is billed
+  ($2.50/$12.50 per Mtok), not to a free tier.** Relying on the alias silently
+  moves a "cheap" packet onto a paid model. `swe-1.6` (pinned above) and
+  `swe-1.7` are the free ones on Pro; `swe-1.7` is newer but **beta** and
+  carries no published absolute benchmark, which is why the pin stays at
+  `swe-1.6` — changing it would also re-prompt the exact-match approval.
+- **Routing a frontier model through devin is the wrong call.** Devin passes
+  through `claude-opus-5`, `gpt-5.6-*`, and `gemini-3.6-flash` at roughly
+  native list price, so there is no economic argument for it — it just inserts
+  an undocumented intermediary in front of a vendor you can reach directly.
+  Use the native backend.
+
+Which passthroughs are worth reaching for, and which the secret-exposure gate
+removes, is in [`select-coder/matrix.md`](../../select-coder/matrix.md) → devin.
 
 Fallback — cloud session: if only a remote/API surface is installed, create a
 session from the packet spec against the repo, poll to completion, and fetch

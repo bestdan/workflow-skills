@@ -8,7 +8,7 @@ description: Use when choosing which coder agent and model should execute a codi
 Given a task (or a set of orchestrate-coders packets), recommend which coder
 backend and model should execute it. The output is one or more ranked coder
 specs in orchestrate-coders syntax — `opus:claude-sonnet-5`,
-`codex:gpt-5.6-luna`, `agy:Gemini 3.5 Flash (High)` — with a one-line
+`codex:gpt-5.6-luna`, `agy:Gemini 3.6 Flash (High)` — with a one-line
 rationale each, directly usable as `--coder` arguments.
 
 Two inputs drive the choice:
@@ -42,17 +42,18 @@ config orchestrate-coders uses) under an `availability:` block:
 
 ```yaml
 availability:
-  probed_at: 2026-07-03
+  probed_at: 2026-07-28
   opus: # always available (Agent tool) — models per session availableModels
     models: [
-      claude-opus-4-8,
+      claude-opus-5,
+      claude-fable-5,
       claude-sonnet-5,
-      claude-sonnet-4-6,
+      claude-opus-4-8,
       claude-haiku-4-5,
     ]
   codex:
     installed: true
-    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
+    default_model: gpt-5.6-sol # from `~/.codex/config.toml`; `gpt-5.6` is an alias for the terra tier
     auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); ranks codex within the secret-exposure gate
   agy:
     installed: true
@@ -60,8 +61,14 @@ availability:
   devin:
     installed: true
     logged_in: true # script-probed via `devin auth status`; false when creds are dead
-    tier: pro # free tier pins swe-1.6-slow; pro unlocks swe-1.6/-fast + passthroughs
+    tier: pro # free tier is limited; pro unlocks the full marketplace (37 model families)
 ```
+
+**`devin` is a model marketplace, not a model vendor.** `devin models list`
+enumerates dozens of families across nine-plus labs, so `devin:<model>` picks a
+_vendor and jurisdiction_, not just a capability tier — always name the model
+explicitly. See `matrix.md` → devin for which ones are worth reaching for and
+which the secret-exposure gate removes.
 
 **When to (re)probe:** block absent, `--refresh` passed, `probed_at` older
 than 30 days, or a recommendation just failed because a model turned out to
@@ -87,8 +94,9 @@ script can't know, fill in yourself before merging:
 - `opus.models` — the script emits `[]`; populate from the session's
   `availableModels` (opus itself is always available).
 
-A devin `tier: unknown` still resolves on first use (an `/upgrade to access
-this model` error means free tier → `swe-1.6-slow` only).
+A devin `tier: unknown` resolves with `devin models list`, which enumerates
+exactly what the account can reach; an `/upgrade to access this model` error on
+a listed model means the tier is gated below it.
 
 Write the block back after probing. Create
 `dev_docs/orchestrate-coders/.coders.yml` if absent — the file may then hold
@@ -170,7 +178,14 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    Name the gate that removed each dropped backend. A gate is not a tiebreak.
 
 4. **Apply the operational modifiers** (also in `matrix.md`) — these come
-   from real pilot runs and outrank benchmark deltas:
+   from real pilot runs and published evaluations, and outrank benchmark
+   deltas:
+   - **`codex:gpt-5.6-sol` games evaluations at the highest rate METR has
+     recorded** (55.4% honesty-suite vs 41.2% for GPT-5.5). It is still #1 on
+     AA's independent Coding Agent Index, so keep it for implementation — but
+     **never emit it for `verification-sensitive`**, and say in the report
+     that the orchestrator's own check run is mandatory on a Sol packet.
+     Substitute `codex:gpt-5.5` when a coder's self-report must be trusted.
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
    - codex sandbox false-FAILs on home-dir caches → orchestrator re-runs
