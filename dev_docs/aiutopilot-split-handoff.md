@@ -26,8 +26,9 @@ from `fa2f505` on `bestdan/autopilot-e-lite-design`.
 
 `auto-pilot` has stopped being a skill and become a product living inside a
 skills library. `scripts/spawn-orchestrator.sh` is 6,324 lines and its test suite
-5,467, against a next-largest script of 532. `dev_docs/elite-spike/` is 1.3M of
-the repo's 2.5M of design docs. It ships its own Seatbelt profile template,
+5,467, against a next-largest script of 579 (`task-scan.py`; the next-largest
+shell script is 532). `dev_docs/elite-spike/` is 1.3M of the repo's 2.5M of
+design docs. It ships its own Seatbelt profile template,
 launchd plist, supervisor, and watcher, and it carries a multi-probe research
 program with spike contracts and kill sheets. Anyone installing the plugin for
 `/plan-with-docs` currently also installs kill machinery whose documented failure
@@ -38,10 +39,14 @@ mode reaped every SSH login on the box for four days.
 **Split the new control plane into `aiutopilot`. Do not move
 `spawn-orchestrator.sh` into it.**
 
-The design doc already drew this line, in §6 of
-`auto-pilot-e-lite-design-2026-07-21.md`:
+The design doc already drew most of this line. §6 of
+`auto-pilot-e-lite-design-2026-07-21.md` sorts the existing code into three
+categories — **Keep as-is**, **Port small**, **Delete, do not port**. §6 never
+mentions an `aiutopilot` repo: the routing to a new repo below is _this_
+document's synthesis of §6 with the components specified in §2, §4, and §5. Read
+the §6 bullets as quotation and the last bullet as a proposal.
 
-- **Delete, do not port** — `spawn-orchestrator.sh`, its test suite,
+- **§6 Delete, do not port** — `spawn-orchestrator.sh`, its test suite,
   `orchestrator.sb.tmpl`, `orchestrator.plist.tmpl`, `smoke-confinement.sh`, the
   supervisor pause ledger, exit classification, the in-jail alarm machinery, the
   verify broker, wrapper-specific doctor repairs. Moving 12k lines you have
@@ -49,15 +54,24 @@ The design doc already drew this line, in §6 of
   adoption of the thing the redesign exists to escape. It stays in
   `workflow-skills` as the explicitly unsupported fallback until Stage 5 plus the
   grep-clean dependency audit, then dies in place.
-- **Keep as-is** — `/deliver-task` lifecycle + adapters + co-review + the freeze
+- **§6 Keep as-is** — `/deliver-task` lifecycle + adapters + co-review + the freeze
   rule; `task-scan.py`, `plan-graph.py`, `claim-scan.sh`, `validate.py`,
   `probe-coders.sh`; `select-coder` / `orchestrate-coders` / `cao-coder.sh`;
   `pr-fix-guard.sh`; the run-state file formats as the human-readable ledger.
   These stay in `workflow-skills` permanently.
-- **Greenfield → `aiutopilot`** — `ap-launch`, the watcher (§5.1), the registry
-  (§4.2), the token broker (§2.1), `ap-agent-exec`, the admission canary,
-  read-only reconciliation, and **the runaway ceiling**, which is row 5b's
-  redirect and the first component to be written.
+- **§6 Port small** — the admission canary (successor of `preflight.sh`),
+  read-only reconciliation (successor of doctor's seven invariants), **resume**
+  (as `ap-launch --resume <run_id>`), the **run-loop prose in `SKILL.md`**
+  (heartbeat touch + reserve gate + §5.3 stop semantics, wrapped in `nono run`),
+  and `scripts/claude-usage.sh`. All five follow the new control plane into
+  `aiutopilot`. Resume and the run-loop prose are named explicitly here because
+  they are easy to lose: they are §6 items with no §4/§5 component of their own,
+  and the run-loop prose in particular is the piece that decides decision 6.
+
+- **Greenfield, from §2/§4/§5 → `aiutopilot`** — `ap-launch`, the watcher
+  (§5.1), the registry (§4.2), the token broker (§2.1), `ap-agent-exec`, and
+  **the runaway ceiling**, which is row 5b's redirect and the first component to
+  be written.
 
 ### Why now is the cheap moment
 
@@ -83,27 +97,63 @@ provider-side usage query. `scripts/claude-usage.sh` is 216 lines with **zero**
 references to `spawn-orchestrator.sh`. The watcher reads the §4.2 registry, which
 does not exist yet.
 
-### The `deliver-task` coupling is shallower than it looks
+### The `deliver-task` coupling is real, and it is not what an earlier draft claimed
 
-`skills/deliver-task/SKILL.md` has 27 references to auto-pilot. Eighteen are
-`.auto-pilot/` **paths** — the run-state file format, which §6 explicitly keeps —
-and exactly one is a real invocation (`spawn-orchestrator.sh write-verify-broker`),
-which §6 deletes anyway. The cross-repo surface is a documented directory layout,
-not an API. That survives a split.
+An earlier draft of this handoff argued the coupling was eighteen `.auto-pilot/`
+run-state **paths** plus one invocation — "a documented directory layout, not an
+API." That was measured wrong, and the co-review caught it. `SKILL.md` contains
+**zero** literal `.auto-pilot/` paths; that file format is referenced from
+`skills/auto-pilot/references/`, not from `deliver-task`. What is actually in
+`skills/deliver-task/SKILL.md`, across its 27 auto-pilot-referencing lines:
+
+- **Five relative markdown links** into `skills/auto-pilot/references/` —
+  `run-state.md` (`:68`, `:292`), `run-budget.md` (`:77`, `:92`),
+  `launch-runtime.md` (`:213`).
+- **Exactly one real invocation** — `spawn-orchestrator.sh write-verify-broker`
+  at `:212`. That part of the earlier claim was right.
+- **Behavioural delegation**, which the earlier draft missed entirely: the
+  auto-pilot reserve gate (`:60`-`:98`), pause/exit classification handed to
+  auto-pilot's `supervisor-check` (`:98`), and verify routed through the
+  un-jailed **verify broker** (`:208`-`:221`).
+
+Do not read this section as a reason the split is cheap. Read it as pre-existing
+debt sitting on the legacy side of the line: §6 deletes the verify broker **and**
+exit classification, so two of those three behavioural couplings come due at
+Stage 5 whether or not the split happens. The split neither creates them nor
+worsens them.
+
+What the split does put at stake is the five relative links — whether they still
+resolve depends entirely on where `skills/auto-pilot/` ends up, which is
+decision 6 below. The case for splitting rests on "nothing of the new control
+plane exists yet," not on this section.
 
 ## What you are being asked to decide
 
 These were left open deliberately. Each needs a real answer, not a default.
 
 1. **Does the E-lite corpus move, and how much of it?**
-   `dev_docs/auto-pilot-e-lite-design-2026-07-21.md`, the four review docs, and
+   `dev_docs/auto-pilot-e-lite-design-2026-07-21.md`, the **five** review docs
+   (`auto-pilot-e-lite-design-review-codex.md` plus `-r2` through `-r5` — an
+   earlier draft said four), and
    `dev_docs/elite-spike/` (1.3M) are the research record for decisions that will
    live in `aiutopilot`. Moving them means PR #243 closes unmerged.
    **Recommended:** they move; the design doc is the new repo's charter.
-   **Except:** `dev_docs/tasks/probe5-incident-evidence/` stays. It is the
-   incident record of `spawn-orchestrator.sh` — code that lives and dies in
-   `workflow-skills` — and it documents that repo's history, not the new
-   product's. It was also explicitly marked as outliving the spike.
+   **Except — and this is a criterion, not a one-off:** docs whose subject is
+   `spawn-orchestrator.sh` or its skill surface stay, because they document
+   code that lives and dies in `workflow-skills`.
+   `dev_docs/tasks/probe5-incident-evidence/` is the clearest case (it was
+   also explicitly marked as outliving the spike), but the same rule keeps at
+   least `auto-pilot-hardening.md`, `autopilot-detached-run-1-findings.md`,
+   `auto-pilot-spawn-smoke.md`, and both
+   `auto-pilot-architecture-review-2026-07-21*.md`. `dev_docs/` holds a
+   dozen-plus `auto-pilot-*` docs; apply the criterion file by file in the
+   split table — each needs a side.
+   **Also:** `-r3` (`:53`, `:59`) and `-r4` (`:62`, `:78`) contain absolute
+   links into a stale local worktree
+   (`/Users/danielegan/src/workflow-skills/.worktrees/e-lite-review/scripts/…`)
+   pointing at `claude-usage.sh` and `claude-auto-resume.sh` — files that stay
+   behind. Those links are already broken and stay broken after a move; decide
+   whether to rewrite them or annotate them.
 
 2. **What happens to draft PR #243?**
    117 commits, and it carries the design review, an external Codex review, and
@@ -122,21 +172,75 @@ These were left open deliberately. Each needs a real answer, not a default.
    a `PROVENANCE` note recording origin repo + SHA, or grafting history. The
    probe program's whole value is that its evidence chain is checkable; do not
    break it in the move.
+   The moved files also reference code that stays behind: `results.json`,
+   `driver.sh`, `runaway.py`, `scenarios.py`, `legs.py`, `probe5b-runaway.md`,
+   and all five `evidence-*.jsonl` files name `spawn-orchestrator.sh`
+   textually. Their sha256s are pinned in `results.json`, so those references
+   cannot be edited out without rebuilding the manifest — which would destroy
+   the provenance this decision exists to preserve. The `PROVENANCE` note must
+   explain the dangling references, not remove them.
+   **This decision is not independent of decision 2.** All four
+   `fixture_git_revision` values (`2636bc96`, `8e9be3ba`, `92455b6c`, `c711dbf`)
+   are reachable only from `bestdan/autopilot-e-lite-design` and this branch —
+   none is on `main`. If #243 closes unmerged and the branch is later deleted,
+   those SHAs become unreachable in `workflow-skills` too, and a `PROVENANCE`
+   note would record origin SHAs that resolve nowhere. Pinning the branch tip
+   (a tag, or an archive branch in `workflow-skills`) is a precondition for the
+   `PROVENANCE` option, not an optional extra.
 
 4. **`scripts/claude-usage.sh` — copy or share?**
    §6 has it serving both the agent's reserve gate and the watcher's
-   maintainer-side observation. 216 lines, standalone.
-   **Recommended:** copy it into `aiutopilot`. Cheaper to duplicate than to
-   coordinate across repos, and the two credential contexts want different
-   behaviour anyway. Say so explicitly in both copies.
+   maintainer-side observation. 216 lines, standalone — but not unconsumed:
+   inside `workflow-skills` it is called by `claude-auto-resume.sh`,
+   `spawn-orchestrator.sh`, and deliver-task's reserve gate, and covered by
+   three bats suites (`claude-usage.bats`, `auto-pilot-reserve.bats`,
+   `claude-auto-resume.bats`). `claude-auto-resume.sh` outlives the
+   orchestrator, so the `workflow-skills` copy is permanent, not
+   transitional — both copies are.
+   **Recommended:** copy it into `aiutopilot`, which owns the canonical
+   version from then on; the `workflow-skills` copy is frozen for its legacy
+   consumers. Cheaper to duplicate than to coordinate across repos, and the
+   two credential contexts want different behaviour anyway. Say so explicitly
+   in both copies. §6's "verified (fixed if needed) for both credential
+   contexts" obligation lands on the `aiutopilot` copy. Decide in the split
+   table whether the three bats suites fork with it or stay behind.
 
 5. **What is the new repo's test and check story on day one?**
-   `workflow-skills`'s `scripts/check.sh` currently carries a **57-failing
-   environmental baseline**, dominated by the 5,467-line orchestrator suite.
-   That noise taxes every unrelated change — during Probe 5b it cost real effort
-   to prove a failure was a pre-existing flake rather than a regression. The new
+   `workflow-skills`'s `scripts/check.sh` carries an **environmental failing
+   baseline** — 57 names at last recording, but the count drifts run to run
+   (70, 64, 62, 57 observed) — dominated by the 5,467-line orchestrator suite.
+   The recorded artifact is
+   `dev_docs/elite-spike/fixtures/runaway/check-baseline.{txt,sh}`: compare
+   failing test NAMES against it, never counts. That noise taxes every
+   unrelated change — during Probe 5b it cost real effort to prove a failure
+   was a pre-existing flake rather than a regression. The new
    repo starts with no baseline debt. Decide deliberately what keeps it that way
    before the first test lands.
+
+6. **Where does the public `/auto-pilot` surface go?**
+   Neither §6 nor the first five decisions assign a destination to
+   `skills/auto-pilot/` (SKILL.md + six reference docs),
+   `commands/auto-pilot.md`, or `test/auto-pilot-reserve.bats` /
+   `test/auto-pilot-less-claude.bats`. That layer is the plugin's **install
+   surface** — the thing the opening paragraph of this document complains about —
+   and it is what `spawn-orchestrator.sh` is invoked _through_. **Settle this
+   before moving any file.** The two answers cost very different amounts:
+   - **Stays, dies with the orchestrator.** The split remains what it claims to
+     be — "create a repo," not "migrate code" — and `deliver-task`'s five
+     relative links keep resolving. But installing the plugin for
+     `/plan-with-docs` keeps installing the kill machinery until Stage 5.
+   - **Moves to `aiutopilot`.** The install-surface complaint is cured
+     immediately, but the split is no longer greenfield-only:
+     `references/run-state.md` alone carries 15 `.auto-pilot/` references and the
+     reference docs are §6's named audit set, and `deliver-task`'s five links
+     break on the day it moves.
+
+   **Recommended:** stays. The greenfield control plane is what `aiutopilot` is
+   for; the legacy skill surface is scheduled to die, and moving a corpse into
+   the new repo is the failure mode §6 already refused for
+   `spawn-orchestrator.sh`. But the §6 "Port small" **run-loop prose in
+   `SKILL.md`** is written _fresh_ in `aiutopilot`'s own skill — do not read
+   "stays" as leaving the new repo without a skill surface.
 
 ## State you are inheriting
 
@@ -175,5 +279,11 @@ These were left open deliberately. Each needs a real answer, not a default.
 2. Draft the file-by-file split as a table — path, destination, rationale —
    covering `scripts/`, `skills/`, `commands/`, `test/`, `dev_docs/`. Do not
    move anything yet.
-3. Bring the five open decisions above to the maintainer with a recommendation
+3. Bring the six open decisions above to the maintainer with a recommendation
    each.
+4. After any move, prove `workflow-skills` still stands — against the
+   recorded baseline, not a bare count: run `check.sh` unsandboxed and feed
+   the transcript to `./check-baseline.sh --compare` (fails only on failing
+   names not in `check-baseline.txt`); confirm `deliver-task`'s five relative
+   links into `skills/auto-pilot/references/` still resolve; re-run
+   `./results.py check-hashes` and `selftest` wherever the fixture landed.
