@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.64.9] - 2026-07-28
+
+### Fixes
+
+- reap bounded-command children on TERM, and isolate fixture git state (#264) (ba8529c)
+
 ## [1.64.8] - 2026-07-27
 
 ### Fixes

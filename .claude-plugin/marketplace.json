@@ -12,7 +12,7 @@
         "url": "https://github.com/bestdan/workflow-skills.git"
       },
       "description": "Claude Code skills for general engineering workflows: collaborative PR review, durable multi-step planning, auditable quantitative analysis pipelines with independent fact-checking, and a repo-native task loop for capturing and processing follow-up work.",
-      "version": "1.64.8",
+      "version": "1.64.9",
       "keywords": [
         "workflow",
         "review",
