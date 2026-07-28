@@ -1,0 +1,61 @@
+# scripts/check.sh failing tests, recorded BEFORE the probe 5b task-2 change.
+# Environmental and pre-existing: a global core.hooksPath pre-commit hook
+# blocks the seed commit inside other fixtures' scratch repos.
+# Run unsandboxed. Compare by NAME, never by count.
+doctor I5 (corrupt git state): an undetermined worktree is NOT summarised as skipped=0
+doctor I5 (corrupt git state): reported as skipped — undetermined, not attempted
+doctor I5 (corrupt git state): the corrupted worktree SURVIVES — it was destroyed
+doctor I5 (corrupt git state): the summary counts it as skipped, naming the worktree
+doctor I5 (corrupt git state): the uncommitted WIP file is still there
+doctor I5 (dead orchestrator): reports the prune
+doctor I5 (live dispatch): a detached-HEAD worker worktree SURVIVES too — it was destroyed
+doctor I5 (live dispatch): a live dispatch's worker worktree SURVIVES — it was destroyed
+doctor I5 (live dispatch): reports the live worktree as skipped, not repaired
+doctor I5 (live dispatch): the skip names the liveness gate
+doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES
+doctor I5 (undetermined liveness): reported as skipped
+doctor I5: a branch with no RUN.md row at all is pruned
+doctor I5: an in-flight worktree is reported as skipped
+doctor I5: exits 0
+doctor I5: reports the prune of the terminal-phase worktree
+doctor I5: the terminal-phase orphan worktree is observably gone
+doctor I6 (D2/D7, gh unreadable): exits 0
+doctor I6 (D2/D7, gh unreadable): reports it as skipped/unreadable, not a park
+doctor I6 (merged parent, D3 markdown-link pr cell): says the remedy is restack, not park
+doctor I6 (merged parent): exits 0
+doctor I6: exits 0
+doctor I6: parks the child whose parent's tip diverged
+doctor I6: REPORT.md explains why
+exit contract [continuing]: reason committed to the run-state branch
+exit contract [done]: reason committed to the run-state branch
+exit contract [fatal auth]: the halt records its OWN true reason
+exit contract [no wake stamp]: a fatal auth exit STILL halts (status: systemic written)
+exit contract [no wake stamp]: the halt STILL alarms in REPORT.md
+exit contract [no wake stamp]: the no-progress guard STILL counts and halts
+exit contract [no-progress]: the halt records its OWN true reason
+exit contract [paused, template's commented paused_until]: an EMPTY paused_until does not corroborate — the no-progress halt still fires
+exit contract [paused, template's commented paused_until]: the halt raises the no-progress alarm
+exit contract [paused]: reason committed to the run-state branch
+fixture: RUN.md absent on task branch
+restack cascade: B retargeted to main
+restack cascade: C restacked in cascade mode
+restack cascade: clean 3-deep run exits 0
+restack resumable: phase-1 restacks Y to main
+restack resumable: re-run does not churn REPORT.md
+restack resumable: re-run reports the cascaded child a no-op
+restack resumable: Z cascaded from the REMOTE parent tip (not stranded)
+restack retarget-fail: reports a DEFECT
+restack: a conflict does not stop the other children
+restack: child's post-restack diff contains ONLY its own file
+restack: exits 0 on a clean stacked restack
+restack: idempotent run does not churn REPORT.md
+restack: idempotent second run exits 0
+restack: idempotent second run reports no-op
+restack: REPORT.md demands re-verify for the child
+restack: REPORT.md flags the co-review as STALE
+restack: reports task_child done
+restack: retargets the PR base
+status-report: OVER-ceiling task says OVER
+supervisor-check: a run-state commit resets the no-progress counter
+supervisor-check: fatal halt commits the run-state change
+supervisor-check: progress in between never halts

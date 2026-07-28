@@ -617,4 +617,71 @@ running something, not by arguing:
 above. Plan task 1 is closed and the approval gate is open: fixture code may now
 be written, starting at task 2.
 
-_No leg has run. Nothing below this line is evidence yet._
+_No **injection leg** has run. Legs 1-4 remain unrun; nothing here bears on any
+family verdict._
+
+### Task 2 — construction record (2026-07-28)
+
+The harness and its smoke leg are built (`common.py`, `driver.sh`, `runaway.py`,
+`scenarios.py`, plus `incarnation.py` copied verbatim from Probe 2 —
+sha256 `1d3da09c…`, identical to `fixtures/process-binding/incarnation.py`,
+which is its provenance). The smoke leg is the false-positive floor, not an
+injection: it asserts the harness does **not** fire, so it cannot contribute a
+family verdict either way. Evidence: `evidence-smoke.jsonl`.
+
+**Smoke leg result — all three variants: zero halts, zero alarms, no `ALARM`
+sentinel, zero survivors.** `quiescent`; `near-miss-short-pause` (which also
+exercised the ledger's `exempt_since` CLEAR path — stamped at wake 1, held
+through wake 4, cleared at wake 5 when the pause ended, no halt); and
+`near-miss-completes-early` (gate rc 20 from wake 4 on `status: done`, no
+deadline halt — finishing early is not a blown deadline).
+
+**Four construction-time facts, measured on this host before any leg:**
+
+- `/usr/bin/python3` **cannot** exec under the rendered profile
+  (`can't exec '/Library/Developer/CommandLineTools/usr/bin/python3'
+  (errno=Operation not permitted)`), exactly as pre-registered. The pinned
+  Homebrew build (`/opt/homebrew/Cellar/python@3.12/…`) execs fine, and
+  `driver.sh` smoke-tests this before every run.
+- The `supervisor-state` write-deny **is in force**: `errno=1` (**EPERM**) from
+  inside the jail, with the **control write to the same directory succeeding**,
+  on every variant (`boundary_in_force: true`). The errno confirms the sheet's
+  correction — Seatbelt deny is EPERM; EACCES belongs to the rule-6 filesystem
+  substitute.
+- Probe 2's `p_uniqueid` reader works unprivileged same-uid here, and is what
+  every signal re-validates against.
+- The jailed surrogate **cannot write the checked-in fixture tree** (only its
+  scratch rundir and tmpdir are RW). Its evidence is therefore written inside
+  its own RW scope and merged by the unjailed driver, tagged `in_jail`.
+
+**The parent-death channel failed its own predicate, and this is why the
+predicate ships as a script** (`parent-death-drill.sh`). As first built it used
+only FIFO EOF. Any child inheriting the driver's write-end fd keeps the FIFO
+open, so `kill -9` of the driver produced **no EOF and the surrogate was still
+alive 30s later**, reparented to init — the fixture outliving its own deadline,
+i.e. the runaway probe becoming the runaway. A plain `sleep` spawned without
+`9>&-` reproduces it. Fixed by adding a second detector that depends on no fd
+hygiene at all: every downstream process polls the driver's recorded incarnation
+through the same `proc_pidinfo` authority the signal path uses. Predicate now
+passes in **1 second**. Review caught none of this; running it did.
+
+**Two host traps that cost time and are not in any other document:**
+
+- `scripts/check.sh` cannot pass here, for reasons pre-dating this work. Cause
+  confirmed: a global **`core.hooksPath`** (`~/src/dotfiles/git/hooks`) — *not*
+  `init.templateDir` — whose `pre-commit` refuses direct commits to `main`,
+  firing inside other fixtures' own scratch git repos so their seed commit never
+  lands and everything cascades from `fatal: not a git repository`. The
+  maintainer ruled (2026-07-28) that the tasks 2-6 criterion means **no NEW
+  failures against a baseline recorded before the change**, and asked that the
+  baseline be recorded so the claim is checkable. It is:
+  `check-baseline.txt` + `check-baseline.sh --compare`, comparing failing test
+  **names** rather than counts (the count drifts: 70/64/62/57 observed).
+  Baseline 57, post-change 57, **no new failures**. Run it **unsandboxed** —
+  sandboxed runs add ~6 spurious failures because `sandbox-exec` cannot nest.
+  `driver.sh` makes its own scratch repo hermetic against those hooks, which
+  matters for legs 1-3: `_supervisor_halt` COMMITS the run-state change, so a
+  host pre-commit hook rejecting it would read as the supervisor failing to
+  record its own halt — a fixture defect wearing the costume of a finding.
+- **`$TMPDIR` differs sandboxed vs unsandboxed.** A file written under one is
+  not visible under the other, and it looks like the file vanished.
