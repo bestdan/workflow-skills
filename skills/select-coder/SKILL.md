@@ -66,7 +66,7 @@ availability:
 
 **`devin` is a model marketplace, not a model vendor.** `devin models list`
 enumerates dozens of families across nine-plus labs, so `devin:<model>` picks a
-*vendor and jurisdiction*, not just a capability tier — always name the model
+_vendor and jurisdiction_, not just a capability tier — always name the model
 explicitly. See `matrix.md` → devin for which ones are worth reaching for and
 which the secret-exposure gate removes.
 
