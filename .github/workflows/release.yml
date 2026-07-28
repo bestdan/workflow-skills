@@ -55,12 +55,19 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: python3 scripts/bump-version.py --apply
 
+      - name: Install format tools
+        if: ${{ steps.bump.outputs.bumped == 'true' }}
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
       - name: Format generated files
         if: ${{ steps.bump.outputs.bumped == 'true' }}
         # Keep the bump dprint-clean so the next PR's CI gate stays green.
-        run: |
-          npm install -g dprint@0.54.0
-          dprint fmt CHANGELOG.md .claude-plugin/plugin.json .claude-plugin/marketplace.json
+        # Must be the same dprint the gate runs, hence mise.toml rather than a
+        # second pin here — dprint's markdown rules do change between minors,
+        # so a release formatted by a different version lands already-dirty.
+        run: dprint fmt CHANGELOG.md .claude-plugin/plugin.json .claude-plugin/marketplace.json
 
       - name: Commit, tag, push, and publish release
         env:

@@ -2,6 +2,18 @@
 
 ## Local dev loop
 
+The gate's tools — `dprint`, `shellcheck`, `shfmt` — are pinned in `mise.toml`,
+which is the single source CI and your laptop both install from:
+
+```sh
+mise install
+```
+
+Don't install them any other way. The pins are owned by `bestdan/dotfiles`'
+`scripts/update-mise-deps.sh`, which opens a PR here when one moves; a
+separately-installed `dprint` will disagree with the gate the moment the pin
+changes.
+
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 

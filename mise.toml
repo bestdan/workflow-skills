@@ -1,0 +1,21 @@
+# mise tool dependencies for this repo.
+#
+# These are the tools scripts/check.sh shells out to. Pinning them here means
+# CI and a contributor's laptop resolve the same bytes — before this file, CI
+# installed dprint from npm and shellcheck/shfmt from tagged tarballs, while a
+# Mac got them from mise via bestdan/dotfiles, and the two drifted (CI sat on
+# dprint 0.54.0 for a while after dotfiles moved to 0.55.2).
+#
+# Versions are owned by bestdan/dotfiles' scripts/update-mise-deps.sh, which
+# runs weekly against this repo as well as its own and opens a PR here when a
+# pin moves. Don't hand-bump these without a reason; the updater will just
+# reconcile them on the next Monday run.
+#
+# Not everything CI needs lives here: uv comes from astral-sh/setup-uv (a
+# first-party action with its own caching) and the claude CLI from npm (no
+# mise plugin exists). Both are still pinned in .github/workflows/ci.yml.
+
+[tools]
+dprint = "0.55.2"
+shellcheck = "0.11.0"
+shfmt = "3.10.0"
