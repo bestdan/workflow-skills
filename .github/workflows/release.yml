@@ -101,8 +101,18 @@ jobs:
 
           # The checkout ran with persist-credentials: false, so re-supply the
           # PAT here -- the last step in the job, after all third-party code.
-          # Same extraheader mechanism actions/checkout uses internally; keeping
-          # it out of the remote URL keeps it out of `ps` and any error output.
+          # Same extraheader mechanism actions/checkout uses internally, rather
+          # than a credential in the remote URL: an in-URL token would land in
+          # the argv of every later git call and in remote error output.
+          #
+          # `tr -d '\n'` is load-bearing twice over. GNU base64 wraps at 76
+          # columns, and a 98-char PAT encodes past that -- a wrapped value both
+          # breaks the header and stops matching the log mask that checkout
+          # registered for the identical unwrapped string (it calls setSecret on
+          # the encoded credential whenever a token is supplied, independent of
+          # persist-credentials, and masks are job-scoped). That inherited mask
+          # is why no ::add-mask:: is needed here -- but it is coupled to the
+          # checkout above still passing token: secrets.RELEASE_TOKEN.
           git config http.https://github.com/.extraheader \
             "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${RELEASE_TOKEN}" | base64 | tr -d '\n')"
 
