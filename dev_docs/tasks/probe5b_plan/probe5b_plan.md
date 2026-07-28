@@ -67,8 +67,12 @@ plan:
 
 - Row 5b carries the falsification and the invalidated assumptions.
 - The named redirect is taken: **a hard control-plane ceiling — wall-clock,
-  action-count, or a live worker-count reap in `supervisor-scan`, reading state
-  the agent cannot write — is a prerequisite for any unattended operation.**
+  action-count, or live worker count — is a prerequisite for any unattended
+  operation.** It is specified in **§5.1 (a watcher check) + §4.2 (a
+  `ceiling_trip` record)**, deliberately _not_ in `spawn-orchestrator.sh`, which
+  §6 marks delete-do-not-port. Its inputs are pinned to the three sources the
+  agent cannot forge: the control plane's own wall clock, the process table, and
+  the provider-side usage query (§2.3's maintainer observation credential).
 - Dependent work stops: **priority 6, the thin vertical run, is stopped at its
   start line.** It had not begun, so the durable state is "not started" and
   there is no external write to reconcile.

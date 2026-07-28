@@ -93,11 +93,12 @@ Create `dev_docs/elite-spike/fixtures/runaway/probe5b-runaway.md` containing:
   its start line by row 5b's falsification, with "not started" as its durable
   state and no external write to reconcile.
 - **Redirect — already taken, not contingent on this measurement:** a hard
-  control-plane ceiling — wall-clock, action-count, or a live worker-count reap
-  in `supervisor-scan`, **reading state the agent cannot write** — is a
-  prerequisite for any unattended operation. This measurement sizes that ceiling;
-  it does not decide whether to build it. If leg 4 escapes, fix the server-side
-  ruleset (Probe 4) first, not the caps.
+  control-plane ceiling — wall-clock, action-count, or live worker count —
+  specified in **§5.1 + §4.2**, not in `spawn-orchestrator.sh` (§6:
+  delete-do-not-port), with inputs pinned to the three agent-unforgeable sources
+  (control-plane wall clock, process table, provider-side usage query). This
+  measurement sizes that ceiling; it does not decide whether to build it. If leg
+  4 escapes, fix the server-side ruleset (Probe 4) first, not the caps.
 
 State explicitly in the document that **CONFIRMED here would mean only
 "not falsified in the tested unprivileged shell environment"** — the ceiling,
