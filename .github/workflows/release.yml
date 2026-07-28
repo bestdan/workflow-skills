@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     if: "${{ !(startsWith(github.event.head_commit.message, 'chore: release v') && contains(github.event.head_commit.message, '[skip ci]')) }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main # release against the tip of main, not just the pushed SHA
           fetch-depth: 0 # full history + tags: the bump diffs against the last v* tag
