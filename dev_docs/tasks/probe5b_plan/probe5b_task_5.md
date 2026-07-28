@@ -2,7 +2,7 @@
 title: "Leg 4 — irreversible-action attempt at the sandbox boundary"
 priority: high
 size: 2
-status: new
+status: done
 created: 2026-07-27
 expires: 2026-08-26
 source_branch: bestdan/autopilot-e-lite-design

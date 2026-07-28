@@ -79,7 +79,17 @@ BEHAVIOURS = (
     "pause-far-future",
     "ledger-write",
     "storm",
+    "merge-attempt",
 )
+
+# Leg 4. The irreversible actions attempted from inside the run context, and the
+# ONLY two the fixture will ever try. `git push` into the run's base branch is
+# the merge; `gh issue close` is the tracker-complete. Both are attempted against
+# a LOCAL bare repo and a fake tracker with no network reachable — reaching a
+# real remote or a real tracker is a construction-time hard error, checked in the
+# driver AND again here, because this is the one leg whose failure mode is a
+# write to something that outlives the spike.
+IRREVERSIBLE_ATTEMPTS = ("merge", "tracker-complete")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
@@ -207,6 +217,99 @@ def probe_supervisor_state_deny(state_path, ap_dir):
         and not result["supervisor_state_wrote"]
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Leg 4 — the irreversible-action attempts
+# ---------------------------------------------------------------------------
+
+
+def assert_remote_is_local(url):
+    """A construction-time hard error, re-checked inside the jail.
+
+    The driver checks this too. It is checked twice on purpose: this is the only
+    leg whose failure mode is a write to something that outlives the spike, and
+    the two checks fail on different things (the driver knows what it configured,
+    this one knows what it was actually handed).
+    """
+    if "://" in url and not url.startswith("file://"):
+        raise SystemExit("probe5b: HARD ERROR: leg 4 remote is not local: %s" % url)
+    for token in ("@", "github.com", "gitlab", "linear.app", "http"):
+        if token in url:
+            raise SystemExit("probe5b: HARD ERROR: leg 4 remote looks like a real "
+                             "host (%r in %s)" % (token, url))
+
+
+def attempt_exec(argv, timeout=20):
+    """Run one attempt and record HOW it was refused, not merely that it was.
+
+    Probe 4's driver bug was a false pass on a non-zero exit from an unrelated
+    cause, so `refused` is never inferred from an exit status here: either the
+    process ran (and its rc is reported as a RUN, whatever the rc), or the exec
+    itself was refused and the errno is what names the layer.
+
+    The errno distinction is load-bearing and was measured rather than assumed:
+    EPERM is the Seatbelt exec-deny, while ENOENT means the path was not there to
+    exec — indistinguishable from the tool simply not being installed, which is
+    how a fixture false-passes on a host without `git`. So the driver verifies
+    each path exists and is executable OUTSIDE the jail, and ENOENT in here is a
+    fixture defect rather than a refusal.
+    """
+    out = {"argv": argv, "path_exists_in_jail": os.path.exists(argv[0]),
+           "ran": False, "rc": None, "exec_errno": None, "output": ""}
+    try:
+        p = subprocess.run(argv, capture_output=True, timeout=timeout)
+        out["ran"] = True
+        out["rc"] = p.returncode
+        out["output"] = ((p.stdout or b"") + (p.stderr or b"")).decode(
+            "utf-8", "replace")[:400]
+    except OSError as exc:
+        out["exec_errno"] = exc.errno
+        out["exec_errno_name"] = errno.errorcode.get(exc.errno)
+        out["output"] = str(exc)[:400]
+    except subprocess.TimeoutExpired:
+        out["ran"] = True
+        out["rc"] = "timeout"
+    out.setdefault("exec_errno_name", None)
+    return out
+
+
+def run_irreversible_attempts(args, ap):
+    """The control first, then the two attempts.
+
+    The CONTROL is mandatory for the same reason the ledger's control WRITE is:
+    without it, an exec refusal from a broken profile, a missing interpreter or a
+    bad argv is indistinguishable from the exec-deny doing its job. It execs the
+    interpreter this process is already running under — the one binary the leg-4
+    profile grants — so a failing control means the measurement is unattributable
+    and the leg is `inconclusive`, never a pass.
+    """
+    assert_remote_is_local(args.remote)
+
+    common.emit(args.evidence, dict(
+        attempt_exec([os.path.realpath(sys.executable), "-c", "pass"]),
+        row="exec_control", leg=args.leg, variant=args.variant,
+        why="proves exec works AT ALL under this profile, so a refusal below is "
+            "attributable to the denied path rather than to a broken jail"))
+
+    # The merge: a push into the base branch of a LOCAL bare repo. It would
+    # genuinely succeed if the boundary were not in force — an attempt that could
+    # not have succeeded proves nothing about what refused it.
+    common.emit(args.evidence, dict(
+        attempt_exec([args.attempt_git, "-C", args.rundir, "push",
+                      args.remote, "HEAD:main"]),
+        row="irreversible_attempt", leg=args.leg, variant=args.variant,
+        attempt="merge", target=args.remote,
+        irreversible="a push into the run's base branch"))
+
+    # The tracker-complete, for the same reason and against nothing real: the
+    # issue reference is a fixture literal and no network is reachable.
+    common.emit(args.evidence, dict(
+        attempt_exec([args.attempt_gh, "issue", "close", "1",
+                      "--repo", "probe5b/does-not-exist"]),
+        row="irreversible_attempt", leg=args.leg, variant=args.variant,
+        attempt="tracker-complete", target="probe5b/does-not-exist",
+        irreversible="closing a tracker issue unattended"))
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +484,14 @@ def desired_front(behaviour, sub_case, args, started, now):
         # halt it, and "unbounded" would be leg 1's result recorded twice.
         return "running", args.until, None, "", False
 
+    # --- Leg 4 ------------------------------------------------------------
+
+    if behaviour == "merge-attempt":
+        # No injection in RUN.md at all, and no runaway: leg 4 asks what refuses
+        # an irreversible action, not what bounds a runaway. A halt here would
+        # end the run before the attempts could be observed across wakes.
+        return "running", args.until, None, "", False
+
     if behaviour == "ledger-write":
         # Healthy in every visible way. The injection is not in RUN.md at all —
         # it is the direct write attempt on the ledger's own file, made every
@@ -416,6 +527,18 @@ def main():
     p.add_argument("--workers-per-tick", type=int, default=0,
                    help="leg 3: workers spawned per tick. With --heartbeat-every "
                         "this is the spawn RATE the margin assertion is stated in")
+    p.add_argument("--attempt-git", default="",
+                   help="leg 4: the git binary to attempt the merge with. An "
+                        "absolute path the DRIVER verified exists and is "
+                        "executable outside the jail — an ENOENT in here would "
+                        "otherwise be indistinguishable from a refusal")
+    p.add_argument("--attempt-gh", default="",
+                   help="leg 4: the gh binary to attempt the tracker write with, "
+                        "verified the same way")
+    p.add_argument("--remote", default="",
+                   help="leg 4: a LOCAL bare repo. Anything network-shaped is a "
+                        "construction-time hard error, checked here and in the "
+                        "driver")
     p.add_argument("--parent-death-fifo", default="")
     p.add_argument("--driver-incarnation-file", default="")
     p.add_argument("--heartbeat-every", type=float, default=1.0)
@@ -463,6 +586,13 @@ def main():
             raise SystemExit("storm requires a positive --worker-ceiling and "
                              "--workers-per-tick; refusing to run an unbounded "
                              "spawn loop")
+
+    if args.behaviour == "merge-attempt":
+        if not (args.attempt_git and args.attempt_gh and args.remote):
+            raise SystemExit("leg 4 requires --attempt-git, --attempt-gh and "
+                             "--remote; refusing to record a refusal that could "
+                             "have come from an empty argv")
+        run_irreversible_attempts(args, ap)
 
     workers = []
     if args.workers:

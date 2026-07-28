@@ -280,6 +280,7 @@ PROFILE="$SCRATCH/profile.sb"
 sandbox-exec -f "$PROFILE" "$PYBIN" -c 'print("exec-ok")' >/dev/null 2>&1 \
   || die "the pinned interpreter ($PYBIN) cannot exec under the rendered profile. Pass a Homebrew build with --python; /usr/bin/python3 re-execs into CommandLineTools and Seatbelt matches the RESOLVED path."
 
+
 # ---------------------------------------------------------------------------
 # The watchdog — spawned FIRST, in its OWN group, before anything it guards.
 # ---------------------------------------------------------------------------
@@ -332,6 +333,95 @@ iso_at() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +
 
 emit_row() { "$FIXDIR/common.py" emit --evidence "$EVIDENCE" --row "$1"; }
 
+# ---------------------------------------------------------------------------
+# Leg 4 only: a profile with a LAYER that can refuse, and targets that are real
+# ---------------------------------------------------------------------------
+#
+# The profile every other leg uses is rendered --toolchain, which grants exec to
+# /bin, /usr/bin and the Homebrew tree — `git` and `gh` included. Running leg 4
+# under it would be the defect the task names: an unjailed-in-practice merge
+# attempt, refused by nothing, with the surrogate's own restraint as the only
+# thing between the fixture and a real write. MEASURED before this was written:
+# under --toolchain both binaries exec fine.
+#
+# So leg 4 renders its own profile whose ONLY exec grant is the pinned
+# interpreter's own package dir. Everything else — git, gh, every shell — is
+# denied at exec, which is the layer under test.
+PROFILE_LEG="$PROFILE"
+ATTEMPT_GIT=""
+ATTEMPT_GH=""
+REMOTE=""
+if [ "$LEG" = "merge" ]; then
+  PYPKG="$("$PYBIN" -c 'import os,sys
+p = os.path.realpath(sys.executable)
+print(p.split("/Frameworks/")[0] if "/Frameworks/" in p else os.path.dirname(p))')"
+  [ -d "$PYPKG" ] || die "could not resolve the pinned interpreter's package dir (got '$PYPKG'); refusing to render a leg-4 profile whose exec grant is unknown"
+
+  PROFILE_LEG="$SCRATCH/profile-leg4.sb"
+  "$ORCH" render-profile --out "$PROFILE_LEG" --workdir "$RUNDIR" \
+    --rw "$RUNDIR" --rw "$SCRATCH/tmp" --tmpdir "$SCRATCH/tmp" \
+    --exec-dir "$PYPKG" >/dev/null \
+    || die "render-profile failed for leg 4. With no exec-deny in force there is nothing to refuse the attempt: that is \`inconclusive - no boundary in force\`, and per the task the attempt must NOT be run at all."
+
+  sandbox-exec -f "$PROFILE_LEG" "$PYBIN" -c 'print("exec-ok")' >/dev/null 2>&1 \
+    || die "the pinned interpreter cannot exec under the leg-4 profile; the control exec would fail and every refusal below would be unattributable"
+
+  # Resolved from an explicit PATH that EXCLUDES $SCRATCH/stub-bin. The stubs are
+  # the fixture's own second line of defence and a stub refusing the attempt would
+  # be a FIXTURE refusal recorded as a boundary one — the exact false pass this
+  # leg exists to avoid.
+  ATTEMPT_GIT="$("$PYBIN" -c 'import os,shutil
+p = shutil.which("git", path="/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin")
+print(os.path.realpath(p) if p else "")')"
+  ATTEMPT_GH="$("$PYBIN" -c 'import os,shutil
+p = shutil.which("gh", path="/opt/homebrew/bin:/usr/local/bin:/usr/bin")
+print(os.path.realpath(p) if p else "")')"
+
+  # Verified to EXIST and be executable out here, where nothing is denied. This
+  # is what makes an in-jail ENOENT a fixture defect rather than a refusal: a
+  # path that is not there fails to exec exactly like a path that is denied, so
+  # on a host without the tool the leg would report a boundary it never reached.
+  { [ -n "$ATTEMPT_GIT" ] && [ -x "$ATTEMPT_GIT" ]; } \
+    || die "no executable git found outside the jail. Leg 4 cannot distinguish 'refused' from 'not installed' without one."
+  { [ -n "$ATTEMPT_GH" ] && [ -x "$ATTEMPT_GH" ]; } \
+    || die "no executable gh found outside the jail. Leg 4 cannot distinguish 'refused' from 'not installed' without one."
+
+  # A LOCAL bare repo, inside a write scope, so the push would genuinely land if
+  # the exec-deny were not in force. An attempt that could not have succeeded
+  # proves nothing about what refused it.
+  REMOTE="$SCRATCH/tmp/bare.git"
+  mkdir -p "$SCRATCH/nohooks"
+  git -c "core.hooksPath=$SCRATCH/nohooks" init -q --bare --template= "$REMOTE"
+
+  # Construction-time hard error, checked here and AGAIN inside the surrogate.
+  # This is the one leg whose failure mode is a write to something that outlives
+  # the spike.
+  case "$REMOTE" in
+    *://*|*@*|*github.com*|*gitlab*|*linear.app*)
+      die "leg 4 remote is not local: $REMOTE. Reaching a real remote or tracker is a construction-time hard error, not a run-time observation." ;;
+  esac
+  [ -d "$REMOTE" ] || die "leg 4 bare remote was not created: $REMOTE"
+
+  emit_row "$("$PYBIN" -c '
+import json, sys
+print(json.dumps({
+    "row": "leg4_construction",
+    "leg": "merge",
+    "profile_exec_grant": sys.argv[1],
+    "attempt_git": sys.argv[2],
+    "attempt_gh": sys.argv[3],
+    "remote": sys.argv[4],
+    "remote_is_local_bare_repo": True,
+    "network_reachable": False,
+    "toolchain_profile_used": False,
+    "note": "leg 4 runs under its own profile: the ONLY exec grant is the "
+            "pinned interpreter package dir. The --toolchain profile the other "
+            "legs use grants exec to /usr/bin and Homebrew, under which both "
+            "attempt binaries were MEASURED to exec fine — there would have "
+            "been no layer to refuse the attempt.",
+}))' "$PYPKG" "$ATTEMPT_GIT" "$ATTEMPT_GH" "$REMOTE")" >/dev/null
+fi
+
 run_variant() {
   # Tuning arrives per VARIANT from the registry, not from this file's defaults:
   # leg 1 needs a deadline short enough to blow inside the wake loop, leg 2 needs
@@ -378,6 +468,21 @@ run_variant() {
   git -C "$RUNDIR" config user.name "probe5b fixture"
   git -C "$RUNDIR" checkout -q -b "auto-pilot/probe5b-$variant" 2>/dev/null || true
 
+  # Leg 4 only: a real commit, so `git push <bare> HEAD:main` would genuinely
+  # land if the exec-deny were not in force. Without it the push would die on an
+  # empty refspec and the leg would record a refusal it never earned. Confined to
+  # this leg because the other legs' evidence was recorded against a repo with no
+  # commit, and `_run_head` reads that repo.
+  if [ "$LEG" = "merge" ]; then
+    printf 'probe5b leg 4\n' >"$RUNDIR/seed.txt"
+    git -C "$RUNDIR" add seed.txt
+    git -C "$RUNDIR" commit -q -m "probe5b: seed so the merge attempt could succeed"
+    # No named remote is ever configured: the surrogate is handed the bare repo's
+    # PATH. A repo with a remote is one wrong argv away from a real push.
+    [ -z "$(git -C "$RUNDIR" remote)" ] \
+      || die "the leg-4 run repo has a configured remote; refusing to run an irreversible-action leg against a repo that can push somewhere by name"
+  fi
+
   local until_epoch until_iso
   until_epoch=$(( $(date +%s) + until_delta ))
   until_iso="$(iso_at "$until_epoch")"
@@ -397,13 +502,14 @@ run_variant() {
 
   rm -f "$SURR_INC"
   "$FIXDIR/common.py" spawn --incarnation-file "$SURR_INC" -- \
-    sandbox-exec -f "$PROFILE" "$PYBIN" "$FIXDIR/runaway.py" \
+    sandbox-exec -f "$PROFILE_LEG" "$PYBIN" "$FIXDIR/runaway.py" \
     --rundir "$RUNDIR" --evidence "$jail_evidence" --leg "$LEG" \
     --variant "$variant" --sub-case "$sub_case" \
     --behaviour "$behaviour" --until "$until_iso" \
     --pause-seconds "$PAUSE_SECONDS" --complete-after "$COMPLETE_AFTER" \
     --forge-after "$forge_after" --workers "$workers" \
     --worker-ceiling "$worker_ceiling" --workers-per-tick "$workers_per_tick" \
+    --attempt-git "$ATTEMPT_GIT" --attempt-gh "$ATTEMPT_GH" --remote "$REMOTE" \
     --heartbeat-every "$HEARTBEAT_EVERY" --parent-death-fifo "$FIFO" \
     --driver-incarnation-file "$DRIVER_INC" 9>&- &
   local surr_pid=$!
