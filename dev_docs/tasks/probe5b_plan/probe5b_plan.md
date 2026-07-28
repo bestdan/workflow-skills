@@ -30,8 +30,8 @@ that has stopped honoring its own prose.
 
 | Breaker (5b)               | Specified in                                       | Real enforcement in repo today                                                                                                                                                              |
 | -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Usage / reserve gate       | `run-budget.md` "Pre-invoke reserve", 15% floor    | `scripts/claude-usage.sh` **does** run out-of-process in the supervisor — `launch` resolves it by default as `--report-usage-bin` (`spawn-orchestrator.sh:4721`) and threads it into the rendered scan and report-tick lines (`:1440`, `:1489`), and `status_report` executes it per report interval (`:4409`). But it is **reporting only**: no supervisor decision consumes its output, and the reserve floor itself has no non-prose caller. (`scripts/claude-auto-resume.sh:62` does gate on it, but is not on the auto-pilot supervisor path.) |
-| Parallelism cap            | Risk #1; Decision #1                               | **Nothing.** No numeric cap, semaphore, or live dispatch counter in `scripts/` or `skills/`. The nearest artifact is the paid-agent dispatch cap — agent-side prose, about cost not concurrency.  |
+| Usage / reserve gate       | `run-budget.md` "Pre-invoke reserve", 15% floor    | `scripts/claude-usage.sh` **does** run out-of-process in the supervisor — `launch` resolves it by default as `--report-usage-bin` (`spawn-orchestrator.sh:4721`) and threads it into the rendered scan and report-tick lines (`:1440`, `:1489`), and `status_report` **executes** it at `:4412` (the `:4409` conditional guards that call). But it is **reporting only**: no supervisor decision consumes its output, and the reserve floor itself has no non-prose caller. (`scripts/claude-auto-resume.sh:86`, reading the query at `:83`, does gate on it, but is not on the auto-pilot supervisor path.) |
+| Parallelism cap            | Risk #1; Decision #1                               | **Nothing out-of-process.** A numeric cap does exist — `wip_limit: 3` (`skills/task/SKILL.md:33`, semantics at `:40`) — but it is agent-side prose on the `/do-tasks` path, not a supervisor control. On the supervisor path there is no cap, semaphore, or live dispatch counter: the only `ps`/`pgrep`/`proc_pidinfo` call sites in `spawn-orchestrator.sh` are `:1584` (launch) and `:5178` (status), so **nothing on the `supervisor_scan` call graph (`:3019`–`:3133`) reads the process table at all**. The other named artifact, the paid-agent dispatch cap, is likewise agent-side prose and about cost not concurrency.  |
 | At-most-twice continuation | Risk #1; §5.3                                      | **Nothing built.** §5.3 defers continuation to Stage 5+; §7a row 8 gives it its own later disposable kernel.                                                                                     |
 | Review-gating              | Decision #5; `/deliver-task` hands off at `needs_review` | Agent-side prose. The enforcement Probe 4 confirmed was the server-side ruleset on the **disposable App, now deleted** (row 4). No live server-side merge block exists.                     |
 
@@ -87,7 +87,8 @@ its own narrower assumption:
 > the measurement sizes the ceiling the redirect must add.
 
 Independent work may continue (rule 5), and this measurement is independent: the
-ledger `EACCES` test, leg 1's forged-deadline falsifications, and leg 3's
+ledger write-deny test (`EPERM` under the rendered profile, with a control write
+succeeding), leg 1's forged-deadline falsifications, and leg 3's
 halt-bounded worker and survivor counts are evidence the inventory cannot
 produce, and the ceiling would otherwise be sized by guesswork.
 
@@ -139,8 +140,8 @@ oversized rather than fix it. Instead the clock is pre-declared:
   outside the probe proper.
 - **Run order is by evidentiary value, and doubles as the degradation order:**
   1. **Leg 2** — the pause-exempt ledger is the only breaker whose input the
-     agent cannot write, and `LedgerWrite`'s `EACCES` is the only positive
-     enforcement evidence available here.
+     agent cannot write, and `LedgerWrite`'s refusal (`EPERM` under the rendered
+     profile) is the only positive enforcement evidence available here.
   2. **Leg 1** — the forged-deadline variants, the highest-value falsification.
   3. **Leg 3** — the storm sizing measurement the redirect needs.
   4. **Leg 4** — runs last; its marginal cost is low because task 2 renders the

@@ -43,7 +43,21 @@ get reaped: the exact same hazard class. So:
   fixture's own loop, not by `launchctl`.
 - **Every surrogate runs in a process group the fixture created**, and the
   fixture only ever signals **that** group. Fail closed at construction if the
-  group is not the fixture's own.
+  group is not the fixture's own. **"The fixture's own group" is not enough on
+  its own** — a child spawned without `setpgid`/`setsid` inherits the *driver's*
+  group, and recording that pgid satisfies a naive check while `kill -- -$pgid`
+  takes out the driver, the invoking shell, and the SSH session (Probe 3's exact
+  bug). Assert both halves before any signal:
+  `pgid(surrogate) != pgid(driver)` **and** `pgid(surrogate) == pid(surrogate)`,
+  i.e. the surrogate is its own group leader.
+- **Re-validate identity immediately before every signal.** A saved pgid names a
+  slot, not a process; once the fixture's group dies the number can be reused.
+  Probe 2's `p_uniqueid` reader (`fixtures/process-binding/incarnation.py`)
+  transfers here — the cross-uid `EPERM` that forced Probe 2 to run privileged
+  does not apply, because the fixture and its surrogates share one uid. Assert
+  `same_incarnation(recorded, live)` immediately before each `kill -- -$pgid`;
+  on mismatch or `ESRCH`, **skip the signal** and record
+  `escaped` / `already-dead`.
 - **Never resolve a uid numerically.** If the fixture needs the `agent` account
   at all, resolve it **by name** (its uid differs per host; 502 on the mini).
   The `agent` account stays — nothing here deletes or recreates it.
@@ -57,9 +71,17 @@ get reaped: the exact same hazard class. So:
   before use.** `spawn-orchestrator.sh`'s `teardown` runs `launchctl bootout
   gui/<uid>/<label>` unconditionally whenever `launchctl` exists (`:1693`) — a
   colliding label would boot out a live job the fixture never created.
-- **The driver enforces its own absolute wall-clock deadline and
-  self-terminates.** The fixture that probes runaways must not be able to become
-  one.
+- **The deadline does not depend on a healthy driver.** "The driver enforces its
+  own absolute deadline and self-terminates" is too weak: a crashed or wedged
+  driver enforces nothing, and the surrogate below is deliberately long-lived and
+  backgrounded so that it does not cooperate. Two independent mechanisms, both
+  asserted: a **parent-death channel** (the driver holds the write end of a pipe;
+  every surrogate and worker holds the read end and exits on EOF) **and** a
+  **watchdog** — a separate process in its own group, spawned first, that sleeps
+  to the absolute deadline and then signals the surrogate group through the same
+  validated path. Predicate: `kill -9` the driver mid-run and every surrogate and
+  worker exits within N seconds. The fixture that probes runaways must not be
+  able to become one.
 - **Escaped descendants are detected and reported, never chased.** Record every
   spawned PID with its start identity; at teardown, report any tracked PID that
   left the process group rather than widening what the fixture is willing to
@@ -101,6 +123,18 @@ Create `dev_docs/elite-spike/fixtures/runaway/`:
   applied inside the time box, say so in the kill sheet and cap the affected
   legs at `inconclusive — boundary not in force`; do not run them and report a
   pass.
+
+  **Pin an interpreter that can actually exec under that profile, and smoke-test
+  it before any leg.** `/usr/bin/python3` re-execs into
+  `CommandLineTools/Library/Frameworks/Python3.framework/...`, and Seatbelt
+  matches the **resolved** path (the renderer documents this defect class at
+  `spawn-orchestrator.sh:828`–`:840`), which falls outside the granted
+  `CommandLineTools/usr` subpath — so a Python surrogate under this profile is
+  refused at exec. Use a Homebrew build (it resolves into the granted
+  `/opt/homebrew/Cellar`) and assert the exec succeeds under the rendered
+  profile as a pre-leg check. Otherwise this construction-time wall consumes the
+  time box and yields `inconclusive — boundary not in force` for a reason that
+  is neither the boundary nor the fixture logic.
 - `common.py` — shared evidence emitter: append-only JSONL per wake, sha256 of
   every fixture file, fixture git revision, non-secret environment metadata.
 - `scenarios.py` — leg registry with one entry per armed injection, so a leg

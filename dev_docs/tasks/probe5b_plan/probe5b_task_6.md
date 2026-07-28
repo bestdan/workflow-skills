@@ -30,9 +30,12 @@ drifted into the repair rule 5 forbids.
 `falsified` / `inconclusive`, and "nearly done" is not a fourth state.
 
 Expected shape, given the inventory: leg 2 establishes the ledger's authority
-(`LedgerWrite` → `EACCES`), leg 1's forgery variants falsify the blown-`--until`
-halt, leg 3 falsifies the parallelism family and yields the number that sizes the
-ceiling, leg 4 is partial with the token boundary blocked. The usage and
+(`LedgerWrite` → **`EPERM`** under the rendered profile, with its control write
+succeeding — `EACCES` belongs to the filesystem substitute, not this boundary),
+leg 1's forgery variants falsify the blown-`--until` halt with `done-forgery`
+destroying supervision outright, leg 3 falsifies the parallelism family and
+yields the number that sizes the ceiling, leg 4 is partial with the token
+boundary blocked. The usage and
 continuation families carry `falsified — no enforcement exists; not exercised`
 rows with no leg.
 
@@ -64,6 +67,10 @@ rows with no leg.
   a hard error. **`inconclusive — not run at cap` is a valid row**: rule 3
   requires classification at the cap, so an unfinished leg is recorded, not
   treated as a missing row.
+- The roll-up from row verdicts (`confirmed` / `falsified` / `inconclusive` /
+  `error` / `blocked`) to rule 3's three probe classifications ships **as a
+  script** and is asserted total over every combination by enumeration — the
+  same move as the re-hash check. An `error` row never yields `confirmed`.
 - The sha256 manifest covers the fixture and evidence files **excluding
   `results.json` itself** — a file cannot contain its own digest. Ship the
   re-hash check as a script in the fixture rather than leaving "verify by
