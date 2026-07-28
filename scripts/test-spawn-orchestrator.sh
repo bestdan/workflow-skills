@@ -16,6 +16,27 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/spawn-orchestrator.sh"
 
+# Inherited git env is neutralized FIRST, before anything reads a repo.
+# GIT_CONFIG_COUNT/PARAMETERS are command-scope config that outranks the
+# GIT_CONFIG_GLOBAL pin below, and GIT_DIR/GIT_INDEX_FILE/etc are exported by
+# git into every hook subprocess — so a check.sh invoked from a pre-commit hook
+# would otherwise hand fixture `git add` calls the caller's repo and index. It
+# has to precede the snapshot below: a leaked GIT_DIR redirects the snapshot's
+# own probe, which then reports "not a git repo" and silently skips every
+# caller-safety assertion in exactly the case they exist to cover.
+# GIT_AUTHOR_*/GIT_COMMITTER_* outrank the gitconfig [user] pin below and are
+# exported into hook and `git rebase -x` subprocesses. This is the explicit
+# list, not `unset $(git rev-parse --local-env-vars)`: that dynamic form fails
+# open — a missing or broken git yields empty output, the error is swallowed,
+# and this line (whose whole purpose is to run before git is trusted) would
+# silently grant zero isolation.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+  GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE \
+  GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE \
+  GIT_COMMON_DIR GIT_TEMPLATE_DIR \
+  GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
+  GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
+
 # --- Caller-repo safety snapshot (PRE-618) ------------------------------------
 # This suite drives REAL git-mutating fixtures. Several deliberately use a run dir
 # that is NOT its own git repo (to exercise the orchestrator's non-git / empty-HEAD
@@ -38,15 +59,24 @@ if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
   # Tracked working tree + index only: a repo-local BASE fallback is untracked and
   # trap-cleaned on exit, so it is not corruption and must not false-fail here.
   CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
-  CALLER_BRANCHES_BEFORE="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+  # The branch SET is deliberately not asserted. Everything above is per-worktree
+  # state that only this checkout can move; refs/heads is shared across every
+  # worktree of the repo, so a concurrent agent creating or deleting a branch
+  # during this suite's multi-minute run fails it for a reason that has nothing
+  # to do with fixture leakage. An escaped commit moves HEAD, an escaped
+  # checkout -b changes the current branch, and escaped adds dirty the tracked
+  # tree — so the checks that remain already cover every escape a fixture here
+  # can produce.
 fi
 
 # Sandboxed runs may deny the system temp dir — fall back to a repo-local base.
 # Resolve to the physical path (pwd -P): the renderer canonicalizes every path,
 # so fixtures must be canonical too or /var vs /private/var would mismatch.
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.so-test.XXXXXX")"
-BASE="$(cd "$BASE" && pwd -P)"
 trap 'rm -rf "$BASE"' EXIT
+# If the cd fails, exit rather than falling through with an empty BASE (which
+# would make every later "$BASE/x" resolve to a root-relative /x).
+BASE="$(cd "$BASE" && pwd -P)" || exit 2
 
 # The belt to the snapshot above (the braces): git must NEVER discover a repo at
 # or above BASE. A ceiling at BASE stops the upward repo-discovery walk before it
@@ -58,6 +88,19 @@ trap 'rm -rf "$BASE"' EXIT
 # the fixtures invoke inherit it too. This makes the escape impossible by
 # construction, the same floor-not-ceiling stance as the notifier guard above.
 export GIT_CEILING_DIRECTORIES="$BASE"
+
+# A developer's global/system git config leaks into these fixture repos too:
+# core.hooksPath (whose pre-commit hook blocks commits to main, and git init
+# names the initial branch main) can silently veto fixture commits, and
+# init.templateDir/commit.gpgsign/aliases are other injection routes. Pin the
+# config env instead of nulling it, so `git init` still deterministically
+# produces branch "main" on stock upstream git. Exported so the
+# spawn-orchestrator.sh subprocesses the fixtures invoke inherit it too. (The
+# env half of this guard is unset at the top of the file, before the
+# caller-repo snapshot.)
+printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$BASE/gitconfig"
+export GIT_CONFIG_GLOBAL="$BASE/gitconfig"
+export GIT_CONFIG_SYSTEM=/dev/null
 
 # --- The notifier guard: the suite may NEVER reach the real /usr/bin/osascript --
 #
@@ -2844,6 +2887,12 @@ CLEOF
   # that, with a `die` here, relaunched into the same 401 forever with zero alarm.
   WSF="$EC/wake-start-fatal"
   mkdir -p "$WSF/.auto-pilot"
+  # The fixture never commits — the HALT PATH does, and the assertions below read
+  # through `git show HEAD:`. So a leaked global hook would run against a commit
+  # this file never issues: one blocking `main` (git init's default branch) vetoes
+  # it, spawn-orchestrator swallows the failure, HEAD is never created, and the
+  # assertions fail pointing at the halt logic instead of at the hook. The
+  # suite-wide GIT_CONFIG_GLOBAL/SYSTEM pin above is what keeps that hook out.
   (cd "$WSF" && git init -q)
   {
     printf -- '---\n'
@@ -3245,6 +3294,9 @@ LCFEOF
   # whole task exists to abolish.
   SP="$EC/stale-pause-reason-fatal"
   mkdir -p "$SP/.auto-pilot"
+  # Same as WSF above: the halt path issues the commit these assertions read via
+  # `git show HEAD:`, so a leaked hook must not reach it — the suite-wide
+  # GIT_CONFIG_GLOBAL/SYSTEM pin is what guarantees that.
   (cd "$SP" && git init -q)
   {
     printf -- '---\n'
@@ -5407,11 +5459,32 @@ USEOF
   else
     bad "status-report [in-wake]: reports kept firing DURING the model call" "digests=$srl_digests (only the wake-start emission fired — the [A] cadence hole)"
   fi
-  sleep 1
-  if pgrep -f "report-tick --dir $SRL" >/dev/null 2>&1; then
-    bad "status-report [in-wake]: the reporter loop is reaped when claude exits" "pgrep matched"
-  else
+  # Poll to a deadline rather than sleeping a fixed second. The reap is a
+  # process-GROUP TERM followed by a wait (`kill -TERM -"$rpt"; wait "$rpt"` in
+  # spawn-orchestrator.sh), so a report-tick caught mid gh/status-report call is
+  # still draining when write-launch returns. A flat `sleep 1` races that drain
+  # and fails on a loaded machine for a reason that has nothing to do with the
+  # property under test — observed flapping pass/fail across runs with no code
+  # change. The claim is "eventually reaped", so bound the wait instead: still
+  # matching after 10s is a real leaked reaper, which is what this should catch.
+  # Note the match is argv-based, and every fork of the report-tick process
+  # inherits that argv — so this also covers _run_bounded's job and watchdog and
+  # anything its TERM handler does. The 10s is a budget for that teardown as
+  # well as for the reap; spend against it knowingly.
+  srl_reaped=0
+  srl_tries=0
+  while [ "$srl_tries" -lt 50 ]; do
+    if ! pgrep -f "report-tick --dir $SRL" >/dev/null 2>&1; then
+      srl_reaped=1
+      break
+    fi
+    sleep 0.2
+    srl_tries=$((srl_tries + 1))
+  done
+  if [ "$srl_reaped" = 1 ]; then
     ok "status-report [in-wake]: the reporter loop is reaped when claude exits"
+  else
+    bad "status-report [in-wake]: the reporter loop is reaped when claude exits" "pgrep still matched after 10s"
   fi
   # --report-every off must emit NO reporter loop at all.
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRL" \
@@ -5442,10 +5515,19 @@ fi
 # files are excluded on purpose: a repo-local BASE fallback is trap-cleaned on
 # exit and is not corruption.)
 if [ "$CALLER_IS_GIT" = 1 ]; then
-  caller_head_after="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
-  caller_ref_after="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
-  caller_tracked_after="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
-  caller_branches_after="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
+  # The after-probes must observe the caller's repo the way the caller's own
+  # git does — otherwise a pinned-config view of a tree checked out under the
+  # developer's own config (core.autocrlf, core.fileMode, core.attributesFile
+  # all affect `status --porcelain`) can report phantom modifications that were
+  # never there. `env -u` CLEARS the three rather than restoring them, so this
+  # reproduces the before-snapshot exactly when the caller had none of them set
+  # — the normal case — and diverges for a caller who exports them in their own
+  # shell. That divergence fails loud and safe (a false positive in this
+  # assertion, never a missed escape), which is why it is not worth carrying the
+  # save/restore machinery to close.
+  caller_head_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  caller_ref_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  caller_tracked_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
   [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
     && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
     || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo" \
@@ -5457,10 +5539,6 @@ if [ "$CALLER_IS_GIT" = 1 ]; then
     && ok "caller-repo safety: tracked working tree + index unchanged" \
     || bad "caller-repo safety: tracked files changed under the caller's repo" \
       "before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after]"
-  [ "$caller_branches_after" = "$CALLER_BRANCHES_BEFORE" ] \
-    && ok "caller-repo safety: no stray branches created" \
-    || bad "caller-repo safety: branch set changed (stray fixture branches leaked)" \
-      "before=[$(printf '%s' "$CALLER_BRANCHES_BEFORE" | tr '\n' ' ')] after=[$(printf '%s' "$caller_branches_after" | tr '\n' ' ')]"
 fi
 
 echo "test-spawn-orchestrator: $pass passed, $fail failed"

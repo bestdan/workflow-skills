@@ -148,8 +148,12 @@ else
 fi
 # Not just `--version`: a real commit forks the git-core helpers out of the
 # toolchain's libexec, a second exec hop that a bin-only grant would miss.
+# core.hooksPath /dev/null: isolate from a developer's global hooks, whose
+# pre-commit veto of `main` (git init's default branch) would otherwise fail
+# this commit for reasons unrelated to Seatbelt confinement.
 allowed "git commit end-to-end (forks git-core helpers)" bash -c \
   "cd $D/run/wt && rm -rf gitrepo && /usr/bin/git init -q gitrepo && cd gitrepo \
+     && /usr/bin/git config core.hooksPath /dev/null \
      && /usr/bin/git -c user.email=a@b -c user.name=c commit -q --allow-empty -m smoke \
      && /usr/bin/git log --oneline -1"
 # RE-EXAMINED, not flipped (task 10 acceptance): this denial's intent is "an

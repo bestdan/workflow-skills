@@ -27,8 +27,69 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
+# Inherited git env is neutralized FIRST, before anything reads a repo.
+# GIT_CONFIG_COUNT/PARAMETERS are command-scope config that outranks the
+# GIT_CONFIG_GLOBAL pin below, and GIT_DIR/GIT_INDEX_FILE/etc are exported by
+# git into every hook subprocess — so a check.sh invoked from a pre-commit hook
+# would otherwise hand fixture `git add` calls the caller's repo and index. It
+# has to precede the snapshot below: a leaked GIT_DIR redirects the snapshot's
+# own probe, which then reports "not a git repo" and silently skips every
+# caller-safety assertion in exactly the case they exist to cover.
+# GIT_AUTHOR_*/GIT_COMMITTER_* outrank the gitconfig [user] pin below and are
+# exported into hook and `git rebase -x` subprocesses. This is the explicit
+# list, not `unset $(git rev-parse --local-env-vars)`: that dynamic form fails
+# open — a missing or broken git yields empty output, the error is swallowed,
+# and this line (whose whole purpose is to run before git is trusted) would
+# silently grant zero isolation.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+  GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE \
+  GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE \
+  GIT_COMMON_DIR GIT_TEMPLATE_DIR \
+  GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
+  GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
+
+# --- Caller-repo safety snapshot (fixture 12 git-inits and commits into a
+# fixture dir; see the ceiling below) -----------------------------------------
+CALLER_REPO="$ROOT"
+CALLER_IS_GIT=0
+if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  CALLER_IS_GIT=1
+  CALLER_HEAD_BEFORE="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  CALLER_REF_BEFORE="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  # Tracked working tree + index only: a repo-local BASE fallback is untracked
+  # and trap-cleaned on exit, so it is not corruption and must not false-fail.
+  CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+fi
+
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.task-scan-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
+# Canonicalize to the physical path: on macOS mktemp -d returns a path under
+# the /var -> /private/var symlink, and the ceiling below is a literal-prefix
+# match, so an uncanonicalized BASE would silently fail to stop the walk. If
+# the cd fails, exit rather than falling through with an empty BASE (which
+# would make every later "$BASE/x" resolve to a root-relative /x).
+BASE="$(cd "$BASE" && pwd -P)" || exit 2
+
+# Stop git's upward repo-discovery walk at BASE. Fixture 12 git-inits and
+# commits into a subdir of BASE; if that init fails (e.g. a sandboxed run
+# that cannot write .git/hooks/*) the add/commit that follow would otherwise
+# resolve UPWARD to whichever repo encloses BASE — the caller's, when the
+# mktemp fallback above lands BASE inside this checkout. This is what
+# actually happened before this guard existed: fixture files got committed
+# onto the caller's live branch. Fixtures that git-init their own subdir are
+# unaffected: their .git sits below the ceiling and is found first.
+export GIT_CEILING_DIRECTORIES="$BASE"
+
+# A developer's global/system git config leaks into these fixture repos too:
+# core.hooksPath (whose pre-commit hook blocks commits to main, and git init
+# names the initial branch main) can silently veto fixture commits, and
+# init.templateDir/commit.gpgsign/aliases are other injection routes. Pin the
+# config env instead of nulling it, so `git init` still deterministically
+# produces branch "main" on stock upstream git. (The env half of this guard is
+# unset at the top of the file, before the caller-repo snapshot.)
+printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$BASE/gitconfig"
+export GIT_CONFIG_GLOBAL="$BASE/gitconfig"
+export GIT_CONFIG_SYSTEM=/dev/null
 
 fail=0
 pass_count=0
@@ -394,12 +455,29 @@ assert_eq "done duplicate does not clear an active same-slug blocker" "false" "$
 # whose resolved date is more than N days before today are candidates.
 DIR12="$BASE/archive"
 mkdir -p "$DIR12"
-git -C "$DIR12" init -q
-git -C "$DIR12" config user.email "test@example.com"
-git -C "$DIR12" config user.name "Test"
 
-# Rung 1: explicit `completed` field, far in the past -> selected.
-write_task "$DIR12/old-done.md" "title: Old done, explicit completed
+# `git init` is unchecked elsewhere in this file because failures there just
+# leave a non-repo dir (the intended behavior for other fixtures). Fixture 12
+# is different: it git-adds and git-commits, so an unnoticed init failure lets
+# those ops resolve UPWARD past DIR12 to whatever repo encloses it — the exact
+# escape this suite's ceiling (above) exists to block. Verify init both
+# succeeded AND actually rooted a repo AT DIR12 (not an inherited one) before
+# trusting it with real commits; belt and braces with GIT_CEILING_DIRECTORIES.
+dir12_git_ok=1
+git -C "$DIR12" init -q || dir12_git_ok=0
+if [ "$dir12_git_ok" = 1 ]; then
+  dir12_toplevel="$(git -C "$DIR12" rev-parse --show-toplevel 2>/dev/null || echo NONE)"
+  [ "$dir12_toplevel" = "$DIR12" ] || dir12_git_ok=0
+fi
+
+if [ "$dir12_git_ok" = 0 ]; then
+  bad "archive fixture: git init did not produce a repo rooted at DIR12 — likely a sandboxed run that cannot write .git/hooks/*; skipping the rest of fixture 12 to avoid leaking into an enclosing repo"
+else
+  git -C "$DIR12" config user.email "test@example.com"
+  git -C "$DIR12" config user.name "Test"
+
+  # Rung 1: explicit `completed` field, far in the past -> selected.
+  write_task "$DIR12/old-done.md" "title: Old done, explicit completed
 priority: low
 size: 1
 status: done
@@ -409,8 +487,8 @@ source_branch: x
 related_files: [a.md]
 expires: 2099-01-01" "$(std_body)"
 
-# Rung 1 (not selected): explicit `completed` field, recent -> NOT selected.
-write_task "$DIR12/new-done.md" "title: New done, explicit completed recent
+  # Rung 1 (not selected): explicit `completed` field, recent -> NOT selected.
+  write_task "$DIR12/new-done.md" "title: New done, explicit completed recent
 priority: low
 size: 1
 status: done
@@ -420,8 +498,8 @@ source_branch: x
 related_files: [a.md]
 expires: 2099-01-01" "$(std_body)"
 
-# Non-done status is never a candidate, whatever its age.
-write_task "$DIR12/old-not-done.md" "title: Old but not done
+  # Non-done status is never a candidate, whatever its age.
+  write_task "$DIR12/old-not-done.md" "title: Old but not done
 priority: low
 size: 1
 status: ready
@@ -431,13 +509,13 @@ source_branch: x
 related_files: [a.md]
 expires: 2099-01-01" "$(std_body)"
 
-git -C "$DIR12" add -A
-GIT_AUTHOR_DATE="2020-02-01T00:00:00" GIT_COMMITTER_DATE="2020-02-01T00:00:00" \
-  git -C "$DIR12" commit -q -m "rung 1 fixtures"
+  git -C "$DIR12" add -A
+  GIT_AUTHOR_DATE="2020-02-01T00:00:00" GIT_COMMITTER_DATE="2020-02-01T00:00:00" \
+    git -C "$DIR12" commit -q -m "rung 1 fixtures"
 
-# Rung 2: no `completed` field -> falls through to the file's last git-commit
-# date, which is old here -> selected.
-write_task "$DIR12/git-dated-done.md" "title: Git-dated done, no completed field
+  # Rung 2: no `completed` field -> falls through to the file's last git-commit
+  # date, which is old here -> selected.
+  write_task "$DIR12/git-dated-done.md" "title: Git-dated done, no completed field
 priority: low
 size: 1
 status: done
@@ -445,13 +523,13 @@ created: 2020-01-01
 source_branch: x
 related_files: [a.md]
 expires: 2099-01-01" "$(std_body)"
-git -C "$DIR12" add -A
-GIT_AUTHOR_DATE="2020-03-01T00:00:00" GIT_COMMITTER_DATE="2020-03-01T00:00:00" \
-  git -C "$DIR12" commit -q -m "rung 2 fixture"
+  git -C "$DIR12" add -A
+  GIT_AUTHOR_DATE="2020-03-01T00:00:00" GIT_COMMITTER_DATE="2020-03-01T00:00:00" \
+    git -C "$DIR12" commit -q -m "rung 2 fixture"
 
-# Rung 3: no `completed` field AND uncommitted/untracked -> falls through to
-# today's date (age 0) -> NOT selected, even under a large --older-than.
-write_task "$DIR12/untracked-done.md" "title: Untracked done, no completed field
+  # Rung 3: no `completed` field AND uncommitted/untracked -> falls through to
+  # today's date (age 0) -> NOT selected, even under a large --older-than.
+  write_task "$DIR12/untracked-done.md" "title: Untracked done, no completed field
 priority: low
 size: 1
 status: done
@@ -460,16 +538,17 @@ source_branch: x
 related_files: [a.md]
 expires: 2099-01-01" "$(std_body)"
 
-out12="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR12")" || bad "archive fixture: script exited non-zero"
-cand_slugs="$(printf '%s' "$out12" | jq -r '.candidates[].slug' | sort)"
-expected_slugs="$(printf 'git-dated-done\nold-done')"
-assert_eq "archive-candidates: selects only the older-than-N done cards" "$expected_slugs" "$cand_slugs"
+  out12="$("$SCRIPT" --archive-candidates --older-than 30 "$DIR12")" || bad "archive fixture: script exited non-zero"
+  cand_slugs="$(printf '%s' "$out12" | jq -r '.candidates[].slug' | sort)"
+  expected_slugs="$(printf 'git-dated-done\nold-done')"
+  assert_eq "archive-candidates: selects only the older-than-N done cards" "$expected_slugs" "$cand_slugs"
 
-completed_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="old-done") | .completion_date_source')"
-assert_eq "archive-candidates: explicit completed field is used when present" "completed" "$completed_source"
+  completed_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="old-done") | .completion_date_source')"
+  assert_eq "archive-candidates: explicit completed field is used when present" "completed" "$completed_source"
 
-git_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="git-dated-done") | .completion_date_source')"
-assert_eq "archive-candidates: falls through to git-commit date when completed is absent" "git_commit_date" "$git_source"
+  git_source="$(printf '%s' "$out12" | jq -r '.candidates[] | select(.slug=="git-dated-done") | .completion_date_source')"
+  assert_eq "archive-candidates: falls through to git-commit date when completed is absent" "git_commit_date" "$git_source"
+fi
 
 # --- Fixture 13: exact `> older_than` boundary (today-relative dates) --------
 # age_days > older_than: a card completed EXACTLY N days ago (age N) is NOT
@@ -524,6 +603,36 @@ if "$SCRIPT" --archive-candidates --older-than -1 "$DIR14" >/dev/null 2>"$BASE/n
   bad "negative --older-than: script should exit non-zero, exited 0"
 else
   ok "negative --older-than: script exits non-zero"
+fi
+
+# --- Caller-repo integrity assertion ------------------------------------------
+# After the entire suite, the caller's repo must be what it was before — same
+# HEAD, same branch, same tracked working tree + index. If any moved, fixture
+# 12 (or the mktemp fallback) reached outside its own temp repo and corrupted
+# the caller's checkout.
+if [ "$CALLER_IS_GIT" = 1 ]; then
+  # The after-probes must observe the caller's repo the way the caller's own
+  # git does — otherwise a pinned-config view of a tree checked out under the
+  # developer's own config (core.autocrlf, core.fileMode, core.attributesFile
+  # all affect `status --porcelain`) can report phantom modifications that were
+  # never there. `env -u` CLEARS the three rather than restoring them, so this
+  # reproduces the before-snapshot exactly when the caller had none of them set
+  # — the normal case — and diverges for a caller who exports them in their own
+  # shell. That divergence fails loud and safe (a false positive in this
+  # assertion, never a missed escape), which is why it is not worth carrying the
+  # save/restore machinery to close.
+  caller_head_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  caller_ref_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  caller_tracked_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
+    && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
+    || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo (before=$CALLER_HEAD_BEFORE after=$caller_head_after)"
+  [ "$caller_ref_after" = "$CALLER_REF_BEFORE" ] \
+    && ok "caller-repo safety: current branch unchanged" \
+    || bad "caller-repo safety: current branch changed (before=$CALLER_REF_BEFORE after=$caller_ref_after)"
+  [ "$caller_tracked_after" = "$CALLER_TRACKED_BEFORE" ] \
+    && ok "caller-repo safety: tracked working tree + index unchanged" \
+    || bad "caller-repo safety: tracked files changed under the caller's repo (before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after])"
 fi
 
 echo

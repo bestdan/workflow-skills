@@ -444,6 +444,30 @@ _run_bounded() {
   local secs="$1"
   shift
   local rc=0 job wd
+  # Installed BEFORE the spawns, not after: a TERM landing between `"$@" &` and
+  # the trap would take the default action, and this shell would die leaving the
+  # very children the trap exists to reap. The guards make it safe to fire
+  # before either variable is assigned — an unguarded `kill -TERM -"${job:-0}"`
+  # expands to a literal `-0`, which POSIX defines as the SENDER's process
+  # group. (A real-but-non-leader pid is a different and harmless case: `set -m`
+  # has bash setpgid in both parent and child, and a group-kill on a non-leader
+  # pid fails ESRCH and signals nothing — it does not fall back to group 0.)
+  #
+  # The handler escalates on its OWN before killing the watchdog. The watchdog
+  # is the only thing that turns a refused TERM into a KILL, so killing it first
+  # orphans precisely the job that ignores TERM — the case this helper exists to
+  # bound. The grace is a short fixed 0.2s rather than the watchdog's 2s or a
+  # detached escalator subshell: this is teardown (the run being reported on has
+  # already ended), status_report writes tmp+mv so a hard KILL cannot tear
+  # STATUS.md, and a forked escalator would inherit this process's argv and so
+  # match the reaper test's `pgrep -f report-tick` for its whole life.
+  trap '[ -n "${job:-}" ] && {
+          kill -TERM -"$job" 2>/dev/null
+          sleep 0.2
+          kill -KILL -"$job" 2>/dev/null
+        }
+        [ -n "${wd:-}" ] && kill -KILL -"$wd" 2>/dev/null
+        exit 143' TERM INT HUP
   set -m
   "$@" &
   job=$!
@@ -455,11 +479,29 @@ _run_bounded() {
   ) >/dev/null 2>&1 &
   wd=$!
   set +m
+  # The trap above forwards a TERM to both groups instead of letting this shell
+  # die alone in the wait below. The `set -m` is what lets a hung job be
+  # group-killed — but it also puts the job and the watchdog in groups of their
+  # OWN, outside the group of whoever called us. So when the in-wake reporter is
+  # reaped (`kill -TERM -"$rpt"` in the generated wrapper), that TERM reaches
+  # this shell and not them: without the trap this shell dies blocked in `wait`,
+  # the cleanup below never runs, and both children re-parent to init — verified
+  # by watching `ps -o pid,ppid,pgid` across a reap (PPID flips to 1, PGID stays
+  # their own, and the watchdog then lingers its full `secs`+2, 62s by default,
+  # firing gh at a run that has already ended). `exit`, not fall-through: a
+  # handled TERM that returned would leave this process alive past the reaper
+  # that just signalled it.
   wait "$job" 2>/dev/null || rc=$?
   # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
   case "$rc" in 143 | 137) rc=124 ;; esac
   kill -KILL -"$wd" 2>/dev/null
   wait "$wd" 2>/dev/null || true
+  # Cleared HERE, not straight after the `wait` above: a TERM in that gap would
+  # take the default action and leave the watchdog to linger its full secs+2 —
+  # the same class as the bug this trap fixes, and moving the line costs
+  # nothing. `wd` stays this shell's own unreaped child until the `wait` above,
+  # so neither kill can land on a recycled pid.
+  trap - TERM INT HUP
   return "$rc"
 }
 

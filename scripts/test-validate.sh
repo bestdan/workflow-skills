@@ -19,6 +19,41 @@ SCRIPT="$ROOT/scripts/validate.py"
 
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.validate-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
+# Canonicalize to the physical path (mktemp -d can land under macOS's
+# /var -> /private/var symlink) and stop git's upward repo-discovery walk at
+# BASE, so a git op inside a fixture dir can never resolve to the caller's
+# repo when the mktemp fallback above lands BASE inside this checkout. If the
+# cd fails, exit rather than falling through with an empty BASE (which would
+# make every later "$BASE/x" resolve to a root-relative /x).
+BASE="$(cd "$BASE" && pwd -P)" || exit 2
+export GIT_CEILING_DIRECTORIES="$BASE"
+
+# A developer's global/system git config leaks into these fixture repos too:
+# core.hooksPath (whose pre-commit hook blocks commits to main, and git init
+# names the initial branch main) can silently veto fixture commits, and
+# init.templateDir/commit.gpgsign/aliases are other injection routes. Pin the
+# config env instead of nulling it, so `git init` still deterministically
+# produces branch "main" on stock upstream git. GIT_CONFIG_COUNT/PARAMETERS are
+# command-scope env config that outranks GIT_CONFIG_GLOBAL, and GIT_DIR/
+# GIT_INDEX_FILE/etc are exported by git into every hook subprocess — so a
+# check.sh invoked from a pre-commit hook would otherwise hand fixture `git
+# add` calls the caller's repo/index. GIT_AUTHOR_*/GIT_COMMITTER_* outrank the
+# gitconfig [user] pin above and are exported into hook and `git rebase -x`
+# subprocesses. Unset the lot so no inherited env can redirect a fixture git op
+# the same way the ceiling above blocks discovery. This is the explicit list,
+# not `unset $(git rev-parse --local-env-vars)`: that dynamic form fails open —
+# a missing or broken git yields empty output, the error is swallowed, and
+# this line (whose whole purpose is to run before git is trusted) would
+# silently grant zero isolation.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+  GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE \
+  GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE \
+  GIT_COMMON_DIR GIT_TEMPLATE_DIR \
+  GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
+  GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
+printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$BASE/gitconfig"
+export GIT_CONFIG_GLOBAL="$BASE/gitconfig"
+export GIT_CONFIG_SYSTEM=/dev/null
 
 fail=0
 pass_count=0
