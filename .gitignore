@@ -24,3 +24,12 @@ dev_docs/co-review/
 #   !dev_docs/tasks/<name>_plan/keep-me.md
 dev_docs/tasks/*
 !dev_docs/tasks/.task-config.yml
+
+# Repo-local mktemp fallback dirs for the shell test suites, used when the
+# system temp dir is denied (e.g. sandboxed runs) — trap-cleaned on exit, but
+# ignore them explicitly in case a run is killed before the trap fires.
+.so-test.*
+.task-scan-test.*
+.validate-test.*
+.plan-graph-test.*
+.claim-scan-test.*

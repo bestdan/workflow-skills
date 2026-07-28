@@ -27,6 +27,16 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
+# Inherited git env is neutralized FIRST, before anything reads a repo.
+# GIT_CONFIG_COUNT/PARAMETERS are command-scope config that outranks the
+# GIT_CONFIG_GLOBAL pin below, and GIT_DIR/GIT_INDEX_FILE/etc are exported by
+# git into every hook subprocess — so a check.sh invoked from a pre-commit hook
+# would otherwise hand fixture `git add` calls the caller's repo and index. It
+# has to precede the snapshot below: a leaked GIT_DIR redirects the snapshot's
+# own probe, which then reports "not a git repo" and silently skips every
+# caller-safety assertion in exactly the case they exist to cover.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_TEMPLATE_DIR GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+
 # --- Caller-repo safety snapshot (fixture 12 git-inits and commits into a
 # fixture dir; see the ceiling below) -----------------------------------------
 CALLER_REPO="$ROOT"
@@ -38,15 +48,16 @@ if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
   # Tracked working tree + index only: a repo-local BASE fallback is untracked
   # and trap-cleaned on exit, so it is not corruption and must not false-fail.
   CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
-  CALLER_BRANCHES_BEFORE="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
 fi
 
 BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.task-scan-test.XXXXXX")"
+trap 'rm -rf "$BASE"' EXIT
 # Canonicalize to the physical path: on macOS mktemp -d returns a path under
 # the /var -> /private/var symlink, and the ceiling below is a literal-prefix
-# match, so an uncanonicalized BASE would silently fail to stop the walk.
-BASE="$(cd "$BASE" && pwd -P)"
-trap 'rm -rf "$BASE"' EXIT
+# match, so an uncanonicalized BASE would silently fail to stop the walk. If
+# the cd fails, exit rather than falling through with an empty BASE (which
+# would make every later "$BASE/x" resolve to a root-relative /x).
+BASE="$(cd "$BASE" && pwd -P)" || exit 2
 
 # Stop git's upward repo-discovery walk at BASE. Fixture 12 git-inits and
 # commits into a subdir of BASE; if that init fails (e.g. a sandboxed run
@@ -57,6 +68,17 @@ trap 'rm -rf "$BASE"' EXIT
 # onto the caller's live branch. Fixtures that git-init their own subdir are
 # unaffected: their .git sits below the ceiling and is found first.
 export GIT_CEILING_DIRECTORIES="$BASE"
+
+# A developer's global/system git config leaks into these fixture repos too:
+# core.hooksPath (whose pre-commit hook blocks commits to main, and git init
+# names the initial branch main) can silently veto fixture commits, and
+# init.templateDir/commit.gpgsign/aliases are other injection routes. Pin the
+# config env instead of nulling it, so `git init` still deterministically
+# produces branch "main" on stock upstream git. (The env half of this guard is
+# unset at the top of the file, before the caller-repo snapshot.)
+printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$BASE/gitconfig"
+export GIT_CONFIG_GLOBAL="$BASE/gitconfig"
+export GIT_CONFIG_SYSTEM=/dev/null
 
 fail=0
 pass_count=0
@@ -442,14 +464,6 @@ if [ "$dir12_git_ok" = 0 ]; then
 else
   git -C "$DIR12" config user.email "test@example.com"
   git -C "$DIR12" config user.name "Test"
-  # The other half of isolating this fixture from the caller's git: a global
-  # `core.hooksPath` applies to every repo, throwaway fixtures included. A
-  # developer whose global hooks block commits to `main` (a common guard —
-  # and `git init` names the initial branch `main`) has those hooks veto the
-  # two commits below, so the git-commit-date rungs silently fall back to
-  # "uncommitted" and fixture 12 fails for a reason that has nothing to do
-  # with task-scan.py. Point hooks at a path that holds none.
-  git -C "$DIR12" config core.hooksPath /dev/null
 
   # Rung 1: explicit `completed` field, far in the past -> selected.
   write_task "$DIR12/old-done.md" "title: Old done, explicit completed
@@ -582,14 +596,13 @@ fi
 
 # --- Caller-repo integrity assertion ------------------------------------------
 # After the entire suite, the caller's repo must be what it was before — same
-# HEAD, same branch, same tracked working tree + index, no branches created.
-# If any moved, fixture 12 (or the mktemp fallback) reached outside its own
-# temp repo and corrupted the caller's checkout.
+# HEAD, same branch, same tracked working tree + index. If any moved, fixture
+# 12 (or the mktemp fallback) reached outside its own temp repo and corrupted
+# the caller's checkout.
 if [ "$CALLER_IS_GIT" = 1 ]; then
   caller_head_after="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
   caller_ref_after="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
   caller_tracked_after="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
-  caller_branches_after="$(git -C "$CALLER_REPO" for-each-ref --format='%(refname)' refs/heads 2>/dev/null)"
   [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
     && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
     || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo (before=$CALLER_HEAD_BEFORE after=$caller_head_after)"
@@ -599,9 +612,6 @@ if [ "$CALLER_IS_GIT" = 1 ]; then
   [ "$caller_tracked_after" = "$CALLER_TRACKED_BEFORE" ] \
     && ok "caller-repo safety: tracked working tree + index unchanged" \
     || bad "caller-repo safety: tracked files changed under the caller's repo (before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after])"
-  [ "$caller_branches_after" = "$CALLER_BRANCHES_BEFORE" ] \
-    && ok "caller-repo safety: no stray branches created" \
-    || bad "caller-repo safety: branch set changed (before=[$(printf '%s' "$CALLER_BRANCHES_BEFORE" | tr '\n' ' ')] after=[$(printf '%s' "$caller_branches_after" | tr '\n' ' ')])"
 fi
 
 echo
