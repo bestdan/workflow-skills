@@ -170,6 +170,11 @@ that completes just before `--until` that must NOT trip the deadline halt.
   hard-errors), not asserted.
 - `scripts/check.sh` passes.
 
+- `dev_docs/tasks/probe5b_plan/probe5b_task2_handoff.md` is **deleted** in the
+  same commit that closes this task. It is scaffolding that goes stale the
+  moment task 2 lands; anything in it still worth keeping moves into the kill
+  sheet or a task file first.
+
 **User-run:**
 
 - After the smoke leg, `ps` shows zero surviving surrogate processes and the
