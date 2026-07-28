@@ -492,9 +492,25 @@ construction and fails closed on**:
 
 ### Time cap
 
-**Half a day. No override is requested.** Probe 5's two-day override was earned
-by privileged uid-domain infrastructure this measurement deliberately renounces,
-so asking for one here would concede the plan is oversized rather than fix it.
+**One day.** Originally half a day with no override requested, on the reasoning
+that Probe 5's two-day override was earned by privileged uid-domain
+infrastructure this measurement deliberately renounces, so asking for one here
+would concede the plan is oversized rather than fix it. **That reasoning still
+stands and is why the extension is half a day rather than parity with Probe 5.**
+
+**Extended to one day by the maintainer, 2026-07-28, after task 2.** The
+justification is a finding, not a shortfall, and the distinction is the whole
+point of rule 3: task 2's overrun bought a **construction-time defect that only
+running it could catch** — the parent-death channel passed review and failed its
+own predicate, leaving the surrogate alive after `kill -9` of the driver, which
+is the fixture becoming the hazard it exists to measure (see the task 2
+construction record under Results). An override earned by a defect the rules
+exist to surface is not the same act as an override requested to rescue an
+oversized plan, and this sheet declines the second while taking the first.
+
+**No further extension is authorized.** A second one would be the concession the
+paragraph above refuses, and the degradation order below already makes truncation
+safe.
 
 - The clock covers **fixture build + legs + classification** (plan tasks 2–6).
   This kill sheet is rule-1 pre-work and the scaffolding-hygiene task sits

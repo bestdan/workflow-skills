@@ -130,10 +130,16 @@ _then_ probing them. That inverts the delivery rule (production component before
 falsifier) and would spend the redirect's budget before the measurement that
 sizes it. Measuring the escape first tells us which ceiling to build.
 
-Time cap: **half a day** (§7a rule 3), and **no override is requested**. Probe
-5's override was earned by privileged uid-domain infrastructure this measurement
-deliberately renounces, so asking for one here would concede the plan is
-oversized rather than fix it. Instead the clock is pre-declared:
+Time cap: **one day** (§7a rule 3) — originally half a day with no override
+requested, **extended by the maintainer on 2026-07-28 after task 2**. Probe 5's
+two-day override was earned by privileged uid-domain infrastructure this
+measurement deliberately renounces, so parity would be unearned; that is why the
+extension is half a day and why **no further extension is authorized**. The
+justification is a finding rather than a shortfall: task 2's overrun bought a
+construction-time defect only running it could catch — the parent-death channel
+passed review and failed its own predicate, leaving the surrogate alive after a
+`kill -9` of the driver. The kill sheet's "Time cap" section carries the full
+record. The clock is otherwise pre-declared as before:
 
 - **The clock covers fixture build + legs + classification** (tasks 2–6). The
   kill sheet is rule-1 pre-work and task 7 is scaffolding hygiene; both sit
