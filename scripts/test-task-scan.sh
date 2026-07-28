@@ -35,7 +35,18 @@ command -v jq >/dev/null 2>&1 || {
 # has to precede the snapshot below: a leaked GIT_DIR redirects the snapshot's
 # own probe, which then reports "not a git repo" and silently skips every
 # caller-safety assertion in exactly the case they exist to cover.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_TEMPLATE_DIR GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+# GIT_AUTHOR_*/GIT_COMMITTER_* outrank the gitconfig [user] pin below and are
+# exported into hook and `git rebase -x` subprocesses. This is the explicit
+# list, not `unset $(git rev-parse --local-env-vars)`: that dynamic form fails
+# open — a missing or broken git yields empty output, the error is swallowed,
+# and this line (whose whole purpose is to run before git is trusted) would
+# silently grant zero isolation.
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+  GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE \
+  GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX GIT_SHALLOW_FILE \
+  GIT_COMMON_DIR GIT_TEMPLATE_DIR \
+  GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
+  GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
 
 # --- Caller-repo safety snapshot (fixture 12 git-inits and commits into a
 # fixture dir; see the ceiling below) -----------------------------------------
@@ -600,9 +611,15 @@ fi
 # 12 (or the mktemp fallback) reached outside its own temp repo and corrupted
 # the caller's checkout.
 if [ "$CALLER_IS_GIT" = 1 ]; then
-  caller_head_after="$(git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
-  caller_ref_after="$(git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
-  caller_tracked_after="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
+  # The after-probes must observe the caller's repo the way the caller's own
+  # git does — the same env the before-snapshot saw, before GIT_CONFIG_GLOBAL/
+  # SYSTEM/CEILING_DIRECTORIES were pinned below. Otherwise a pinned-config
+  # view of a tree checked out under the developer's own config (core.autocrlf,
+  # core.fileMode, core.attributesFile all affect `status --porcelain`) can
+  # report phantom modifications that were never there.
+  caller_head_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse HEAD 2>/dev/null || echo NONE)"
+  caller_ref_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo NONE)"
+  caller_tracked_after="$(env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM -u GIT_CEILING_DIRECTORIES git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
   [ "$caller_head_after" = "$CALLER_HEAD_BEFORE" ] \
     && ok "caller-repo safety: HEAD unmoved (no fixture committed into the caller's repo)" \
     || bad "caller-repo safety: HEAD MOVED — a fixture committed into the caller's repo (before=$CALLER_HEAD_BEFORE after=$caller_head_after)"
