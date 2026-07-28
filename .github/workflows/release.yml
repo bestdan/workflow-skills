@@ -57,7 +57,12 @@ jobs:
 
       - name: Install format tools
         if: ${{ steps.bump.outputs.bumped == 'true' }}
-        uses: jdx/mise-action@v2
+        # SHA-pinned, unlike ci.yml's floating @v4: this job runs with
+        # `contents: write` and the checkout above persists RELEASE_TOKEN into
+        # .git/config, so a moved tag here would execute third-party code
+        # alongside a credential that can push to protected main. The CI job has
+        # no such credential, hence no pin there. Bump this alongside ci.yml.
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
         with:
           cache: true
 

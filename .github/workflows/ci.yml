@@ -42,7 +42,7 @@ jobs:
         # trust root moved from this file to that registry. Commit a mise.lock
         # (`mise settings lockfile=true`) if that tradeoff stops being
         # acceptable.
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v4
         with:
           cache: true
 

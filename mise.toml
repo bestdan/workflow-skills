@@ -13,7 +13,8 @@
 #
 # Not everything CI needs lives here: uv comes from astral-sh/setup-uv (a
 # first-party action with its own caching) and the claude CLI from npm (no
-# mise plugin exists). Both are still pinned in .github/workflows/ci.yml.
+# mise plugin exists). Both are installed from .github/workflows/ci.yml — uv is
+# version-pinned there; the claude CLI deliberately is not.
 
 [tools]
 dprint = "0.55.2"

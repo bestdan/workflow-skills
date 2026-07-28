@@ -3,10 +3,11 @@
 ## Local dev loop
 
 The gate's tools — `dprint`, `shellcheck`, `shfmt` — are pinned in `mise.toml`,
-which is the single source CI and your laptop both install from:
+which is the single source CI and your laptop both install from. Get `mise`
+itself from <https://mise.jdx.dev/getting-started.html>, then:
 
 ```sh
-mise install
+mise trust && mise install
 ```
 
 Don't install them any other way. The pins are owned by `bestdan/dotfiles`'
