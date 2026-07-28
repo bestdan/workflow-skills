@@ -329,7 +329,11 @@ Print:
   Unassigned pass's 50-row truncation cap, so note that explicitly whenever
   that cap was hit (e.g. append "(query truncated — actual count may be
   higher)"). Omit the line only when the bucket is empty **and** the query
-  did not truncate.
+  did not truncate. When the bucket is empty **but** the query truncated,
+  the count line above would degenerate to a bare `0` with no projects to
+  name — print this instead: `⚠ out-of-scope coverage incomplete (query
+  truncated) — started-type issues outside configured scope may exist. Use
+  --all or --project <name> to check.`
 - **Per-issue lines** — identifier, the PR resolved (if any) and its merge
   state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
   `left: closed unmerged`, `skipped: no PR found`, or `already complete` for

@@ -91,7 +91,8 @@ skeleton:
   step defines.
 
 Both, on the default (no-flag) scope only, also carry the out-of-scope
-warning line when the handler's "Report" step computed a non-empty bucket —
-started-type issues sitting in team projects not covered by this run. The
-warning changes nothing on its own; it only reports that `--all` or
-`--project <name>` would reach more.
+warning line the handler's "Report" step prints when a non-empty bucket was
+computed — started-type issues sitting in team projects not covered by this
+run — or when truncation prevented proving the bucket empty. The warning
+changes nothing on its own; it only reports that `--all` or `--project
+<name>` would reach more.
