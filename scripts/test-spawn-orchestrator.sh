@@ -5459,11 +5459,28 @@ USEOF
   else
     bad "status-report [in-wake]: reports kept firing DURING the model call" "digests=$srl_digests (only the wake-start emission fired — the [A] cadence hole)"
   fi
-  sleep 1
-  if pgrep -f "report-tick --dir $SRL" >/dev/null 2>&1; then
-    bad "status-report [in-wake]: the reporter loop is reaped when claude exits" "pgrep matched"
-  else
+  # Poll to a deadline rather than sleeping a fixed second. The reap is a
+  # process-GROUP TERM followed by a wait (`kill -TERM -"$rpt"; wait "$rpt"` in
+  # spawn-orchestrator.sh), so a report-tick caught mid gh/status-report call is
+  # still draining when write-launch returns. A flat `sleep 1` races that drain
+  # and fails on a loaded machine for a reason that has nothing to do with the
+  # property under test — observed flapping pass/fail across runs with no code
+  # change. The claim is "eventually reaped", so bound the wait instead: still
+  # matching after 10s is a real leaked reaper, which is what this should catch.
+  srl_reaped=0
+  srl_tries=0
+  while [ "$srl_tries" -lt 50 ]; do
+    if ! pgrep -f "report-tick --dir $SRL" >/dev/null 2>&1; then
+      srl_reaped=1
+      break
+    fi
+    sleep 0.2
+    srl_tries=$((srl_tries + 1))
+  done
+  if [ "$srl_reaped" = 1 ]; then
     ok "status-report [in-wake]: the reporter loop is reaped when claude exits"
+  else
+    bad "status-report [in-wake]: the reporter loop is reaped when claude exits" "pgrep still matched after 10s"
   fi
   # --report-every off must emit NO reporter loop at all.
   "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$SRL" \

@@ -444,6 +444,14 @@ _run_bounded() {
   local secs="$1"
   shift
   local rc=0 job wd
+  # Installed BEFORE the spawns, not after: a TERM landing between `"$@" &` and
+  # the trap would take the default action, and this shell would die leaving the
+  # very children the trap exists to reap. The guards make it safe to fire
+  # before either variable is assigned — an unguarded `kill -TERM -"${job:-0}"`
+  # would signal group 0, i.e. our own caller's group.
+  trap '[ -n "${job:-}" ] && kill -TERM -"$job" 2>/dev/null
+        [ -n "${wd:-}" ] && kill -KILL -"$wd" 2>/dev/null
+        exit 143' TERM INT
   set -m
   "$@" &
   job=$!
@@ -455,7 +463,20 @@ _run_bounded() {
   ) >/dev/null 2>&1 &
   wd=$!
   set +m
+  # The trap above forwards a TERM to both groups instead of letting this shell
+  # die alone in the wait below. The `set -m` is what lets a hung job be
+  # group-killed — but it also puts the job and the watchdog in groups of their
+  # OWN, outside the group of whoever called us. So when the in-wake reporter is
+  # reaped (`kill -TERM -"$rpt"` in the generated wrapper), that TERM reaches
+  # this shell and not them: without the trap this shell dies blocked in `wait`,
+  # the cleanup below never runs, and both children re-parent to init — verified
+  # by watching `ps -o pid,ppid,pgid` across a reap (PPID flips to 1, PGID stays
+  # their own, and the watchdog then lingers its full `secs`+2, 62s by default,
+  # firing gh at a run that has already ended). `exit`, not fall-through: a
+  # handled TERM that returned would leave this process alive past the reaper
+  # that just signalled it.
   wait "$job" 2>/dev/null || rc=$?
+  trap - TERM INT
   # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
   case "$rc" in 143 | 137) rc=124 ;; esac
   kill -KILL -"$wd" 2>/dev/null
