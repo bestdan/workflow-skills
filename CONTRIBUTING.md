@@ -10,10 +10,9 @@ itself from <https://mise.jdx.dev/getting-started.html>, then:
 mise trust && mise install
 ```
 
-Don't install them any other way. The pins are owned by `bestdan/dotfiles`'
-`scripts/update-mise-deps.sh`, which opens a PR here when one moves; a
-separately-installed `dprint` will disagree with the gate the moment the pin
-changes.
+Don't install them any other way — a separately-installed `dprint` will disagree
+with the gate the moment the pin changes. The pins are hand-bumped; edit
+`mise.toml` and run `just check` before pushing.
 
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.

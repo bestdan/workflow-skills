@@ -1,0 +1,25 @@
+version: 2
+
+# Actions only. The tool pins in mise.toml are hand-bumped (see the note there),
+# and Python/npm deps are pinned by their own lockfiles, so neither ecosystem
+# belongs here.
+#
+# The reason this file exists: release.yml pins jdx/mise-action to a full commit
+# SHA (it runs in a contents: write job) while ci.yml tracks the floating major.
+# Nothing but a comment kept those two in step, so they would have drifted
+# silently. Dependabot bumps the SHA and rewrites its `# vX.Y.Z` trailing
+# comment, which makes the divergence self-maintaining.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # One PR a week rather than four. These are all low-risk infrastructure
+      # bumps; reviewing them together is the point.
+      actions:
+        patterns: ["*"]

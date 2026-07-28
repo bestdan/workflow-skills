@@ -48,6 +48,14 @@ jobs:
           # owner is on the branch bypass list. See CONTRIBUTING.md "Versioning".
           # Its pushes re-trigger workflows, hence the [skip ci] + `if:` guards.
           token: ${{ secrets.RELEASE_TOKEN }}
+          # Keep the PAT out of .git/config. Steps below this one run
+          # third-party code (mise-action, the mise binary, and the dprint
+          # binary mise installs) and a persisted credential would be readable
+          # by any of them. The repo is public so the later `git fetch` needs
+          # no auth; only the two pushes do, and the final step re-injects the
+          # token for itself. Rotating this is manual, so containment matters
+          # more than it would for a job-scoped GITHUB_TOKEN.
+          persist-credentials: false
 
       - name: Compute + apply version bump
         id: bump
@@ -58,10 +66,17 @@ jobs:
       - name: Install format tools
         if: ${{ steps.bump.outputs.bumped == 'true' }}
         # SHA-pinned, unlike ci.yml's floating @v4: this job runs with
-        # `contents: write` and the checkout above persists RELEASE_TOKEN into
-        # .git/config, so a moved tag here would execute third-party code
-        # alongside a credential that can push to protected main. The CI job has
-        # no such credential, hence no pin there. Bump this alongside ci.yml.
+        # `contents: write`, and mise-action's github_token input defaults to
+        # the job's GITHUB_TOKEN, so a moved tag would hand third-party code a
+        # write-scoped token. That token can't touch protected main and dies
+        # with the job -- and persist-credentials: false above keeps the far
+        # more valuable RELEASE_TOKEN out of reach entirely -- but the pin is
+        # free, so take it. The CI job is contents: read, hence no pin there.
+        # Bump this alongside ci.yml.
+        #
+        # The pin does not cover what mise then installs: dprint and friends
+        # come from the aqua registry (see the ci.yml note on that trust root)
+        # and run in this same job.
         uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
         with:
           cache: true
@@ -77,11 +92,19 @@ jobs:
       - name: Commit, tag, push, and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The checkout ran with persist-credentials: false, so re-supply the
+          # PAT here -- the last step in the job, after all third-party code.
+          # Same extraheader mechanism actions/checkout uses internally; keeping
+          # it out of the remote URL keeps it out of `ps` and any error output.
+          git config http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${RELEASE_TOKEN}" | base64 | tr -d '\n')"
 
           if [ "${{ steps.bump.outputs.bumped }}" = "true" ]; then
             TAG="v${{ steps.bump.outputs.new_version }}"

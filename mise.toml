@@ -6,10 +6,11 @@
 # Mac got them from mise via bestdan/dotfiles, and the two drifted (CI sat on
 # dprint 0.54.0 for a while after dotfiles moved to 0.55.2).
 #
-# Versions are owned by bestdan/dotfiles' scripts/update-mise-deps.sh, which
-# runs weekly against this repo as well as its own and opens a PR here when a
-# pin moves. Don't hand-bump these without a reason; the updater will just
-# reconcile them on the next Monday run.
+# These are hand-bumped. Automating it would mean a cross-repo token between
+# this public repo and a private dotfiles repo, in one direction or the other,
+# which isn't worth it for three version strings that move a few times a year.
+# When you bump one, run `just check` before pushing — a dprint minor can change
+# markdown rules and dirty the whole tree.
 #
 # Not everything CI needs lives here: uv comes from astral-sh/setup-uv (a
 # first-party action with its own caching) and the claude CLI from npm (no
