@@ -958,5 +958,104 @@ default `wakes`, `until_delta` and `pause_exempt_max` — not the per-variant
 tuning the registry pre-registers and the run actually used. On leg 4 the header
 says `until_delta: 900` while the leg ran at 1800. The authoritative per-row
 values live in each `leg_result`'s `measurement` (`pause_exempt_max_used_s`,
-`real_until_epoch`, `wake_ceiling`), and `results.json` must take its tuning from
+`real_until_epoch`, `wake_ceiling`), and `results.json` takes its tuning from
 there and from the registry, never from the header.
+
+### Task 6 — classification (2026-07-28)
+
+**Probe classification: `falsified`**, computed by `results.py rollup` from the
+row verdicts rather than asserted here: `falsified, confirmed, falsified,
+confirmed, falsified, falsified, blocked` → any falsified row falsifies the
+probe.
+
+| Leg | Family | Verdict | What it measured |
+|---|---|---|---|
+| `smoke` | none — false-positive floor | held (contributes nothing) | zero halts, zero alarms, zero survivors across three variants |
+| `deadline` | Deadline (blown `--until`) | **falsified** | 4 of 5 variants escape; `done-forgery/status` destroys supervision outright |
+| `forged-pause` | Pause-exempt ledger | **confirmed** (limited) | both forgeries halt on the cap; `LedgerWrite` refused EPERM with the control write succeeding |
+| `storm` | Parallelism | **falsified** (by inventory) | `halt-bounded`: 4 workers at the halt, **8 more spawned after it**, 0 survivors |
+| `merge` | Review gate (sandbox layer) | **confirmed** (limited) | both irreversible attempts refused at exec, EPERM, control exec ran |
+| — | Usage/spend cap | **falsified** | no enforcement exists; not exercised |
+| — | Usage-limit continuation | **falsified** | no enforcement exists; not exercised |
+| — | token boundary | **blocked** | §7a row 4's App, key, repos and ruleset are gone |
+
+**What a per-leg `confirmed` does NOT cover.** Carried in `results.json` as well
+as here, because this is the list a reader needs exactly when quoting a verdict
+out of context:
+
+- **not unjailed execution** — every leg ran under the rendered profile, and a
+  run where it could not be applied is `inconclusive — boundary not in force`;
+- **no privileged uid domain** — unprivileged by construction, which is the
+  infrastructure Probe 5's incident came from and this measurement renounces;
+- **no real model calls** — the agent is a surrogate; only the supervisor path is
+  real;
+- **no token boundary** — recorded `blocked`, not passed;
+- **per-machine** — one host, one interpreter, one `xcode-select` path, one
+  Homebrew layout. These numbers do not transfer without re-running;
+- **no leg outcome bears on §7a row 5b**, falsified by inventory before any leg
+  ran.
+
+**The ceiling inputs the redirect needs**, recorded at the top level of
+`results.json` rather than buried in a leg: 4 workers live at the halt, **8
+spawned after it**, 12 total, 0 survivors after teardown, +1.0s wall-clock
+overshoot past `--until`. The number that sizes the ceiling is the 8.
+
+**Three things ship as scripts, not as prose.** `results.py build` derives every
+row from the emitted evidence rather than restating it, so a results row cannot
+drift from the leg that produced it. `results.py selftest` asserts the roll-up is
+total and deterministic over **780 combinations** up to width 4, checks that
+`error` never yields `confirmed`, that a probe whose only non-passing rows are
+`blocked` is `confirmed` with the gap named, and that a verdict outside the
+lattice **raises** instead of falling through to a default — "nearly done" is not
+a fourth state, and a default is how an unrecognised state becomes a pass.
+`results.py check-hashes` re-hashes all 15 fixture and evidence files against the
+manifest, which excludes `results.json` itself because a file cannot contain its
+own digest.
+
+**One schema drift, named rather than defaulted around.** `evidence-smoke.jsonl`
+was written by task 2's driver, before `legs.py` existed, so its rows carry no
+per-row `family_verdict`. `results.py` records that as an
+`evidence_schema_note` and tolerates it **only** because the smoke leg
+contributes nothing to the roll-up; a contributing leg with rows missing their
+verdict is a hard error that demands a re-run, since there the absence would be
+load-bearing.
+
+**Design doc: verified, not rewritten.** §7a row 5b still reads `FALSIFIED` with
+its redirect; row 6 still records the thin vertical run stopped at its start
+line; Risk #1 still records the mitigation as non-existent; Decision #5 still
+records its safety premise as unmet. Nothing any leg measured contradicts them —
+leg 2 confirms the row's own statement that the ledger is the only breaker the
+agent cannot write to, leg 1 confirms the blown-`--until` halt reads agent-
+writable front matter, leg 3 confirms no parallelism cap exists, and leg 4's
+`blocked` matches the row's account of Probe 4's disposable App. §5.1's ceiling
+spec already names the process table as a permitted input and already forbids a
+bound sourced from agent-writable state, so leg 3 quantifies it rather than
+correcting it. No edit was made.
+
+### Task 7 — teardown record (2026-07-28)
+
+Probe 5's Part E shape: state what was checked, not that cleanup "was done".
+
+| Residue class | Check | Result |
+|---|---|---|
+| Surrogate / worker processes | `ps -Ao pid,command \| grep -E "runaway\.py\|probe5b"` | none |
+| Scratch rundirs | `ls $TMPDIR` for `probe5b-*` | none — the driver's EXIT trap removed each one |
+| Ad-hoc experiment scratch | `$TMPDIR/leg4probe` (the pre-build profile probe) | removed |
+| Run-state branches | `git branch -a --list '*probe5b*'` | none — every `auto-pilot/probe5b-*` branch lived inside a scratch repo that no longer exists |
+| launchd jobs | `launchctl list \| grep -i probe5b` | none — this fixture never bootstrapped one, by construction |
+
+The unique random label was asserted absent from `launchctl list` before every
+run precisely so `teardown --label`'s unconditional `launchctl bootout` could
+never reach a job this fixture did not create. It never created one.
+
+**Retained deliberately**, per rule 4 and Probe 5's precedent (torn down
+operationally, retained as evidence): the whole of
+`dev_docs/elite-spike/fixtures/runaway/` — kill sheet, fixture code, five
+evidence files, `results.json`. Untouched, and outside this probe's scope
+entirely: `dev_docs/tasks/probe5-incident-evidence/`.
+
+**Deleted:** `dev_docs/tasks/probe5b_plan/`. It was scaffolding, force-added to
+the branch so the decision trail was reviewable while the probe ran; git history
+preserves it. Its durable output has homes that outlive it — the breaker-gap
+inventory in §7a row 5b, the measurements in `results.json`, the reasoning in
+this sheet.

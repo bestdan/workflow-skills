@@ -52,6 +52,7 @@ FIXTURE_FILES = (
     "incarnation.py",
     "legs.py",
     "parent-death-drill.sh",
+    "results.py",
     "runaway.py",
     "scenarios.py",
 )
