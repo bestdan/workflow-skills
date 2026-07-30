@@ -95,7 +95,6 @@ A card isn't executable until it's been vetted. `/promote-tasks` scans every
 
 - Are all required fields present and is the size valid (1/2/3/5)?
 - Does it have acceptance criteria and _no_ unresolved open questions?
-- Is the priority not `urgent` (urgent is human-only)?
 - **Does the described scope plausibly fit in one PR?** (model judgment, not a
   keyword scan — "migrate one constant" passes, "restructure the auth module"
   doesn't)

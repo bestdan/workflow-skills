@@ -100,12 +100,11 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 **HIGH (→ promote)** requires ALL of:
 
 - `fields.summary` present and non-empty.
-- `fields.priority.name` is **not** the project's top/urgent level (`Highest`, or `P1` under the `P`-scheme — the same mapping `jira.md`'s List section documents). A non-urgent or unset priority passes — Jira priority is coarse metadata here, like gh-issue's optional priority label.
 - `fields.description` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare summary or an "investigate X" description fails with `description missing acceptance criteria`.
 - `fields.description` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
 - **Scope fits one PR (~size 5), judgment not keywords.** Weigh the description's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`); a story-points custom field, if the project exposes one, is a hint. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `priority is urgent`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
 
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands in `refinement_status` for a human to confirm, never silently lost.
 

@@ -3,7 +3,7 @@ title: Reconsider treating urgent priority as eligible for auto-promotion
 priority: medium
 size: 2
 impact: 2
-status: new
+status: done
 created: 2026-06-07
 source_branch: claude/refine-urgent-priority-promotion
 related_files:

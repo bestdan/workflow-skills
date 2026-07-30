@@ -133,7 +133,7 @@ This single scale governs the promotion confidence check (below), the `/do-tasks
 
 When a command picks the "next" task or orders a list, it ranks tasks by, in order:
 
-1. **`priority`** — `urgent` > `high` > `medium` > `low` (urgent is human-only, so the auto-execute path never selects it, but it still sorts first in `/list-tasks`).
+1. **`priority`** — `urgent` > `high` > `medium` > `low` (urgent both sorts first in `/list-tasks` and is auto-promotable/auto-executable like any other tier — see the Confidence check's urgent-eligibility decision).
 2. **Value/effort score** — `impact / size`, **descending** (`size` is effort, `impact` is value; both Fibonacci `1`/`2`/`3`/`5`). A task with no `impact` set, or a missing/invalid `size` (e.g. an unpromoted card that hasn't passed validation), has no score and ranks **last within its priority tier** — never dropped.
 3. **Age** — oldest `created` first.
 
@@ -184,7 +184,7 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 | Field                      | Required | Description                                                                                                                                                                                                                                |
 | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `title`                    | yes      | Imperative description, < 80 chars                                                                                                                                                                                                         |
-| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                                                                                                                                                                 |
+| `priority`                 | yes      | `low` / `medium` / `high` / `urgent`                                                                                                                                                                                                       |
 | `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                                                                                                                                               |
 | `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                                                                                                                                            |
 | `impact`                   | no       | Fibonacci value estimate: `1` / `2` / `3` / `5`, mirroring `size`. Used for value/effort ranking. See **Task size**                                                                                                                        |
@@ -259,10 +259,35 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 ### Confidence check (used by `/promote-tasks`)
 
-- **HIGH** (→ `ready`): all required fields present; `size` is one of `1` / `2` / `3` / `5`; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; and the promoter **judges** the described scope to plausibly fit within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the `## Task` steps, and `related_files` breadth. This last gate is model judgment, not a keyword scan: a title merely containing "migrate"/"refactor" does not fail it, while one implying multi-file rework that exceeds size `5` does (reason: `scope exceeds size 5 — split into sub-tasks`).
+**Decision: `urgent` is auto-promotable.** `priority: urgent` is scored exactly
+like `high`/`medium`/`low` — there is no `priority ≠ urgent` HIGH condition.
+Reading `urgent` as "escalate to a human" made the highest-priority tier the
+_only_ one that could never be picked up autonomously, which is backwards: an
+equally valid reading is "do this fastest, by whatever capacity is available,
+including an agent." The one real tension — auto-promoting urgent makes it
+eligible for **unattended** auto-execution — is already covered by the
+existing per-task `human_approval_requested: true` HIGH check
+(`human_approval_not_requested`): a task that genuinely needs human eyes is
+held by that escape hatch regardless of priority, so no separate urgent-only
+gate is needed. **Rejected alternative:** keep urgent human-only (status quo)
+— rejected because it inverted the priority signal (highest priority ⇒ least
+autonomous), for no benefit `human_approval_requested` didn't already provide.
+
+**Backfill (before scoring).** The promoter backfills two fields on every `status: new` candidate **except one held on an unresolved blocker**, which is left entirely untouched (see the held-card rule below). Otherwise it is unconditional — even a candidate that will fail some other check and land in `needs_refinement` anyway is backfilled, so the human has less to redo:
+
+- `priority` missing → defaulted to `medium`. A flat static default is correct here: `priority` only orders work, it never gates anything. `urgent` is never auto-set.
+- `size` missing or not one of `1` / `2` / `3` / `5` → **estimated** by the promoter (Fibonacci `1`/`2`/`3`/`5`) from the card body and `related_files` breadth. This is deliberately not a static default: `size` feeds the one-task-one-PR ceiling and `auto_execute_max_size` routing downstream, so a blind constant could misroute work. Producing the number is the same judgment the scope-fit check below already requires — deciding whether the scope fits size `5` — backfill just records it. If the honest estimate would exceed `5`, no value is written; the scope-fit check below scores LOW instead (reason: `scope exceeds size 5 — split into sub-tasks`).
+
+Both backfills are recorded with provenance a human can cheaply correct: a `# promoter:` frontmatter comment on the file path (`# promoter: priority defaulted to medium`, `# promoter: size auto-estimated`), or a one-line issue comment on the Linear path. `dry-run` reports the intended backfills and writes nothing.
+
+**An auto-estimated `size` is fully trusted downstream**, exactly like a human-set one: it is eligible for `auto_execute_max_size` headless batch auto-execution, with no reserve-only carve-out for auto-estimated cards. The auto-execute path still ends in a PR a human reviews, and a mis-estimated task beats a permanently blocked one.
+
+- **HIGH** (→ `ready`): all required fields present (after backfill); `size` is one of `1` / `2` / `3` / `5` (after backfill); Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; and the promoter **judges** the described scope to plausibly fit within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the `## Task` steps, and `related_files` breadth. This last gate is model judgment, not a keyword scan: a title merely containing "migrate"/"refactor" does not fail it, while one implying multi-file rework that exceeds size `5` does (reason: `scope exceeds size 5 — split into sub-tasks`).
 - **LOW** (→ `needs_refinement`, set `human_approval_requested: true`): any of the above fails, or `human_approval_requested` is already true.
 
 The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
+
+On the file path, `scripts/task-scan.py` computes `promote_gate` from the file **before** backfill and is not re-run after — so the promoter must re-evaluate `required_fields_present` and `size_valid` itself against the backfilled values rather than trusting `promote_gate.high` as-is; every other check in `promote_gate` is unaffected by backfill and stays trusted (see `commands/promote-tasks.md` step 2).
 
 A card with an unresolved `is_blocked_by` entry (target card present and not `done`) is **held** instead of scored: it is left in `status: new`, not promoted to `ready` and not demoted to `needs_refinement`, so it stays in the scanned pool and auto-promotes once the blocker clears. Demoting to `needs_refinement` is deliberately avoided — the promoter only scans `status: new`, so a demoted card would never be re-checked.
 

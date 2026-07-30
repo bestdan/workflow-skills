@@ -24,10 +24,10 @@ canonical source; this script does not invent variants):
   (parent: <epic-slug>, or living in the epic's plan directory tree,
   recursively).
 - expired iff expires < today AND status is non-terminal (status != done).
-- Promote HIGH gate: the 7 *deterministic* checks from SKILL.md's confidence
-  check / promote-tasks.md step 2. The 8th check ("scope plausibly fits
+- Promote HIGH gate: the 6 *deterministic* checks from SKILL.md's confidence
+  check / promote-tasks.md step 2. The 7th check ("scope plausibly fits
   size 5") is NL judgment and stays in prose — NOT implemented here; a
-  human/agent still makes that call (see `high_gate_check_8_scope_fits_size_5`
+  human/agent still makes that call (see `high_gate_check_7_scope_fits_size_5`
   below).
 
 Usage:
@@ -159,21 +159,21 @@ def has_open_questions_or_tbd_content(sections: dict[str, list[str]]) -> bool:
     return False
 
 
-def high_gate_check_8_scope_fits_size_5() -> None:
+def high_gate_check_7_scope_fits_size_5() -> None:
     """Deliberately unimplemented. Per SKILL.md's confidence check, whether
     the described scope plausibly fits within size 5 (~300 lines / ~5 files)
     is model judgment weighing the stated size, the ## Task steps, and
     related_files breadth — not a keyword scan. /promote-tasks still makes
-    this call in prose; this script only reports the 7 deterministic checks
-    and leaves a `note` field for the caller to apply check 8 itself."""
-    raise NotImplementedError("check 8 is NL judgment; kept in prose, not here")
+    this call in prose; this script only reports the 6 deterministic checks
+    and leaves a `note` field for the caller to apply check 7 itself."""
+    raise NotImplementedError("check 7 is NL judgment; kept in prose, not here")
 
 
 def promote_gate(data: dict, body: str) -> dict:
-    """The 7 deterministic HIGH checks from SKILL.md's confidence check /
+    """The 6 deterministic HIGH checks from SKILL.md's confidence check /
     promote-tasks.md step 2. Returns {checks: {name: bool}, high: bool,
     reasons: [str], note: str}. `high` reflects only the deterministic
-    checks — the 8th (scope) is not evaluated here."""
+    checks — the 7th (scope) is not evaluated here."""
     sections = body_sections(body)
     checks: dict[str, bool] = {}
     reasons: list[str] = []
@@ -210,10 +210,6 @@ def promote_gate(data: dict, body: str) -> dict:
     if not checks["no_open_questions_or_tbd"]:
         reasons.append("## Open Questions or ## TBD has content")
 
-    checks["priority_not_urgent"] = data.get("priority") != "urgent"
-    if not checks["priority_not_urgent"]:
-        reasons.append("priority is urgent")
-
     har = data.get("human_approval_requested")
     checks["human_approval_not_requested"] = har in (None, False)
     if not checks["human_approval_not_requested"]:
@@ -224,7 +220,7 @@ def promote_gate(data: dict, body: str) -> dict:
         "high": all(checks.values()),
         "reasons": reasons,
         "note": (
-            "deterministic checks only — check 8 (scope plausibly fits size 5) "
+            "deterministic checks only — check 7 (scope plausibly fits size 5) "
             "is NL judgment and is NOT evaluated here; the caller still makes "
             "that call"
         ),

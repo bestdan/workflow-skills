@@ -80,12 +80,11 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 **HIGH (→ promote)** requires ALL of:
 
 - `title` present and non-empty.
-- **Not** labeled `priority:urgent` (the gh analogue of Linear `priority` urgent, which fails). A _missing_ priority label does **not** fail — unlike Linear's required `priority`, GitHub priority is optional metadata expressed by an opt-in `priority:<urgent|high|medium|low>` label.
 - `body` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare title or an "investigate X" body fails with `body missing acceptance criteria`.
 - `body` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
 - **Scope fits one PR (~size 5), judgment not keywords.** Weigh the body's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`); a `size:<n>` label, if the repo uses one, is a hint. Because gh issues have no estimate field, the file path's "`size` is one of 1/2/3/5" check folds into this judgment. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `body missing acceptance criteria`, `priority is urgent`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `body missing acceptance criteria`, `unresolved open questions`).
 
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands labeled `human-approval-requested` for a human to confirm, never silently lost.
 
