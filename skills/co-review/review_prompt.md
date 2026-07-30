@@ -19,5 +19,15 @@ For each finding, give:
 - the issue, stated concisely
 - a suggested fix
 
-Output a plain list of findings, nothing else. You are read-only: do not modify
-files, write anything, or run commands — emit only the review.
+Output a plain list of findings, followed by the terminal verdict line below,
+and nothing else. You are read-only: do not modify files, write anything, or
+run commands — emit only the review and the verdict.
+
+Always return your findings on stdout — never rely on a file as your only
+report channel. Do not stop after a preamble, a progress update, or a tool
+result with no findings text. The verdict line below is not itself a finding
+— it is required even when you have none (`PASS`) — so end your output with
+exactly one terminal line, and nothing after it:
+
+- `REVIEW_COMPLETE: PASS` — you reviewed the change and have no findings.
+- `REVIEW_COMPLETE: FINDINGS` — you reviewed the change and are reporting findings above.

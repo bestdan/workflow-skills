@@ -29,7 +29,9 @@ Per packet:
    root is <dir>; edit only files under that directory. Implement the task below,
    run the verification command if your tool permissions allow it, and finish
    with a short report listing changed files, verification status, and any
-   environmental failures separately from content failures.
+   environmental failures separately from content failures. End your report with
+   exactly one terminal line: `PACKET_COMPLETE: DONE` if you finished the task,
+   or `PACKET_COMPLETE: PARTIAL` if you stopped short of it.
    ```
 3. **Invoke** the coder with cwd `<dir>` (invocations below). **Capture both
    stdout and stderr, and read only the final message / tail** — coders stream
@@ -45,6 +47,18 @@ Per packet:
    run the main-checkout containment check (SKILL.md step 5) — a CLI coder
    (notably agy) can land correct edits in the user's main checkout instead of
    its worktree. Empty diff **and** clean main checkout = failed packet.
+   The coder's own report is never the success signal — the diff plus the
+   verify command (step 5 below) are — but a report that stops after a
+   preamble or a tool result, with no terminal `PACKET_COMPLETE: DONE` /
+   `PACKET_COMPLETE: PARTIAL` line (per the initial prompt in step 2), is
+   itself a signal the coder cut off mid-task: note it alongside the
+   verification result rather than reading silence as a clean finish. An
+   explicit `PACKET_COMPLETE: PARTIAL` is that same signal stated outright:
+   record the packet as incomplete even if the step-5 verify passes — a green
+   check on half the task is exactly what PARTIAL warns about — and route it
+   through the content-failure branch of the retry protocol (SKILL.md step 5):
+   back to the **same** coder once with the unfinished remainder appended to
+   the spec.
 5. **Verify** in `<dir>` per the packet spec, then **commit the packet's
    changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
    commit — so the branch actually carries the work that SKILL.md step 6
