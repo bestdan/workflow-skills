@@ -54,49 +54,61 @@ Also set aside (do **not** score) any candidate that is **blocked** — a backlo
 
 ### 6. Score each candidate
 
-For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter:
+**Backfill missing estimates first.** Before scoring, backfill two fields on every remaining candidate — unconditionally, even one that will fail some other check and get tagged `human-approval-requested` anyway — mirroring the file path's backfill (`commands/promote-tasks.md` step 2):
+
+- `priority` is `none` (`0`) → set to `medium` (Linear priority `3`). A flat static default is correct here: priority only orders work, it never gates anything. Never auto-set `urgent` (`1`).
+- `estimate` is unset or not one of `1` / `2` / `3` / `5` → **estimate it** from the issue `description` (Fibonacci `1`/`2`/`3`/`5` — `estimate` is the same scale as the file path's `size`, see `linear-common.md`). This is deliberately not a static default: `estimate` feeds the same size-driven routing `size` does on the file path, so a blind constant could misroute; producing the number is the same judgment the scope-fit check below already requires, backfill just records it. If the honest estimate would exceed `5`, do not write a bogus `5` — leave `estimate` unset and let the scope-fit check below score LOW with reason `scope exceeds estimate 5 — split into sub-issues`.
+
+Backfilled values are written in step 7's `save_issue` call alongside the state/label transition (not a separate write), with a one-line issue comment noting which field(s) the promoter auto-set so a human can cheaply correct a bad guess. `dry-run` reports the intended backfills without writing them. An auto-estimated `estimate` is fully trusted downstream exactly like a human-set one — see the file path's equivalent note in `skills/task/SKILL.md`'s Confidence check section.
+
+Then, for each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter, **using the backfilled `priority`/`estimate` values** from above:
 
 **HIGH (→ promote)** requires ALL of:
 
 - `title` present and non-empty.
-- `priority` is set and is **not** `urgent` (Linear `priority` `1`). Linear's `none` (`0`) counts as "no priority set" → fails this check.
-- `estimate` is set and is one of `1` / `2` / `3` / `5` (Linear's `estimate` is the same Fibonacci scale as our task `size` — see `linear-common.md`). An unset or out-of-scale estimate fails (the analogue of a missing/invalid `size`).
+- `priority` is set (Linear `priority` ≠ `0`). Linear's `none` (`0`) counts as "no priority set", but backfill above always sets it to `medium` first, so this check never fails in practice — it stays as a defensive check against a backfill bug rather than a live gate. `urgent` (`1`) is not excluded — it passes this check like any other priority.
+- `estimate` is set and is one of `1` / `2` / `3` / `5` (Linear's `estimate` is the same Fibonacci scale as our task `size` — see `linear-common.md`). An unset or out-of-scale estimate fails (the analogue of a missing/invalid `size`) — this only still fails when the honest backfill estimate exceeded `5` and was left unset.
 - `description` is non-empty and contains acceptance-style content — a concrete, checkable outcome (the analogue of the file path's `## Acceptance Criteria` requirement). A bare title with an empty or "investigate X" description fails.
 - `description` has no unresolved open-questions / TBD content.
 - **Scope fits estimate 5 (judgment, not keywords).** Assess whether the described scope plausibly fits within estimate `5` (~300 lines / ~5 files — see **Task size** in `skills/task/SKILL.md`), weighing the stated `estimate` against the breadth of the description. A word like "migrate" or "refactor" is not itself disqualifying; a description implying multi-module rework is. If the scope clearly exceeds `5`, score LOW with reason `scope exceeds estimate 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split on the Linear path — convert the issue into a parent and create the components as child issues.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `no estimate set`, `description missing acceptance criteria`, `priority is urgent`).
+**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `no estimate set`, `description missing acceptance criteria`, `no priority set`).
 
 As on the file path, this scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands tagged `human-approval-requested` for a human to confirm, never silently lost.
 
 ### 7. Apply
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** calling `save_issue`.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below) and exit **without** calling `save_issue`.
 
-Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`:
+Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`, including any backfilled `priority`/`estimate` from step 6 regardless of HIGH/LOW (a LOW-scored issue still gets its backfilled fields saved, so the human has less to fix):
 
-- **HIGH:** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering).
-- **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`. Optionally call `<linear-mcp>__save_comment` with `issueId` = candidate `id` (the `save_comment` field is named `issueId`, not `id` — same as `linear-claim.md`) and `body` = a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment.
+- **HIGH:** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering); `priority`/`estimate` = the backfilled value(s) from step 6, if any.
+- **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`; `priority`/`estimate` = the backfilled value(s) from step 6, if any. Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` (the `save_comment` field is named `issueId`, not `id` — same as `linear-claim.md`) and `body` = a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment; if any field was backfilled, note it in the same comment (e.g. `promoter auto-set priority to Medium, estimate to 2`).
+
+If a candidate had no other failed check but **did** get a backfill, still call `save_comment` to note what was auto-set (there is no failed-check reason in that case, just the backfill note) — mirrors the file path's provenance comment being appended even when the card is otherwise HIGH.
 
 Never move an issue to a `completed`- or `canceled`-type state, and never touch a non-`backlog` issue.
 
 ### 8. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
 
 ```
 scope: project Payments revamp
 Promoted 4 of 7 candidates:
   ready (3):
-    - PRE-12  Fix broken import
+    - PRE-12  Fix broken import  (backfilled: estimate)
     - PRE-15  Bump eslint config
-    - PRE-18  Remove stale alias
+    - PRE-18  Remove stale alias  (backfilled: priority, estimate)
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
   skipped (3):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
     - PRE-11  (blocked)
+backfilled (2):
+  - PRE-12  (estimate)
+  - PRE-18  (priority, estimate)
 ```
 
 Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 5 if it applied.

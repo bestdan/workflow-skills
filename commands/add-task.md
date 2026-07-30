@@ -95,7 +95,7 @@ Once the user confirms, you hold a normalized **drafted task** that every handle
 | --------------- | -------------------------------------------------------------- |
 | `title`         | Imperative, < 80 chars                                         |
 | `body`          | The Context / Task / Acceptance Criteria markdown              |
-| `priority`      | `low` / `medium` / `high` / `urgent` (urgent = human-only)     |
+| `priority`      | `low` / `medium` / `high` / `urgent`                           |
 | `size`          | Fibonacci story points — `1` / `2` / `3` / `5` (`> 5` ⇒ split) |
 | `tags`          | List of freeform tags                                          |
 | `slug`          | Kebab-case slug from step 2                                    |
