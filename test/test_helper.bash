@@ -65,3 +65,15 @@ write_fixture() {
   shift
   printf '%s' "$*" >"$path"
 }
+
+# assert_doc_contains <path> <snippet>
+# Asserts a reference doc still contains an exact snippet. These pin down
+# wording and location in skills/*.md, so they break on doc reorganization or
+# rewording by design — that's the point, it catches drift. When a doc moves
+# or gets reworded, `grep -rn assert_doc_contains test/` finds every assertion
+# tied to it in one pass, instead of chasing bare `grep -F` calls.
+assert_doc_contains() {
+  local path="$1" snippet="$2"
+  run grep -F -- "$snippet" "$path"
+  assert_success
+}

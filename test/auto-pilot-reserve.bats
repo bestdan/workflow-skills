@@ -13,36 +13,21 @@ load test_helper
   assert_success
   assert_output "86 $reset"
 
-  run grep -F 'headroom = 100 - percent' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F 'when `headroom < reserve`, do not start' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F 'reserve = max(fixed_floor, observed_worst_task_delta * safety)' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F 'are **N = 5** such deltas, set `reserve = fixed_floor`' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F '`usage_deltas` is the rolling, capped (20-entry) record' "$REPO_ROOT/skills/auto-pilot/references/run-state.md"
-  assert_success
-  run grep -F '**re-verify** and repeated **co-review**' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F -- '--run-state <RUN.md>' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'step 2, **Claim**' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'step 3, **Verify**' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'step 5, **Co-review**' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'every **re-verify** and every repeated' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'This is an expected auto-pilot pause, **not a delivery' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
-  run grep -F 'paused_until = reset_epoch + grace' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F 'paused_until = now + 3600' "$REPO_ROOT/skills/auto-pilot/references/run-budget.md"
-  assert_success
-  run grep -F '`pause_observed_at` and `pause_source`' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'headroom = 100 - percent'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'when `headroom < reserve`, do not start'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'reserve = max(fixed_floor, observed_worst_task_delta * safety)'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'are **N = 5** such deltas, set `reserve = fixed_floor`'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" '`usage_deltas` is the rolling, capped (20-entry) record'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" '**re-verify** and repeated **co-review**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '--run-state <RUN.md>'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 2, **Claim**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 3, **Verify**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 5, **Co-review**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'every **re-verify** and every repeated'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'This is an expected auto-pilot pause, **not a delivery'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'paused_until = reset_epoch + grace'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'paused_until = now + 3600'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '`pause_observed_at` and `pause_source`'
 }
 
 @test "reserve instrumentation discards a delta across a reset window" {
@@ -60,8 +45,6 @@ load test_helper
   assert_success
   assert_output "4 $second_reset"
 
-  run grep -F '**discard the cross-window delta**' "$REPO_ROOT/skills/auto-pilot/references/run-state.md"
-  assert_success
-  run grep -F 'Fewer than five valid recorded in-window deltas means the effective' "$REPO_ROOT/skills/deliver-task/SKILL.md"
-  assert_success
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" '**discard the cross-window delta**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'Fewer than five valid recorded in-window deltas means the effective'
 }
