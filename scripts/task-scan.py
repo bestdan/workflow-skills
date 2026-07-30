@@ -27,7 +27,7 @@ canonical source; this script does not invent variants):
 - Promote HIGH gate: the 6 *deterministic* checks from SKILL.md's confidence
   check / promote-tasks.md step 2. The 7th check ("scope plausibly fits
   size 5") is NL judgment and stays in prose — NOT implemented here; a
-  human/agent still makes that call (see `high_gate_check_8_scope_fits_size_5`
+  human/agent still makes that call (see `high_gate_check_7_scope_fits_size_5`
   below).
 
 Usage:
@@ -159,7 +159,7 @@ def has_open_questions_or_tbd_content(sections: dict[str, list[str]]) -> bool:
     return False
 
 
-def high_gate_check_8_scope_fits_size_5() -> None:
+def high_gate_check_7_scope_fits_size_5() -> None:
     """Deliberately unimplemented. Per SKILL.md's confidence check, whether
     the described scope plausibly fits within size 5 (~300 lines / ~5 files)
     is model judgment weighing the stated size, the ## Task steps, and

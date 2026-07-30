@@ -273,7 +273,7 @@ gate is needed. **Rejected alternative:** keep urgent human-only (status quo)
 — rejected because it inverted the priority signal (highest priority ⇒ least
 autonomous), for no benefit `human_approval_requested` didn't already provide.
 
-**Backfill (before scoring).** The promoter backfills two fields on **every** `status: new` candidate, unconditionally — even one that will fail some other check and land in `needs_refinement` anyway, so the human has less to redo:
+**Backfill (before scoring).** The promoter backfills two fields on every `status: new` candidate **except one held on an unresolved blocker**, which is left entirely untouched (see the held-card rule below). Otherwise it is unconditional — even a candidate that will fail some other check and land in `needs_refinement` anyway is backfilled, so the human has less to redo:
 
 - `priority` missing → defaulted to `medium`. A flat static default is correct here: `priority` only orders work, it never gates anything. `urgent` is never auto-set.
 - `size` missing or not one of `1` / `2` / `3` / `5` → **estimated** by the promoter (Fibonacci `1`/`2`/`3`/`5`) from the card body and `related_files` breadth. This is deliberately not a static default: `size` feeds the one-task-one-PR ceiling and `auto_execute_max_size` routing downstream, so a blind constant could misroute work. Producing the number is the same judgment the scope-fit check below already requires — deciding whether the scope fits size `5` — backfill just records it. If the honest estimate would exceed `5`, no value is written; the scope-fit check below scores LOW instead (reason: `scope exceeds size 5 — split into sub-tasks`).
