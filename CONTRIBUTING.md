@@ -14,6 +14,14 @@ Don't install them any other way — a separately-installed `dprint` will disagr
 with the gate the moment the pin changes. The pins are hand-bumped; edit
 `mise.toml` and run `just check` before pushing.
 
+The Bats suite lives in git submodules under `test/vendor/`, so a clone made
+without `--recursive` fails the gate's shell steps with `bats submodules
+missing`. CI checks out recursively; on your laptop, run:
+
+```sh
+git submodule update --init --recursive
+```
+
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 
