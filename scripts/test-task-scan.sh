@@ -358,11 +358,11 @@ out7="$("$SCRIPT" "$DIR7")" || bad "promote fixture: script exited non-zero"
 high_gate="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="high") | .promote_gate.high')"
 low_gate="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="low-tbd") | .promote_gate.high')"
 urgent_gate="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="urgent") | .promote_gate.high')"
-urgent_check="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="urgent") | .promote_gate.checks.priority_not_urgent')"
+urgent_check="$(printf '%s' "$out7" | jq -r '.cards.new[] | select(.slug=="urgent") | .promote_gate.checks | has("priority_not_urgent")')"
 assert_eq "promote gate: clean card scores HIGH on deterministic checks" "true" "$high_gate"
 assert_eq "promote gate: card with TBD content scores not-HIGH" "false" "$low_gate"
 assert_eq "promote gate: urgent card scores HIGH (urgent is auto-promotable)" "true" "$urgent_gate"
-assert_eq "promote gate: priority_not_urgent check no longer exists" "null" "$urgent_check"
+assert_eq "promote gate: priority_not_urgent check no longer exists" "false" "$urgent_check"
 
 # --- Fixture 8: a present blocker with no `status` is unresolved -------------
 # (absent OR status: done satisfies a blocker; a present card missing its
