@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.65.1] - 2026-07-30
+
+### Fixes
+
+- drop devin --sandbox, which now fails the ACP handshake (#274) (db728ea)
+
 ## [1.65.0] - 2026-07-30
 
 ### Features
