@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.65.0] - 2026-07-30
+
+### Features
+
+- stop blocking promotion on missing or urgent estimates (#272) (632e46a)
+
 ## [1.64.10] - 2026-07-28
 
 ### Fixes
