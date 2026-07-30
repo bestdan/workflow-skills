@@ -52,7 +52,13 @@ Per packet:
    preamble or a tool result, with no terminal `PACKET_COMPLETE: DONE` /
    `PACKET_COMPLETE: PARTIAL` line (per the initial prompt in step 2), is
    itself a signal the coder cut off mid-task: note it alongside the
-   verification result rather than reading silence as a clean finish.
+   verification result rather than reading silence as a clean finish. An
+   explicit `PACKET_COMPLETE: PARTIAL` is that same signal stated outright:
+   record the packet as incomplete even if the step-5 verify passes — a green
+   check on half the task is exactly what PARTIAL warns about — and route it
+   through the content-failure branch of the retry protocol (SKILL.md step 5):
+   back to the **same** coder once with the unfinished remainder appended to
+   the spec.
 5. **Verify** in `<dir>` per the packet spec, then **commit the packet's
    changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
    commit — so the branch actually carries the work that SKILL.md step 6
