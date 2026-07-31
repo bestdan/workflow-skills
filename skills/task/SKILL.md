@@ -41,12 +41,13 @@ Each claims on a primitive that can elect one winner among sessions authenticate
 merge is the only completion signal.
 
 The primitive differs per handler, and reporting a claim means reporting which one held:
-jira and gh-issue push the `task/<KEY>` ref (a non-forced ref creation is a server-side
-compare-and-swap — see `commands/handlers/claim-lock.md`), and linear runs a
+jira and gh-issue create the `task/<KEY>` ref through GitHub's create-ref API, which
+returns 422 rather than updating a ref that exists (a plain `git push` is **not** the
+lock — see `commands/handlers/claim-lock.md`), and linear runs a
 first-writer-wins election on a comment log carrying a unique per-session token. An
 assignee re-read is **not** a lock on any of them: it confirms only that the final
 assignee is your own account, which is identical for two sessions on the same account.
-In a branch-pinned environment that cannot push `task/<KEY>`, jira and gh-issue degrade
+In a branch-pinned environment that cannot create `task/<KEY>`, jira and gh-issue degrade
 to the same comment-token election and say so explicitly — never report an atomic claim
 the run did not make.
 

@@ -8,7 +8,7 @@ Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` i
 name the jira handler uses, because it is also the claim lock (see
 `claim-lock.md`). This path deliberately no longer uses `gh issue develop`: its
 generated branch name is not deterministic, so it cannot be probed before the claim,
-and the create it performs is not a rejection this flow can read as a lost race. The
+and the create it performs yields no rejection this flow can read as a lost race. The
 GitHub-native issue↔branch link is the cost; `Closes #<n>` in the PR body and the
 `[#<n>]` title prefix carry the association instead.
 
@@ -28,7 +28,7 @@ normal run — passing both is an error: stop and ask which was meant.
 - **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
   candidates, pre-flight, judge, then acquire the `task/<n>` claim lock, assign `@me`,
   add `auto-claimed`, remove `auto-eligible`), then **stop**: no execution, no PR. The
-  pushed `task/<n>` lock ref plus the assigned `auto-claimed` issue is the reservation
+  created `task/<n>` lock ref plus the assigned `auto-claimed` issue is the reservation
   marker — do **not** swap to
   `needs-review`. `--claim-only` is the one execute-family action safe to batch, so
   `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
@@ -40,7 +40,7 @@ normal run — passing both is an error: stop and ask which was meant.
   one login) **and** it carries `auto-claimed`. Otherwise **stop and explain** —
   executing an unclaimed issue reopens the race the claim step closes. When the guard
   passes, **check out the existing claim branch** rather than branching fresh from
-  `HEAD` — the claim pushed the handler's deterministic `task/<n>`, so there is nothing
+  `HEAD` — the claim created the handler's deterministic `task/<n>`, so there is nothing
   to look up:
 
   ```bash
@@ -48,7 +48,7 @@ normal run — passing both is an error: stop and ask which was meant.
   ```
 
   If that branch exists neither locally nor on the remote — the claim ran on the
-  degraded comment-election path, which pushes no ref (see `claim-lock.md`) — create it
+  degraded comment-election path, which creates no ref (see `claim-lock.md`) — create it
   now: `git switch -c "task/<n>" "origin/<base>"` (`<base>` defaults to the repo's
   default branch). Then run "Branch + execute" (skipping branch creation), "PR", and
   "Move to review" — without re-claiming.
@@ -142,15 +142,15 @@ Keeping the order as pre-flight → judge → claim is acceptable here because t
 The claim locks on an **atomic primitive** — pushing the `task/<n>` ref, a server-side compare-and-swap — because GitHub exposes no compare-and-swap on issue fields and a same-account racer reads back the identical `assignees`. Mechanics, the branch-pinned fallback, and the release rule live in **`commands/handlers/claim-lock.md`**; read it and follow it here rather than re-deriving them. The assignee and `auto-claimed` label below stay on as the **human-visible** claim marker — they no longer decide the race.
 
 1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or carries `auto-claimed`, **another session beat you** — return `race`, fall back to the next candidate. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it).
-2. **Acquire the lock** — `claim-lock.md` → "Primitive: non-forced ref creation", with `<base>` the repo's default branch (or `--base` when `/do-tasks` passed one):
+2. **Acquire the lock** — `claim-lock.md` → "Primitive: create-only ref creation via the GitHub API", with `<base>` the repo's default branch (or `--base` when `/do-tasks` passed one), and `<repo>` = `gh-issue.repo` if set, else the current repo:
 
    ```bash
    git fetch origin
-   git switch -c "task/<n>" "origin/<base>"
-   git push origin "task/<n>"   # no --force: creation is the CAS
+   base_sha=$(git rev-parse "origin/<base>")
+   gh api --method POST "repos/<repo>/git/refs" -f "ref=refs/heads/task/<n>" -f "sha=$base_sha"
    ```
 
-   Rejected because the ref exists → **you lost**: `git switch -` and `git branch -D "task/<n>"`, leave the issue's assignee and labels untouched, return `race`, and fall back to the next candidate. Failed for a permission / branch-pinned reason → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason. Only a successful acquire proceeds to step 3.
+   **HTTP 422 `Reference already exists`** → **you lost**: leave the issue's assignee and labels untouched, return `race`, and fall back to the next candidate. **Any other failure** (403/404, protected-ref ruleset, branch-pinned environment) → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason. Only **HTTP 201** proceeds to step 3 — check the branch out first (`git fetch origin "task/<n>" && git switch -c "task/<n>" FETCH_HEAD`). Do **not** substitute `git push origin task/<n>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
 3. **Mark it on the board** — assign yourself, flip the status label:
 
    ```bash

@@ -24,53 +24,76 @@ are reading for a value that is identical for both. The lock therefore has to si
 primitive that _is_ atomic. Assignee, labels, and status stay on as the **human-visible**
 claim marker; they no longer decide the race.
 
-## Primitive: non-forced ref creation (the default)
+The same trap applies to any "atomic" primitive whose success is indistinguishable from
+a no-op — see the plain-`git push` warning below, which measured exactly that.
 
-`git push origin <local>:refs/heads/task/<KEY>` **without** `--force` is a server-side
-compare-and-swap: the push is rejected if the ref already exists, so exactly one pusher
-wins regardless of which account each session is authenticated as. Both handlers already
-probe `git ls-remote --heads origin task/<KEY>` in pre-flight; pushing at **claim** time
-(rather than at PR time, ~an hour of work later) is what turns that read into a real
-lock instead of a TOCTOU probe spanning the whole execution.
+## Primitive: create-only ref creation via the GitHub API (the default)
+
+`POST /repos/<owner>/<repo>/git/refs` **creates** a ref or fails — it never updates one.
+A second call for a ref that exists returns **HTTP 422 `Reference already exists`**
+regardless of the sha it names, so exactly one caller wins no matter which account each
+session is authenticated as. Both handlers already probe
+`git ls-remote --heads origin task/<KEY>` in pre-flight; creating the ref at **claim**
+time (rather than at PR time, ~an hour of work later) is what turns that read into a
+real lock instead of a TOCTOU probe spanning the whole execution.
+
+> **Do not "simplify" this to `git push origin task/<KEY>`.** Measured against a real
+> GitHub remote: two racers both cut `task/<KEY>` from the same `origin/<base>` tip, so
+> they push the **identical sha** — the loser's push reports `Everything up-to-date` and
+> **exits 0**, and both sessions conclude they won. That is the same both-confirm bug
+> this file exists to fix, one layer down. `--force-with-lease=refs/heads/task/<KEY>:`
+> (create-only lease) does **not** rescue it either: git short-circuits on
+> nothing-to-update before evaluating the lease, and also exits 0. A plain push is a
+> reliable CAS only when the two racers push **different** commits, which two sessions
+> branching from one base do not.
 
 **Acquire** — run this as the _first_ mutating step of "Claim the issue", before any
-assignee/status/label write:
+assignee/status/label write. `<repo>` is the handler's configured repo
+(`gh-issue.repo`) or, when unset, the current one (`gh repo view --json nameWithOwner
+--jq .nameWithOwner`); `<base>` is the handler's configured base branch, else the repo
+default:
 
 ```bash
 git fetch origin
-git switch -c "task/<KEY>" "origin/<base>"   # <base>: the handler's configured base, else the repo default
-git push origin "task/<KEY>"                 # no --force, no --force-with-lease: creation is the CAS
+base_sha=$(git rev-parse "origin/<base>")
+gh api --method POST "repos/<repo>/git/refs" \
+  -f "ref=refs/heads/task/<KEY>" -f "sha=$base_sha"
 ```
 
-Read the push result — it is the election:
+Read the result — it is the election:
 
-- **Push succeeds** → you hold the claim. Proceed to the handler's human-visible
-  markers (assign yourself, transition/label), then to "Branch + execute" **already on
-  this branch** — do not create it a second time.
-- **Push is rejected for an existing ref** (`! [rejected] … (fetch first)` /
-  `(non-fast-forward)`, or `Updates were rejected because the remote contains work
-  that you do not have`) → **you lost the race.** Do not build, do not touch the
-  issue's assignee or status: they belong to the winner. Clean up locally
-  (`git switch -` then `git branch -D "task/<KEY>"`), report
-  `Skipped <KEY>: claim lost — task/<KEY> already exists on origin`, and advance to the
+- **HTTP 201** → you hold the claim. Check the branch out and proceed to the handler's
+  human-visible markers (assign yourself, transition/label), then to "Branch + execute"
+  **already on this branch** — do not create it a second time:
+
+  ```bash
+  git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD
+  ```
+
+- **HTTP 422 `Reference already exists`** → **you lost the race.** Do not build, do not
+  touch the issue's assignee or status: they belong to the winner. Report
+  `Skipped <KEY>: claim lost — task/<KEY> already exists on origin` and advance to the
   next candidate (in single/direct mode, stop).
-- **Push fails for any other reason** — permission denied, protected-ref rule, a
-  branch-pinned environment that forbids pushing off its fixed branch — → this is
-  **not** a lost race and **not** a held claim. Fall back to the election below; never
-  report a claim you did not acquire atomically.
+- **Any other failure** — 403/404 from a token without write scope, a protected-ref
+  ruleset, a branch-pinned environment, a network error — → this is **not** a lost race
+  and **not** a held claim. Fall back to the election below; never report a claim you
+  did not acquire atomically.
 
-Because the loser detects the loss from the push result, feasibility judging may still
-run **before** the claim: two sessions can both judge the same issue, but only one can
+Because the loser detects the loss from the 422, feasibility judging may still run
+**before** the claim: two sessions can both judge the same issue, but only one can
 acquire, and the other advances deterministically instead of building a duplicate.
+
+Every later `git push` on this branch is an ordinary fast-forward update of a ref this
+session owns — the lock is the **creation**, and it is already decided by then.
 
 ## Fallback: comment-token election (branch-pinned environments)
 
 Claude Code on the web runs pinned to a fixed `claude/<session>` branch and cannot
 create `task/<KEY>` — this is exactly why the `repo-pr` handler locks on a PR rather
-than a branch. When the acquire push fails for an environment or permission reason
-(never for an existing ref — that is a decided race), degrade to the election below and
+than a branch. When the acquire call fails for an environment or permission reason
+(never on a 422 — that is a decided race), degrade to the election below and
 **say so explicitly** in the report: `claim lock degraded to comment election: <the
-push error>`. A silent degrade would claim atomicity the run does not have.
+API error>`. A silent degrade would claim atomicity the run does not have.
 
 The election is `linear-claim.md`'s, ported to the handler's own comment API
 (`addCommentToJiraIssue` / `gh issue comment`). Issue comments are append-only with
@@ -116,7 +139,7 @@ A claim is released on **bail** (and only there — a successful run's lock ref 
 the PR's head branch and is cleaned up by the merge):
 
 ```bash
-git push origin --delete "task/<KEY>"   # only if this session acquired it via the push above
+git push origin --delete "task/<KEY>"   # only if this session acquired the ref above
 ```
 
 Delete the remote ref **before** clearing the issue's assignee/status, so the issue

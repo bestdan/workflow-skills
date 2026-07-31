@@ -31,7 +31,7 @@ normal run — passing both is an error: stop and ask which was meant.
 - **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
   candidates, pre-flight, judge, then acquire the `task/<KEY>` claim lock, self-assign,
   and transition to an In-Progress status), then **stop**: no execution, no PR. The
-  pushed `task/<KEY>` lock ref plus the assigned, In-Progress issue is the reservation
+  created `task/<KEY>` lock ref plus the assigned, In-Progress issue is the reservation
   marker — do **not** transition it to In Review.
   `--claim-only` is the one execute-family action safe to batch, so `/do-tasks --all`
   / `-n N --claim-only` may reserve several issues at once, each bounded by the WIP
@@ -51,7 +51,7 @@ normal run — passing both is an error: stop and ask which was meant.
   ```
 
   If that branch exists neither locally nor on the remote — the claim ran on the
-  degraded comment-election path, which pushes no ref (see `claim-lock.md`) — create it
+  degraded comment-election path, which creates no ref (see `claim-lock.md`) — create it
   now: `git switch -c "task/<KEY>" "origin/<base>"` (`<base>` is `jira.base_branch` if
   set, else the repo's default branch — resolved as in "Branch + execute" below). Then
   run "Branch + execute" (skipping branch creation), "PR", and "Move to review" —
@@ -127,7 +127,7 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    GitHub search tokenizes on punctuation, so `[PROJ-45]` searches the tokens `PROJ` and `45` and can over-match. Before skipping, confirm a returned PR's `title` actually contains the literal `[<KEY>]` token — only then **skip** with `Skipped <KEY>: open PR already exists (<url>)`. (The `task/<KEY>` branch check in step 2 is exact and needs no post-filter.)
 
-2. **Remote branch (no PR yet).** A pushed `task/<KEY>` with no PR signals another session mid-build:
+2. **Remote branch (no PR yet).** An existing `task/<KEY>` with no PR signals another session mid-build:
 
    ```bash
    git ls-remote --heads origin "task/<KEY>"
@@ -168,15 +168,15 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
 
 2. **Re-read** the chosen issue — `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: ["assignee", "status"]`). If it now has an assignee, or its status is no longer `ready_status`, **another session beat you** — return `race`, fall back to the next candidate. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it).
 
-3. **Acquire the lock** — `claim-lock.md` → "Primitive: non-forced ref creation", with `<base>` = `jira.base_branch` if set, else the repo's default branch:
+3. **Acquire the lock** — `claim-lock.md` → "Primitive: create-only ref creation via the GitHub API", with `<base>` = `jira.base_branch` if set, else the repo's default branch, and `<repo>` from `gh repo view --json nameWithOwner --jq .nameWithOwner`:
 
    ```bash
    git fetch origin
-   git switch -c "task/<KEY>" "origin/<base>"
-   git push origin "task/<KEY>"   # no --force: creation is the CAS
+   base_sha=$(git rev-parse "origin/<base>")
+   gh api --method POST "repos/<repo>/git/refs" -f "ref=refs/heads/task/<KEY>" -f "sha=$base_sha"
    ```
 
-   Rejected because the ref exists → **you lost**: `git switch -` and `git branch -D "task/<KEY>"`, leave the issue's assignee and status untouched, return `race`, and fall back to the next candidate. Failed for a permission / branch-pinned reason → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report the degrade reason. Only a successful acquire proceeds to step 4.
+   **HTTP 422 `Reference already exists`** → **you lost**: leave the issue's assignee and status untouched, return `race`, and fall back to the next candidate. **Any other failure** (403/404, protected-ref ruleset, branch-pinned environment) → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report the degrade reason. Only **HTTP 201** proceeds to step 4 — check the branch out first (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not** substitute `git push origin task/<KEY>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
 
 4. **Assign yourself.** Call `<atlassian-mcp>__editJiraIssue` with:
    - `cloudId`: `<jira.site>`

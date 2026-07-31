@@ -72,16 +72,17 @@ error: stop and ask which one was meant.
     `commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
     pre-flight → judge → acquire the atomic `task/<n>` claim lock → assign `@me`, add
     `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute". The
-    pushed `task/<n>` lock ref plus the assigned `auto-claimed` issue is the
+    created `task/<n>` lock ref plus the assigned `auto-claimed` issue is the
     reservation marker — no PR.
   - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
     (pre-claim WIP gate → find candidates → pre-flight → judge → acquire the atomic
     `task/<KEY>` claim lock → self-assign + transition to an In-Progress status), then
-    stop before "Branch + execute". The pushed `task/<KEY>` lock ref plus the assigned,
+    stop before "Branch + execute". The created `task/<KEY>` lock ref plus the assigned,
     In-Progress issue is the reservation marker — no PR.
 
-  On `gh-issue` and `jira` the lock is the **ref push**, not the assignee — a
-  non-forced ref creation is a server-side compare-and-swap, so two sessions
+  On `gh-issue` and `jira` the lock is the **atomic creation of that ref** (GitHub's
+  create-ref API, which returns 422 rather than updating an existing ref), not the
+  assignee — so two sessions
   authenticated as the **same** account cannot both win (see
   `commands/handlers/claim-lock.md`, which also carries the comment-token election
   these handlers degrade to in a branch-pinned environment that cannot push
