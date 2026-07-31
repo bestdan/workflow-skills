@@ -57,6 +57,15 @@ gh-issue.
    further (gh-issue graphs at this scale are rare; this mirrors the
    no-paginate stance the other gh-issue handlers take).
 
+   **At milestone scope, backfill referenced out-of-scope issues.** For any
+   `#<n>` referenced in a fetched body but absent from the fetched set, fetch
+   it individually (`gh issue view <n> --repo "<repo>" --json
+   number,title,body,state,stateReason,labels,milestone,createdAt`) and add it
+   as a node. Without this, Dimension 2 has no milestone to compare against and
+   Dimension 1's stale/satisfied check has no `state`/`stateReason` for those
+   targets. These out-of-scope nodes are **analysis inputs only, never mutation
+   targets** — §Apply must not edit an issue outside the resolved scope.
+
 5. **Build the graph.** Nodes carry `{number, title, milestone, state,
    stateReason, body, labels, createdAt}`. Derive:
    - `priority` from a `priority:<urgent|high|medium|low>` label if present,
@@ -142,20 +151,25 @@ propose the link with the shared evidence quoted, marked lower-confidence.
 Pairwise-compare titles and bodies for overlapping scope or a shared code
 surface, quoting the overlapping evidence. GitHub issues have no native
 `duplicateOf` — propose a `duplicate` label plus a comment naming the
-suspected canonical issue (`gh issue comment <n> --body "Possible duplicate of
-#<canonical> — <evidence>"`). **Never** `gh issue close` from this path; a
+suspected canonical issue (`gh issue comment <n> --repo "<repo>" --body
+"Possible duplicate of #<canonical> — <evidence>"`). **Never** `gh issue close`
+from this path; a
 duplicate is always a human decision here, same as Linear never auto-merges.
 
 ## Apply (gated)
 
 For each **approved** finding:
 
-| Finding                               | Action                                                                                                                                                                                                                                                                                              |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a `Blocked by:` / `Related:` line | Read the current body (`gh issue view <n> --json body --jq .body`), append the new footer line (create a `---` footer section per `gh-issue.md` step 2 if none exists), write it back with `gh issue edit <n> --body-file <tmp>`. Preserve the rest of the body verbatim — only the footer changes. |
-| Remove a stale footer line            | Same read/edit-body-file pattern, dropping just that line.                                                                                                                                                                                                                                          |
-| Fix a priority inversion              | `gh issue edit <n> --add-label priority:<x> --remove-label priority:<old>` (omit `--remove-label` if no prior priority label existed).                                                                                                                                                              |
-| Mark a suspected duplicate            | `gh issue edit <n> --add-label duplicate` (create the label first if missing: `gh label create duplicate --repo <repo> 2>/dev/null`) + `gh issue comment` per Dimension 4.                                                                                                                          |
+| Finding                               | Action                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a `Blocked by:` / `Related:` line | Read the current body (`gh issue view <n> --repo "<repo>" --json body --jq .body`), append the new footer line (create a `---` footer section per `gh-issue.md` step 2 if none exists), write it back with `gh issue edit <n> --repo "<repo>" --body-file <tmp>`. Preserve the rest of the body verbatim — only the footer changes. |
+| Remove a stale footer line            | Same read/edit-body-file pattern, dropping just that line.                                                                                                                                                                                                                                                                          |
+| Fix a priority inversion              | `gh issue edit <n> --repo "<repo>" --add-label priority:<x> --remove-label priority:<old>` (omit `--remove-label` if no prior priority label existed).                                                                                                                                                                              |
+| Mark a suspected duplicate            | `gh issue edit <n> --repo "<repo>" --add-label duplicate` (create the label first if missing: `gh label create duplicate --repo "<repo>" 2>/dev/null`) + `gh issue comment` per Dimension 4.                                                                                                                                        |
+
+Every `gh` call above takes `--repo "<repo>"` (the value resolved in §Load step
+2) — omitting it silently targets the current directory's repo, which is the
+wrong one whenever `gh-issue.repo` is configured.
 
 **Hard rules (stop if you're about to break one):**
 
