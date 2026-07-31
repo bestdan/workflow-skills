@@ -9,7 +9,10 @@ declare a ``$variable`` it does not *reference in the operation body* (Linear
 rejects a declared-but-unused variable with HTTP 400).
 """
 
+import argparse
+import contextlib
 import importlib.util
+import io
 import re
 import unittest
 from pathlib import Path
@@ -134,6 +137,151 @@ class TerminalPassesTests(unittest.TestCase):
             self.assertEqual(
                 expected[state_type], ts_field, f"wrong ts for {state_type}"
             )
+
+
+class NamedIssueTests(unittest.TestCase):
+    """--issues archives named issues regardless of age (the age threshold is the
+    bulk-sweep mode's gate, not a property of archiving), but never archives an
+    issue that is not in a terminal state."""
+
+    def _stub(self, nodes):
+        calls = []
+
+        def fake_gql(key, query, variables=None):
+            calls.append((query, variables or {}))
+            return {"issues": {"nodes": nodes}}
+
+        return calls, fake_gql
+
+    def _find(self, nodes, identifiers, uuids, team="PreThink"):
+        calls, fake_gql = self._stub(nodes)
+        original = linear_archive.gql
+        linear_archive.gql = fake_gql
+        try:
+            found, missing = linear_archive.find_by_ref("k", team, identifiers, uuids)
+        finally:
+            linear_archive.gql = original
+        return found, missing, calls
+
+    def _node(self, ident, state_type="completed", uuid="u-1", team="PreThink"):
+        return {
+            "id": uuid,
+            "identifier": ident,
+            "title": ident,
+            "completedAt": "2026-07-31T12:00:00.000Z",
+            "canceledAt": None,
+            "state": {"type": state_type},
+            "team": {"id": TEAM_UUID, "name": team},
+        }
+
+    def test_lookup_filters_on_number_not_age(self):
+        _, _, calls = self._find([self._node("PRE-12")], ["PRE-12"], [])
+        query, variables = calls[0]
+        self.assertIn("number: { in: $numbers }", query)
+        self.assertEqual(variables["numbers"], [12])
+        self.assertNotIn("cutoff", query)
+        self.assertNotIn("completedAt: {", query)
+
+    def test_lookup_declares_only_variables_it_uses(self):
+        """Same HTTP-400 invariant as the sweep query (PRE-567)."""
+        for identifiers, uuids in ((["PRE-12"], []), ([], [PROJECT_UUID])):
+            _, _, calls = self._find([], identifiers, uuids)
+            query, variables = calls[0]
+            declared = set(DECLARED_VAR_RE.findall(query))
+            self.assertEqual(declared, set(variables))
+            for var in declared:
+                self.assertGreater(query.count(f"${var}"), 1, f"${var} unused")
+
+    def test_other_teams_same_number_is_not_archived(self):
+        """The number filter is team-scoped, so a foreign prefix must come back
+        missing rather than matching this team's issue with the same number."""
+        found, missing, _ = self._find([self._node("PRE-12")], ["OTH-12"], [])
+        self.assertEqual(found, [])
+        self.assertEqual(missing, ["OTH-12"])
+
+    def test_unmatched_refs_reported_missing(self):
+        found, missing, _ = self._find([self._node("PRE-12")], ["PRE-12", "PRE-99"], [])
+        self.assertEqual([n["identifier"] for n in found], ["PRE-12"])
+        self.assertEqual(missing, ["PRE-99"])
+
+    def test_non_terminal_named_issue_is_skipped(self):
+        args = argparse.Namespace(
+            team="PreThink", project=None, older_than=None, issues=["PRE-12,PRE-13"]
+        )
+        nodes = [
+            self._node("PRE-12", "completed", "u-12"),
+            self._node("PRE-13", "started", "u-13"),
+        ]
+        original = linear_archive.gql
+        linear_archive.gql = lambda key, query, variables=None: {
+            "issues": {"nodes": nodes}
+        }
+        try:
+            candidates = linear_archive.collect_named("k", args)
+        finally:
+            linear_archive.gql = original
+        self.assertEqual([c["identifier"] for c in candidates], ["PRE-12"])
+
+    def test_uuid_on_another_team_is_not_archived(self):
+        """An issue `id` is a global key, so its query cannot bind the team —
+        the confinement to --team has to happen client-side or a pasted UUID
+        archives an issue on a team the caller never named."""
+        foreign = self._node("OTH-4", uuid=PROJECT_UUID, team="OtherTeam")
+        found, missing, _ = self._find([foreign], [], [PROJECT_UUID])
+        self.assertEqual(found, [])
+        self.assertEqual(missing, [PROJECT_UUID])
+
+    def test_uuid_case_does_not_desync_found_and_missing(self):
+        """Linear returns lowercase ids. An un-normalized uppercase ref matched
+        nothing in `missing`, so the same issue was archived AND reported
+        'not found'."""
+        upper = PROJECT_UUID.upper()
+        identifiers, uuids = linear_archive.parse_issue_refs([upper])
+        self.assertEqual(uuids, [PROJECT_UUID])
+        found, missing, _ = self._find(
+            [self._node("PRE-12", uuid=PROJECT_UUID)], identifiers, uuids
+        )
+        self.assertEqual([n["id"] for n in found], [PROJECT_UUID])
+        self.assertEqual(missing, [])
+
+    def test_oversized_ref_list_is_rejected_not_truncated(self):
+        """Both lookups fetch a single page, so an overflowing list would come
+        back as 'not found' and go unarchived — indistinguishable from a clean
+        run. Reject it instead."""
+        refs = ",".join(f"PRE-{n}" for n in range(linear_archive.PAGE + 1))
+        args = argparse.Namespace(
+            team="PreThink", project=None, older_than=None, issues=[refs]
+        )
+        with self.assertRaises(SystemExit):
+            linear_archive.collect_named("k", args)
+
+    def test_ignored_sweep_flags_are_announced(self):
+        args = argparse.Namespace(
+            team="PreThink", project=PROJECT_UUID, older_than=7, issues=["PRE-12"]
+        )
+        original = linear_archive.gql
+        linear_archive.gql = lambda key, query, variables=None: {
+            "issues": {"nodes": [self._node("PRE-12")]}
+        }
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                linear_archive.collect_named("k", args)
+        finally:
+            linear_archive.gql = original
+        self.assertIn("--project is ignored", buf.getvalue())
+        self.assertIn("--older-than is ignored", buf.getvalue())
+
+    def test_bad_ref_is_rejected_not_dropped(self):
+        with self.assertRaises(SystemExit):
+            linear_archive.parse_issue_refs(["PRE-12, not an id"])
+
+    def test_refs_accept_identifiers_and_uuids(self):
+        identifiers, uuids = linear_archive.parse_issue_refs(
+            ["pre-12, PRE-13", f" {PROJECT_UUID} "]
+        )
+        self.assertEqual(identifiers, ["PRE-12", "PRE-13"])
+        self.assertEqual(uuids, [PROJECT_UUID])
 
 
 if __name__ == "__main__":
