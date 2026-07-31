@@ -271,6 +271,28 @@ def main():
             issue["project"] = scope_tag
             all_issues.append((issue, scope["max_estimate"]))
 
+    # Unassigned bucket exclusion pass — mirrors linear-common.md's "The
+    # Unassigned bucket" (claim variant): only runs when 1+ projects are
+    # configured (bare --project args), since with none the whole-team scope
+    # above already covers everything. One extra whole-team query, keeping
+    # only issues whose project is null or outside the configured id set.
+    # Unlike the MCP floor's single capped list_issues call, fetch_issues
+    # paginates to exhaustion, so this pass has no truncation blind spot.
+    if args.project:
+        configured_ids = {scope["id"] for scope in scopes}
+        unassigned_scope_tag = {
+            "id": "__unassigned__",
+            "name": "Unassigned",
+            "max_estimate": args.max_estimate,
+        }
+        for issue in fetch_issues(key, team_node["id"], None, args.limit):
+            project = issue.get("project")
+            project_id = project["id"] if project else None
+            if project_id is not None and project_id in configured_ids:
+                continue
+            issue["project"] = unassigned_scope_tag
+            all_issues.append((issue, args.max_estimate))
+
     candidates, dropped = [], []
     for issue, max_estimate in all_issues:
         labels = [n["name"] for n in issue["labels"]["nodes"]]
