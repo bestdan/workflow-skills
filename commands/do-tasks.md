@@ -455,8 +455,11 @@ so the gh-issue (section 4) and jira (section 5) batch paths can reference it
 unchanged once their batch tasks land — only the find/rank phase (step 1), the
 dependency-readiness check (step 3), and the per-issue claim+execute flow (step 4)
 differ by handler. It runs **only** for
-`--all` / `-n N` **without** `--claim-only` (bare `/do-tasks` stays single foreground;
-`--claim-only` keeps its batch-claim behavior; `--local` caps the batch at 1 and runs
+`--all` / `-n N` **without** `--claim-only` **and without** `--no-claim` (bare
+`/do-tasks` stays single foreground; `--claim-only` keeps its batch-claim behavior;
+`--no-claim` is always single — it resumes one already-claimed issue, so
+`--all --no-claim` is a contradiction: reject it with
+`--no-claim is single-only; drop --all/-n N`; `--local` caps the batch at 1 and runs
 the single highest-ranked issue foreground via "Claim and execute" above).
 
 **Connector availability: fail safe at the remote end, not by a pre-check.** Batch
@@ -542,6 +545,11 @@ capability is actually visible — inside the remote session** — via two concr
    it does not fall back to a different issue — which is exactly why no double-claim can
    occur even when two runs' candidate sets overlap. This is why the tracker batch needs
    no equivalent of repo-pr's draft `task-claim` PR marker.
+
+   **The claim guards issue identity, not capacity.** The WIP slack read in step 2
+   is not atomic, so two concurrent batch runs can each observe the same slack,
+   dispatch to disjoint issues, and together overshoot `wip_limit`. Accepted at
+   single-operator scale — don't run two batch dispatches concurrently.
 6. **Report** the dispatched issues (identifier, title, "remote session started"),
    then, separately, those `held` by the WIP / `-n N` bound and those skipped as
    `waiting on <identifier>`. Point the user at `/tasks` to monitor.
