@@ -2,7 +2,15 @@
 
 Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
 
-**Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
+**Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
+
+**Branch name.** The work branch is the handler's deterministic `task/<n>` — the same
+name the jira handler uses, because it is also the claim lock (see
+`claim-lock.md`). This path deliberately no longer uses `gh issue develop`: its
+generated branch name is not deterministic, so it cannot be probed before the claim,
+and the create it performs is not a rejection this flow can read as a lost race. The
+GitHub-native issue↔branch link is the cost; `Closes #<n>` in the PR body and the
+`[#<n>]` title prefix carry the association instead.
 
 > **Hard rule for every phase below: never close a gh issue manually, and never move it to a `completed`/`canceled` state.** Merge is the only completion signal — GitHub closes the issue automatically when the PR (with `Closes #<n>` in its body) merges. If you are about to `gh issue close` from this file, you have a bug — stop.
 
@@ -18,9 +26,10 @@ normal run — passing both is an error: stop and ask which was meant.
 - **default** (neither flag) — run every phase below: pre-claim WIP gate → find
   candidates → pre-flight → judge → claim → branch + execute → PR → move to review.
 - **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
-  candidates, pre-flight, judge, then assign `@me`, add `auto-claimed`, remove
-  `auto-eligible`), then **stop**: no branch, no execution, no PR. The assigned issue
-  carrying `auto-claimed` is the reservation marker — do **not** swap to
+  candidates, pre-flight, judge, then acquire the `task/<n>` claim lock, assign `@me`,
+  add `auto-claimed`, remove `auto-eligible`), then **stop**: no execution, no PR. The
+  pushed `task/<n>` lock ref plus the assigned `auto-claimed` issue is the reservation
+  marker — do **not** swap to
   `needs-review`. `--claim-only` is the one execute-family action safe to batch, so
   `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
   bounded by the WIP gate.
@@ -30,13 +39,19 @@ normal run — passing both is an error: stop and ask which was meant.
   (`me=$(gh api user --jq .login)`; the issue's `assignees[].login` is exactly that
   one login) **and** it carries `auto-claimed`. Otherwise **stop and explain** —
   executing an unclaimed issue reopens the race the claim step closes. When the guard
-  passes, **check out the claim branch** rather than branching fresh from `HEAD`:
-  `gh issue develop <n> --list [--repo <repo>]` lists the issue's linked branch(es).
-  If one exists (resuming after a crash mid-execution), `git fetch` and `git checkout`
-  it — do **not** re-run `gh issue develop --checkout`, which would create a second
-  branch. If none exists (the issue was reserved via `--claim-only`, which creates no
-  branch), create it now with `gh issue develop <n> --checkout`. Then run "Branch +
-  execute" (skipping branch creation), "PR", and "Move to review" — without re-claiming.
+  passes, **check out the existing claim branch** rather than branching fresh from
+  `HEAD` — the claim pushed the handler's deterministic `task/<n>`, so there is nothing
+  to look up:
+
+  ```bash
+  git fetch origin && git switch "task/<n>"
+  ```
+
+  If that branch exists neither locally nor on the remote — the claim ran on the
+  degraded comment-election path, which pushes no ref (see `claim-lock.md`) — create it
+  now: `git switch -c "task/<n>" "origin/<base>"` (`<base>` defaults to the repo's
+  default branch). Then run "Branch + execute" (skipping branch creation), "PR", and
+  "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
 
 ## Pre-claim WIP gate
@@ -87,14 +102,16 @@ Take the ranked candidates **one at a time**: for each candidate in ranked order
 
 Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<#n>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight: catch a sibling session that is already building this issue before spending the full issue-body read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
-1. **Linked branch + its PR.** GitHub links a `gh issue develop` branch to the issue; list it and check for an open PR on that head:
+1. **Claim branch + its PR.** The claim pushes the deterministic `task/<n>` (see "Claim the issue"), so probing that one ref catches a sibling session mid-build:
 
    ```bash
-   gh issue develop <n> --list [--repo <repo>]                       # linked branch name(s), if any
-   gh pr list --state open --head "<branch>" --json number,url,headRefName [--repo <repo>]
+   git ls-remote --heads origin "task/<n>"
+   gh pr list --state open --head "task/<n>" --json number,url,headRefName [--repo <repo>]
    ```
 
-   If `gh issue develop --list` names a branch, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch <branch> already exists`.
+   If `git ls-remote` returns the ref, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch task/<n> already exists`.
+
+   This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
 
 2. **Open PR by issue number.** The execute path titles PRs `[#<n>] <title>`, so also catch a PR opened from an unlinked branch:
 
@@ -118,26 +135,35 @@ gh issue comment <n> --body "Skipped by /do-tasks: <reason>" [--repo <repo>]
 
 **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's number, title, and a one-sentence rationale, then proceed.
 
-Keeping the order as pre-flight → judge → claim is acceptable here because the claim is a cheap read-then-write guard executed immediately after the judge, unlike Linear's slow token-comment election that forces the judge inside the claim.
+Keeping the order as pre-flight → judge → claim is acceptable here because the claim below is atomic: two sessions may both judge the same issue, but only one can acquire the lock, and the loser detects the loss from the acquire result and advances to the next candidate instead of building a duplicate. (Linear's slow token-comment election is what forces its judge _inside_ the claim.)
 
 ## Claim the issue
 
-GitHub has no transactional claim, so use a **claim-then-verify** guard (read-then-write, then re-read — the analogue of `linear-claim.md`'s concurrency guard plus verify):
+The claim locks on an **atomic primitive** — pushing the `task/<n>` ref, a server-side compare-and-swap — because GitHub exposes no compare-and-swap on issue fields and a same-account racer reads back the identical `assignees`. Mechanics, the branch-pinned fallback, and the release rule live in **`commands/handlers/claim-lock.md`**; read it and follow it here rather than re-deriving them. The assignee and `auto-claimed` label below stay on as the **human-visible** claim marker — they no longer decide the race.
 
-1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or carries `auto-claimed`, **another session beat you** — return `race`, fall back to the next candidate.
-2. **Mutate** — assign yourself, flip the status label:
+1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or carries `auto-claimed`, **another session beat you** — return `race`, fall back to the next candidate. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it).
+2. **Acquire the lock** — `claim-lock.md` → "Primitive: non-forced ref creation", with `<base>` the repo's default branch (or `--base` when `/do-tasks` passed one):
+
+   ```bash
+   git fetch origin
+   git switch -c "task/<n>" "origin/<base>"
+   git push origin "task/<n>"   # no --force: creation is the CAS
+   ```
+
+   Rejected because the ref exists → **you lost**: `git switch -` and `git branch -D "task/<n>"`, leave the issue's assignee and labels untouched, return `race`, and fall back to the next candidate. Failed for a permission / branch-pinned reason → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason. Only a successful acquire proceeds to step 3.
+3. **Mark it on the board** — assign yourself, flip the status label:
 
    ```bash
    gh issue edit <n> --add-assignee @me --add-label auto-claimed --remove-label auto-eligible [--repo <repo>]
    ```
 
-3. **Confirm** — resolve your own login once (`me=$(gh api user --jq .login)`; `@me` is only valid as a `--add-assignee`/`--remove-assignee` argument, never a value you can match in the JSON), then re-read the issue's `assignees`. The claim holds **iff** `assignees[].login` is exactly that one login. If anyone else appears, a concurrent claimer raced in — unassign yourself (`gh issue edit <n> --remove-assignee @me --remove-label auto-claimed --add-label auto-eligible [--repo <repo>]`) and fall back to the next candidate.
+4. **Confirm the marker landed** (not the race — the push in step 2 already decided that). Resolve your own login once (`me=$(gh api user --jq .login)`; `@me` is only valid as a `--add-assignee`/`--remove-assignee` argument, never a value you can match in the JSON), then re-read the issue's `assignees`. If a **different** login appears, a same-second sibling wrote the marker even though you hold the lock: leave the assignee alone (stomping it would disrupt a human's deliberate reassignment) and report `#<n>: claim lock held, but assignee is <other> — the board marker disagrees with the lock`. Do **not** return `race` on this signal alone — you hold `task/<n>` and no one else can push it, so the atomic winner is you.
 
 (`gh issue edit` errors if a label doesn't exist; create it first with `gh label create "<label>" [--repo <repo>] 2>/dev/null`, mirroring the create flow.)
 
 ## Branch + execute
 
-1. **Branch** — `gh issue develop <n> --checkout [--base <branch>] [--repo <repo>]` creates a branch linked to the issue and checks it out (base defaults to the repository's default branch; pass `--base` to override). Use the name `gh issue develop` prints — do not invent a branch name.
+1. **Branch** — already done. "Claim the issue" step 2 created `task/<n>` from `<base>` (the repo's default branch unless `/do-tasks` passed `--base`) and pushed it as the claim lock, so this session is already on it. Confirm with `git branch --show-current` and do **not** re-create it. Only on the degraded comment-election path (no ref was pushed) create it now: `git switch -c "task/<n>" "origin/<base>"`.
 2. **Execute** — do the work, then run the project's quality gate (`just check` here). Keep the diff scoped to this one issue.
 
 ## PR
@@ -168,9 +194,15 @@ Never `gh issue close` here, regardless of how done the work feels — merge han
 
 ```bash
 git stash push -u
+git switch - && git push origin --delete "task/<n>"   # release the claim lock
 gh issue edit <n> --remove-label auto-claimed --add-label human-approval-requested --remove-assignee @me [--repo <repo>]
 gh issue comment <n> --body "Bailed by /do-tasks: <what was tried, what tripped the bail>" [--repo <repo>]
 ```
+
+Release the lock **first** (`claim-lock.md` → "Release the lock") so the issue never
+returns to the ready lane while a stale `task/<n>` still blocks the next session's
+acquire. On the degraded election path there is no ref to delete — delete this session's
+token comment instead.
 
 Stop — do not auto-pick another candidate after a bail; a human should look before more work is auto-claimed.
 

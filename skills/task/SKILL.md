@@ -36,16 +36,19 @@ than for bookkeeping. Route to the existing verbs:
 
 The claim mechanics are the handler's, not this skill's: `commands/handlers/jira-claim.md`
 ("Claim the issue"), `commands/handlers/linear-claim.md`, `commands/handlers/gh-issue-claim.md`.
-Each claims by **claim-then-verify** (re-read, write, re-read) and each refuses to move
-an issue to a completed status — merge is the only completion signal.
+Each claims on a primitive that can elect one winner among sessions authenticated as the
+**same** tracker account, and each refuses to move an issue to a completed status —
+merge is the only completion signal.
 
-Don't oversell that guard when reporting to the user: on jira and gh-issue it confirms
-only that the final assignee is **your own** account, so it defeats a _different_ user
-racing you but **not** a second session authenticated as the same user — both see their
-own account and both conclude they won. Only `linear-claim.md` distinguishes same-user
-sessions, via a first-writer-wins election on a comment log carrying a unique
-per-session token. The pre-flight open-PR and `task/<KEY>` branch checks are what
-actually catch a sibling session mid-build on jira.
+The primitive differs per handler, and reporting a claim means reporting which one held:
+jira and gh-issue push the `task/<KEY>` ref (a non-forced ref creation is a server-side
+compare-and-swap — see `commands/handlers/claim-lock.md`), and linear runs a
+first-writer-wins election on a comment log carrying a unique per-session token. An
+assignee re-read is **not** a lock on any of them: it confirms only that the final
+assignee is your own account, which is identical for two sessions on the same account.
+In a branch-pinned environment that cannot push `task/<KEY>`, jira and gh-issue degrade
+to the same comment-token election and say so explicitly — never report an atomic claim
+the run did not make.
 
 **Resolve the handler from the merged view** — `dev_docs/tasks/.task-config.yml`
 overlaid with the optional `dev_docs/tasks/.task-config.local.yml` — never from the

@@ -70,14 +70,22 @@ error: stop and ask which one was meant.
     judging feasibility (the judge now runs after the claim, which `--claim-only` skips).
   - `gh-issue`: run through "Claim the issue" in
     `commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
-    pre-flight → judge → read-then-write claim: assign `@me`, add `auto-claimed`,
-    remove `auto-eligible`), then stop before "Branch + execute". The assigned
-    `auto-claimed` issue is the reservation marker — no branch, no PR.
+    pre-flight → judge → acquire the atomic `task/<n>` claim lock → assign `@me`, add
+    `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute". The
+    pushed `task/<n>` lock ref plus the assigned `auto-claimed` issue is the
+    reservation marker — no PR.
   - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
-    (pre-claim WIP gate → find candidates → pre-flight → judge → read-then-write
-    claim: self-assign + transition to an In-Progress status), then stop before
-    "Branch + execute". The assigned, In-Progress issue is the reservation marker —
-    no branch, no PR.
+    (pre-claim WIP gate → find candidates → pre-flight → judge → acquire the atomic
+    `task/<KEY>` claim lock → self-assign + transition to an In-Progress status), then
+    stop before "Branch + execute". The pushed `task/<KEY>` lock ref plus the assigned,
+    In-Progress issue is the reservation marker — no PR.
+
+  On `gh-issue` and `jira` the lock is the **ref push**, not the assignee — a
+  non-forced ref creation is a server-side compare-and-swap, so two sessions
+  authenticated as the **same** account cannot both win (see
+  `commands/handlers/claim-lock.md`, which also carries the comment-token election
+  these handlers degrade to in a branch-pinned environment that cannot push
+  `task/<KEY>`).
 - **`--no-claim`** — skip the claim step and execute a task this caller has
   **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
   no default selection, since the target is a specific already-claimed task, not
@@ -100,16 +108,17 @@ error: stop and ask which one was meant.
     already published, so stop and report it rather than re-executing. Otherwise
     check out Linear's verbatim `branchName`, do the work, open the PR, and "Move to
     review on PR open" — without re-claiming.
-  - `gh-issue`: check out the claim branch — `gh issue develop <n> --list` lists it;
-    `git fetch` + check out an existing one, or `gh issue develop <n> --checkout` to
-    create it when the claim was `--claim-only` (which leaves no branch). Then do the
+  - `gh-issue`: check out the handler's deterministic claim branch `task/<n>`
+    (`git fetch origin && git switch task/<n>`), which the claim pushed as its lock;
+    create it (`git switch -c task/<n> origin/<base>`) only when the claim ran on the
+    degraded comment-election path, which pushes no ref. Then do the
     work, open the PR, and "Move to review on PR open" (per `gh-issue-claim.md`) —
     without re-claiming.
   - `jira`: check out the handler's deterministic claim branch `task/<KEY>`
-    (`git fetch origin && git switch task/<KEY>`); create it
-    (`git switch -c task/<KEY> origin/<base>`) when the claim was `--claim-only`, which
-    leaves no branch. Then do the work, open the PR, and "Move to review on PR open"
-    (per `jira-claim.md`) — without re-claiming.
+    (`git fetch origin && git switch task/<KEY>`), which the claim pushed as its lock;
+    create it (`git switch -c task/<KEY> origin/<base>`) only when the claim ran on the
+    degraded comment-election path, which pushes no ref. Then do the work, open the PR,
+    and "Move to review on PR open" (per `jira-claim.md`) — without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
@@ -421,7 +430,8 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 
 Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
 the find-candidates query, the in-flight pre-flight, the feasibility judgment, the
-read-then-write claim guard, the `gh issue develop` branch, `gh pr create` with
+atomic `task/<n>` claim lock (defined in `commands/handlers/claim-lock.md`), the work
+branch, `gh pr create` with
 `Closes #<n>`, the move-to-review label swap, bail mechanics, and the report format.
 `/do-tasks` runs these phases in the **current session** over the `gh` CLI. If the
 relative path doesn't resolve, find it with **Glob**
@@ -442,8 +452,9 @@ claim/execute split" and "Pre-claim WIP gate").
 
 Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
 config read (`ready_status` is required here), the find-candidates JQL, the
-in-flight pre-flight, the feasibility judgment, the self-assign + transition
-read-then-write claim guard, the `task/<KEY>` branch, `gh pr create` with the
+in-flight pre-flight, the feasibility judgment, the atomic `task/<KEY>` claim lock
+(defined in `commands/handlers/claim-lock.md`) plus the self-assign + transition board
+marker, `gh pr create` with the
 `[<KEY>]` title prefix, the move-to-review transition, bail mechanics, and the
 report format. `/do-tasks` runs these phases in the **current session** over the
 Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
