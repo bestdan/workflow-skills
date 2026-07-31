@@ -1,6 +1,6 @@
 ---
 name: task
-description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks.
+description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks. ALSO use when the user starts work on an existing tracker issue by naming its key — "work on PRE-683", "let's do ABC-142", "pick up ENG-9", or pasting a Jira/Linear issue URL — because the issue must be claimed (assigned to the user, moved to its tracker's started state) before work begins.
 ---
 
 # Task Loop — Capture and Process Follow-Up Work
@@ -12,6 +12,49 @@ Repo-native system for capturing follow-up work with full context and processing
 - User notices incidental work during a feature branch (stale flags, dead code, missing tests)
 - User says "task", "todo", "follow-up", "we should come back to this", "add a task for this"
 - User runs `/add-task` or `/do-tasks`
+- User starts work on an existing tracker issue by naming its key or URL — see **Starting work on a named issue** below
+
+## Starting work on a named issue
+
+When the user opens work on an issue that already exists in the tracker — "work on
+PRE-683", "let's do ABC-142", "pick up ENG-9", or a pasted Jira/Linear issue URL —
+that issue must be **claimed before the first edit**: assigned to the user and moved
+into its tracker's started state (`In Progress` on Jira/Linear; the `auto-claimed`
+label on gh-issue, which has no status field). Without that, the board silently shows the
+work as unstarted and unowned for its whole lifetime, and a parallel session can
+claim the same issue.
+
+Do not hand-roll the claim, and do not skip it because the user asked for code rather
+than for bookkeeping. Route to the existing verbs:
+
+- **`/deliver-task <KEY>`** — the default. Claims, implements, verifies, opens a PR,
+  co-reviews, hands off at `needs_review`. Use when the ask is "do this issue".
+- **`/do-tasks <KEY>`** — the batch-flow equivalent; same claim/execute path.
+- **`/do-tasks <KEY> --claim-only`** — claim now, no execution. Use when the user
+  wants to work the issue themselves (or interactively with you) but still wants the
+  board correct. Resume later with `/do-tasks <KEY> --no-claim`.
+
+The claim mechanics are the handler's, not this skill's: `commands/handlers/jira-claim.md`
+("Claim the issue"), `commands/handlers/linear-claim.md`, `commands/handlers/gh-issue-claim.md`.
+Each claims by **claim-then-verify** (re-read, write, re-read) and each refuses to move
+an issue to a completed status — merge is the only completion signal.
+
+Don't oversell that guard when reporting to the user: on jira and gh-issue it confirms
+only that the final assignee is **your own** account, so it defeats a _different_ user
+racing you but **not** a second session authenticated as the same user — both see their
+own account and both conclude they won. Only `linear-claim.md` distinguishes same-user
+sessions, via a first-writer-wins election on a comment log carrying a unique
+per-session token. The pre-flight open-PR and `task/<KEY>` branch checks are what
+actually catch a sibling session mid-build on jira.
+
+**Resolve the handler from the merged view** — `dev_docs/tasks/.task-config.yml`
+overlaid with the optional `dev_docs/tasks/.task-config.local.yml` — never from the
+committed file alone (see `commands/task-config.md` → "Resolving the handler"). If the
+resolved handler isn't the issue's tracker — including the missing-config case, which
+resolves to `repo-pr` rather than to "no handler" — say so and offer
+`/task-config jira` (or the right tracker) rather than editing the issue ad hoc over
+the MCP. A handler that doesn't match the tracker is the usual reason a Jira issue
+never gets claimed.
 
 ## How it works
 
@@ -47,12 +90,12 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 | ---------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo-pr`  | a committed markdown file in `dev_docs/tasks/` via PR (default) | `commands/handlers/repo-pr.md`                                                                                                                                                     |
 | `gh-issue` | a GitHub Issue                                                  | `commands/handlers/gh-issue.md`                                                                                                                                                    |
-| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md`                                                                                                                                                        |
+| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md` + per-verb `jira-claim.md` / `jira-promote.md` / `jira-archive.md`                                                                                     |
 | `linear`   | a Linear issue under a team                                     | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` / `linear-complete.md` / `linear-sweep-complete.md` / `linear-reconcile.md` |
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. Of the reconciler verbs, `/complete-task` supports both `linear` and `gh-issue` in v1 (`repo-pr`/`jira` unsupported); `/sweep-for-complete` and `/reconcile-tasks` remain `linear`-only in v1. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, the gh-issue path for `gh-issue`, and the jira path for `jira` (single only — needs `jira.ready_status` set). Of the reconciler verbs, `/complete-task` supports both `linear` and `gh-issue` in v1 (`repo-pr`/`jira` unsupported); `/sweep-for-complete` and `/reconcile-tasks` remain `linear`-only in v1. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -63,7 +106,7 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 
 ### Execute (`/do-tasks`)
 
-`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`), the tracker path (`linear`), or the gh-issue path (`gh-issue`). `jira` has no execute path yet. See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path), `commands/handlers/linear-claim.md` (tracker path), and `commands/handlers/gh-issue-claim.md` (gh-issue path).
+`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`), the tracker path (`linear`), the gh-issue path (`gh-issue`), or the jira path (`jira`). See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path), `commands/handlers/linear-claim.md` (tracker path), `commands/handlers/gh-issue-claim.md` (gh-issue path), and `commands/handlers/jira-claim.md` (jira path).
 
 Flag matrix:
 
@@ -255,7 +298,7 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 > **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The task file is deleted as part of readying the review PR, so it cannot carry these statuses in the file system. `/list-tasks` populates these two columns by querying `gh pr list --label task-loop --state open` (needs_review) and `--state merged` (recent done). An in-flight **claim** uses the separate `task-claim` label (and keeps its `in_progress` file), so it does **not** appear in `needs_review` — the claim PR only becomes a `task-loop` PR once the work is done and the file is deleted. For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
 >
-> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr` and `gh-issue` paths keep their native merge-derived completion, with `/complete-task` as the explicit fallback for `gh-issue` when that auto-close doesn't fire; `jira` completion stays with Jira's GitHub integration or smart commits where configured (it has no execute path here yet).
+> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr` and `gh-issue` paths keep their native merge-derived completion, with `/complete-task` as the explicit fallback for `gh-issue` when that auto-close doesn't fire; `jira` completion stays with Jira's GitHub integration or smart commits where configured — the jira execute path deliberately never transitions an issue to a `Done`-category status itself (see `commands/handlers/jira-claim.md`).
 
 ### Confidence check (used by `/promote-tasks`)
 
