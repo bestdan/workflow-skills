@@ -35,8 +35,14 @@ Same fields as `linear-complete.md`'s caller contract:
 1. **Resolve the task file.** The identifier is the task **slug** (filename
    stem), matching how `/do-tasks <slug>` addresses `repo-pr` tasks. Slugs
    resolve globally by filename stem (see `skills/task/SKILL.md` and
-   `scripts/task-scan.py`), so **Glob** `dev_docs/tasks/**/<slug>.md`,
-   excluding anything under `dev_docs/tasks/_archive/`.
+   `scripts/task-scan.py`), so scan with the same `-not -path` guard the other
+   task-file scanners use (`repo-pr-archive.md` §Scan exclusion) — **Glob** has
+   no exclusion syntax, so use `find`:
+
+   ```bash
+   find "$(git rev-parse --show-toplevel)/dev_docs/tasks" \
+     -name "<slug>.md" -not -path '*/_archive/*'
+   ```
    - **No match** → idempotent, no write: "`<slug>`: no task file found —
      already done (merged/archived) or never existed." Do not treat a
      missing file as an error — `repo-pr` deletes task files on review-PR
@@ -47,6 +53,10 @@ Same fields as `linear-complete.md`'s caller contract:
 2. **Read the frontmatter.** Parse the file's `status:` field.
    - `status: done` → "`<slug>` is already complete (`status: done`) — no
      change made."
+   - **No `status:` line at all** → stop with no write: "`<slug>`: no `status:`
+     frontmatter field — the file is schema-invalid, not incomplete. Run
+     `/doctor --fix` or add the field by hand." Step 4 edits an existing
+     `status:` line; never insert one here.
    - Any other status → continue.
 
 3. **`--dry-run` and confirmation** (mirrors `linear-complete.md` step 5):

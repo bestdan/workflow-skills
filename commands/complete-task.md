@@ -1,6 +1,6 @@
 ---
 description: Explicitly transition one identified work item to its tracker's completed state — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
 argument-hint: "<identifier> [--dry-run]"
 ---
 
