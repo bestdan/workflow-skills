@@ -14,8 +14,11 @@ This is the standalone backstop for the `linear` handler's `/archive-tasks` flow
 mutation, so this talks to the GraphQL API directly with a personal API key.
 
 Safety: DRY RUN by default — lists candidates and changes nothing. Pass --apply
-to actually archive. Re-running is idempotent (archived issues are excluded from
-the query by default).
+to actually archive. Re-running --older-than is idempotent: the sweep query
+excludes archived issues by default, so an already-archived issue is simply not
+a candidate. --issues cannot lean on that — the caller named those issues, and
+silence about them would read as failure — so it looks them up with
+includeArchived and reports the already-archived ones as done, not missing.
 
 The API key is read, in order, from:
   1. $LINEAR_API_KEY, else
@@ -81,9 +84,11 @@ ARCHIVE = "mutation($id: String!) { issueArchive(id: $id, trash: false) { succes
 # checked client-side against the returned `team` instead. Same
 # declared-vars-must-be-used rule as QUERY: each shape declares only the
 # variables it references.
-NODE_FIELDS = (
-    "id identifier title completedAt canceledAt state { type } team { id name }"
-)
+#
+# Both shapes pass includeArchived (the `issues` query drops archived rows
+# otherwise) and select archivedAt, so a re-run of --issues can tell "already
+# archived" apart from "no such issue" instead of reporting both as missing.
+NODE_FIELDS = "id identifier title completedAt canceledAt archivedAt state { type } team { id name }"
 
 # One page, no cursor loop: collect_named rejects a ref list longer than this, so
 # a named lookup can never overflow it. Substituted into both queries rather than
@@ -92,7 +97,7 @@ PAGE = 250
 
 LOOKUP_BY_NUMBER = """
 query($team: String!, $numbers: [Float!]) {
-  issues(first: %d, filter: {
+  issues(first: %d, includeArchived: true, filter: {
     team: { %s: { eq: $team } }
     number: { in: $numbers }
   }) {
@@ -102,7 +107,7 @@ query($team: String!, $numbers: [Float!]) {
 
 LOOKUP_BY_ID = """
 query($ids: [ID!]) {
-  issues(first: %d, filter: { id: { in: $ids } }) {
+  issues(first: %d, includeArchived: true, filter: { id: { in: $ids } }) {
     nodes { %s }
   }
 }"""
@@ -229,7 +234,7 @@ def parse_issue_refs(raw):
 
 
 def find_by_ref(key, team, identifiers, uuids):
-    """Look up explicitly named issues. Returns (nodes, missing_refs).
+    """Look up explicitly named issues. Returns (nodes, archived, missing_refs).
 
     Every ref is confined to `--team`, by two different mechanisms. The `number`
     filter is team-scoped server-side, so another team's `OTH-12` matches
@@ -238,9 +243,14 @@ def find_by_ref(key, team, identifiers, uuids):
     without it, a pasted UUID would archive an issue on a team the caller never
     named. Either way an out-of-team ref lands in `missing` rather than being
     archived, which is also why returned identifiers are re-checked against what
-    was asked for.
+    was asked for. The team check runs before the archived split, so an archived
+    out-of-team ref is still missing, not "already archived".
+
+    Archived matches come back separately from live ones: the queries ask for
+    them explicitly, so an already-archived issue is a no-op to report rather
+    than a lookup failure. Only `nodes` are archive candidates.
     """
-    nodes, seen = [], set()
+    nodes, archived, seen = [], [], set()
     if identifiers:
         team_field = "id" if UUID_RE.match(team) else "name"
         query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
@@ -251,7 +261,7 @@ def find_by_ref(key, team, identifiers, uuids):
         ]:
             if node["identifier"].upper() in wanted and node["id"] not in seen:
                 seen.add(node["id"])
-                nodes.append(node)
+                (archived if node.get("archivedAt") else nodes).append(node)
     if uuids:
         team_field = "id" if UUID_RE.match(team) else "name"
         query = LOOKUP_BY_ID % (PAGE, NODE_FIELDS)
@@ -259,12 +269,15 @@ def find_by_ref(key, team, identifiers, uuids):
             if node["team"][team_field] != team or node["id"] in seen:
                 continue
             seen.add(node["id"])
-            nodes.append(node)
+            (archived if node.get("archivedAt") else nodes).append(node)
 
     # Both sides are already in Linear's case (parse_issue_refs normalizes the
     # refs), so plain membership is enough.
-    found = {n["identifier"].upper() for n in nodes} | {n["id"].lower() for n in nodes}
-    return nodes, [r for r in identifiers + uuids if r not in found]
+    matched = nodes + archived
+    found = {n["identifier"].upper() for n in matched} | {
+        n["id"].lower() for n in matched
+    }
+    return nodes, archived, [r for r in identifiers + uuids if r not in found]
 
 
 def collect_aged(key, args):
@@ -307,7 +320,7 @@ def collect_named(key, args):
             f"(got {len(identifiers) + len(uuids)}); split the list, or use "
             "--older-than for a bulk sweep."
         )
-    nodes, missing = find_by_ref(key, args.team, identifiers, uuids)
+    nodes, archived, missing = find_by_ref(key, args.team, identifiers, uuids)
 
     candidates, open_refs = [], []
     for node in nodes:
@@ -318,11 +331,16 @@ def collect_named(key, args):
         candidates.append(node)
 
     print(f"Named issues (team={args.team}, no age threshold)\n")
+    if archived:
+        print(
+            "Already archived (nothing to do): "
+            + ", ".join(n["identifier"] for n in archived)
+        )
     if missing:
         print(f"Not found on this team: {', '.join(missing)}")
     if open_refs:
         print(f"Skipped — not in a terminal state: {', '.join(open_refs)}")
-    if missing or open_refs:
+    if archived or missing or open_refs:
         print()
     return candidates
 

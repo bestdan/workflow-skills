@@ -144,9 +144,10 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
 4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
    `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
    exhausted — a single page silently undercounts a backlog at the cap. The
-   `issues` query **excludes archived issues by default**, so re-running is
-   idempotent: already-archived items simply don't come back. (No `archivedAt`
-   filter needed.)
+   `issues` query **excludes archived issues by default**, so re-running the
+   sweep is idempotent: already-archived items simply don't come back. (No
+   `archivedAt` filter needed.) That default is wrong for `--issues`, where the
+   caller named the issues — see that section below.
 5. **Cutoff & the terminal passes.** `$cutoff` is `now − N days` as an ISO-8601
    string (`DateTimeOrDuration`). Run the query once per terminal type **× per
    configured project** (§3's loop) — **all three types, always**: `completed`
@@ -171,16 +172,16 @@ below (the mutation, the report, and dry-run all behave identically):
 
 ```graphql
 query($team: String!, $numbers: [Float!]) {
-  issues(first: 250, filter: {
+  issues(first: 250, includeArchived: true, filter: {
     team: { name: { eq: $team } },   # UUID-configured team? use id: { eq: $team }
     number: { in: $numbers }         # the numeric halves of PRE-12, PRE-13, …
   }) {
-    nodes { id identifier title completedAt canceledAt state { type } team { id name } }
+    nodes { id identifier title completedAt canceledAt archivedAt state { type } team { id name } }
   }
 }
 ```
 
-Three rules make this safe, and none of them are optional:
+Four rules make this safe, and none of them are optional:
 
 - **Terminal state is still required.** The age gate is gone; this one is not.
   Check `state.type` **client-side** against `completed`/`canceled`/`duplicate`
@@ -191,6 +192,13 @@ Three rules make this safe, and none of them are optional:
   raw issue **UUID** instead, filter on `id: { in: $ids }` — but an `id` is a
   **global** key that cannot bind the team, so compare the returned
   `team.id`/`team.name` yourself and drop mismatches.
+- **Ask for archived rows, and report them as done.** `includeArchived: true`
+  plus `archivedAt` in the selection, then split the matches three ways: live
+  (archive these), already archived (report "already archived", archive
+  nothing), and unmatched. Without it a re-run reports work that already
+  succeeded as "not found on this team" — the sweep's exclude-archived default
+  is what makes _it_ idempotent, and it does not transfer here. The team check
+  runs first, so an archived ref on another team is still not found.
 - **Report what didn't resolve.** Any ref with no matching node is listed as not
   found. Silence would read as "archived", which is the one wrong impression to
   leave about a destructive op.
