@@ -93,7 +93,9 @@ class UnassignedBucketTests(unittest.TestCase):
             sys.argv = old_argv
         return result, calls
 
-    def test_configured_scopes_tag_own_project_and_unassigned_pass_buckets_the_rest(self):
+    def test_configured_scopes_tag_own_project_and_unassigned_pass_buckets_the_rest(
+        self,
+    ):
         db = {
             CONFIGURED_A: [issue("A-1", CONFIGURED_A)],
             CONFIGURED_B: [issue("B-1", CONFIGURED_B)],
