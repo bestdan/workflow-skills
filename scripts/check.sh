@@ -43,6 +43,7 @@ run scripts/test-validate.sh
 run scripts/test-plan-graph.sh
 run scripts/test-claim-scan.sh
 run scripts/test-linear-archive.sh
+run scripts/test-linear-ready.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then
