@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>@LABEL@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PYTHON@</string>
+    <string>@DIR@/watcher.py</string>
+  </array>
+  <key>StartInterval</key><integer>@INTERVAL@</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PROBE3_RUNDIR</key><string>@RUNDIR@</string>
+    <key>PROBE3_INTERVAL_S</key><string>@INTERVAL@</string>
+    <key>PROBE3_STALE_S</key><string>@STALE@</string>
+  </dict>
+  <key>StandardOutPath</key><string>@RUNDIR@/watcher.launchd.out</string>
+  <key>StandardErrorPath</key><string>@RUNDIR@/watcher.launchd.err</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

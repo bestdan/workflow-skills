@@ -1,0 +1,931 @@
+---
+title: Auto-pilot E-lite — design proposal (identity-first, no-VM substrate)
+created: 2026-07-21
+status: proposal — v5
+context: A maintainer-owned control plane paired with an agent-owned execution plane, so trust flows one way (Max subscription for everything; a dedicated macOS agent user; GitHub App identity; tmux-hosted orchestrator for remote attach).
+audience: reviewer, then implementer
+related:
+  - ./auto-pilot-architecture-review-2026-07-21.md
+  - ./auto-pilot-architecture-review-2026-07-21-codex.md
+  - ./auto-pilot-option-e-research-2026-07-21.md
+  - ./auto-pilot-e-lite-design-review-codex.md
+  - ./auto-pilot-e-lite-design-review-codex-r2.md
+  - ./auto-pilot-e-lite-design-review-codex-r3.md
+  - ./auto-pilot-e-lite-design-review-codex-r4.md
+  - ./auto-pilot-e-lite-design-review-codex-r5.md
+  - ./auto-pilot-problem-statement.md
+  - ./nono-evaluation.md
+---
+
+# Auto-pilot E-lite: design proposal
+
+## 0. Summary and the one-way trust rule
+
+Replace the hand-built substrate (Seatbelt renderer + launchd wake cycle +
+6.3k-line bash supervisor) with a small **maintainer-owned control plane**
+and an **agent-owned execution plane**:
+
+| Plane     | Owner (uid) | Components                                                                                                    |
+| --------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| Control   | maintainer  | launcher (`ap-launch`), stopper (`ap-stop`), token broker, registry, watcher, continuation wrapper (Stage 5+) |
+| Execution | `agent`     | tmux server + run shim + Claude session + workers + clones/worktrees                                          |
+
+**The one-way trust rule (the organizing principle):** the control plane
+never executes agent-controlled code, never reads agent-controlled
+_configuration_, and never accepts agent input as authoritative. Everything
+the agent writes (heartbeat, exit files, run notes) is a **claim**; only
+control-plane observations (its own process checks, its own API queries) are
+**facts**. There is no privileged API the agent can invoke — no sudo hooks,
+no on-demand mint. Trust flows one way.
+
+**The standing anti-spiral rule:** watcher, broker, launcher,
+and wrapper each have a one-sentence job and are forbidden to interpret,
+classify, repair, or resume. Special cases accumulating in any of them is a
+stop-and-reassess event.
+
+The delivery loop (`/deliver-task`, adapters, co-review, freeze rule) is
+kept. Run-state/resume references are replaced, not retained (§6). The old
+harness is deleted only after Stage 5 + a dependency audit.
+
+## 0a. Implementation boundary — measure first, then specify
+
+Five review rounds have settled the architectural direction (delete the
+hand-built jail; identity-first containment; one-way trust) and cleared the
+**minimal agent identity plus broker track** for Stages 0–1. They have _not_
+cleared the production control plane. The remaining work separates into two
+different categories which must not be collapsed into one implementation
+spike:
+
+- **Empirical substrate facts**: the real tmux pane/shim/Claude process
+  topology; `setsid(2) → execve` PID/PGID/session continuity; launchd behavior
+  across crash, sleep, and reboot; and whether the maintainer and agent
+  credentials report the same Max window for one exact test session (a
+  continuation-only prerequisite, not a Stage-2 blocker).
+- **Design and policy choices**: the trusted run-manifest interface; atomic
+  prepared/active/terminal launch states; lease-generation replacement;
+  registration and teardown of the baseline in-tree worker topology; the
+  clock-skew fail-closed policy; and the typed registry schema. Atomic
+  continuation admission and CAO-worker registration are later, separately
+  gated extensions. Experiments can inform these choices but cannot make them.
+
+**Approved next step — a measurement spike, not a production prototype.** It
+proceeds in **one-working-day tranches** (ordered by §7a): each tranche stops
+at the day boundary, and every started probe closes as `confirmed`, `falsified`,
+or `inconclusive` against its pre-written kill sheet. There is no `unfinished`
+result and no automatic extension: another tranche may run a materially more
+discriminating probe, take the named redirect, or defer the dependent feature.
+No review round interposes between unchanged measurement tranches; only an
+architectural redirect or the measured revision returns for review. Apart
+from provisioning the dedicated non-admin agent identity, the spike runs
+unprivileged from a disposable directory and dedicated test repository;
+installs no production sudoers entry and writes nothing under
+`/usr/local/autopilot`; and makes no Linear write. It uses the real Max account
+in exactly two ways: establishing
+the agent user's own Max OAuth and running the minimal invocations probe 1's
+headless-auth check requires — one per launch context, interactive and
+launchd, each consuming shared usage — and the
+read-only cross-user coherence queries.
+It may exercise real tmux, a per-user launchd test job, signals, clock changes
+inside fixtures, and forced crashes. It must not mint or expose the production
+App credential — probe 4 runs against a disposable test App (§7a).
+
+The spike delivers a checked-in measurement table, reproducible fixture
+commands/tests, a result for every started probe, and a result for every
+baseline empirical question needed by Stage 2. A falsified or inconclusive
+load-bearing result blocks only the dependent path; unrelated probes may
+continue. The results are folded into a measured revision which completes the
+baseline manifest, launch, lease, registry, and in-tree
+worker-lifecycle contracts before Stage 2 implementation begins. Continuation
+and CAO receive their own design and evidence gates before they are enabled;
+they do not block the stop-and-notify baseline. Spike code is disposable and
+is never promoted by renaming it into `/usr/local/autopilot/bin`.
+
+This boundary applies the anti-spiral rule to the design itself: execute
+claims about the substrate, but specify authority and transaction semantics
+before privileged code exists. No Stage-1 work has begun.
+
+## 1. Locked decisions (2026-07-21)
+
+| # | Decision                                                          | Consequence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| - | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | **Claude Max subscription for everything.**                       | Budget control = usage windows. Reserve gate (`claude-usage.sh`) kept, re-verified under the agent user. Rate-limit exits handled by the control plane (§5.3). No server-side spend cap; parallelism + per-task bounds are client-side substitutes. The Max OAuth credential is an agent-readable bearer secret, explicitly in the threat model (blast radius: the subscription's usage window; revocable in console). nono was **not** adopted to hide it (§3.2 degraded tier), so it stays agent-readable — but nono's network allowlist now blocks exfiltration to non-allowlisted hosts, a partial mitigation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 2 | **Trial a dedicated `agent` macOS user.**                         | Headless service account; workflow §3.1. Permanent only if Stage-2 friction is acceptable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 3 | **GitHub App identity.**                                          | Key never readable by agent (§2.1); authorization policy incl. no-bypass rulesets (§2.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 4 | **tmux-hosted orchestrator** (remote attach, always-on mac mini). | Plain tmux on a pinned socket; launched by the maintainer-owned launcher (§4).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 5 | **Notification is async, never a pager (2026-07-22).**            | The maintainer is **not an overnight responder** and is never alarmed to intervene mid-run. Notifications are a **durable async record** read on the maintainer's own schedule — a dedicated Slack channel (persistent, reviewable) plus an opportunistic Claude-remote ping when present. No acknowledged-delivery requirement, no retry-until-acked pager loop, no device alarm. Consequence: **safety must be autonomous** — every condition that would have paged instead drives the run to a safe terminal/paused state on its own (fail closed, hold durable state) and records it. The circuit breakers were to carry the safety a pager would have: usage/parallelism caps, at-most-twice continuation, and review-gating (nothing merged or tracker-completed unattended). **As of 2026-07-28 they do not — none of those three is enforced out-of-process (§7a row 5b, falsified by inventory), so this decision's safety premise is currently unmet and unattended operation waits on row 5b's redirect.** The **10-minute SLO rebinds** from "alert reaches the device" to "detect-and-stop, to cap damage"; the **08:00 daily canary is the primary health signal** (present = healthy, absent = investigate at leisure), which also covers the host-too-dead-to-alert case no failure-push could. |
+
+## 2. Identity layer
+
+### 2.1 Token broker (maintainer-owned, fixed-configuration)
+
+- **App setup** (one-time): App `bestdan-autopilot`; permissions Contents
+  RW, Pull requests RW, Issues RW, Checks Read; installed on target repos
+  only.
+- **Broker contract**: a maintainer-owned script run by
+  a maintainer launchd job every **45 minutes**. Its App ID, installation
+  ID, key path, token path, and log path are **hard-coded constants in the
+  script**; it takes no arguments, reads no environment beyond PATH-fixed
+  absolute binary paths, follows no symlinks (it verifies each path's
+  owner, mode, and non-symlink status before use, and refuses otherwise).
+  There is **no agent-invokable mint** — an on-demand mint the agent could
+  trigger would make the 1-hour TTL meaningless, since the agent could
+  re-invoke at will. With a 45-minute refresh of a 60-minute token, the
+  published token normally has ≥15 minutes of validity — but a failed
+  refresh makes staleness unbounded, so broker health is monitored
+  independently: the **watcher alerts when the token file's mtime exceeds
+  50 minutes** (i.e. before expiry, not after), and the agent-side helpers
+  apply a **minimum-validity admission rule** — they read the expiry from
+  the broker log and refuse to _start_ a push/PR operation with < 5
+  minutes of validity remaining (failing closed to stop-and-notify). A
+  long write that loses authentication mid-flight falls under the
+  unknown-outcome reconciliation rule below. A stale token file means the
+  broker is dead; the response is stop-and-notify — never a fallback
+  credential.
+- **Clock policy**: token expiry and broker freshness use wall time because
+  GitHub supplies wall-clock epochs. The broker and watcher also record a
+  monotonic timestamp. If wall time moves by more than 60 seconds relative to
+  monotonic elapsed time, admission fails closed and the watcher alerts until
+  one successful fresh mint re-establishes the baseline. Forward and backward
+  jumps are Stage-1 fault drills; age alone never authorizes reclamation or a
+  retry.
+- **Publication protocol**: all control-plane state lives under a neutral
+  maintainer-owned root, `/usr/local/autopilot/` (`maintainer:apagent`,
+  dirs 0750 — the agent traverses but cannot write or substitute paths).
+  The broker writes the token to a temp file in the same directory, sets
+  `maintainer:apagent 0640`, fsyncs, then **renames** onto
+  `/usr/local/autopilot/gh-token` — readers never observe a partial or
+  empty token. Issuance metadata (time, installation, expiry, serial) is
+  appended to the broker log (0640, agent-readable, maintainer-writable).
+- **Consumption** (agent side): the supported workflow reaches git writes and
+  `gh` through fixed, maintainer-owned helpers which read the token file and
+  correlated broker metadata per operation. There is no long-lived `GH_TOKEN`
+  in any environment, so refresh needs no coordination with running shells.
+  The helpers enforce the five-minute admission rule. Because the agent can
+  read the bearer token and invoke another HTTP client, this is a workflow
+  correctness invariant, not a security boundary; the server-side App policy
+  remains the security boundary. (nono's network allowlist (§3.2) now constrains
+  that "other HTTP client" to allowlisted hosts, so a read token cannot be
+  exfiltrated to an arbitrary endpoint — defense-in-depth, still not the primary
+  boundary.)
+- **Failure protocol**: broker refreshes proactively; the agent never
+  triggers minting. On an authenticated failure the orchestrator may retry
+  an **idempotent read** once (the file may have just rotated); a **write
+  with unknown outcome is never re-fired** — reconcile observable
+  GitHub/Linear state first (the `pr-fix-guard.sh` discipline). Stale
+  token + dead broker → stop-and-notify.
+- **Positive no-fallback evidence**: the Stage-1 gate runs
+  the canary with instrumented helpers — capturing which credential helper
+  responded, which `gh` binary resolved, and the installation/token serial or
+  one-way digest that was presented — never the raw bearer token — not merely
+  with personal credentials absent.
+
+### 2.2 GitHub authorization policy
+
+Server-side write control, stated and tested:
+
+- Default branch of every installed repo protected by a **ruleset with an
+  empty bypass list** — the App is _not_ a bypass actor; PRs only.
+- The agent pushes only branches matching **`bestdan/ap/**`** (+ the
+  run-state branch prefix); a ruleset restricts other branch creation and
+  non-fast-forward pushes where supported.
+- Installation set is the trust boundary: repos of differing sensitivity
+  are not installed under the same App without a deliberate decision.
+- **Denial tests in the Stage-1 gate**: direct default-branch push denied;
+  push to a non-matching branch name denied; any operation on a
+  non-installed repo denied; an org-level operation (e.g. team read)
+  denied; the GraphQL reads `gh`'s real workflow performs succeed.
+
+### 2.3 Linear + Claude + git config
+
+Linear bot key (team-scoped, Read+Write, no Admin) in
+the agent env file; Claude Max auth established once for the agent user
+(interactive OAuth preferred; `setup-token` fallback; the
+credentials.json + claude.json pairing caveat is a Stage-2 canary item).
+The agent user has exactly one `~/.gitconfig` (bot identity,
+`hooksPath=/dev/null`, credential helper → §2.1); run repos are fresh
+agent-owned clones; per-task worktrees inside them.
+
+**Credential inventory** (normative):
+
+| Credential                     | Owner      | Location                              | Agent-readable        | Scope                                   | TTL                 | Rotation      | Revocation test                     |
+| ------------------------------ | ---------- | ------------------------------------- | --------------------- | --------------------------------------- | ------------------- | ------------- | ----------------------------------- |
+| App private key                | maintainer | `~danielegan/.autopilot/app.pem` 0600 | **No** (Stage-1 gate) | mint-only                               | until rotated       | App settings  | delete key → next broker run alerts |
+| Installation token             | broker     | `/usr/local/autopilot/gh-token` 0640  | Yes                   | installed repos, PR/contents/issues     | 1 h (≥15 min fresh) | broker 45 min | uninstall App                       |
+| Linear bot key                 | agent      | agent env file 0600                   | Yes                   | team-scoped RW                          | static              | manual        | revoke in Linear                    |
+| Claude Max OAuth (run)         | agent      | agent `~/.claude`                     | Yes                   | subscription                            | long-lived          | re-auth       | console sign-out                    |
+| Claude Max OAuth (observation) | maintainer | maintainer Keychain / `~/.claude`     | No                    | subscription, usage queries only (§5.3) | long-lived          | re-auth       | console sign-out                    |
+
+The observation credential is your existing login — inventoried because
+the watcher's usage queries (§5.3) run as maintainer and would otherwise
+have no credential path (`claude-usage.sh` reads the _invoking_ user's
+Keychain), which would make continuation permanently fail closed.
+
+## 3. Containment layer
+
+### 3.1 The `agent` user
+
+Non-admin headless account, work under
+`/Users/agent/work/`, per-user tool caches (Homebrew binaries are shared;
+caches/globals are agent-local — availability is a Stage-2 assertion),
+secrets 0600/0640 with audited ownership, no shared writable directories,
+no ACL leakage from your home.
+
+**sudoers**: because launch/stop/registry are
+maintainer-owned programs run _by you_ (§4), the only rule is
+maintainer → `agent` for the fixed launch/attach/exec wrappers (exact
+command paths, NOPASSWD). The agent user has **no sudo rules at all** —
+nothing to invoke, nothing to abuse. Probe 2 adds one entry to this matrix:
+the **authoritative incarnation measure + signal** in `ap-stop`/watcher need a
+maintainer → **root** NOPASSWD exact-command rule, because cross-uid
+`proc_pidinfo` and `killpg` of an agent-owned process require root
+(`fixtures/process-binding/`) — kept in the maintainer's trust domain rather
+than run as `sudo -u agent`, so a hostile agent cannot ptrace or race the
+process that authorizes its own stop. Neither rule prompts for a password;
+that is why the running harness is unattended.
+
+### 3.2 Native sandbox and the `gh` hole
+
+**Containment via nono (`nono run`), adopted at the defense-in-depth tier.** The
+evaluation ([nono-evaluation.md](./nono-evaluation.md), evidence in
+`dev_docs/elite-spike/`) selected [nono](https://nono.sh) as the sandbox +
+network layer over a hand-rolled Seatbelt profile. nono wraps the agent's
+`claude` session and its git/`gh`/Linear traffic in a Seatbelt sandbox whose
+**local proxy enforces a host-level domain allowlist** —
+`api.anthropic.com`, `github.com`, **`api.github.com`** (the `gh` REST/GraphQL
+host; both GitHub hosts are required), `api.linear.app`, loopback; default-deny
+otherwise. This **closes the `gh` hole**: `gh` runs _inside_ the sandbox and its
+egress is filtered (confirmed — the proxy blocks non-allowlisted hosts and both
+git and `gh` honor it). The hand-rolled `orchestrator.sb.tmpl` renderer is
+retired.
+
+Three constraints from the code-level security review
+(`tasks/elite_stage0_plan/nono_security_review.md`) bound the adoption:
+
+- **Host-level allowlist only; keep §2.2's server-side rulesets (SR-3).** nono's
+  _path/method-level_ endpoint policy is bypassable (dot-segment traversal), so
+  it is defense-in-depth, never the bound on _what a token can do_. §2.2's GitHub
+  rulesets remain the real token boundary.
+- **Defense-in-depth, not a secret boundary.** nono is self-declared alpha on an
+  active escape-and-fix cadence. Credential injection was **not** adopted (it
+  would not meaningfully out-perform §2.2 given SR-3, and betting a secret on an
+  alpha MITM is unwarranted). **Decision #1 stands** — the Max/Linear bearer
+  tokens remain agent-readable; the network allowlist only limits _where_ the
+  agent can send them, not whether it holds them.
+- **Pin + vendor + ephemeral CA.** Pin the nono binary version; **vendor the
+  reviewed `claude` profile as checked-in config** rather than live registry
+  auto-pull (SR-4 runs profile "wiring" silently); use only the default ephemeral
+  CA (never `--trust-proxy-ca`, which leaves an extractable CA key in the
+  keychain). **macOS-only** assumption is load-bearing — nono's network
+  containment does not hold on Linux (SR-1/SR-2).
+
+**Keychain note (F5):** nono's `claude` profile grants the whole agent login
+Keychain, so the agent Keychain must contain **only** the agent's own Claude
+credential (verified in the spike). This is a provisioning invariant, not
+optional.
+
+Remaining before Stage 2 flips this on: the authenticated write loop
+(clone→push→PR) through the proxy under the disposable test App, and the
+sandbox-layer sentinel battery — neither expected to change the tier. Stage 2
+tests effective policy per execution path (orchestrator Bash, in-sandbox `gh`,
+each worker backend), never trusting sandbox startup success.
+
+### 3.3 CAO (deferred, evidence-gated extension)
+
+CAO is **disabled in the baseline Stage-2 control plane**. Only worker backends
+whose processes remain in the registered run topology may be enabled. This
+removes an out-of-tree lifecycle from the first production protocol.
+
+CAO may be enabled later as `agent` via launchd
+(`CAO_ENABLE_WORKING_DIRECTORY=true` in the unit) only after a separate design
+defines how the control plane binds a CAO worker to `{run_id, generation}`
+without accepting an agent-selected kill target. Its evidence gate records
+each worker's PID, PPID, start identity, and process tree; injects pane-dead /
+worker-live failures; and proves that `ap-stop` reaches only the registered
+worker incarnation. Failure or absence of that gate keeps `less-claude`
+disabled for auto-pilot.
+
+## 4. Run lifecycle (maintainer-owned launcher)
+
+An agent-owned entry script appending to a maintainer registry via sudo
+hooks would be an un-designed privileged API. Instead, **the launcher is
+maintainer-owned and maintainer-run**, and derives every registry fact
+from its own observations.
+
+### 4.1 Process topology
+
+```
+you (maintainer shell, local or ssh)
+└─ ap-launch <repo> <source> [flags]          maintainer uid
+   ├─ acquires a prepared lease generation     (control plane)
+   ├─ writes an immutable run manifest + digest (control plane)
+   ├─ starts the session via ap-agent-exec (see below)
+   ├─ receives a candidate pane PID, then independently validates the
+   │   measured parent/PID/PGID/session topology against the manifest
+   └─ atomically publishes the active lease + launch record only after
+       the post-start liveness recheck succeeds             (facts)
+      session started as:
+      tmux server                              agent uid (long-lived, all runs)
+      └─ pane: run-shim                        agent uid, maintainer-owned binary
+         ├─ setsid(2) → records own {pid, pgid, starttime}
+         │   to /Users/agent/work/<run_id>/.runfile   (a CLAIM — corroboration only)
+         └─ execve claude --session-id <uuid> …  (orchestrator session)
+             └─ workers (subagents; a future CAO extension is outside this tree)
+```
+
+**Trusted run manifest.** Before it crosses the uid boundary, `ap-launch`
+writes `/usr/local/autopilot/manifests/<run_id>.json` by same-directory temp,
+fsync, rename, and directory fsync. The maintainer-owned, agent-readable file
+contains the canonical repo key and checkout path, allowlisted source/flags,
+Claude session UUID, generation, launch nonce, and expected executable paths;
+the launch record stores its digest. The agent cannot replace or edit it.
+`ap-agent-exec start-session <run_id> <generation>` reads only this manifest;
+it does not accept paths, commands, prompts, or flags from argv or the
+environment.
+
+**The agent-side command boundary** is a single narrow wrapper,
+`ap-agent-exec`, with a **fixed verb interface** containing only
+`start-session <run_id> <generation>`, `pane-pid <run_id> <generation>`,
+`list-sessions`, `attach <run_id>`, and
+`kill-session <run_id> <generation>`. It is maintainer-owned,
+invoked as `sudo -u agent env -i /usr/local/autopilot/bin/ap-agent-exec
+…` (scrubbed environment; absolute maintainer-owned paths for `tmux` and
+`run-shim` hard-coded inside it; fixed working directory; `run_id`
+validated against `^[a-z0-9-]+$` before use). The generic `sudo -iu
+agent <anything>` form exists nowhere in sudoers — the lifecycle boundary
+gets the same fixed-configuration treatment as the broker.
+
+The run shim is a bare `execve(2)` wrapper — **no `setsid(2)` and no helper**.
+Probe 2 measured that tmux already creates each pane as its own session leader
+(`sid == pgid == pid` before any setsid call), so the shim inherits leadership
+and `pgid == pid` gives stop a clean process-group target
+(`fixtures/process-binding/`). A candidate PID returned by agent-owned tmux is
+still never sufficient: the measured revision defines the unique control-plane
+binding (below) and rollback for start failure, pane death before observation,
+identity mismatch, and launcher crash before active publication — all
+fault-injected and confirmed in Probe 2.
+
+- **Run identity**: `run_id` = timestamp+slug. Session `ap-<run_id>` on
+  the single pinned socket `/Users/agent/.autopilot-runtime/tmux.sock`
+  (runtime directory agent-owned 0700; the control plane never reads or edits
+  it directly and reaches tmux only through the fixed wrapper). `start-session`
+  removes a stale socket only after its agent-side process probe finds no tmux
+  server. Socket/session results are claims used to operate tmux; they never
+  establish lease ownership, process identity, or terminal state.
+- **Incarnation identity**: every recorded process is stored as a measured
+  incarnation `{pid, p_uniqueid, start_µs, executable}`, keyed on
+  **`p_uniqueid`** — the monotonic, never-reused-within-a-boot kernel process id
+  from `proc_pidinfo(PROC_PIDUNIQIDENTIFINFO)`. Probe 2 confirmed this is
+  available on the target macOS and strictly stronger than the earlier
+  `{pid, ps lstart}` candidate, whose second-granularity `lstart` false-matches a
+  reused PID within the same second; µs `start` corroborates and `p_puniqueid`
+  pins the expected tmux-server parent (`fixtures/process-binding/`). PID reuse
+  is therefore a hard mismatch, not a probabilistic one, and stop fails closed on
+  any mismatch. The run's incarnation is never the short-lived launcher's PID,
+  the runfile's claim, or the agent-owned tmux `pane_pid`. Both cross-uid facts
+  are confirmed on the mini: a non-root maintainer's `proc_pidinfo` and `killpg`
+  of an agent-owned process are both `EPERM` (read fails closed, not a partial
+  read), while root reads the full tuple and terminates the group — so the
+  independent measurement and the signal both run **privileged (root)**, never a
+  fallback to `ps` lstart.
+- **Session identity**: `ap-launch` generates the Claude session UUID,
+  passes it via `--session-id`, and records it in the launch record. Any
+  future resume targets exactly that session — never "the most recent
+  conversation in this directory."
+- **Lease** (maintainer-owned, generation-based): the lock at
+  `/usr/local/autopilot/lock/<repo-key>` (`<repo-key>` = canonical remote
+  URL hash, not a local path) has `prepared`, `active`, and `terminal` states.
+  Its owner record contains `{generation, run_id, manifest_digest, run
+  incarnation, registered worker incarnations, created_at}`. Every transition
+  occurs while holding `/usr/bin/lockf -t 0` on the repo's maintainer-owned
+  lock file and publishes a same-directory temp using fsync, rename, and
+  directory fsync. OS lock ownership ends on process death; there is no
+  crash-persistent `mkdir` mutex. A writer that loses the non-blocking
+  acquisition (e.g. to a running watcher pass) fails closed: it aborts the
+  transition, publishes nothing, and reports the contention — it never blocks,
+  spins, or retries within the same invocation. The measured revision must enumerate and
+  fault-inject rollback at every prepared-to-active boundary before Stage 2.
+  **Release** occurs only after an `observed_terminal` record is durable and
+  the current-generation pane plus every registered worker are observed dead:
+  by `ap-stop`, or by the watcher for a naturally terminated run. Generation
+  compare under the lock prevents either writer from releasing a successor.
+  **Takeover** (`ap-launch --take-over`, human-run) uses the same OS-owned lock,
+  verifies the recorded incarnation and registered workers are dead, records
+  the abandoned/prepared generation, and atomically publishes the incremented
+  generation. Records from a superseded generation are recognizable and never
+  acted on.
+- **Stop semantics** (`ap-stop <run_id>`, maintainer-owned): all targets
+  come **from the registry and live process-table observation, never from
+  the runfile** — the runfile corroborates but cannot select a kill
+  target (an agent-writable file must not aim a maintainer-privileged
+  signal). Sequence: read the launch record's incarnation; confirm it in
+  the process table. If the pane is already dead, continue to the registered
+  worker check rather than releasing immediately. Otherwise signal its
+  registered process group (TERM, grace, KILL), then invoke `ap-agent-exec
+  kill-session <run_id> <generation>`. CAO is absent in the baseline; when its
+  extension is enabled, stop only the registry-bound worker incarnations.
+  Write `observed_terminal`, fsync it, and release the matching lease last.
+- **Terminal records — two kinds, never conflated**:
+  - _agent-claimed exit_: the shim writes `{exit_code, end_time}` to the
+    runfile on normal exit. The watcher copies it into the registry
+    **marked as a claim**. A claim **never** releases the lease,
+    suppresses an alert condition, or authorizes resume or cleanup.
+  - _observed-terminal_: written by watcher or `ap-stop` from their own
+    process checks (session gone, incarnation dead). SIGKILL/power loss
+    produce no claim — only an observed-terminal record. The registry
+    never represents disappearance as a trusted exit.
+
+### 4.2 Registry (maintainer-owned, agent never writes)
+
+`/usr/local/autopilot/registry/` — writers are `ap-launch`, `ap-stop`, the
+watcher, and (Stage 5+) the fixed continuation wrapper only (all maintainer
+uid). Schema: versioned JSONL, one file
+per month. Baseline record types (complete for Stages 2–4):
+`launch_prepared`, `launch`, `launch_aborted`, `observed_terminal`,
+`lease_release`, `claimed_exit` (marked), `alert`, `alert_failed`, `canary`,
+`watcher_slow`, `clock_anomaly`, `usage_limit`, `ceiling_trip` (§5.1's runaway
+ceiling fired: which input tripped, its observed value, the configured bound, and
+the stop the watcher requested — added 2026-07-28 by §7a row 5b's redirect; the
+"complete for Stages 2–4" claim above predates it), and `takeover`. Before bounded
+continuation is enabled, a versioned Stage-5 schema extension adds
+`expected_resume`, `continuation_reserved`, and `continuation_attempt`. Every
+record has `schema`, monotonic `seq`, wall and monotonic timestamps, a
+boot-session identifier, writer identity, and a link to the causal prior `seq`.
+Run-scoped records also require
+`run_id`, `repo_key`, and `generation`; host-scoped `canary`, `watcher_slow`,
+and unassociated `clock_anomaly` records declare `scope: host` instead. Typed
+records additionally carry the data their decision requires: manifest digest
+and session UUID; process and worker incarnations; terminal evidence; alert
+dedup key and delivery status; usage percent and `reset_epoch`; or continuation
+reservation key, ordinal, scheduled/actual time, and outcome. The measured
+revision must publish the baseline JSON schema before Stage 2 code begins; the
+continuation extension must be published and fault-injected before Stage 5.
+
+Append serialization uses `/usr/bin/lockf -t 0` on a maintainer-owned lock
+file. The writer derives the next `seq` from the highest existing `seq` across
+all monthly files — `seq` is global and never resets at file rollover — then
+appends, fsyncs, and releases the lock;
+duplicate or out-of-order records are a watcher alert, not silently repaired.
+"Append-only" is enforced by uid ownership (agent has group read, no
+write), not asserted.
+
+### 4.3 Heartbeat and remote workflow
+
+Heartbeat: agent touches `.heartbeat` per loop turn. **Staleness
+threshold: 6 minutes**: stale → the watcher drives the run to a safe stop and
+records it (async notice; §5.1). With the two-minute watcher cadence and bounded
+pass times, worst-case **detect-and-stop** stays below the ten-minute SLO
+(Decision #5 — the SLO bounds detection, not message delivery).
+Freshness is **non-authoritative**: a fresh heartbeat (or a
+present-looking tmux session) means only "no stall condition" — it never
+cancels, delays, or suppresses any condition raised by a control-plane
+observation (dead incarnation, overdue `expected_resume`, registry
+anomaly, broker-staleness), and it never establishes terminal state. A
+wedged-but-touching run is caught by those other conditions and,
+ultimately, by the human reading the morning report — the heartbeat is a
+liveness tripwire, not a health certificate.
+
+Remote workflow: ssh → `ap-agent-exec attach` wrapper → detach.
+Double-launch refused by the lease; two operators attaching is safe
+(read-only unless they type).
+
+## 5. Supervision
+
+### 5.1 Watcher (maintainer-owned)
+
+Launchd job, `StartInterval` 120s, **single short-lived pass per
+invocation** (no daemon to wedge): non-blocking `/usr/bin/lockf -t 0` (skip if a
+previous pass is running); every external operation has a timeout —
+process/tmux probes 10s, push delivery 15s, total pass budget 60s. If a
+pass overruns, launchd simply fires the next one. Each successful pass
+records its own timestamp; a pass that finds the previous success **older
+than 2 intervals** appends a `watcher_slow` record covering the gap (the
+realizable form of skipped-pass detection — a skipped pass can't record
+anything itself, so the next successful one accounts for the silence).
+
+The pass holds `/usr/bin/lockf -t 0` on its own maintainer-owned lock file;
+process death releases ownership. Checks per tick (each independent):
+registered-run incarnation and worker liveness; tmux session existence (via
+`ap-agent-exec list-sessions`, as a claim); heartbeat freshness vs the
+six-minute threshold; broker-token freshness (§2.1's 50-minute deadline);
+wall/monotonic clock coherence; terminal-record consistency (runfile claim vs
+registry); registry sequence/schema validity; overdue `expected_resume`
+records (Stage 5+); alert-queue state; and — added 2026-07-28 by §7a row 5b's
+redirect — the **runaway ceiling** below.
+
+**Runaway ceiling (row 5b's redirect).** Every other check on this list detects
+death, staleness, or inconsistency. None detects a run that is vigorously
+misbehaving while keeping all of them green — which is exactly what a runaway
+does, so without this check the watcher is blind to the failure mode Decision #5
+made safety-critical. The ceiling trips on a bound exceeded (wall-clock,
+action-count, or live worker count), and its inputs must obey the one-way trust
+rule: **only the wall clock (the control plane's own), the process table (§3.1's
+observation path), and the provider-side usage query via the §2.3 maintainer
+observation credential.** Anything read from the run directory is a claim (§4.1)
+— a bound sourced from agent-writable state is forgeable by the very process the
+ceiling exists to stop, which is the concrete defect row 5b found in the legacy
+harness. The usage query is therefore load-bearing here as well as for
+continuation: it measures server-side truth the agent cannot forge, even though
+nono's allowlist lets the agent reach `api.anthropic.com` directly with its own
+readable bearer token. A trip appends a `ceiling_trip` record (§4.2) and requests
+the same safe stop a stale heartbeat does (§4.3).
+
+**This is the redirect's home, and it is deliberately not `spawn-orchestrator.sh`.**
+Row 5b's redirect originally said "a live worker-count reap in `supervisor-scan`".
+That would have built the safety-critical ceiling inside the legacy harness §6
+marks **delete, do not port** — investing in code scheduled for deletion while
+leaving the new control plane without it. Corrected 2026-07-28.
+
+**Notification contract (async record, not a pager — Decision #5):**
+
+The watcher never pages the maintainer to intervene. Its job is to **detect,
+drive the run to a safe state autonomously, and record** — notification is the
+async by-product, read on the maintainer's own schedule.
+
+- **Detect-and-stop, not alert-to-device.** On a stall/kill/wedge, the bound is
+  on the watcher **detecting and driving the run to a safe terminal/paused state
+  within 10 minutes** while the host is running (the mini is always-on;
+  sleep-during-run is out of contract). This caps damage from a wedge or
+  runaway; it is **not** a promise that a message reaches a device in 10 minutes.
+  Nothing depends on a human responding within the run.
+- **Notification sinks (durable, async).** The **registry is the authoritative
+  log**; its human-readable mirror is a **dedicated Slack channel** (persistent,
+  reviewed at leisure), with an **opportunistic Claude-remote ping** when the
+  maintainer is around (Case 1). Best-effort delivery with a small bounded retry
+  for _record completeness_ (then an `alert_failed` record) and dedup key
+  `run_id+condition` — but **no acknowledged-delivery requirement and no
+  retry-until-acked pager loop**; a missed message is recovered by the canary and
+  the registry, not by escalation.
+- **Primary health signal: the 08:00 daily canary** — present = healthy,
+  **absent = investigate at leisure**. This is positive confirmation, so it also
+  covers the host-too-dead-to-emit-anything case that no failure-triggered push
+  could, and bounds watcher-silence at 24h. The documented missed-canary
+  procedure is the maintainer's async response; there is no overnight page.
+- Boot check: registered run with no terminal record after reboot → async boot
+  notice + safe-stop, same contract.
+
+**Hard prohibitions**: the watcher never edits agent run state, re-mints,
+kills, resumes, classifies an agent claim as fact, or repairs registry data.
+Its sole lease transition is generation-checked release after it
+has durably recorded `observed_terminal` and independently observed the pane
+and all registered workers dead; authoring registry records (`usage_limit`,
+`expected_resume`, `watcher_slow`, alerts) is appending evidence, not a
+transition. Interruption remains a human running
+`ap-stop`.
+
+**What "never kills" means — read this before implementing** (clarified
+2026-07-28). Taken literally alongside "interruption remains a human running
+`ap-stop`", this prohibition reads as forbidding the autonomous safe-stop the
+rest of this section requires — §4.3's stale heartbeat "drives the run to a safe
+stop", probe 3 confirmed the watcher doing exactly that with no human in the
+loop, and the runaway ceiling above depends on it. The reconciliation is that
+**the watcher never issues signals itself**: it detects, records, and _requests_
+the stop through the maintainer-owned stopper, which owns the authoritative
+incarnation measure + signal (§3.1, §4.1). The sentence bounds the watcher's
+**mechanism**, not its autonomy, and "interruption remains a human" means
+_discretionary_ interruption — a maintainer choosing to end a healthy run — not
+the safety stops Decision #5 makes mandatory precisely because no human is
+awake. An implementer who reads the prohibition the other way removes the
+autonomous safety this design is built on.
+
+### 5.2 Reboot
+
+Stop-the-run event; async boot notice; human-initiated `--resume` (§6).
+
+### 5.3 Usage-limit handling (evidence-based; continuation Stage 5+ only)
+
+- **Authoritative evidence**: a `claude` exit alone is not a rate-limit
+  determination. On any orchestrator exit, the _watcher_ queries usage
+  itself — as maintainer, with the **observation credential** from the
+  §2.3 inventory (same Max subscription; `claude-usage.sh` resolves the
+  invoking user's credentials, so the maintainer side must hold one — its
+  presence is a Stage-2 canary item). **Exhausted-window predicate**
+  (exact): the usage query reports the session window at ≥100%
+  utilization with a `reset_epoch` in the future. Exit + predicate true =
+  `usage_limit` record with `reset_epoch`; exit + predicate false =
+  ordinary termination notice (async). Usage query fails → fail closed: ordinary
+  termination notice, no continuation.
+- **Coherence prerequisite**: continuation is disabled unless the measurement
+  spike demonstrates that the maintainer and agent credentials return the
+  same session-window utilization and `reset_epoch` for one exact Claude test
+  session. Merely proving that both queries succeed is insufficient.
+- **Stages 1–4: stop-and-notify.** The async notice carries `reset_epoch`.
+- **Stage 5+: bounded continuation, control-plane-owned.** Not an
+  agent-side sleeping parent — its sleep would be indistinguishable from a
+  wedge. When the watcher records `usage_limit`, it also writes
+  `expected_resume {run_id, generation, at: reset_epoch+jitter}` —
+  maintainer-owned durable state, so the run is _known_ to be
+  intentionally paused (no false stall; and no agent heartbeat or session
+  state can negate an `expected_resume` or an independently detected
+  failure) and reservation state survives crashes and relaunches. At/after
+  `at`, a maintainer launchd job acquires the run's OS-owned continuation
+  lock, revalidates clock coherence, the durable `expected_resume`, current
+  terminal state, reserve, and attempt bounds, then checks for a reservation
+  keyed by `{run_id, generation, reset_epoch}`. If none exists it appends and
+  fsyncs exactly one `continuation_reserved` record before releasing the lock.
+  A duplicate job observes that reservation and exits without launching.
+
+  The reservation owner invokes `ap-launch --resume <run_id>` to acquire a new
+  lease generation and resume the **exact recorded Claude session UUID** from
+  the prior launch record (§4.1). It writes a linked `continuation_attempt`
+  outcome after launch succeeds or fails. Bounds are **at most once per usage
+  window and at most twice per run**, computed from durable reservation
+  records rather than best-effort attempt logs. A reservation stranded before
+  launch is not retried automatically; it alerts for human reconciliation.
+  Clock changes, host sleep past `at`, reboot, missing usage data, or session
+  identity mismatch likewise stop-and-alert, never admit a silent extra
+  attempt.
+
+## 6. Keep / port / delete
+
+**Keep as-is**: `/deliver-task` lifecycle + adapters + co-review + freeze
+rule; `task-scan.py`, `plan-graph.py`, `claim-scan.sh`, `validate.py`,
+`probe-coders.sh`, `select-coder`/`orchestrate-coders`/`cao-coder.sh`;
+`pr-fix-guard.sh`; the run-state file formats as the human-readable
+ledger.
+
+**Port small** (new, minimal implementations under this design):
+
+- _Admission canary_ (successor of `preflight.sh`, a rewrite, not a
+  rename): executes the real path as the agent identity — clone, commit,
+  push, PR open/close, Linear read/write, usage query, one worker
+  dispatch — pass/fail on the actual load-bearing operations.
+- _Read-only reconciliation_ (successor of doctor's 7 invariants):
+  reports divergence between run-state, git, and tracker; repairs
+  nothing.
+- _Resume_, invoked as `ap-launch --resume <run_id>`: lease revalidation
+  and registry continuity from the control plane; the model-side
+  reconciliation prose (git + tracker + run-state comparison) is the
+  ported read-only part. No alarm-clearing, exit-state, or doctor-repair
+  steps — those concepts no longer exist.
+- _Run-loop prose in `SKILL.md`_: heartbeat touch + reserve gate + §5.3
+  stop semantics replace every legacy harness invocation. The Claude session
+  is launched wrapped in `nono run` with the vendored profile (§3.2):
+  non-interactive stdin, agent login keychain pre-unlocked, host-level domain
+  allowlist (`api.anthropic.com`, `github.com`, `api.github.com`,
+  `api.linear.app`, loopback).
+- _`claude-usage.sh`_: verified (fixed if needed) for both credential
+  contexts — agent (reserve gate) and maintainer (watcher observation).
+
+**Delete, do not port** (after Stage 5 + grep-clean dependency audit;
+until then the old harness remains as an explicitly unsupported
+fallback): `spawn-orchestrator.sh` + its test suite,
+`orchestrator.sb.tmpl`, `orchestrator.plist.tmpl`,
+`smoke-confinement.sh`, the supervisor pause ledger, exit
+classification, in-jail alarm machinery, the verify broker, and
+wrapper-specific doctor repairs. Verified coupling to audit: `SKILL.md`,
+`resume.md`, `run-state.md`, `run-budget.md`, `launch-runtime.md`.
+
+Linear reconciliation: ≈24 issues obsoleted with pointer; PRE-536 →
+launcher prompt file; PRE-551 → §2.1/§5.3 protocols; PRE-619 closes with
+the supervisor.
+
+## 7. Migration stages and evidence gates
+
+**Stage 0 — minimal agent identity + bounded measurement spike.**
+Provision the non-admin `agent` user and `apagent` group, but no sudoers entry
+or production control-plane path. Then run §7a's first, one-working-day
+falsification tranche from unprivileged fixtures: write the kill sheet, then
+run as many of the highest-priority probes as fit. Stop after one working day
+instead of squeezing every question into the tranche. Close every started
+probe with a classified result; an inconclusive load-bearing probe remains a
+dependency blocker and may be rerun only with a changed kill sheet that names
+the new evidence expected to discriminate it (§0a). The fixtures may measure
+tmux/process identity, `setsid(2) → execve` continuity, per-user launchd
+crash/sleep/reboot behavior, autonomous detect-and-stop + async notice delivery, and exact-session cross-user
+usage-window coherence without the GitHub App key, Linear key, production
+sudoers, or production installation paths; the Max coherence probe is
+read-only. Stage 0 and Stage 1 may interleave under §7a. Their combined
+baseline evidence, including the baseline crash-transaction kernel, must exist
+before Stage 2; continuation-reservation and CAO evidence are not Stage-2
+prerequisites.
+**Gate**: checked-in measurements and reproducible fixtures classify every
+baseline load-bearing question as confirmed, falsified, or inconclusive. A
+falsified or inconclusive result blocks its dependent Stage-2 path. A measured
+design revision specifies the trusted manifest, complete baseline registry
+schema, launch/lease state machine, and rollback table before control-plane
+implementation.
+
+**Stage 1 — broker + server-side authorization.**
+Build: the maintainer-owned identity/token directory skeleton; App + rulesets
+(§2.2), broker, token file, fixed `gh`/git helpers, and the agent's gitconfig.
+Run manifests and the registry wait for the measured protocol revision; this
+stage does not build or launch the orchestrator control plane.
+**Gate** (all executed): canary performs clone/commit/push/PR
+open+comment+close/Linear read+write as the actual `agent` uid, **including the
+GraphQL reads `gh` actually issues**; **App key unreadable from every
+non-broker process path, including the agent identity**;
+broker fixed-config verified (refuses
+symlinked/wrong-owner paths; atomic rename observed under a concurrent
+reader; no arguments/env accepted); mint fault drills (expired token,
+missing key, revoked installation, clock skew) fail loudly; **denial
+tests**: default-branch push, non-matching branch push, non-installed
+repo, org-level operation — all denied, with the App absent from every
+bypass list; **positive no-fallback evidence** via instrumented helpers
+(§2.1). Forward/backward clock jumps exercise the 60-second fail-closed policy.
+
+**Stage 2 — sandbox + tmux + control plane (CAO disabled).**
+Prerequisite: Stage 0's measured protocol revision is approved. Build: agent
+execution directories, sudoers (exact-command, maintainer→agent only),
+maintainer-owned run shim and manifest writer, `ap-launch`/`ap-stop`/wrappers,
+registry, watcher, and push channel. The sandbox layer is **nono** (§3.2,
+adopted) with the **vendored** `claude` profile and pinned binary — the run shim
+wraps the Claude session in `nono run` (non-interactive stdin; agent login
+keychain pre-unlocked), not a hand-rolled `.sb` render. CAO remains disabled
+under §3.3.
+**Gate — per execution path** (orchestrator Bash, **in-sandbox `gh`** — nono
+filters its egress, no longer an excluded hole — each
+enabled worker backend) **× launch context**
+(ssh-interactive and launchd/no-GUI): recorded **uid, groups, HOME, PATH,
+TMPDIR, CWD, tool versions, env allowlist**;
+sentinels in your home/Keychain/`~/.ssh`/`~/.aws`/personal gitconfig
+unreadable; App key unreadable; Claude auth headless; `kill -9` of the
+orchestrator → **detected and driven to safe stop within the 10-min SLO**, with
+a durable async notice logged (Slack + registry; Decision #5); canary present on
+the real device (delivery-logged, not acknowledged); re-attach after disconnect;
+double-launch refused; lease takeover drills (dead incarnation replaced;
+**live incarnation refused** — proving the incarnation is the pane, not
+the exited launcher; **two concurrent takeovers → exactly one wins** the
+OS-owned lock); pane death before observation, launcher death in every
+prepared-to-active transition, run-shim-to-Claude identity continuity,
+lock-owner death, and corrupt/truncated publication all produce the specified
+rollback without touching a successor generation; `ap-agent-exec` rejects an
+invalid `run_id`, generation mismatch, manifest digest mismatch, and unknown
+verb.
+
+**Stage 3 — run #4** (one small real task, non-auto-pilot plan, partially
+attended, no fan-out, no auto-retry).
+**Gate**: reviewable PR exists; **an independent verifier (CI or a
+separate process) validates the exact pushed SHA**; forced **worker**
+stall (orchestrator waiting) detected and driven to safe stop with an async
+notice, in addition to the orchestrator-kill case.
+
+**Stage 4 — recovery drills** (3-task chain), each with a clean outcome:
+orchestrator SIGKILL; crash between each durable transition (post-push /
+post-tracker / post-run-state); expired token during a read; expired
+token during a **write with unknown outcome** (reconcile, don't re-fire);
+usage-limit exit (stop-and-notify path, watcher-corroborated); stale tmux
+socket; boot-time notification after reboot; repeated + concurrent
+`--resume` (lease holds); registry `seq` anomaly alerts.
+**Gate**: reconciliation from git/tracker/registry only — zero legacy
+supervisor commands, no duplicate PR/claim/comment, no destructive touch
+of a live worker.
+
+**Stage 5 — overnight.** Prerequisites: forced-stall **detected → autonomous
+safe stop + durable async notice** (Slack + registry; Decision #5), no page; the
+maintainer and agent usage queries return the same
+window for the exact test session; the continuation schema extension is
+published; continuation failure-injection drills prove reservations durable
+across concurrent jobs and a continuation-job crash; a stale
+`expected_resume` (clock moved / host slept past `at`) producing
+stop-and-alert, and a
+fresh agent heartbeat shown _not_ to cancel an overdue
+`expected_resume`; duplicate jobs produce one `continuation_reserved` record
+and at most one launch. Then one genuinely unattended run: starts with no
+attached terminal; spans **≥ 4 hours**; crosses ≥ 1 real boundary (worker
+dispatch, broker token renewal mid-run, watcher-corroborated usage-window
+stop or continuation, dependency transition); morning report tied to
+actual git/tracker state; **no detect-and-stop gap > 10 min while the host
+runs** (Decision #5 — the bound is detection, not paging), async notices landing
+durably in Slack; canary received at 08:00.
+**After this gate only**: dependency audit → delete old harness → Linear
+reconciliation.
+
+## 7a. Tactical validation delivery order
+
+Section 7 remains the durable migration plan: its gates define what must be
+true before production authority or unattended scope increases. This section
+is the tactical overlay: it decides what disposable experiment to run next so
+the largest, least-certain assumptions are falsified before their dependent
+components are built. Tactical priority is deliberately not the same as stage
+number. A probe may run ahead of the production stage it informs, but it never
+satisfies that stage's gate by itself.
+
+Prioritize each probe by:
+
+> **assumption blast radius × uncertainty × ease of falsification ÷ experiment
+> cost**
+
+The ordering rules are:
+
+1. Before writing the fixture, write the falsifier, pass threshold,
+   `inconclusive` condition, time cap, dependent work, and redirect. A result is
+   useful only if it changes what gets built next.
+2. Exercise one load-bearing assumption through the real boundary, with the
+   smallest disposable fixture that can disprove it. Do not build the
+   production-shaped component first.
+3. Time-box each probe to at most half a day unless this section states
+   otherwise. At the cap, stop and classify the probe as `confirmed`,
+   `falsified`, or `inconclusive`; "nearly done" is not a fourth state and does
+   not extend the cap.
+4. Check in the fixture command/test, sanitized raw evidence, non-secret
+   environment metadata, result, and decision. Never persist bearer tokens,
+   credential files, secret-bearing headers, or secret environment values.
+   Spike code is never promoted into production by renaming it.
+5. On `falsified` or load-bearing `inconclusive`, stop dependent work at its
+   next safe checkpoint. Reconcile any external write, record the exact durable
+   state and invalidated assumptions, then take the named redirect or defer the
+   feature. Independent work may continue. Never repair a probe until it
+   resembles the desired answer.
+6. Repeating an inconclusive probe requires a changed kill sheet naming the new
+   evidence or method expected to distinguish pass from fail. Otherwise take
+   the redirect or defer the dependent feature; do not carry the same probe
+   across tranches as open work.
+
+The dependency order is explicit: after the kill sheet, the dedicated-user
+canary and autonomous-safe/async-report skeleton may run in parallel. The process-binding and
+GitHub-authority probes wait for the agent identity; the baseline
+crash-transaction kernel waits for the measured process model and a draft
+baseline state machine. The thin vertical run waits for those baseline probes,
+the Stage-1 gate, and approval of the measured revision. This is a dependency
+graph, not a utilization target: independent probes may run concurrently only
+when they have separate evidence and enough attention to stop cleanly. Probe 3
+is never deferred behind probe 2 merely because its priority number is larger.
+
+| Priority | Work item                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Key assumption                                                                                                                                                                                                                                     | Falsification redirect                                                                                                                                                                                            |
+| -------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|        0 | **Kill sheet.** For every item below, record the falsifier, pass threshold, inconclusive condition, evidence required, time cap, dependent work, and redirect before running it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | The team shares binary-enough decisions; evidence will end debate rather than create another review round.                                                                                                                                         | Tighten the decision rule before any implementation work.                                                                                                                                                         |
+|        1 | **Dedicated-user viability canary — substantially DONE** (`dev_docs/elite-spike/`, nono evaluation). Confirmed live: agent provisioned (non-admin, 0700 home, clean login keychain), headless Claude auth, **nono** sandbox startup + host-level allowlist, sentinel unreadability (uid + sandbox layers), tool/cache access. The sandbox is nono (§3.2), not a hand-rolled Seatbelt render. Remaining: the interactive+launchd matrix under one enabled worker, and the F2 write loop (needs test App).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | The no-VM `agent` identity is a usable execution substrate with a real filesystem/Keychain boundary.                                                                                                                                               | Stop the no-VM E-lite substrate; test a microVM-per-run boundary or restrict the product to attended operation.                                                                                                   |
+|        2 | **tmux/process-binding spike — CONFIRMED** (`dev_docs/elite-spike/fixtures/process-binding/`). Shim is a bare `exec` (tmux pane is already session leader); incarnation key is `p_uniqueid`; all four injections held (fail-closed on pre-observation death, benign launcher crash, replacement-pane and PID-reuse both refused). Both cross-uid facts confirmed on the mini: non-root `proc_pidinfo` and `killpg` are EPERM (read fails closed), root does both → measure + signal run privileged. Fully closed. Start a trivial shim and then a harmless exec surrogate through the fixed-wrapper shape (the real shim→Claude transition is captured once, during probe 1's authorized invocations — §0a's Max allowance admits no `claude` launches beyond probe 1's); measure PID/PPID/PGID/SID/executable continuity; inject pane death before observation, launcher death, replacement panes, and stop races.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | The maintainer can uniquely bind a requested launch to one live incarnation and stop only that incarnation despite the agent-owned tmux server.                                                                                                    | Abandon pane identity as authority; evaluate a directly held maintainer guardian/process handle or a different session host before designing leases.                                                              |
+|        3 | **Autonomous-safe / async-report walking skeleton — CONFIRMED** (`dev_docs/elite-spike/fixtures/async-skeleton/`). Under real per-user launchd, the watcher autonomously detected a killed run (detect 9.4 s) and a wedged SIGSTOP run (detect 10.7 s), drove each to a safe terminal with no human in the loop, and emitted a durable async notice (authoritative registry `observed_terminal`+`alert` plus a Slack mirror). The 08:00 canary is health-coupled and the **load-bearing false-positive leg passed** (run wedged _and_ watcher killed → `unhealthy`, never host-is-up). Production-cadence kill detect 117 s < 600 s SLO. Findings: safe-stop needs the run to be its own session leader (Probe 2 topology) so `killpg` can't reach the supervisor; launchd's ~10 s relaunch throttle floors `StartInterval` (production 120 s clears it). Fully closed. (Decision #5.) A trivial launchd-hosted heartbeat process is killed and wedged; the watcher must **detect and drive the run to a safe terminal/paused state within ten minutes** (host running), emit a **durable async notice** (Slack + registry record; opportunistic Claude-remote ping), and the **08:00 canary must correctly flip to absent/unhealthy**. **Canary false-positive leg (load-bearing): with a run wedged _and_ the watcher killed, the canary must NOT report "healthy"** — it must be health-coupled (gated on current watcher passes / no run past its stop deadline / broker fresh), not a bare host-is-up ping. Not required: waking the maintainer, acknowledged delivery, sub-10-min message arrival.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | The unattended promise—autonomous detection + self-safe stop + honest async self-report, no human in the loop—works without the full registry or launcher.                                                                                         | Stop unattended work; change launch context, watcher primitive, cadence, safe-stop mechanism, or the durable record sink and rerun this probe.                                                                    |
+|        4 | **GitHub authority canary — CONFIRMED (GitHub); Linear leg deferred** (`dev_docs/elite-spike/fixtures/github-authority/`). Under the actual agent uid (502 on that host — resolve by NAME; see the 2026-07-27 re-verification note, which found this probe NOT re-verifiable because its disposable App, key, repos and ruleset are gone) via a disposable test App (installation scoped to one test repo), every sufficiency op succeeded over the App installation token (clone/commit/push-to-`autopilot/**`/PR open+comment+close + the captured GraphQL `RepositoryInfo`/`PullRequestForBranch`); denials all held server-side (default-branch and non-matching-branch push both `GH013` ruleset violations, non-installed repo 404), App on no bypass list; no-fallback held (agent cannot read the App key; token removed → fails closed). B4 org-level N/A on a personal account (→ Stage 1). Linear read+write **operations** confirmed on a disposable issue (read/comment/state-change/revert), but via the maintainer MCP identity — agent-scoped tracker auth + denials defer to Stage 1. A driver bug — `sudo` inheriting a 0700 cwd made denial checks false-pass on non-zero exit — was caught and fixed (verdicts now require a real denial reason). Under the actual agent uid, perform every required git/`gh`/GraphQL operation and all denial tests with instrumented credential resolution — against a **disposable test App** installed only on the test repository; the production App never enters the spike. Stage 1's gate reruns the identical tests against the real App.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The App identity is both sufficient for the delivery loop and constrained by server-side policy — now the enforcement of "no irreversible action unattended" (Decision #5), so its denial tests are safety-critical, not just correctness.         | Change App permissions/helpers or replace unsupported `gh` paths with fixed API calls; do not build broker hardening around a false permission model.                                                             |
+|        5 | **Baseline crash-transaction kernel — flat-file FALSIFIED (4 rounds) → SQLite/launchd/uid redirect taken; v5.1 fixture CONFIRMED 2026-07-27** (`dev_docs/elite-spike/fixtures/crash-kernel/`). **CONFIRMED means only what the kill sheet defines: _not falsified in the tested process-crash environment_ — the ceiling, not "proven correct", and explicitly NOT a power-loss durability claim.** 28 rows in ONE pass at a single clean fixture revision (`c5eb8fd`): **26 PASS, 1 DOCUMENTED-LIMITATION, 1 BLOCKED**, all under the real escape-proof uid domain. **Transaction half:** 12/12 crash injections at every armed transition boundary (including both TAKEOVER boundaries) were a clean rollback or clean commit; gapless seq with an idempotent replay consuming no sequence number; admission gate + `BEGIN IMMEDIATE` let exactly one of two concurrent launches through; the start-gate EOF rule closed all three DB↔spawn windows; the stop saga resumed from every crash point and refused to terminalize on non-convergence; PID-reuse rejected by `p_uniqueid` re-read after kqueue attach, now exercised against a process inside the real containment domain; reconciliation proved INERT on replay across all 12 rows. **Containment half — the part that was missing on 07-23 and is now established:** a `setsid`+double-fork+`exec` escapee invisible to token scanning was still reaped to zero (`Esc`); 38 live processes converged (`Churn`); a write from the agent uid got `EACCES`, making sole-writer **enforced rather than architectural** (`Writer`); under real launchd `KeepAlive` a supervisor SIGKILL **re-adopted** a healthy run _and its descendant_ while a dead run with a live descendant was reaped to zero then terminalized; takeover reaped generation g to **verified zero before** publishing g+1. **So invariants 4 (earned release), 5 (orphan safe-stop) and 6 (reap convergence) are now ESTABLISHED, and 8 (sole writer) is enforced** — the Stage-2 block is lifted. **What CONFIRMED does NOT cover:** reboot/power-loss (inconclusive by construction, **never** passable here — `SIGKILL` cannot prove it, for SQLite exactly as for flat files); **EIO** (bad media, distinct SQLite error paths, uninjected — `Io` now injects a genuine ENOSPC that struck after the WAL had been extended, which establishes failure-after-writing-began, not a torn `write(2)`); a **uid-changing helper**, which leaves the domain and is a documented limitation → containment option 2; and **portability** — row evidence is per-machine and none of it transfers to another host. **Provenance:** every row carries its fixture revision and the privileged surface (root-owned helpers, sha256 per file, sudoers scoped to runas `agent` only) is recorded per run. **An incident is part of this record:** a supervisor bootstrapped in uid mode against the _maintainer's own_ uid reaped every SSH login for four days (`dev_docs/tasks/probe5-incident-evidence/`); the fixture now fails closed at construction, resolves the agent account **by name** (its uid differs per host), and an armed crash point with no row is a hard error. The fixture also caught a real v5.1 spec defect — the re-adopt rule's "no unexpected extra processes" conjunct false-reaps any run that forks a worker — fixed as **v5.2** and now carrying real uid-domain evidence via `Sup-readopt`. **Fully closed 2026-07-27:** v5.2 is ratified in `draft-state-machine.md`, and Part E teardown is done — the helper tree, sudoers fragment and all rundirs are gone, the `agent` account deliberately left in place. Nothing about this probe is outstanding. Probe 1 re-verified 2026-07-27; **Probe 4 is NOT re-verifiable** (its disposable App, key, both test repos and ruleset are gone) — its GitHub-side findings are properties of that App and ruleset, not of the invoking uid, and are re-earned by Stage 1's gate against the real App. Time cap: two working days (an explicit override of rule 3). **Under Decision #5 no outcome may sit ambiguous awaiting a human: every crash/contention result must be a safe terminal or a safe hold that needs no mid-run intervention.** | The baseline control-plane state model has one recoverable outcome under crash and concurrency — **every outcome a safe terminal or a safe hold needing no mid-run human action (Decision #5)** — before it is coupled to tmux, GitHub, or Claude. | Simplify the protocol or evaluate a transactional store such as SQLite before writing `ap-launch`, `ap-stop`, or the watcher around it.                                                                           |
+|       5b | **Autonomous runaway containment — FALSIFIED 2026-07-28, by inventory, before any fixture ran** (Decision #5). Heartbeat detects _stalls_; a _runaway_ keeps the heartbeat fresh while looping, burning the Max window, spawning workers, or attempting a merge. The step-1 inventory of what exists in code — not what this design specifies — falsified this row's assumption outright: **of the three breaker families named here, none has out-of-process enforcement.** The reserve gate has no enforcing caller (`claude-usage.sh` runs in the supervisor via `--report-usage-bin`, `spawn-orchestrator.sh:4721`, but only to render a report line; no decision consumes it); **no parallelism cap exists in code at all**; **at-most-twice continuation is not built** (§5.3 defers it to Stage 5+); and review-gating is agent-side prose whose server-side enforcement died with Probe 4's disposable App. All three are instructions the agent follows about itself, and a runaway is definitionally an agent that has stopped honoring its own prose. **Redirect taken (2026-07-28):** a hard control-plane ceiling — wall-clock, action-count, or live worker count — is now a prerequisite for any unattended operation, and **priority 6 (thin vertical run) is stopped at its start line** pending it. It is **specified in §5.1 (watcher check) + §4.2 (`ceiling_trip` record), not in `spawn-orchestrator.sh`** — an earlier wording of this redirect said "a reap in `supervisor-scan`", which would have built safety-critical code inside the harness §6 marks _delete, do not port_. Its inputs are pinned to the three sources the agent cannot forge: the control plane's own wall clock, the process table, and the provider-side usage query (§2.3's maintainer observation credential). **The enforcement mechanism already exists** — Probe 5 reaped a uid domain to verified zero including a `setsid`+double-fork escapee — so this redirect composes two proven halves: 5b's finding is that nothing ever _decides_ to invoke those teeth against a live, heartbeat-fresh runaway. Rule 4 still forbids promoting the spike code; the reap is rebuilt as production code under Stage-2 gates, inheriting Probe 5's construction-time fail-closed rules and not merely its reap logic — this redirect arms another kill path, and the four-day incident establishes that the kill machinery is the most dangerous component on the box. What DOES exist out-of-process is narrower than this row assumed: two halting breakers (blown `--until`, pause-exempt ledger) plus a report-only park-storm tripwire — and the blown-`--until` halt reads agent-writable `RUN.md` front matter and **fails open on unparseable values** (`:2374`), so the pause-exempt ledger is the only breaker whose input the agent cannot write. A disposable fixture still runs, but as a **sizing measurement for the redirect under a narrower assumption**, not as a re-test of this row: see `dev_docs/elite-spike/fixtures/runaway/`. It cannot return this row to `confirmed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | The circuit breakers — now safety-critical, not budget hygiene (Risk #1) — autonomously contain a runaway and cap its damage with no human response.                                                                                               | Add a hard control-plane ceiling (usage / wall-clock / action-count) or tighten the caps before any unattended operation; if a merge escapes the gate, fix the server-side ruleset (Probe 4) first, not the caps. |
+|        6 | **Thin vertical run — STOPPED 2026-07-28 at its start line** by row 5b's falsification (rule 5: stop dependent work at its next safe checkpoint). Nothing had begun, so the durable state is simply "not started"; no external write to reconcile. Resumes only once row 5b's redirect — a hard control-plane ceiling on state the agent cannot write — exists. Prerequisites: approved measured revision and Stage-2 sudoers/production paths. Build only enough production-shaped code to launch one agent session in a test repo, emit heartbeat, dispatch one worker, make one tiny commit/PR, independently verify the pushed SHA, and exercise stop/alert/reconciliation, handing off at `needs_review` (the review-gate that keeps irreversible actions out of the unattended window — Decision #5). Before each externally visible seam, record its expected outcome and reconciliation action. On failure, reconcile any unknown outcome and durably terminalize or explicitly pause the run before stopping.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The surviving identity, lifecycle, authority, supervision, and transaction assumptions compose across their real seams.                                                                                                                            | Stop at the first failed seam; leave a reconciled durable state, then return to its owning probe instead of completing adjacent components.                                                                       |
+|        7 | **Production hardening.** Only after the thin run survives: complete broker renewal, typed registry coverage, reboot handling, recovery drills, and the Stage-2/4 matrices.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Hardening is now protecting a demonstrated path rather than elaborating a speculative one.                                                                                                                                                         | Any architectural failure returns to the relevant earlier probe; ordinary implementation defects stay within this phase.                                                                                          |
+|        8 | **Optional complexity.** Specify and fault-inject continuation reservation in its own disposable kernel, then add bounded continuation and overnight scheduling/fan-out. The separately designed and gated CAO extension remains last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Optional capability can be layered on without changing the proven baseline authority model.                                                                                                                                                        | Delete or defer the optional feature; retain the stop-and-notify, no-CAO baseline.                                                                                                                                |
+
+Rows 0–5 (including 5b) are disposable baseline probes under §0a's spike
+contract, and rule 4's never-promote rule applies to them. Rows 6–7 are the
+baseline production path: their code is kept and written under §7's stage
+prerequisites and gates, not under the spike contract, and only those stage
+gates advance production authority. Row 8 is a later optional branch: its
+continuation kernel is again disposable, while the production continuation,
+scheduling, and CAO changes are kept only after their own Stage-5 or §3.3 gates.
+
+**Explicitly not a probe (Decision #5):** an off-host dead-man monitor. Under a
+pager model a host too dead to alert would need an external watcher to wake you;
+the async model dissolves that — the **08:00 positive-confirmation canary** makes
+_absence_ the signal, which a failure-triggered push never could. Do not add
+off-host supervision to the baseline.
+
+Two cheap probes run opportunistically as soon as the agent identity exists:
+
+- **Max-window coherence**: query the exact same test session as agent and
+  maintainer. Failure immediately deletes automatic continuation from the
+  build order but does not block Stages 1–4's stop-and-notify baseline.
+- **`setsid(2) → execve` topology — RESOLVED** by Probe 2: tmux already makes
+  the pane a session leader, so the run-shim is a bare `exec` with no `setsid`
+  and no helper (`fixtures/process-binding/`). This selected the run-shim
+  implementation; it does not by itself establish control-plane identity.
+
+The delivery rule is therefore **falsifier first, fixture second, production
+component last**. Passing a probe is permission to test the next dependent
+assumption, not evidence that the eventual production component is complete.
+
+## 8. Risks
+
+1. **Max runaway** (no server cap): reserve gate + parallelism cap +
+   at-most-twice continuation, counters control-plane-durable. **NOT accepted —
+   this mitigation does not exist (2026-07-28, §7a row 5b).** The inventory found
+   the reserve gate has no enforcing caller, the parallelism cap is absent from
+   code entirely, and continuation is deferred to Stage 5+. All three are
+   agent-cooperative prose, which is no mitigation at all against a runaway. The
+   residual risk is therefore **unmitigated** until row 5b's redirect — a hard
+   control-plane ceiling on state the agent cannot write, specified in §5.1 and
+   §4.2 — is built. Until then, the only real bounds are the two out-of-process
+   halts in `supervisor-scan`, one of which (blown `--until`) reads
+   agent-writable state and fails open. **Blast radius while unmitigated,
+   stated so the alarm is the right size:** one Max window (subscription usage,
+   no marginal spend), local processes, and pushed `bestdan/ap/**` branches — and
+   **no merges only once Stage 1's rulesets exist**, since Probe 4's App and
+   ruleset are deleted and no server-side write boundary is live today. So the
+   missing ceiling turns "worst case = one wasted night" into "worst case =
+   bounded minutes"; it is not holding back unbounded spend or repo damage,
+   **provided Stage 1 lands before any unattended run.** The 08:00 canary does
+   not help here: it is health-coupled to watcher/heartbeat/broker freshness, all
+   of which a runaway keeps green.
+2. **`gh` outside the sandbox — closed at the network layer (§3.2).** nono's
+   host-level domain allowlist brings `gh` inside the sandbox with filtered
+   egress (evaluation: [nono-evaluation.md](./nono-evaluation.md)), so `gh` no
+   longer runs unconfined. §2.2's server-side rulesets **stay** as the bound on
+   what the token can do (nono's path-level filter is bypassable — SR-3 — so it
+   is defense-in-depth, not the token boundary). Residual risk is now nono itself
+   (alpha; macOS-only containment; pinned version + vendored profile), not an
+   unfiltered `gh`. Accepted.
+3. **TCC under a headless user**: Stage-2 no-GUI context test; work stays
+   out of TCC-protected locations.
+4. **CAO under agent**: disabled in the baseline; enabled only after §3.3's
+   separate registration/teardown design and evidence gate.
+5. **Watcher/notification blind spots**: bounded, not eliminated — but the
+   design does **not** lean on a page reaching a sleeping human (Decision #5).
+   Safety is autonomous (detect-and-stop SLO, fail-closed hold, review-gated
+   irreversible actions); notification is an async durable record (Slack +
+   registry). The primary health signal is the **08:00 positive-confirmation
+   canary** (absent = investigate), which covers the host-too-dead-to-notify case
+   a failure-push cannot; missed-canary procedure documented; sleep-during-run
+   out of contract on the always-on mini. Residual: a same-night silent failure
+   is surfaced next morning, not mid-run — an accepted consequence of not paging.
+6. **Control-plane bloat** (the #1 spiral risk): the
+   one-way trust rule + anti-spiral rule are the tripwire; any
+   interpretation/repair logic in launcher/broker/watcher/wrapper is a
+   stop-and-reassess event.

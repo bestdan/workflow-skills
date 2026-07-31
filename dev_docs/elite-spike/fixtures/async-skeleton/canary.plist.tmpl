@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>@LABEL@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PYTHON@</string>
+    <string>@DIR@/canary.py</string>
+  </array>
+  <!-- Production cadence: fire once a day at 08:00. The probe also kickstarts
+       it on demand to assert the verdict under each injected condition. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PROBE3_RUNDIR</key><string>@RUNDIR@</string>
+    <key>PROBE3_STALE_S</key><string>@STALE@</string>
+    <key>PROBE3_WATCHER_FRESH_S</key><string>@WATCHER_FRESH@</string>
+  </dict>
+  <key>StandardOutPath</key><string>@RUNDIR@/canary.launchd.out</string>
+  <key>StandardErrorPath</key><string>@RUNDIR@/canary.launchd.err</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

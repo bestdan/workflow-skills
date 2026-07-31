@@ -1,0 +1,86 @@
+{
+  "cadence_compressed": {
+    "PROBE3_INTERVAL_S": "5",
+    "PROBE3_STALE_S": "8",
+    "PROBE3_WATCHER_FRESH_S": "15"
+  },
+  "false_positive": {
+    "canary_launchd_kickstart_rc": 0,
+    "healthy_before": {
+      "dedup": null,
+      "kind": "canary",
+      "reasons": [],
+      "ts": {
+        "mono": 1579502.290705333,
+        "wall": 1784730604.847283
+      },
+      "verdict": "healthy"
+    },
+    "verdict_when_wedged_and_watcher_dead": {
+      "dedup": null,
+      "kind": "canary",
+      "reasons": [
+        "watcher_stale=19.1s",
+        "active_run_heartbeat_stale"
+      ],
+      "ts": {
+        "mono": 1579520.378136291,
+        "wall": 1784730622.9345942
+      },
+      "verdict": "unhealthy"
+    }
+  },
+  "kill_wedge": {
+    "baseline_canary": {
+      "dedup": null,
+      "kind": "canary",
+      "reasons": [],
+      "ts": {
+        "mono": 1579460.935750041,
+        "wall": 1784730563.4974341
+      },
+      "verdict": "healthy"
+    },
+    "kill": {
+      "detect_s": 9.40058422088623,
+      "pid": 23461,
+      "record": {
+        "dedup": "killrun+stall_kill",
+        "detail": "incarnation_dead pid=23461",
+        "kind": "observed_terminal",
+        "reason": "stall_kill",
+        "run_id": "killrun",
+        "ts": {
+          "mono": 1579470.128862791,
+          "wall": 1784730572.687998
+        }
+      },
+      "runfile_state": "terminal"
+    },
+    "wedge": {
+      "detect_s": 10.675451755523682,
+      "pid": 23825,
+      "record": {
+        "dedup": "wedgerun+wedge",
+        "detail": "heartbeat_stale=11.0s safe_stop=killed",
+        "kind": "observed_terminal",
+        "reason": "wedge",
+        "run_id": "wedgerun",
+        "ts": {
+          "mono": 1579490.84276175,
+          "wall": 1784730593.399683
+        }
+      },
+      "still_alive_after_safe_stop": false
+    }
+  },
+  "production_kill": {
+    "cadence": {
+      "PROBE3_INTERVAL_S": "120",
+      "PROBE3_STALE_S": "360",
+      "PROBE3_WATCHER_FRESH_S": "360"
+    },
+    "kill_detect_s": 117.36825299263,
+    "under_slo_600s": true
+  }
+}

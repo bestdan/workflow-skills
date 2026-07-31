@@ -17,6 +17,10 @@ done
   exit 2
 }
 
+# dev_docs/elite-spike/fixtures/ is excluded below for the same reason
+# dprint.json excludes it: it is checked-in spike evidence that must stay
+# byte-for-byte as it ran, and results.json records sha256 provenance for files
+# in that tree. A formatter rewriting them would silently invalidate the record.
 shell_files=()
 bats_files=()
 while IFS= read -r file; do
@@ -24,7 +28,7 @@ while IFS= read -r file; do
     *.sh | *.bash) shell_files+=("$file") ;;
     *.bats) bats_files+=("$file") ;;
   esac
-done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bash' '*.bats' | while IFS= read -r file; do
+done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bash' '*.bats' ':(exclude)dev_docs/elite-spike/fixtures/**' | while IFS= read -r file; do
   [ -f "$file" ] && printf '%s\n' "$file"
 done)
 

@@ -1,0 +1,3 @@
+{"condition": "canary_healthy", "text": "08:00 canary: present \u2014 healthy", "ts": {"mono": 1579460.936237458, "wall": 1784730563.497922}}
+{"condition": "stall_kill", "run_id": "killrun", "text": "run killrun: stall_kill \u2014 driven to safe stop (incarnation_dead pid=23461)", "ts": {"mono": 1579470.131255041, "wall": 1784730572.69039}}
+{"condition": "wedge", "run_id": "wedgerun", "text": "run wedgerun: wedge \u2014 driven to safe stop (heartbeat_stale=11.0s safe_stop=killed)", "ts": {"mono": 1579490.844402083, "wall": 1784730593.401325}}

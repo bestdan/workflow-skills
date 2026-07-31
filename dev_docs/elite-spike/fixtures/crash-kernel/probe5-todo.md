@@ -1,0 +1,616 @@
+# Probe 5 — closed
+
+**CLOSED 2026-07-27, Part E teardown included. Nothing here is outstanding work.**
+This file is kept as the record of how the probe was run. It is no longer a
+resume point, and the paste-me handoff prompts that used to live beside it have
+been deleted rather than left to rot.
+
+Probe 5 is **CONFIRMED** ([`probe5-crash-kernel.md`](./probe5-crash-kernel.md)) —
+in the kill sheet's specific sense of *"not falsified in the tested process-crash
+environment"*, and nothing wider. Read that file's **"What CONFIRMED here does
+not mean"** before quoting the verdict anywhere; the claim is narrower than the
+word.
+
+**The evidence is machine-specific and the host surface no longer exists.** Every
+row ran on Daniel's MacBook Pro, and §Results is explicit that none of it
+transfers to another machine. Part E removed `/usr/local/probe5`,
+`/etc/sudoers.d/probe5` and every rundir, so **nothing below is runnable as-is** —
+Part A would have to be redone from scratch first. Read Parts A–D as a historical
+account of what was done, not as instructions.
+
+---
+
+## Status
+
+**Final, 2026-07-27.** All 28 rows ran under the real uid containment domain
+(`domain_mode=uid`), in one pass at fixture revision `c5eb8fd` with a clean tree.
+
+**Verdicts: 26 PASS / 1 DOCUMENTED-LIMITATION (`Uid`) / 1 BLOCKED (`PL`).**
+
+| | |
+| --- | --- |
+| **Established** | invariants 1, 2, 3, 7 |
+| **Established — containment, first real evidence** | invariants 4 (earned release), 5 (orphan safe-stop, no false kill), 6 (reap convergence or fence), 8 (sole writer). `Esc` reaped an `exec`'d escapee invisible to token scanning; `Churn` converged from 38 live processes; `Writer` took `EACCES` from a genuinely separate uid. **None of these were reachable under the degraded mode** — which is why the probe stayed open until a host with a dedicated `agent` account was available. |
+| **Never passed, by construction** | `PL` (power-loss). `SIGKILL` cannot prove power-loss durability, for SQLite exactly as for flat files. **A green matrix says nothing about this row.** |
+| **Documented limitation, not a falsifier** | `Uid` — a helper that acquires a different credential leaves the domain. |
+| **Still untested** | **EIO (bad media)**, which follows distinct SQLite error paths. `Io` injects a genuine ENOSPC striking *after* the WAL was extended, which establishes failure-after-writing-began — **not** that any individual `write(2)` was partial. |
+
+Two things carry forward past this probe. The **four-day incident** that shaped
+every safety rule below — a supervisor bootstrapped in uid mode against the
+*maintainer's* uid, reaping every SSH login for four days — is recorded at
+[`dev_docs/tasks/probe5-incident-evidence/`](../../../tasks/probe5-incident-evidence/),
+which outlives the spike. And the `agent` account was deliberately **left in
+place** at teardown: deleting and recreating it is what produced the
+uid-reassignment hazard that caused the outage.
+
+### The sequence, as it was actually run
+
+Part A (attended) → the matrix in uid mode → Part D → Part E. All complete.
+Part B stopped being a separate step once it landed in `c6cf804`.
+
+---
+
+## Part A — host prerequisites (attended, one time per machine)
+
+Every command here is entered by a human in a real terminal. An agent session has
+no tty for the password prompt.
+
+> **On the mac mini as of 2026-07-27:** A1–A3 are **already satisfied** — `agent`
+> exists at **uid 503** (not 502, which is a live human account), in `staff` +
+> `apagent`, not `admin`. A4–A7 are **not**: the incident cleanup removed
+> `/usr/local/probe5` and `/etc/sudoers.d/probe5` entirely. Start at A4.
+>
+> **The old `/usr/local/probe5` was owned by `danielegan`, not `root`**
+> (`privileged-surface.txt`) — the `chown root:wheel` below was skipped on the
+> first pass, so the trust boundary the fixture documents was never actually
+> there. A7 now verifies ownership rather than assuming it.
+>
+> **Never pin the domain to a number.** Resolve `agent` by name; the fixture does
+> (`scenarios._dedicated_agent_uid`), and `reaper.Domain` independently refuses
+> `agent_uid ∈ {0, caller's uid}`.
+
+> **On Daniel's MacBook Pro as of 2026-07-27:** A1–A7 are **all satisfied**; A8 is
+> half done. This is the console machine the launchd rows moved to. Maintainer is
+> `danielegan` (uid 501); `agent` exists at **uid 502**, in `staff` + `apagent`,
+> not `admin`, zero sudo, `0700` home and work dir, no autologin.
+>
+> **`agent` is 502 here and 503 on the mac mini.** That is not a contradiction and
+> nothing needs reconciling — the two hosts were provisioned independently and the
+> fixture resolves by name. It does mean `PROBE5_AGENT_UID` must stay **unset** on
+> this machine: `_dedicated_agent_uid()` returns `int(AGENT_UID)` when it is set,
+> so exporting it overrides the name lookup and reintroduces exactly the class of
+> mistake the incident came from. The mini's 502-was-reassigned-to-a-human hazard
+> is specific to that host; here 502 *is* `agent` and no other account claims it.
+>
+> The interpreter needed installing. `python3.12` resolved to a `mise` build under
+> the maintainer's `0700` home, which the agent cannot traverse — `p5-spawn` and
+> `p5-measure` exec the interpreter *as agent*, so it would have failed. Fixed by
+> `brew install python@3.12`; `/opt/homebrew/opt/python@3.12/bin/python3.12` is
+> 3.12.13 / SQLite 3.53.4, world-`r-x` along the whole chain, and is already
+> `scenarios.PY`'s default, so no env override is needed.
+>
+> Ownership was verified with `stat -f '%Su:%Sg'`, not `ls -l` — a token-compressing
+> `ls` wrapper on this host silently drops the owner column, which is the single
+> field A7 exists to check. Everything reads `root:wheel`, **including the
+> directory itself**: the `chown root:wheel` here now covers `/usr/local/probe5`
+> and not just its contents, since a maintainer-owned `755` dir still lets the
+> maintainer swap the helpers out from under `sudo`.
+
+Set these once per shell; everything below uses them.
+
+```sh
+export P5_MAINTAINER="$(id -un)"
+export P5_PY="$(command -v python3.12 || echo /opt/homebrew/opt/python@3.12/bin/python3.12)"
+export P5_FIXTURE="<repo>/dev_docs/elite-spike/fixtures/crash-kernel"
+```
+
+`P5_PY` **must not** be Apple's system Python — its SQLite is Apple's build, whose
+`F_FULLFSYNC` handling is not a stable public contract (see `prior-art-research.md`
+§1). `kernel.assert_stock_sqlite()` fails closed on it. Verify:
+
+```sh
+"$P5_PY" -c "import sqlite3,sys;print(sys.executable, sqlite3.sqlite_version)"
+```
+
+### A1 — pick a free uid
+
+```sh
+dscl . -list /Users UniqueID | awk '$2>500 && $2<600 {print}' | sort -k2 -n
+```
+
+Take the lowest unused number ≥503 as `<P5UID>`.
+
+**Do not assume 502.** On the original host `agent` held 502, the account later
+vanished, and 502 was reassigned to an unrelated human. Since the containment
+primitive is `kill(-1)` *as that uid*, a fixture pinned to the number rather than
+the name would have signalled every process of a live user's account. Pin by name
+and record the uid you actually get.
+
+### A2 — create the account
+
+Do **not** create the home directory first. `sysadminctl` registers the record but
+does not build the home, and `createhomedir` silently no-ops on a directory that
+already exists — after which macOS refuses to `rm -rf` it. That sequence wedged
+the original provisioning (`provisioning.md` § Notes).
+
+```sh
+sudo sysadminctl -addUser agent -fullName "Autopilot Agent" -UID <P5UID> \
+     -password - -home /Users/agent -shell /bin/zsh
+sudo createhomedir -c -u agent
+sudo chown -R agent:staff /Users/agent && sudo chmod 700 /Users/agent
+sudo mkdir -p /Users/agent/work && sudo chown agent:staff /Users/agent/work
+sudo chmod 700 /Users/agent/work
+sudo dseditgroup -o create apagent
+sudo dseditgroup -o edit -a agent -t user apagent
+```
+
+If `createhomedir` trips a TCC "administer your computer" prompt, grant the
+terminal Full Disk Access and retry.
+
+### A3 — the agent checks
+
+All of these must pass before any row is worth running.
+
+```sh
+echo "== identity ==";       id agent
+echo "== shell/home ==";     dscl . -read /Users/agent UserShell NFSHomeDirectory
+echo "== zero sudo ==";      sudo -l -U agent
+echo "== not admin ==";      dsmemberutil checkmembership -U agent -G admin
+echo "== home perms ==";     ls -ld /Users/agent /Users/agent/work
+echo "== no autologin ==";   sudo defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>&1
+echo "== uid unique ==";     dscl . -list /Users UniqueID | awk '$2>500 && $2<600'
+```
+
+Expected: member of `apagent` and `staff`, **not** `admin`; `UserShell: /bin/zsh`;
+`sudo -l -U agent` → *"User agent is not allowed to run sudo"*; membership check →
+*is not a member*; both dirs `drwx------ agent staff`; autologin → *does not
+exist*; one account per uid.
+
+### A4 — privileged spawn/reap/measure helpers
+
+The supervisor runs as the maintainer and cannot spawn-as, signal, or *measure*
+another uid, so all three go through a scoped `sudo -u agent` helper. The helpers
+must be **root-owned and not agent-writable**, or the agent could rewrite what the
+maintainer is about to execute.
+
+**There are THREE helpers, not two.** Earlier drafts of this file listed only
+`p5-spawn` and `p5-reap`; `supervisor.measure_run` also calls
+`reaper.MEASURE_HELPER` (`/usr/local/probe5/p5-measure`). `proc_pidinfo` is EPERM
+across uids for a non-root caller, so without `p5-measure` the supervisor reads
+**every** healthy agent-uid run as dead and reaps it — the same false-reap class
+as the v5.2 defect, by another route. It fails *closed*, so the symptom is
+"nothing ever adopts", not an obvious error.
+
+```sh
+sudo mkdir -p /usr/local/probe5 && sudo chmod 755 /usr/local/probe5
+
+sudo tee /usr/local/probe5/p5-reap >/dev/null <<'SH'
+#!/bin/sh
+# Runs AS the agent uid. kill(-1) from a non-root uid reaches only that uid.
+set -u
+[ "$(id -u)" -eq 0 ] && { echo "refusing to run as root" >&2; exit 64; }
+case "${1:-}" in TERM|KILL) ;; *) echo "usage: p5-reap TERM|KILL" >&2; exit 64 ;; esac
+/bin/kill -s "$1" -1 2>/dev/null
+exit 0
+SH
+
+sudo tee /usr/local/probe5/p5-spawn >/dev/null <<'SH'
+#!/bin/sh
+# Runs AS the agent uid. Execs the fixture surrogate, keeping fds 3 and 4.
+set -u
+exec /opt/homebrew/opt/python@3.12/bin/python3.12 \
+     /usr/local/probe5/runsurrogate.py "$@"
+SH
+
+sudo tee /usr/local/probe5/p5-measure >/dev/null <<'SH'
+#!/bin/sh
+# Runs AS the agent uid. Prints one JSON incarnation record for <pid> on stdout.
+# The supervisor parses stdout and FAILS CLOSED on anything unparsable, so this
+# must emit nothing but that JSON.
+set -u
+exec /opt/homebrew/opt/python@3.12/bin/python3.12 \
+     /usr/local/probe5/incarnation.py "$@"
+SH
+
+sudo chown root:wheel /usr/local/probe5/p5-reap /usr/local/probe5/p5-spawn \
+                      /usr/local/probe5/p5-measure
+sudo chmod 755 /usr/local/probe5/p5-reap /usr/local/probe5/p5-spawn \
+               /usr/local/probe5/p5-measure
+```
+
+Adjust the interpreter path in `p5-spawn` and `p5-measure` to match `$P5_PY` on
+this machine.
+
+### A5 — stage the surrogate somewhere the agent can read
+
+The fixture lives under the maintainer's `0700` home, which the agent cannot
+traverse — that is deliberate and is what makes the `Writer` row meaningful. Copy
+only the surrogate out, into the **root-owned** staging dir:
+
+Two files, not one: `p5-measure` runs `incarnation.py`, which lives under the same
+unreadable home.
+
+```sh
+sudo cp "$P5_FIXTURE/runsurrogate.py" "$P5_FIXTURE/incarnation.py" /usr/local/probe5/
+sudo chown root:wheel /usr/local/probe5/runsurrogate.py /usr/local/probe5/incarnation.py
+sudo chmod 755 /usr/local/probe5/runsurrogate.py /usr/local/probe5/incarnation.py
+```
+
+These are **copies**. Any later edit to `runsurrogate.py` or `incarnation.py` in
+the fixture must be re-staged, or the uid-mode rows silently run the stale copy.
+
+Prefer this over the `/Users/Shared/p5` (`1777`) staging the fixture brief
+suggested: a world-writable directory on a path invoked through `sudo` lets any
+local account swap the executable. The escalation would only be maintainer→agent,
+but there is no reason to accept it when a root-owned directory works.
+
+### A6 — sudoers
+
+`sudo` closes every fd ≥3 by default, which would destroy the inherited report
+pipe and start gate the design depends on. `closefrom_override` preserves them.
+
+All three helpers must be listed. `p5-measure` is invoked with `sudo -n` (no
+password prompt possible); if it is missing from the alias, every measurement
+returns unparsable output and the supervisor fails closed — reaping healthy runs.
+
+```sh
+sudo tee /etc/sudoers.d/probe5 >/dev/null <<'EOF'
+Cmnd_Alias P5CMDS = /usr/local/probe5/p5-spawn, /usr/local/probe5/p5-reap, \
+                    /usr/local/probe5/p5-measure
+Defaults!P5CMDS closefrom_override
+<P5_MAINTAINER> ALL=(agent) NOPASSWD: P5CMDS
+EOF
+sudo chmod 440 /etc/sudoers.d/probe5
+sudo visudo -c -f /etc/sudoers.d/probe5
+```
+
+Substitute the real username for `<P5_MAINTAINER>`. The runas is `(agent)`, not
+`(ALL)` — this entry cannot be used to become root.
+
+### A7 — verify the plumbing
+
+Ownership first — this is the check that was skipped last time. Every path must
+read `root wheel`; anything owned by the maintainer means the agent-side trust
+boundary does not exist and no containment row is worth running.
+
+```sh
+echo "== helpers are root-owned =="; ls -l /usr/local/probe5/
+echo "== dir is root-owned ==";      ls -ld /usr/local/probe5
+echo "== sudoers frag ==";           sudo ls -l /etc/sudoers.d/probe5
+echo "== nothing agent-writable =="; sudo -u agent test -w /usr/local/probe5 && \
+     echo "FAIL: agent can write the helper dir" || echo "ok: not agent-writable"
+echo "== measure works ==";          sudo -n -u agent /usr/local/probe5/p5-measure $$
+```
+
+The last must print **one line of JSON and nothing else** — the supervisor parses
+stdout and treats any noise as "not alive", which routes to reap.
+
+The next line is the **first live firing of the uid-wide kill**. It reaps
+everything owned by `agent`, so run it only when no agent work is in flight (at
+this point that is just `cfprefsd`/`distnoted`, which respawn).
+
+**`rc=143` is the success case, not a failure.** `p5-reap` is inside the domain it
+reaps, so it dies of its own `SIGTERM` and exits `128+15`. `reaper._sudo_reap`
+records this as `helper_self_killed` and deliberately does **not** treat the exit
+status as authoritative — convergence is decided only by the maintainer-side
+`proc_listpids` rescan. Two lines of `getcwd: … Permission denied` on **stderr**
+are also expected when invoking it by hand from a directory the agent cannot read;
+the real path forces `cwd="/"`, and stdout stays clean either way.
+
+Measured on the mac mini 2026-07-27, the first time this primitive has ever been
+fired in this probe:
+
+| | Before | After |
+| --- | --- | --- |
+| uid 503 procs | `cfprefsd` 38576, `distnoted` 44047 | both gone; fresh `distnoted` 80127 |
+| uid 501 procs | 346 | **346** |
+
+The reap emptied its own uid and **did not cross the uid boundary** — the
+containment primitive invariants 4/5/6 quantify over, working as specified.
+
+Reproduced on Daniel's MacBook Pro 2026-07-27 (agent = uid 502), `rc=143`:
+
+| | Before | After |
+| --- | --- | --- |
+| uid 502 procs | `distnoted` 66840, `mdbulkimport` 66842, `lsd` 66846 | all three gone; fresh `containermanagerd` 80455, `distnoted` 86233 |
+| uid 501 procs | 274 | 295 (grew; nothing died) |
+| login sessions | 11 | **11** |
+
+Read the "after" row correctly: uid 501 going **up** is the expected shape, since
+the surrounding session keeps spawning processes. The falsifier would be a *drop*.
+The survivors on 502 are respawned daemons with new pids, not survivors of the
+signal — check pids, not counts. Evidence is per-machine and this table does not
+transfer either way.
+
+```sh
+echo "== reap runs as agent ==";  sudo -n -u agent /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 143, NOT 0)"
+echo "== root path refused ==";   sudo /usr/local/probe5/p5-reap TERM; echo "rc=$? (expect 64)"
+echo "== fd 3 survives sudo ==";  sudo -n -C 5 -u agent /usr/local/probe5/p5-measure $$ >/dev/null; echo "rc=$? (expect 0)"
+echo "== agent cannot read fixture =="; ls -ld "$HOME"   # 0700 => agent cannot traverse
+```
+
+**Test `-C 5` on a command that is inside `P5CMDS`.** `Defaults!P5CMDS
+closefrom_override` scopes the privilege to those three commands, so
+`sudo -C 5 -u agent /bin/sh …` (an earlier version of this check) fails with
+*"you are not permitted to use the -C option"* even when A6 is perfectly correct —
+and sends you off to fix a working sudoers file. Only conclude
+`closefrom_override` did not take if `-C 5` is refused on `p5-measure`/`p5-spawn`
+itself; then fix A6, or fall back to the socket design in Part B note 3 and record
+it as a deviation from the draft.
+
+The other checks not to misread: `sudo -u agent <anything not in P5CMDS>` prompts
+for a password and, non-interactively, just fails — so it proves nothing about the
+agent's own permissions. Read those off the filesystem instead (a `0700` home the
+agent cannot traverse; a root-owned `755` helper dir it cannot write). Likewise
+`sudo /usr/local/probe5/p5-reap` as **root** may or may not be refused by sudo —
+**do not count on A6 for this.** Measured on the MacBook 2026-07-27, sudo let it
+through and the helper's own `id -u -eq 0` guard printed `refusing to run as root`
+and exited 64. A6 grants `(agent)` NOPASSWD, but a maintainer in `admin` already
+holds `%admin ALL=(ALL) ALL`, so the root invocation is permitted on any password
+prompt; the P5CMDS entry only makes the *agent* path passwordless, it takes
+nothing away. So on an admin maintainer account the internal guard is the **first**
+and only layer standing between a fat-fingered `sudo p5-reap` and a host-wide
+`kill(-1)` as root. It is load-bearing. Never "simplify" it out of the shebang
+block, and run this check with a real tty (`sudo -n` fails at the password prompt
+and proves nothing about the guard).
+
+### A8 — if this is a fresh machine
+
+Probes 1–4's evidence was gathered on the original host and none of it transfers.
+Before trusting Probe 5's containment rows, re-confirm the two facts they depend on:
+
+- `launchctl bootstrap gui/$(id -u) <plist>` returns rc=0 **unsandboxed** (it fails
+  `EIO` under the command sandbox — as does `ps`, so the orchestrator must run
+  unsandboxed either way).
+- `incarnation.py <pid>` returns a non-null `p_uniqueid`.
+
+---
+
+## Part B — fixture code changes — **DONE (`c6cf804`, `396bd02`)**
+
+All five items below landed in the WIP checkpoint after this file was drafted.
+Verified present 2026-07-27: `BLOCKED` holds only `PL`; `kernel.takeover_publish`
+exists with the reap-before-publish gate; `runsurrogate.py` handles
+`--try-write-db`; `supervisor.spawn_run` and `reaper.Domain._sudo_reap` both route
+through `sudo -C 5 -u agent`. Kept for the rationale — **do not re-implement.**
+
+
+
+### B1 — route spawn through the helper (`supervisor.spawn_run`)
+
+Currently `posix_spawn`s the surrogate directly as the maintainer. Under
+`PROBE5_DOMAIN_MODE=uid` it must exec
+`sudo -C 5 -u agent /usr/local/probe5/p5-spawn <gen_token> [flags]`, keeping the
+dup2 file-actions that place the report pipe on fd 3 and the gate on fd 4. Keep
+the existing direct-spawn path for degraded mode so both remain runnable.
+
+### B2 — route the reap through the helper (`reaper.Domain.signal_all`)
+
+Today it takes the true `kill(-1)` path only when `geteuid() == agent_uid`, and
+otherwise falls back to enumerate-then-signal — which reintroduces the PID-reuse
+race at signal time. Add a third branch: in `uid` mode from the maintainer, shell
+out to `sudo -u agent /usr/local/probe5/p5-reap TERM|KILL`. The existing root
+refusal must stay in front of all branches.
+
+`Domain.scan()` in `uid` mode already uses `proc_listpids(PROC_UID_ONLY)` and needs
+no change. Note that `exclude` defaults to `{os.getpid()}`, which is correct for
+degraded mode but should be **empty** in uid mode — the maintainer's pid is not in
+the agent's uid set, and excluding anything there could mask a survivor.
+
+### B3 — implement TAKEOVER (`kernel.py`)
+
+Not written. The draft specifies: reap the current generation first (full saga,
+verify zero), **then** one `BEGIN IMMEDIATE` transaction publishing `g+1/prepared`.
+The ordering is the point — publishing before the reap is the v1 live-orphan hazard
+coming back through the side door (third pass, HIGH-6). Add `takeover_publish()`
+plus crash points either side of the reap.
+
+### B4 — surrogate flag for the Writer row
+
+`runsurrogate.py` has `--escape`, `--churn`, `--ignore-term`, `--descendant`; the
+first three are **never driven by any row** — they were written for the blocked
+rows and are untested. Add `--try-write-db <path>`: attempt to open the DB path
+read-write, report the errno on the report pipe. Expect `EACCES`.
+
+### B5 — promote the blocked rows (`scenarios.py`)
+
+Move `Esc`, `Churn`, `Writer`, `Uid`, `Tw` out of the `BLOCKED` dict into real row
+functions. Delete each entry from `BLOCKED` as its row lands, so a half-finished
+pass cannot silently report a row as blocked when it actually ran and failed.
+
+---
+
+## Part C — the remaining rows and their pass bars
+
+| Row | Drive | Passes only if |
+| --- | --- | --- |
+| **Esc** | run with `--escape` (setsid + double-fork), then stop | uid-wide `kill(-1)` reaps the escaped descendant; rescan → zero. This is the row the degraded mode *cannot* fake: the escapee drops the gen_token, so only a real uid domain sees it. |
+| **Churn** | run with `--churn` (continuous fork), then stop | TERM→KILL→**rescan** converges to zero, or the lease stays fenced in `stop_intent`. A reap that only signals the set it enumerated must not report converged. |
+| **Writer** | run with `--try-write-db <state.db>` | The open fails `EACCES`. Sole-writer becomes enforced rather than architectural. |
+| **Uid** | worker spawns a helper under a different credential | **Documented limitation, not a falsifier.** Record whether it is detectable (privileged uid/token scan) or honestly undetectable. Do not let this row fail the probe. |
+| **Tw** | launch gen g with live workers, then takeover | gen g is reaped to **verified zero before** `g+1` is published. Check event order in `state.db`, not just the end state. |
+| **Io** | small disk image (`hdiutil create -size 1m`) or a fault-injecting VFS | A genuine mid-write ENOSPC/EIO fails the transaction atomically. The current row only induces a read-only-database refusal, which fails before the first byte — a different class. |
+| **PL** | VM or loopback power-fail harness | **Leave inconclusive.** SIGKILL cannot prove power-loss durability, for SQLite exactly as for flat files. The kill sheet says this is never passed; do not let a green matrix imply otherwise. |
+
+Also re-run the 19 passing rows under `PROBE5_DOMAIN_MODE=uid`. They passed in
+degraded mode; the uid domain changes what `scan()` returns, so their evidence does
+not transfer unexamined.
+
+---
+
+## Part D — closing the probe
+
+1. `PROBE5_DOMAIN_MODE=uid PROBE5_AGENT_UID=<P5UID> "$P5_PY" scenarios.py` —
+   **unsandboxed**.
+2. Reclassify. `confirmed` here means *"not falsified in the tested process-crash
+   environment"*, never "proven correct" — power-loss stays inconclusive. If any
+   invariant fails, it is `falsified`, the redirect is **containment option 2**
+   (Linux VM / container), and it is **never** a return to the flat-file kernel.
+3. Update, in this order: `results.json` (regenerated), the Environment and Results
+   sections of `probe5-crash-kernel.md`, §7a row 5 of
+   `dev_docs/auto-pilot-e-lite-design-2026-07-21.md`.
+4. Ratify the **v5.2** reconcile fix in `draft-state-machine.md` (the re-adopt rule
+   no longer requires an empty scan — see the Finding in `probe5-crash-kernel.md`).
+5. Re-verify **Probe 1 and Probe 4**. Both certify an `agent` account that has since
+   vanished, on a host where its uid was reassigned to a human. Their evidence is
+   currently asserting something untrue of the machine.
+
+---
+
+## Part E — teardown
+
+**DONE on Daniel's MacBook Pro, 2026-07-27.** Verified after each step; see the
+notes below for the two places the commands as written are wrong.
+
+This is a disposable spike (§0a rule 4 — spike code is never promoted by renaming).
+None of it should outlive the probe.
+
+```sh
+launchctl list | grep probe5     # expect nothing (matches both label generations)
+pkill -f runsurrogate.py; pkill -f 'supervisor.py daemon'
+sudo rm -rf /usr/local/probe5    # helper tree BEFORE the sudoers fragment
+sudo rm -f /etc/sudoers.d/probe5
+rm -rf "$TMPDIR"/probe5.*
+```
+
+**Order matters, and the original snippet had it backwards.** Removing
+`/etc/sudoers.d/probe5` first takes the NOPASSWD helper path with it, so anything
+still depending on it to reach `/usr/local/probe5` is stranded. Remove the helper
+tree first, or both in one invocation. (A maintainer with their own admin sudo
+gets away with either order — which is exactly why the wrong one survives review.)
+
+**Do not `launchctl disable` the `com.probe5r2.sup.*` labels at teardown.** The
+instinct is to disable them as a tripwire the way the incident's `com.probe5.sup.*`
+labels were, but these have load history from the passing rows, and the rule in
+Gotchas below then forbids re-enabling them without investigation. Boot out only
+and leave the override database alone. `com.probe5r2.drill` is a sacrificial decoy
+and stays `disabled` — that is its correct final state.
+
+Leave the `agent` account in place — Stage 1 and Stage 2 both need it, and deleting
+and recreating it is what produced the uid-reassignment hazard in the first place.
+
+### What was actually removed, 2026-07-27
+
+- Booted out `com.probe5r2.sup.{readopt,orphan,smoke}`; all three returned
+  `rc=3 No such process` (already unloaded). Override DB left untouched:
+  `readopt`/`orphan` still `enabled`, `drill` still `disabled`.
+- `/usr/local/probe5` (root:wheel 755, five files) and `/etc/sudoers.d/probe5`
+  (root:wheel 0440) removed by the maintainer at a real tty. `/etc/sudoers.d` is
+  now empty.
+- All 57 `$TMPDIR/probe5.*` rundirs (2.2 MB) deleted **without archiving**. The
+  raw `state.db`/`crashes.jsonl` are redundant against `results.json`, which
+  embeds the full `events` and `lease` dumps per row; the only columns not already
+  committed are per-run host noise (pids, proc uniqueids, boot-session UUIDs). And
+  the process-domain invariants (inv4, escapee containment, launchd relaunch) were
+  measured live and are not re-auditable from a SQLite file regardless. Only 24 of
+  the 57 dirs backed a committed row anyway.
+- Verified after: nothing in `launchctl list`, both paths gone, no rundirs, no
+  probe5 processes, `id agent` intact (uid 502, `staff`+`apagent`, no `admin`)
+  with only `cfprefsd`/`distnoted` running under it, maintainer sessions intact.
+
+Homebrew `python@3.12` was left installed — it is a general tool, not something
+this probe installed for itself. `dev_docs/tasks/probe5-incident-evidence/` also
+stays; it is the incident record and outlives the spike.
+
+---
+
+## Gotchas already paid for
+
+- **The supervisor labels are `com.probe5r2.sup.*`, not `com.probe5.sup.*`.** The
+  originals are the incident's two labels; they are booted out **and left
+  `disabled`** in the launchd override database as a permanent tripwire. A
+  `bootstrap` of a disabled label returns rc=0 and never runs, so reusing them
+  reads as a spurious row failure whose obvious "fix" is `launchctl enable` —
+  which re-arms exactly those labels. `install_supervisor` now refuses to
+  bootstrap any label it finds in `launchctl print-disabled`. Do not enable them;
+  pick a fresh prefix if you ever need another generation.
+
+  **That rule is about the INCIDENT's labels, and does not generalise.** The kill
+  switch is `bootout; disable`, so *every* use of it — including a drill — ends
+  with the `r2` labels disabled and the next bootstrap refused. Applied literally,
+  "never enable, take a fresh prefix" would burn a label generation each time the
+  safety net is exercised, and worse, it would silently invalidate the kill switch
+  the maintainer has pre-typed: those commands name the old labels. A stale kill
+  switch during a real incident is a much worse failure than an `enable`.
+
+  **The criterion is load history, not anyone's memory.** "I disabled that one
+  myself" is the kind of justification that erodes into "I'm fairly sure I did",
+  so the rule is written against observable state instead: a label with **no load
+  history cannot be evidence of anything**, because nothing has ever run under it.
+  A label that *has* run may be disabled precisely because it misbehaved, and must
+  stay that way until a human has looked. `launchctl list <label>` is the
+  discriminator (rc=0 → known to launchd), and `INCIDENT_LABELS` in `scenarios.py`
+  is the never-ever list — named in the repo deliberately, since the override
+  database is host-local and does not travel between machines.
+
+  This is enforced, not advisory: `install_supervisor` refuses an incident label
+  outright, and for any other disabled label it reports whether it has load
+  history and only offers the `launchctl enable` line when it does not.
+
+  Corollary — **do not drill against live labels.** The kill switch is
+  `bootout; disable`, so a drill against the real labels disarms the very
+  mechanism it is rehearsing; that happened on the MacBook 2026-07-27 and blocked
+  the next bootstrap. Use a sacrificial label. Both r2 labels were re-enabled
+  after confirming zero load history.
+
+  Prefer keeping the prefix stable. If you do bump it, re-issue the kill switch in
+  the same breath — but note that `install_supervisor` now **emits the kill switch
+  for the label it is about to arm** (stdout plus `<rundir>/KILL-SWITCH.sh`), so
+  the correct practice is "copy the one it just printed", not "keep one pre-typed".
+  A hand-kept kill switch names whatever label was current when it was typed.
+- **There is deliberately NO respawn circuit breaker in the supervisor.** This was
+  considered and rejected on advice (2026-07-27), and the reasoning should survive,
+  because "add a breaker" is the obvious-looking fix someone will propose again.
+  Two reasons. First, the guards already downgrade a misconfiguration from a reap
+  loop to a *crash* loop — the job refuses at construction and exits, so the
+  residual harm is log volume on a machine with console access. Second and
+  decisive: a breaker counts rapid restarts, and rapid restart after `SIGKILL` is
+  **exactly what `Sup-readopt` and `Sup-orphan` provoke on purpose**. It cannot
+  distinguish the mechanism under test from a runaway, so leaked counter state or a
+  retry would trip it just before the row checks reconciliation — a false failure in
+  the very rows the breaker was supposed to protect.
+
+  Nor should the job boot *itself* out: self-bootout has domain-authorization
+  problems, launchd may kill the caller before cleanup finishes, and the `disable`
+  it leaves behind poisons later rows.
+
+  What replaces it is an **external dead-man** (`scenarios._arm_deadman`): an
+  independent process, in its own session, armed *before* the bootstrap and
+  cancelled at teardown, which runs the label's own kill switch after
+  `DEADMAN_SECONDS`. It covers what no in-process guard can — the supervisor is a
+  launchd job, so if it wedges, nothing inside the orchestrator is running to
+  notice. Forgetting to disarm it is safe by construction: the job just gets booted
+  out a few minutes later, which is why it is armed inside `install_supervisor`
+  rather than left to each caller. When it fires, the label is left disabled *with*
+  load history — so the rule above correctly refuses to re-enable it until someone
+  has looked.
+
+  `ThrottleInterval` is **5**, not 1. At 1 a refusing supervisor relaunches at
+  1 Hz; 5 makes that 0.2 Hz and costs nothing, since the rows that need a respawn
+  provoke exactly one. Any wait that spans a launchd respawn is derived from
+  `THROTTLE_INTERVAL` — raising the throttle while leaving a hardcoded deadline is
+  how a slower restart turns into "launchd never relaunched it".
+
+- **uid mode + `KeepAlive` is a loaded gun.** `PROBE5_AGENT_UID` must be the
+  dedicated account, resolved by name — never the maintainer's uid, never root.
+  `reaper.Domain` and `scenarios.install_supervisor` both refuse it now, but a
+  refusal under `KeepAlive` + `ThrottleInterval 1` becomes a 1 Hz *crash* loop
+  (noisy, harmless) rather than a reap loop. Have
+  `launchctl bootout gui/$(id -u)/<label> && launchctl disable gui/$(id -u)/<label>`
+  ready in a second terminal before the first bootstrap of any run.
+
+- **`launchctl` and `ps` both fail under the command sandbox** (`bootstrap` → `EIO`).
+  Run `scenarios.py` unsandboxed or every launchd row reads as a spurious failure.
+- **A spawned surrogate must not inherit the orchestrator's stdio.** It blocks for
+  an hour; inheriting stdout holds the driver's pipe open long after the supervisor
+  exits, and every scenario looks like a hang. `spawn_run` redirects 0/1/2 to
+  `/dev/null` — keep that when routing through `sudo`.
+- **Report the pragmas from an on-disk DB.** An in-memory one cannot use WAL and
+  reports `journal_mode=memory`, understating the durability actually configured.
+- **A crash before the first commit leaves no lease at all**, and that is the
+  correct safe outcome, not a missing one. The safe-outcome predicate must accept
+  four shapes: no lease, terminal, fenced in `stop_intent`, or a healthy re-adopted
+  run.
+- **Do not gate re-adoption on an empty domain scan.** That was the v5.1 defect
+  (see the Finding): a live run's own workers are in the domain too, so it
+  false-reaps every run that forks. The recorded incarnation is the discriminator.

@@ -1,0 +1,4140 @@
+{
+  "environment": {
+    "agent_uid_provisioned": true,
+    "boot_session_present": true,
+    "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "coverage": {
+      "aliases": {
+        "G1": "T2",
+        "G2": "T3",
+        "G3": "T5",
+        "Saga1": "T7",
+        "Saga2": "T8",
+        "Sup-benign": "Sup-readopt + Sup-smoke"
+      },
+      "armed_crash_points": [
+        "activate.post_commit",
+        "activate.pre_commit",
+        "prepare.post_commit",
+        "prepare.pre_commit",
+        "reap.post_zero",
+        "spawn.post_spawn",
+        "stop_intent.post_commit",
+        "stop_intent.pre_commit",
+        "takeover.post_commit",
+        "takeover.pre_commit",
+        "terminalize.post_commit",
+        "terminalize.pre_commit"
+      ],
+      "modules_scanned": [
+        "incarnation.py",
+        "kernel.py",
+        "reaper.py",
+        "runsurrogate.py",
+        "supervisor.py"
+      ]
+    },
+    "domain_mode": "uid",
+    "macos": "26.4.1",
+    "pragmas": {
+      "fullfsync": 1,
+      "journal_mode": "wal",
+      "sqlite_version": "3.53.4",
+      "synchronous": 2
+    },
+    "provenance": {
+      "branch": "bestdan/elite-probe5-crash-kernel",
+      "dirty": false,
+      "dirty_paths": [],
+      "fixture_revision": "c5eb8fdad2021623f98bf9b2ee445ea4ce52ba5e",
+      "fixture_revision_short": "c5eb8fd",
+      "helpers": {
+        "incarnation.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "1d3da09c2b55741b4ee3b702c0e964107f841439fb9ed96f60a0440594dc4731"
+        },
+        "p5-measure": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "df17c472563cd791ea69b7dd9d622c03333004e58e8db1a4e5b940bd08a76172"
+        },
+        "p5-reap": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "ed20fe8ce6168ae6e5159e4763932a8870e50221694b759d6e4d959689e90812"
+        },
+        "p5-spawn": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "352b1c6bce3d2b1b45c11390850f78c1e9e7bf72b8816dfd92abf5a8df5ebc2e"
+        },
+        "runsurrogate.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "a384d0300be8dd6edd905d63752d735b133736178ffc492fbb221946b542bd73"
+        }
+      },
+      "python": "/opt/homebrew/opt/python@3.12/bin/python3.12"
+    },
+    "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
+    "sqlite_build": "Homebrew stock (NOT Apple's system build)",
+    "sqlite_version": "3.53.4"
+  },
+  "prior_environment": {
+    "agent_uid_provisioned": true,
+    "boot_session_present": true,
+    "containment_caveat": "Escape-proof uid domain, agent uid 502. Rows recorded under domain_mode=uid exercise the real kill(-1) containment primitive; rows still marked gentoken do NOT and cannot establish invariants 4/5/6.",
+    "coverage": {
+      "aliases": {
+        "G1": "T2",
+        "G2": "T3",
+        "G3": "T5",
+        "Saga1": "T7",
+        "Saga2": "T8",
+        "Sup-benign": "Sup-readopt + Sup-smoke"
+      },
+      "armed_crash_points": [
+        "activate.post_commit",
+        "activate.pre_commit",
+        "prepare.post_commit",
+        "prepare.pre_commit",
+        "reap.post_zero",
+        "spawn.post_spawn",
+        "stop_intent.post_commit",
+        "stop_intent.pre_commit",
+        "takeover.post_commit",
+        "takeover.pre_commit",
+        "terminalize.post_commit",
+        "terminalize.pre_commit"
+      ],
+      "modules_scanned": [
+        "incarnation.py",
+        "kernel.py",
+        "reaper.py",
+        "runsurrogate.py",
+        "supervisor.py"
+      ]
+    },
+    "domain_mode": "uid",
+    "macos": "26.4.1",
+    "pragmas": {
+      "fullfsync": 1,
+      "journal_mode": "wal",
+      "sqlite_version": "3.53.4",
+      "synchronous": 2
+    },
+    "provenance": {
+      "branch": "bestdan/elite-probe5-crash-kernel",
+      "dirty": true,
+      "dirty_paths": [
+        "ev_docs/elite-spike/fixtures/crash-kernel/scenarios.py"
+      ],
+      "fixture_revision": "ce136b344442bb0a34b4cde0740f9daa9c480e30",
+      "fixture_revision_short": "ce136b3",
+      "helpers": {
+        "incarnation.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "1d3da09c2b55741b4ee3b702c0e964107f841439fb9ed96f60a0440594dc4731"
+        },
+        "p5-measure": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "df17c472563cd791ea69b7dd9d622c03333004e58e8db1a4e5b940bd08a76172"
+        },
+        "p5-reap": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "ed20fe8ce6168ae6e5159e4763932a8870e50221694b759d6e4d959689e90812"
+        },
+        "p5-spawn": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "352b1c6bce3d2b1b45c11390850f78c1e9e7bf72b8816dfd92abf5a8df5ebc2e"
+        },
+        "runsurrogate.py": {
+          "mode": "0o755",
+          "owner": "root:0",
+          "sha256": "a384d0300be8dd6edd905d63752d735b133736178ffc492fbb221946b542bd73"
+        }
+      },
+      "python": "/opt/homebrew/opt/python@3.12/bin/python3.12"
+    },
+    "python": "/opt/homebrew/opt/python@3.12/bin/python3.12",
+    "sqlite_build": "Homebrew stock (NOT Apple's system build)",
+    "sqlite_version": "3.53.4"
+  },
+  "rows": {
+    "Churn": {
+      "domain_before_reap": 39,
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "lease_state": "terminal",
+      "outcome": "converged",
+      "row": "Churn",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.56titb3o",
+      "survivors_after_reap": [],
+      "system_daemons_after_reap": [],
+      "verdict": "PASS"
+    },
+    "Esc": {
+      "domain_mode": "uid",
+      "escape_proof_domain": true,
+      "escapee_hidden_from_token_scan": true,
+      "escapees": [
+        {
+          "command": "/bin/sleep 3600",
+          "pid": 57656
+        }
+      ],
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "Esc",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "run_survivors_after_reap": [],
+      "rundir": "<TMPDIR>/probe5.k544o89l",
+      "system_daemons_after_reap": [],
+      "token_visible_pids": [
+        57651,
+        57652
+      ],
+      "uid_domain": [
+        {
+          "command": "/usr/sbin/distnoted agent",
+          "pid": 57306
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785174756-57649 --escape",
+          "pid": 57652
+        },
+        {
+          "command": "/bin/sleep 3600",
+          "pid": 57656
+        }
+      ],
+      "verdict": "PASS"
+    },
+    "Idem": {
+      "detail": {
+        "counter_after_replay": 1,
+        "counter_before": 1,
+        "next_seq_no_gap": 2,
+        "replay_flagged": true,
+        "seq_first": 1,
+        "seq_replay": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 2,
+            "seqs": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "Idem",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.zixm5cfd",
+      "verdict": "PASS"
+    },
+    "IdemConflict": {
+      "detail": {
+        "counter_unchanged": true,
+        "raised": "idem_key 'k:1' replayed with a different payload"
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 1,
+            "seqs": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "IdemConflict",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.q92xkuaz",
+      "verdict": "PASS"
+    },
+    "Io": {
+      "domain_mode": "uid",
+      "enospc_subcase": {
+        "atomic": true,
+        "error": "OperationalError: database or disk is full",
+        "events_after": 1,
+        "events_before": 1,
+        "filler_errno": 28,
+        "filler_hit_enospc": true,
+        "free_bytes_at_failure": 40960,
+        "induced": true,
+        "integrity_ok": true,
+        "seq_after": 1,
+        "seq_before": 1,
+        "wal_bytes_at_failure": 110592,
+        "wal_bytes_before": 70072,
+        "wal_grew": true
+      },
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "note": "Two sub-cases: a pre-write refusal (read-only dir), and an ENOSPC that struck AFTER the WAL had been extended on a filled hdiutil volume, verified by re-opening the DB from disk. Scope, precisely: this establishes failure-after-writing-began, NOT that an individual write(2) was partial \u2014 an earlier WAL write may have succeeded and a later write, sync or allocation failed. Localising to a syscall needs a fault-injecting VFS or a trace. EIO proper (bad media) is NOT injected and follows distinct SQLite error paths; it remains untested.",
+      "readonly_subcase": {
+        "atomic": true,
+        "counter_after": 1,
+        "counter_before": 1,
+        "error": "OperationalError: attempt to write a readonly database",
+        "events": 1
+      },
+      "row": "Io",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.ftarb03q",
+      "untested": [
+        "EIO (bad media) \u2014 distinct SQLite error paths",
+        "syscall-level localisation of the failing write"
+      ],
+      "verdict": "PASS"
+    },
+    "NoConv": {
+      "detail": {
+        "converged": false,
+        "lease_state": "prepared",
+        "rounds": 2,
+        "terminalize_refused": "terminalize refused: reap did not verify zero survivors"
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 1,
+            "seqs": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "NoConv",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.vuyf1187",
+      "verdict": "PASS"
+    },
+    "PL": {
+      "domain_mode": "uid",
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "reason": "Reboot / power-loss durability. SIGKILL cannot prove it; a VM or loopback power-fail harness was out of scope. INCONCLUSIVE BY CONSTRUCTION, per the kill sheet \u2014 never passed. This is the one row the dedicated uid does not unblock.",
+      "row": "PL",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "verdict": "BLOCKED"
+    },
+    "Pid": {
+      "detail": {
+        "forged_adopt_refused": true,
+        "genuine_adopt_error": null,
+        "genuine_adopt_succeeded": true,
+        "identity_predicate_rejects_forgery": true,
+        "refusal_reason": "identity changed after attach (PID reuse) \u2014 refusing to adopt",
+        "subject_measured_alive": true
+      },
+      "domain_mode": "uid",
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "note": "real PID wraparound not forced; this exercises the guard the reuse would trip, not the wraparound itself",
+      "row": "Pid",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "subject": {
+        "pid": 56923,
+        "spawned_as": "agent",
+        "uid_mode": true
+      },
+      "verdict": "PASS"
+    },
+    "Priv": {
+      "detail": {
+        "reason": "refusing to signal as root: kill(-1) as root targets every process on the host",
+        "refused_as_root": true
+      },
+      "domain_mode": "uid",
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "note": "guard exercised with a mocked euid; not run as real root (the fixture must never acquire root)",
+      "row": "Priv",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "verdict": "PASS"
+    },
+    "Race": {
+      "detail": {
+        "generations_reserved": 1,
+        "loser_stderr": [
+          "File \"<HOME>/src/worktrees/workflow-skills/probe5-crash-kernel/dev_docs/elite-spike/fixtures/crash-kernel/kernel.py\", line 244, in launch_prepare\n    raise KernelError(f\"admission gate: {live} non-terminal lease(s) exist\")\nkernel.KernelError: admission gate: 1 non-terminal lease(s) exist\n"
+        ],
+        "return_codes": [
+          1,
+          0
+        ],
+        "winners": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "Race",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.jb9my7_s",
+      "verdict": "PASS"
+    },
+    "Sup-orphan": {
+      "actions": [
+        "reap_dead_run"
+      ],
+      "bootstrap_rc": 0,
+      "deadman_disarmed": true,
+      "decisions": [
+        {
+          "action": "reap_dead_run",
+          "alive_verified": false,
+          "domain_live": [
+            59210,
+            59211
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "other_domain_procs": [
+            59210,
+            59211
+          ],
+          "recorded_incarnation": true,
+          "repo_key": "repo-a",
+          "state": "active",
+          "stop": {
+            "converged": true,
+            "terminalized": true
+          },
+          "stop_intent": 0
+        }
+      ],
+      "domain_after": [],
+      "domain_after_run_kill": [
+        59210,
+        59211
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "gen_token_present": true,
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "lease_after": {
+        "gen_token": "P5TOKEN-run-1785174788-59204",
+        "generation": 1,
+        "manifest_digest": "",
+        "repo_key": "repo-a",
+        "run_id": "run-1785174788",
+        "state": "terminal",
+        "stop_intent": 0,
+        "updated_seq": 5
+      },
+      "passes_before": 1,
+      "reconcile_passes": 2,
+      "relaunched_by_launchd": true,
+      "row": "Sup-orphan",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "run_died": true,
+      "run_pid": 59207,
+      "run_still_alive": false,
+      "run_survivor_pids": [],
+      "run_survivors_after": [],
+      "rundir": "<TMPDIR>/probe5.otnmhuxo",
+      "supervisor_pid": 59217,
+      "survivors_after": [],
+      "system_daemons_after": [],
+      "verdict": "PASS"
+    },
+    "Sup-readopt": {
+      "actions": [
+        "readopt"
+      ],
+      "bootstrap_rc": 0,
+      "deadman_disarmed": true,
+      "decisions": [
+        {
+          "action": "readopt",
+          "alive_verified": true,
+          "domain_live": [
+            58552,
+            58555
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "other_domain_procs": [
+            58555
+          ],
+          "recorded_incarnation": true,
+          "repo_key": "repo-a",
+          "state": "active",
+          "stop_intent": 0
+        }
+      ],
+      "domain_after": [
+        58552,
+        58555
+      ],
+      "domain_after_restart": [
+        58552,
+        58555
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "gen_token_present": true,
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "lease_after": {
+        "gen_token": "P5TOKEN-run-1785174781-58516",
+        "generation": 1,
+        "manifest_digest": "",
+        "repo_key": "repo-a",
+        "run_id": "run-1785174781",
+        "state": "active",
+        "stop_intent": 0,
+        "updated_seq": 2
+      },
+      "passes_before": 1,
+      "reconcile_passes": 2,
+      "relaunched_by_launchd": true,
+      "row": "Sup-readopt",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "run_pid": 58552,
+      "run_still_alive": true,
+      "run_survivor_pids": [
+        58552,
+        58555
+      ],
+      "run_survivors_after": [
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785174781-58516 --descendant",
+          "pid": 58552
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785174781-58516 --descendant",
+          "pid": 58555
+        }
+      ],
+      "rundir": "<TMPDIR>/probe5.q0lxhvk7",
+      "supervisor_pid": 58589,
+      "system_daemons_after": [],
+      "verdict": "PASS"
+    },
+    "Sup-smoke": {
+      "actions": [
+        "readopt"
+      ],
+      "alive_verified": [
+        true
+      ],
+      "bootstrap_rc": 0,
+      "deadman_disarmed": true,
+      "decisions": [
+        {
+          "action": "readopt",
+          "alive_verified": true,
+          "domain_live": [
+            57904,
+            57912
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "other_domain_procs": [
+            57912
+          ],
+          "recorded_incarnation": true,
+          "repo_key": "repo-a",
+          "state": "active",
+          "stop_intent": 0
+        }
+      ],
+      "domain_after_pass": [
+        57904,
+        57912
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "gen_token_present": true,
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "keepalive": false,
+      "kill_switch_emitted": true,
+      "lease_after_pass": {
+        "gen_token": "P5TOKEN-run-1785174762-57901",
+        "generation": 1,
+        "manifest_digest": "",
+        "repo_key": "repo-a",
+        "run_id": "run-1785174762",
+        "state": "active",
+        "stop_intent": 0,
+        "updated_seq": 2
+      },
+      "passes_after_kill": 1,
+      "pid_after_kill": null,
+      "plist_keepalive": false,
+      "plist_runatload": true,
+      "plist_throttle": 5,
+      "print_after_kill": "worktrees/workflow-skills/probe5-crash-kernel/dev_docs/elite-spike/fixtures/crash-kernel/supervisor.py\n\t\tdaemon\n\t}\n\n\tstdout path = <TMPDIR>/probe5.nn35b5ta/supervisor.launchd.out\n\tstderr path = <TMPDIR>/probe5.nn35b5ta/supervisor.launchd.err\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/com.apple.launchd.e0LjUS8L4m/Listeners\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPROBE5_AGENT_UID => 502\n\t\tPROBE5_RECONCILE_LOG => <TMPDIR>/probe5.nn35b5ta/reconcile.jsonl\n\t\tPROBE5_DB => <TMPDIR>/probe5.nn35b5ta/state.db\n\t\tPROBE5_REPO => repo-a\n\t\tPROBE5_DOMAIN_MODE => uid\n\t\tXPC_SERVICE_NAME => com.probe5r2.sup.smoke\n\t}\n\n\tdomain = gui/501 [100023]\n\tasid = 100023\n\tminimum runtime = 5\n\texit timeout = 5\n\truns = 1\n\tlast terminating signal = Killed: 9\n\n\tresource coalition = {\n\t\tID = 178587\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tjetsam coalition = {\n\t\tID = 178588\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tspawn type = background (5)\n\tjetsam priority = 40\n\tjetsam memory limit (active) = (unlimited)\n\tjetsam memory limit (inactive) = (unlimited)\n\tjetsamproperties category = daemon\n\tjetsam thread limit = 32\n\tcpumon = default\n\n\tproperties = runatload | inferred program\n}\n",
+      "print_before_kill": "3dblprtb8hl1mpr0000gn/T/probe5.nn35b5ta/supervisor.launchd.err\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/com.apple.launchd.e0LjUS8L4m/Listeners\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPROBE5_AGENT_UID => 502\n\t\tPROBE5_RECONCILE_LOG => <TMPDIR>/probe5.nn35b5ta/reconcile.jsonl\n\t\tPROBE5_DB => <TMPDIR>/probe5.nn35b5ta/state.db\n\t\tPROBE5_REPO => repo-a\n\t\tPROBE5_DOMAIN_MODE => uid\n\t\tXPC_SERVICE_NAME => com.probe5r2.sup.smoke\n\t}\n\n\tdomain = gui/501 [100023]\n\tasid = 100023\n\tminimum runtime = 5\n\texit timeout = 5\n\truns = 1\n\tpid = 57954\n\timmediate reason = speculative\n\tforks = 2\n\texecs = 2\n\tinitialized = 1\n\ttrampolined = 1\n\tstarted suspended = 0\n\tproxy started suspended = 0\n\tchecked allocations = 0 (queried = 1)\n\tchecked allocations reason = no host\n\tchecked allocations flags = 0x0\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 178587\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tjetsam coalition = {\n\t\tID = 178588\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.probe5r2.sup.smoke\n\t}\n\n\tspawn type = background (5)\n\tjetsam priority = 40\n\tjetsam memory limit (active) = (unlimited)\n\tjetsam memory limit (inactive) = (unlimited)\n\tjetsamproperties category = daemon\n\tjetsam thread limit = 32\n\tcpumon = default\n\n\tproperties = runatload | inferred program\n}\n",
+      "reconcile_passes": 1,
+      "relaunched_after_kill": false,
+      "row": "Sup-smoke",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "run_pid": 57904,
+      "run_still_alive": true,
+      "run_survivor_pids": [
+        57904,
+        57912
+      ],
+      "run_survivors_after_pass": [
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785174762-57901 --descendant",
+          "pid": 57904
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /usr/local/probe5/runsurrogate.py P5TOKEN-run-1785174762-57901 --descendant",
+          "pid": 57912
+        }
+      ],
+      "rundir": "<TMPDIR>/probe5.nn35b5ta",
+      "supervisor_pid": 57954,
+      "system_daemons_after_pass": [],
+      "throttle_interval": 5,
+      "verdict": "PASS"
+    },
+    "T1": {
+      "boundary_expectation": null,
+      "crash_point": "prepare.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 0,
+            "seqs": []
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": []
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": []
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 0,
+            "seqs": []
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": []
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": []
+          },
+          "ok": true
+        }
+      },
+      "phase": "launch",
+      "reconcile": [],
+      "reconcile_rc": 0,
+      "row": "T1",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.2gwcsm5p",
+      "safe_outcome": true,
+      "safe_outcome_reason": "clean rollback: no lease was ever published",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          0,
+          0
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [],
+        "lease": null,
+        "meta_seq": 0
+      },
+      "state_after_reconcile": {
+        "events": [],
+        "lease": null,
+        "meta_seq": 0
+      },
+      "verdict": "PASS"
+    },
+    "T10": {
+      "boundary_expectation": null,
+      "crash_point": "terminalize.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "stop",
+      "reconcile": [],
+      "reconcile_rc": 0,
+      "row": "T10",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.2pnjkzv8",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          5,
+          5
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174741-56855",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174741",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 5
+        },
+        "meta_seq": 5
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174741-56855",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174741",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 5
+        },
+        "meta_seq": 5
+      },
+      "verdict": "PASS"
+    },
+    "T11": {
+      "boundary_expectation": {
+        "checks": {
+          "generation": true,
+          "generation_not_published": true,
+          "generations_reserved": true
+        },
+        "observed": {
+          "generation": 1,
+          "generations_reserved": [
+            1
+          ],
+          "state": "active",
+          "stop_intent": 1
+        },
+        "ok": true,
+        "why": "crash BEFORE the takeover publish commits: g+1 must not exist"
+      },
+      "crash_point": "takeover.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 1
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "takeover",
+      "reconcile": "[sup 56881 18:52:22] stop_intent committed (reap_stop_intent)\n[sup 56881 18:52:22] reap converged=True rounds=0\n[sup 56881 18:52:22] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T11",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.17b9d91h",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174742-56869",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174742",
+          "state": "active",
+          "stop_intent": 1,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_stop_intent",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174742-56869",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174742",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "T12": {
+      "boundary_expectation": {
+        "checks": {
+          "generation": true,
+          "generations_reserved": true,
+          "no_incarnation_for_new_generation": true,
+          "state": true
+        },
+        "observed": {
+          "generation": 2,
+          "generations_reserved": [
+            1,
+            2
+          ],
+          "incarnation_for_g2": false,
+          "state": "prepared",
+          "stop_intent": 0
+        },
+        "ok": true,
+        "why": "crash AFTER the takeover publish commits: g+1 must be durable, prepared, and never activated"
+      },
+      "crash_point": "takeover.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 4,
+            "seqs": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "takeover",
+      "reconcile": [
+        {
+          "action": "launch_aborted",
+          "domain_live": [],
+          "escape_proof": true,
+          "generation": 2,
+          "reap": {
+            "converged": true,
+            "escape_proof": true,
+            "initial": [],
+            "mode": "uid",
+            "rounds": 0,
+            "signals": [],
+            "survivors": []
+          },
+          "recorded_incarnation": false,
+          "repo_key": "repo-a",
+          "state": "prepared",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T12",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.zrtwswml",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 2,
+            "idem_key": "generation_reserved:repo-a:2",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "takeover-1785174742",
+            "seq": 4
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-takeover-1785174742-56893",
+          "generation": 2,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "takeover-1785174742",
+          "state": "prepared",
+          "stop_intent": 0,
+          "updated_seq": 4
+        },
+        "meta_seq": 4
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174742",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:takeover",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 2,
+            "idem_key": "generation_reserved:repo-a:2",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "takeover-1785174742",
+            "seq": 4
+          },
+          {
+            "generation": 2,
+            "idem_key": "launch_aborted:repo-a:2",
+            "kind": "launch_aborted",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 2,
+            "idem_key": "lease_release:repo-a:2",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-takeover-1785174742-56893",
+          "generation": 2,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "takeover-1785174742",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "T2": {
+      "boundary_expectation": null,
+      "crash_point": "prepare.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 1,
+            "seqs": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "phase": "launch",
+      "reconcile": [
+        {
+          "action": "launch_aborted",
+          "domain_live": [
+            56679
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "reap": {
+            "converged": true,
+            "escape_proof": true,
+            "initial": [
+              56679
+            ],
+            "mode": "uid",
+            "rounds": 1,
+            "signals": [
+              {
+                "helper_self_killed": true,
+                "method": "sudo /usr/local/probe5/p5-reap TERM",
+                "rc": -15,
+                "sig": "TERM",
+                "stderr": null,
+                "targets": null
+              }
+            ],
+            "survivors": []
+          },
+          "recorded_incarnation": false,
+          "repo_key": "repo-a",
+          "state": "prepared",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T2",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.ak5n6lhh",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          3,
+          3
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56680",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "prepared",
+          "stop_intent": 0,
+          "updated_seq": 1
+        },
+        "meta_seq": 1
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "launch_aborted:repo-a:1",
+            "kind": "launch_aborted",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56680",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "verdict": "PASS"
+    },
+    "T3": {
+      "boundary_expectation": null,
+      "crash_point": "spawn.post_spawn",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 1,
+            "seqs": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "phase": "launch",
+      "reconcile": [
+        {
+          "action": "launch_aborted",
+          "domain_live": [],
+          "escape_proof": true,
+          "generation": 1,
+          "reap": {
+            "converged": true,
+            "escape_proof": true,
+            "initial": [],
+            "mode": "uid",
+            "rounds": 0,
+            "signals": [],
+            "survivors": []
+          },
+          "recorded_incarnation": false,
+          "repo_key": "repo-a",
+          "state": "prepared",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T3",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.fya0v066",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          3,
+          3
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56715",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "prepared",
+          "stop_intent": 0,
+          "updated_seq": 1
+        },
+        "meta_seq": 1
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "launch_aborted:repo-a:1",
+            "kind": "launch_aborted",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56715",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "verdict": "PASS"
+    },
+    "T4": {
+      "boundary_expectation": null,
+      "crash_point": "activate.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 1,
+            "seqs": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "prepared",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "phase": "launch",
+      "reconcile": [
+        {
+          "action": "launch_aborted",
+          "domain_live": [],
+          "escape_proof": true,
+          "generation": 1,
+          "reap": {
+            "converged": true,
+            "escape_proof": true,
+            "initial": [],
+            "mode": "uid",
+            "rounds": 0,
+            "signals": [],
+            "survivors": []
+          },
+          "recorded_incarnation": false,
+          "repo_key": "repo-a",
+          "state": "prepared",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T4",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.zf1xa60w",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          3,
+          3
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56722",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "prepared",
+          "stop_intent": 0,
+          "updated_seq": 1
+        },
+        "meta_seq": 1
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174738",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "launch_aborted:repo-a:1",
+            "kind": "launch_aborted",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174738-56722",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174738",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "verdict": "PASS"
+    },
+    "T5": {
+      "boundary_expectation": null,
+      "crash_point": "activate.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 2,
+            "seqs": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "phase": "launch",
+      "reconcile": "[sup 56737 18:52:19] stop_intent committed (reap_dead_run)\n[sup 56737 18:52:19] reap converged=True rounds=0\n[sup 56737 18:52:19] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 0,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_dead_run\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T5",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.0gdm78xs",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          5,
+          5
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 2
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174739-56731",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174739",
+          "state": "active",
+          "stop_intent": 0,
+          "updated_seq": 2
+        },
+        "meta_seq": 2
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_dead_run",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174739-56731",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174739",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 5
+        },
+        "meta_seq": 5
+      },
+      "verdict": "PASS"
+    },
+    "T6": {
+      "boundary_expectation": null,
+      "crash_point": "stop_intent.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 2,
+            "seqs": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 2,
+            "seqs": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 0
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "stop",
+      "reconcile": [
+        {
+          "action": "readopt",
+          "alive_verified": true,
+          "domain_live": [
+            56745
+          ],
+          "escape_proof": true,
+          "generation": 1,
+          "other_domain_procs": [],
+          "recorded_incarnation": true,
+          "repo_key": "repo-a",
+          "state": "active",
+          "stop_intent": 0
+        }
+      ],
+      "reconcile_rc": 0,
+      "row": "T6",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.usxu584o",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe hold: healthy run re-adopted, stop retried",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          2,
+          2
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 2
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174739-56742",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174739",
+          "state": "active",
+          "stop_intent": 0,
+          "updated_seq": 2
+        },
+        "meta_seq": 2
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174739",
+            "seq": 2
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174739-56742",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174739",
+          "state": "active",
+          "stop_intent": 0,
+          "updated_seq": 2
+        },
+        "meta_seq": 2
+      },
+      "verdict": "PASS"
+    },
+    "T7": {
+      "boundary_expectation": null,
+      "crash_point": "stop_intent.post_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 1
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "stop",
+      "reconcile": "[sup 56772 18:52:20] stop_intent committed (reap_stop_intent)\n[sup 56772 18:52:20] reap converged=True rounds=1\n[sup 56772 18:52:20] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [\n      56767\n    ],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": true,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T7",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.4qmaf4i2",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174740-56764",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174740",
+          "state": "active",
+          "stop_intent": 1,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_stop_intent",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174740-56764",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174740",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "T8": {
+      "boundary_expectation": null,
+      "crash_point": "reap.post_zero",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 1
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "stop",
+      "reconcile": "[sup 56793 18:52:21] stop_intent committed (reap_stop_intent)\n[sup 56793 18:52:21] reap converged=True rounds=0\n[sup 56793 18:52:21] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T8",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.lujt6jqu",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174740-56781",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174740",
+          "state": "active",
+          "stop_intent": 1,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174740",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_stop_intent",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174740-56781",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174740",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "T9": {
+      "boundary_expectation": null,
+      "crash_point": "terminalize.pre_commit",
+      "crashed_op": {
+        "rc": 1
+      },
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants_after_crash": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 3,
+            "seqs": [
+              1,
+              2,
+              3
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 1
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": "not in terminal state",
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": {
+            "state": "active",
+            "stop_intent": 1
+          },
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "invariants_after_reconcile": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "launch_rc": 0,
+      "phase": "stop",
+      "reconcile": "[sup 56850 18:52:21] stop_intent committed (reap_stop_intent)\n[sup 56850 18:52:21] reap converged=True rounds=0\n[sup 56850 18:52:21] terminalized\n[\n  {\n    \"repo_key\": \"repo-a\",\n    \"generation\": 1,\n    \"state\": \"active\",\n    \"stop_intent\": 1,\n    \"domain_live\": [],\n    \"recorded_incarnation\": true,\n    \"escape_proof\": true,\n    \"alive_verified\": false,\n    \"other_domain_procs\": [],\n    \"action\": \"reap_stop_intent\",\n    \"stop\": {\n      \"converged\": true,\n      \"terminalized\": true\n    }\n  }\n]\n",
+      "reconcile_rc": 0,
+      "row": "T9",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.7p4ilunq",
+      "safe_outcome": true,
+      "safe_outcome_reason": "safe terminal",
+      "second_reconcile_inert": {
+        "event_count_unchanged": true,
+        "lease_unchanged": true,
+        "meta_seq": [
+          6,
+          6
+        ],
+        "seq_unchanged": true
+      },
+      "state_after_crash": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174741-56798",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174741",
+          "state": "active",
+          "stop_intent": 1,
+          "updated_seq": 3
+        },
+        "meta_seq": 3
+      },
+      "state_after_reconcile": {
+        "events": [
+          {
+            "generation": 1,
+            "idem_key": "generation_reserved:repo-a:1",
+            "kind": "generation_reserved",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 1
+          },
+          {
+            "generation": 1,
+            "idem_key": "run_registered:repo-a:1",
+            "kind": "run_registered",
+            "repo_key": "repo-a",
+            "run_id": "run-1785174741",
+            "seq": 2
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:requested",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 3
+          },
+          {
+            "generation": 1,
+            "idem_key": "stop_requested:repo-a:1:reap_stop_intent",
+            "kind": "stop_requested",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 4
+          },
+          {
+            "generation": 1,
+            "idem_key": "observed_terminal:repo-a:1",
+            "kind": "observed_terminal",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 5
+          },
+          {
+            "generation": 1,
+            "idem_key": "lease_release:repo-a:1",
+            "kind": "lease_release",
+            "repo_key": "repo-a",
+            "run_id": null,
+            "seq": 6
+          }
+        ],
+        "lease": {
+          "gen_token": "P5TOKEN-run-1785174741-56798",
+          "generation": 1,
+          "manifest_digest": "",
+          "repo_key": "repo-a",
+          "run_id": "run-1785174741",
+          "state": "terminal",
+          "stop_intent": 0,
+          "updated_seq": 6
+        },
+        "meta_seq": 6
+      },
+      "verdict": "PASS"
+    },
+    "Tw": {
+      "domain_before_takeover": [
+        57887,
+        57892
+      ],
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "generations_reserved": [
+        1,
+        2
+      ],
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 6,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1,
+              2
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "Tw",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.uf3dbum2",
+      "takeover": {
+        "converged": true,
+        "domain_at_publish": [],
+        "new_generation": 2,
+        "old_generation": 1,
+        "published": true
+      },
+      "verdict": "PASS"
+    },
+    "Uid": {
+      "detail": {
+        "claim": "A worker that acquires a different credential leaves the uid containment domain and is not reaped by kill(-1) as the agent.",
+        "detection": "proc_listpids over other uids plus a gen_token argv scan could surface a suspect process, but a helper that execs and drops the token is undetectable by that means. Treated as admitted-undetectable rather than claimed-detected.",
+        "reachable_in_this_fixture": false,
+        "redirect_if_ever_in_scope": "containment option 2 (Linux VM/container)",
+        "why": "The agent has zero sudo rules (verified: `sudo -l -U agent` -> not allowed), so it cannot change credential at all here. The limitation is therefore real but UNREACHABLE from the agent's own authority \u2014 it needs an external privileged spawner."
+      },
+      "domain_mode": "uid",
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "row": "Uid",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "verdict": "DOCUMENTED-LIMITATION"
+    },
+    "Writer": {
+      "domain_mode": "uid",
+      "failed_checks": [],
+      "fixture_dirty": false,
+      "fixture_revision": "c5eb8fd",
+      "invariants": {
+        "inv1_no_orphan_events": {
+          "detail": {
+            "orphans": []
+          },
+          "ok": true
+        },
+        "inv2_gapless_seq": {
+          "detail": {
+            "meta_seq": 5,
+            "seqs": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "ok": true
+        },
+        "inv2_idem_unique": {
+          "detail": {
+            "dupes": 0
+          },
+          "ok": true
+        },
+        "inv3_one_live_lease": {
+          "detail": {
+            "count": 0
+          },
+          "ok": true
+        },
+        "inv4_earned_release": {
+          "detail": {
+            "run_survivors": [],
+            "system_daemons_respawned": []
+          },
+          "ok": true
+        },
+        "inv6_fenced_not_released": {
+          "detail": "terminal",
+          "ok": true
+        },
+        "inv7_generation_monotonic": {
+          "detail": {
+            "generations": [
+              1
+            ]
+          },
+          "ok": true
+        },
+        "inv8_sole_writer": {
+          "detail": {
+            "writers": [
+              "supervisor"
+            ]
+          },
+          "ok": true
+        }
+      },
+      "row": "Writer",
+      "run_at": "2026-07-27T18:53:16+0100",
+      "rundir": "<TMPDIR>/probe5.ok2jj91k",
+      "verdict": "PASS",
+      "write_probe": "EACCES"
+    }
+  }
+}

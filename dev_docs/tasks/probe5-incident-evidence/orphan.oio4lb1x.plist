@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.probe5.sup.orphan</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/python@3.12/bin/python3.12</string>
+    <string>/Users/danielegan/src/worktrees/workflow-skills/probe5-crash-kernel/dev_docs/elite-spike/fixtures/crash-kernel/supervisor.py</string>
+    <string>daemon</string>
+  </array>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>1</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PROBE5_DB</key><string>/var/folders/td/xdvk13613q1_mpvts9_mvq_c0000gn/T/probe5.oio4lb1x/state.db</string>
+    <key>PROBE5_REPO</key><string>repo-a</string>
+    <key>PROBE5_DOMAIN_MODE</key><string>uid</string>
+    <key>PROBE5_AGENT_UID</key><string>501</string>
+    <key>PROBE5_RECONCILE_LOG</key><string>/var/folders/td/xdvk13613q1_mpvts9_mvq_c0000gn/T/probe5.oio4lb1x/reconcile.jsonl</string>
+  </dict>
+  <key>StandardOutPath</key><string>/var/folders/td/xdvk13613q1_mpvts9_mvq_c0000gn/T/probe5.oio4lb1x/supervisor.launchd.out</string>
+  <key>StandardErrorPath</key><string>/var/folders/td/xdvk13613q1_mpvts9_mvq_c0000gn/T/probe5.oio4lb1x/supervisor.launchd.err</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
