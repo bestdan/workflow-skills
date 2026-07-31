@@ -100,6 +100,14 @@ class FindQueryTests(unittest.TestCase):
         self.assertEqual(variables.get("project"), PROJECT_UUID)
         self.assert_vars_declared_used_and_passed(query, variables)
 
+    def test_sweep_still_excludes_archived_issues(self):
+        """The other half of the --issues fix: the named lookups ask for archived
+        rows, the sweep must not. Excluding them by default is what makes a
+        re-run of --older-than a clean no-op instead of re-listing everything
+        already archived."""
+        query, _ = self._capture(team="PreThink", project=None)
+        self.assertNotIn("includeArchived", query)
+
     def test_team_name_vs_uuid_selects_filter_field(self):
         name_query, _ = self._capture(team="PreThink", project=None)
         uuid_query, _ = self._capture(team=TEAM_UUID, project=None)
