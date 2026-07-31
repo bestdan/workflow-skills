@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.66.1] - 2026-07-31
+
+### Fixes
+
+- tell "already archived" apart from "not found" (#280) (0b7d40e)
+
 ## [1.66.0] - 2026-07-31
 
 ### Features
