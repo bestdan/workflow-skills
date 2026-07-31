@@ -14,6 +14,7 @@ import contextlib
 import importlib.util
 import io
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -139,10 +140,8 @@ class TerminalPassesTests(unittest.TestCase):
             )
 
 
-class NamedIssueTests(unittest.TestCase):
-    """--issues archives named issues regardless of age (the age threshold is the
-    bulk-sweep mode's gate, not a property of archiving), but never archives an
-    issue that is not in a terminal state."""
+class RefLookupCase(unittest.TestCase):
+    """Shared stubs for the --issues lookup path."""
 
     def _stub(self, nodes):
         calls = []
@@ -158,24 +157,40 @@ class NamedIssueTests(unittest.TestCase):
         original = linear_archive.gql
         linear_archive.gql = fake_gql
         try:
-            found, missing = linear_archive.find_by_ref("k", team, identifiers, uuids)
+            found, archived, missing = linear_archive.find_by_ref(
+                "k", team, identifiers, uuids
+            )
         finally:
             linear_archive.gql = original
-        return found, missing, calls
+        return found, archived, missing, calls
 
-    def _node(self, ident, state_type="completed", uuid="u-1", team="PreThink"):
+    def _node(
+        self,
+        ident,
+        state_type="completed",
+        uuid="u-1",
+        team="PreThink",
+        archived_at=None,
+    ):
         return {
             "id": uuid,
             "identifier": ident,
             "title": ident,
             "completedAt": "2026-07-31T12:00:00.000Z",
             "canceledAt": None,
+            "archivedAt": archived_at,
             "state": {"type": state_type},
             "team": {"id": TEAM_UUID, "name": team},
         }
 
+
+class NamedIssueTests(RefLookupCase):
+    """--issues archives named issues regardless of age (the age threshold is the
+    bulk-sweep mode's gate, not a property of archiving), but never archives an
+    issue that is not in a terminal state."""
+
     def test_lookup_filters_on_number_not_age(self):
-        _, _, calls = self._find([self._node("PRE-12")], ["PRE-12"], [])
+        *_, calls = self._find([self._node("PRE-12")], ["PRE-12"], [])
         query, variables = calls[0]
         self.assertIn("number: { in: $numbers }", query)
         self.assertEqual(variables["numbers"], [12])
@@ -185,7 +200,7 @@ class NamedIssueTests(unittest.TestCase):
     def test_lookup_declares_only_variables_it_uses(self):
         """Same HTTP-400 invariant as the sweep query (PRE-567)."""
         for identifiers, uuids in ((["PRE-12"], []), ([], [PROJECT_UUID])):
-            _, _, calls = self._find([], identifiers, uuids)
+            *_, calls = self._find([], identifiers, uuids)
             query, variables = calls[0]
             declared = set(DECLARED_VAR_RE.findall(query))
             self.assertEqual(declared, set(variables))
@@ -195,13 +210,16 @@ class NamedIssueTests(unittest.TestCase):
     def test_other_teams_same_number_is_not_archived(self):
         """The number filter is team-scoped, so a foreign prefix must come back
         missing rather than matching this team's issue with the same number."""
-        found, missing, _ = self._find([self._node("PRE-12")], ["OTH-12"], [])
+        found, _, missing, _ = self._find([self._node("PRE-12")], ["OTH-12"], [])
         self.assertEqual(found, [])
         self.assertEqual(missing, ["OTH-12"])
 
     def test_unmatched_refs_reported_missing(self):
-        found, missing, _ = self._find([self._node("PRE-12")], ["PRE-12", "PRE-99"], [])
+        found, archived, missing, _ = self._find(
+            [self._node("PRE-12")], ["PRE-12", "PRE-99"], []
+        )
         self.assertEqual([n["identifier"] for n in found], ["PRE-12"])
+        self.assertEqual(archived, [])
         self.assertEqual(missing, ["PRE-99"])
 
     def test_non_terminal_named_issue_is_skipped(self):
@@ -227,7 +245,7 @@ class NamedIssueTests(unittest.TestCase):
         the confinement to --team has to happen client-side or a pasted UUID
         archives an issue on a team the caller never named."""
         foreign = self._node("OTH-4", uuid=PROJECT_UUID, team="OtherTeam")
-        found, missing, _ = self._find([foreign], [], [PROJECT_UUID])
+        found, _, missing, _ = self._find([foreign], [], [PROJECT_UUID])
         self.assertEqual(found, [])
         self.assertEqual(missing, [PROJECT_UUID])
 
@@ -238,7 +256,7 @@ class NamedIssueTests(unittest.TestCase):
         upper = PROJECT_UUID.upper()
         identifiers, uuids = linear_archive.parse_issue_refs([upper])
         self.assertEqual(uuids, [PROJECT_UUID])
-        found, missing, _ = self._find(
+        found, _, missing, _ = self._find(
             [self._node("PRE-12", uuid=PROJECT_UUID)], identifiers, uuids
         )
         self.assertEqual([n["id"] for n in found], [PROJECT_UUID])
@@ -282,6 +300,76 @@ class NamedIssueTests(unittest.TestCase):
         )
         self.assertEqual(identifiers, ["PRE-12", "PRE-13"])
         self.assertEqual(uuids, [PROJECT_UUID])
+
+
+class AlreadyArchivedTests(RefLookupCase):
+    """A re-run of --issues names issues that are already archived. Linear's
+    `issues` query drops archived rows unless asked, so without includeArchived
+    those refs came back as "Not found on this team" — failure-shaped output for
+    work that had already succeeded."""
+
+    ARCHIVED_AT = "2026-07-30T09:00:00.000Z"
+
+    def test_both_lookups_ask_for_archived_issues(self):
+        for identifiers, uuids in ((["PRE-12"], []), ([], [PROJECT_UUID])):
+            *_, calls = self._find([], identifiers, uuids)
+            self.assertIn("includeArchived: true", calls[0][0])
+            self.assertIn("archivedAt", calls[0][0])
+
+    def test_archived_issue_is_reported_archived_not_missing(self):
+        node = self._node("PRE-12", archived_at=self.ARCHIVED_AT)
+        found, archived, missing, _ = self._find([node], ["PRE-12"], [])
+        self.assertEqual(found, [])
+        self.assertEqual([n["identifier"] for n in archived], ["PRE-12"])
+        self.assertEqual(missing, [])
+
+    def test_archived_is_not_an_archive_candidate_and_run_succeeds(self):
+        """The whole point: a second `--issues PRE-12 --apply` exits 0 and says
+        the issue is already archived, instead of reporting it missing."""
+        argv = ["linear-archive.py", "--team", "PreThink", "--issues", "PRE-12"]
+        nodes = [self._node("PRE-12", archived_at=self.ARCHIVED_AT)]
+        original_gql, original_key, original_argv = (
+            linear_archive.gql,
+            linear_archive.get_key,
+            sys.argv,
+        )
+        linear_archive.gql = lambda key, query, variables=None: {
+            "issues": {"nodes": nodes}
+        }
+        linear_archive.get_key = lambda: "k"
+        sys.argv = argv + ["--apply"]
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                linear_archive.main()  # returns (exit 0); does not SystemExit
+        finally:
+            linear_archive.gql = original_gql
+            linear_archive.get_key = original_key
+            sys.argv = original_argv
+        out = buf.getvalue()
+        self.assertIn("Already archived", out)
+        self.assertIn("PRE-12", out)
+        self.assertNotIn("Not found on this team", out)
+        self.assertNotIn("Archiving", out)
+        self.assertIn("Nothing to archive.", out)
+
+    def test_unknown_ref_is_still_missing(self):
+        found, archived, missing, _ = self._find([], ["PRE-99"], [])
+        self.assertEqual((found, archived), ([], []))
+        self.assertEqual(missing, ["PRE-99"])
+
+    def test_archived_issue_on_another_team_is_missing_not_archived(self):
+        """The team check runs first: an out-of-team ref must stay missing, or
+        'already archived' would confirm work on a team the caller never named."""
+        foreign = self._node(
+            "OTH-4",
+            uuid=PROJECT_UUID,
+            team="OtherTeam",
+            archived_at=self.ARCHIVED_AT,
+        )
+        found, archived, missing, _ = self._find([foreign], [], [PROJECT_UUID])
+        self.assertEqual((found, archived), ([], []))
+        self.assertEqual(missing, [PROJECT_UUID])
 
 
 if __name__ == "__main__":
