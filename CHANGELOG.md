@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.66.0] - 2026-07-31
+
+### Features
+
+- archive named issues without an age threshold (#279) (ab9f740)
+
 ## [1.65.2] - 2026-07-31
 
 ### Fixes
