@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.65.2] - 2026-07-31
+
+### Fixes
+
+- route named tracker issues to the claim path, and unstale the jira docs (#276) (7bb4ecb)
+
 ## [1.65.1] - 2026-07-30
 
 ### Fixes
