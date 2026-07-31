@@ -1,6 +1,6 @@
 ---
 name: task
-description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks. ALSO use when the user starts work on an existing tracker issue by naming its key — "work on PRE-683", "let's do ABC-142", "pick up ENG-9", or pasting a Jira/Linear issue URL — because the issue must be claimed (assigned to the user, moved to In Progress) before work begins.
+description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks. ALSO use when the user starts work on an existing tracker issue by naming its key — "work on PRE-683", "let's do ABC-142", "pick up ENG-9", or pasting a Jira/Linear issue URL — because the issue must be claimed (assigned to the user, moved to its tracker's started state) before work begins.
 ---
 
 # Task Loop — Capture and Process Follow-Up Work
@@ -19,7 +19,8 @@ Repo-native system for capturing follow-up work with full context and processing
 When the user opens work on an issue that already exists in the tracker — "work on
 PRE-683", "let's do ABC-142", "pick up ENG-9", or a pasted Jira/Linear issue URL —
 that issue must be **claimed before the first edit**: assigned to the user and moved
-into the tracker's In-Progress status. Without that, the board silently shows the
+into its tracker's started state (`In Progress` on Jira/Linear; the `auto-claimed`
+label on gh-issue, which has no status field). Without that, the board silently shows the
 work as unstarted and unowned for its whole lifetime, and a parallel session can
 claim the same issue.
 
@@ -35,13 +36,25 @@ than for bookkeeping. Route to the existing verbs:
 
 The claim mechanics are the handler's, not this skill's: `commands/handlers/jira-claim.md`
 ("Claim the issue"), `commands/handlers/linear-claim.md`, `commands/handlers/gh-issue-claim.md`.
-Each guards against a concurrent claimer and each refuses to move an issue to a
-completed status — merge is the only completion signal.
+Each claims by **claim-then-verify** (re-read, write, re-read) and each refuses to move
+an issue to a completed status — merge is the only completion signal.
 
-**If the repo has no `.task-config.yml`**, there is no handler to claim through: say
-so and offer `/task-config jira` (or the right tracker) rather than editing the issue
-ad hoc over the MCP. A missing config is the usual reason a Jira issue never gets
-claimed.
+Don't oversell that guard when reporting to the user: on jira and gh-issue it confirms
+only that the final assignee is **your own** account, so it defeats a _different_ user
+racing you but **not** a second session authenticated as the same user — both see their
+own account and both conclude they won. Only `linear-claim.md` distinguishes same-user
+sessions, via a first-writer-wins election on a comment log carrying a unique
+per-session token. The pre-flight open-PR and `task/<KEY>` branch checks are what
+actually catch a sibling session mid-build on jira.
+
+**Resolve the handler from the merged view** — `dev_docs/tasks/.task-config.yml`
+overlaid with the optional `dev_docs/tasks/.task-config.local.yml` — never from the
+committed file alone (see `commands/task-config.md` → "Resolving the handler"). If the
+resolved handler isn't the issue's tracker — including the missing-config case, which
+resolves to `repo-pr` rather than to "no handler" — say so and offer
+`/task-config jira` (or the right tracker) rather than editing the issue ad hoc over
+the MCP. A handler that doesn't match the tracker is the usual reason a Jira issue
+never gets claimed.
 
 ## How it works
 
