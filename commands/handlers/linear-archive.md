@@ -230,7 +230,30 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
 # Scope to a project (all terminal states are swept either way):
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
   --project <uuid> --apply
+
+# Archive named issues regardless of age (identifiers and/or UUIDs):
+python3 commands/handlers/assets/linear-archive.py --team PreThink \
+  --issues PRE-12,PRE-13 --apply
 ```
+
+### `--issues` — archive specific issues, no age threshold
+
+The age threshold guards the **bulk sweep**: without a cutoff there is no bounded
+candidate list, so a bare run could archive a whole workspace. That reasoning does
+not apply once the caller has **named** the issues, and the guard was blocking a
+real case — issues closed minutes ago are un-archivable until the cutoff passes,
+even when you want exactly those three gone now.
+
+`--issues <refs>` is that mode. Refs are issue identifiers (`PRE-12`,
+case-insensitive) or issue UUIDs, comma-separated and/or the flag repeated. It
+ignores `--older-than` and `--project` (both are sweep-scoping knobs), and it is
+still dry-run until `--apply`.
+
+What it does **not** relax is the terminal-state rule: a named issue that is not
+`completed`/`canceled`/`duplicate` is **reported and skipped**, never archived —
+archiving open work would hide it. Identifiers that don't resolve on the
+configured team are reported as not found (the lookup is team-scoped, so another
+team's `OTH-12` never matches this team's issue 12).
 
 `--team`/`--older-than` also read `$LINEAR_TEAM`/`$ARCHIVE_AFTER`, so a cron entry
 can set those plus `$LINEAR_API_KEY` (or `$OP_SERVICE_ACCOUNT_TOKEN` +
