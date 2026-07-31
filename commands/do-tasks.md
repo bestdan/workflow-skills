@@ -480,7 +480,7 @@ capability is actually visible — inside the remote session** — via two concr
   dispatch entirely and degrade `--all` to a single foreground claim (note
   `remote batch disabled — claiming one issue`, mirroring the jira degrade). Absent or
   `true` → attempt remote dispatch with the self-check above. This is the only
-  *deterministic* signal available, so it is the config knob rather than a runtime probe.
+  _deterministic_ signal available, so it is the config knob rather than a runtime probe.
 
 1. **Rank unclaimed candidates.** Run the handler's find-candidates phase (Linear:
    `linear-claim.md` "Find candidates") restricted to the `unstarted`/ready state,
