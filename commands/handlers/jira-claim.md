@@ -261,8 +261,10 @@ git switch - && git push origin --delete "task/<KEY>"   # release the claim lock
 
 Release the lock **first** (`claim-lock.md` → "Release the lock") so the issue never
 returns to `ready_status` while a stale `task/<KEY>` still blocks the next session's
-acquire. On the degraded election path there is no ref to delete — delete this session's
-token comment instead. Then, over the Atlassian MCP:
+acquire. On the degraded election path there is no ref to delete — **retract** this
+session's token comment instead by rewriting its body without the token
+(`addCommentToJiraIssue` with `commentId`); the Atlassian MCP has no delete-comment tool,
+so deletion is not available here. Then, over the Atlassian MCP:
 
 1. **Unassign** — `editJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: { "assignee": null }`).
 2. **Transition back** to `ready_status` (resolve its transition id via `getTransitionsForJiraIssue`, matching `to.name == <ready_status>`) so the issue returns to the lane it came from. If a `human-approval-requested` label is configured on the board, re-read the issue's current labels (`getJiraIssue`, `fields: ["labels"]`), append `human-approval-requested` to that list, and write the combined list back via `editJiraIssue` (`fields: { "labels": [<existing…>, "human-approval-requested"] }`) so a human knows to look — `editJiraIssue` **replaces** the whole label set, so omitting the existing labels would drop them. Otherwise the comment below carries that signal.

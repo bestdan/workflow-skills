@@ -96,16 +96,26 @@ than a branch. When the acquire call fails for an environment or permission reas
 API error>`. A silent degrade would claim atomicity the run does not have.
 
 The election is `linear-claim.md`'s, ported to the handler's own comment API
-(`addCommentToJiraIssue` / `gh issue comment`). Issue comments are append-only with
-monotonic ids on both trackers, so a lowest-id-wins ordering is deterministic:
+(`addCommentToJiraIssue` / `gh issue comment`). Comment ids are numeric and increase
+with creation time on both trackers, so a lowest-id-wins ordering is deterministic —
+**verified** on a live Jira instance: ids `324986` (13:02:13) < `324988` (13:02:31) <
+`325216` (next day), and editing a comment moves `updated` without changing its `id`.
 
 1. **Record `T_unclaimed`** — the wall-clock time of the last read that showed this
    issue unclaimed (the handler's re-read guard). Claim comments older than it are
    stale orphans from earlier attempts, not competitors.
 2. **Mint a unique session token** — `openssl rand -hex 16` (or
-   `printf '%s%s' "$(date +%s%N)" "$RANDOM"`), wrapped in an HTML comment so it is
-   invisible in rendered markdown: `<!-- do-tasks-claim:<rand> -->`. No email, hostname,
-   or pid — the election needs only uniqueness.
+   `printf '%s%s' "$(date +%s%N)" "$RANDOM"`), written as
+   `<!-- do-tasks-claim:<rand> -->`. No email, hostname, or pid — the election needs
+   only uniqueness.
+
+   > **The token is invisible on gh-issue, visible on Jira.** GitHub renders the HTML
+   > comment away; Jira does **not** — the Atlassian MCP converts the body to ADF and
+   > stores the marker as a literal text paragraph (verified: `{"type":"text","text":"<!--
+   > do-tasks-claim:… -->"}`), so it shows verbatim on the issue. Accept that on the
+   > degraded path rather than dropping the token — it is the ordering key — but do not
+   > tell the user it is hidden.
+
 3. **Post the claim comment first** — it is the lock:
 
    ```
@@ -113,9 +123,9 @@ monotonic ids on both trackers, so a lowest-id-wins ordering is deterministic:
    <!-- do-tasks-claim:<rand> -->
    ```
 
-   Capture the comment id; the losing branch and the bail path both delete **this
-   session's** comment by id. **Then** write the human-visible markers (assign
-   yourself + transition/label).
+   Capture the comment id — the losing branch and the bail path both need it to retract
+   **this** session's comment (see step 6). **Then** write the human-visible markers
+   (assign yourself + transition/label).
 4. **Sleep a jittered ~2–3 s** so the comment and the issue write propagate and racer
    symmetry is broken.
 5. **Re-list the comments and elect** — among comments carrying the
@@ -126,9 +136,23 @@ monotonic ids on both trackers, so a lowest-id-wins ordering is deterministic:
    earliest `createdAt`). Both filters are load-bearing: without (a) a stale orphan
    from a dead session is elected and the issue deadlocks with no owner; without (b) a
    session that crashed between the comment and the issue write wins forever.
-6. **If your comment wins** → you hold the claim; proceed. **If it does not** → delete
-   your own claim comment, leave the assignee/status **untouched** (they are the
+6. **If your comment wins** → you hold the claim; proceed. **If it does not** → retract
+   your own claim comment (below), leave the assignee/status **untouched** (they are the
    winner's), and advance to the next candidate.
+
+   **Retract, per tracker — jira cannot delete.** The Atlassian MCP exposes no
+   delete-comment tool (`addCommentToJiraIssue`, `addWorklogToJiraIssue`, … — there is
+   no `deleteJiraComment`), so a jira loser **cannot** remove its comment. Instead
+   **rewrite the body without the token**, which is what makes it inert for every future
+   election: `addCommentToJiraIssue` with `commentId: <your id>` updates in place
+   (verified — same id, `updated` advances). Use a body that says the claim was retracted
+   and no work started. On gh-issue, delete it outright:
+   `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
+
+   Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
+   than the winner's, so it can never win its own race. What it protects is the _next_
+   session, whose `T_unclaimed` may fall before a leftover token — the tokenless
+   rewrite means there is nothing left to elect.
 7. **Read-lag residual.** If the re-list returns **only** your own marker, treat it as
    inconclusive and re-poll once or twice before declaring a win — no server-side CAS
    backs this path, which is why it is the fallback and not the default.
@@ -144,5 +168,6 @@ git push origin --delete "task/<KEY>"   # only if this session acquired the ref 
 
 Delete the remote ref **before** clearing the issue's assignee/status, so the issue
 never sits unclaimed while a stale lock ref still blocks the next session's acquire. On
-the fallback path there is no ref to delete — delete this session's token comment
-instead. Never delete a `task/<KEY>` ref this session did not acquire.
+the fallback path there is no ref to delete — **retract** this session's token comment
+instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
+on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.

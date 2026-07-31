@@ -202,7 +202,7 @@ gh issue comment <n> --body "Bailed by /do-tasks: <what was tried, what tripped 
 Release the lock **first** (`claim-lock.md` → "Release the lock") so the issue never
 returns to the ready lane while a stale `task/<n>` still blocks the next session's
 acquire. On the degraded election path there is no ref to delete — delete this session's
-token comment instead.
+token comment instead (`gh api --method DELETE repos/<repo>/issues/comments/<id>`).
 
 Stop — do not auto-pick another candidate after a bail; a human should look before more work is auto-claimed.
 
