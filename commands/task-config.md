@@ -14,7 +14,7 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 ## Handler capability matrix
 
-Handler feature parity is jagged — only `repo-pr` runs the full loop. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
+Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
 | Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
 | ----------------------------------- | --------- | ---------- | ------ | -------- |
@@ -26,7 +26,7 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
 | reoptimize (`/reoptimize-tasks`)    | no        | report     | no     | yes      |
 
-`repo-pr` is the only full-loop handler. `jira` and `gh-issue` add list, promote, and single `do` (but not batch process); `linear` adds list, promote, single `do`, **and** batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`linear` is the most complete handler — it now supports **every** verb in the table, including batch process and reoptimize. `repo-pr` supports all but `reoptimize` (its tasks are local plan files — reoptimize those directly). `jira` and `gh-issue` add list, promote, and single `do` but **not** batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 **Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 

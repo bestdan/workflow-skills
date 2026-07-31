@@ -382,7 +382,17 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    project in this run — treat it like an in-flight result: in ranked mode skip to the
    next candidate (whose project may have slack), on a direct pick stop. (The global
    ceiling, when set, is checked once up front and declines the whole run before the
-   loop.)
+   loop.) **Also verify dependency-readiness here** — the shared "Find candidates"
+   gates do **not** check native blockers, so this is where single mode enforces it,
+   using the **same rule as the Tracker-batch subroutine (step 3)**: read `get_issue`
+   with `includeRelations: true` on the candidate and confirm every `blockedBy` issue
+   is in a `completed`-type state (`Done`) or no longer exists — a `canceled` blocker
+   does **not** satisfy it (matching `linear-reoptimize.md` Dimension 1). If any blocker
+   is unresolved the candidate is **not** dependency-ready: in ranked mode skip it
+   (`waiting on <identifier>`, move to the next candidate); on a direct `<identifier>`
+   pick **stop** and report the unresolved blocker rather than claiming an issue whose
+   dependencies aren't met. This keeps bare `/do-tasks` and `/do-tasks --all` from ever
+   disagreeing on whether an issue is ready.
 3. **Claim** — `linear-claim.md` "Claim the issue": the **token-comment lock** —
    read-before-write guard, then post a token-bearing claim comment **first** (the
    lock), then set the `started`-type state + `auto-claimed` label (creating it if
@@ -449,15 +459,28 @@ differ by handler. It runs **only** for
 `--claim-only` keeps its batch-claim behavior; `--local` caps the batch at 1 and runs
 the single highest-ranked issue foreground via "Claim and execute" above).
 
-**Pre-flight: confirm the remote session will carry the tracker connector.** Batch
+**Connector availability: fail safe at the remote end, not by a pre-check.** Batch
 dispatch hands each issue's claim, comment, and state transitions to a remote cloud
-session, which can only run them if it has the handler's MCP connector — unlike the
-repo-pr remote fan-out, which needs only `git`/`gh`. For Linear a remote session **may**
-inherit the Linear connector but does **not** always. If it will not, do **not** dispatch:
-fall back to the single foreground path ("Claim and execute" above) and note
-`remote Linear MCP unavailable — claiming one issue` (mirroring how the jira path degrades
-batch to a single claim). Only proceed to the ranked dispatch below when the remote session
-is confirmed to carry the connector.
+session, which can only run them if that session has the handler's MCP connector —
+unlike the repo-pr remote fan-out, which needs only `git`/`gh`. A remote session **may**
+inherit the Linear connector but does **not** always, and the launching session has **no
+deterministic way to introspect what `claude --remote` will inherit** — the tools loaded
+here say nothing about the VM's environment. So do **not** gate dispatch on an
+un-actionable "confirm the VM has MCP" pre-check. Instead, put the check **where the
+capability is actually visible — inside the remote session** — via two concrete rules:
+
+- **Make the remote prompt's first step a self-check.** The inlined prompt (step 4) must
+  begin: "If the Linear MCP connector is not available in this session, do **not** claim —
+  stop immediately and report `remote Linear MCP unavailable`." A misconfigured remote then
+  degrades **loudly** (a visible bail on that issue) rather than silently doing nothing or
+  half-claiming. Because the claim is the session's first mutation, a bail here leaves no
+  partial state.
+- **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
+  connector can set `linear.remote_batch: false` in `.task-config.yml` to skip remote
+  dispatch entirely and degrade `--all` to a single foreground claim (note
+  `remote batch disabled — claiming one issue`, mirroring the jira degrade). Absent or
+  `true` → attempt remote dispatch with the self-check above. This is the only
+  *deterministic* signal available, so it is the config knob rather than a runtime probe.
 
 1. **Rank unclaimed candidates.** Run the handler's find-candidates phase (Linear:
    `linear-claim.md` "Find candidates") restricted to the `unstarted`/ready state,
@@ -466,32 +489,49 @@ is confirmed to carry the connector.
    handler's ranking (Linear: `priority`, then `updatedAt` ascending — oldest first).
    Rank on the metadata the list query already returns — do **not** fetch each issue's
    relations yet.
-2. **Bound by WIP slack.** Resolve `wip_limit` and count current in-flight work
-   **exactly as the Pre-claim WIP gate above defines it** (started-type issues,
-   scoped by team and `default_project`). Compute `slack = wip_limit - current_wip`.
-   If `slack <= 0`, dispatch nothing and report
-   `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
-3. **Select dependency-ready candidates lazily, in ranked order.** Walk the ranked
-   list and check dependency-readiness **on demand**, one candidate at a time:
-   **dependency-ready** for a tracker means every native blocking relationship is
-   resolved — for Linear, read `get_issue` with `includeRelations: true` and confirm
-   each `blockedBy` issue is in a `completed`- or `canceled`-type state, or no longer
-   exists. Keep ready issues; skip the rest, recording each as `waiting on
-   <identifier>`. **Stop** as soon as you have `min(N, slack)` ready issues (for
-   `--all`, `N` is unbounded, so the bound is just `slack`) or you exhaust the list.
-   Checking lazily in ranked order this way avoids up to ~50 `get_issue` calls per run.
-   Record any ranked candidate left unexamined past the bound as
-   `held (WIP limit reached)` or `held (-n N ceiling)`.
+2. **Bound by WIP slack (per-project + optional global ceiling).** WIP is **not** a
+   single team-wide scalar for Linear — resolve the chosen scope(s) and their caps
+   exactly as **"Resolve claim scope"** and the **"Pre-claim WIP gate (per-project +
+   optional global ceiling)"** above define them: each configured project (plus the
+   Unassigned bucket) carries its own `wip_limit` (per-project override else the
+   top-level `wip_limit`, default `3`; the bucket uses `unassigned_wip_limit`), and the
+   optional `linear.global_wip_limit` caps the **total** in-flight across all of them.
+   For each chosen scope, count `started`-type issues (per the gate) and set that
+   scope's `slack = wip_limit − in_flight`; also track the remaining **global** slack.
+   If every chosen scope has `slack ≤ 0` (or the global ceiling is already reached),
+   dispatch nothing and report `WIP limit reached (<per-scope counts> in flight) —
+   nothing dispatched`.
+3. **Select dependency-ready candidates lazily, in ranked order, respecting each
+   scope's slack.** Walk the ranked list and check dependency-readiness **on demand**,
+   one candidate at a time: **dependency-ready** for a tracker means every native
+   blocking relationship is resolved — for Linear, read `get_issue` with
+   `includeRelations: true` and confirm each `blockedBy` issue is in a
+   `completed`-type state (`Done`) or no longer exists. A **`canceled`** blocker does
+   **not** satisfy the dependency (it blocks until a human removes the link — matching
+   `linear-reoptimize.md` Dimension 1, where a canceled `blockedBy` blocks forever and
+   only `Done` satisfies). Keep ready issues; skip the rest, recording each as
+   `waiting on <identifier>`. As you accept a ready issue, **decrement its scope's
+   slack and the global slack**, and **skip** a ready issue whose own scope is already
+   full even if the global ceiling still has room. **Stop** once every chosen scope is
+   full, the global ceiling is reached, you have `N` issues (for `-n N`), or you
+   exhaust the list. Checking lazily in ranked order this way avoids up to ~50
+   `get_issue` calls per run. Record any ranked candidate left unexamined past the
+   bound as `held (WIP limit reached)` or `held (-n N ceiling)`.
 4. **Dispatch one remote session per selected issue.** Each issue gets its **own**
    cloud VM running the handler's single-issue claim+execute flow against **that one
    issue's identifier** — never instruct a session to claim more than one. For
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — the VM has no plugin installed — so inline the issue
-   identifier and the claim+execute instructions, mirroring the inline-prompt pattern
-   in `repo-pr-execute.md` §4. Run the dispatch commands in sequence so the user sees
-   each session id.
+   **self-contained** — the VM has no plugin installed **and** a fresh clone has no
+   local task config (`/task-config` gitignores `dev_docs/tasks/` by default) — so
+   inline the issue identifier, the claim+execute instructions, **and** the
+   already-resolved **non-secret** Linear config the single-issue flow needs (the
+   resolved `team`, `base_branch`, the issue's project scope, and its applicable
+   `wip_limit`/`max_estimate`), mirroring the inline-prompt pattern in
+   `repo-pr-execute.md` §4. **Never** inline secrets — `api_key_ref` or any raw key
+   stays in the remote host's own environment, never in the prompt. Run the dispatch
+   commands in sequence so the user sees each session id.
 5. **The atomic claim is the only race guard.** Parallel sessions are safe **without**
    any branch- or file-based lock because each session's first mutating step is the
    handler's read-then-write claim (Linear: the token-comment election in
