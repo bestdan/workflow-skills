@@ -1,7 +1,7 @@
 ---
 description: Retire completed/canceled work items — a handler-dispatched archive/prune of terminal-state tasks past an age threshold
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(mkdir *), Bash(op *), Bash(curl *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
-argument-hint: "[--older-than <N>d] [dry-run]"
+argument-hint: "[--older-than <N>d] [--issues <refs>] [dry-run]"
 ---
 
 # Archive Tasks
@@ -46,12 +46,26 @@ parse.
 - **`--older-than <N>d`** — the age threshold. Only terminal items whose
   completion timestamp is more than `N` days ago are candidates. Accept `14d` or
   a bare `14` (both mean 14 days). This **overrides** the config default.
+- **`--issues <refs>`** — archive **these specific items**, whatever their age.
+  A comma-separated list of tracker identifiers (`PRE-12`). This is the
+  **named-issue mode**: it replaces the age threshold rather than narrowing it,
+  so the no-threshold refusal below does **not** apply, and `--older-than` is
+  ignored if also passed. Everything else still holds — terminal state is still
+  required (a named item that is not `done`/`completed`/`canceled` is reported
+  and skipped, never archived), and `dry-run` still works.
+  **`linear` handler only** for now; on `repo-pr`/`gh-issue`/`jira`, stop and
+  say the handler has no named-issue mode rather than falling back to a sweep.
 - **`dry-run`** — list the candidates and stop. Change nothing. (A run with no
-  resolvable threshold is dry-run-only regardless — see below.)
+  resolvable threshold **and** no `--issues` is dry-run-only regardless — see
+  below.)
 
 ### Resolving the threshold (and the no-threshold safety default)
 
-Resolve the effective threshold in this order:
+**Skip this whole section when `--issues <refs>` was passed** — it resolves the
+**sweep's** bound, and a named-issue run is already bounded by the list the user
+typed. Go straight to the handler with those refs.
+
+Otherwise resolve the effective threshold in this order:
 
 1. **`--older-than <N>d`** from `$ARGUMENTS`, if present.
 2. else the **`archive_after`** key (days) from `dev_docs/tasks/.task-config.yml`
@@ -62,9 +76,11 @@ Resolve the effective threshold in this order:
    `dev_docs/tasks/.task-config.yml`, then re-run." This guards against a
    surprise bulk archive when someone runs the bare command.
 
-So the only way to mutate is an explicit `--older-than` **or** a configured
-`archive_after`, **and** the absence of `dry-run`. Always **print the candidate
-list first**; in dry-run, stop there.
+So a **sweep** mutates only with an explicit `--older-than` **or** a configured
+`archive_after`, **and** the absence of `dry-run`. The other way to mutate is
+`--issues <refs>`, where the typed list is the bound the threshold would
+otherwise supply. Always **print the candidate list first**; in dry-run, stop
+there.
 
 ## 1. Resolve the handler
 
@@ -95,7 +111,8 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/<handler>-archive.md`) and Read the result. Pass the
-resolved threshold and the `dry-run` flag through.
+resolved threshold — **or the `--issues` refs** — and the `dry-run` flag
+through.
 
 ## 2. Report
 

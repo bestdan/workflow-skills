@@ -77,13 +77,22 @@ ARCHIVE = "mutation($id: String!) { issueArchive(id: $id, trash: false) { succes
 # so the cutoff is not the gate; terminal state still is (checked client-side
 # against the returned state.type). Two shapes because the identifier form
 # (PRE-12) filters on the team-scoped issue `number`, while a pasted UUID filters
-# on `id` and needs no team binding. Same declared-vars-must-be-used rule as
-# QUERY: each shape declares only the variables it references.
-NODE_FIELDS = "id identifier title completedAt canceledAt state { type }"
+# on `id` — a global key, so its query cannot bind the team and the match is
+# checked client-side against the returned `team` instead. Same
+# declared-vars-must-be-used rule as QUERY: each shape declares only the
+# variables it references.
+NODE_FIELDS = (
+    "id identifier title completedAt canceledAt state { type } team { id name }"
+)
+
+# One page, no cursor loop: collect_named rejects a ref list longer than this, so
+# a named lookup can never overflow it. Substituted into both queries rather than
+# written twice, so the guard and the queries can't drift apart.
+PAGE = 250
 
 LOOKUP_BY_NUMBER = """
 query($team: String!, $numbers: [Float!]) {
-  issues(first: 250, filter: {
+  issues(first: %d, filter: {
     team: { %s: { eq: $team } }
     number: { in: $numbers }
   }) {
@@ -93,7 +102,7 @@ query($team: String!, $numbers: [Float!]) {
 
 LOOKUP_BY_ID = """
 query($ids: [ID!]) {
-  issues(first: 250, filter: { id: { in: $ids } }) {
+  issues(first: %d, filter: { id: { in: $ids } }) {
     nodes { %s }
   }
 }"""
@@ -193,6 +202,11 @@ def parse_issue_refs(raw):
     Accepts repeated flags and comma/whitespace-separated lists of either
     identifiers (`PRE-12`, case-insensitive) or issue UUIDs. Anything else is a
     typo — reject it rather than silently dropping it from the archive set.
+
+    Both forms are case-normalized to the case Linear returns (identifiers
+    upper, UUIDs lower) so find_by_ref can match refs against returned nodes by
+    plain set membership — an un-normalized ref matches nothing and gets
+    reported "not found" even as the issue it names is archived.
     """
     identifiers, uuids, bad = [], [], []
     for chunk in raw:
@@ -200,7 +214,7 @@ def parse_issue_refs(raw):
             if not ref:
                 continue
             if UUID_RE.match(ref):
-                uuids.append(ref)
+                uuids.append(ref.lower())
             elif IDENTIFIER_RE.match(ref):
                 identifiers.append(ref.upper())
             else:
@@ -217,15 +231,19 @@ def parse_issue_refs(raw):
 def find_by_ref(key, team, identifiers, uuids):
     """Look up explicitly named issues. Returns (nodes, missing_refs).
 
-    The `number` filter is team-scoped, so an identifier from another team's
-    prefix matches nothing — it comes back in `missing` rather than archiving
-    the same-numbered issue on the configured team, which is why the returned
-    identifiers are re-checked against what was asked for.
+    Every ref is confined to `--team`, by two different mechanisms. The `number`
+    filter is team-scoped server-side, so another team's `OTH-12` matches
+    nothing. An issue `id` is a global key whose query cannot bind the team, so
+    that half is checked client-side against the returned `team` instead —
+    without it, a pasted UUID would archive an issue on a team the caller never
+    named. Either way an out-of-team ref lands in `missing` rather than being
+    archived, which is also why returned identifiers are re-checked against what
+    was asked for.
     """
     nodes, seen = [], set()
     if identifiers:
         team_field = "id" if UUID_RE.match(team) else "name"
-        query = LOOKUP_BY_NUMBER % (team_field, NODE_FIELDS)
+        query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
         numbers = sorted({int(IDENTIFIER_RE.match(i).group(2)) for i in identifiers})
         wanted = set(identifiers)
         for node in gql(key, query, {"team": team, "numbers": numbers})["issues"][
@@ -235,17 +253,18 @@ def find_by_ref(key, team, identifiers, uuids):
                 seen.add(node["id"])
                 nodes.append(node)
     if uuids:
-        query = LOOKUP_BY_ID % NODE_FIELDS
+        team_field = "id" if UUID_RE.match(team) else "name"
+        query = LOOKUP_BY_ID % (PAGE, NODE_FIELDS)
         for node in gql(key, query, {"ids": sorted(set(uuids))})["issues"]["nodes"]:
-            if node["id"] not in seen:
-                seen.add(node["id"])
-                nodes.append(node)
+            if node["team"][team_field] != team or node["id"] in seen:
+                continue
+            seen.add(node["id"])
+            nodes.append(node)
 
-    found = {n["identifier"].upper() for n in nodes} | {n["id"] for n in nodes}
-    missing = [
-        r for r in identifiers + uuids if r.upper() not in found and r not in found
-    ]
-    return nodes, missing
+    # Both sides are already in Linear's case (parse_issue_refs normalizes the
+    # refs), so plain membership is enough.
+    found = {n["identifier"].upper() for n in nodes} | {n["id"].lower() for n in nodes}
+    return nodes, [r for r in identifiers + uuids if r not in found]
 
 
 def collect_aged(key, args):
@@ -271,9 +290,23 @@ def collect_named(key, args):
     not: archiving an issue that is still open hides live work, so a non-terminal
     ref is reported and skipped rather than archived.
     """
-    if args.project:
-        print("Note: --project is ignored when --issues names specific issues.")
+    for flag in (
+        "--project" if args.project else "",
+        "--older-than" if args.older_than else "",
+    ):
+        if flag:
+            print(f"Note: {flag} is ignored when --issues names specific issues.")
     identifiers, uuids = parse_issue_refs(args.issues)
+
+    # Both lookups ask for one page. Rejecting an oversized list beats paging it:
+    # the overflow would otherwise come back as "not found" and quietly go
+    # unarchived, which reads identical to a clean run.
+    if len(identifiers) + len(uuids) > PAGE:
+        sys.exit(
+            f"--issues takes at most {PAGE} refs at once "
+            f"(got {len(identifiers) + len(uuids)}); split the list, or use "
+            "--older-than for a bulk sweep."
+        )
     nodes, missing = find_by_ref(key, args.team, identifiers, uuids)
 
     candidates, open_refs = [], []

@@ -162,6 +162,42 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
    > accumulated invisibly. There is no flag to narrow this — archiving completed
    > work while deliberately retaining canceled work is not a thing anyone wants.
 
+### Named issues instead of a sweep (`--issues <refs>`)
+
+When `/archive-tasks` passed `--issues <refs>`, **skip steps 3–5 entirely** —
+there is no cutoff and no per-project loop, because the refs _are_ the candidate
+set. Replace the find with a direct lookup, then rejoin the flow at **Archive**
+below (the mutation, the report, and dry-run all behave identically):
+
+```graphql
+query($team: String!, $numbers: [Float!]) {
+  issues(first: 250, filter: {
+    team: { name: { eq: $team } },   # UUID-configured team? use id: { eq: $team }
+    number: { in: $numbers }         # the numeric halves of PRE-12, PRE-13, …
+  }) {
+    nodes { id identifier title completedAt canceledAt state { type } team { id name } }
+  }
+}
+```
+
+Three rules make this safe, and none of them are optional:
+
+- **Terminal state is still required.** The age gate is gone; this one is not.
+  Check `state.type` **client-side** against `completed`/`canceled`/`duplicate`
+  and **report-and-skip** anything else. Never archive an issue that is still
+  open just because someone named it.
+- **Stay inside the configured team.** The `number` filter is team-scoped
+  server-side, so another team's `OTH-12` simply matches nothing. If a ref is a
+  raw issue **UUID** instead, filter on `id: { in: $ids }` — but an `id` is a
+  **global** key that cannot bind the team, so compare the returned
+  `team.id`/`team.name` yourself and drop mismatches.
+- **Report what didn't resolve.** Any ref with no matching node is listed as not
+  found. Silence would read as "archived", which is the one wrong impression to
+  leave about a destructive op.
+
+The shipped script implements exactly this as `--issues` (see below); prefer it
+over hand-rolling the queries.
+
 > **In-session alternative (no key for the query).** If you are already in an
 > agent session with the Linear MCP, you _can_ do the read half over the MCP:
 > resolve `completed`/`canceled`/`duplicate` state ids with `<linear-mcp>__list_workflow_states`,
@@ -246,14 +282,21 @@ even when you want exactly those three gone now.
 
 `--issues <refs>` is that mode. Refs are issue identifiers (`PRE-12`,
 case-insensitive) or issue UUIDs, comma-separated and/or the flag repeated. It
-ignores `--older-than` and `--project` (both are sweep-scoping knobs), and it is
-still dry-run until `--apply`.
+ignores `--older-than` and `--project` (both are sweep-scoping knobs) and says so
+on stdout rather than silently, and it is still dry-run until `--apply`. Refs are
+capped at **250 per run** — the lookup fetches one page, so an overflowing list
+would come back as "not found" and go unarchived, which reads exactly like a
+clean run; it is rejected outright instead. Split the list, or use `--older-than`
+if you are archiving that many.
 
 What it does **not** relax is the terminal-state rule: a named issue that is not
 `completed`/`canceled`/`duplicate` is **reported and skipped**, never archived —
-archiving open work would hide it. Identifiers that don't resolve on the
-configured team are reported as not found (the lookup is team-scoped, so another
-team's `OTH-12` never matches this team's issue 12).
+archiving open work would hide it. Nor does it relax the **team** scope: an
+identifier is confined server-side by the team-scoped `number` filter, and a raw
+UUID — a global key whose query cannot bind the team — is checked against the
+returned `team` client-side. Either way a ref outside `--team` is reported as not
+found rather than archived, so another team's `OTH-12` never matches this team's
+issue 12.
 
 `--team`/`--older-than` also read `$LINEAR_TEAM`/`$ARCHIVE_AFTER`, so a cron entry
 can set those plus `$LINEAR_API_KEY` (or `$OP_SERVICE_ACCOUNT_TOKEN` +
