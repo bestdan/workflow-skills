@@ -170,3 +170,47 @@ _prg_make_repo() {
   assert_failure 2
   assert_output --partial 'sandbox-exec required'
 }
+
+# ensure-bats.sh resolves its root from its own location, so these run a copy
+# planted in a fixture tree rather than the real repo — where the submodules are
+# already present and every case would take the no-op path.
+plant_ensure_bats() {
+  mkdir -p "$TEST_TMPDIR/root/scripts"
+  cp "$REPO_ROOT/scripts/ensure-bats.sh" "$TEST_TMPDIR/root/scripts/"
+}
+
+@test "ensure-bats leaves an initialized checkout alone" {
+  plant_ensure_bats
+  mkdir -p "$TEST_TMPDIR/root/test/vendor/bats-core/bin"
+  touch "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
+  chmod +x "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
+  # Any git call here would be a wasted network round-trip on every check run.
+  make_stub git 'echo "unexpected git call" >&2; exit 1'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$TEST_TMPDIR/root/scripts/ensure-bats.sh"
+  assert_success
+  refute_output --partial 'unexpected git call'
+}
+
+@test "ensure-bats initializes missing submodules" {
+  plant_ensure_bats
+  make_stub git 'mkdir -p test/vendor/bats-core/bin
+touch test/vendor/bats-core/bin/bats
+chmod +x test/vendor/bats-core/bin/bats'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$TEST_TMPDIR/root/scripts/ensure-bats.sh"
+  assert_success
+  assert_output --partial 'initializing'
+  assert_file_exists "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
+}
+
+@test "ensure-bats falls back to the manual command when init cannot run" {
+  # The clone needs network, so a sandboxed or offline run must still say what
+  # to do by hand instead of failing bare.
+  plant_ensure_bats
+  make_stub git 'echo "fatal: could not resolve host" >&2; exit 128'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$TEST_TMPDIR/root/scripts/ensure-bats.sh"
+  assert_failure 2
+  assert_output --partial 'git submodule update --init --recursive'
+}
