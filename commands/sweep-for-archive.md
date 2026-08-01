@@ -28,9 +28,13 @@ did not own.
 ## Arguments
 
 - **`--since <window>`** — the close-out window: `24h` / `2d` shorthand, an ISO
-  datetime, or a Linear duration (`-P2D`). **Defaults to `24h`.** This is the
-  bound on legs 1 and 3; leg 2 is unbounded by design (a PR that merged last week
-  against an issue still sitting `In Review` is exactly what the sweep is for).
+  datetime, or a Linear duration (`-P2D`). **Defaults to `24h`.** It bounds
+  **leg 1's scan only.** Leg 2 is unbounded by design (a PR that merged last week
+  against an issue still sitting `In Review` is exactly what the sweep is for),
+  and leg 3 archives whatever the two legs verified — so **leg 3's set is not
+  window-bounded**. An issue leg 2 completes from an old merge is archived by a
+  `--since 24h` run, and that is correct: it earned its place by merge
+  verification, not by falling in the window.
 - **`--apply`** — actually mutate: complete the sweep's verified matches and
   archive the verified closures. Without it every leg runs read-only and the
   command prints what it _would_ do (dry-run is the default posture, inherited
@@ -39,8 +43,8 @@ did not own.
   configured `linear.projects`. Omit to cover all of them.
 - **`--restore-false-closures`** — pre-answer the step 5 prompt with _yes_.
   Restoring is **off by default**; without this flag an interactive run asks, and
-  an unattended one (`/loop`, `/schedule`, `--apply` with no TTY) declines. See
-  step 5 for why the default is off.
+  an unattended one (`/schedule`, or `--apply` with no TTY) declines. See step 5
+  for why the default is off.
 
 ## 1. Resolve the handler
 
@@ -74,7 +78,8 @@ Follow **`commands/handlers/linear-false-closures.md`** ("Invoked from
 Run it **without `--apply` even when this command was given `--apply`** — this
 leg's mutation is a _restore_, which step 5 gates separately.
 
-Split its output into two sets and hold both:
+Split its output into two sets and hold both, **tagging each row with the project
+whose invocation produced it** — step 5's restore needs that partition:
 
 - **`verified`** — every `ok <IDENTIFIER> <- <PR URL>` line. A merged PR owns
   each of these; they are leg 3's candidate list.
@@ -82,11 +87,16 @@ Split its output into two sets and hold both:
   permanently** and never reach leg 3, whatever step 5 decides. A false closure
   is unfinished work wearing a Done label; archiving it would bury it.
 
-If leg 1 fails outright (no `op` session, a GraphQL error, a non-zero exit that
-is not the "found false closures" exit `1`), **stop the whole command** and say
-so. `verified` is a _positive_ proof list — a leg that could not run produces an
-empty one, not a safe one, and continuing would archive nothing while reporting
-a clean sweep.
+**Classify each invocation on its stdout, never on its exit code.** A run that
+reached the end prints either `no false closures.` or the
+`FALSE CLOSURES (N) — …` header. Neither of those, or a `linear-false-closures:`
+/ `GraphQL error:` line on stderr, means the leg **failed** — **stop the whole
+command** and say so. The exit code cannot make this call: the asset returns `1`
+for "found false closures" in dry run, but its `die()` path is
+`sys.exit("<message>")`, which also exits `1`, so a dead `op` session and a
+successful detection are the same number. `verified` is a _positive_ proof list —
+a leg that could not run produces an empty one, not a safe one, and continuing
+would archive nothing while reporting a clean sweep.
 
 ## 3. Leg 2 — complete what merged
 
@@ -125,9 +135,11 @@ Three properties of that path matter here and none are optional:
 
 - **`--issues` is the right mode, not a shortcut past a safety rail.** The
   `archive_after` threshold exists to bound a _sweep_ that would otherwise have
-  no candidate list. Here `--since` already bounded it and leg 1 proved every
-  member, so the threshold is redundant — this run deliberately archives work
-  closed minutes ago, which is the case the threshold was blocking.
+  no candidate list. Here every member was individually proved — by leg 1's
+  ownership check, or by leg 2's own merge verification — so the list is bounded
+  by evidence rather than by age, and the threshold is redundant. This run
+  deliberately archives work closed minutes ago, which is the case the threshold
+  was blocking.
 - **Terminal state is still checked**, client-side, by the asset. It cannot be
   reached from here.
 - **The 250-ref cap applies.** A window wide enough to exceed it is a window that
@@ -143,12 +155,18 @@ Otherwise, print the flagged rows, then **ask** — one question, default _no_:
 > N false closure(s) found. Restore them to Todo?
 
 - **`--restore-false-closures` was passed** → skip the ask, treat as _yes_.
-- **No TTY / unattended run** (`/loop`, `/schedule`, `/auto-pilot`) → **decline
-  silently and report it.** Never block a scheduled close-out on an unanswered
-  prompt, and never restore without an answer.
+- **No TTY / unattended run** (`/schedule`, or `--apply` with no TTY) →
+  **decline silently and report it.** Never block a scheduled close-out on an
+  unanswered prompt, and never restore without an answer. A `/loop` run in an
+  open session is _not_ this case — it can ask.
 - **Yes** → re-run leg 1's asset with `--apply --only <the flagged ids>` (that
   flag exists precisely so an apply matches a specific approval rather than
-  reopening whatever a later scan turns up).
+  reopening whatever a later scan turns up). **Partition the approved ids by
+  their source project from step 2 and re-run that project's own invocation**
+  (same `--project`, `--repo`, `--since`) with only its share. The asset
+  validates `--only` against the false closures **that invocation** detected and
+  dies on any id it didn't — so one combined list across a multi-project run
+  aborts the whole restore.
 - **No** (the default) → change nothing; the rows stay in the report.
 
 **Why off by default.** A restore is a _demotion_: it drags an issue the team
@@ -187,13 +205,16 @@ The close-out is a daily-cadence job. Both wrappers work and neither needs new
 infrastructure:
 
 - **`/schedule`** — a cloud routine running
-  `/sweep-for-archive --since 24h --apply` daily. Unattended, so step 5 declines
+  `/sweep-for-archive --since 36h --apply` daily. Unattended, so step 5 declines
   on its own and false closures accumulate in the report rather than being
   silently reopened.
-- **`/loop`** — `/loop 1d /sweep-for-archive --since 24h --apply` in a session
+- **`/loop`** — `/loop 1d /sweep-for-archive --since 36h --apply` in a session
   you keep open, where step 5 can actually ask you.
 
-Keep `--since` and the cadence in agreement: a daily run with `--since 24h`
-covers everything exactly once, and a wider window is only redundant, never
-harmful (leg 1 excludes archived issues, so yesterday's already-archived
-closures never come back).
+**Overlap the window deliberately — don't match it to the cadence.** A daily run
+with `--since 24h` only covers everything once if every run fires exactly on
+time; one late or skipped run leaves a permanent hole, and nothing ever revisits
+it. `36h` on a daily cadence costs nothing: a wider window is redundant, never
+harmful, because leg 1 excludes archived issues, so yesterday's already-archived
+closures never come back. Widen it freely — the only ceiling is leg 3's 250-ref
+cap.
