@@ -56,11 +56,11 @@ scan that is exit-0 by design, like `suggest`, still cannot suppress the
 dispatcher's `2`).
 
 This file lands the skeleton: CLI dispatch, tree discovery, the fenced-block
-parser and record model, question-section discovery, and the reporting shape.
-Field *semantics* (required/enum/referential rules, ledger derivation, the
-status report) land in the later tasks of the research-spike plan; the verbs
-they own dispatch to an explicit not-implemented-yet error here rather than a
-silent success.
+parser and record model, question-section discovery, the reporting shape, and
+`init` — the one verb that legitimately creates files. Field *semantics*
+(required/enum/referential rules, ledger derivation, the status report) land in
+the later tasks of the research-spike plan; the verbs they own dispatch to an
+explicit not-implemented-yet error here rather than a silent success.
 """
 
 from __future__ import annotations
@@ -109,6 +109,19 @@ NONE_KEY = "none"
 # examples parse correctly: a 4-backtick fence is closed only by 4 or more.
 FENCE_RE = re.compile(r"^[ \t]*(?P<ticks>`{3,})(?P<info>.*)$")
 
+# An HTML comment, scanned by CommonMark's HTML-block-type-2 rule: a line whose
+# content begins with `<!--` opens the block, and the first line containing
+# `-->` (which may be that same line) closes it. Blank lines do not end it.
+#
+# Content inside a comment is inert — not a record, not a heading. That is what
+# lets `init` scaffold a *worked example* of the record grammar into a fresh
+# `questions.md` instead of merely describing it: an example that parsed would
+# make `init` emit a tree that fails its own gate. The ledger markers below are
+# themselves single-line comments, so they open and close on their own line and
+# leave the ledger bullets between them ordinary, visible markdown.
+COMMENT_OPEN = "<!--"
+COMMENT_CLOSE = "-->"
+
 # The `### Q<n>.` heading convention `init` installs. A section ends at the
 # next heading of the same level or shallower (a `####` sub-heading stays
 # inside the section).
@@ -122,6 +135,21 @@ HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})[ \t]+")
 # value's own leading key (`none: <reason>`) — never as a mere prefix, so
 # `owes: nonetheless the receipt` stays ordinary prose.
 NONE_SENTINEL_RE = re.compile(r"^none[ \t]*(?::(?P<reason>.*))?$")
+
+# The shape every declared id has, and — the same rule, deliberately — every
+# project and track name. Names become the `project/track/` qualification
+# prefix, so anything carrying `/`, whitespace or `..` corrupts qualification,
+# uniqueness reporting and the cross-project destination check, all of which
+# parse on that prefix. Enforcing it on ids is a later task's; `init` enforces
+# it on names.
+KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+KEBAB_DESCRIPTION = "lowercase letters, digits and single hyphens (a-z0-9, kebab-case)"
+
+# The stored ledgers live between these markers. `init` installs them; only
+# `write-ledger` rewrites what sits between them, and `validate` reports — never
+# repairs — a stored block that disagrees with the derived one.
+LEDGER_BEGIN = "<!-- research-spike:ledger -->"
+LEDGER_END = "<!-- /research-spike:ledger -->"
 
 
 # --------------------------------------------------------------------------
@@ -325,19 +353,65 @@ class Fence:
         return first if first in RECORD_KINDS else None
 
 
-def scan_fences(lines: list[str]) -> tuple[list[Fence], Fence | None]:
-    """Split `lines` into top-level fenced blocks.
+@dataclass
+class Comment:
+    """One HTML-comment region: everything inside it is inert."""
 
-    Returns (fences, unterminated). Nesting is handled by run length, per
-    CommonMark: a fence closes only on a line of at least as many backticks
-    with no info string, so a ````-fenced markdown example containing a
-    ```obligation block yields one fence (the outer one), not two.
+    open_index: int  # 0-based index of the line carrying `<!--`
+    end_index: int  # 0-based index of the last line of the region, inclusive
+    closed: bool
+
+
+@dataclass
+class Blocks:
+    """The non-prose regions of one markdown file."""
+
+    fences: list[Fence] = field(default_factory=list)
+    unterminated_fence: Fence | None = None
+    comments: list[Comment] = field(default_factory=list)
+
+    def inert_lines(self) -> set[int]:
+        """Every 0-based line index that is not ordinary prose — fence bodies
+        and delimiters, and whole comment regions. A `### Q1.` written in
+        either is a sample, not a heading."""
+        inside: set[int] = set()
+        for f in self.fences:
+            start, end = f.body
+            inside.add(f.open_index)
+            inside.update(range(start, end))
+            if f.closed:
+                inside.add(end)
+        for c in self.comments:
+            inside.update(range(c.open_index, c.end_index + 1))
+        return inside
+
+
+def scan_blocks(lines: list[str]) -> Blocks:
+    """Split `lines` into top-level fenced blocks and comment regions.
+
+    Nesting inside a fence is handled by run length, per CommonMark: a fence
+    closes only on a line of at least as many backticks with no info string, so
+    a ````-fenced markdown example containing a ```obligation block yields one
+    fence (the outer one), not two.
+
+    Comments and fences cannot nest in either direction — whichever opens first
+    owns the lines until it closes. A fence inside a comment is therefore never
+    reported as a record, which is what makes `init`'s worked example inert.
     """
-    fences: list[Fence] = []
-    unterminated: Fence | None = None
+    blocks = Blocks()
+    fences = blocks.fences
     i = 0
     n = len(lines)
     while i < n:
+        if lines[i].lstrip().startswith(COMMENT_OPEN):
+            j = i
+            while j < n and COMMENT_CLOSE not in lines[j]:
+                j += 1
+            closed = j < n
+            end = j if closed else n - 1
+            blocks.comments.append(Comment(open_index=i, end_index=end, closed=closed))
+            i = end + 1
+            continue
         m = FENCE_RE.match(lines[i])
         if not m:
             i += 1
@@ -370,25 +444,12 @@ def scan_fences(lines: list[str]) -> tuple[list[Fence], Fence | None]:
             j += 1
         if close is None:
             unterminated = Fence(open_index=i, info=info, body=(i + 1, n), closed=False)
+            blocks.unterminated_fence = unterminated
             fences.append(unterminated)
             break
         fences.append(Fence(open_index=i, info=info, body=(i + 1, close), closed=True))
         i = close + 1
-    return fences, unterminated
-
-
-def fenced_line_indices(lines: list[str]) -> set[int]:
-    """Every 0-based line index inside a fence, delimiters included — so a
-    `### Q1.` written inside a code sample is not mistaken for a heading."""
-    inside: set[int] = set()
-    fences, _ = scan_fences(lines)
-    for f in fences:
-        start, end = f.body
-        inside.add(f.open_index)
-        inside.update(range(start, end))
-        if f.closed:
-            inside.add(end)
-    return inside
+    return blocks
 
 
 # --------------------------------------------------------------------------
@@ -457,7 +518,8 @@ def parse_records(
 ) -> list[Record]:
     """Every recognized record block in one markdown file."""
     lines = text.splitlines()
-    fences, unterminated = scan_fences(lines)
+    blocks = scan_blocks(lines)
+    unterminated = blocks.unterminated_fence
     if unterminated is not None:
         label = f"```{unterminated.info}" if unterminated.info else "```"
         report.error(
@@ -466,8 +528,20 @@ def parse_records(
             f"unterminated fenced block opened here ({label}) — every record "
             "after it would be silently swallowed",
         )
+    for c in blocks.comments:
+        if not c.closed:
+            # Same failure as an unterminated fence, by a different door: an
+            # HTML comment that never closes runs to end of file and makes
+            # every record after it inert. Silent record loss is the accrual
+            # this instrument exists to prevent, so it is reported, not absorbed.
+            report.error(
+                rel,
+                c.open_index + 1,
+                "unterminated HTML comment opened here (<!--) — every record "
+                "after it would be silently swallowed",
+            )
     records: list[Record] = []
-    for f in fences:
+    for f in blocks.fences:
         kind = f.kind
         if kind is None or not f.closed:
             continue
@@ -513,10 +587,10 @@ def question_sections(text: str) -> list[QuestionSection]:
 
     A section starts at a `### Q<n>.` heading and ends at the next heading of
     the same level or shallower, or at end of file. Headings inside fenced
-    blocks are not headings.
+    blocks or HTML comments are not headings.
     """
     lines = text.splitlines()
-    inside = fenced_line_indices(lines)
+    inside = scan_blocks(lines).inert_lines()
     starts: list[tuple[int, int, str]] = []  # (index, number, title)
     boundaries: list[int] = []  # indices of headings at level <= 3
     for i, line in enumerate(lines):
@@ -635,6 +709,412 @@ def discover(root: Path, report: Report) -> Tree:
                 f"live under {research_dir.name}/<project>/",
             )
     return tree
+
+
+# --------------------------------------------------------------------------
+# Ledger rendering
+# --------------------------------------------------------------------------
+
+
+def read_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def write_lines(path: Path, lines: list[str]) -> None:
+    """Write a generated markdown file: UTF-8, LF, one trailing newline.
+
+    `newline=""` stops the platform translating `\\n` to `\\r\\n` on Windows —
+    a generated file whose line endings depend on who ran `init` would be
+    rewritten by the next person's formatter and fail the freshness check for
+    reasons nobody could see in a diff.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(lines).rstrip("\n") + "\n"
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        fh.write(body)
+
+
+@dataclass(frozen=True)
+class Counts:
+    """One ledger's four numbers, plus the obligation subtotals.
+
+    Derivation from the records is a later task's; what lives here is the
+    *rendering*, because `init` must scaffold a tree that is ledger-**fresh**
+    rather than merely marker-bearing. A fresh track whose stored block did not
+    already match its derivation would be born stale, and a stale stored ledger
+    is an error — `init` would emit a tree failing its own gate. Rendering
+    therefore has exactly one implementation, used by `init` now and by
+    `write-ledger` later; only the counting is added.
+    """
+
+    answered: int = 0
+    open_questions: int = 0
+    retired: int = 0
+    discharged: int = 0
+    open_obligations: int = 0
+    blocking: int = 0
+    stubs: int = 0
+    external: int = 0
+
+
+def render_counts(counts: Counts) -> list[str]:
+    """The two stored ledger lines.
+
+    A bullet list, not an aligned table, and deliberately: the reference
+    implementation paid for this. A generated block the repo's formatter
+    rewrites puts the freshness check and the formatter in a fight neither can
+    win, and `dprint` reflows table columns while leaving bullets alone.
+    """
+    stubs = f"{counts.stubs} stub" + ("" if counts.stubs == 1 else "s")
+    return [
+        f"- **Questions:** {counts.answered} answered, "
+        f"{counts.open_questions} open, {counts.retired} retired",
+        f"- **Obligations:** {counts.discharged} discharged, "
+        f"{counts.open_obligations} open "
+        f"({counts.blocking} blocking, {stubs}, {counts.external} external)",
+    ]
+
+
+def render_project_ledger(tracks: list[tuple[str, Counts]], total: Counts) -> list[str]:
+    """The `LEDGER.md` roll-up body: decisions, the same lines per track, totals.
+
+    Totals never print without the per-track breakdown — big projects are
+    exactly where one sick track hides inside healthy totals.
+    """
+    lines = ["## Decisions", "", "_None yet._", "", "## Tracks", ""]
+    if not tracks:
+        lines += ["_No tracks yet._", ""]
+    for name, counts in tracks:
+        lines += [f"### {name}", "", *render_counts(counts), ""]
+    lines += ["## Total", "", *render_counts(total)]
+    return lines
+
+
+def find_ledger_block(lines: list[str]) -> tuple[int, int] | None:
+    """(begin, end) 0-based indices of the ledger marker lines, or None."""
+    begin = end = None
+    for i, line in enumerate(lines):
+        if line.strip() == LEDGER_BEGIN and begin is None:
+            begin = i
+        elif line.strip() == LEDGER_END and begin is not None:
+            end = i
+            break
+    if begin is None or end is None:
+        return None
+    return begin, end
+
+
+def replace_ledger_block(path: Path, body: list[str], rel: str) -> None:
+    """Rewrite what sits between a file's ledger markers, leaving the rest of
+    the file — including the markers themselves — untouched."""
+    lines = read_lines(path)
+    span = find_ledger_block(lines)
+    if span is None:
+        raise UsageError(
+            f"{rel} carries no ledger markers ({LEDGER_BEGIN} … {LEDGER_END}) — "
+            "they are installed by `init` and are never inserted silently"
+        )
+    begin, end = span
+    write_lines(path, lines[: begin + 1] + ["", *body, ""] + lines[end:])
+
+
+# --------------------------------------------------------------------------
+# Scaffolding (`init`)
+# --------------------------------------------------------------------------
+
+
+def require_name(kind: str, name: str) -> None:
+    """Reject a malformed project or track name — before any filesystem op.
+
+    Grammar consistency, not security hardening: the name becomes the
+    `project/track/` id-qualification prefix, so a `/`, whitespace or `..`
+    corrupts qualification, uniqueness reporting and the cross-project
+    destination check, all of which parse on that prefix. It also stops
+    `init ../../outside` scaffolding outside the tree.
+    """
+    if not KEBAB_RE.match(name):
+        raise UsageError(
+            f"{kind} name {name!r} is not a valid id shape — use "
+            f"{KEBAB_DESCRIPTION}. The name becomes this record set's "
+            "id-qualification prefix, so a path separator or space would "
+            "corrupt every qualified id derived from it."
+        )
+
+
+def project_md(project: str) -> list[str]:
+    return [
+        f"# {project} — research spike",
+        "",
+        "A research spike: for a while, this project's job is answering the",
+        "questions that gate building the thing, on evidence, in the open.",
+        "",
+        "## What is being built",
+        "",
+        "_One paragraph. The thing this spike exists to de-risk._",
+        "",
+        "## Why the spike exists",
+        "",
+        "_What cannot be built until these questions are answered, and what",
+        "building it blind would cost._",
+        "",
+        "## How this project is laid out",
+        "",
+        "- `decisions.md` — the decisions this spike exists to unblock."
+        " **Organizer-owned.**",
+        "- `LEDGER.md` — the generated roll-up. **Never hand-edited.**",
+        "- `tracks/<name>/questions.md` — one track's questions, answers, and its"
+        " own stored ledger.",
+        "- `tracks/<name>/obligations/` — stub and receipt cards: where deferred"
+        " work gets an address.",
+        "- `tracks/<name>/contracts/` — optional. Every file in it must declare"
+        " its obligations, or declare `none:` with a reason.",
+        "",
+        "Answering a question in a spike mostly creates **obligations**, not",
+        "new questions — and obligations deferred into prose accrue invisibly.",
+        "So a deferral must name a `destination:` that **already exists**, and",
+        "every question section must say what it owes, or say `none:` and why.",
+        "",
+        "## Tracks",
+        "",
+        "A track is an agent-sized context bundle: working one needs `tracks/<name>/`",
+        "plus this project's `decisions.md`, and nothing else. Add one with",
+        f"`research-spike.py init {project} --track <name>`.",
+    ]
+
+
+def decisions_md(project: str) -> list[str]:
+    return [
+        f"# {project} — decisions",
+        "",
+        "**Organizer-owned.** Decisions are filed here, carrying only the human",
+        "lifecycle state (`state: pending | decided`) — readiness is derived by",
+        "`status` from the questions and obligations that block them, never",
+        "stored, so a stale status cannot disagree with the truth. A track that",
+        "discovers it needs a decision files a `state: proposed` block in its own",
+        "`questions.md` instead; promoting one into this file is an organizer act.",
+    ]
+
+
+def ledger_md(project: str, tracks: list[str]) -> list[str]:
+    return [
+        f"# {project} — ledger",
+        "",
+        "Generated by `research-spike.py write-ledger`. **Do not hand-edit the",
+        "block below** — edit the records it counts, then regenerate. `validate`",
+        "reports this file stale as a warning so track work is never failed by a",
+        "file it must not touch; `validate --strict`, the organizer's gate, fails",
+        "on it.",
+        "",
+        "The signal to read here is the **divergence**: questions converging while",
+        "obligations climb is the state that feels like futility. These are",
+        "snapshots — the trend is read across commits, not reported here.",
+        "",
+        LEDGER_BEGIN,
+        "",
+        *render_project_ledger([(t, Counts()) for t in tracks], Counts()),
+        "",
+        LEDGER_END,
+    ]
+
+
+def questions_md(project: str, track: str) -> list[str]:
+    return [
+        f"# {project} / {track} — questions",
+        "",
+        LEDGER_BEGIN,
+        "",
+        *render_counts(Counts()),
+        "",
+        LEDGER_END,
+        "",
+        "The block above is generated by `research-spike.py write-ledger` and",
+        "stored, not computed on demand: a number you have to remember to run is",
+        "invisible, which is the failure this whole instrument exists to fix. Add",
+        "a record, then regenerate — `validate` fails this track if the stored",
+        "numbers have gone stale.",
+        "",
+        "Each question below is a `### Q<n>.` section carrying one `question`",
+        "block. Every section must also declare what answering it **owes**: an",
+        "`obligation` block per deferral, or a bare `none:` block giving the",
+        "reason it owes nothing. Forgetting is not one of the options; only",
+        "deliberate silence is, and a reviewer can see that.",
+        "",
+        "A `destination:` must be a path that **already exists**. Naming a file",
+        "that does not exist yet is how deferred work goes dark — write the stub",
+        "card first (`obligations/`), then point at it.",
+        "",
+        "<!--",
+        "Worked example. Inert: it lives inside this HTML comment, so `validate`",
+        "sees neither the heading nor the blocks. Copy it out, drop the comment",
+        "markers from your copy, and fill it in.",
+        "",
+        "### Q1. Does the account need an isolated uid domain?",
+        "",
+        "```question",
+        "id: uid-domain-isolation",
+        "status: open",
+        "blocks: account-provisioning",
+        "```",
+        "",
+        "The evidence goes here, in prose: what was measured, where, and what it",
+        "showed. The conclusion goes in the block, as `answer:`, before `status:`",
+        "may become `answered`.",
+        "",
+        "```obligation",
+        "id: uid-domain-provisioning",
+        "owes: the provisioning steps this answer implies",
+        f"destination: dev_docs/research/{project}/tracks/{track}/obligations/uid-domain.md",
+        "status: open",
+        "```",
+        "",
+        "A section that owes nothing says so, with a reason:",
+        "",
+        "```obligation",
+        "none: option (A) adds no observation and owes no tooling",
+        "```",
+        "-->",
+        "",
+        "## Questions",
+    ]
+
+
+def scaffold_project(project_dir: Path, project: str) -> list[Path]:
+    write_lines(project_dir / "PROJECT.md", project_md(project))
+    write_lines(project_dir / "decisions.md", decisions_md(project))
+    write_lines(project_dir / "LEDGER.md", ledger_md(project, []))
+    return [
+        project_dir,
+        project_dir / "PROJECT.md",
+        project_dir / "decisions.md",
+        project_dir / "LEDGER.md",
+    ]
+
+
+def scaffold_track(track_dir: Path, project: str, track: str) -> list[Path]:
+    write_lines(track_dir / QUESTIONS_FILENAME, questions_md(project, track))
+    # An empty directory does not survive git, and `obligations/` must exist
+    # before the first stub card can be written into it — the destination that
+    # already exists is the whole invariant.
+    write_lines(track_dir / "obligations" / ".gitkeep", [])
+    # Deliberately no `contracts/`: it is optional, and an eagerly created one
+    # would be an empty directory subject to the contracts coverage rule.
+    return [
+        track_dir,
+        track_dir / QUESTIONS_FILENAME,
+        track_dir / "obligations" / ".gitkeep",
+    ]
+
+
+def track_names(project_dir: Path) -> list[str]:
+    tracks_dir = project_dir / TRACKS_DIRNAME
+    if not tracks_dir.is_dir():
+        return []
+    return sorted(t.name for t in tracks_dir.iterdir() if t.is_dir())
+
+
+def index_track(project_dir: Path, track: str, rel: str) -> None:
+    """Add the new track to `PROJECT.md`'s tracks index.
+
+    An index nobody updates is the dead structure this design criticises
+    elsewhere, so `init` keeps it current. It appends within the `## Tracks`
+    section and nowhere else; if a human has removed that heading, `init` says
+    so and leaves the file alone rather than guessing where the list went.
+    """
+    path = project_dir / "PROJECT.md"
+    lines = read_lines(path)
+    entry = f"- [{track}](tracks/{track}/{QUESTIONS_FILENAME})"
+    if entry in lines:
+        return
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.strip() == "## Tracks"),
+        None,
+    )
+    if start is None:
+        print(
+            f"  note: {rel}/PROJECT.md has no '## Tracks' heading — "
+            f"add '{entry}' to its index by hand"
+        )
+        return
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith("## ") or lines[i].startswith("# ")
+        ),
+        len(lines),
+    )
+    body = lines[start:end]
+    while body and not body[-1].strip():
+        body.pop()
+    write_lines(path, lines[:start] + body + ["", entry, ""] + lines[end:])
+
+
+def verb_init(args: argparse.Namespace, root: Path) -> int:
+    """Scaffold a project, and/or add a track to one.
+
+    Scaffolding is the one place this script legitimately creates files.
+    Everywhere else, creating a file so that a record resolves is exactly the
+    theatre the instrument exists to prevent.
+    """
+    project: str = args.project
+    track: str | None = args.track
+    # Both names are checked before anything touches the filesystem, so a
+    # rejected `init` never leaves a half-made tree behind.
+    require_name("project", project)
+    if track is not None:
+        require_name("track", track)
+
+    research_dir = root.joinpath(*RESEARCH_SUBPATH)
+    project_dir = research_dir / project
+    rel = project_dir.relative_to(root).as_posix()
+    track_dir = project_dir / TRACKS_DIRNAME / track if track else None
+
+    if track is None and project_dir.exists():
+        raise UsageError(
+            f"project already exists: {rel} — `init` never overwrites one. "
+            f"To add a track to it, run: init {project} --track <name>"
+        )
+    if track_dir is not None and track_dir.exists():
+        raise UsageError(
+            f"track already exists: {track_dir.relative_to(root).as_posix()} — "
+            "`init` never overwrites one"
+        )
+
+    created: list[Path] = []
+    scaffolded_project = not project_dir.exists()
+    if scaffolded_project:
+        created += scaffold_project(project_dir, project)
+    if track is not None and track_dir is not None:
+        created += scaffold_track(track_dir, project, track)
+        index_track(project_dir, track, rel)
+        # The roll-up must list the new track, or the tree `init` just made
+        # would be born ledger-stale — which is an error, so `init` would be
+        # emitting a tree that fails its own gate.
+        replace_ledger_block(
+            project_dir / "LEDGER.md",
+            render_project_ledger(
+                [(t, Counts()) for t in track_names(project_dir)], Counts()
+            ),
+            f"{rel}/LEDGER.md",
+        )
+
+    if scaffolded_project:
+        print(f"{PROG}: initialized {rel}")
+    else:
+        print(f"{PROG}: added track '{track}' to {rel}")
+    for path in created:
+        suffix = "/" if path.is_dir() else ""
+        print(f"  {path.relative_to(root).as_posix()}{suffix}")
+    if track_dir is None:
+        print(f"  next: add a track — init {project} --track <name>")
+    else:
+        questions = track_dir.relative_to(root).as_posix()
+        print(
+            f"  next: file your first question in {questions}/{QUESTIONS_FILENAME} — "
+            "every section declares what answering it owes, or declares "
+            "`none:` and why"
+        )
+    return EXIT_OK
 
 
 # --------------------------------------------------------------------------
@@ -759,9 +1239,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = subparsers.add_parser(
         "init", help="Scaffold a research project directory."
     )
-    p_init.add_argument("project", nargs="?", help="Project name to scaffold.")
-    p_init.add_argument("--track", help="Add a track to an existing project.")
-    p_init.set_defaults(run=unimplemented("init", "task 2"))
+    p_init.add_argument("project", help="Project name to scaffold.")
+    p_init.add_argument(
+        "--track",
+        metavar="NAME",
+        help=(
+            "Also add this track. Valid on the initial init and repeatedly "
+            "afterwards — it is how a project grows."
+        ),
+    )
+    p_init.set_defaults(run=verb_init)
 
     # Whole-tree scanning only. `validate [<project>] [--track <t>]
     # [--strict]` is task 7's, and accepting those options here while

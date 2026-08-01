@@ -478,6 +478,241 @@ for opt in --track=account --strict --project=alpha; do
   assert_contains "validate says why it rejected '$opt'" "$out_i4" "unrecognized arguments"
 done
 
+# --- Fixture (k): init scaffolds a project ------------------------------
+DIR_K="$BASE/init"
+mkdir -p "$DIR_K"
+out_k="$(python3 "$SCRIPT" --root "$DIR_K" init foo 2>&1)"
+exit_k=$?
+assert_exit "init foo exits 0" "$exit_k" 0
+K_PROJECT="$DIR_K/dev_docs/research/foo"
+for path in PROJECT.md decisions.md LEDGER.md; do
+  if [ -f "$K_PROJECT/$path" ]; then
+    ok "init foo creates $path"
+  else
+    bad "init foo did not create $path"
+  fi
+done
+assert_contains "init names what it created" "$out_k" "dev_docs/research/foo/PROJECT.md"
+assert_contains "the scaffolded LEDGER.md carries the ledger markers" \
+  "$(cat "$K_PROJECT/LEDGER.md")" "<!-- research-spike:ledger -->"
+assert_contains "the scaffolded LEDGER.md carries zeroed roll-up lines" \
+  "$(cat "$K_PROJECT/LEDGER.md")" "- **Questions:** 0 answered, 0 open, 0 retired"
+assert_contains "decisions.md says it is organizer-owned" \
+  "$(cat "$K_PROJECT/decisions.md")" "Organizer-owned"
+assert_contains "decisions.md points track agents at 'proposed' in their own file" \
+  "$(cat "$K_PROJECT/decisions.md")" "state: proposed"
+
+# Bare init never overwrites; --track is how a project grows.
+out_k2="$(python3 "$SCRIPT" --root "$DIR_K" init foo 2>&1)"
+exit_k2=$?
+assert_exit "a second bare 'init foo' exits 2" "$exit_k2" 2
+assert_contains "the refusal names the existing path" "$out_k2" \
+  "project already exists: dev_docs/research/foo"
+assert_contains "the refusal points at the way to grow the project" "$out_k2" \
+  "init foo --track"
+
+python3 "$SCRIPT" --root "$DIR_K" init foo --track bar >/dev/null 2>&1
+exit_k3=$?
+assert_exit "init --track on an existing project succeeds" "$exit_k3" 0
+K_BAR="$K_PROJECT/tracks/bar"
+if [ -f "$K_BAR/questions.md" ]; then
+  ok "init --track creates the track's questions.md"
+else
+  bad "init --track did not create questions.md"
+fi
+assert_contains "the track's questions.md carries the ledger markers" \
+  "$(cat "$K_BAR/questions.md")" "<!-- research-spike:ledger -->"
+assert_contains "the track's questions.md carries zeroed ledger lines" \
+  "$(cat "$K_BAR/questions.md")" \
+  "- **Obligations:** 0 discharged, 0 open (0 blocking, 0 stubs, 0 external)"
+if [ -f "$K_BAR/obligations/.gitkeep" ]; then
+  ok "init --track creates obligations/.gitkeep (an empty dir does not survive git)"
+else
+  bad "init --track did not create obligations/.gitkeep"
+fi
+# contracts/ is optional, and an eagerly created one would be an empty directory
+# subject to the contracts coverage rule (task 4).
+if [ -d "$K_BAR/contracts" ]; then
+  bad "init --track must not create contracts/"
+else
+  ok "init --track does not create contracts/"
+fi
+assert_contains "the new track is added to PROJECT.md's index" \
+  "$(cat "$K_PROJECT/PROJECT.md")" "- [bar](tracks/bar/questions.md)"
+assert_contains "the roll-up gains a per-track section for the new track" \
+  "$(cat "$K_PROJECT/LEDGER.md")" "### bar"
+
+# A second track lands beside the first; a repeat of an existing one is refused.
+bar_before="$(cat "$K_BAR/questions.md")"
+python3 "$SCRIPT" --root "$DIR_K" init foo --track baz >/dev/null 2>&1
+exit_k4=$?
+assert_exit "a second --track on the same project succeeds" "$exit_k4" 0
+if [ "$(cat "$K_BAR/questions.md")" = "$bar_before" ]; then
+  ok "adding a second track leaves the first untouched"
+else
+  bad "adding a second track rewrote the first track's questions.md"
+fi
+assert_contains "the roll-up lists both tracks" "$(cat "$K_PROJECT/LEDGER.md")" "### baz"
+
+out_k5="$(python3 "$SCRIPT" --root "$DIR_K" init foo --track bar 2>&1)"
+exit_k5=$?
+assert_exit "repeating an existing --track exits 2" "$exit_k5" 2
+assert_contains "the track refusal names the existing path" "$out_k5" \
+  "track already exists: dev_docs/research/foo/tracks/bar"
+
+# --- Fixture (k2): a malformed name is rejected before any mkdir ---------
+# The name becomes the `project/track/` id-qualification prefix, so a path
+# separator or `..` would corrupt every qualified id derived from it — and
+# `init ../outside` would scaffold outside the tree entirely.
+DIR_K2="$BASE/init-names"
+mkdir -p "$DIR_K2"
+for name in ../outside /abs/path 'foo/bar' 'Foo' 'foo bar' '..'; do
+  out_k6="$(python3 "$SCRIPT" --root "$DIR_K2" init "$name" 2>&1)"
+  exit_k6=$?
+  assert_exit "init '$name' exits 2" "$exit_k6" 2
+  assert_contains "init '$name' says why" "$out_k6" "is not a valid id shape"
+done
+for name in '..' 'a/b' 'Bad'; do
+  out_k7="$(python3 "$SCRIPT" --root "$DIR_K2" init good --track "$name" 2>&1)"
+  exit_k7=$?
+  assert_exit "init good --track '$name' exits 2" "$exit_k7" 2
+  assert_contains "init good --track '$name' says why" "$out_k7" "is not a valid id shape"
+done
+# Nothing above may have touched the filesystem — names are checked first.
+if [ -e "$DIR_K2/dev_docs" ] || [ -e "$BASE/outside" ] || [ -e "$DIR_K2/../outside" ]; then
+  bad "a rejected init created something on disk"
+else
+  ok "a rejected init creates no directory anywhere"
+fi
+# The bare form still needs a project name at all.
+out_k8="$(python3 "$SCRIPT" --root "$DIR_K2" init 2>&1)"
+exit_k8=$?
+assert_exit "init with no project name exits 2" "$exit_k8" 2
+assert_contains "init with no project name says which argument is missing" "$out_k8" \
+  "the following arguments are required: project"
+
+# --- Fixture (k3): a freshly-initialized tree passes its own gate --------
+# An init that emits a tree failing `validate` is the worst possible first
+# impression. This assertion is wired now and must keep passing as tasks 3-5
+# land the rest of the rules.
+DIR_K3="$BASE/init-clean"
+mkdir -p "$DIR_K3"
+python3 "$SCRIPT" --root "$DIR_K3" init demo --track account >/dev/null 2>&1
+out_k9="$(python3 "$SCRIPT" --root "$DIR_K3" --verbose validate 2>&1)"
+exit_k9=$?
+assert_exit "a freshly-initialized tree passes validate" "$exit_k9" 0
+assert_contains "the fresh tree reports its project and track" "$out_k9" \
+  "demo — tracks: account"
+# The scaffolded `### Q<n>.` worked example lives inside an HTML comment, so it
+# installs the convention without registering as a question: a section there
+# would fail task 4's coverage rule and make init emit a tree failing its own
+# gate. Task 6's `status` asserts the same fact as a count.
+assert_contains "the scaffolded worked example registers no records" "$out_k9" "0 records"
+assert_not_contains "the scaffolded worked example registers no question section" \
+  "$out_k9" "section @"
+assert_contains "the worked example is present, not merely documented" \
+  "$(cat "$DIR_K3/dev_docs/research/demo/tracks/account/questions.md")" \
+  "### Q1. Does the account need an isolated uid domain?"
+
+# --- Fixture (k4): an HTML comment is inert, and never swallows silently -
+DIR_K4="$BASE/comments"
+write_file "$DIR_K4/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+<!--
+### Q9. A heading inside a comment is not a heading.
+
+```obligation
+desination: a typo inside an inert example
+```
+-->
+
+### Q1. A real one.
+
+```obligation
+id: real
+owes: the real thing
+status: open
+```'
+out_k10="$(python3 "$SCRIPT" --root "$DIR_K4" --verbose validate 2>&1)"
+exit_k10=$?
+assert_exit "a commented-out example leaves an otherwise-clean tree clean" "$exit_k10" 0
+assert_not_contains "a typo inside a comment is not a record" "$out_k10" "desination"
+assert_not_contains "a heading inside a comment is not a section" "$out_k10" "Q9"
+assert_contains "the record after the comment survives" "$out_k10" "id=alpha/account/real"
+assert_contains "the section after the comment is still found" "$out_k10" "Q1 'A real one.'"
+
+# An unterminated comment runs to end of file and makes every record after it
+# inert — the same silent-loss failure as an unterminated fence, by a different
+# door, so it is reported the same way.
+DIR_K5="$BASE/unterminated-comment"
+write_file "$DIR_K5/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+<!-- an example nobody closed
+
+```obligation
+id: swallowed
+owes: everything after this point
+status: open
+```'
+out_k11="$(python3 "$SCRIPT" --root "$DIR_K5" validate 2>&1)"
+exit_k11=$?
+assert_exit "an unterminated comment exits 1, not a silent 0" "$exit_k11" 1
+assert_contains "an unterminated comment is reported" "$out_k11" "unterminated HTML comment"
+assert_not_contains "an unterminated comment does not traceback" "$out_k11" "Traceback"
+
+# --- Fixture (k6): the generated tree survives dprint --------------------
+# A generated block the formatter rewrites puts the freshness check and the
+# formatter in a fight neither can win. Assert it against the repo's own
+# dprint.json rather than by eye. dprint's exit codes distinguish the two
+# outcomes that matter: 20 is "these files are not formatted", anything else
+# non-zero is the tool failing to run at all (12 = plugins unresolvable, e.g.
+# offline), which is a skip rather than a false pass.
+if command -v dprint >/dev/null 2>&1; then
+  # The glob must be **relative to the cwd** — dprint resolves an absolute
+  # pattern against its config directory, finds nothing, and exits 14. That
+  # form passed this fixture while checking zero files, so 14 is a failure
+  # here, not a skip: a vacuous formatter assertion is worse than none.
+  (cd "$DIR_K3" && dprint check --config "$ROOT/dprint.json" --incremental=false \
+    "dev_docs/**/*.md") >"$BASE/dprint.out" 2>&1
+  dprint_exit=$?
+  case "$dprint_exit" in
+    0) ok "dprint leaves the generated markdown untouched" ;;
+    20) bad "dprint rewrites the generated markdown: $(cat "$BASE/dprint.out")" ;;
+    14) bad "the dprint fixture matched no files — the assertion is vacuous" ;;
+    *)
+      # Anything else is dprint failing to run at all (12 = plugins
+      # unresolvable, e.g. a sandbox with no network), so the harness stays
+      # runnable on a bare machine. CI installs dprint from mise and resolves
+      # plugins, so this branch is not how the assertion passes there.
+      echo "  … skipped: dprint could not run (exit $dprint_exit): $(head -1 "$BASE/dprint.out")"
+      ;;
+  esac
+else
+  echo "  … skipped: dprint is not on PATH — install it via mise (see CONTRIBUTING.md)"
+fi
+
+# --- Fixture (k7): the fresh tree is ledger-fresh, not marker-bearing ----
+# `write-ledger` over a just-initialized tree must produce **no diff**: init
+# emits exactly what the derivation emits for an empty project, so a fresh
+# track is not born stale (task 7 makes a stale stored ledger an error). The
+# guard self-activates the moment task 7 lands the verb.
+DIR_K7="$BASE/ledger-fresh"
+mkdir -p "$DIR_K7"
+python3 "$SCRIPT" --root "$DIR_K7" init demo --track account >/dev/null 2>&1
+cp -r "$DIR_K7/dev_docs" "$BASE/ledger-fresh-before"
+out_k12="$(python3 "$SCRIPT" --root "$DIR_K7" write-ledger 2>&1)"
+exit_k12=$?
+if [ "$exit_k12" -eq 2 ] && [ "${out_k12#*not implemented}" != "$out_k12" ]; then
+  echo "  … deferred: write-ledger lands in task 7 — the no-diff round-trip is asserted there"
+else
+  assert_exit "write-ledger over a freshly-initialized tree exits 0" "$exit_k12" 0
+  if diff -r "$BASE/ledger-fresh-before" "$DIR_K7/dev_docs" >"$BASE/ledger.diff" 2>&1; then
+    ok "a freshly-initialized tree is ledger-fresh (write-ledger produces no diff)"
+  else
+    bad "init emits a stale ledger: $(cat "$BASE/ledger.diff")"
+  fi
+fi
+
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do
