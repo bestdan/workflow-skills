@@ -56,10 +56,20 @@ track's `questions.md` (section discovery landed in task 1):
 - `id` kebab-case, unique under `project/track/` qualification (reuse task 3's
   uniqueness machinery — one implementation, not two).
 - `status` ∈ `open | answered | retired`.
-- `blocks` — one or more decision ids (comma-separated), **or** `none: <reason>`.
-  A `blocks` value of `none` without a reason fails: a question that gates
-  nothing is worth noticing. Referential resolution of the named decisions
-  belongs to task 5; accept and record the ids here.
+- `blocks` — one or more decision ids (comma-separated), **or** the reserved
+  sentinel, whose canonical one-line form is `blocks: none: <reason>` (task 1's
+  sentinel rule: the reason is verbatim and is **not** comma-split). Bare
+  `blocks: none` with nothing after it fails — a question that gates nothing is
+  worth noticing. Referential resolution of the named decisions belongs to task
+  5; accept and record the ids here.
+
+  > **Do not unify this with the bare `none:` coverage block below.** They mean
+  > different things: `blocks: none: …` says the question **gates no decision**,
+  > while a bare `none: …` block says the question **owes no obligations**.
+  > Collapsing them makes a bare `none:` block inside a question section
+  > ambiguous between the two, and the coverage rule becomes undecidable. The
+  > bare coverage block is fenced as `` ```obligation ``, matching the design's
+  > example.
 - `retired` requires `retired_because:` — questions leave the board without
   pretending to be answered.
 - `answered` requires **both**:
@@ -102,7 +112,14 @@ track's `questions.md` (section discovery landed in task 1):
   - `status: answered` with an `answer:` but no coverage fails;
   - `status: answered` with both passes;
   - `status: retired` without `retired_because` fails;
-  - `blocks: none` without a reason fails; with a reason passes;
+  - bare `blocks: none` with nothing after it fails; `blocks: none: <reason>`
+    passes;
+  - `blocks: none: <reason>` whose **reason contains a comma** parses as one
+    reason and **zero** decision ids — the sentinel exempts it from the
+    comma-list rule (task 1), and without this the tail becomes a dangling
+    reference in task 5;
+  - a question section carrying **both** `blocks: none: …` and a bare `none:`
+    coverage block validates clean, with both meanings intact;
   - a `### Q3.` section with no `question` block fails;
   - a contracts file with neither an obligation nor a `none` fails; with either,
     passes;

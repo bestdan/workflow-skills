@@ -96,9 +96,17 @@ happens to be checked in.
     `decision`, `card` in any `*.md` under the tree.
   - One `key: value` per line. Unknown keys are an **error, not ignored** (a
     `desination:` typo must not silently drop the constraint).
+  - **The key/value split is on the _first_ colon only**; everything after it
+    is the value, verbatim.
   - **No inline comment syntax** — a `#` is part of the value and will fail the
     relevant enum check. Do not add comment stripping.
   - List values are comma-separated.
+  - **`none` is a reserved sentinel value.** When a value begins with `none`,
+    the field is a **declaration**: everything after the sentinel's own colon is
+    a free-text reason taken verbatim, and **the comma-list rule does not apply
+    to it**. Without this exemption, `blocks: none: it gates nothing, and
+    probably never will` splits on the comma into two "decision ids", and task
+    5 then reports `and probably never will` as a dangling reference.
   - A bare `none: <reason>` block is a valid record shape (used by the coverage
     rule in task 4); parse it here, enforce it there.
 - **Record model**: a dataclass per record type carrying its raw fields, source
