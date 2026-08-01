@@ -352,13 +352,16 @@ id: second
 owes: the second thing
 status: open
 ```'
-out_g2="$(python3 "$SCRIPT" --root "$DIR_G2" validate 2>&1)"
+out_g2="$(python3 "$SCRIPT" --root "$DIR_G2" --verbose validate 2>&1)"
 exit_g2=$?
 assert_exit "a code-span line does not swallow the records after it" "$exit_g2" 1
 assert_contains "the record a bogus fence would have swallowed is still checked" "$out_g2" \
   "unknown key 'desination'"
-# Same shape without the typo, so the run is clean and the count is visible
-# (the inventory dump is only reached when validation passes).
+# The inventory prints on a failing run too, so the swallowed record can be
+# seen surviving in the same output that reports the finding.
+assert_contains "the inventory prints on a failing run" "$out_g2" \
+  "id=alpha/account/second"
+# Same shape without the typo, so the clean-run record count is visible.
 DIR_G3="$BASE/code-span-clean"
 write_file "$DIR_G3/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
@@ -409,12 +412,14 @@ assert_not_contains "an undecodable file does not traceback" "$out_g4" "Tracebac
 # mode, reproducing the platform-default decoding this script would otherwise
 # get on Windows.
 #
-# Scoped to the *decode* side deliberately. The script's own output carries
-# `—`/`⚠`/`✘`, so under this same env it still fails when it prints — matching
-# scripts/validate.py, scripts/check.sh and this harness, which all print those
-# glyphs too. Fixing output encoding here alone would diverge from every
-# sibling for no gain, so it stays unaddressed; this fixture pins the read-side
-# guarantee without silently asserting the output-side one.
+# PYTHONIOENCODING=utf-8 overrides *stdio* encoding only and leaves read_text's
+# platform-default decoding as the variable under test. Without it this fixture
+# is vacuous twice over: the run dies printing the script's own `—`/`⚠` glyphs
+# before the assertion means anything, and the assertion itself can never trip,
+# because read_md catches UnicodeDecodeError and formats it as `cannot read:
+# {e}` — and str(UnicodeDecodeError) carries no class name. Proven by mutation:
+# with `encoding="utf-8"` removed from read_md, the old form still passed.
+# Assert on what actually moves — the exit code and the OK summary.
 DIR_G5="$BASE/utf8-prose"
 write_file "$DIR_G5/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
@@ -424,9 +429,11 @@ owes: the receipt — and its durability contract
 destination: dev_docs/tasks/x.md
 status: open
 ```'
-out_g5="$(LC_ALL=C LANG=C PYTHONUTF8=0 python3 "$SCRIPT" --root "$DIR_G5" validate 2>&1)"
-assert_not_contains "UTF-8 prose decodes under a platform-default (ASCII) codec" "$out_g5" \
-  "UnicodeDecodeError"
+out_g5="$(LC_ALL=C LANG=C PYTHONUTF8=0 PYTHONIOENCODING=utf-8 python3 "$SCRIPT" --root "$DIR_G5" validate 2>&1)"
+exit_g5=$?
+assert_exit "UTF-8 prose decodes under a platform-default (ASCII) codec" "$exit_g5" 0
+assert_contains "UTF-8 prose yields a clean scan" "$out_g5" "research-spike: OK"
+assert_not_contains "UTF-8 prose is never reported as unreadable" "$out_g5" "cannot read:"
 
 # --- Fixture (h): a record outside any project directory is an error -----
 DIR_H="$BASE/stray-record"

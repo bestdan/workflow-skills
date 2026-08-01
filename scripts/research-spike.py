@@ -691,6 +691,14 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     if not tree.present:
         # No research tree is clean, not an error: nothing to say, exit 0.
         return EXIT_OK
+    if args.verbose:
+        # Printed before the verdict, and whatever the verdict. The inventory
+        # is the only view of what the parser actually made of the tree, so
+        # suppressing it on a failing run withholds it exactly when it is most
+        # useful — while a finding at `path:line` is far easier to read against
+        # the record it came from. Findings stay last so they end the output.
+        for project in tree.projects:
+            print_inventory_for(tree, project)
     code = report.emit()
     if code != EXIT_OK:
         return code
@@ -703,8 +711,6 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
         tracks = ", ".join(t.name for t in project.tracks) or "none"
         count = sum(1 for r in tree.records if r.project == project.name)
         print(f"  {project.name} — tracks: {tracks} ({count} records)")
-        if args.verbose:
-            print_inventory_for(tree, project)
     return EXIT_OK
 
 
@@ -790,6 +796,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # This script's reports carry `—`, `⚠` and `✘`, and it is the one file here
+    # that runs on machines nobody in this repo controls — `scripts/validate.py`
+    # and `scripts/check.sh` print the same glyphs but only ever run in CI on a
+    # UTF-8 host. A consumer's stdout is not guaranteed UTF-8 (on Windows a
+    # *redirected* stdout, which is how a plugin invocation captures it, uses
+    # the ANSI codepage, and cp1252 has no `✘`), and the encode failure would
+    # land on the FAIL path — the one that matters.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
