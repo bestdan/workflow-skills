@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.67.1] - 2026-08-01
+
+### Fixes
+
+- auto-init bats submodules instead of failing the suite (#306) (d69fa76)
+
 ## [1.67.0] - 2026-07-31
 
 ### Features
