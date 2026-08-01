@@ -45,7 +45,9 @@ On the fast path, the script's own prelude resolves the team itself, so this
 3. **Build the graph.** Each `issues[]` entry already carries `description`
    and the derived `blockedBy`/`blocks`/`relatedTo`/`duplicateOf` edge lists
    (see the script's header for the exact `relations`/`inverseRelations`
-   derivation). Nodes carry `{id, title, project, priority, estimate, updatedAt,
+   derivation). Note `relatedTo` folds in Linear's **`similar`** relation
+   alongside `related` — they are indistinguishable downstream, so a proposal
+   to convert a weak link into a real `blocks` may be acting on either. Nodes carry `{id, title, project, priority, estimate, updatedAt,
    statusType (from state.type), description, labels, relations}` — `estimate`
    is selected so Dimension 3's "smaller estimate first (quick wins)" ordering
    matches the floor. Edges come from native `blockedBy`. Keep terminal nodes in the graph for

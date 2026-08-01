@@ -9,7 +9,14 @@
 # by whatever `linear.api_key_resolver` names (local config only; `op` by
 # default). This harness only ever BRIDGES config values onto the environment
 # of the script under test and asks the shared helper whether the result
-# resolves — it never resolves a secret itself.
+# resolves — it never resolves a secret itself, with one narrow exception: the
+# enum-drift guard below queries the API directly and resolves in-process.
+#
+# With an APPROVAL-BASED resolver (e.g. opx) that means THREE dialogs per run —
+# the probe, the script under test, and the enum guard — since each resolve is
+# separately approved and the session is invalidated between them. That is the
+# resolver working as designed, not a bug; use `LINEAR_API_KEY=… bash <this>` to
+# run it with a single pre-resolved key instead.
 # With no key it SKIPS and exits 0 — this keeps `check.sh` green for keyless
 # devs and keeps CI keyless *by construction*: a Linear personal API key is a
 # full-account bearer token that must never live in CI secrets (see
@@ -145,15 +152,31 @@ python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$HAPPY_OUT" 2>"$HAPPY_ERR"
 HAPPY_RC=$?
 
 # Enum-drift guard: introspect the IssueRelationType enum and confirm every value
-# is one derive_edges() actually handles ({blocks, related, duplicate}). Without
+# is one derive_edges() actually handles ({blocks, related, duplicate, similar}).
+# Without
 # this, a renamed/added enum value is silently dropped to empty edge lists and
 # slips past the list-shape checks below — the exact drift the header claims to
 # surface. Field-NAME drift already fails via the happy-path rc!=0 (GraphQL 400);
 # this closes the enum-VALUE gap.
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Authorization: $LINEAR_API_KEY" -H 'Content-Type: application/json' \
-  --data '{"query":"query{__type(name:\"IssueRelationType\"){enumValues{name}}}"}' \
-  >"$ENUM_OUT" 2>/dev/null || true
+# Resolved in-process via the shared helper rather than with `curl -H
+# "Authorization: $LINEAR_API_KEY"`: this harness BRIDGES a ref/resolver and
+# never holds the key itself (so the old form died under `set -u` once the
+# bridge landed), and a key passed as a curl argument is visible in `ps`.
+python3 - "$ENUM_OUT" <<'PY' 2>/dev/null || true
+import json, sys, urllib.request
+sys.path.insert(0, "commands/handlers/assets")
+from _secret_resolve import resolve_key
+
+req = urllib.request.Request(
+    "https://api.linear.app/graphql",
+    data=json.dumps(
+        {"query": 'query{__type(name:"IssueRelationType"){enumValues{name}}}'}
+    ).encode(),
+    headers={"Authorization": resolve_key("LINEAR_API_KEY"), "Content-Type": "application/json"},
+)
+with open(sys.argv[1], "wb") as fh:
+    fh.write(urllib.request.urlopen(req, timeout=15).read())
+PY
 
 # Bad-key path: a bogus key with the op:// ref/resolver unset so it can't fall
 # back and accidentally succeed. Exercises the fail-closed exit
@@ -226,7 +249,7 @@ if not issues and d is not None:
 # values; anything else it silently drops. Fail loud if the live schema carries a
 # value we don't handle (renamed/added enum), which is exactly the drift the
 # script header claims this test surfaces.
-KNOWN_TYPES = {"blocks", "related", "duplicate"}
+KNOWN_TYPES = {"blocks", "related", "duplicate", "similar"}
 try:
     enum_vals = {e["name"] for e in json.load(open(enum_out))["data"]["__type"]["enumValues"]}
 except Exception as e:

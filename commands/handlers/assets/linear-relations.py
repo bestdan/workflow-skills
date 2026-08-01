@@ -24,7 +24,11 @@ a real key.
 Derivation:
   blocks      = relations,        type == "blocks"   -> relatedIssue
   blockedBy   = inverseRelations, type == "blocks"    -> issue
-  relatedTo   = either connection, type == "related"  -> relatedIssue / issue
+  relatedTo   = either connection, type in ("related", "similar")
+                -> relatedIssue / issue. Linear's `similar` is a weaker
+                "these are connected" signal with no separate consumer, so it
+                folds in here rather than being dropped (deduped against
+                `related`, since an issue can carry both).
   duplicateOf = relations,         type == "duplicate" -> relatedIssue
                 (inverse duplicates are "duplicated by" THIS issue, not the
                 other way round — directional like blocks, so dropped here)
@@ -194,8 +198,13 @@ def derive_edges(issue):
         ref = _ref(target)
         if edge.get("type") == "blocks":
             blocks.append(ref)
-        elif edge.get("type") == "related":
-            related_to.append(ref)
+        # `similar` folds into related_to: it is a weaker "these are connected"
+        # signal with no separate consumer, and dropping it would silently lose
+        # edges from the graph (which is what happened until the enum-drift
+        # guard in test-linear-relations-live.sh started running again).
+        elif edge.get("type") in ("related", "similar"):
+            if ref not in related_to:
+                related_to.append(ref)
         elif edge.get("type") == "duplicate":
             duplicate_of.append(ref)
 
@@ -206,7 +215,7 @@ def derive_edges(issue):
         ref = _ref(target)
         if edge.get("type") == "blocks":
             blocked_by.append(ref)
-        elif edge.get("type") == "related":
+        elif edge.get("type") in ("related", "similar"):
             if ref not in related_to:
                 related_to.append(ref)
         # An inverse `duplicate` means the OTHER issue is a duplicate of THIS
