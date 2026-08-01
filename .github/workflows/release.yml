@@ -38,7 +38,14 @@ jobs:
     runs-on: ubuntu-latest
     if: "${{ !(startsWith(github.event.head_commit.message, 'chore: release v') && contains(github.event.head_commit.message, '[skip ci]')) }}"
     steps:
-      - uses: actions/checkout@v4
+      # SHA-pinned for the same reason mise-action is below: this job is
+      # `contents: write`, and this step is handed RELEASE_TOKEN -- a PAT on
+      # main's branch-protection bypass list, so strictly more valuable than the
+      # job's GITHUB_TOKEN. A moved v7 tag would hand that PAT to whatever the
+      # tag now points at. checkout is first-party, so the risk is lower than for
+      # third-party actions, but the pin is free. ci.yml/evals.yml are
+      # `contents: read` and keep the floating major.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main # release against the tip of main, not just the pushed SHA
           fetch-depth: 0 # full history + tags: the bump diffs against the last v* tag
