@@ -4,11 +4,15 @@ version: 2
 # and Python/npm deps are pinned by their own lockfiles, so neither ecosystem
 # belongs here.
 #
-# The reason this file exists: release.yml pins jdx/mise-action to a full commit
-# SHA (it runs in a contents: write job) while ci.yml tracks the floating major.
-# Nothing but a comment kept those two in step, so they would have drifted
-# silently. Dependabot bumps the SHA and rewrites its `# vX.Y.Z` trailing
-# comment, which makes the divergence self-maintaining.
+# The reason this file exists: some refs are pinned to a full commit SHA and
+# others track a floating major, and nothing but a comment kept the two in step,
+# so they would have drifted silently. Dependabot bumps the SHA and rewrites its
+# `# vX.Y.Z` trailing comment, which makes the divergence self-maintaining.
+#
+# Pinned today (each carries its own why): jdx/mise-action and actions/checkout
+# in release.yml, because that job is contents: write and holds RELEASE_TOKEN;
+# astral-sh/setup-uv in ci.yml, because upstream stopped publishing floating
+# major tags and a floating ref there no longer tracks releases at all.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -18,6 +22,13 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    cooldown:
+      # Don't adopt a release until it has had a week in the wild -- long enough
+      # for a compromised or broken publish to be caught by someone else first.
+      # Only `default-days` is honored for the github-actions ecosystem; the
+      # semver-major/minor/patch-days variants are not supported here, so the
+      # one window covers every bump type.
+      default-days: 7
     groups:
       # One PR a week rather than four. These are all low-risk infrastructure
       # bumps; reviewing them together is the point.
