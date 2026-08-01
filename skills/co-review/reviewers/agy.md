@@ -78,7 +78,7 @@ cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <
 Merge into the `permissions.allow` array (see SKILL.md → Permissions). The first is the reviewer command; the second is the pre-flight auth probe (a read-only status query with no varying arguments). Replace `<INPUT>` with your real fixed absolute path — and `<INPUT-DIR>` with its containing directory — in the first rule:
 
 ```json
-"Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" --model \"Gemini 3.5 Flash (High)\" -p \"Your entire input is the file at <INPUT> (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")",
+"Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" --model \"Gemini 3.6 Flash (High)\" -p \"Your entire input is the file at <INPUT> (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")",
 "Bash(agy models)"
 ```
 
