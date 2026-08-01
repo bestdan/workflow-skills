@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.71.0] - 2026-08-01
+
+### Features
+
+- init — scaffold a project, add tracks, install the convention (#320) (f07e986)
+
 ## [1.70.0] - 2026-08-01
 
 ### Features
