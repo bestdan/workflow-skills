@@ -63,7 +63,7 @@ launchd-tracked PID was `claude` itself, never a wrapper shell. That leaves
 no way for the supervisor to see the exit: `exec` replaces the process, so
 nothing runs after `claude` dies. The script instead runs the jailed `claude`
 in the foreground, captures its exit code, and calls
-`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" supervisor-check` before exiting itself — the
+`spawn-orchestrator.sh supervisor-check` before exiting itself — the
 launchd-tracked PID is now this wrapper, not `claude`, which is the
 deliberate trade against being able to classify the exit at all.
 
@@ -445,10 +445,10 @@ actually reach a human. That is also the only place it _could_ work anyway: a
 rate-limited or auth-dead orchestrator cannot make a model call to alert anyone
 (the same reasoning that put `classify-exit` / `supervisor-check` in shell).
 
-| Side                       | Subcommand                                                                         | What it can do                                                                                                                                                                                                                                                                            |
-| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
-| **Orchestrator** (jailed)  | `spawn-orchestrator.sh alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+| Side                       | Subcommand                                                                                                         | What it can do                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`                                         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
+| **Orchestrator** (jailed)  | `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
 
 **The wake's shape: bookkeeping, then the gate, then the agent.** The generated
 wrapper runs, in order:

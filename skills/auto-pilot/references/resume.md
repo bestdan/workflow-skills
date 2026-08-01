@@ -38,7 +38,7 @@ a step ordering that no code enforces. Belt and braces: the guard here, the
 liveness gate there.)
 
 **Clear the run's alarms — after the guard above, and BEFORE the doctor.** Run
-`spawn-orchestrator.sh alarm-clear --dir <run-dir>`, which removes the
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" alarm-clear --dir <run-dir>`, which removes the
 `.auto-pilot/ALARM` sentinel and any undelivered `alarm-requests/`. That sentinel
 is the alarm's **per-run idempotency key**
 ([`run-budget.md`](run-budget.md) "The alarm"), and every alarm's own required
