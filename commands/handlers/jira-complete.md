@@ -65,7 +65,9 @@ This phase takes, in addition to the identifier:
    Capture its current `status.name` and `status.statusCategory.key`
    (`new` / `indeterminate` / `done` — the only "category" this flow reads). If
    the identifier doesn't resolve, stop and report "no issue found for
-   `<identifier>`".
+   `<identifier>` (it may not exist, or you may lack permission to view it)" —
+   Jira returns one indistinguishable error for both cases, so don't claim the
+   issue is missing when the real cause may be a project you can't browse.
 
 3. **Idempotence check.** If the issue's current `statusCategory.key` (from
    step 2) is already `done`, **stop here** — do not write:
@@ -83,16 +85,30 @@ This phase takes, in addition to the identifier:
    target status is in the `done` category (`to.statusCategory.key ==
    "done"`). **Resolve by status category, never by display name** — a board
    may rename its terminal status to anything.
-   - **None** → stop and report: "`<IDENTIFIER>`: no Done-category transition
-     available from `<current status name>` — resolve manually in Jira."
-   - **One** → use it.
-   - **Several** → some workflows expose more than one terminal transition
-     (e.g. `Done` and `Won't Do`). Prefer one whose `to.name` matches
-     `done`/`complete`/`resolved` (case-insensitive); if only a `Won't
-     Do`-style transition exists (matches `won't do`, `wont do`, `cancel`,
-     `reject`, `obsolete`), **do not fire it** — stop and report the available
-     transition names so a human can pick, the same way `jira-claim.md`
+
+   Then **drop every cancellation-style candidate** — any whose `to.name`
+   matches `won't do`, `wont do`, `cancel`, `reject`, or `obsolete`
+   (case-insensitive) — **before** branching on how many are left. Completing
+   means "this shipped", and cancelling is a different outcome even though Jira
+   files both under the same `done` category. Filtering first is what stops a
+   board whose _only_ terminal transition is `Canceled` from being quietly
+   completed with the wrong resolution.
+   - **No Done-category transition at all** → stop and report: "`<IDENTIFIER>`:
+     no Done-category transition available from `<current status name>` —
+     resolve manually in Jira."
+   - **Every candidate was cancellation-style** → stop and report them by name:
+     "`<IDENTIFIER>`: the only Done-category transition(s) available are
+     `<names>`, which cancel rather than complete — resolve manually in Jira."
+     Never fire one just to satisfy the request, the same way `jira-claim.md`
      declines to guess among ambiguous in-progress transitions.
+   - **One left** → use it.
+   - **Several left** → some workflows expose more than one genuine terminal
+     transition. Prefer one whose `to.name` matches `done`/`complete`/`resolved`
+     (case-insensitive). If that leaves **exactly one**, use it. If it leaves
+     **several** (e.g. both `Complete` and `Resolved`) or **none** (e.g.
+     `Closed` and `Shipped` — real terminal statuses matching no known name),
+     **stop** and report the candidates by name so a human can pick. Never pick
+     arbitrarily just to have picked.
 
 5. **`--dry-run` and confirmation.**
    - **`dry_run: true`** → print the planned transition and **stop, no
