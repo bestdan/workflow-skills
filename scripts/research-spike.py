@@ -1127,7 +1127,11 @@ def index_track(lines: list[str], track: str, rel: str) -> list[str] | None:
     body = lines[start:end]
     while body and not body[-1].strip():
         body.pop()
-    return lines[:start] + body + ["", entry, ""] + lines[end:]
+    # A blank line before the entry only when the entry starts the list: the
+    # fresh render emits consecutive entries, and a grown index that inserted a
+    # blank between them would be a loose list a fresh `init` never writes.
+    sep = [] if body and body[-1].startswith("- [") else [""]
+    return lines[:start] + body + sep + [entry, ""] + lines[end:]
 
 
 def verb_init(args: argparse.Namespace, root: Path) -> int:

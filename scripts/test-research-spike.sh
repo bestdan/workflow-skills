@@ -813,6 +813,27 @@ else
   bad "inserting a track produces a different roll-up than rendering one"
 fi
 
+# The same equality holds for PROJECT.md's tracks index: an index grown by
+# index_track must be byte-identical to the freshly-rendered one (modulo the
+# project's own name), or the grown form drifts into a shape init never writes.
+tracks_index() {
+  # tracks_index <PROJECT.md> <project-name>
+  sed -n '/^## Tracks$/,$p' "$1" | sed "s/init $2 /init PROJ /"
+}
+if [ "$(tracks_index "$DIR_K8B/dev_docs/research/one/PROJECT.md" one)" \
+  = "$(tracks_index "$DIR_K8B/dev_docs/research/two/PROJECT.md" two)" ]; then
+  ok "a track indexed into an existing PROJECT.md matches the fully-rendered form"
+else
+  bad "indexing a track produces a different PROJECT.md index than rendering one"
+fi
+# Entries stay adjacent — a blank line spliced between them would be a loose
+# list the fresh render never emits.
+python3 "$SCRIPT" --root "$DIR_K8B" init one --track beta >/dev/null 2>&1
+assert_contains "a grown tracks index keeps its entries adjacent" \
+  "$(cat "$DIR_K8B/dev_docs/research/one/PROJECT.md")" \
+  '- [alpha](tracks/alpha/questions.md)
+- [beta](tracks/beta/questions.md)'
+
 # --- Fixture (k9): a track is never left half-made -----------------------
 # The track used to be written before PROJECT.md and LEDGER.md were read, so a
 # roll-up with no markers left the track behind and exited 2 — and the retry
