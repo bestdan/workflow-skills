@@ -36,8 +36,7 @@ age. This is the one hard safety rule every handler file restates.
 
 ## On `linear`, the retire step never goes through the MCP
 
-Read this **before** planning a run — it is the difference between a clean run
-and one that dies at the mutation. Everything up to the candidate list (argument
+Read this **before** planning a run. Everything up to the candidate list (argument
 parsing, threshold resolution, discovery) works in-session on every handler. The
 **retire** step on the **`linear`** handler is the exception, and it has one hard
 cause and one conditional one:
@@ -45,8 +44,8 @@ cause and one conditional one:
 - **Hard: the Linear MCP exposes no archive mutation.** The read side is fully
   available, but there is no `issueArchive` (or delete) MCP call at all, so
   retiring goes through the GraphQL backstop —
-  `commands/handlers/assets/linear-archive.py` — never through the MCP.
-- **Conditional: that backstop needs a personal API key in its environment.** How
+  `commands/handlers/assets/linear-archive.py`.
+- **Conditional: that backstop needs an API key in its environment.** How
   the key gets there is **not** this command's business — it is the two-ladder
   contract in `dev_docs/auth_key_access.md`, applied by `linear-common.md` →
   "Key resolution". A plaintext `linear.api_key`, an exported `$LINEAR_API_KEY`,
