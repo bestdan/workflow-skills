@@ -41,6 +41,7 @@ run scripts/test-shell.sh
 run scripts/test-task-scan.sh
 run scripts/test-validate.sh
 run scripts/test-plan-graph.sh
+run scripts/test-research-spike.sh
 run scripts/test-claim-scan.sh
 run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
