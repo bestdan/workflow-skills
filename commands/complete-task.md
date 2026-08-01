@@ -1,6 +1,6 @@
 ---
 description: Explicitly transition one identified work item to its tracker's completed state — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
 argument-hint: "<identifier> [--dry-run]"
 ---
 
@@ -73,25 +73,29 @@ Overlay the local override on the committed config — mappings merge recursivel
   file-delete on review) is still the **primary** done signal for `repo-pr` —
   this handler only covers the residual case of a task file left behind in a
   non-terminal status whose work landed some other way.
-- `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
-  Jira's completion path is its GitHub integration or **smart commits**
+- `handler: jira` → read and follow **`commands/handlers/jira-complete.md`**
+  (resolves a `Done`-category transition via the Atlassian MCP, checks
+  idempotence by status category, confirms before mutating, applies the
+  transition via `transitionJiraIssue`, optionally posts a comment). Jira's
+  completion path is normally its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
-  natively on merge. `/complete-task` has nothing to add here; configure the
-  integration or smart commits if that transition isn't firing."
+  natively on merge; this handler is the explicit replacement for when that
+  integration is off, unconfigured, or didn't fire.
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative path doesn't resolve, find the handler file with **Glob**
-(`**/commands/handlers/linear-complete.md` or
-`**/commands/handlers/gh-issue-complete.md`, or
-`**/commands/handlers/repo-pr-complete.md`) and Read the result. Pass the
+(`**/commands/handlers/linear-complete.md`,
+`**/commands/handlers/gh-issue-complete.md`,
+`**/commands/handlers/repo-pr-complete.md`, or
+`**/commands/handlers/jira-complete.md`) and Read the result. Pass the
 identifier and the `--dry-run` flag through.
 
 ## 2. Report
 
 The handler file owns its report format, but every outcome fits this skeleton:
 
-- **Unsupported handler** — the one-line pointer above, nothing mutated.
+- **Unknown handler** — the stop message above, nothing mutated.
 - **Already complete** — the identifier and its current terminal state; no
   write made.
 - **dry-run** — the planned `<current state> → <completed state>` transition,
