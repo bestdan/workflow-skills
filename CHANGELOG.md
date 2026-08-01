@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.69.3] - 2026-08-01
+
+### Fixes
+
+- disable patsub_replacement so plists escape correctly (#315) (af9d0db)
+
 ## [1.69.2] - 2026-08-01
 
 ### Fixes
