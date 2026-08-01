@@ -34,6 +34,31 @@ than the threshold**. It never archives `new`, `ready`, `in_progress`,
 `blocked`, or `needs_review` work — open work is always left alone, regardless of
 age. This is the one hard safety rule every handler file restates.
 
+## On `linear`, the retire step cannot run from an agent session
+
+Read this **before** planning a run. Everything below — argument parsing,
+threshold resolution, the candidate list — works fine in-session on every
+handler. But on the **`linear`** handler the mutation itself does not, for two
+independent reasons, neither of which is a bug to work around:
+
+- **The Linear MCP exposes no `issueArchive` mutation.** The read side (candidate
+  discovery) is fully available; there is simply no MCP call that archives an
+  issue, so the retire step has to go through the GraphQL backstop.
+- **That backstop needs a personal API key, and the permission classifier blocks
+  `op read` in a tool-spawned shell by design.** The key cannot be resolved from
+  inside the agent session, and the right response is to run the step elsewhere,
+  not to loosen the boundary.
+
+So an in-session `/archive-tasks` on `linear` is **dry-run in practice**: use it
+to review candidates, then apply them from outside the agent shell — the shipped
+`commands/handlers/assets/linear-archive.py`, run via `!` in this session, as a
+cron job, or as a GitHub Action. See "Run it without an agent — the shipped
+script" in `commands/handlers/linear-archive.md` for the invocation and the
+plain-key fallback, and §3 below for scheduling it on a cadence.
+
+The other handlers are unaffected: `repo-pr` archives by moving files, and
+`gh-issue`/`jira` mutate through their own tool surfaces, all in-session.
+
 ## Arguments
 
 `$ARGUMENTS` is a set of independent, combinable tokens (order-insensitive). Test
