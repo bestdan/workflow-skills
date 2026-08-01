@@ -12,10 +12,7 @@ for tool in shfmt shellcheck; do
   fi
 done
 
-[ -x test/vendor/bats-core/bin/bats ] || {
-  echo "lint-shell: bats submodules missing — run: git submodule update --init --recursive" >&2
-  exit 2
-}
+scripts/ensure-bats.sh || exit 2
 
 shell_files=()
 bats_files=()
