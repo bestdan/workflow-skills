@@ -40,3 +40,4 @@ dev_docs/tasks/research_spike_plan/*
 .validate-test.*
 .plan-graph-test.*
 .claim-scan-test.*
+.research-spike-test.*
