@@ -25,10 +25,16 @@ mapping this file reuses.
 > subshell is disallowed. Once `op signin` has run in **your own** terminal (with
 > desktop-app integration that raises the biometric prompt), `op` keeps the
 > session in a per-user cache daemon and `op read` works from the agent's subshell
-> too. Sessions lapse after roughly 30 minutes of inactivity. **Test once** with a
-> non-revealing probe (`op read "<ref>" >/dev/null 2>&1`); if it resolves (exit 0),
-> use it. If it returns `account is not signed in`, run `op signin` in your
-> terminal and probe again — or fall back to one of these two paths:
+> too. Sessions lapse after roughly 30 minutes of inactivity. **Test once** with the
+> non-revealing probe, which honors a configured non-default resolver and never
+> prints the key:
+>
+> ```sh
+> python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+> ```
+>
+> Exit 0 → use it. Category `no-session` → run `op signin` in your terminal and
+> probe again — or fall back to one of these two paths:
 >
 > - **Interactive:** run the archive step in _your_ terminal via the session's
 >   `!` prefix (e.g. `! python3 …`), where `op` is authorized. The agent prepares
@@ -82,17 +88,24 @@ native window, or needs to drain a workspace that has already hit the cap.
    `linear-config.md` → "Archive key"). The agent already parses that merged
    config, so it reads the value directly (no YAML-scraping one-liner); a
    cron/Action sets `$LINEAR_API_KEY_REF` — or `$LINEAR_API_KEY` outright — in the
-   job env.
+   job env. `$LINEAR_API_KEY_RESOLVER` rides alongside it when the operator has
+   configured a non-default resolver; it comes from `linear.api_key_resolver` in
+   the **gitignored local config only** (`dev_docs/auth_key_access.md` →
+   "Provenance"), never from the committed file.
+
+   The script resolves the key itself — prefer letting it, rather than resolving
+   in the shell, so the redaction and the 120s bound apply. Where you do need the
+   value in a shell (the standalone cron path below), use the configured resolver:
 
    ```bash
-   LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # e.g. op://Private/Linear API/credential
-   # or, by item UUID + field:
-   # LINEAR_API_KEY="$(op item get <uuid> --fields label=<field> --reveal)"
+   LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # default resolver; e.g. op://Private/Linear API/credential
+   # with an approval-based resolver configured instead:
+   # LINEAR_API_KEY="$(opx "$LINEAR_API_KEY_REF")"
    ```
 
-   Per the gotcha above, this needs an authorized `op` session — establish one with
-   `op signin` in your own terminal (it then works from the agent's subshell too),
-   or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
+   Per the gotcha above, the default resolver needs an authorized `op` session —
+   establish one with `op signin` in your own terminal (it then works from the
+   agent's subshell too), or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
    needs a personal API key. Add `linear.api_key_ref` (a 1Password `op://`
    reference) to the gitignored `dev_docs/tasks/.task-config.local.yml` — see
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a
@@ -252,9 +265,12 @@ as a runnable script:
 **`commands/handlers/assets/linear-archive.py`** (Glob `**/handlers/assets/linear-archive.py` if the relative path doesn't resolve).
 
 It **defaults to a dry run** and only mutates with `--apply` — preserve that. It
-reads the key from `$LINEAR_API_KEY`, else `op read "$LINEAR_API_KEY_REF"`. This
-is the exact script validated against a real workspace (archived 75 issues, 0
-failures).
+reads the key from `$LINEAR_API_KEY`, else resolves `$LINEAR_API_KEY_REF` with the
+program named by `$LINEAR_API_KEY_RESOLVER` (`op` by default — see
+`dev_docs/auth_key_access.md`). Because this command has **no MCP floor**, an
+unresolvable key is **fatal**: the script exits non-zero with a reason category
+and the archive does not run. This is the exact script validated against a real
+workspace (archived 75 issues, 0 failures).
 
 > **Plain-key fallback.** If the 1Password desktop-app integration doesn't
 > expose an account to the CLI (`op account list` comes back empty even when

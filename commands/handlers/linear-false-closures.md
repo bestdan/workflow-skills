@@ -105,17 +105,21 @@ run headless with `$OP_SERVICE_ACCOUNT_TOKEN`.
 
 Same as `linear-archive.md`: the script needs a Linear **personal API
 key** — a full-account bearer token — which must never enter a claude.ai/
-Claude Code cloud sandbox. It reads the key from `$LINEAR_API_KEY`, else
-`op read "$LINEAR_API_KEY_REF"`. That needs an authorized `op` **session**, not a
-particular shell: `op signin` in your own terminal establishes one the agent's
-subshell can use too (it lapses after ~30 min idle) — see `linear-archive.md`'s
-"Gotcha" note for the full explanation and the headless
+Claude Code cloud sandbox. It reads the key from `$LINEAR_API_KEY`, else resolves
+`$LINEAR_API_KEY_REF` with the program named by `$LINEAR_API_KEY_RESOLVER` —
+`op` by default, meaning `op read <ref>` (full contract:
+`dev_docs/auth_key_access.md`). The default needs an authorized `op` **session**,
+not a particular shell: `op signin` in your own terminal establishes one the
+agent's subshell can use too (it lapses after ~30 min idle) — see
+`linear-archive.md`'s "Gotcha" note for the full explanation and the headless
 `$OP_SERVICE_ACCOUNT_TOKEN` fallback.
 
 Unlike the read fast paths, this command has **no MCP floor** — the key is
 required, not an optimization — so it does not run behind `linear-common.md`'s
 gate and does **not** inherit that section's "Key resolution" step. Export
-`$LINEAR_API_KEY_REF` (or `$LINEAR_API_KEY`) yourself before invoking.
+`$LINEAR_API_KEY_REF` (plus `$LINEAR_API_KEY_RESOLVER` if you use a non-default
+resolver), or `$LINEAR_API_KEY`, yourself before invoking. An unresolvable key is
+**fatal** here, not a fallback: report the script's reason category and stop.
 
 ## Dry-run-default posture
 
