@@ -24,9 +24,10 @@ days, while the question count looked flat-to-down and healthy.
 
 The instrument makes deferred work addressable: a deferral must name a
 `destination:` **path that already exists**, every question section must
-declare its obligations or explicitly declare `none:` with a reason, and four
-counts are stored (not computed on demand) so the divergence between
-questions-converging and obligations-climbing is legible in one line.
+declare its obligations or explicitly declare `none:` with a reason, and the
+question and obligation counts are stored (not computed on demand) so the
+divergence between questions-converging and obligations-climbing is legible in
+one line.
 
 ## Scope / non-goals
 
