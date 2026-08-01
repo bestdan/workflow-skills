@@ -374,9 +374,11 @@
 #   2  usage, dependency, or fail-closed path error (nothing partial written)
 set -uo pipefail
 # bash >= 5.2 turns `&` in a ${var//pat/repl} replacement into the matched text.
-# render_plist substitutes XML-escaped values containing `&amp;`, so that option
-# would corrupt every plist rendered under a modern bash. Absent in 3.2 (the
-# macOS system bash), where the shopt name itself is an error — hence the guard.
+# BOTH xml_escape (whose replacements are `&amp;`/`&lt;`/…, so `${s//</&lt;}`
+# yields `<lt;`) and render_plist (which substitutes those escaped values, yielding
+# `@@WORKDIR@@amp;`) depend on this being off — don't remove the guard on the
+# strength of fixing only one of them. Absent in 3.2 (the macOS system bash),
+# where the shopt name itself is an error — hence the `|| true`.
 shopt -u patsub_replacement 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -1250,10 +1252,10 @@ xml_escape() {
 
 # Inline token replacement (bash, not sed) so arbitrary paths with regex-special
 # chars can't corrupt the render; every substituted string value is XML-escaped.
-# Relies on patsub_replacement being off (see `set -uo pipefail` above): xml_escape
-# emits `&amp;`, and with that option on the bare `&` would expand to the matched
-# token, rendering `@@WORKDIR@@amp;` and breaking the plist. Quoting the
-# replacement is NOT the fix — bash 3.2 keeps the quotes literally.
+# Relies on patsub_replacement being off (see the shopt near `set -uo pipefail`):
+# xml_escape emits `&amp;`, and with that option on the bare `&` would expand to
+# the matched token, rendering `@@WORKDIR@@amp;` and breaking the plist. Quoting
+# the replacement is NOT the fix — bash 3.2 keeps the quotes literally.
 render_plist() {
   local label launch_script workdir log
   label="$(xml_escape "$1")"
