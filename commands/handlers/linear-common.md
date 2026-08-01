@@ -150,9 +150,11 @@ The gate and rank rules `/do-tasks` (tracker path) apply when picking claimable 
 | Has label `blocked`                                                                | `blocked`                  |
 | `assignee` is set and is **not** the current Linear user                           | `assigned to <name>`       |
 
+**The assignee gate is viewer-relative — and each path resolves "the current Linear user" from its own credential.** The GraphQL fast path reads `assignee { isMe }`, which the Linear API evaluates server-side against the **`$LINEAR_API_KEY`'s** owner; the MCP floor compares `assigneeId` against the **MCP connection's** viewer (`<linear-mcp>__get_user`). Those are two independent identities, so the gate only means the same thing on both paths when the personal API key and the MCP connection belong to the **same Linear user** — see `linear-claim.md` → "Find candidates" for the operator-facing statement of that requirement. When they diverge, the fast path gates against the key's owner and the floor against the MCP's, and the two paths can legitimately disagree about which candidates are "someone else's". Nothing detects this automatically; it is a configuration requirement, not an invariant the code enforces.
+
 **Rank.** Sort remaining issues by Linear `priority`: urgent(1) → high(2) → medium(3) → low(4), then **none(0) last** (Linear stores "no priority" as `0`, so a naive numeric ascending sort would wrongly put it first), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
 
-This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep.
+This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep. **Every gate above is enforceable on both paths**, including the assignee gate: `<linear-mcp>__list_issues` returns `assignee`/`assigneeId` on each result, so the floor applies it client-side over data it has already fetched — no per-candidate `<linear-mcp>__get_issue`. The only cross-path difference is _whose_ viewer the gate is relative to (above), not whether it runs.
 
 ## Fast-path / MCP-floor gate (and the security boundary)
 
