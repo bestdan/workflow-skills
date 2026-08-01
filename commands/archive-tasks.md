@@ -34,6 +34,68 @@ than the threshold**. It never archives `new`, `ready`, `in_progress`,
 `blocked`, or `needs_review` work — open work is always left alone, regardless of
 age. This is the one hard safety rule every handler file restates.
 
+## On `linear`, the retire step never goes through the MCP
+
+Read this **before** planning a run. Everything up to the candidate list (argument
+parsing, threshold resolution, discovery) works in-session on every handler. The
+**retire** step on the **`linear`** handler is the exception, and it has one hard
+cause and one conditional one:
+
+- **Hard: the Linear MCP exposes no archive mutation.** The read side is fully
+  available, but there is no `issueArchive` (or delete) MCP call at all, so
+  retiring goes through the GraphQL backstop —
+  `commands/handlers/assets/linear-archive.py`.
+- **Conditional: that backstop needs an API key in its environment.** How
+  the key gets there is **not** this command's business — it is the two-ladder
+  contract in `dev_docs/auth_key_access.md`, applied by `linear-common.md` →
+  "Key resolution". A plaintext `linear.api_key`, an exported `$LINEAR_API_KEY`,
+  and a pointer resolved by whatever resolver the machine configures are all
+  supported, and only the last of those can need an unlock at all.
+
+So the practical rule: **probe, don't guess.** The shipped helper answers the
+question without ever printing the key, and honors a configured non-default
+resolver:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+```
+
+Exit 0 means the backstop runs in-session like any other command. Otherwise the
+**category tells you which problem you have**, and they are not the same problem:
+
+- `no-session` — the only genuinely session-bound case. Run the unlock in your
+  own terminal (for the default `op` resolver, `op signin`), then re-probe; or
+  move the step outside the session (`!` prefix, cron, GitHub Action — headless
+  paths use `OP_SERVICE_ACCOUNT_TOKEN` or a CI secret instead).
+- `denied` — the resolver ran and refused. With an **approval-per-read** resolver
+  this is the ordinary "nobody answered the dialog" outcome, not a fault: approve
+  it and re-probe. It is also the **catch-all** for any stderr the helper can't
+  classify, so treat it as "read the resolver's own message" rather than as a
+  specific diagnosis.
+- `not-found` — the resolver worked but the reference points at nothing (renamed
+  or deleted item). Fix the reference, not the session.
+- `unconfigured` — no key or reference is set anywhere. A config task, not a
+  session one; moving the step elsewhere fixes nothing.
+- `malformed-ref` / `unknown-resolver` — a bad value in the local config. These
+  are **deliberately distinct** failures: before the shared resolver landed they
+  looked identical to a keyless host, so a typo silently floored every run.
+
+Only `no-session` and `denied` are ever fixed by changing _where_ you run the
+step. The other four are configuration, and will fail identically from a cron
+job.
+
+Two things **not** to conclude from a failure. It is not "the agent is forbidden
+from calling the secret tool" — it isn't (this command's own `allowed-tools`
+includes `Bash(op *)`). And it is not "you must use 1Password" — `op` is the
+default resolver, not the only one, and a plaintext or exported key needs no
+resolver at all. Take the mechanism from `auth_key_access.md`, never from this
+section. See "Run it without an agent — the shipped script" in
+`commands/handlers/linear-archive.md` for the invocation, and §3 below for
+scheduling it on a cadence.
+
+The other handlers are unaffected: `repo-pr` archives by moving files, and
+`gh-issue`/`jira` mutate through their own tool surfaces, all in-session.
+
 ## Arguments
 
 `$ARGUMENTS` is a set of independent, combinable tokens (order-insensitive). Test
