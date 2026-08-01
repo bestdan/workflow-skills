@@ -34,27 +34,33 @@ than the threshold**. It never archives `new`, `ready`, `in_progress`,
 `blocked`, or `needs_review` work — open work is always left alone, regardless of
 age. This is the one hard safety rule every handler file restates.
 
-## On `linear`, the retire step cannot run from an agent session
+## On `linear`, the retire step never goes through the MCP
 
-Read this **before** planning a run. Everything below — argument parsing,
-threshold resolution, the candidate list — works fine in-session on every
-handler. But on the **`linear`** handler the mutation itself does not, for two
-independent reasons, neither of which is a bug to work around:
+Read this **before** planning a run — it is the difference between a clean run
+and one that dies at the mutation. Everything up to the candidate list (argument
+parsing, threshold resolution, discovery) works in-session on every handler. The
+**retire** step on the **`linear`** handler is the exception, and it has one hard
+cause and one conditional one:
 
-- **The Linear MCP exposes no `issueArchive` mutation.** The read side (candidate
-  discovery) is fully available; there is simply no MCP call that archives an
-  issue, so the retire step has to go through the GraphQL backstop.
-- **That backstop needs a personal API key, and the permission classifier blocks
-  `op read` in a tool-spawned shell by design.** The key cannot be resolved from
-  inside the agent session, and the right response is to run the step elsewhere,
-  not to loosen the boundary.
+- **Hard: the Linear MCP exposes no archive mutation.** The read side is fully
+  available, but there is no `issueArchive` (or delete) MCP call at all, so
+  retiring goes through the GraphQL backstop —
+  `commands/handlers/assets/linear-archive.py` — never through the MCP.
+- **Conditional: that backstop needs a personal API key via `op read`, which
+  needs an already-authorized 1Password session.** The agent's shell can _use_ a
+  session that already exists (`op` caches it in a per-user daemon that crosses
+  the process boundary), but it cannot _establish_ one — `op signin` raises a
+  biometric prompt only your own terminal can answer.
 
-So an in-session `/archive-tasks` on `linear` is **dry-run in practice**: use it
-to review candidates, then apply them from outside the agent shell — the shipped
-`commands/handlers/assets/linear-archive.py`, run via `!` in this session, as a
-cron job, or as a GitHub Action. See "Run it without an agent — the shipped
-script" in `commands/handlers/linear-archive.md` for the invocation and the
-plain-key fallback, and §3 below for scheduling it on a cadence.
+So the practical rule: probe with a non-revealing `op read "<ref>" >/dev/null
+2>&1` first. If it resolves, the backstop runs in-session like any other command.
+If it returns `account is not signed in`, run `op signin` in your own terminal —
+or move the step outside the session entirely (`!` prefix, cron, GitHub Action).
+Do **not** read a failure as "the agent is forbidden from calling `op`"; it isn't
+(this command's own `allowed-tools` includes `Bash(op *)`), it just has no
+session yet. See "Run it without an agent — the shipped script" in
+`commands/handlers/linear-archive.md` for the invocation and the plain-key
+fallback, and §3 below for scheduling it on a cadence.
 
 The other handlers are unaffected: `repo-pr` archives by moving files, and
 `gh-issue`/`jira` mutate through their own tool surfaces, all in-session.
