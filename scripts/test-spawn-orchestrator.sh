@@ -823,13 +823,17 @@ wlnopath="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.
   --out-script "$BASE/nopath.sh" --out-plist "$BASE/nopath.plist" 2>&1)"
 [ $? = 2 ] && [ ! -e "$BASE/nopath.sh" ] && printf '%s' "$wlnopath" | grep -qF 'requires --path' \
   && ok "launch: missing --path fails closed" || bad "launch: missing --path fails closed" "$wlnopath"
+# plist injection: an XML-metachar path must still yield a VALID plist (escaped).
+# Rendered unconditionally: the content assertion below is the only guard CI has
+# against the patsub_replacement corruption, and CI is Linux (no plutil), on the
+# very bash >= 5.2 that reproduces it.
+mkdir -p "$BASE/a&b<x"
+"$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
+  --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
+  --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
+have "launch: XML-metachar path is escaped, not mangled" "a&amp;b&lt;x" "$(cat "$BASE/e.plist" 2>/dev/null)"
 if command -v plutil >/dev/null 2>&1; then
   if plutil -lint "$BASE/job.plist" >/dev/null 2>&1; then ok "launch: plist lints"; else bad "launch: plist lints"; fi
-  # plist injection: an XML-metachar path must still yield a VALID plist (escaped).
-  mkdir -p "$BASE/a&b<x"
-  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/a&b<x" \
-    --log "$BASE/a&b<x/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.esc --claude-bin "$BIN" \
-    --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/e.sh" --out-plist "$BASE/e.plist" >/dev/null 2>&1
   if plutil -lint "$BASE/e.plist" >/dev/null 2>&1; then ok "launch: XML-metachar path still lints (escaped)"; else bad "launch: XML-metachar path still lints (escaped)"; fi
 else
   echo "skip - launch: plist lint (plutil absent)"
