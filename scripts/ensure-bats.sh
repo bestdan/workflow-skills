@@ -14,14 +14,24 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-BATS=test/vendor/bats-core/bin/bats
+# All four submodules matter, not just bats-core: test_helper.bash loads
+# bats-support, bats-assert, and bats-file too. Checking only the runner would
+# call a partial init a success — and since the same check gates the next run,
+# the half-initialized tree would never be repaired, just fail at load time.
+bats_ready() {
+  [ -x test/vendor/bats-core/bin/bats ] || return 1
+  local helper
+  for helper in bats-support bats-assert bats-file; do
+    [ -f "test/vendor/$helper/load.bash" ] || return 1
+  done
+}
 
-[ -x "$BATS" ] && exit 0
+bats_ready && exit 0
 
 echo "bats submodules missing — initializing" >&2
 git submodule update --init --recursive test/vendor >&2
 
-[ -x "$BATS" ] && exit 0
+bats_ready && exit 0
 
 echo "bats submodules unavailable — run: git submodule update --init --recursive" >&2
 exit 2

@@ -179,11 +179,23 @@ plant_ensure_bats() {
   cp "$REPO_ROOT/scripts/ensure-bats.sh" "$TEST_TMPDIR/root/scripts/"
 }
 
+# Mirrors what a completed `git submodule update` leaves behind: the runner plus
+# the three helpers test_helper.bash loads.
+plant_all_bats_artifacts() {
+  local root="$1"
+  mkdir -p "$root/test/vendor/bats-core/bin"
+  touch "$root/test/vendor/bats-core/bin/bats"
+  chmod +x "$root/test/vendor/bats-core/bin/bats"
+  local helper
+  for helper in bats-support bats-assert bats-file; do
+    mkdir -p "$root/test/vendor/$helper"
+    touch "$root/test/vendor/$helper/load.bash"
+  done
+}
+
 @test "ensure-bats leaves an initialized checkout alone" {
   plant_ensure_bats
-  mkdir -p "$TEST_TMPDIR/root/test/vendor/bats-core/bin"
-  touch "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
-  chmod +x "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
+  plant_all_bats_artifacts "$TEST_TMPDIR/root"
   # Any git call here would be a wasted network round-trip on every check run.
   make_stub git 'echo "unexpected git call" >&2; exit 1'
   PATH="$BIN_DIR:/bin:/usr/bin"
@@ -196,12 +208,32 @@ plant_ensure_bats() {
   plant_ensure_bats
   make_stub git 'mkdir -p test/vendor/bats-core/bin
 touch test/vendor/bats-core/bin/bats
-chmod +x test/vendor/bats-core/bin/bats'
+chmod +x test/vendor/bats-core/bin/bats
+for helper in bats-support bats-assert bats-file; do
+  mkdir -p "test/vendor/$helper"
+  touch "test/vendor/$helper/load.bash"
+done'
   PATH="$BIN_DIR:/bin:/usr/bin"
   run bash "$TEST_TMPDIR/root/scripts/ensure-bats.sh"
   assert_success
   assert_output --partial 'initializing'
   assert_file_exists "$TEST_TMPDIR/root/test/vendor/bats-core/bin/bats"
+}
+
+@test "ensure-bats does not call a partial init a success" {
+  # A clone that dies after bats-core but before the helpers used to exit 0 —
+  # and because the same check gates the next run, the tree stayed broken and
+  # only failed later, at helper-load time, with nothing actionable.
+  plant_ensure_bats
+  make_stub git 'mkdir -p test/vendor/bats-core/bin
+touch test/vendor/bats-core/bin/bats
+chmod +x test/vendor/bats-core/bin/bats
+echo "fatal: clone of bats-file failed" >&2
+exit 128'
+  PATH="$BIN_DIR:/bin:/usr/bin"
+  run bash "$TEST_TMPDIR/root/scripts/ensure-bats.sh"
+  assert_failure 2
+  assert_output --partial 'git submodule update --init --recursive'
 }
 
 @test "ensure-bats falls back to the manual command when init cannot run" {
