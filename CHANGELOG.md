@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.69.1] - 2026-08-01
+
+### Fixes
+
+- agy allow-rule pinned a model the invocation never uses (#313) (8a1ef96)
+
 ## [1.69.0] - 2026-08-01
 
 ### Features
