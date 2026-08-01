@@ -47,28 +47,41 @@ cause and one conditional one:
   retiring goes through the GraphQL backstop —
   `commands/handlers/assets/linear-archive.py` — never through the MCP.
 - **Conditional: that backstop needs a personal API key in its environment.** How
-  the key gets there is **not** this command's business — it is the resolution
-  ladder in `linear-common.md` → "Key resolution", which reads an already-set
-  `$LINEAR_API_KEY` first and only then falls back to resolving a reference. The
-  step is blocked in-session **only** when resolution would need an interactive
-  unlock the agent cannot perform (e.g. a 1Password session that does not exist
-  yet — `op signin` raises a biometric prompt only your own terminal can answer).
+  the key gets there is **not** this command's business — it is the two-ladder
+  contract in `dev_docs/auth_key_access.md`, applied by `linear-common.md` →
+  "Key resolution". A plaintext `linear.api_key`, an exported `$LINEAR_API_KEY`,
+  and a pointer resolved by whatever resolver the machine configures are all
+  supported, and only the last of those can need an unlock at all.
 
-So the practical rule: **try it, and read the failure.** If the key is already
-resolvable — exported in the launching shell, or reachable through whatever
-resolver this machine is configured for — the backstop runs in-session like any
-other command. Only an unlock-required failure means the step has to move: run
-the unlock in your own terminal, or run the step outside the session entirely
-(`!` prefix, cron, GitHub Action).
+So the practical rule: **probe, don't guess.** The shipped helper answers the
+question without ever printing the key, and honors a configured non-default
+resolver:
 
-Two things **not** to conclude from a failure here. It is not "the agent is
-forbidden from calling the secret tool" — it isn't (this command's own
-`allowed-tools` includes `Bash(op *)`). And it is not "you must use 1Password" —
-`op` is one resolver among several, and an exported key needs none at all. Take
-the mechanism from `linear-common.md`, never from this section. See "Run it
-without an agent — the shipped script" in `commands/handlers/linear-archive.md`
-for the invocation and the plain-key fallback, and §3 below for scheduling it on
-a cadence.
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+```
+
+Exit 0 means the backstop runs in-session like any other command. Otherwise the
+**category tells you which problem you have**, and they are not the same problem:
+
+- `no-session` — the only genuinely session-bound case. Run the unlock in your
+  own terminal (for the default `op` resolver, `op signin`), then re-probe; or
+  move the step outside the session (`!` prefix, cron, GitHub Action — headless
+  paths use `OP_SERVICE_ACCOUNT_TOKEN` or a CI secret instead).
+- `unconfigured` — no key or reference is set anywhere. A config task, not a
+  session one; moving the step elsewhere fixes nothing.
+- `malformed-ref` / `unknown-resolver` — a bad value in the local config. These
+  are **deliberately distinct** failures: before the shared resolver landed they
+  looked identical to a keyless host, so a typo silently floored every run.
+
+Two things **not** to conclude from a failure. It is not "the agent is forbidden
+from calling the secret tool" — it isn't (this command's own `allowed-tools`
+includes `Bash(op *)`). And it is not "you must use 1Password" — `op` is the
+default resolver, not the only one, and a plaintext or exported key needs no
+resolver at all. Take the mechanism from `auth_key_access.md`, never from this
+section. See "Run it without an agent — the shipped script" in
+`commands/handlers/linear-archive.md` for the invocation, and §3 below for
+scheduling it on a cadence.
 
 The other handlers are unaffected: `repo-pr` archives by moving files, and
 `gh-issue`/`jira` mutate through their own tool surfaces, all in-session.
