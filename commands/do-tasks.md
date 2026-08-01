@@ -38,10 +38,20 @@ the single highest-ranked task and reports the rest as held. `/do-tasks <slug>
 `--claim-only` reserves without executing, so it batches regardless; see the
 Claim / execute split below.)
 
-For the **tracker** (`linear`) handler, execution is single and foreground
-(it runs in the current session): `--remote`/`--local` do not apply, and `--all` /
-`-n N` degrades to a single claim with a one-line note (except with `--claim-only`,
-which is batchable — see below). See section 3.
+For the **tracker** handlers, the execution mode now splits by handler:
+
+- **`linear`** supports **true batch execution**. `--all` / `-n N` (without
+  `--claim-only`) dispatches **one remote session per dependency-ready issue**
+  (each its own cloud VM), bounded by WIP slack, via the **Tracker-batch
+  subroutine** in section 3. Bare `/do-tasks` stays single and foreground, and
+  `--local` caps the batch at **1** (single highest-ranked issue, foreground).
+- **`gh-issue`** and **`jira`** execution is still single and foreground (current
+  session): `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
+  single claim with a one-line note. See sections 4–5.
+
+Across all three trackers, `--claim-only` batches regardless (it reserves without
+executing — see the Claim / execute split below), and `/do-tasks <identifier>`
+claims one specific issue.
 
 ### Claim / execute split (`--claim-only`, `--no-claim`)
 
@@ -215,19 +225,25 @@ Read and follow **`commands/handlers/linear-claim.md`** (with
 end — it holds the find-candidates query, the in-flight pre-flight, the
 token-comment claim lock, the feasibility judgment (now run _after_ the claim),
 the branch-name-verbatim rule, PR↔issue linking, move-to-review, the two-trigger
-bail mechanics, and the report format. `/do-tasks` runs these
-phases in the **current session**. If the relative paths don't resolve, find them
-with **Glob** (`**/commands/handlers/linear-claim.md`,
+bail mechanics, and the report format. In **single** mode `/do-tasks` runs these
+phases in the **current session**; in **batch** mode it runs them inside a
+dispatched **remote session per issue** (see the Tracker-batch subroutine below).
+If the relative paths don't resolve, find them with **Glob**
+(`**/commands/handlers/linear-claim.md`,
 `**/commands/handlers/linear-common.md`).
 
-**Single by nature.** Tracker _execution_ is foreground, so `--remote`/`--local`
-do not apply and `--all` / `-n N` is **not supported for execution** — a batch flag
-on a normal (claim+execute) or `--no-claim` run degrades to a single claim/resume
-with a one-line note ("batch isn't supported for tracker handlers; claiming one
-issue"). The exception is `--claim-only`: reserving an issue runs no foreground
-work, so `--all` / `-n N --claim-only` may claim several issues at once, bounded by
-the pre-claim WIP gate below. `/do-tasks <identifier>` (a specific Linear id, e.g.
-`PRE-12`) claims that one issue.
+**Execution modes.** Linear `/do-tasks` is no longer single-only:
+
+- `/do-tasks` / `/do-tasks <identifier>` (e.g. `PRE-12`) / `--no-claim` — **single**,
+  foreground, current session. Bare `/do-tasks` selects the single highest-ranked
+  dependency-ready issue; `<identifier>` claims that one issue.
+- `/do-tasks --all` / `-n N` (without `--claim-only`) — **true batch execution**:
+  dispatch up to `min(N, wip_slack)` **remote** single-claim sessions (one per
+  dependency-ready issue, each its own cloud VM), via the **Tracker-batch
+  subroutine** below. `--remote` is the default and the only batch mode; `--local`
+  caps the batch at **1** (the single highest-ranked issue, run foreground).
+- `/do-tasks --all` / `-n N --claim-only` — **batch claim** (reserve several issues),
+  bounded by the pre-claim WIP gate below, no execution. Unchanged.
 
 > **Runtime order (the sections below are not in execution order).** The tracker
 > path runs: **Find candidates** (`linear-claim.md` "Find candidates" — documented
@@ -339,7 +355,11 @@ scope's **remaining** slack is `0` (so `unassigned_wip_limit: 0` reserves nothin
 unassigned work), and stop the batch once the global slack hits `0`. The held-overflow
 report names each held task's project (`Unassigned` for the bucket).
 
-### Claim and execute
+### Claim and execute (single mode)
+
+This is the **single**, foreground path (`/do-tasks`, `/do-tasks <identifier>`,
+`--no-claim`). Batch runs the same `linear-claim.md` flow, but once per issue
+inside a remote session — see the **Tracker-batch subroutine** below.
 
 With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 
@@ -362,7 +382,17 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    project in this run — treat it like an in-flight result: in ranked mode skip to the
    next candidate (whose project may have slack), on a direct pick stop. (The global
    ceiling, when set, is checked once up front and declines the whole run before the
-   loop.)
+   loop.) **Also verify dependency-readiness here** — the shared "Find candidates"
+   gates do **not** check native blockers, so this is where single mode enforces it,
+   using the **same rule as the Tracker-batch subroutine (step 3)**: read `get_issue`
+   with `includeRelations: true` on the candidate and confirm every `blockedBy` issue
+   is in a `completed`-type state (`Done`) or no longer exists — a `canceled` blocker
+   does **not** satisfy it (matching `linear-reoptimize.md` Dimension 1). If any blocker
+   is unresolved the candidate is **not** dependency-ready: in ranked mode skip it
+   (`waiting on <identifier>`, move to the next candidate); on a direct `<identifier>`
+   pick **stop** and report the unresolved blocker rather than claiming an issue whose
+   dependencies aren't met. This keeps bare `/do-tasks` and `/do-tasks --all` from ever
+   disagreeing on whether an issue is ready.
 3. **Claim** — `linear-claim.md` "Claim the issue": the **token-comment lock** —
    read-before-write guard, then post a token-bearing claim comment **first** (the
    lock), then set the `started`-type state + `auto-claimed` label (creating it if
@@ -417,6 +447,113 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    load-bearing distinction from the step-4 feasibility reject: a reject that never
    built continues to the next candidate; a build that broke halts for a human.
 
+### Tracker-batch subroutine (reusable across linear / gh-issue / jira)
+
+This is the tracker analogue of the repo-pr remote fan-out
+(`repo-pr-execute.md` §4 "Dispatch remote agents"). It is written **handler-neutral**
+so the gh-issue (section 4) and jira (section 5) batch paths can reference it
+unchanged once their batch tasks land — only the find/rank phase (step 1), the
+dependency-readiness check (step 3), and the per-issue claim+execute flow (step 4)
+differ by handler. It runs **only** for
+`--all` / `-n N` **without** `--claim-only` **and without** `--no-claim` (bare
+`/do-tasks` stays single foreground; `--claim-only` keeps its batch-claim behavior;
+`--no-claim` is always single — it resumes one already-claimed issue, so
+`--all --no-claim` is a contradiction: reject it with
+`--no-claim is single-only; drop --all/-n N`; `--local` caps the batch at 1 and runs
+the single highest-ranked issue foreground via "Claim and execute" above).
+
+**Connector availability: fail safe at the remote end, not by a pre-check.** Batch
+dispatch hands each issue's claim, comment, and state transitions to a remote cloud
+session, which can only run them if that session has the handler's MCP connector —
+unlike the repo-pr remote fan-out, which needs only `git`/`gh`. A remote session **may**
+inherit the Linear connector but does **not** always, and the launching session has **no
+deterministic way to introspect what `claude --remote` will inherit** — the tools loaded
+here say nothing about the VM's environment. So do **not** gate dispatch on an
+un-actionable "confirm the VM has MCP" pre-check. Instead, put the check **where the
+capability is actually visible — inside the remote session** — via two concrete rules:
+
+- **Make the remote prompt's first step a self-check.** The inlined prompt (step 4) must
+  begin: "If the Linear MCP connector is not available in this session, do **not** claim —
+  stop immediately and report `remote Linear MCP unavailable`." A misconfigured remote then
+  degrades **loudly** (a visible bail on that issue) rather than silently doing nothing or
+  half-claiming. Because the claim is the session's first mutation, a bail here leaves no
+  partial state.
+- **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
+  connector can set `linear.remote_batch: false` in `.task-config.yml` to skip remote
+  dispatch entirely and degrade `--all` to a single foreground claim (note
+  `remote batch disabled — claiming one issue`, mirroring the jira degrade). Absent or
+  `true` → attempt remote dispatch with the self-check above. This is the only
+  _deterministic_ signal available, so it is the config knob rather than a runtime probe.
+
+1. **Rank unclaimed candidates.** Run the handler's find-candidates phase (Linear:
+   `linear-claim.md` "Find candidates") restricted to the `unstarted`/ready state,
+   dropping any already-claimed issue (Linear: carries `auto-claimed`) and any that
+   fails the standard filters (estimate, labels, assignee). Sort the survivors by the
+   handler's ranking (Linear: `priority`, then `updatedAt` ascending — oldest first).
+   Rank on the metadata the list query already returns — do **not** fetch each issue's
+   relations yet.
+2. **Bound by WIP slack (per-project + optional global ceiling).** WIP is **not** a
+   single team-wide scalar for Linear — resolve the chosen scope(s) and their caps
+   exactly as **"Resolve claim scope"** and the **"Pre-claim WIP gate (per-project +
+   optional global ceiling)"** above define them: each configured project (plus the
+   Unassigned bucket) carries its own `wip_limit` (per-project override else the
+   top-level `wip_limit`, default `3`; the bucket uses `unassigned_wip_limit`), and the
+   optional `linear.global_wip_limit` caps the **total** in-flight across all of them.
+   For each chosen scope, count `started`-type issues (per the gate) and set that
+   scope's `slack = wip_limit − in_flight`; also track the remaining **global** slack.
+   If every chosen scope has `slack ≤ 0` (or the global ceiling is already reached),
+   dispatch nothing and report `WIP limit reached (<per-scope counts> in flight) —
+   nothing dispatched`.
+3. **Select dependency-ready candidates lazily, in ranked order, respecting each
+   scope's slack.** Walk the ranked list and check dependency-readiness **on demand**,
+   one candidate at a time: **dependency-ready** for a tracker means every native
+   blocking relationship is resolved — for Linear, read `get_issue` with
+   `includeRelations: true` and confirm each `blockedBy` issue is in a
+   `completed`-type state (`Done`) or no longer exists. A **`canceled`** blocker does
+   **not** satisfy the dependency (it blocks until a human removes the link — matching
+   `linear-reoptimize.md` Dimension 1, where a canceled `blockedBy` blocks forever and
+   only `Done` satisfies). Keep ready issues; skip the rest, recording each as
+   `waiting on <identifier>`. As you accept a ready issue, **decrement its scope's
+   slack and the global slack**, and **skip** a ready issue whose own scope is already
+   full even if the global ceiling still has room. **Stop** once every chosen scope is
+   full, the global ceiling is reached, you have `N` issues (for `-n N`), or you
+   exhaust the list. Checking lazily in ranked order this way avoids up to ~50
+   `get_issue` calls per run. Record any ranked candidate left unexamined past the
+   bound as `held (WIP limit reached)` or `held (-n N ceiling)`.
+4. **Dispatch one remote session per selected issue.** Each issue gets its **own**
+   cloud VM running the handler's single-issue claim+execute flow against **that one
+   issue's identifier** — never instruct a session to claim more than one. For
+   Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
+   branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
+   `Closes <id>` → `Move to review on PR open`). The remote prompt must be
+   **self-contained** — the VM has no plugin installed **and** a fresh clone has no
+   local task config (`/task-config` gitignores `dev_docs/tasks/` by default) — so
+   inline the issue identifier, the claim+execute instructions, **and** the
+   already-resolved **non-secret** Linear config the single-issue flow needs (the
+   resolved `team`, `base_branch`, the issue's project scope, and its applicable
+   `wip_limit`/`max_estimate`), mirroring the inline-prompt pattern in
+   `repo-pr-execute.md` §4. **Never** inline secrets — `api_key_ref` or any raw key
+   stays in the remote host's own environment, never in the prompt. Run the dispatch
+   commands in sequence so the user sees each session id.
+5. **The atomic claim is the only race guard.** Parallel sessions are safe **without**
+   any branch- or file-based lock because each session's first mutating step is the
+   handler's read-then-write claim (Linear: the token-comment election in
+   `linear-claim.md` "Claim the issue" — first-writer-wins on the oldest claim
+   comment, with `auto-claimed`/`assignee` as the human-visible marker). Each
+   session is pinned to one identifier, so a
+   session that finds its issue already claimed by another run simply **stops/bails** —
+   it does not fall back to a different issue — which is exactly why no double-claim can
+   occur even when two runs' candidate sets overlap. This is why the tracker batch needs
+   no equivalent of repo-pr's draft `task-claim` PR marker.
+
+   **The claim guards issue identity, not capacity.** The WIP slack read in step 2
+   is not atomic, so two concurrent batch runs can each observe the same slack,
+   dispatch to disjoint issues, and together overshoot `wip_limit`. Accepted at
+   single-operator scale — don't run two batch dispatches concurrently.
+6. **Report** the dispatched issues (identifier, title, "remote session started"),
+   then, separately, those `held` by the WIP / `-n N` bound and those skipped as
+   `waiting on <identifier>`. Point the user at `/tasks` to monitor.
+
 ## 4. gh-issue path (`gh-issue` handler)
 
 Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
@@ -449,7 +586,8 @@ report format. `/do-tasks` runs these phases in the **current session** over the
 Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
-**Single by nature.** Like the tracker and gh-issue paths, jira execution is
+**Single by nature.** Like the gh-issue path (and unlike the Linear tracker path,
+which now batches via the Tracker-batch subroutine in section 3), jira execution is
 foreground: `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
 single claim with a one-line note ("batch isn't supported for jira execution;
 claiming one issue"). The exception is `--claim-only`: reserving an issue runs no
@@ -472,10 +610,14 @@ In both file-path modes, list separately any tasks skipped because they are
 waiting on another task (with every unresolved blocker) or **held** by the `-n N`
 ceiling or the WIP limit.
 
-For the **tracker path**, report per `linear-claim.md` "Report": on success print
-the issue identifier, the PR URL, and a one-line summary; on bail print the
-identifier, why it bailed, and the Linear comment URL; on the WIP gate declining,
-print the limit and the in-flight count.
+For the **tracker path** in **single** mode, report per `linear-claim.md` "Report":
+on success print the issue identifier, the PR URL, and a one-line summary; on bail
+print the identifier, why it bailed, and the Linear comment URL; on the WIP gate
+declining, print the limit and the in-flight count. In **batch** mode (`--all` /
+`-n N`), report per the Tracker-batch subroutine (section 3) step 6: the dispatched
+issues (identifier, title, "remote session started"), then separately those held by
+the WIP / `-n N` bound and those skipped as waiting on a blocker; point the user at
+`/tasks` to monitor.
 
 For the **gh-issue path**, report per `gh-issue-claim.md` "Report": on success
 print the issue number, the PR URL, and a one-line summary; on bail print the

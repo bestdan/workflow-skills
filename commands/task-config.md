@@ -14,7 +14,7 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 ## Handler capability matrix
 
-Handler feature parity is jagged — only `repo-pr` runs the full loop. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
+Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
 | Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
 | ----------------------------------- | --------- | ---------- | ------ | -------- |
@@ -22,17 +22,17 @@ Handler feature parity is jagged — only `repo-pr` runs the full loop. This tab
 | list (`/list-tasks`)                | yes       | yes        | yes    | yes      |
 | promote (`/promote-tasks`)          | yes       | yes        | yes    | yes      |
 | do — single (`/do-tasks`)           | yes       | yes        | yes    | yes      |
-| process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
+| process — batch (`/do-tasks --all`) | yes       | no         | no     | yes      |
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
 | reoptimize (`/reoptimize-tasks`)    | no        | report     | no     | yes      |
 
-`repo-pr` is the only full-loop handler. `jira`, `gh-issue`, and `linear` all add list, promote, and single `do` (but not batch process). Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`linear` is the most complete handler — it now supports **every** verb in the table, including batch process and reoptimize. `repo-pr` supports all but `reoptimize` (its tasks are local plan files — reoptimize those directly). `jira` and `gh-issue` add list, promote, and single `do` but **not** batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
 **Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 
 `reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **`linear`** applies relation edits, priority, and duplicates natively. **`gh-issue`** is `report` — GitHub Issues have no native dependency edge, so dependency findings surface as a report plus a suggested `Blocked by:`/`Related:` body footer line rather than a real link; priority/label fixes still apply via `gh issue edit`. `jira` re-optimize is a planned follow-up, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
 
-`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear`, `gh-issue`, and `jira` it claims and executes one issue in the current session.
+`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr` and `linear` (Linear dispatches one remote session per dependency-ready issue, bounded by the WIP limit). On `gh-issue` and `jira` it claims and executes one issue in the current session.
 
 ## Steps
 
@@ -160,7 +160,7 @@ Tell the user:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
   - `jira`: "`jira` supports: /add-task, /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
-  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
+  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). You can still manage issues in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
 - **For `gh-issue` / `jira` / `linear`:** that `dev_docs/tasks/` was added to the repo's local git exclude, so the config stays local and out of `git status` (rerun the guarded `git check-ignore … || echo …` command above on any other clone). If they instead want teammates to share this destination, they can **commit** `.task-config.yml` rather than excluding it.
 - They can now run `/add-task`, or re-run `/task-config` to switch handlers.

@@ -30,6 +30,10 @@ linear:
   # "Task size" in skills/task/SKILL.md). Default 3. Inherited by each project unless overridden.
   base_branch: main # optional, used by /do-tasks (tracker path) — branch /do-tasks branches
   # from. Default main.
+  remote_batch: true # optional, used by /do-tasks batch (--all / -n N). true/absent → dispatch
+  # one remote session per dependency-ready issue (each self-checks for the Linear connector and
+  # bails loudly if absent). Set false when the remote VMs are known NOT to carry the Linear
+  # connector: --all then degrades to a single foreground claim. Default true.
   projects: # optional — the Linear projects this repo's task commands scope to. Replaces the
     # old scalar `default_project`. Absent or empty → whole-team scope (today's "no pin" behavior);
     # exactly one entry → equivalent to a single pin.
@@ -68,6 +72,7 @@ linear:
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
 - Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, and `api_key_ref` remain global. `api_key_ref` is a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
+- `remote_batch` is optional and lives under `linear:`. It is the deterministic opt-out for `/do-tasks` batch remote dispatch — `false` degrades `--all` / `-n N` to a single foreground claim; absent or `true` dispatches one remote session per issue (each self-checks for the connector). Default `true`. See `commands/do-tasks.md` §3 "Tracker-batch subroutine".
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
 - `orphan_claim_hours` is optional and lives under `linear:`. It is read only by `/reconcile-tasks` row 4 (`linear-reconcile.md`) as the idle-hours threshold before an orphaned claim (started + `auto-claimed`, no resolvable PR, no remote branch) is demoted back to Backlog. Default `24`. **Must be a finite number > 0** — it is the sole guard for a fresh pre-branch claim, so row 4 treats a `0`, negative, or non-numeric value as invalid and fails closed (disables the row for that run) rather than mass-demoting.
 - `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).
