@@ -63,7 +63,7 @@ launchd-tracked PID was `claude` itself, never a wrapper shell. That leaves
 no way for the supervisor to see the exit: `exec` replaces the process, so
 nothing runs after `claude` dies. The script instead runs the jailed `claude`
 in the foreground, captures its exit code, and calls
-`scripts/spawn-orchestrator.sh supervisor-check` before exiting itself — the
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" supervisor-check` before exiting itself — the
 launchd-tracked PID is now this wrapper, not `claude`, which is the
 deliberate trade against being able to classify the exit at all.
 
@@ -382,7 +382,7 @@ Operation not permitted`, exit 126) **regardless of the diff** — they fail
 identically on pristine `main`. And a `sandbox-exec`-confined process's **children
 inherit the profile**, so the jailed orchestrator **cannot** simply spawn an
 un-jailed verifier. So verify runs in a **separate, un-jailed launchd job** — the
-**verify broker** (`scripts/spawn-orchestrator.sh write-verify-broker` installs it;
+**verify broker** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker` installs it;
 `verify-request` / `verify-broker` / `verify-await` are the handshake):
 
 1. The jailed orchestrator drops a **request sentinel** (`verify-request`) into a

@@ -57,7 +57,7 @@ FILES an `alarm-request` when it halts (`run-state.md` "Run doctor"), and an
 filed, restoring exactly the silence both mechanisms exist to end.
 
 **Clear the terminal exit state — likewise before the doctor and the first wake.** Run
-`scripts/spawn-orchestrator.sh clear-exit-state --dir <run-worktree>`. The exit
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" clear-exit-state --dir <run-worktree>`. The exit
 contract is DURABLE by design ([`run-state.md`](run-state.md) "Exit contract"):
 the last `exit_reason` / `exit_reason_at` / `exit_reason_detail` are committed to
 the run-state branch, and a terminal reason (`done` / `systemic` / `deadline`)
@@ -74,7 +74,7 @@ three `exit_reason*` fields, and commits — so the run's first real declaration
 the only one on the branch.
 
 **Then run the doctor — before anything else reads the worktree.** Run
-`scripts/spawn-orchestrator.sh doctor --dir <run-worktree> --run-id <run_id>
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run-worktree> --run-id <run_id>
 --questions .auto-pilot/QUESTIONS.md [--handler <h>]`
 ([`run-state.md`](run-state.md) "Run doctor"). `--resume`'s reconciliation pass
 **is** the doctor, run once at the top of resume — the same seven-invariant

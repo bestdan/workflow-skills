@@ -62,6 +62,29 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   against run-state.md's crash-reconciliation table before falling into the run
   loop. The Resume phase summarizes this; the mechanics live here.
 
+## Script paths
+
+**Always invoke a plugin-shipped helper script as
+`"${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh"`** — `preflight.sh`,
+`spawn-orchestrator.sh`, `probe-coders.sh`, `claude-usage.sh`, and the rest of
+this repo's `scripts/`. The orchestrator runs with cwd = the **target repo**,
+not this plugin, so a bare `scripts/<name>.sh` resolves against the target
+repo's tree, where the file doesn't exist — and it fails as "not found" rather
+than as "wrong repo", which is how it went undiagnosed. If
+`$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/<name>.sh`.
+
+This rule governs **invocation**. These files also mention the same scripts in
+prose by bare name (`spawn-orchestrator.sh status`, `claude-usage.sh
+--session-status`) when naming a subcommand rather than giving a command to
+run; those mean the same plugin-shipped script and resolve the same way.
+
+The rule does **not** extend to the **target repo's own** scripts — e.g.
+`bash scripts/check.sh` in
+[`references/launch-runtime.md`](references/launch-runtime.md) "Verify broker",
+which is the repo-under-automation's declared verify command and is correctly
+repo-relative.
+
 ## Launch phase (interactive)
 
 Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
@@ -117,7 +140,7 @@ The full mechanics of each step are in
 
 1. **Worktree + run-state branch** (BLOCKS LAUNCH) — create the run worktree
    and the `auto-pilot/<run_id>` branch; an untracked plan is a blocker.
-2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `scripts/preflight.sh`
+2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
    plus per-credential probes (GitHub, Linear, coder CLIs, MCP), each through
    the run's sandbox wrapper; capture the environment fingerprint / class; a
    probe that would prompt is itself the failure. Includes the less-claude CAO
@@ -198,7 +221,7 @@ declare the exit reason, then exit          # every termination path, no excepti
 ```
 
 **The exit contract.** Before exiting, for any reason, run
-`scripts/spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r>`
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r>`
 (`continuing` | `paused` | `done` | `systemic` | `deadline`), and beat the
 heartbeat (`spawn-orchestrator.sh heartbeat --dir <run worktree> --note
 <where>`) at each loop iteration and `/deliver-task` sub-step boundary. Full
@@ -206,7 +229,7 @@ semantics, precedence, and fail-safe rules:
 [`references/run-state.md`](references/run-state.md) "Exit contract" and
 "Heartbeat".
 
-**Every iteration opens with the run doctor**, `scripts/spawn-orchestrator.sh
+**Every iteration opens with the run doctor**, `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
 doctor` — a cheap, deterministic, no-model-call audit of seven invariants
 (HALT on `status: systemic`, exit 30 — the loop must not dispatch). The
 invariant table, each one's repair, the exit codes, and the finding-#22/#23

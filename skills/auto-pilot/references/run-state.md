@@ -253,7 +253,7 @@ deletes the parent's branch → the child, still based on it, gets closed) or
 **quietly** (the child still targets the parent's _branch_, so merging it lands
 on that branch, never on `base_branch` — the PR looks healthy while doing
 nothing). Finding #25 hit the loud case for real, on a P1 PR. `restack`
-(`scripts/spawn-orchestrator.sh restack --run-dir <dir> --repo <path>`) reads
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" restack --run-dir <dir> --repo <path>`) reads
 this table's `base`/`base_sha`/`pr` columns and, for every chained task whose
 parent PR has merged, runs the incantation a human would otherwise have to
 remember at the exact right moment: fetch, `rebase --onto <base_branch>
@@ -403,7 +403,7 @@ uncommitted task-branch edits can block the checkout back, wedging recovery.
 
 **Guard.** Each run-loop iteration, and the top of `--resume`
 ([`resume.md`](resume.md)), calls
-`scripts/spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" assert-run-head --dir <run-worktree> --run-id
 <run_id> --questions .auto-pilot/QUESTIONS.md`. It asserts `git rev-parse
 --abbrev-ref HEAD` in the run worktree equals `auto-pilot/<run_id>`; if not, it
 restores that branch and appends a `QUESTIONS.md` entry recording the
@@ -514,7 +514,7 @@ Findings #22 and #23 both hit a live run and **both presented as a clean
 was `exit 0`, `terminal_reason: completed`. Neither tripped the circuit
 breaker, because the circuit breaker counts _delivery_ failures and neither of
 these was one. The run never asked "am I still a valid run?" — `doctor`
-(`scripts/spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id>
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run worktree> --run-id <run_id>
 [--label <launchd label>] [--questions <path>] [--handler repo-pr|linear]
 [--gh <path>] [--no-progress-limit N] [--context loop|resume]`) is that
 question, asked seven ways, run at the **top of every run-loop iteration**
