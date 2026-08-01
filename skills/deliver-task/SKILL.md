@@ -150,8 +150,11 @@ version has hard-won race handling that must not be forked:
 - **linear** → "Pre-flight: is work already in flight?" then "Claim the issue" in
   `linear-claim.md` (the token-comment election with the live-window + state-backed
   eligibility filters).
-- **gh-issue** / **jira** → "Claim the issue" in the respective handler file
-  (read-then-write assign + label/transition).
+- **gh-issue** / **jira** → "Claim the issue" in the respective handler file (acquire
+  the atomic `task/<KEY>` ref lock per `commands/handlers/claim-lock.md`, then write the
+  assignee + label/transition board marker). The lock is the ref **creation**, not the
+  assignee; a 422 is a lost race, and a create blocked by a branch-pinned environment
+  degrades to the comment-token election with an explicit note.
 
 **`--base`:** when the handler's claim acquires the work branch, base it on
 `--base` (default `main`) instead of the handler's default base — step 1 has
