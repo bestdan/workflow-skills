@@ -42,9 +42,17 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
 
 - **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
   confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
-- **Linear** (linear source) — `local-full`: resolve the API key from its
-  `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
-  `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
+- **Linear** (linear source) — `local-full`: confirm the API key resolves with
+  `python3 commands/handlers/assets/_secret_resolve.py --probe LINEAR_API_KEY`,
+  which honors the configured resolver and never prints the key (contract:
+  `dev_docs/auth_key_access.md`). An auto-pilot run is **unattended**, so the
+  resolver must be one that works without a UI — `op` with an authorized session
+  or `$OP_SERVICE_ACCOUNT_TOKEN`, or `$LINEAR_API_KEY` injected directly. An
+  approval-based resolver such as `opx` fails closed here **by design**; if the
+  probe reports `timeout` or `denied`, that is the cause, and the fix is to set
+  `$LINEAR_API_KEY_RESOLVER=op` (or inject the key) for the run rather than to
+  wait on a dialog no one will answer. `claude-web`: use the **Linear MCP**
+  connection (no `op`/CLI).
   Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
   the team) to confirm auth actually works, not just that it resolves.
 - **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each

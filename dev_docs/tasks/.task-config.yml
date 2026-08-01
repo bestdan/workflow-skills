@@ -9,9 +9,17 @@ linear:
       # project may name its own; without it the command falls back to the
       # current repo's origin. Example: repo: bestdan/workflow-skills
       repo: bestdan/workflow-skills
-# api_key_ref (the op:// pointer to a Linear personal API key) is PERSONAL and
-# machine-specific — it does NOT belong in this committed, public config.
-# Put it in the gitignored local override instead: dev_docs/tasks/.task-config.local.yml
+# The Linear API key is PERSONAL and machine-specific — none of the three keys below
+# belong in this committed, public config. Put them in the gitignored local override,
+# dev_docs/tasks/.task-config.local.yml:
 #   linear:
-#     api_key_ref: op://<vault>/<item>/<field>
-# (or just export $LINEAR_API_KEY / $LINEAR_API_KEY_REF). Unset → the MCP floor.
+#     api_key_ref: op://<vault>/<item>/<field>   # a POINTER to a personal API key
+#     api_key_resolver: op                        # which allow-listed program resolves it
+#                                                 # (`op` default, or `opx`); local-only
+#     api_key: lin_api_…                          # OR a raw key, if you'd rather not run
+#                                                 # a secret manager; local-only
+# api_key and api_key_resolver are REFUSED from this file, not merely ignored: one is a
+# full-account token, the other names a program to run, and neither may come from a
+# checkout. Exporting $LINEAR_API_KEY / $LINEAR_API_KEY_REF (+ $LINEAR_API_KEY_RESOLVER)
+# works too and takes precedence. Nothing set → the MCP floor.
+# Full contract: dev_docs/auth_key_access.md.

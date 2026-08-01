@@ -532,8 +532,9 @@ capability is actually visible — inside the remote session** — via two concr
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
    `wip_limit`/`max_estimate`), mirroring the inline-prompt pattern in
-   `repo-pr-execute.md` §4. **Never** inline secrets — `api_key_ref` or any raw key
-   stays in the remote host's own environment, never in the prompt. Run the dispatch
+   `repo-pr-execute.md` §4. **Never** inline secrets — `api_key`, `api_key_ref`,
+   `api_key_resolver`, or any raw key stays in the remote host's own environment,
+   never in the prompt. Run the dispatch
    commands in sequence so the user sees each session id.
 5. **The atomic claim is the only race guard.** Parallel sessions are safe **without**
    any branch- or file-based lock because each session's first mutating step is the
