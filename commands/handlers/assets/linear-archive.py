@@ -128,7 +128,15 @@ def get_key():
             "full op://vault/item/field reference. (A configured linear.api_key_ref "
             "is exported by the caller — see this file's header.)"
         )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
+    try:
+        out = subprocess.run(
+            ["op", "read", ref], capture_output=True, text=True, timeout=10
+        )
+    except subprocess.TimeoutExpired:
+        sys.exit(
+            f"Timed out reading key from 1Password ({ref}) after 10s "
+            "— if the 1Password app is locked, unlock it or run `op signin` in your own terminal."
+        )
     key = out.stdout.strip()
     if not key:
         sys.exit(
