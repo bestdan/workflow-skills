@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.69.0] - 2026-08-01
+
+### Features
+
+- resolve auth keys through a shared, configurable resolver (#310) (8f45273)
+
 ## [1.68.0] - 2026-08-01
 
 ### Features
