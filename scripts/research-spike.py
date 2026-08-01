@@ -69,7 +69,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 PROG = "research-spike"
 
@@ -86,6 +86,19 @@ TRACKS_DIRNAME = "tracks"
 QUESTIONS_FILENAME = "questions.md"
 
 RECORD_KINDS = ("question", "obligation", "decision", "card")
+
+# Where cards live, and the two enums task 3 owns. `open | discharged` is the
+# obligation's whole lifecycle: there is no `in progress`, because a half-state
+# is a place for work to sit and look accounted for.
+OBLIGATIONS_DIRNAME = "obligations"
+OBLIGATION_STATUSES = ("open", "discharged")
+CARD_KINDS = ("stub", "receipt")
+
+# A plan directory, by the `plan-with-docs` convention (`<name>_plan/`).
+# Matched on the *directory* components of a destination only — a destination
+# under one is a warning, not an error, because `/push-plan` deletes these
+# folders after migrating them to a tracker.
+PLAN_DIR_SUFFIX = "_plan"
 
 # Keys each record kind accepts. Unknown keys are an error, not ignored — a
 # `desination:` typo must not silently drop the constraint. Only membership is
@@ -277,6 +290,21 @@ class Project:
 
 
 @dataclass
+class CardCounts:
+    """One track's cards, counted by kind.
+
+    Exposed on the tree rather than printed: the ledgers (task 7) report stubs
+    and receipts separately because they mean opposite things. A stub is work
+    with nowhere to go yet — a growing stub count is the diagnostic — while a
+    receipt is work that *did* go somewhere, into a system this validator
+    cannot see. Folding them into one number would hide both signals.
+    """
+
+    stubs: int = 0
+    receipts: int = 0
+
+
+@dataclass
 class Tree:
     """A discovered `dev_docs/research/` tree.
 
@@ -293,6 +321,11 @@ class Tree:
     # path. Task 4's coverage rule walks these: every section must declare its
     # obligations or explicitly declare `none:` with a reason.
     sections: dict[str, list[QuestionSection]] = field(default_factory=dict)
+    # Card tallies per track, keyed `project/track`. Filled by the card checks
+    # and read by task 7's ledgers — counted once, where the cards are already
+    # being walked, so the ledger and the validator can never disagree about
+    # how many stubs a track has.
+    cards: dict[str, CardCounts] = field(default_factory=dict)
 
     def project(self, name: str) -> Project | None:
         return next((p for p in self.projects if p.name == name), None)
@@ -721,6 +754,416 @@ def discover(root: Path, report: Report) -> Tree:
                 f"live under {research_dir.name}/<project>/",
             )
     return tree
+
+
+# --------------------------------------------------------------------------
+# Obligations and cards
+# --------------------------------------------------------------------------
+#
+# The load-bearing rule of the whole instrument lives here. A deferral in the
+# origin repo stayed visible **exactly when its destination was a file that
+# already existed**; "defer to the account track" was invisible because naming
+# a track does not create one. So `destination:` is not a comment, and every
+# message below says why its rule matters — a bare "invalid path" teaches
+# nobody, and a rule nobody understands is one they route around.
+
+
+def field_line(rec: Record, key: str) -> int:
+    """Where to hang a finding: the offending field's own line, or the block's
+    opening fence when the field is the thing that is missing."""
+    value = rec.fields.get(key)
+    return value.line if value is not None else rec.line
+
+
+def declared(rec: Record, key: str) -> str | None:
+    """A field's text, or None when it is absent, blank, or the `none`
+    sentinel — the three ways a required field can fail to say anything."""
+    value = rec.fields.get(key)
+    if value is None or value.is_none or not value.raw:
+        return None
+    return value.raw
+
+
+def is_none_block(rec: Record) -> bool:
+    """True for a bare `none: <reason>` block.
+
+    That is the coverage rule's explicit declaration — "this section owes
+    nothing, and here is why" — not an obligation with fields to check. It is
+    the only record shape allowed to carry no id, and task 4 is what makes
+    sure the reason is there.
+    """
+    return NONE_KEY in rec.fields
+
+
+def in_obligations_dir(tree: Tree, path: Path) -> bool:
+    """True for a file under some track's `obligations/` directory."""
+    try:
+        parts = path.relative_to(tree.research_dir).parts
+    except ValueError:
+        return False
+    return (
+        len(parts) >= 5
+        and parts[1] == TRACKS_DIRNAME
+        and parts[3] == OBLIGATIONS_DIRNAME
+    )
+
+
+def track_key(rec: Record) -> str:
+    return f"{rec.project}/{rec.track}"
+
+
+# Named once because four separate destination errors have to end the same
+# way: every one of them is fixed by pointing at a file that is already there.
+POINT_AT = (
+    "point at a specific file that already exists — the plan's epic file "
+    "(<name>_plan/<name>_plan.md), a particular task card, or a stub or "
+    "receipt card under tracks/<track>/obligations/"
+)
+
+
+def check_destination(rec: Record, tree: Tree, report: Report) -> None:
+    """The seven destination rules. Rules 1-6 are errors; rule 7 warns.
+
+    Checked in order and reported one at a time: a path that is absolute is
+    not also usefully described as missing, and a stack of derived findings
+    over one wrong line is how a report stops being read.
+    """
+    rel = rec.rel
+    line = field_line(rec, "destination")
+    raw = declared(rec, "destination")
+    if raw is None:
+        report.error(
+            rel,
+            line,
+            "obligation block: 'destination:' is required — an obligation "
+            "deferred into prose accrues invisibly, which is the failure this "
+            f"instrument exists to prevent. {POINT_AT}.",
+        )
+        return
+
+    pure = PurePosixPath(raw)
+    if pure.is_absolute() or raw.startswith("~"):
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' is an absolute path — destinations are "
+            "repo-relative so the record means the same thing in every clone; "
+            "an absolute one names somebody's own disk and resolves nowhere "
+            "for the next reader. Write it relative to the repository root.",
+        )
+        return
+    if ".." in pure.parts:
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' escapes the repository with '../' — a "
+            "deferral has to be reviewable alongside the record that names "
+            f"it, and nothing outside the tree is. {POINT_AT}.",
+        )
+        return
+
+    resolved = (tree.root / raw).resolve()
+    try:
+        inside = resolved.relative_to(tree.root)
+    except ValueError:
+        # No `..` in the text, so the escape came through a symlink. Same
+        # consequence either way: the file it points at is in no clone of this
+        # repo, so the obligation is addressed to nowhere.
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' resolves through a symlink to '{resolved}', "
+            "outside the repository — no clone of this repo contains that "
+            f"file, so the deferral has no address anyone else can follow. "
+            f"{POINT_AT}.",
+        )
+        return
+
+    if not resolved.exists():
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' does not exist — this is how deferred work "
+            "goes dark: naming a place does not create one, and a deferral to "
+            "a path that is not there reads as routed while routing nowhere. "
+            "Write the file first — a stub card under "
+            "tracks/<track>/obligations/ carrying its own "
+            "`superseded_when:` is the usual move — then point at it.",
+        )
+        return
+    if resolved.is_dir():
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' is a directory, not a file — a directory "
+            "can exist while saying nothing about the work, whereas a file "
+            f"names it. {POINT_AT}. (If the file you pick sits under a "
+            "*_plan/ directory, read the plan-directory warning first: "
+            "/push-plan deletes those folders.)",
+        )
+        return
+    if not resolved.is_file():
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' is not a regular file — a deferral has to "
+            f"point at something a reader can open and a diff can show. "
+            f"{POINT_AT}.",
+        )
+        return
+
+    research_parts: tuple[str, ...] = ()
+    try:
+        research_parts = resolved.relative_to(tree.research_dir).parts
+    except ValueError:
+        pass
+    if research_parts and research_parts[0] != rec.project:
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' lands in another research project "
+            f"('{research_parts[0]}') — work an answer creates for another "
+            "project is filed in that project, so every project's inbound "
+            "dependencies stay visible in its own ledger rather than in a "
+            "neighbour's. File the work there, then point this obligation at "
+            "a receipt card under tracks/<track>/obligations/ recording the "
+            "handoff.",
+        )
+        return
+
+    plan_dir = next(
+        (p for p in inside.parts[:-1] if p.endswith(PLAN_DIR_SUFFIX)),
+        None,
+    )
+    if plan_dir is not None:
+        report.warn(
+            rel,
+            line,
+            f"destination '{raw}' is inside a plan directory "
+            f"('{plan_dir}') — /push-plan deletes plan directories once it "
+            "has migrated them to a tracker, so this pointer rots on the "
+            "first push and the obligation goes dark exactly the way an "
+            "unwritten destination does. Pointing at an in-flight plan is "
+            "legitimate; revisit it before the plan is pushed, and replace it "
+            "with a receipt card under tracks/<track>/obligations/ recording "
+            "the handoff.",
+        )
+
+
+def validate_obligations(tree: Tree, report: Report) -> None:
+    """Field semantics for every `obligation` block in the tree.
+
+    Uniqueness is checked over the whole tree in one pass, not per file: two
+    files each internally consistent is precisely how the reference
+    implementation ended up with a `blocking:` reference that could mean
+    either of two records.
+    """
+    seen: dict[str, tuple[str, int]] = {}
+    for rec in tree.records:
+        if rec.kind != "obligation" or is_none_block(rec):
+            continue
+        rel = rec.rel
+
+        if rec.track is None:
+            report.error(
+                rel,
+                rec.line,
+                "obligation block is outside any track — an obligation is "
+                "identified as project/track/id and counted in its track's "
+                "ledger, so one filed outside tracks/<track>/ belongs to no "
+                "ledger and can be named by no reference. Move it into the "
+                "track whose work it is.",
+            )
+
+        bare = declared(rec, "id")
+        if bare is None:
+            report.error(
+                rel,
+                field_line(rec, "id"),
+                "obligation block: 'id:' is required — an obligation with no "
+                "id cannot be counted, referenced by `blocking:`, or reported "
+                "as discharged.",
+            )
+        elif not KEBAB_RE.match(bare):
+            report.error(
+                rel,
+                field_line(rec, "id"),
+                f"obligation id {bare!r} is not a valid id shape — use "
+                f"{KEBAB_DESCRIPTION}. Ids are qualified as project/track/id "
+                "and read back in reports and references, so an id carrying a "
+                "separator or a space corrupts the qualification.",
+            )
+        else:
+            qualified = rec.qualified_id
+            if qualified is not None:
+                prior = seen.get(qualified)
+                if prior is None:
+                    seen[qualified] = (rel, field_line(rec, "id"))
+                else:
+                    report.error(
+                        rel,
+                        field_line(rec, "id"),
+                        f"duplicate obligation id '{qualified}' — already "
+                        f"declared at {prior[0]}:{prior[1]}. Qualified ids "
+                        "must be unique across the whole tree: two records "
+                        "sharing one are counted twice in the ledger, and a "
+                        "`blocking:` reference to them names neither. Rename "
+                        "one.",
+                    )
+
+        if declared(rec, "owes") is None:
+            report.error(
+                rel,
+                field_line(rec, "owes"),
+                "obligation block: 'owes:' is required — one line, in your "
+                "own words, saying what is owed. A destination without it is "
+                "an address with no letter in it; nobody picking the work up "
+                "later can tell what was deferred.",
+            )
+
+        status = declared(rec, "status")
+        if status is None:
+            report.error(
+                rel,
+                field_line(rec, "status"),
+                "obligation block: 'status:' is required — "
+                f"{' | '.join(OBLIGATION_STATUSES)}. The open count is half "
+                "the divergence signal the ledger exists to show, and a "
+                "record with no status is counted in neither column.",
+            )
+        elif status not in OBLIGATION_STATUSES:
+            report.error(
+                rel,
+                field_line(rec, "status"),
+                f"obligation status {status!r} is not one of "
+                f"{' | '.join(OBLIGATION_STATUSES)} — there is deliberately "
+                "no in-between state, because a half-state is somewhere work "
+                "sits looking accounted for.",
+            )
+
+        discharged_by = rec.fields.get("discharged_by")
+        if status == "discharged" and declared(rec, "discharged_by") is None:
+            report.error(
+                rel,
+                field_line(rec, "discharged_by"),
+                "a discharged obligation requires 'discharged_by:' — free "
+                "text naming the change that discharged it, typically a PR or "
+                "commit reference. Without it 'discharged' is an assertion "
+                "nobody can check. It is deliberately not path-checked: the "
+                "discharging artifact usually lives outside this tree.",
+            )
+        elif status == "open" and discharged_by is not None:
+            report.error(
+                rel,
+                field_line(rec, "discharged_by"),
+                "'discharged_by:' is set while status is open — one of the "
+                "two is wrong, and either way the record is reported as "
+                "outstanding work that somebody has already done. Flip the "
+                "status, or drop the field.",
+            )
+
+        # `blocking:` is accepted and recorded here; whether it names a real
+        # decision is task 5's referential check.
+        check_destination(rec, tree, report)
+
+
+def validate_cards(tree: Tree, report: Report) -> None:
+    """Card blocks, and the files under `obligations/` that must carry one.
+
+    Cards are what make stubs and handoffs first-class instead of folklore, so
+    both halves are checked: a card block filed somewhere the ledger never
+    walks, and a file in the directory the ledger *does* walk that turns out
+    to hold nothing.
+    """
+    carded: set[Path] = set()
+    for rec in tree.records:
+        if rec.kind != "card":
+            continue
+        rel = rec.rel
+        if not in_obligations_dir(tree, rec.path):
+            report.error(
+                rel,
+                rec.line,
+                "card block outside tracks/<track>/obligations/ — cards are "
+                "counted by walking that directory, so one filed anywhere "
+                "else is a stub or a handoff that no ledger will ever show. "
+                "Move the file into the track's obligations/ directory.",
+            )
+            continue
+        carded.add(rec.path)
+        counts = tree.cards.setdefault(track_key(rec), CardCounts())
+
+        kind = declared(rec, "kind")
+        if kind is None:
+            report.error(
+                rel,
+                field_line(rec, "kind"),
+                "card block: 'kind:' is required — "
+                f"{' | '.join(CARD_KINDS)}. The two are opposites in the "
+                "ledger: a stub is work with nowhere to go yet, a receipt is "
+                "work that went somewhere this validator cannot see.",
+            )
+            continue
+        if kind not in CARD_KINDS:
+            report.error(
+                rel,
+                field_line(rec, "kind"),
+                f"card kind {kind!r} is not one of {' | '.join(CARD_KINDS)} — "
+                "a card either holds a place open (stub) or records a handoff "
+                "out of this tree (receipt); there is no third thing for the "
+                "ledger to count.",
+            )
+            continue
+
+        if kind == "stub":
+            counts.stubs += 1
+            if declared(rec, "superseded_when") is None:
+                report.error(
+                    rel,
+                    field_line(rec, "superseded_when"),
+                    "a stub card requires 'superseded_when:' — the condition "
+                    "of this card's own deletion. A stub that never gets "
+                    "superseded is a new place for work to hide, and the "
+                    "written condition is what lets a later reader tell "
+                    "whether it is still holding anything open.",
+                )
+        else:
+            counts.receipts += 1
+            if declared(rec, "url") is None:
+                report.error(
+                    rel,
+                    field_line(rec, "url"),
+                    "a receipt card requires 'url:' — the address of the work "
+                    "in the system it was handed to. The receipt is the whole "
+                    "reason the destination-must-exist rule survives a "
+                    "handoff: the path stays local and real while the "
+                    "external reference lives in content the validator never "
+                    "fetches (it is offline by contract, and an unreachable "
+                    "tracker must never fail this gate).",
+                )
+
+    for project in tree.projects:
+        for track in project.tracks:
+            directory = track.path / OBLIGATIONS_DIRNAME
+            if not directory.is_dir():
+                continue
+            tree.cards.setdefault(f"{project.name}/{track.name}", CardCounts())
+            # Markdown only. `init` writes an `obligations/.gitkeep` because an
+            # empty directory does not survive git, and a scaffolded tree must
+            # pass its own gate.
+            for md in sorted(directory.rglob("*.md")):
+                if not md.is_file() or md in carded:
+                    continue
+                report.error(
+                    md.relative_to(tree.root).as_posix(),
+                    0,
+                    "no card block in this file — every file under "
+                    "obligations/ is a card, and the ledger counts stubs and "
+                    "receipts by walking this directory. A file here with no "
+                    "block looks filed and is counted nowhere. Add a ```card "
+                    "block: kind: stub with superseded_when:, or kind: "
+                    "receipt with url:.",
+                )
 
 
 # --------------------------------------------------------------------------
@@ -1275,6 +1718,8 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     if not tree.present:
         # No research tree is clean, not an error: nothing to say, exit 0.
         return EXIT_OK
+    validate_obligations(tree, report)
+    validate_cards(tree, report)
     if args.verbose:
         # Printed before the verdict, and whatever the verdict. The inventory
         # is the only view of what the parser actually made of the tree, so
