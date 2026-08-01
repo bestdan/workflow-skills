@@ -11,20 +11,19 @@ per-issue `get_issue` attachment-fetch loop with one paginated GraphQL query
 per scope (project, or whole-team when no --project is given).
 
 Read-only. Never mutates anything. This is a sibling of linear-ready.py and
-linear-archive.py; it reuses linear-archive.py's get_key()/gql() verbatim.
+linear-archive.py; it reuses linear-archive.py's gql() helper verbatim, and
+all three call the shared _secret_resolve.py for get_key().
 
-The API key is read, in order, from:
-  1. $LINEAR_API_KEY, else
-  2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
+The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
+walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
+`$LINEAR_API_KEY_REF` -> unavailable) and resolver (`$LINEAR_API_KEY_RESOLVER`
+-> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
+A failed resolve never falls through to the next rung. See
+dev_docs/auth_key_access.md for the full contract.
 
-`op read` needs an authorized 1Password session. Running `op signin` in your own
-terminal establishes one that IS visible to an agent's tool-spawned subshell — op
-holds the session in a per-user cache daemon — and it lapses after roughly 30
-minutes of inactivity. Headless runs instead set $LINEAR_API_KEY directly, or
-$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
-
-A configured `linear.api_key_ref` reaches step 2 only because the caller exports
-it — see linear-common.md's "Key resolution" step. This script reads no config.
+A configured `linear.api_key_ref` / `linear.api_key_resolver` reaches this
+script only because the caller bridges them onto the environment — see
+linear-common.md's "Key resolution" step. This script reads no config.
 
 On any failure (missing key, GraphQL error, team not found) this exits
 non-zero with the reason on stderr, so the caller can fall back to the MCP
@@ -40,10 +39,12 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _secret_resolve import SecretUnavailable, resolve_key
 
 API = "https://api.linear.app/graphql"
 
@@ -93,24 +94,10 @@ query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
 
 
 def get_key():
-    key = os.environ.get("LINEAR_API_KEY")
-    if key:
-        return key.strip()
-    ref = os.environ.get("LINEAR_API_KEY_REF")
-    if not ref:
-        sys.exit(
-            "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (A configured linear.api_key_ref "
-            "is exported by the caller — see this file's header.)"
-        )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
-    key = out.stdout.strip()
-    if not key:
-        sys.exit(
-            f"Could not read key from 1Password ({ref}): {out.stderr.strip()} "
-            "— if the op session has lapsed, run `op signin` in your own terminal."
-        )
-    return key
+    try:
+        return resolve_key("LINEAR_API_KEY")
+    except SecretUnavailable as e:
+        sys.exit(str(e))
 
 
 def gql(key, query, variables=None):

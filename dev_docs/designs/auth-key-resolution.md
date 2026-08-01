@@ -197,10 +197,17 @@ scheme.
 Exit status alone is not enough — `linear-common.md` requires the agent to tell the user
 to run `op signin` when a session has lapsed, and a bare status cannot distinguish that
 from a missing item or a missing binary. So the helper emits a **sanitized reason
-category** on stderr, which the agent may relay verbatim: `no-session`, `not-found`,
-`denied`, `no-binary`, `timeout`, `empty`, `malformed-ref`, `unknown-resolver`. Category
-plus the vault-reduced pointer is what a caller reports; the resolver's own output never
-is.
+category** on stderr, which the agent may relay verbatim: `unconfigured`, `no-session`,
+`not-found`, `denied`, `no-binary`, `timeout`, `empty`, `malformed-ref`,
+`unknown-resolver`. Category plus the vault-reduced pointer is what a caller reports; the
+resolver's own output never is.
+
+`unconfigured` was added during implementation and is load-bearing: the first draft had
+only eight categories, which forced "nothing is configured anywhere" to share `not-found`
+with "the ref names an item that does not exist". Those must stay distinct, because
+`linear-common.md` requires a keyless host to floor **silently** while a configured-but-
+unresolvable key gets an explanatory line. Collapsing them would have reintroduced this
+design's founding bug in a new place.
 
 ## Invariant check
 

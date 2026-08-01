@@ -8,12 +8,12 @@ fifth fast-path.
 
 ## The family
 
-| Script                                                                                        | Read                                                                         | Consumer(s)                                                                                    | `description`?            | Field philosophy                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`commands/handlers/assets/linear-ready.py`](../commands/handlers/assets/linear-ready.py)     | Ready-candidate selection (find-candidates)                                  | `/do-tasks` tracker path (`linear-claim.md` "Find candidates")                                 | No                        | Skinny — just enough to gate + rank + branch: `id identifier title priority estimate updatedAt branchName url assignee labels state project`                                                                                                                                                                                                                                                                                     |
-| [`commands/handlers/assets/linear-scan.py`](../commands/handlers/assets/linear-scan.py)       | In-flight scan (state + PR attachment)                                       | `/sweep-for-complete`, `/reconcile-tasks` row 2 (both via `linear-common.md` "In-flight scan") | No                        | Skinniest — `id identifier title url state { id type } attachments { nodes { url } }`; PR resolution and merge-checking are a separate downstream step                                                                                                                                                                                                                                                                           |
-| `commands/handlers/assets/linear-relations.py`                                                | Relations load (native `blockedBy`/`blocks`/`relatedTo`/`duplicateOf` edges) | `/reoptimize-tasks` "Load — build the graph"                                                   | **Yes** (plus `estimate`) | Richer — reoptimize runs rarely and legitimately needs body text for dedup/overlap judgment, so it trades the skinny-fields default for a payload that answers the graph-building question in one shot                                                                                                                                                                                                                           |
-| [`commands/handlers/assets/linear-archive.py`](../commands/handlers/assets/linear-archive.py) | Terminal-state issue archive (+ `issueArchive` mutation)                     | `/archive-tasks`                                                                               | No                        | Origin of the shared `get_key()`/`gql()` helpers: `get_key()` is reused verbatim by every sibling, while the read scripts (`linear-ready.py`/`linear-scan.py`) harden `gql()` with a request timeout and HTTP/URL error handling on top of this origin version; also the one family member that mutates (the Linear MCP exposes no archive mutation, so this is a GraphQL-only backstop, not a read fast-path with an MCP floor) |
+| Script                                                                                        | Read                                                                         | Consumer(s)                                                                                    | `description`?            | Field philosophy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`commands/handlers/assets/linear-ready.py`](../commands/handlers/assets/linear-ready.py)     | Ready-candidate selection (find-candidates)                                  | `/do-tasks` tracker path (`linear-claim.md` "Find candidates")                                 | No                        | Skinny — just enough to gate + rank + branch: `id identifier title priority estimate updatedAt branchName url assignee labels state project`                                                                                                                                                                                                                                                                                                                                                                  |
+| [`commands/handlers/assets/linear-scan.py`](../commands/handlers/assets/linear-scan.py)       | In-flight scan (state + PR attachment)                                       | `/sweep-for-complete`, `/reconcile-tasks` row 2 (both via `linear-common.md` "In-flight scan") | No                        | Skinniest — `id identifier title url state { id type } attachments { nodes { url } }`; PR resolution and merge-checking are a separate downstream step                                                                                                                                                                                                                                                                                                                                                        |
+| `commands/handlers/assets/linear-relations.py`                                                | Relations load (native `blockedBy`/`blocks`/`relatedTo`/`duplicateOf` edges) | `/reoptimize-tasks` "Load — build the graph"                                                   | **Yes** (plus `estimate`) | Richer — reoptimize runs rarely and legitimately needs body text for dedup/overlap judgment, so it trades the skinny-fields default for a payload that answers the graph-building question in one shot                                                                                                                                                                                                                                                                                                        |
+| [`commands/handlers/assets/linear-archive.py`](../commands/handlers/assets/linear-archive.py) | Terminal-state issue archive (+ `issueArchive` mutation)                     | `/archive-tasks`                                                                               | No                        | Origin of the shared `get_key()`/`gql()` helpers: `get_key()` is now a thin wrapper around `_secret_resolve.py` in every sibling (it was previously copied verbatim from here), while the read scripts (`linear-ready.py`/`linear-scan.py`) harden `gql()` with a request timeout and HTTP/URL error handling on top of this origin version; also the one family member that mutates (the Linear MCP exposes no archive mutation, so this is a GraphQL-only backstop, not a read fast-path with an MCP floor) |
 
 Each script is a **paginated GraphQL query per scope** (a project, or the
 whole team when no `--project` is given) instead of a multi-call MCP fan-out
@@ -108,21 +108,34 @@ every script in the family resolves it the same narrow way and every
 consumer treats the resolution itself as the security gate, not an add-on
 check.
 
-**Resolution order** (`get_key()`, defined once in `linear-archive.py` and
-reused verbatim by every sibling):
+**Resolution order.** `get_key()` was originally defined in `linear-archive.py`
+and copied verbatim into every sibling. It is now a thin wrapper in each script
+around the shared `commands/handlers/assets/_secret_resolve.py`, whose contract
+is `dev_docs/auth_key_access.md`. In outline:
 
 1. `$LINEAR_API_KEY` — a raw key already in the environment.
-2. `op read "$LINEAR_API_KEY_REF"` — a full `op://vault/item/field`
-   reference, resolved via the 1Password CLI. This needs an authorized `op`
-   session (established by `op signin` in the user's own terminal, and then
-   shared across their processes), or `$OP_SERVICE_ACCOUNT_TOKEN` set.
+2. `$LINEAR_API_KEY_REF` — a `<scheme>://…` reference, resolved by an
+   allow-listed program: `op` (default, `op read <ref>`) or `opx`
+   (`opx <ref>`), chosen by `$LINEAR_API_KEY_RESOLVER`. The default needs an
+   authorized `op` session (established by `op signin` in the user's own
+   terminal, and then shared across their processes), or
+   `$OP_SERVICE_ACCOUNT_TOKEN` set.
 
-`$LINEAR_API_KEY_REF` itself is exported by the caller from the merged config's
-`linear.api_key_ref` — see `linear-common.md`'s "Key resolution" step. The
-scripts read no config of their own.
+A failed resolve does **not** fall through to the next rung — that would make a
+misconfigured reference indistinguishable from a keyless host, which is exactly
+how a bad value went unnoticed here for weeks.
+
+Both env vars are bridged by the caller: `$LINEAR_API_KEY_REF` from the merged
+config's `linear.api_key_ref`, and `$LINEAR_API_KEY_RESOLVER` from
+`linear.api_key_resolver` in the gitignored `.task-config.local.yml` only —
+a resolver names a program, so a committed config may not supply one. See
+`linear-common.md`'s "Key resolution" step. The scripts read no config of their
+own.
 
 Neither source is ever a literal key in a config file — `linear.api_key_ref`
-holds an `op://` reference, never a raw secret.
+holds a reference, never a raw secret — and the scripts redact the reference to
+its vault segment in every error path rather than relying on callers not to
+repeat it.
 
 **Never in a cloud sandbox.** This is a **deployment policy, not a check the
 code enforces** — `get_key()` will use whatever key it finds, so the boundary
@@ -185,8 +198,11 @@ harness, so they are opt-in rather than always-on:
 
 1. **Write a new script** under `commands/handlers/assets/`, mirroring the
    shape of `linear-ready.py` or `linear-scan.py`: copy `get_key()` and
-   `gql()` from an existing sibling — `get_key()` is identical everywhere, but
-   copy the **hardened** `gql()` (request timeout + HTTP/URL error handling)
+   `gql()` from an existing sibling — `get_key()` is identical everywhere and
+   should stay a thin wrapper around `_secret_resolve.resolve_key()` (never
+   re-implement resolution, and state in the script's own docs whether an
+   unavailable key floors or is fatal, per `dev_docs/auth_key_access.md` →
+   "Failure semantics"), but copy the **hardened** `gql()` (request timeout + HTTP/URL error handling)
    from `linear-ready.py` or `linear-scan.py`, not the older plain version in
    `linear-archive.py` (do not reimplement key resolution or the GraphQL POST),
    build one paginated query per scope
