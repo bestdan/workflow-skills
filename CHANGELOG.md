@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.69.2] - 2026-08-01
+
+### Fixes
+
+- lock the jira/gh-issue claim on an atomic primitive (#278) (2ab0747)
+
 ## [1.69.1] - 2026-08-01
 
 ### Fixes
