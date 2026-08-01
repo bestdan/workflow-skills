@@ -68,11 +68,22 @@ Exit 0 means the backstop runs in-session like any other command. Otherwise the
   own terminal (for the default `op` resolver, `op signin`), then re-probe; or
   move the step outside the session (`!` prefix, cron, GitHub Action — headless
   paths use `OP_SERVICE_ACCOUNT_TOKEN` or a CI secret instead).
+- `denied` — the resolver ran and refused. With an **approval-per-read** resolver
+  this is the ordinary "nobody answered the dialog" outcome, not a fault: approve
+  it and re-probe. It is also the **catch-all** for any stderr the helper can't
+  classify, so treat it as "read the resolver's own message" rather than as a
+  specific diagnosis.
+- `not-found` — the resolver worked but the reference points at nothing (renamed
+  or deleted item). Fix the reference, not the session.
 - `unconfigured` — no key or reference is set anywhere. A config task, not a
   session one; moving the step elsewhere fixes nothing.
 - `malformed-ref` / `unknown-resolver` — a bad value in the local config. These
   are **deliberately distinct** failures: before the shared resolver landed they
   looked identical to a keyless host, so a typo silently floored every run.
+
+Only `no-session` and `denied` are ever fixed by changing _where_ you run the
+step. The other four are configuration, and will fail identically from a cron
+job.
 
 Two things **not** to conclude from a failure. It is not "the agent is forbidden
 from calling the secret tool" — it isn't (this command's own `allowed-tools`
