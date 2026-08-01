@@ -11,11 +11,6 @@ and push it to the tracker configured for this repo. This is the **local-first**
 flow: plans are always drafted and vetted as files first; pushing is a separate,
 deliberate, re-runnable act — never an auto-sync on write.
 
-The design that this command implements (trigger, readiness, mapping,
-idempotency, reverse drift) is the spike
-`dev_docs/tasks/task_loop_improvements_plan/plan_tracker_sync_design.md` — read
-it for the full rationale and rejected alternatives.
-
 This command **reuses each handler's existing add-flow** to create issues rather
 than re-implementing create logic. Its own job is only: resolve the container,
 order the tasks topologically, resolve `is_blocked_by` slugs to tracker ids, and
