@@ -2,7 +2,7 @@
 title: "research-spike: script skeleton — CLI, tree discovery, block parser, test harness"
 priority: high
 size: 5
-status: new
+status: ready
 created: 2026-08-01
 source_branch: claude/spike-research-plan-jz7ggg
 related_files:
