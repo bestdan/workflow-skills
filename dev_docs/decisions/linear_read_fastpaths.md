@@ -55,15 +55,19 @@ two means depending on the read. For a read with a `linear-common.md` block
 (ready-candidate, in-flight scan), the script and its MCP-floor sibling both
 implement that same block (see next section), so a caller never needs to
 reconcile "what did the fast path pick" against "what would the floor have
-picked" — they're defined to be the same selection. One caveat that equivalence
-does **not** cover: ready-candidate selection's assignee gate is
+picked" — they're defined to be the same selection. Two caveats that equivalence
+does **not** cover. First, ready-candidate selection's assignee gate is
 **viewer-relative**, and each path resolves the viewer from its own credential
 (the script from `$LINEAR_API_KEY`'s owner, the floor from the MCP connection's).
 Both paths enforce the gate — the floor reads `assigneeId` off its own
 `list_issues` results — but they only agree about _who_ "me" is while the key and
 the MCP connection belong to the same Linear user, which is a configuration
 requirement rather than a property of the design (`linear-claim.md` → "Find
-candidates"). For a single-consumer
+candidates"). Second, equivalence is over the selection **rules**, not over the
+candidate set each path enumerates: the MCP floor reads a bounded page per scope
+and does not paginate, while the script paginates to exhaustion, so a truncated
+floor read can miss a candidate the script ranks. Both caveats are conditions on
+the inputs, not divergences in the gates. For a single-consumer
 read with no block (relations load), equivalence is instead matched **by
 hand** between the script's docstring and the consumer's prose. (Archive is
 the exception with no floor at all — it is a GraphQL-only backstop, not a
