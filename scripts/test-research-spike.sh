@@ -1225,6 +1225,110 @@ assert_exit "a card block outside obligations/ exits 1" "$exit_m7" 1
 assert_contains "the misplaced-card error says no ledger will show it" "$out_m7" \
   "card block outside tracks/<track>/obligations/"
 
+# --- Fixture (m8): a `none:` line is not a way to switch the checks off --
+# The exemption is for a *bare* `none:` block — the coverage rule's explicit
+# declaration. Exempting any block that merely carries the line let a record
+# with a real destination skip every check in the file, missing destination
+# included, which would have made `none:` the off switch.
+DIR_M8="$BASE/none-mixed"
+mkdir -p "$DIR_M8/dev_docs/research/alpha/tracks/account"
+write_file "$DIR_M8/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+none: nothing is owed here
+id: keychain-invariant
+owes: except for this, apparently
+destination: dev_docs/tasks/never_written.md
+status: open
+```'
+out_m8="$(python3 "$SCRIPT" --root "$DIR_M8" validate 2>&1)"
+exit_m8=$?
+assert_exit "a none: line alongside real fields does not exempt the block" "$exit_m8" 1
+assert_contains "the mixed block is reported as trying to be two records" "$out_m8" \
+  "declares 'none:' alongside other fields"
+assert_contains "the mixed block's destination is still checked" "$out_m8" \
+  "destination 'dev_docs/tasks/never_written.md' does not exist"
+
+# --- Fixture (m9): an unresolvable destination is a finding, not a crash -
+# pathlib raises RuntimeError (not OSError) on a symlink loop, so catching
+# only OSError left this tracebacking out of the middle of the walk — and a
+# traceback exits 1, which is indistinguishable from a real finding.
+DIR_M9="$BASE/dest-symlink-loop"
+obligation_fixture "$DIR_M9" "dev_docs/tasks/loop.md"
+ln -s loop.md "$DIR_M9/dev_docs/tasks/loop.md"
+out_m9="$(python3 "$SCRIPT" --root "$DIR_M9" validate 2>&1)"
+exit_m9=$?
+assert_exit "a symlink loop destination exits 1" "$exit_m9" 1
+assert_not_contains "a symlink loop does not traceback" "$out_m9" "Traceback"
+assert_contains "a symlink loop is reported as an address nobody can follow" "$out_m9" \
+  "cannot be resolved"
+
+# --- Fixture (m10): a file directly under dev_docs/research/ is not a project
+# With the containment test at `>= 1`, the file's own name landed in
+# research_parts[0] and README.md was reported as "another research project" —
+# a rule firing on a name it invented.
+DIR_M10="$BASE/dest-research-root"
+obligation_fixture "$DIR_M10" "dev_docs/research/README.md"
+printf '# the research tree\n' >"$DIR_M10/dev_docs/research/README.md"
+out_m10="$(python3 "$SCRIPT" --root "$DIR_M10" validate 2>&1)"
+exit_m10=$?
+assert_exit "a destination directly under dev_docs/research/ passes" "$exit_m10" 0
+assert_not_contains "a research-root file is never called another project" "$out_m10" \
+  "another research project"
+
+# --- Fixture (m11): one card per file ------------------------------------
+DIR_M11="$BASE/card-two-blocks"
+mkdir -p "$DIR_M11/dev_docs/research/alpha/tracks/account/obligations"
+write_file "$DIR_M11/dev_docs/research/alpha/tracks/account/obligations/keychain.md" \
+  '# two cards in one file
+
+```card
+kind: stub
+superseded_when: the account track files its measurement card
+```
+
+```card
+kind: receipt
+url: https://example.invalid/ISSUE-1
+```'
+out_m11="$(python3 "$SCRIPT" --root "$DIR_M11" validate 2>&1)"
+exit_m11=$?
+assert_exit "a second card block in one file exits 1" "$exit_m11" 1
+assert_contains "the second-card error says a file holds exactly one card" "$out_m11" \
+  "a card file holds exactly one card"
+assert_contains "the second-card error names the first block's line" "$out_m11" \
+  "the first is at line 3"
+assert_contains "the second-card error is located at the second block" "$out_m11" \
+  "obligations/keychain.md:8:"
+
+# --- Fixture (m12): obligations/ holds cards, not stray files ------------
+# Globbing only *.md left a notes.txt holding deferred work that no parser
+# reads and no ledger counts — a hiding place inside the one directory whose
+# whole purpose is that work cannot hide in it. Dotfiles stay exempt: `init`
+# writes .gitkeep, and Finder drops .DS_Store into anything it opens.
+DIR_M12="$BASE/obligations-stray-file"
+card_fixture "$DIR_M12" "kind: stub
+superseded_when: the account track files its measurement card"
+M12_DIR="$DIR_M12/dev_docs/research/alpha/tracks/account/obligations"
+printf 'a deferral somebody typed into a text file\n' >"$M12_DIR/notes.txt"
+out_m12="$(python3 "$SCRIPT" --root "$DIR_M12" validate 2>&1)"
+exit_m12=$?
+assert_exit "a non-markdown file under obligations/ exits 1" "$exit_m12" 1
+assert_contains "the stray-file error names the file" "$out_m12" "obligations/notes.txt"
+assert_contains "the stray-file error says it would be counted nowhere" "$out_m12" \
+  "not a markdown card"
+
+DIR_M13="$BASE/obligations-dotfiles"
+card_fixture "$DIR_M13" "kind: stub
+superseded_when: the account track files its measurement card"
+M13_DIR="$DIR_M13/dev_docs/research/alpha/tracks/account/obligations"
+: >"$M13_DIR/.gitkeep"
+printf '\x00\x01macOS junk\n' >"$M13_DIR/.DS_Store"
+out_m13="$(python3 "$SCRIPT" --root "$DIR_M13" validate 2>&1)"
+exit_m13=$?
+assert_exit "dotfiles under obligations/ are exempt (.gitkeep, .DS_Store)" "$exit_m13" 0
+assert_not_contains "a dotfile is never reported as a card" "$out_m13" ".gitkeep"
+
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do

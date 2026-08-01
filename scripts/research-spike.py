@@ -785,14 +785,20 @@ def declared(rec: Record, key: str) -> str | None:
 
 
 def is_none_block(rec: Record) -> bool:
-    """True for a bare `none: <reason>` block.
+    """True for a **bare** `none: <reason>` block — `none` and nothing else.
 
     That is the coverage rule's explicit declaration — "this section owes
     nothing, and here is why" — not an obligation with fields to check. It is
     the only record shape allowed to carry no id, and task 4 is what makes
     sure the reason is there.
+
+    The bareness is the whole guard. Exempting any block that merely *carries*
+    a `none:` line let a record declaring nothing owed alongside a real
+    `destination:` skip every check in this file, missing destination
+    included — a `none:` line would have become the way to switch the
+    validator off, which is worse than not having the rules.
     """
-    return NONE_KEY in rec.fields
+    return NONE_KEY in rec.fields and len(rec.fields) == 1
 
 
 def in_obligations_dir(tree: Tree, path: Path) -> bool:
@@ -862,7 +868,23 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         )
         return
 
-    resolved = (tree.root / raw).resolve()
+    try:
+        resolved = (tree.root / raw).resolve()
+    except (OSError, RuntimeError) as e:
+        # A symlink loop is the realistic case, and pathlib's own error for it
+        # is a **RuntimeError**, not an OSError — catching only OSError left
+        # this line raising out of the middle of the walk. A traceback exits 1,
+        # which this script's contract reserves for tree-content violations, so
+        # the crash would be indistinguishable from a real finding while hiding
+        # every record the scan never reached.
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' cannot be resolved ({e}) — the address does "
+            "not lead anywhere the filesystem can follow, so neither can a "
+            f"reader. {POINT_AT}.",
+        )
+        return
     try:
         inside = resolved.relative_to(tree.root)
     except ValueError:
@@ -917,7 +939,11 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         research_parts = resolved.relative_to(tree.research_dir).parts
     except ValueError:
         pass
-    if research_parts and research_parts[0] != rec.project:
+    # `>= 2` because a file sitting *directly* in dev_docs/research/ (a README
+    # at the root of the tree) is in no project at all — with `>= 1` its own
+    # filename landed in `research_parts[0]` and got reported as "another
+    # research project", which is a rule firing on a name it invented.
+    if len(research_parts) >= 2 and research_parts[0] != rec.project:
         report.error(
             rel,
             line,
@@ -963,6 +989,22 @@ def validate_obligations(tree: Tree, report: Report) -> None:
         if rec.kind != "obligation" or is_none_block(rec):
             continue
         rel = rec.rel
+
+        if NONE_KEY in rec.fields:
+            # Not exempt — reaching here means the block carries `none:` *and*
+            # ordinary fields, so it is trying to be two records at once: a
+            # declaration that nothing is owed, and an obligation owing
+            # something. Reported, then checked in full, because the half that
+            # registers work is the half that must not go unvalidated.
+            report.error(
+                rel,
+                field_line(rec, NONE_KEY),
+                "obligation block declares 'none:' alongside other fields — a "
+                "block either declares that nothing is owed, or registers "
+                "something owed; it cannot do both, and a reader cannot tell "
+                "which one was meant. Split it into a bare `none:` block and "
+                "an obligation, or drop the line that does not apply.",
+            )
 
         if rec.track is None:
             report.error(
@@ -1075,7 +1117,7 @@ def validate_cards(tree: Tree, report: Report) -> None:
     walks, and a file in the directory the ledger *does* walk that turns out
     to hold nothing.
     """
-    carded: set[Path] = set()
+    carded: dict[Path, Record] = {}
     for rec in tree.records:
         if rec.kind != "card":
             continue
@@ -1090,7 +1132,23 @@ def validate_cards(tree: Tree, report: Report) -> None:
                 "Move the file into the track's obligations/ directory.",
             )
             continue
-        carded.add(rec.path)
+        first = carded.setdefault(rec.path, rec)
+        if first is not rec:
+            # One card per file, by design: the file *is* the address an
+            # obligation's `destination:` points at, so a second block in it
+            # gives one address two meanings — and the destination can only
+            # ever name the file. Not counted either; a tally that included
+            # both would put a stub in the ledger nobody can point at.
+            report.error(
+                rel,
+                rec.line,
+                "a second card block in this file — a card file holds exactly "
+                f"one card (the first is at line {first.line}), because the "
+                "file is the address an obligation's `destination:` points at "
+                "and a path cannot name one of two blocks. Split it into two "
+                "files under obligations/.",
+            )
+            continue
         counts = tree.cards.setdefault(track_key(rec), CardCounts())
 
         kind = declared(rec, "kind")
@@ -1148,14 +1206,35 @@ def validate_cards(tree: Tree, report: Report) -> None:
             if not directory.is_dir():
                 continue
             tree.cards.setdefault(f"{project.name}/{track.name}", CardCounts())
-            # Markdown only. `init` writes an `obligations/.gitkeep` because an
-            # empty directory does not survive git, and a scaffolded tree must
-            # pass its own gate.
-            for md in sorted(directory.rglob("*.md")):
-                if not md.is_file() or md in carded:
+            # **Every** file, not just `*.md`. Globbing markdown alone let a
+            # `notes.txt` sit here holding deferred work that no parser reads
+            # and no ledger counts — a labelled hiding place inside the one
+            # directory whose entire purpose is that work cannot hide in it.
+            #
+            # Dotfiles are exempt: a dotfile cannot plausibly be a card, and
+            # two of them are unavoidable here — `init` writes
+            # `obligations/.gitkeep` because an empty directory does not
+            # survive git, and macOS's Finder drops `.DS_Store` into any
+            # directory somebody opens.
+            for entry in sorted(directory.rglob("*")):
+                if not entry.is_file() or entry.name.startswith("."):
+                    continue
+                rel_entry = entry.relative_to(tree.root).as_posix()
+                if entry.suffix != ".md":
+                    report.error(
+                        rel_entry,
+                        0,
+                        "not a markdown card — every file under obligations/ "
+                        "is a card, and only markdown is parsed for card "
+                        "blocks, so this file holds work no ledger will ever "
+                        "count. Rewrite it as a `.md` card file, or move it "
+                        "somewhere the directory's rule does not apply.",
+                    )
+                    continue
+                if entry in carded:
                     continue
                 report.error(
-                    md.relative_to(tree.root).as_posix(),
+                    rel_entry,
                     0,
                     "no card block in this file — every file under "
                     "obligations/ is a card, and the ledger counts stubs and "
