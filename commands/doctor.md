@@ -57,6 +57,13 @@ view for every check below (the linear `api_key_ref` resolution check in particu
 depends on it). Hold the parsed `handler:` value (default `repo-pr`) for checks 1
 and 2.
 
+**One exception to "use the merged view":** `linear.api_key` and
+`linear.api_key_resolver` are machine-scoped — a raw secret and the name of a
+program to run — so they are honored only from the **raw `.task-config.local.yml`
+leaf**, never from the committed file. Keep the two files distinguishable rather
+than only their merge, since the archive-key check reports a committed one as a
+provenance `WARN` (see `dev_docs/auth_key_access.md` → "Provenance").
+
 ### 2. Run the checks
 
 Run all checks regardless of individual outcomes (one bad check must not hide the
@@ -239,20 +246,56 @@ auto-archive, store an API key). Report against the resolved handler:
   mechanism and the GraphQL script is the backstop (state this, since `/doctor`
   can't read Linear's team settings). Read `linear.api_key_ref` from the **merged
   config** (`.task-config.yml` overlaid with the gitignored
-  `.task-config.local.yml`, its canonical home). Then:
-  - **Unset** (in neither file) → `WARN`: "no `linear.api_key_ref` — the GraphQL
-    archive backstop is unavailable; rely on native auto-archive or add a key to
-    `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
+  `.task-config.local.yml`, its canonical home), and `linear.api_key` from the
+  **raw `.task-config.local.yml` leaf** — it is machine-scoped, so a value in the
+  committed file is refused rather than merged (see the provenance bullet below).
+  Then:
+  - **Unset** (no key and no ref in either file) → `WARN`: "no `linear.api_key_ref`
+    — the GraphQL archive backstop is unavailable; rely on native auto-archive or
+    add a key to `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
   - **Set** → confirm it actually **resolves**, don't just accept the string.
-    Test resolution without revealing the secret: if `$LINEAR_API_KEY` is already
-    exported, `PASS` (the script will use it directly). Else probe the ref with
-    `op read "<ref>" >/dev/null 2>&1` (redirect — never print the key). Exit 0 →
-    `PASS` "backstop wired; key resolves." Non-zero → `WARN`: "`api_key_ref` is
-    set but did not resolve. The usual cause is no authorized `op` session (the error
-    reads `account is not signed in`) rather than a bad ref — run `op signin` in your
-    own terminal and re-run, or set `OP_SERVICE_ACCOUNT_TOKEN`. If it fails after
-    signing in, fix the `op://vault/item/field` reference." (Still a
-    `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
+    Bridge the config exactly as `linear-common.md` → "Key resolution" does — **all
+    three rungs**, not just the ref, or a host configured with a plaintext
+    `linear.api_key` probes with nothing bridged and gets a false `WARN` for a
+    correct setup. Then probe with the shared helper, which honors the configured
+    resolver and never writes a secret to stdout:
+
+    ```bash
+    LINEAR_API_KEY="${LINEAR_API_KEY:-<linear.api_key from .task-config.local.yml>}" \
+      LINEAR_API_KEY_REF='<from merged config>' LINEAR_API_KEY_RESOLVER='<from .task-config.local.yml>' \
+      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+    ```
+
+    Omit any assignment whose source is unset — an empty value is not the same as an
+    absent one — and keep the `${LINEAR_API_KEY:-…}` form so an already-exported key
+    still wins over config, as the ladder requires.
+
+    **Do not probe with a bare `op read "<ref>"`.** That ignores a configured
+    resolver, so a machine using an approval-based one (`opx`) gets a false `WARN`
+    saying its key doesn't resolve when the real fast paths work fine.
+
+    Exit 0 → `PASS` "backstop wired; key resolves." Non-zero → the helper prints one
+    reason **category** on stderr; report the fix that matches it (`no-session` →
+    run `op signin` in your own terminal, or set `OP_SERVICE_ACCOUNT_TOKEN` for a
+    headless run; `not-found` → fix the reference; `no-binary` → the configured
+    resolver isn't installed; `malformed-ref` → the value isn't a `<scheme>://…`
+    reference, and a command-prefixed one like `opx op://…` belongs in
+    `api_key_resolver` instead; `unknown-resolver` → `api_key_resolver` names
+    something not on the allow-list; `timeout` → an approval dialog went unanswered).
+    (Still a `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
+
+    Two notes worth stating in the output when they apply. A resolver that raises an
+    approval dialog will raise one **for this probe too**, and `opx` invalidates the
+    `op` session afterwards — so a later plain `op read` in the same shell failing is
+    expected, not a broken session. And if `$LINEAR_API_KEY` is already exported, the
+    probe passes on that alone without exercising the ref at all; say so rather than
+    implying the ref was verified.
+  - **Provenance** → if `api_key` or `api_key_resolver` appears in the **committed**
+    `.task-config.yml`, `WARN` regardless of whether anything resolves: "`<key>` is
+    machine-scoped and is refused from the committed config — move it to
+    `.task-config.local.yml` (see `dev_docs/auth_key_access.md` → 'Provenance')." A
+    raw key there is worse than ignored — it is a full-account token in a tracked
+    file, so say that plainly and recommend rotating it.
     The same key, when set, also enables the read-only GraphQL fast paths
     (`/do-tasks` find-candidates, `/sweep-for-complete`, `/reconcile-tasks`,
     `/reoptimize-tasks`) via `linear-common.md`'s "Key resolution" step —

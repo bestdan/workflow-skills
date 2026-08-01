@@ -2,9 +2,21 @@
 # Live smoke test for commands/handlers/assets/linear-relations.py.
 #
 # Unlike the other scripts/test-*.sh harnesses, this one hits the REAL Linear
-# GraphQL API, so it is OPT-IN and only runs when a key is resolvable: a raw
-# $LINEAR_API_KEY, an op:// ref in $LINEAR_API_KEY_REF, or `linear.api_key_ref`
-# from the repo config — the last two resolved via `op read`.
+# GraphQL API, so it is OPT-IN and only runs when a key is resolvable, per the
+# shared secret/pointer/resolver contract in dev_docs/auth_key_access.md: a
+# raw $LINEAR_API_KEY, a raw `linear.api_key` (local config only), an op://
+# ref in $LINEAR_API_KEY_REF or `linear.api_key_ref` (merged config), resolved
+# by whatever `linear.api_key_resolver` names (local config only; `op` by
+# default). This harness only ever BRIDGES config values onto the environment
+# of the script under test and asks the shared helper whether the result
+# resolves — it never resolves a secret itself, with one narrow exception: the
+# enum-drift guard below queries the API directly and resolves in-process.
+#
+# With an APPROVAL-BASED resolver (e.g. opx) that means THREE dialogs per run —
+# the probe, the script under test, and the enum guard — since each resolve is
+# separately approved and the session is invalidated between them. That is the
+# resolver working as designed, not a bug; use `LINEAR_API_KEY=… bash <this>` to
+# run it with a single pre-resolved key instead.
 # With no key it SKIPS and exits 0 — this keeps `check.sh` green for keyless
 # devs and keeps CI keyless *by construction*: a Linear personal API key is a
 # full-account bearer token that must never live in CI secrets (see
@@ -28,83 +40,89 @@ SCRIPT="$ROOT/commands/handlers/assets/linear-relations.py"
 CONFIG="$ROOT/dev_docs/tasks/.task-config.yml"
 LOCAL_CONFIG="$ROOT/dev_docs/tasks/.task-config.local.yml" # gitignored personal override
 
-# Resolve an op:// ref to its secret WITHOUT ever hanging. `op read` BLOCKS on a
-# locked 1Password desktop session (a biometric prompt it can't answer in this
-# non-interactive subshell), which would stall check.sh — so run it in the
-# background and hard-kill it after ~6s. Prints the secret on success; non-zero
-# and empty on failure/timeout. (macOS ships no `timeout`, hence the manual bound.)
-op_read_bounded() {
-  command -v op >/dev/null 2>&1 || return 1
-  local tmp
-  tmp="$(mktemp)"
-  op read "$1" >"$tmp" 2>/dev/null &
-  local pid=$! i=0
-  while kill -0 "$pid" 2>/dev/null; do
-    i=$((i + 1))
-    if [ "$i" -gt 60 ]; then
-      kill "$pid" 2>/dev/null
-      sleep 0.2
-      kill -9 "$pid" 2>/dev/null # TERM then KILL, so a TERM-ignoring op can't wedge the wait
-      wait "$pid" 2>/dev/null
-      rm -f "$tmp"
-      return 1
-    fi
-    sleep 0.1
-  done
-  if wait "$pid"; then
-    cat "$tmp"
-    rm -f "$tmp"
-    return 0
-  fi
-  rm -f "$tmp"
-  return 1
+# Extract a YAML leaf `key: value` from $1, first match, trimmed and unquoted.
+# Values may contain internal spaces — 1Password item titles routinely do — so
+# this only strips a trailing ` # comment` and a matching pair of surrounding
+# quotes; it never truncates at the first space the way a `[^[:space:]]*`
+# capture would (that bug used to silently chop `op://Private/PreThink Linear/…`
+# down to `op://Private/PreThink`).
+yaml_leaf() {
+  local file="$1" key="$2" val
+  [ -f "$file" ] || return 1
+  val="$(sed -n "s/^[[:space:]]*${key}:[[:space:]]*//p" "$file" | head -1)"
+  [ -z "$val" ] && return 1
+  val="$(printf '%s' "$val" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//')"
+  case "$val" in
+    \"*\") val="${val#\"}" val="${val%\"}" ;;
+    \'*\') val="${val#\'}" val="${val%\'}" ;;
+  esac
+  [ -z "$val" ] && return 1
+  printf '%s' "$val"
 }
 
-# --- resolve a key (opt-in) ---------------------------------------------------
-# Precedence: a raw $LINEAR_API_KEY; else an op:// ref in $LINEAR_API_KEY_REF;
-# else linear.api_key_ref from the repo config. A ref is resolved with `op read`,
-# which only works non-interactively when op is signed in (an authorized
-# terminal) or $OP_SERVICE_ACCOUNT_TOKEN is set. Anything unresolved -> the test
-# WARNs (loud locally, quiet in CI) and exits 0 — it never fails the suite, so
-# keyless devs and CI stay green and the full-account key never lands in CI.
-KEY="${LINEAR_API_KEY:-}"
-REF_SRC=""
-if [ -z "$KEY" ]; then
-  REF="${LINEAR_API_KEY_REF:-}"
-  [ -n "$REF" ] && REF_SRC="\$LINEAR_API_KEY_REF"
-  # Prefer the gitignored local override, then the committed config. A personal
-  # op://Private/... ref belongs in .task-config.local.yml — never committed to
-  # this public repo — so read it first.
-  for cfg in "$LOCAL_CONFIG" "$CONFIG"; do
-    if [ -z "$REF" ] && [ -f "$cfg" ]; then
-      REF="$(sed -n 's/^[[:space:]]*api_key_ref:[[:space:]]*\([^#[:space:]]*\).*/\1/p' "$cfg" | head -1)"
-      REF="${REF%\"}"
-      REF="${REF#\"}"
-      REF="${REF%\'}"
-      REF="${REF#\'}"
-      [ -n "$REF" ] && REF_SRC="linear.api_key_ref (${cfg##*/})"
-    fi
-  done
-  if [ -n "$REF" ]; then
-    KEY="$(op_read_bounded "$REF" || true)"
-  fi
+# --- bridge config onto the environment (opt-in) -------------------------------
+# Per dev_docs/auth_key_access.md, the secret/pointer and resolver ladders are
+# resolved independently and this harness only ever BRIDGES — it never resolves
+# a secret itself, and never lets a config value clobber an already-inherited
+# env var. `api_key` / `api_key_resolver` are machine-scoped and refused from the
+# committed config: found there, that's a WARNING and an ignore, not a failure.
+BRIDGE_SRC=""
+
+# Rung 0: a raw key, local config only.
+if [ -z "${LINEAR_API_KEY:-}" ] && RAW="$(yaml_leaf "$LOCAL_CONFIG" api_key)"; then
+  export LINEAR_API_KEY="$RAW"
+  BRIDGE_SRC="linear.api_key (.task-config.local.yml)"
+fi
+if yaml_leaf "$CONFIG" api_key >/dev/null 2>&1; then
+  echo "WARNING: linear.api_key is set in the COMMITTED .task-config.yml — refused per" >&2
+  echo "         dev_docs/auth_key_access.md (Provenance); ignoring it. Move it to" >&2
+  echo "         .task-config.local.yml and rotate the key." >&2
 fi
 
-if [ -z "$KEY" ]; then
+# Rung 2/3: a pointer — env first, else the merged config (local override, then
+# the committed file).
+if [ -n "${LINEAR_API_KEY_REF:-}" ]; then
+  BRIDGE_SRC="\$LINEAR_API_KEY_REF"
+elif [ -z "${LINEAR_API_KEY:-}" ]; then
+  for cfg in "$LOCAL_CONFIG" "$CONFIG"; do
+    if REF="$(yaml_leaf "$cfg" api_key_ref)"; then
+      export LINEAR_API_KEY_REF="$REF"
+      BRIDGE_SRC="linear.api_key_ref (${cfg##*/})"
+      break
+    fi
+  done
+fi
+
+# Resolver: env first, else local config only.
+if [ -z "${LINEAR_API_KEY_RESOLVER:-}" ] && RESOLVER="$(yaml_leaf "$LOCAL_CONFIG" api_key_resolver)"; then
+  export LINEAR_API_KEY_RESOLVER="$RESOLVER"
+fi
+if yaml_leaf "$CONFIG" api_key_resolver >/dev/null 2>&1; then
+  echo "WARNING: linear.api_key_resolver is set in the COMMITTED .task-config.yml —" >&2
+  echo "         refused per dev_docs/auth_key_access.md (Provenance); ignoring it." >&2
+  echo "         Move it to .task-config.local.yml." >&2
+fi
+
+# Ask the shared helper, which honors whatever resolver is configured (op, opx,
+# ...) instead of calling `op read` directly — so a non-default resolver doesn't
+# read as a false SKIP. It never prints the secret; only a reason category.
+CATEGORY="$(python3 "$ROOT/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY 2>&1 >/dev/null)"
+PROBE_RC=$?
+
+if [ "$PROBE_RC" -ne 0 ]; then
   if [ -n "${CI:-}" ]; then
-    echo "test-linear-relations-live: SKIP — no key (expected in CI; keeps CI keyless)"
-  elif [ -n "$REF_SRC" ]; then
-    echo "WARNING: test-linear-relations-live DID NOT RUN — $REF_SRC is set but 'op read' could not resolve it non-interactively." >&2
-    echo "         Install + sign in op in this terminal, or set \$OP_SERVICE_ACCOUNT_TOKEN — or export \$LINEAR_API_KEY directly." >&2
+    echo "test-linear-relations-live: SKIP — $CATEGORY (expected in CI; keeps CI keyless)"
+  elif [ -n "$BRIDGE_SRC" ]; then
+    echo "WARNING: test-linear-relations-live DID NOT RUN — $BRIDGE_SRC is set but did not resolve ($CATEGORY)." >&2
+    echo "         See dev_docs/auth_key_access.md (Diagnostics) for what '$CATEGORY' means and how to fix it." >&2
     echo "         Linear API contract drift will NOT be detected on this run." >&2
   else
-    echo "WARNING: test-linear-relations-live DID NOT RUN — no \$LINEAR_API_KEY / \$LINEAR_API_KEY_REF and no linear.api_key_ref in config." >&2
+    echo "WARNING: test-linear-relations-live DID NOT RUN — no \$LINEAR_API_KEY / \$LINEAR_API_KEY_REF and no linear.api_key_ref in config ($CATEGORY)." >&2
     echo "         Linear API contract drift will NOT be detected on this run." >&2
     echo "         Export a key or set linear.api_key_ref to enable it." >&2
   fi
   exit 0
 fi
-export LINEAR_API_KEY="$KEY"
 
 # --- resolve the team ($LINEAR_TEAM, else linear.team from the config) --------
 TEAM="${LINEAR_TEAM:-}"
@@ -134,20 +152,36 @@ python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$HAPPY_OUT" 2>"$HAPPY_ERR"
 HAPPY_RC=$?
 
 # Enum-drift guard: introspect the IssueRelationType enum and confirm every value
-# is one derive_edges() actually handles ({blocks, related, duplicate}). Without
+# is one derive_edges() actually handles ({blocks, related, duplicate, similar}).
+# Without
 # this, a renamed/added enum value is silently dropped to empty edge lists and
 # slips past the list-shape checks below — the exact drift the header claims to
 # surface. Field-NAME drift already fails via the happy-path rc!=0 (GraphQL 400);
 # this closes the enum-VALUE gap.
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Authorization: $LINEAR_API_KEY" -H 'Content-Type: application/json' \
-  --data '{"query":"query{__type(name:\"IssueRelationType\"){enumValues{name}}}"}' \
-  >"$ENUM_OUT" 2>/dev/null || true
+# Resolved in-process via the shared helper rather than with `curl -H
+# "Authorization: $LINEAR_API_KEY"`: this harness BRIDGES a ref/resolver and
+# never holds the key itself (so the old form died under `set -u` once the
+# bridge landed), and a key passed as a curl argument is visible in `ps`.
+python3 - "$ENUM_OUT" "$ROOT/commands/handlers/assets" <<'PY' 2>/dev/null || true
+import json, sys, urllib.request
+sys.path.insert(0, sys.argv[2])  # absolute: this harness is runnable from any cwd
+from _secret_resolve import resolve_key
 
-# Bad-key path: a bogus key with the op:// ref unset so it can't fall back and
-# accidentally succeed. Exercises the fail-closed exit `linear-reoptimize.md`
-# falls back on.
-env -u LINEAR_API_KEY_REF LINEAR_API_KEY="lin_api_BOGUS_000000000000000000000000" \
+req = urllib.request.Request(
+    "https://api.linear.app/graphql",
+    data=json.dumps(
+        {"query": 'query{__type(name:"IssueRelationType"){enumValues{name}}}'}
+    ).encode(),
+    headers={"Authorization": resolve_key("LINEAR_API_KEY"), "Content-Type": "application/json"},
+)
+with open(sys.argv[1], "wb") as fh:
+    fh.write(urllib.request.urlopen(req, timeout=15).read())
+PY
+
+# Bad-key path: a bogus key with the op:// ref/resolver unset so it can't fall
+# back and accidentally succeed. Exercises the fail-closed exit
+# `linear-reoptimize.md` falls back on.
+env -u LINEAR_API_KEY_REF -u LINEAR_API_KEY_RESOLVER LINEAR_API_KEY="lin_api_BOGUS_000000000000000000000000" \
   python3 "$SCRIPT" --team "$TEAM" --limit 50 >"$BAD_OUT" 2>"$BAD_ERR"
 BAD_RC=$?
 
@@ -215,7 +249,7 @@ if not issues and d is not None:
 # values; anything else it silently drops. Fail loud if the live schema carries a
 # value we don't handle (renamed/added enum), which is exactly the drift the
 # script header claims this test surfaces.
-KNOWN_TYPES = {"blocks", "related", "duplicate"}
+KNOWN_TYPES = {"blocks", "related", "duplicate", "similar"}
 try:
     enum_vals = {e["name"] for e in json.load(open(enum_out))["data"]["__type"]["enumValues"]}
 except Exception as e:

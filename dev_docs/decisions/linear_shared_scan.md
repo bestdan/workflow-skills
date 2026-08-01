@@ -26,7 +26,10 @@ The gate owns **only what is identical across all consumers**:
 - the rule that there is **no** independent `[ -n "$LINEAR_API_KEY" ]` pre-check —
   the script's own non-zero exit _is_ the gate (so the headless
   `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case still attempts the fast
-  path);
+  path). This is also why the gate is indifferent to _how_ the key resolves: the
+  scripts share `_secret_resolve.py`, so a configured resolver, a malformed
+  reference, and a keyless host all arrive as the same signal — a non-zero exit
+  (see `dev_docs/auth_key_access.md`);
 - the **security boundary**: the account key is a full-account bearer token that
   must never reach a cloud sandbox; cloud sessions set no key, so the script exits
   non-zero before any request and the run floors by design.
