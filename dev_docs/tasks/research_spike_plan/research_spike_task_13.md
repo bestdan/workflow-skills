@@ -53,8 +53,10 @@ a standing counterexample to a rule the tool enforces.
 **Code-enforced:**
 
 - `dev_docs/tasks/research_spike_plan/` no longer exists; `grep -rn
-  "research_spike_plan" --include='*.md' .` returns nothing outside git
-  history.
+  "research_spike_plan" . .gitignore` returns nothing outside git history.
+  **Do not scope this grep to `--include='*.md'`** — that would skip
+  `.gitignore`, which is the one file the leftover negation block lives in, so
+  the check would pass while the orphan it exists to catch survives.
 - `bash scripts/check.sh` green.
 - `dev_docs/research_spike.md` exists and is linked from
   `skills/research-spike/SKILL.md`.
@@ -70,14 +72,21 @@ a standing counterexample to a rule the tool enforces.
 scoped negation the `.gitignore` comment itself documents (plan decision 3):
 
 ```
+# research_spike_plan is force-tracked while in flight so it is reviewable in
+# its PR. research_spike_task_13 deletes these three lines together with the
+# folder — a negation outliving its path is the orphaned reference that plan is
+# about.
 !dev_docs/tasks/research_spike_plan/
 dev_docs/tasks/research_spike_plan/*
 !dev_docs/tasks/research_spike_plan/*.md
 ```
 
-**Delete those three lines in this task, in the same commit that deletes the
-folder.** A negation left behind for a path that no longer exists is exactly
-the kind of orphaned reference this whole skill is about.
+**Delete that entire block — the four comment lines included, not just the
+three rules — in this task, in the same commit that deletes the folder.**
+Removing only the rules would leave comments naming a folder and a task that no
+longer exist, which is precisely the orphaned reference this whole skill is
+about. Seven lines go, or the cleanup has produced the defect it exists to
+prevent.
 
 If the plan is instead migrated with `/push-plan research_spike` before it
 completes, that command deletes the local files at push time and the negation

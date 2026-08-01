@@ -11,7 +11,11 @@ related_files:
   - skills/research-spike/references/record-grammar.md
   - skills/plan-with-docs/SKILL.md
   - scripts/validate.py
-is_blocked_by: [research_spike_task_2, research_spike_task_7]
+is_blocked_by: [
+  research_spike_task_2,
+  research_spike_task_7,
+  research_spike_task_8,
+]
 parent: research_spike
 expires: 2026-08-31
 tags: [research-spike, skill, docs]
@@ -21,10 +25,13 @@ tags: [research-spike, skill, docs]
 
 ## Context
 
-The judgment half. Blocked until `init` (task 2) and the ledgers (task 7) exist
-because the procedures are written **around** the script's actual behaviour —
-documenting a verb surface before it runs is how the doc and the tool drift on
-day one.
+The judgment half. Blocked until `init` (task 2), the ledgers (task 7) and
+`suggest` (task 8) all exist, because the procedures are written **around** the
+script's actual behaviour — documenting a verb surface before it runs is how the
+doc and the tool drift on day one. Task 8 is a blocker specifically because item
+3 below documents all six subcommands: without it, this card would ship prose
+describing a `suggest` that does not exist. (Tasks 3–6 are covered transitively
+through 7.)
 
 **Presenting the two layers as one flat verb list was reviewed as the most
 likely way to implement the wrong half.** SKILL.md must state the boundary
@@ -49,11 +56,25 @@ Body, in this order:
    _if two runs over the same tree could disagree, it belongs to the script._
 2. **The on-disk structure** and the id-scoping rule (`project/track/id`;
    `project/id` for decisions).
-3. **The script surface** — the six subcommands, invoked as
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" …`. Note the
-   `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob `**/scripts/research-spike.py`),
-   matching `commands/handlers/linear-common.md`. Paths resolve against the
-   **plugin**, not the target repo — this is the PRE-487 class of bug.
+3. **The script surface** — the six subcommands. **Two different paths are
+   involved and the doc must not conflate them:**
+   - The **executable** resolves against the **plugin**:
+     `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py"`, with the
+     `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob `**/scripts/research-spike.py`),
+     matching `commands/handlers/linear-common.md`. This is the PRE-487 class
+     of bug.
+   - The **data root** resolves against the **consumer repo** and must be
+     passed explicitly on every invocation:
+
+     ```bash
+     python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" \
+       --root "$(git rev-parse --show-toplevel)" validate
+     ```
+
+     This matches how `commands/doctor.md` and `commands/promote-tasks.md` hand
+     `"$(git rev-parse --show-toplevel)/dev_docs/tasks"` to a plugin-resolved
+     script. **Never rely on the default root inside a procedure** — see task
+     1's note on why an `__file__`-anchored default fails silently green.
 4. **The five procedures**, each a numbered walk-through:
    - `file` — add a question: prose, id, `blocks` (offer the existing decision
      list, or file a `proposed` decision in the agent's own track). Naming a
@@ -107,6 +128,9 @@ SKILL.md under the line cap.
   `description` ≤ 1024 chars, body ≤ 500 lines.
 - `claude plugin validate . --strict` passes.
 - `bash scripts/check.sh` green (`dprint check` included).
+- **Every subcommand example in `SKILL.md` and `references/record-grammar.md`
+  carries an explicit `--root`** — grep the two files and assert no invocation
+  relies on the default root.
 
 **User-run:**
 

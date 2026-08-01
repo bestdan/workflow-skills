@@ -46,10 +46,27 @@ references across record types.
 - `state` ∈ `pending | decided`. Any other state key or value — notably a
   stored `ready` or `blocked` — is an error.
 - `decided` requires `decided_in:`. Validate durability structurally: the value
-  must resolve to an existing file that is **not** under a `*_plan/` directory,
-  and the error must explain the `/push-plan` deletion hazard.
-- A reopened decision is `state: pending` plus `reopened_because:`;
-  `reopened_because` on a never-decided decision is an error.
+  must resolve to an existing file that is **not** under a `*_plan/` directory
+  (any path segment matching `*_plan`, so `dev_docs/tasks/foo_plan/bar.md` is
+  rejected at any depth), and the error must explain the `/push-plan` deletion
+  hazard. `decided_in:` gets the **same containment rules** as task 3's
+  `destination` — repo-relative, no `../`, no symlink escape, existing regular
+  file — sharing one implementation, not two.
+- A reopened decision is `state: pending` plus `reopened_because:` **plus the
+  retained `decided_in:` from the decision it is reopening.** `decided_in:` is
+  required when `decided` and **permitted while pending only as reopen
+  evidence** — that exemption is what keeps this rule from contradicting the
+  `decided ⇒ decided_in` rule above. **`reopened_because:` without a retained
+  `decided_in:` is the error**: a decision that was never decided has nothing to
+  reopen.
+
+  > The obvious phrasing — "`reopened_because` on a never-decided decision is an
+  > error" — is **not implementable** and must not be specified. The validator
+  > reads one snapshot of the tree, with no history (fixtures are bare
+  > `mktemp -d` trees with no git), so absent a retained `decided_in:` the
+  > on-disk record of a legitimately reopened decision is byte-identical to a
+  > never-decided one that spuriously carries `reopened_because:`. The retained
+  > pointer is what makes the prior decision structurally evident.
 
 **Proposed decisions** — filed by track agents as `state: proposed` blocks
 inside their own `questions.md`, next to the question that needs them:
@@ -94,8 +111,12 @@ inside their own `questions.md`, next to the question that needs them:
   - `decided` with an open question blocking it fails;
   - `decided` with an open **obligation** `blocking:` it fails;
   - a new open blocker against a `decided` decision fails; the same with
-    `state: pending` + `reopened_because:` passes;
-  - `reopened_because` on a decision that was never decided fails;
+    `state: pending` + `reopened_because:` + the retained `decided_in:` passes;
+  - `reopened_because:` **without** a retained `decided_in:` fails;
+  - a reopened decision retaining `decided_in:` passes and accepts new open
+    blockers;
+  - `decided_in:` on a `pending` decision **without** `reopened_because:` fails
+    (the pending exemption is for reopen evidence only);
   - a decision nothing references produces a **warning** and still exits `0`;
   - `blocks:` naming a decision that exists only in a sibling project fails.
 - `bash scripts/check.sh` green.

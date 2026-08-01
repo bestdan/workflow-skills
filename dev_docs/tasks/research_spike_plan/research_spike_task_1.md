@@ -62,8 +62,22 @@ happens to be checked in.
 
 - CLI with `argparse`: subcommands `init`, `validate`, `ledger`,
   `write-ledger`, `status`, `suggest`, each registered but only dispatching to
-  a stub in this task except as noted. Global `--root <dir>` (default: repo
-  root discovered from `__file__`, mirroring `scripts/validate.py`'s `ROOT`).
+  a stub in this task except as noted. Global `--root <dir>`, defaulting to
+  **the current working directory**, matching `scripts/task-scan.py` and
+  `scripts/claim-scan.sh` — and deliberately **not** `__file__`-anchored.
+
+  > **Do not mirror `scripts/validate.py`'s `ROOT` here.** That script's
+  > script-relative default exists so the plugin can validate **its own** tree;
+  > consumers reach it only when `/doctor` passes an explicit dir. This script
+  > ships to consumers and is invoked through `${CLAUDE_PLUGIN_ROOT}`, so
+  > `__file__` is the **installed plugin**, and an `__file__`-anchored default
+  > would scan the plugin checkout instead of the consumer repo. It would also
+  > fail **silently green**: the plugin has no `dev_docs/research/` tree, and
+  > the "no research dir is clean" rule below would report success. Worse,
+  > `init` (task 2) would scaffold into the plugin install directory.
+  > `dev_docs/deterministic-code-opportunity.md` §"Load-bearing decisions &
+  > gotchas", item 1, documents this as the exact defect PRE-611 fixed and
+  > warns against re-breaking it.
 - Exit-code contract, applied by the dispatcher and asserted by tests:
   `0` clean, `1` violations, `2` usage error.
 - **Tree discovery**: enumerate `<root>/dev_docs/research/*/` as projects and
@@ -97,6 +111,10 @@ file's git-env neutralization block verbatim — the same inherited-env hazards
 apply. Cover in this task:
 
 - an empty root (no `dev_docs/research/`) exits 0 silently;
+- **invoked with no `--root` from inside a fixture tree, the scan finds that
+  tree's projects** — the regression guard for the plugin-vs-consumer default;
+- **invoked with no `--root` from a directory with no `dev_docs/research/`, it
+  exits 0 without touching the plugin tree**;
 - a two-project tree discovers both projects and their tracks;
 - an unknown key in a block is an error naming the key;
 - an inline `#` comment is **not** stripped (assert the value retains it);
