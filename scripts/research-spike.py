@@ -113,13 +113,20 @@ FENCE_RE = re.compile(r"^[ \t]*(?P<ticks>`{3,})(?P<info>.*)$")
 # content begins with `<!--` opens the block, and the first line containing
 # `-->` (which may be that same line) closes it. Blank lines do not end it.
 #
+# The **at most three spaces** of indentation is CommonMark's, and load-bearing
+# rather than pedantic: at four it is an indented code block instead, so prose
+# that *shows* an opener in an indented sample would otherwise open a real
+# comment region and swallow every record and heading after it — reproduced,
+# and reported as an unterminated-comment error over a file that had none. A
+# tab counts as four columns, so it does not open one either.
+#
 # Content inside a comment is inert — not a record, not a heading. That is what
 # lets `init` scaffold a *worked example* of the record grammar into a fresh
 # `questions.md` instead of merely describing it: an example that parsed would
 # make `init` emit a tree that fails its own gate. The ledger markers below are
 # themselves single-line comments, so they open and close on their own line and
 # leave the ledger bullets between them ordinary, visible markdown.
-COMMENT_OPEN = "<!--"
+COMMENT_OPEN_RE = re.compile(r"^ {0,3}<!--")
 COMMENT_CLOSE = "-->"
 
 # The `### Q<n>.` heading convention `init` installs. A section ends at the
@@ -142,7 +149,12 @@ NONE_SENTINEL_RE = re.compile(r"^none[ \t]*(?::(?P<reason>.*))?$")
 # uniqueness reporting and the cross-project destination check, all of which
 # parse on that prefix. Enforcing it on ids is a later task's; `init` enforces
 # it on names.
-KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+#
+# Anchored with `\Z`, not `$`: Python's `$` also matches immediately before a
+# final newline, so `init $'foo\n'` would pass a `$`-anchored check and
+# scaffold a directory whose name carries the whitespace this rule exists to
+# forbid. `\Z` is end-of-string and nothing else.
+KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\Z")
 KEBAB_DESCRIPTION = "lowercase letters, digits and single hyphens (a-z0-9, kebab-case)"
 
 # The stored ledgers live between these markers. `init` installs them; only
@@ -403,7 +415,7 @@ def scan_blocks(lines: list[str]) -> Blocks:
     i = 0
     n = len(lines)
     while i < n:
-        if lines[i].lstrip().startswith(COMMENT_OPEN):
+        if COMMENT_OPEN_RE.match(lines[i]):
             j = i
             while j < n and COMMENT_CLOSE not in lines[j]:
                 j += 1
@@ -716,8 +728,23 @@ def discover(root: Path, report: Report) -> Tree:
 # --------------------------------------------------------------------------
 
 
-def read_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8").splitlines()
+def read_file_lines(path: Path, rel: str) -> list[str]:
+    """A file's lines, or a caller error naming it.
+
+    `init` reads only files it is about to edit, and every one of them is a
+    file it (or a previous `init`) wrote. A missing or undecodable one means
+    the directory is not the research project it looks like, which is a caller
+    error — not a traceback out of the middle of a scaffold.
+    """
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        raise UsageError(
+            f"{rel} does not exist — this does not look like a research "
+            "project directory"
+        ) from None
+    except (OSError, UnicodeDecodeError) as e:
+        raise UsageError(f"cannot read {rel}: {e}") from None
 
 
 def write_lines(path: Path, lines: list[str]) -> None:
@@ -804,10 +831,9 @@ def find_ledger_block(lines: list[str]) -> tuple[int, int] | None:
     return begin, end
 
 
-def replace_ledger_block(path: Path, body: list[str], rel: str) -> None:
-    """Rewrite what sits between a file's ledger markers, leaving the rest of
-    the file — including the markers themselves — untouched."""
-    lines = read_lines(path)
+def ledger_block_body(path: Path, rel: str) -> tuple[list[str], int, int]:
+    """A file's ledger-block body, and the marker indices bounding it."""
+    lines = read_file_lines(path, rel)
     span = find_ledger_block(lines)
     if span is None:
         raise UsageError(
@@ -815,7 +841,57 @@ def replace_ledger_block(path: Path, body: list[str], rel: str) -> None:
             "they are installed by `init` and are never inserted silently"
         )
     begin, end = span
-    write_lines(path, lines[: begin + 1] + ["", *body, ""] + lines[end:])
+    return lines, begin, end
+
+
+def split_track_sections(section: list[str]) -> list[tuple[str, list[str]]]:
+    """The `### <track>` sub-sections of a roll-up's `## Tracks` section."""
+    groups: list[tuple[str, list[str]]] = []
+    for line in section:
+        if line.startswith("### "):
+            groups.append((line[4:].strip(), [line]))
+        elif groups:
+            groups[-1][1].append(line)
+    return groups
+
+
+def insert_track_section(body: list[str], track: str, rel: str) -> list[str]:
+    """Splice a zero-count section for `track` into an existing roll-up body.
+
+    Deliberately surgical rather than a full re-render. Re-rendering resets
+    every other track's stored numbers to zero, which silently destroys a
+    roll-up the organizer had regenerated — and a number this script quietly
+    zeroes is far worse than one it reports stale, since nothing ever flags it.
+    An empty track contributes zero to every total, so leaving the `## Total`
+    and `## Decisions` sections alone keeps the block exactly what the
+    derivation would emit.
+    """
+    start = next((i for i, ln in enumerate(body) if ln.strip() == "## Tracks"), None)
+    if start is None:
+        raise UsageError(
+            f"{rel}'s ledger block has no '## Tracks' section to add the track "
+            "to — regenerate it with `write-ledger` first"
+        )
+    end = next(
+        (i for i in range(start + 1, len(body)) if body[i].startswith("## ")),
+        len(body),
+    )
+    groups = split_track_sections(body[start + 1 : end])
+    if any(name == track for name, _ in groups):
+        return body
+    groups.append((track, [f"### {track}", "", *render_counts(Counts())]))
+    # Sorted, because that is the order the full derivation emits — a roll-up
+    # `init` left in some other order would read as stale the moment anyone ran
+    # `write-ledger`. A `_No tracks yet._` placeholder belongs to no group and
+    # is dropped here, which is what it is for.
+    groups.sort(key=lambda g: g[0])
+    section: list[str] = [""]
+    for _, group in groups:
+        trimmed = list(group)
+        while trimmed and not trimmed[-1].strip():
+            trimmed.pop()
+        section += trimmed + [""]
+    return body[: start + 1] + section + body[end:]
 
 
 # --------------------------------------------------------------------------
@@ -841,7 +917,7 @@ def require_name(kind: str, name: str) -> None:
         )
 
 
-def project_md(project: str) -> list[str]:
+def project_md(project: str, tracks: list[str]) -> list[str]:
     return [
         f"# {project} — research spike",
         "",
@@ -879,6 +955,8 @@ def project_md(project: str) -> list[str]:
         "A track is an agent-sized context bundle: working one needs `tracks/<name>/`",
         "plus this project's `decisions.md`, and nothing else. Add one with",
         f"`research-spike.py init {project} --track <name>`.",
+        *([""] if tracks else []),
+        *[track_index_entry(t) for t in tracks],
     ]
 
 
@@ -978,10 +1056,16 @@ def questions_md(project: str, track: str) -> list[str]:
     ]
 
 
-def scaffold_project(project_dir: Path, project: str) -> list[Path]:
-    write_lines(project_dir / "PROJECT.md", project_md(project))
+def scaffold_project(project_dir: Path, project: str, tracks: list[str]) -> list[Path]:
+    """Write the three project-level files.
+
+    `tracks` is whatever this same `init` run is also creating, so a
+    `init <p> --track <t>` scaffolds a roll-up that already lists the track
+    rather than one patched immediately afterwards.
+    """
+    write_lines(project_dir / "PROJECT.md", project_md(project, tracks))
     write_lines(project_dir / "decisions.md", decisions_md(project))
-    write_lines(project_dir / "LEDGER.md", ledger_md(project, []))
+    write_lines(project_dir / "LEDGER.md", ledger_md(project, tracks))
     return [
         project_dir,
         project_dir / "PROJECT.md",
@@ -1005,36 +1089,29 @@ def scaffold_track(track_dir: Path, project: str, track: str) -> list[Path]:
     ]
 
 
-def track_names(project_dir: Path) -> list[str]:
-    tracks_dir = project_dir / TRACKS_DIRNAME
-    if not tracks_dir.is_dir():
-        return []
-    return sorted(t.name for t in tracks_dir.iterdir() if t.is_dir())
+def track_index_entry(track: str) -> str:
+    return f"- [{track}](tracks/{track}/{QUESTIONS_FILENAME})"
 
 
-def index_track(project_dir: Path, track: str, rel: str) -> None:
-    """Add the new track to `PROJECT.md`'s tracks index.
+def index_track(lines: list[str], track: str, rel: str) -> list[str] | None:
+    """`PROJECT.md` with the new track added to its tracks index, or None.
 
     An index nobody updates is the dead structure this design criticises
     elsewhere, so `init` keeps it current. It appends within the `## Tracks`
-    section and nowhere else; if a human has removed that heading, `init` says
-    so and leaves the file alone rather than guessing where the list went.
+    section and nowhere else; if a human has removed that heading, `init`
+    returns None so the caller can say so and leave the file alone rather than
+    guessing where the list went. A missing index is a note, not a refusal —
+    unlike the ledger, nothing downstream reads it.
     """
-    path = project_dir / "PROJECT.md"
-    lines = read_lines(path)
-    entry = f"- [{track}](tracks/{track}/{QUESTIONS_FILENAME})"
+    entry = track_index_entry(track)
     if entry in lines:
-        return
+        return lines
     start = next(
         (i for i, ln in enumerate(lines) if ln.strip() == "## Tracks"),
         None,
     )
     if start is None:
-        print(
-            f"  note: {rel}/PROJECT.md has no '## Tracks' heading — "
-            f"add '{entry}' to its index by hand"
-        )
-        return
+        return None
     end = next(
         (
             i
@@ -1046,7 +1123,7 @@ def index_track(project_dir: Path, track: str, rel: str) -> None:
     body = lines[start:end]
     while body and not body[-1].strip():
         body.pop()
-    write_lines(path, lines[:start] + body + ["", entry, ""] + lines[end:])
+    return lines[:start] + body + ["", entry, ""] + lines[end:]
 
 
 def verb_init(args: argparse.Namespace, root: Path) -> int:
@@ -1080,23 +1157,37 @@ def verb_init(args: argparse.Namespace, root: Path) -> int:
             "`init` never overwrites one"
         )
 
-    created: list[Path] = []
     scaffolded_project = not project_dir.exists()
+    # Everything this run must read or edit in an **existing** project is
+    # resolved here, before a single byte is written. Creating the track first
+    # and discovering afterwards that PROJECT.md is unreadable or LEDGER.md has
+    # lost its markers leaves a half-made track behind — and the retry then
+    # fails on "track already exists", so the caller is stuck with a tree only
+    # a manual `rm` gets them out of.
+    pending: list[tuple[Path, list[str]]] = []
+    index_missing = False
+    if track is not None and not scaffolded_project:
+        project_path = project_dir / "PROJECT.md"
+        ledger_path = project_dir / "LEDGER.md"
+        ledger_rel = f"{rel}/LEDGER.md"
+        lines, begin, end = ledger_block_body(ledger_path, ledger_rel)
+        body = insert_track_section(lines[begin + 1 : end], track, ledger_rel)
+        pending.append((ledger_path, lines[: begin + 1] + body + lines[end:]))
+        indexed = index_track(
+            read_file_lines(project_path, f"{rel}/PROJECT.md"), track, rel
+        )
+        if indexed is None:
+            index_missing = True
+        else:
+            pending.append((project_path, indexed))
+
+    created: list[Path] = []
     if scaffolded_project:
-        created += scaffold_project(project_dir, project)
+        created += scaffold_project(project_dir, project, [track] if track else [])
     if track is not None and track_dir is not None:
         created += scaffold_track(track_dir, project, track)
-        index_track(project_dir, track, rel)
-        # The roll-up must list the new track, or the tree `init` just made
-        # would be born ledger-stale — which is an error, so `init` would be
-        # emitting a tree that fails its own gate.
-        replace_ledger_block(
-            project_dir / "LEDGER.md",
-            render_project_ledger(
-                [(t, Counts()) for t in track_names(project_dir)], Counts()
-            ),
-            f"{rel}/LEDGER.md",
-        )
+    for path, lines in pending:
+        write_lines(path, lines)
 
     if scaffolded_project:
         print(f"{PROG}: initialized {rel}")
@@ -1105,6 +1196,11 @@ def verb_init(args: argparse.Namespace, root: Path) -> int:
     for path in created:
         suffix = "/" if path.is_dir() else ""
         print(f"  {path.relative_to(root).as_posix()}{suffix}")
+    if index_missing:
+        print(
+            f"  note: {rel}/PROJECT.md has no '## Tracks' heading — add "
+            f"'{track_index_entry(track)}' to its index by hand"
+        )
     if track_dir is None:
         print(f"  next: add a track — init {project} --track <name>")
     else:

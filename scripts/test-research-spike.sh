@@ -572,6 +572,14 @@ for name in ../outside /abs/path 'foo/bar' 'Foo' 'foo bar' '..'; do
   assert_exit "init '$name' exits 2" "$exit_k6" 2
   assert_contains "init '$name' says why" "$out_k6" "is not a valid id shape"
 done
+# Python's `$` also matches immediately before a final newline, so a
+# `$`-anchored check accepted `foo\n` and scaffolded a directory whose name
+# carries the whitespace the rule exists to forbid.
+# $'...' keeps the newline; "$(printf ...)" would strip it and test nothing.
+out_k6n="$(python3 "$SCRIPT" --root "$DIR_K2" init $'foo\n' 2>&1)"
+exit_k6n=$?
+assert_exit "a name with a trailing newline exits 2" "$exit_k6n" 2
+assert_contains "a trailing-newline name says why" "$out_k6n" "is not a valid id shape"
 for name in '..' 'a/b' 'Bad'; do
   out_k7="$(python3 "$SCRIPT" --root "$DIR_K2" init good --track "$name" 2>&1)"
   exit_k7=$?
@@ -660,6 +668,36 @@ assert_exit "an unterminated comment exits 1, not a silent 0" "$exit_k11" 1
 assert_contains "an unterminated comment is reported" "$out_k11" "unterminated HTML comment"
 assert_not_contains "an unterminated comment does not traceback" "$out_k11" "Traceback"
 
+# --- Fixture (k4b): an indented `<!--` is a code sample, not a comment ---
+# CommonMark allows at most three spaces before an HTML block opener; at four
+# it is an indented code block. Recognizing any indentation let prose that
+# *shows* an opener in an indented sample open a real comment region and
+# swallow every record and heading after it — reported, on top, as an
+# unterminated comment in a file that had none.
+DIR_K4B="$BASE/indented-comment"
+write_file "$DIR_K4B/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+The convention wraps the example in an opener, shown here indented:
+
+    <!-- the opener line, on its own
+
+### Q2. A real question.
+
+```obligation
+id: first
+owes: the real thing
+status: open
+```'
+out_k11b="$(python3 "$SCRIPT" --root "$DIR_K4B" --verbose validate 2>&1)"
+exit_k11b=$?
+assert_exit "an indented '<!--' sample does not swallow the file" "$exit_k11b" 0
+assert_contains "the record after an indented '<!--' survives" "$out_k11b" \
+  "id=alpha/account/first"
+assert_contains "the section after an indented '<!--' survives" "$out_k11b" \
+  "Q2 'A real question.'"
+assert_not_contains "an indented '<!--' is not reported as unterminated" "$out_k11b" \
+  "unterminated HTML comment"
+
 # --- Fixture (k6): the generated tree survives dprint --------------------
 # A generated block the formatter rewrites puts the freshness check and the
 # formatter in a fight neither can win. Assert it against the repo's own
@@ -678,13 +716,20 @@ if command -v dprint >/dev/null 2>&1; then
   case "$dprint_exit" in
     0) ok "dprint leaves the generated markdown untouched" ;;
     20) bad "dprint rewrites the generated markdown: $(cat "$BASE/dprint.out")" ;;
-    14) bad "the dprint fixture matched no files — the assertion is vacuous" ;;
+    12)
+      # 12 is specifically "could not resolve a plugin" — a bare machine with
+      # no network, which is the one case this fixture may skip so the harness
+      # stays runnable there. CI installs dprint from mise and resolves the
+      # pinned plugins, so this is never how the assertion passes in the gate.
+      echo "  … skipped: dprint cannot resolve its plugins (offline?): $(head -1 "$BASE/dprint.out")"
+      ;;
     *)
-      # Anything else is dprint failing to run at all (12 = plugins
-      # unresolvable, e.g. a sandbox with no network), so the harness stays
-      # runnable on a bare machine. CI installs dprint from mise and resolves
-      # plugins, so this branch is not how the assertion passes there.
-      echo "  … skipped: dprint could not run (exit $dprint_exit): $(head -1 "$BASE/dprint.out")"
+      # Every other status is dprint being handed something it could not do —
+      # a bad config, a bad invocation, no matching files (14), a crash. Those
+      # must fail: a formatter assertion that "passes" without reading a
+      # generated file is worse than not having one, and the absolute-glob
+      # form of this very fixture did exactly that.
+      bad "dprint failed to run the check (exit $dprint_exit): $(head -1 "$BASE/dprint.out")"
       ;;
   esac
 else
@@ -711,6 +756,96 @@ else
   else
     bad "init emits a stale ledger: $(cat "$BASE/ledger.diff")"
   fi
+fi
+
+# --- Fixture (k8): adding a track never zeroes a stored roll-up ----------
+# Re-rendering the whole block from zero counts erased every other track's
+# stored numbers — silently, since nothing flags a roll-up that agrees with a
+# derivation nobody ran. The insert is surgical instead: an empty track
+# contributes zero to every total, so the stored numbers and the decisions
+# section must come through untouched.
+DIR_K8="$BASE/rollup-preserved"
+mkdir -p "$DIR_K8"
+python3 "$SCRIPT" --root "$DIR_K8" init demo --track account >/dev/null 2>&1
+K8_LEDGER="$DIR_K8/dev_docs/research/demo/LEDGER.md"
+# Stand in for what task 7's write-ledger leaves once the project has records.
+python3 - "$K8_LEDGER" <<'PY'
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+t = t.replace("_None yet._", "- **stop-semantics** — BLOCKED by 2 questions")
+t = t.replace(
+  "- **Questions:** 0 answered, 0 open, 0 retired\n"
+  "- **Obligations:** 0 discharged, 0 open (0 blocking, 0 stubs, 0 external)",
+  "- **Questions:** 8 answered, 4 open, 1 retired\n"
+  "- **Obligations:** 3 discharged, 10 open (2 blocking, 1 stub, 1 external)",
+)
+p.write_text(t, encoding="utf-8")
+PY
+python3 "$SCRIPT" --root "$DIR_K8" init demo --track zebra >/dev/null 2>&1
+k8_out="$(cat "$K8_LEDGER")"
+assert_contains "an existing track's stored numbers survive adding a track" "$k8_out" \
+  "- **Questions:** 8 answered, 4 open, 1 retired"
+assert_contains "the stored obligation subtotals survive too" "$k8_out" \
+  "- **Obligations:** 3 discharged, 10 open (2 blocking, 1 stub, 1 external)"
+assert_contains "the generated decisions section survives" "$k8_out" \
+  "- **stop-semantics** — BLOCKED by 2 questions"
+assert_contains "the new track is added with zero counts" "$k8_out" "### zebra"
+assert_not_contains "the roll-up placeholder is gone once a track exists" "$k8_out" \
+  "_No tracks yet._"
+
+# The inserted form must be byte-identical to the fully-rendered form, or a
+# tree grown one track at a time reads as stale the moment write-ledger runs.
+DIR_K8B="$BASE/insert-equals-render"
+mkdir -p "$DIR_K8B"
+python3 "$SCRIPT" --root "$DIR_K8B" init one --track alpha >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_K8B" init two >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_K8B" init two --track alpha >/dev/null 2>&1
+ledger_block() {
+  sed -n '/research-spike:ledger -->/,/\/research-spike:ledger/p' "$1"
+}
+if [ "$(ledger_block "$DIR_K8B/dev_docs/research/one/LEDGER.md")" \
+  = "$(ledger_block "$DIR_K8B/dev_docs/research/two/LEDGER.md")" ]; then
+  ok "a track inserted into an existing roll-up matches the fully-rendered form"
+else
+  bad "inserting a track produces a different roll-up than rendering one"
+fi
+
+# --- Fixture (k9): a track is never left half-made -----------------------
+# The track used to be written before PROJECT.md and LEDGER.md were read, so a
+# roll-up with no markers left the track behind and exited 2 — and the retry
+# then failed on "track already exists", stranding the caller.
+DIR_K9="$BASE/preflight"
+mkdir -p "$DIR_K9"
+python3 "$SCRIPT" --root "$DIR_K9" init demo >/dev/null 2>&1
+K9_PROJECT="$DIR_K9/dev_docs/research/demo"
+grep -v 'research-spike:ledger' "$K9_PROJECT/LEDGER.md" >"$K9_PROJECT/LEDGER.tmp"
+mv "$K9_PROJECT/LEDGER.tmp" "$K9_PROJECT/LEDGER.md"
+out_k13="$(python3 "$SCRIPT" --root "$DIR_K9" init demo --track bar 2>&1)"
+exit_k13=$?
+assert_exit "a marker-less LEDGER.md makes init exit 2" "$exit_k13" 2
+assert_contains "the refusal names the missing markers" "$out_k13" "carries no ledger markers"
+if [ -e "$K9_PROJECT/tracks/bar" ]; then
+  bad "a refused init left a half-made track behind"
+else
+  ok "a refused init creates no track (the retry is not blocked by its own debris)"
+fi
+
+# The same holds for an unreadable PROJECT.md, which used to traceback.
+DIR_K10="$BASE/preflight-project-md"
+mkdir -p "$DIR_K10"
+python3 "$SCRIPT" --root "$DIR_K10" init demo >/dev/null 2>&1
+rm "$DIR_K10/dev_docs/research/demo/PROJECT.md"
+out_k14="$(python3 "$SCRIPT" --root "$DIR_K10" init demo --track bar 2>&1)"
+exit_k14=$?
+assert_exit "a missing PROJECT.md makes init exit 2, not traceback" "$exit_k14" 2
+assert_not_contains "a missing PROJECT.md does not traceback" "$out_k14" "Traceback"
+if [ -e "$DIR_K10/dev_docs/research/demo/tracks/bar" ]; then
+  bad "a refused init left a half-made track behind"
+else
+  ok "a missing PROJECT.md leaves no half-made track either"
 fi
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
