@@ -79,7 +79,15 @@ happens to be checked in.
   > gotchas", item 1, documents this as the exact defect PRE-611 fixed and
   > warns against re-breaking it.
 - Exit-code contract, applied by the dispatcher and asserted by tests:
-  `0` clean, `1` violations, `2` usage error.
+  `0` clean, `1` violations, `2` usage error. **State the classification rule
+  explicitly, because three separate PRs write fixtures against it and an
+  unstated convention is how they end up inconsistent:** `1` is for
+  **tree-content violations** found by a scan — a rule broken by what is in the
+  tree. `2` is for **caller errors** — unparseable arguments, an unknown
+  subcommand, a malformed or already-existing project named on the command
+  line. Argparse's own usage exit is `2` and is **never overridden by a
+  subcommand** (see task 8, whose scan is exit-0 by design but which does not
+  get to suppress the dispatcher's `2`).
 - **Tree discovery**: enumerate `<root>/dev_docs/research/*/` as projects and
   `tracks/*/` within each. A root with no `dev_docs/research/` is **clean, not
   an error** — exit 0 with no output.

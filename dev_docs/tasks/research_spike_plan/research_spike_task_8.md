@@ -48,9 +48,14 @@ Implement `suggest` in `scripts/research-spike.py`:
   `obligation` block (or a `none:` declaration) is suppressed. The suppression
   rule matters more than the phrase list; without it the advisory output is
   dominated by exactly the deferrals that were done correctly.
-- **Always exit `0`.** This is a structural property, not a policy: there must
-  be no code path in `suggest` that returns non-zero, including on a parse
-  error in a scanned file (report it and continue).
+- **The scan always exits `0`.** This is a structural property, not a policy:
+  no code path in the **scan** returns non-zero, including on a parse error in
+  a scanned file (report it and continue). Argparse **usage** errors still exit
+  `2` before dispatch — that is task 1's dispatcher contract, and a malformed
+  flag is not the scan reporting a finding. Scoping the absolute to the scan is
+  what keeps "no findings" distinguishable from "you invoked it wrongly"; it
+  does **not** reopen the settled decision that lexical findings never fail a
+  run (design §"What is deliberately _not_ in the gate", measured at 29 hits).
 - Document in `--help` that this mode is advisory and why, in one line.
 
 ## Acceptance Criteria
@@ -61,9 +66,11 @@ Implement `suggest` in `scripts/research-spike.py`:
   - `suggest` reports unregistered deferral prose with path and line;
   - `suggest` stays **quiet** next to a registered obligation;
   - `suggest` stays quiet next to an explicit `none:` declaration;
-  - `suggest` **never returns non-zero** — assert exit `0` on a clean tree, on
+  - the **scan** never returns non-zero — assert exit `0` on a clean tree, on
     a tree full of hits, and on a tree containing a file that fails the
     block parser;
+  - `suggest --bogus-flag` still exits `2` — the dispatcher's usage contract is
+    not suppressed by the scan's exit-0 guarantee;
   - `suggest` writes nothing (tree unchanged).
 - `bash scripts/check.sh` green.
 

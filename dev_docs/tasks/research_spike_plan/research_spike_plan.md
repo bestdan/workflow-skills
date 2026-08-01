@@ -19,7 +19,7 @@ load-bearing instrument is an **obligation ledger**. A research spike answers
 questions before building; answering a question mostly creates _obligations_,
 not new questions, and obligations that are deferred into prose (rather than
 into a file that exists) accrue invisibly. The reference implementation
-(`aiutopilot` PR #25) measured **~6 discharged against 23 open** after four
+(`aiutopilot#25`) measured **~6 discharged against 23 open** after four
 days, while the question count looked flat-to-down and healthy.
 
 The instrument makes deferred work addressable: a deferral must name a
@@ -127,7 +127,8 @@ Two implementation traps the design paid for and this plan must not re-pay:
 **Phase 3 — adoption and cleanup.**
 
 12. [research_spike_task_12.md](research_spike_task_12.md) — the adoption
-    playbook and a real backfill, which is the moment of truth.
+    playbook, rehearsed end-to-end against a scratch tree. The first _real_
+    backfill is deliberately after this plan (see decision 2).
 13. [research_spike_task_13.md](research_spike_task_13.md) — graduate the
     durable wisdom to `dev_docs/research_spike.md` and delete this folder.
 

@@ -53,9 +53,9 @@ In `scripts/research-spike.py`, validate `obligation` and `card` records.
 - `blocking: <decision-id>` is optional; its referential check belongs to task
   5. Accept and record it here.
 
-**`destination` rules** — all errors, each with a message that says why it
-matters (the message is part of the mechanism; a bare "invalid path" teaches
-nobody):
+**`destination` rules** — rules 1-6 are errors, rule 7 is a warning. Each
+message must say why it matters (the message is part of the mechanism; a bare
+"invalid path" teaches nobody):
 
 1. required and non-empty;
 2. **repo-relative** — an absolute path fails;
@@ -64,12 +64,35 @@ nobody):
 4. a **symlink that escapes** the root fails (resolve and re-check
    containment);
 5. must resolve to an **existing regular file** — a missing path fails, and so
-   does a directory;
+   does a directory. **The error must state the fix, not just the rule**: a
+   folder-shaped deferral points at a **specific file inside** the folder — the
+   plan's epic file (`<name>_plan/<name>_plan.md`), a specific task card, or a
+   stub/receipt card under `tracks/<track>/obligations/` — because a directory
+   can exist while saying nothing about the work, whereas a file names it. (See
+   rule 7 before pointing at a `*_plan/` file.)
 6. **cross-project destinations are forbidden**: the resolved path must not
    land under a different `dev_docs/research/<other-project>/` tree. Work an
    answer creates for another project is filed in that project, and the local
    obligation points at a **receipt card** recording the handoff (design
    §"On-disk structure"). Say that in the error message.
+7. **plan directories are a rot hazard — warned, not rejected.** A destination
+   resolving under a `*_plan/` directory emits a **warning** naming the
+   `/push-plan` deletion hazard and pointing at the receipt-card route (task
+   10's `defer` bridge). Unlike `decided_in:` (task 5, a hard **error** —
+   decision evidence is permanent), an obligation may legitimately point at an
+   in-flight plan card; the warning is what stops it outliving the folder.
+
+> **Why rule 5's suggested fix and rule 7 must be read together.** The obvious
+> replacement for a folder destination — a file inside that folder — is exactly
+> the destination rule 7 warns about when the folder is a `*_plan/`. That is
+> deliberate, not a contradiction: pointing at the epic file is right for an
+> in-flight plan and still needs to be revisited before `/push-plan` deletes it.
+>
+> Note this tightens the design's own origin story, where "a plan folder that
+> was created" is cited as a **visible** (successful) deferral. That was true
+> under the loose reference-implementation rule ("a path that must exist"); the
+> post-review tightening makes a bare directory insufficient, which is why the
+> migration has to be stated rather than left for the implementer to infer.
 
 **Card records** — files under `tracks/<track>/obligations/`, one block each:
 
@@ -90,6 +113,8 @@ nobody):
 
 - New fixtures in `scripts/test-research-spike.sh`, one per rule:
   - a nonexistent destination fails **and the message says why it matters**;
+  - a destination under a `*_plan/` directory **warns**, names `/push-plan`, and
+    still **exits 0** — the one non-fatal destination rule;
   - a destination that is a directory fails;
   - an absolute destination fails;
   - a `../` traversal destination fails;

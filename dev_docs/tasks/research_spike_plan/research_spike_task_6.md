@@ -72,7 +72,8 @@ Also:
 - Stub and external (receipt) counts appear in the per-track obligation column,
   from task 3's tallies.
 - `status` with no project argument prints every project; an unknown project
-  exits `1` with the list of known projects.
+  exits `2` with the list of known projects — a caller error, not a
+  tree-content violation (task 1's exit-code classification).
 - `status` is a **report**: it never writes, and it exits `0` even when
   decisions are blocked. Only `validate` gates.
 
@@ -96,7 +97,7 @@ Also:
   - more than a third of open obligations carrying `blocking:` emits the
     scarcity **warning** and still exits `0`;
   - `status` never modifies the tree (assert file mtimes/contents unchanged);
-  - unknown project exits `1` listing known projects.
+  - unknown project exits `2` listing known projects.
 - `bash scripts/check.sh` green.
 
 **User-run:**

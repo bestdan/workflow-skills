@@ -64,6 +64,16 @@ Implement `ledger`, `write-ledger`, and freshness validation.
   touch — and an **error** under `validate --strict`, the organizer's gate, run
   on merge to the mainline. Warning-only everywhere would let the roll-up rot;
   the strict tier is what keeps the number checked rather than decorative.
+- **`validate` gets its full scoping surface here** — task 1 built whole-tree
+  scanning and this card owns the flags, so per-project scoping belongs to it
+  rather than falling through the gap:
+  `validate [<project>] [--track <t>] [--strict]`. A bare project name scopes
+  the whole gate to one project (records, referential integrity, ledger
+  freshness, `LEDGER.md`), mirroring `status <project>`; `--track` narrows it
+  further; omitting both scans every project. An unknown project name exits `2`
+  listing known projects (task 1's classification). Without this the organizer
+  has no way to gate one project on a root the design explicitly allows to hold
+  several.
 - `write-ledger --track <t>` rewrites one track; without `--track` it rewrites
   every track plus `LEDGER.md`.
 - Missing markers in a file that should carry them is an error naming `init`
@@ -83,6 +93,9 @@ Implement `ledger`, `write-ledger`, and freshness validation.
   - `validate` on a stale ledger leaves the file **byte-identical** (no
     auto-repair);
   - a stale **foreign** track does not fail `validate --track <mine>`;
+  - `validate <project>` ignores a violation in a **sibling project**, while
+    bare `validate` catches it; an unknown project name exits `2` listing the
+    known ones;
   - a stale `LEDGER.md` **warns** under plain `validate` (exit 0) and **fails**
     under `validate --strict` (exit 1);
   - `write-ledger --track t` rewrites only `t`;

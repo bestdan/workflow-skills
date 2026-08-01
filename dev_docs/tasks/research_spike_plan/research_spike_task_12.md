@@ -1,5 +1,5 @@
 ---
-title: "research-spike: adoption playbook and the first real backfill"
+title: "research-spike: adoption playbook and a rehearsed backfill"
 priority: medium
 size: 3
 status: new
@@ -70,12 +70,31 @@ annotated retroactively.
 
 - `bash scripts/check.sh` green, still running the fixture harness and **not**
   a repo-tree `validate` (there is no tree to validate).
-- The playbook is exercised end to end against a scratch repo, not just
-  written: `init` → backfill a doc carrying at least one destination-less
-  deferral → stub card created → `write-ledger` → `validate --strict` exits 0.
+- The playbook's **deterministic spine** is a fixture in
+  `scripts/test-research-spike.sh`, not prose: `init` a scratch project and
+  track under `mktemp -d`, **hand-write** an obligation with no resolvable
+  destination plus the stub card that fixes it (exactly the records the playbook
+  tells a human to produce), then `write-ledger` → `validate --strict` exits 0.
+  Also assert the **negative**: the same tree _without_ the stub card **fails**
+  `validate`, so the fixture proves the stub is load-bearing rather than
+  decorative.
+
+  > `backfill` itself is **not** code-enforceable and must not be written as a
+  > shell assertion. It is a SKILL.md procedure — an interactive walk (task 9)
+  > — and creating the stub card is the `defer` procedure's judgment act, which
+  > the script is explicitly _forbidden_ to perform ("silently create a
+  > destination to make a record resolve" is on the design's must-not list).
+  > Putting that chain under Code-enforced would be this plan breaking the
+  > script/LLM boundary the whole design rests on, inside an acceptance
+  > criterion. The fixture above covers the deterministic half; the User-run
+  > bullet below covers the LLM half.
 
 **User-run:**
 
+- Run the `backfill` procedure end to end against a scratch repo carrying at
+  least one destination-less deferral, and confirm it produces the stub card the
+  fixture above hand-writes. This is the LLM half of the playbook and is
+  deliberately not code-enforced.
 - Read the backfill output and confirm the stub count was stated plainly rather
   than buried — if the number of destination-less deferrals is not visible, the
   playbook has failed at the one thing it exists to surface.
