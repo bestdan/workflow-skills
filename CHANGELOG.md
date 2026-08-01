@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.68.0] - 2026-08-01
+
+### Features
+
+- close-out sweep that carries the verified id set into archive (#309) (6892060)
+
 ## [1.67.1] - 2026-08-01
 
 ### Fixes
