@@ -223,8 +223,9 @@ declare the exit reason, then exit          # every termination path, no excepti
 **The exit contract.** Before exiting, for any reason, run
 `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r>`
 (`continuing` | `paused` | `done` | `systemic` | `deadline`), and beat the
-heartbeat (`spawn-orchestrator.sh heartbeat --dir <run worktree> --note
-<where>`) at each loop iteration and `/deliver-task` sub-step boundary. Full
+heartbeat (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" heartbeat
+--dir <run worktree> --note <where>`) at each loop iteration and
+`/deliver-task` sub-step boundary. Full
 semantics, precedence, and fail-safe rules:
 [`references/run-state.md`](references/run-state.md) "Exit contract" and
 "Heartbeat".

@@ -183,7 +183,7 @@ most important distinction invisible:
 Everything downstream was guessing: the supervisor relaunched on a **blind timer**
 because it could not tell them apart, and a human reading `exit code = 0` could not
 tell whether the run was done or dead. So the orchestrator **declares** its reason —
-`spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r> [--detail …]` —
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r> [--detail …]` —
 **before** it exits, on **every** termination path. The reason is written to
 `RUN.md`'s front matter and committed to the run-state branch (it must outlive the
 process; a local file would be invisible to `--resume` and to a human reading the
@@ -225,7 +225,7 @@ does the bootout.
 ### Heartbeat — telling _slow_ from _wedged_
 
 `.auto-pilot/heartbeat` is a timestamp the orchestrator touches
-(`spawn-orchestrator.sh heartbeat --dir <run worktree> --note <where>`) at **each
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" heartbeat --dir <run worktree> --note <where>`) at **each
 loop iteration** and **each `/deliver-task` sub-step boundary**; the launch wrapper
 also beats it at the top of every wake, so a `claude` that wedges before its first
 iteration still leaves an ageable timestamp. `status` ages it against the per-task
