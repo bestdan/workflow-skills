@@ -244,22 +244,31 @@ auto-archive, store an API key). Report against the resolved handler:
   pointing at the gap.
 - **`linear` specifics** — assume **native team auto-archive** is the primary
   mechanism and the GraphQL script is the backstop (state this, since `/doctor`
-  can't read Linear's team settings). Read `linear.api_key` / `linear.api_key_ref`
-  from the **merged config** (`.task-config.yml` overlaid with the gitignored
-  `.task-config.local.yml`, its canonical home). Then:
+  can't read Linear's team settings). Read `linear.api_key_ref` from the **merged
+  config** (`.task-config.yml` overlaid with the gitignored
+  `.task-config.local.yml`, its canonical home), and `linear.api_key` from the
+  **raw `.task-config.local.yml` leaf** — it is machine-scoped, so a value in the
+  committed file is refused rather than merged (see the provenance bullet below).
+  Then:
   - **Unset** (no key and no ref in either file) → `WARN`: "no `linear.api_key_ref`
     — the GraphQL archive backstop is unavailable; rely on native auto-archive or
     add a key to `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
   - **Set** → confirm it actually **resolves**, don't just accept the string.
-    Bridge the config exactly as `linear-common.md` → "Key resolution" does (both
-    ladders — the ref, plus `api_key_resolver` from the raw local file), then probe
-    with the shared helper, which honors the configured resolver and never writes a
-    secret to stdout:
+    Bridge the config exactly as `linear-common.md` → "Key resolution" does — **all
+    three rungs**, not just the ref, or a host configured with a plaintext
+    `linear.api_key` probes with nothing bridged and gets a false `WARN` for a
+    correct setup. Then probe with the shared helper, which honors the configured
+    resolver and never writes a secret to stdout:
 
     ```bash
-    LINEAR_API_KEY_REF='<from merged config>' LINEAR_API_KEY_RESOLVER='<from .task-config.local.yml>' \
+    LINEAR_API_KEY="${LINEAR_API_KEY:-<linear.api_key from .task-config.local.yml>}" \
+      LINEAR_API_KEY_REF='<from merged config>' LINEAR_API_KEY_RESOLVER='<from .task-config.local.yml>' \
       python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
     ```
+
+    Omit any assignment whose source is unset — an empty value is not the same as an
+    absent one — and keep the `${LINEAR_API_KEY:-…}` form so an already-exported key
+    still wins over config, as the ladder requires.
 
     **Do not probe with a bare `op read "<ref>"`.** That ignores a configured
     resolver, so a machine using an approval-based one (`opx`) gets a false `WARN`

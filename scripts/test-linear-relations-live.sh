@@ -162,9 +162,9 @@ HAPPY_RC=$?
 # "Authorization: $LINEAR_API_KEY"`: this harness BRIDGES a ref/resolver and
 # never holds the key itself (so the old form died under `set -u` once the
 # bridge landed), and a key passed as a curl argument is visible in `ps`.
-python3 - "$ENUM_OUT" <<'PY' 2>/dev/null || true
+python3 - "$ENUM_OUT" "$ROOT/commands/handlers/assets" <<'PY' 2>/dev/null || true
 import json, sys, urllib.request
-sys.path.insert(0, "commands/handlers/assets")
+sys.path.insert(0, sys.argv[2])  # absolute: this harness is runnable from any cwd
 from _secret_resolve import resolve_key
 
 req = urllib.request.Request(
