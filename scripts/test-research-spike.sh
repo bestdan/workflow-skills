@@ -328,6 +328,106 @@ exit_g=$?
 assert_exit "a record inside a four-backtick fenced sample is not parsed" "$exit_g" 0
 assert_contains "the nested sample yields no records" "$out_g" "0 records"
 
+# --- Fixture (g2): an inline code span does not open a fence -------------
+# CommonMark forbids backticks in a backtick fence's info string precisely so a
+# paragraph opening with a code span stays a paragraph. Read as a fence, the
+# line below opens one that closes on the *first real record's* closing fence
+# — swallowing that record whole with no error and exit 0. Silent record loss
+# is the failure this instrument exists to prevent, so it must not come from
+# the parser: assert both records survive and the typo inside the first is
+# still reported.
+DIR_G2="$BASE/code-span"
+write_file "$DIR_G2/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation``` blocks are opened next to the prose that creates them.
+
+```obligation
+id: first
+desination: dev_docs/tasks/x.md
+status: open
+```
+
+```obligation
+id: second
+owes: the second thing
+status: open
+```'
+out_g2="$(python3 "$SCRIPT" --root "$DIR_G2" validate 2>&1)"
+exit_g2=$?
+assert_exit "a code-span line does not swallow the records after it" "$exit_g2" 1
+assert_contains "the record a bogus fence would have swallowed is still checked" "$out_g2" \
+  "unknown key 'desination'"
+# Same shape without the typo, so the run is clean and the count is visible
+# (the inventory dump is only reached when validation passes).
+DIR_G3="$BASE/code-span-clean"
+write_file "$DIR_G3/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation``` blocks are opened next to the prose that creates them.
+
+```obligation
+id: first
+owes: the first thing
+status: open
+```
+
+```obligation
+id: second
+owes: the second thing
+status: open
+```'
+out_g3="$(python3 "$SCRIPT" --root "$DIR_G3" --verbose validate 2>&1)"
+exit_g3=$?
+assert_exit "a code-span line leaves an otherwise-clean tree clean" "$exit_g3" 0
+assert_contains "both records after a code-span line are parsed" "$out_g3" "2 records"
+assert_contains "the second record survives the code-span line" "$out_g3" \
+  "id=alpha/account/second"
+
+# --- Fixture (g4): an undecodable file is a finding, not an abort --------
+# Files are decoded as UTF-8 explicitly (the platform default is the ANSI
+# codepage on Windows, and this script ships to consumers). A file that still
+# will not decode must be reported and skipped: a traceback would exit 1 —
+# which this script's contract reserves for tree-content violations — and
+# would hide every file the scan never reached.
+DIR_G4="$BASE/undecodable"
+mkdir -p "$DIR_G4/dev_docs/research/alpha/tracks/account"
+printf '# caf\xe9\n' >"$DIR_G4/dev_docs/research/alpha/PROJECT.md"
+write_file "$DIR_G4/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```question
+id: still-scanned
+status: open
+```'
+out_g4="$(python3 "$SCRIPT" --root "$DIR_G4" validate 2>&1)"
+exit_g4=$?
+assert_exit "an undecodable file exits 1, not a crash" "$exit_g4" 1
+assert_contains "an undecodable file is reported as a located finding" "$out_g4" \
+  "dev_docs/research/alpha/PROJECT.md: cannot read:"
+assert_not_contains "an undecodable file does not traceback" "$out_g4" "Traceback"
+# A UTF-8 file in this repo's own prose style (an `owes:` line is "one line, in
+# the author's own words", so em dashes and curly quotes are expected) must
+# decode whatever the caller's locale. PYTHONUTF8=0 disables PEP 540's UTF-8
+# mode, reproducing the platform-default decoding this script would otherwise
+# get on Windows.
+#
+# Scoped to the *decode* side deliberately. The script's own output carries
+# `—`/`⚠`/`✘`, so under this same env it still fails when it prints — matching
+# scripts/validate.py, scripts/check.sh and this harness, which all print those
+# glyphs too. Fixing output encoding here alone would diverge from every
+# sibling for no gain, so it stays unaddressed; this fixture pins the read-side
+# guarantee without silently asserting the output-side one.
+DIR_G5="$BASE/utf8-prose"
+write_file "$DIR_G5/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: ceiling-receipt
+owes: the receipt — and its durability contract
+destination: dev_docs/tasks/x.md
+status: open
+```'
+out_g5="$(LC_ALL=C LANG=C PYTHONUTF8=0 python3 "$SCRIPT" --root "$DIR_G5" validate 2>&1)"
+assert_not_contains "UTF-8 prose decodes under a platform-default (ASCII) codec" "$out_g5" \
+  "UnicodeDecodeError"
+
 # --- Fixture (h): a record outside any project directory is an error -----
 DIR_H="$BASE/stray-record"
 write_file "$DIR_H/dev_docs/research/README.md" '# research

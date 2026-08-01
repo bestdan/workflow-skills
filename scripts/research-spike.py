@@ -121,7 +121,7 @@ HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})[ \t]+")
 # The `none` sentinel. Recognized only as the whole value (`none`) or as the
 # value's own leading key (`none: <reason>`) — never as a mere prefix, so
 # `owes: nonetheless the receipt` stays ordinary prose.
-NONE_SENTINEL_RE = re.compile(r"^none[ \t]*(?::(?P<reason>.*))?$", re.DOTALL)
+NONE_SENTINEL_RE = re.compile(r"^none[ \t]*(?::(?P<reason>.*))?$")
 
 
 # --------------------------------------------------------------------------
@@ -344,6 +344,18 @@ def scan_fences(lines: list[str]) -> tuple[list[Fence], Fence | None]:
             continue
         ticks = m.group("ticks")
         info = m.group("info").strip()
+        if "`" in info:
+            # Not a fence. CommonMark forbids backticks in a backtick fence's
+            # info string exactly so a paragraph opening with an inline code
+            # span stays a paragraph — a line like "```obligation``` blocks are
+            # opened next to the prose" is a code span, not an obligation. Read
+            # as a fence it would open here and close on the *first real
+            # record's* closing fence, swallowing that record whole: no error,
+            # exit 0, one record silently gone. That is the invisible accrual
+            # this instrument exists to prevent, so it must not be introduced
+            # by the parser itself.
+            i += 1
+            continue
         close = None
         j = i + 1
         while j < n:
@@ -562,6 +574,24 @@ def discover(root: Path, report: Report) -> Tree:
     def rel_of(p: Path) -> str:
         return p.relative_to(root).as_posix()
 
+    def read_md(md: Path, rel: str) -> str | None:
+        """A markdown file's text, or None when it cannot be read.
+
+        Decoded as UTF-8 explicitly rather than by the platform default: this
+        script ships to consumers and runs wherever they run it, including
+        Windows, where the default is the ANSI codepage regardless of locale.
+        An undecodable or unreadable file is reported as an ordinary located
+        finding instead of aborting the walk — a traceback would exit 1, which
+        this script's contract reserves for tree-content violations, making a
+        crash indistinguishable from a real finding and hiding every file the
+        scan never reached.
+        """
+        try:
+            return md.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            report.error(rel, 0, f"cannot read: {e}")
+            return None
+
     project_dirs = sorted(p for p in research_dir.iterdir() if p.is_dir())
     for pdir in project_dirs:
         project = Project(name=pdir.name, path=pdir)
@@ -576,8 +606,10 @@ def discover(root: Path, report: Report) -> Tree:
         for md in sorted(pdir.rglob("*.md")):
             if not md.is_file():
                 continue
-            text = md.read_text()
             rel = rel_of(md)
+            text = read_md(md, rel)
+            if text is None:
+                continue
             tree.records.extend(
                 parse_records(text, md, rel, project.name, locate(pdir, md), report)
             )
@@ -591,9 +623,13 @@ def discover(root: Path, report: Report) -> Tree:
     for md in sorted(research_dir.glob("*.md")):
         if not md.is_file():
             continue
-        for rec in parse_records(md.read_text(), md, rel_of(md), "", None, report):
+        rel = rel_of(md)
+        text = read_md(md, rel)
+        if text is None:
+            continue
+        for rec in parse_records(text, md, rel, "", None, report):
             report.error(
-                rel_of(md),
+                rel,
                 rec.line,
                 f"{rec.kind} block is outside any project directory — records "
                 f"live under {research_dir.name}/<project>/",
