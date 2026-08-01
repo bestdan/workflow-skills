@@ -151,6 +151,34 @@ assert_contains "question record is located in its track and id-qualified" "$out
 assert_contains "project-level decision has no track and qualifies as project/id" "$out_b2" \
   "decision @ dev_docs/research/beta/PROJECT.md:3 [beta] id=beta/stop-semantics"
 
+# --- Fixture (b2b): a non-decision outside a track has no qualified id ---
+# `project/id` is the decision form. Handing it to a stray obligation would
+# make it indistinguishable from a decision id — which is what task 5 resolves
+# `blocks:`/`blocking:` against — so the rule declines to place it. It stays
+# named in the dump: task 3 rejects the placement, and a dropped record is the
+# invisible accrual this instrument exists to prevent.
+DIR_B2B="$BASE/track-less-obligation"
+write_file "$DIR_B2B/dev_docs/research/alpha/PROJECT.md" '# alpha
+
+```obligation
+id: homeless
+owes: something filed outside any track
+destination: dev_docs/tasks/x.md
+status: open
+```
+
+```decision
+id: stop-semantics
+state: pending
+```'
+out_b2b="$(python3 "$SCRIPT" --root "$DIR_B2B" --verbose validate 2>&1)"
+assert_contains "a track-less obligation is not given the decision id form" "$out_b2b" \
+  "id=homeless (unplaceable: outside any track)"
+assert_not_contains "a track-less obligation never qualifies as project/id" "$out_b2b" \
+  "id=alpha/homeless"
+assert_contains "a project-level decision still qualifies as project/id" "$out_b2b" \
+  "id=alpha/stop-semantics"
+
 # --- Fixture (b3): question-section discovery ----------------------------
 # The `### Q<n>.` convention `init` installs: a section ends at the next
 # heading of the same level or shallower, and a heading written inside a
@@ -248,6 +276,26 @@ assert_not_contains "a 'none' declaration is not comma-split" "$out_e" \
 assert_contains "the first colon is the only split point" "$out_e" \
   "owes = 'the keychain invariant, spelled out'"
 
+# --- Fixture (e2): a bare `none:` block parses as a none declaration -----
+# The coverage rule's explicit declaration (task 4). It must reach that rule in
+# the same shape as the field-position sentinel, with its reason verbatim — a
+# reason comma-split into "ids" is unusable, and two shapes for one concept is
+# how tasks 3-5 end up reading only half of them.
+DIR_E2="$BASE/bare-none"
+write_file "$DIR_E2/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+### Q1. Which option observes least?
+
+```obligation
+none: option (A) adds no observation, and owes no tooling
+```'
+out_e2="$(python3 "$SCRIPT" --root "$DIR_E2" --verbose validate 2>&1)"
+exit_e2=$?
+assert_exit "a bare 'none:' block is a valid record shape" "$exit_e2" 0
+assert_contains "a bare 'none:' block keeps its reason verbatim" "$out_e2" \
+  "none = none reason='option (A) adds no observation, and owes no tooling'"
+assert_not_contains "a bare 'none:' reason is never comma-split" "$out_e2" "items="
+
 # --- Fixture (f): a malformed fence is an error, not a crash -------------
 DIR_F="$BASE/malformed-fence"
 write_file "$DIR_F/dev_docs/research/alpha/tracks/account/questions.md" '# account
@@ -311,6 +359,17 @@ out_i3="$(python3 "$SCRIPT" --root "$DIR_A" ledger 2>&1)"
 exit_i3=$?
 assert_exit "an unimplemented verb exits 2, never a silent 0" "$exit_i3" 2
 assert_contains "an unimplemented verb names the task that lands it" "$out_i3" "task 7"
+
+# validate's scoping surface is task 7's (`validate [<project>] [--track <t>]
+# [--strict]`). Accepting the flags here while ignoring them would be worse
+# than not having them: `--track mine` would silently scan every track and
+# report OK. They must be rejected until their semantics land.
+for opt in --track=account --strict --project=alpha; do
+  out_i4="$(python3 "$SCRIPT" --root "$DIR_B" validate "$opt" 2>&1)"
+  exit_i4=$?
+  assert_exit "validate rejects '$opt' until task 7 lands its semantics" "$exit_i4" 2
+  assert_contains "validate says why it rejected '$opt'" "$out_i4" "unrecognized arguments"
+done
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"

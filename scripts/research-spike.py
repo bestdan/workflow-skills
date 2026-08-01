@@ -204,12 +204,22 @@ class Record:
         Decisions qualify project-wide even when a `proposed` one is filed
         inside a track, because promoting it into `decisions.md` must not
         change its id.
+
+        None when no id is declared **or** when the rule cannot produce one —
+        a non-decision record outside any track. Falling back to the decision
+        form there would give a stray obligation an identity indistinguishable
+        from a decision id, which is what task 5 resolves `blocks:` and
+        `blocking:` against. Rejecting the placement is task 3's job; this
+        property only declines to invent an identity for it, and the inventory
+        dump reports the record as unplaceable rather than dropping it.
         """
         bare = self.declared_id
         if bare is None:
             return None
-        if self.kind == "decision" or self.track is None:
+        if self.kind == "decision":
             return f"{self.project}/{bare}"
+        if self.track is None:
+            return None
         return f"{self.project}/{self.track}/{bare}"
 
 
@@ -413,6 +423,14 @@ def parse_block_fields(
         if key in fields:
             report.error(rel, lineno, f"{kind} block: duplicate key '{key}'")
             continue
+        if key == NONE_KEY:
+            # A bare `none: <reason>` block is the coverage rule's explicit
+            # declaration. Re-attach the sentinel so it parses to exactly the
+            # same shape as the field-position form (`blocks: none: ...`):
+            # tasks 3-5 then have one representation to read, and the reason
+            # is never comma-split into "ids" the way ordinary prose would be.
+            fields[key] = make_value(f"{NONE_KEY}:{raw}", lineno)
+            continue
         fields[key] = make_value(raw, lineno)
     return fields
 
@@ -608,10 +626,16 @@ def print_inventory_for(tree: Tree, project: Project) -> None:
         if rec.project != project.name:
             continue
         scope = f"{rec.project}/{rec.track}" if rec.track else rec.project
-        print(
-            f"    {rec.kind} @ {rec.rel}:{rec.line} [{scope}] "
-            f"id={rec.qualified_id or '-'}"
-        )
+        if rec.qualified_id is not None:
+            ident = rec.qualified_id
+        elif rec.declared_id is not None:
+            # An id the qualification rule cannot place. Named, not dropped —
+            # task 3 rejects the placement; silence here would be the
+            # invisible-accrual failure this instrument exists to prevent.
+            ident = f"{rec.declared_id} (unplaceable: outside any track)"
+        else:
+            ident = "-"
+        print(f"    {rec.kind} @ {rec.rel}:{rec.line} [{scope}] id={ident}")
         for key, value in rec.fields.items():
             print(f"      {key} = {render_value(value)}")
     prefix = f"{project.path.relative_to(tree.root).as_posix()}/"
@@ -697,15 +721,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--track", help="Add a track to an existing project.")
     p_init.set_defaults(run=unimplemented("init", "task 2"))
 
+    # Whole-tree scanning only. `validate [<project>] [--track <t>]
+    # [--strict]` is task 7's, and accepting those options here while
+    # ignoring them would be the silently-green interface this instrument
+    # exists to prevent: `--track mine` would scan every track and report OK,
+    # and `--strict` would pass without ever running the strict tier.
     p_validate = subparsers.add_parser(
-        "validate", help="The gate: parse and check the tree."
-    )
-    p_validate.add_argument("--project", help="Limit the scan to one project.")
-    p_validate.add_argument("--track", help="Limit the scan to one track.")
-    p_validate.add_argument(
-        "--strict",
-        action="store_true",
-        help="Organizer flavor: LEDGER.md staleness becomes an error.",
+        "validate", help="The gate: parse and check the whole tree."
     )
     p_validate.set_defaults(run=verb_validate)
 
