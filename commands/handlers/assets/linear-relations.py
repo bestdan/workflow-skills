@@ -44,7 +44,8 @@ walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
 A failed resolve never falls through to the next rung. See
 dev_docs/auth_key_access.md for the full contract.
 
-A configured `linear.api_key_ref` / `linear.api_key_resolver` reaches this
+A configured `linear.api_key` / `linear.api_key_ref` / `linear.api_key_resolver`
+reaches this
 script only because the caller bridges them onto the environment — see
 linear-common.md's "Key resolution" step. This script reads no config.
 

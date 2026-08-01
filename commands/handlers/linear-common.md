@@ -60,8 +60,12 @@ linear:
   # remote branch is treated as an orphaned claim and demoted back to Backlog. Default 24.
   api_key_ref: op://Private/Linear API/credential # optional, used by /archive-tasks —
 # a 1Password op:// reference to a Linear PERSONAL API key. The MCP has no archive
-# mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key.
+# mutation, so the GraphQL issueArchive backstop needs a raw key. Never a literal key
+# in THIS file — see api_key below for the local-only plaintext option.
 # See linear-config.md → "Archive key" and commands/handlers/linear-archive.md.
+# api_key: lin_api_…  # LOCAL-ONLY — a raw key, for operators who would rather not run a
+# secret manager. Wins over api_key_ref (nothing to resolve, no approval raised). Like
+# api_key_resolver it must NOT appear in this committed file, where it is refused.
 # api_key_resolver: opx  # LOCAL-ONLY — shown here for the schema, but it must NOT appear
 # in this committed file. It names which allow-listed program turns api_key_ref into the
 # key (`op` default, or `opx`) — an IDENTIFIER, never a command line — so it is honored
@@ -75,7 +79,7 @@ linear:
 
 - `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
-- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override"). `api_key_resolver` is stricter still: it names a program, so it is honored **only** from `.task-config.local.yml` or the environment, and is refused outright in the committed config (see "Key resolution").
+- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, `api_key`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override"). `api_key` (a raw key) and `api_key_resolver` (which names a program) are stricter still: both are honored **only** from `.task-config.local.yml` or the environment, and are refused outright in the committed config (see "Key resolution").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `remote_batch` is optional and lives under `linear:`. It is the deterministic opt-out for `/do-tasks` batch remote dispatch — `false` degrades `--all` / `-n N` to a single foreground claim; absent or `true` dispatches one remote session per issue (each self-checks for the connector). Default `true`. See `commands/do-tasks.md` §3 "Tracker-batch subroutine".
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
@@ -161,12 +165,13 @@ Three GraphQL reads run behind the **same** gate, defined once here: "Ready-cand
 _Pointer:_
 
 1. If `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF` is **already set** in the environment, bridge no pointer — an inherited value always wins (this is the headless `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case, and the launching-terminal export).
-2. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
+2. Otherwise, if `linear.api_key` is set in the **raw `.task-config.local.yml` leaf** — a plaintext key, a supported choice for operators who don't run a secret manager (`linear-config.md` → "Archive key") — bridge it into `$LINEAR_API_KEY` and skip the ref entirely; nothing needs resolving. Read it from the local file in isolation, **not** the merged view: a raw secret in the committed `.task-config.yml` is refused, reported in one line, and never used. Treat the value like any resolved key — it never appears in a log line, a reported command, or a summary.
+3. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
 
 _Resolver:_
 
-3. If `$LINEAR_API_KEY_RESOLVER` is already set, bridge no resolver. Otherwise read `linear.api_key_resolver` from the **raw `.task-config.local.yml` leaf in isolation** — _not_ the merged view. This is the one key in the repo with that exception, and it is deliberate: a resolver names a program to run, so an untrusted checkout must not be able to supply one. If `api_key_resolver` appears in the **committed** `.task-config.yml`, do not bridge it — say so in one line (`api_key_resolver belongs in .task-config.local.yml, not the committed config — ignoring it`) and carry on with the default. Silently dropping it would fail in the same shape as absence, which is the bug this whole step exists to remove.
-4. Bridge whatever you have as a **one-shot environment prefix on the same command that runs the script**, in a **single Bash call**:
+4. If `$LINEAR_API_KEY_RESOLVER` is already set, bridge no resolver. Otherwise read `linear.api_key_resolver` from the **raw `.task-config.local.yml` leaf in isolation** — _not_ the merged view. This is the one key in the repo with that exception, and it is deliberate: a resolver names a program to run, so an untrusted checkout must not be able to supply one. If `api_key_resolver` appears in the **committed** `.task-config.yml`, do not bridge it — say so in one line (`api_key_resolver belongs in .task-config.local.yml, not the committed config — ignoring it`) and carry on with the default. Silently dropping it would fail in the same shape as absence, which is the bug this whole step exists to remove.
+5. Bridge whatever you have as a **one-shot environment prefix on the same command that runs the script**, in a **single Bash call** — `LINEAR_API_KEY` when step 2 supplied a plaintext key, otherwise the ref, plus the resolver when there is one:
    ```bash
    LINEAR_API_KEY_REF='<linear.api_key_ref from merged config>' \
      LINEAR_API_KEY_RESOLVER='<linear.api_key_resolver from .task-config.local.yml>' \
@@ -175,7 +180,7 @@ _Resolver:_
    Omit either assignment entirely when that ladder produced nothing — an empty value is not the same as an absent one. Two rules, both load-bearing:
    - **Same call.** Each Bash tool call is a **fresh shell**, so a standalone `export` in an earlier call is gone by the time the script runs — the bridge would be silently inert, which is the exact bug this step exists to fix. Never split the assignments and the invocation across two calls.
    - **Single quotes.** The values come from a config file; inside double quotes a ref containing `$(…)`, backticks, or `"` would be evaluated by the shell rather than passed literally. Single-quote them. A `op://` reference legitimately contains spaces (1Password item titles do), which is another reason the quoting is not optional. If a value itself contains a single quote, it is not a valid reference — treat it as a config error and floor rather than trying to escape it.
-5. If neither ladder produced anything, pass nothing and invoke the script anyway. It exits non-zero and the run floors — the correct behavior for a keyless host. That fallback still logs the gate's ordinary one-line debug message (see "The gate"); what it must **not** add is any further "your key didn't resolve" explanation, since there was no key to resolve.
+6. If neither ladder produced anything, pass nothing and invoke the script anyway. It exits non-zero and the run floors — the correct behavior for a keyless host. That fallback still logs the gate's ordinary one-line debug message (see "The gate"); what it must **not** add is any further "your key didn't resolve" explanation, since there was no key to resolve.
 
 The default resolver, `op read`, needs an authorized 1Password session. `op signin` **in the user's own terminal** establishes one that _is_ visible to the agent's tool-spawned subshell — `op` holds the session in its per-user cache daemon (`--cache`, on by default on UNIX), so it crosses the process boundary. Sessions lapse after roughly 30 minutes of inactivity, at which point the fast path floors until the next `op signin`. An approval-based resolver such as `opx` instead raises a dialog per read and invalidates the session afterwards — so a later plain `op read` in the same shell will fail until the next approval, which is that tool working as designed rather than a broken session.
 

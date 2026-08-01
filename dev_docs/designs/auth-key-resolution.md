@@ -92,6 +92,13 @@ operator installed `opx` to get.
 
 **Secret / pointer ladder** — first hit wins:
 
+0. `linear.api_key` from `.task-config.local.yml` — a raw key in the local config, bridged
+   by the agent into `$LINEAR_API_KEY`. Added after the first review round at the owner's
+   request: an operator who doesn't want to run a secret manager for one key should not be
+   forced to. Local file only, refused in the committed config, same provenance rule as
+   the resolver. The exposure it accepts — plaintext inside a tree every agent session
+   reads — is documented at the point of configuration rather than prevented, because it
+   is the operator's call to make about their own token.
 1. `$LINEAR_API_KEY` (raw secret) → use it; no resolver runs.
 2. `$LINEAR_API_KEY_REF` → resolve it.
 3. `linear.api_key_ref` from the merged config, bridged by the agent onto the _same_

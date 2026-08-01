@@ -14,17 +14,22 @@ For a credential belonging to service `<SERVICE>`:
 
 | Layer    | Environment                        | Config                            | Holds                              |
 | -------- | ---------------------------------- | --------------------------------- | ---------------------------------- |
-| Secret   | `$<SERVICE>_<CREDENTIAL>`          | **never**                         | the raw secret value               |
+| Secret   | `$<SERVICE>_<CREDENTIAL>`          | local file only                   | the raw secret value               |
 | Pointer  | `$<SERVICE>_<CREDENTIAL>_REF`      | `<service>.<credential>_ref`      | an opaque `<scheme>://…` reference |
 | Resolver | `$<SERVICE>_<CREDENTIAL>_RESOLVER` | `<service>.<credential>_resolver` | an identifier from the allow-list  |
 
 For the Linear key that is `$LINEAR_API_KEY`, `$LINEAR_API_KEY_REF` /
 `linear.api_key_ref`, and `$LINEAR_API_KEY_RESOLVER` / `linear.api_key_resolver`.
 
-**A raw secret never goes in config, in the repo, or in a command line that gets logged.**
-A pointer is not a secret, but it is still sensitive — it advertises where a
-full-account token lives — so its canonical home is the gitignored
-`dev_docs/tasks/.task-config.local.yml`, never the committed `.task-config.yml`.
+**A raw secret never goes in the committed config, in tracked files, or in a command line
+that gets logged.** It is accepted in the **gitignored `.task-config.local.yml`** for
+operators who would rather not run a secret manager — see
+[Plaintext keys](#plaintext-keys) for the trade — and refused in the committed
+`.task-config.yml`.
+
+A pointer is not a secret, but it is still sensitive — it advertises where a full-account
+token lives — so its canonical home is that same gitignored file, never the committed
+one.
 
 ## Two ladders
 
@@ -35,11 +40,18 @@ inherited `$..._REF` silently suppressed the operator's configured resolver.
 
 **Secret / pointer** — first hit wins:
 
+0. `<service>.<credential>` from `.task-config.local.yml` — a raw secret in the local
+   config, bridged by the agent into `$<NAME>`. Local file only; refused in the committed
+   config. See [Plaintext keys](#plaintext-keys).
 1. `$<NAME>` — the raw secret. Used directly; no resolver runs.
 2. `$<NAME>_REF` — resolve it.
 3. `<service>.<credential>_ref` from the **merged** config, bridged by the agent onto the
    same Bash invocation that runs the script.
-4. Nothing → unavailable.
+4. Nothing → unavailable (`unconfigured`).
+
+Rung 0 is numbered from zero because it is not something the helper sees: like rung 3, it
+is a config value the **agent** bridges into the environment. An inherited `$<NAME>`
+(rung 1) is what the helper actually reads in both cases.
 
 **Resolver** — first hit wins:
 
@@ -101,6 +113,32 @@ that runs on your machine. It does not defend against a hostile environment — 
 can set `$..._RESOLVER` can already run commands. And with `op` as the default, a
 committed pointer is **not** inert on a machine with a live `op` session; it resolves.
 The guarantee is that the committed config cannot choose the _program_.
+
+## Plaintext keys
+
+`<service>.<credential>` — a raw secret in `.task-config.local.yml` — is **supported**,
+for operators who don't want to run a secret manager for a single key. It takes
+precedence over the pointer: nothing needs resolving, so no resolver runs and no approval
+is raised.
+
+Two rules, both enforced the same way as the resolver's provenance rule:
+
+- **Local file only.** In the committed `.task-config.yml` a raw secret is refused with a
+  loud error, never merged and never used. The agent must read this key from the raw
+  `.task-config.local.yml` leaf in isolation, not from the merged view.
+- **Never echoed.** It is a secret, so it never appears in a diagnostic, a log line, a
+  reported command, or a summary — the same rule that governs a resolved value.
+
+The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
+robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
+config, so this is not one forgotten ignore line away from being committed, and
+`git stash -u` does not sweep ignored files. What you accept instead is a plaintext
+full-account token **inside the repo tree**, where every agent session, editor index,
+directory-wide grep, and backup of that folder can read it. For a plaintext key without
+that exposure, export `$<NAME>` from your shell profile — same rung, nothing on disk in
+the checkout.
+
+Both are legitimate. Nothing in this plugin nags about either.
 
 ## Failure semantics
 
