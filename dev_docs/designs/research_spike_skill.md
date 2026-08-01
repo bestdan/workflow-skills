@@ -1,7 +1,9 @@
 # Design — the obligation ledger for research spikes
 
-Status: proposed. Extracted from a working implementation in `aiutopilot`
-(PR #25), which is where every measurement below comes from.
+Status: designed. The ledger mechanism is extracted from a working
+implementation in `aiutopilot` (PR #25), which is where every measurement
+below comes from; the skill design ("How this becomes a skill" onward) was
+settled 2026-08-01 and extends it to long-running, multi-track projects.
 Date: 2026-08-01
 
 ## Problem
@@ -248,29 +250,225 @@ The reference implementation hard-codes decisions that were right for one repo:
 | Markdown + `dprint`                                  | house format                          | detect the formatter, verify generated-block stability          |
 | Green-or-broken gate                                 | that repo's contract                  | detect whether an advisory tier exists                          |
 
+The design below resolves the first three rows **structurally rather than by
+config**: the skill owns the directory convention, so coverage files, heading
+convention, and coverage scope are fixed by `init` instead of configured per
+repo. Only the formatter check and the advisory-tier detection remain
+environmental.
+
 ## How this becomes a skill
 
-Proposed surface, in the order a user meets it:
+Design settled 2026-08-01. The scope is wider than the reference
+implementation: not just the obligation ledger, but **research-spike
+management for long-running, big projects** — the ledger is one instrument
+inside it. The settled constraints:
 
-- **`init`** — detect the answers file and heading convention, install the
-  script, add ledger markers, write the check-contract paragraph.
-- **`backfill`** — walk the answers file section by section _with the user_,
-  proposing a record or a `none` for each. It must **not** invent destinations:
-  where none exists it offers to create a stub and says so out loud, because the
-  count of required stubs is the diagnostic.
-- **`validate`** — the gate command.
-- **`ledger`** — print or rewrite.
-- **`suggest`** — advisory, never failing.
+| Question            | Decision                                                                |
+| ------------------- | ----------------------------------------------------------------------- |
+| Lifecycle ownership | Full — the skill owns the question format, filing, and convergence      |
+| Structure           | Track directories with a project roll-up; multiple concurrent projects  |
+| Composition         | Sibling to plan-with-docs / task loop, with explicit bridges            |
+| Agent dispatch      | Structure now, dispatch later — tracks are agent-sized context bundles  |
+| Convergence         | Decisions-gated: questions and obligations name the decision they block |
+| Reconciliation      | Script-driven, always — the LLM never computes a status or a count      |
 
-Things the skill must **not** do, each corresponding to a way this becomes
-theatre:
+### On-disk structure
+
+Multiple research projects coexist under one root; each is self-contained:
+
+```
+dev_docs/research/<project>/
+  PROJECT.md            # charter: what's being built, links to tracks
+  decisions.md          # the decisions this spike exists to unblock
+  LEDGER.md             # generated roll-up (organizer-owned)
+  tracks/<track>/
+    questions.md        # the track's questions + answers + track ledger
+    contracts/          # optional: contract docs whose preconditions register here
+    obligations/        # stub cards for obligations with no owner yet
+```
+
+Ids scope as `project/track/id`, so two projects can each have an `account`
+track without collision. Cross-project obligations are just records whose
+`destination` points into the other project's tree — the path-must-exist rule
+already covers them.
+
+The structural payoff is compartmentalization: an agent told to "work track X"
+needs `tracks/X/` plus `decisions.md` and nothing else. That contract is stated
+in the SKILL.md so a future `/work-track` dispatcher (or auto-pilot
+integration) composes without redesign.
+
+### Record formats
+
+**Questions** get structure — this is the full-lifecycle choice. Each question
+is a section in `questions.md` with a fenced header block:
+
+````markdown
+### Q3. Must the baseline stop contain a process-group escapee?
+
+```question
+id: baseline-stop-escapee
+status: open            # open | answered | retired
+blocks: foo/stop-semantics    # decision id(s), or "none: <reason>"
+method: measure         # measure | prototype | read | decide
+```
+````
+
+- `retired` is for questions whose premise died; it requires
+  `retired_because`, so questions leave the board without pretending to be
+  answered.
+- `blocks` is the convergence hook. As with obligation coverage, "none" must
+  carry a reason — a question that gates nothing is worth noticing.
+- `answered` requires the obligation coverage rule satisfied (a record or an
+  explicit `none`), exactly as in the reference implementation.
+
+**Decisions** (`decisions.md`) are the same pattern at project level:
+
+````markdown
+```decision
+id: stop-semantics
+status: blocked          # blocked | ready | decided
+```
+````
+
+`ready` is **computed, never asserted**: a decision may only be `ready` when
+every question blocking it is answered or retired and every obligation marked
+`blocking: <decision-id>` is discharged. The validator enforces this; a
+hand-edit to `ready` while a blocker is open fails the gate. `ready → decided`
+is a human act, recorded with a `decided_in:` pointer (typically a plan
+directory or ADR — destination-must-exist applies again).
+
+**Obligations** are unchanged from the record format above, plus one optional
+field: `blocking: <decision-id>` for the subset that gates a decision rather
+than merely being owed. Most obligations should not carry it — scarcity is
+what keeps convergence meaningful.
+
+**Ledgers**: each track stores its own two-line ledger at the top of its
+`questions.md`, so parallel agents never contend on a shared file. The project
+`LEDGER.md` is the roll-up — per-track counts, per-decision blocker status,
+project totals. Only the organizer regenerates it; the validator flags it
+stale rather than auto-fixing.
+
+### The verb surface
+
+One script (`research-spike.py`, stdlib-only, `--root`-testable) plus a
+SKILL.md teaching the agent workflow:
+
+| Verb                      | Behaviour                                                                                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init <project>`          | Scaffold the project directory — charter stub, empty `decisions.md`, ledger markers. `--track <name>` adds a track later.                                                                                             |
+| `file`                    | Add a question: prose, id, `blocks` (offering the existing decision list, or filing a new decision), `method`. Naming a nonexistent decision fails — the "track that did not exist" bug, prevented for decisions too. |
+| `answer`                  | Walk a question to `answered`; the coverage rule fires here — obligations registered or `none` declared before the status flips.                                                                                      |
+| `defer`                   | Register an obligation next to prose, creating a stub card when no destination exists and saying so out loud — the stub count is the diagnostic.                                                                      |
+| `backfill`                | Section-by-section interactive walk of an existing doc, as above — now also imports free-form questions into the structured format.                                                                                   |
+| `validate`                | The gate; per-project, per-track (`--track`), or whole tree.                                                                                                                                                          |
+| `ledger` / `write-ledger` | Derive or rewrite the stored ledgers. Explicit act, never auto-repair.                                                                                                                                                |
+| `status <project>`        | The convergence report — below.                                                                                                                                                                                       |
+| `suggest`                 | Advisory lexical scan, never failing, unchanged.                                                                                                                                                                      |
+
+### Convergence: the `status` report
+
+`status` answers "what still blocks building?" — the question the maintainer
+was really asking on day four. Derived entirely by the script, printed per
+decision:
+
+```
+foo — 2 of 5 decisions ready
+
+  stop-semantics        READY    (decided: no)
+  account-provisioning  BLOCKED  by 2 questions, 1 obligation
+    Q: foo/account/uid-domain-isolation   open   (method: measure)
+    O: foo/account/keychain-invariant     open   → tracks/account/obligations/keychain.md
+
+  Questions:    14 answered, 6 open, 2 retired
+  Obligations:  9 discharged, 17 open (3 blocking)
+```
+
+Rules that keep the report trustworthy rather than decorative:
+
+1. **Decision status is computed, never asserted** — stated above, enforced by
+   `validate`.
+2. **The divergence signal survives the roll-up.** The health metric —
+   questions converging while obligations climb — is printed per track and per
+   project. Big projects are exactly where one sick track hides inside healthy
+   totals, so totals never print without the per-track breakdown.
+3. **Blocking obligations stay scarce.** `blocking:` must name an existing
+   decision; the script warns when more than a stated fraction of obligations
+   are blocking (default: warn, configurable) — if everything blocks, nothing
+   converges and the flag has become emphasis.
+4. **Retired questions count separately everywhere.** Retirement is legitimate
+   scope reduction, but folding it into "answered" would let a project
+   converge by giving up.
+
+### Script/LLM split
+
+If two runs over the same tree could disagree, it belongs to the script: all
+parsing, every validation rule, decision-status computation, the `status`
+report, ledger derivation and freshness, `suggest`. The gate in CI is only
+ever the script. The LLM contributes judgment only: prose, proposed ids and
+`none:` reasons, the interactive `file`/`answer`/`backfill` dialogues, and
+deciding _whether_ something is a deferral at all. The agent never computes a
+status or a count itself.
+
+### Validation rules and parallel-agent safety
+
+All reference-implementation rules carry over (block syntax, unknown-key
+rejection, kebab-case scoped ids, destination-must-exist, coverage rule,
+ledger freshness, `discharged_by` iff discharged). New rules:
+
+1. **Referential integrity across record types.** `blocks:` and `blocking:`
+   must name an existing decision; `decided_in:` / `retired_because` required
+   by their statuses; a decision nothing references is a warning (dead
+   decision).
+2. **Status consistency.** `answered` ⇒ coverage satisfied; `ready`/`decided`
+   ⇒ zero open blockers. Errors, not warnings — this is what makes hand-editing
+   the files safe to allow.
+3. **Ledger freshness is scoped.** A track's stored ledger is checked against
+   that track only, so a parallel agent fails validation only for its own
+   forgotten `write-ledger` — another track's activity cannot fail it.
+   `LEDGER.md` staleness is reported distinctly as organizer-owned; track
+   agents gate on `validate --track <theirs>`.
+4. **Write-ownership by convention, checked by consequence.** Nothing stops an
+   agent writing outside its track, but every cross-track effect it could
+   cause — duplicate id, broken destination, stale foreign ledger — is caught
+   by the organizer's project-wide `validate`. Convention in SKILL.md: track
+   agents touch `tracks/<theirs>/` only; `decisions.md` and `LEDGER.md` are
+   organizer-owned.
+
+### Bridges (sibling, not extension)
+
+The spike machinery stands alone and works in any repo. Where the
+workflow-skills task loop is configured, two explicit bridges exist, both
+expressed through the destination field rather than new mechanism:
+
+- **`defer` → task loop.** When task-config is set up, `defer` offers
+  "/add-task this instead of a stub"; the created task's path or URL becomes
+  the obligation's destination.
+- **`decided` → plan-with-docs.** A decided decision hands off by pointing
+  `decided_in:` at the plan directory; the plan becomes the destination for
+  the decision's residual obligations.
+
+No auto-promotion in either direction — promotion is an explicit act, for the
+same reason ledger rewriting is.
+
+### What the skill must **not** do
+
+Each corresponds to a way this becomes theatre:
 
 - silently create a destination to make a record resolve;
-- auto-repair a stale ledger during validation (rewrite must be an explicit act,
-  or the number stops being checked and starts being generated);
+- auto-repair a stale ledger during validation (rewrite must be an explicit
+  act, or the number stops being checked and starts being generated);
 - widen coverage to every markdown file, which turns the discipline into noise
   and trains people to satisfy it mechanically;
+- let the LLM assert any status or count the script can compute;
 - report the obligation count as a progress metric on its own — see below.
+
+### Test surface, extended
+
+The fixture-tree/`--root` discipline above carries over, extended with
+fixtures for: cross-record referential integrity, the computed-decision rules
+(hand-edited `ready` with an open blocker fails), scoped ledger freshness (a
+stale foreign track does not fail `--track`), and a two-project tree (id
+scoping, cross-project destinations).
 
 ## The discipline the tool cannot supply
 
@@ -293,10 +491,10 @@ theatre:
   describe work going somewhere without emitting a record. The coverage rule
   closes this in the one file where deferrals are created; `--suggest` gestures
   at the rest; neither closes it in general.
-- **Coverage is one file.** A precondition stated in a contract doc — the class
-  that hid the worst offender in the origin repo — is registered voluntarily.
-- **Ids are a global flat namespace**, which is fine at tens and would need
-  scoping at hundreds.
+- **Coverage reaches questions files only.** Per-track `questions.md` files are
+  covered; a precondition stated in a contract doc — the class that hid the
+  worst offender in the origin repo — is still registered voluntarily, even
+  when the doc lives under `tracks/<t>/contracts/`.
 - **The ledger counts registered obligations, not tasks.** It is a measure of
   declared debt, not of remaining work.
 
