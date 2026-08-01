@@ -6,13 +6,16 @@ Stubs the resolver binary via PATH (a small shell script standing in for
 a network, or needs a live `op` session. Covers: allow-list enforcement, an
 unknown resolver identifier, a valid ref containing spaces, the malformed
 `opx op://…` value, no-fallthrough on a failed resolve, timeout, empty
-stdout, and that the full ref never appears in an error message.
+stdout, that the full ref never appears in an error message, and the
+`--probe` CLI contract (stdout stays empty; only a category on stderr).
 """
 
 import contextlib
 import importlib.util
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -194,6 +197,47 @@ class ResolveKeyTests(unittest.TestCase):
         for message in cases:
             self.assertNotIn(secret, message)
             self.assertNotIn(ref, message)
+
+
+class ProbeTests(unittest.TestCase):
+    """`--probe` is what /doctor calls, so it is exercised as a subprocess.
+
+    The property worth a test is that stdout stays empty even on success —
+    that is the guard against a probe ever printing the secret it resolved.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bin_dir = self.tmp.name
+
+    def _probe(self, env):
+        return subprocess.run(
+            [sys.executable, str(ASSET), "--probe", "SECRET"],
+            capture_output=True,
+            text=True,
+            env={"PATH": self.bin_dir, **env},
+        )
+
+    def test_success_is_silent_on_stdout(self):
+        write_stub(self.bin_dir, "op", "#!/bin/sh\necho the-secret\n")
+        out = self._probe({"SECRET_REF": "op://Private/x/y"})
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout, "")
+        self.assertNotIn("the-secret", out.stderr)
+
+    def test_failure_reports_only_the_category(self):
+        write_stub(self.bin_dir, "op", "#!/bin/sh\necho 'not signed in' 1>&2; exit 1\n")
+        out = self._probe({"SECRET_REF": "op://Private/PreThink Linear/dan_local_key"})
+        self.assertNotEqual(out.returncode, 0)
+        self.assertEqual(out.stdout, "")
+        self.assertEqual(out.stderr.strip(), "no-session")
+
+    def test_unconfigured_host_is_its_own_category(self):
+        out = self._probe({})
+        self.assertNotEqual(out.returncode, 0)
+        self.assertEqual(out.stdout, "")
+        self.assertEqual(out.stderr.strip(), "unconfigured")
 
 
 class RedactTests(unittest.TestCase):

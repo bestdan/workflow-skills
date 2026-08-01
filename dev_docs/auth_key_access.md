@@ -21,11 +21,10 @@ For a credential belonging to service `<SERVICE>`:
 For the Linear key that is `$LINEAR_API_KEY`, `$LINEAR_API_KEY_REF` /
 `linear.api_key_ref`, and `$LINEAR_API_KEY_RESOLVER` / `linear.api_key_resolver`.
 
-**A raw secret never goes in the committed config, in tracked files, or in a command line
-that gets logged.** It is accepted in the **gitignored `.task-config.local.yml`** for
-operators who would rather not run a secret manager — see
-[Plaintext keys](#plaintext-keys) for the trade — and refused in the committed
-`.task-config.yml`.
+**A raw secret never goes in the committed config or in a tracked file.** It is accepted
+in the **gitignored `.task-config.local.yml`** for operators who would rather not run a
+secret manager — see [Plaintext keys](#plaintext-keys) for what that costs — and refused
+in the committed `.task-config.yml`.
 
 A pointer is not a secret, but it is still sensitive — it advertises where a full-account
 token lives — so its canonical home is that same gitignored file, never the committed
@@ -126,17 +125,25 @@ Two rules, both enforced the same way as the resolver's provenance rule:
 - **Local file only.** In the committed `.task-config.yml` a raw secret is refused with a
   loud error, never merged and never used. The agent must read this key from the raw
   `.task-config.local.yml` leaf in isolation, not from the merged view.
-- **Never echoed.** It is a secret, so it never appears in a diagnostic, a log line, a
-  reported command, or a summary — the same rule that governs a resolved value.
+- **Never echoed in prose.** It is a secret, so it never appears in a diagnostic, a log
+  line, or a summary — the same rule that governs a resolved value.
+
+There is a third consequence, and it is the one most easily missed: bridging a config
+value into the environment means the agent writes it into the **command it runs**, so a
+plaintext key lands in the session transcript and is briefly visible in `ps`. A pointer
+does not have that problem — only the reference is bridged, and the resolver hands the
+secret to the process directly. This is inherent to choosing plaintext, not a defect in
+the bridge, but it is part of what you accept.
 
 The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
 robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
 config, so this is not one forgotten ignore line away from being committed, and
-`git stash -u` does not sweep ignored files. What you accept instead is a plaintext
-full-account token **inside the repo tree**, where every agent session, editor index,
-directory-wide grep, and backup of that folder can read it. For a plaintext key without
-that exposure, export `$<NAME>` from your shell profile — same rung, nothing on disk in
-the checkout.
+`git stash -u` does not sweep ignored files. What you accept instead is twofold: a
+plaintext full-account token **inside the repo tree**, where every agent session, editor
+index, directory-wide grep, and backup of that folder can read it — and, because the
+agent bridges it into the command it runs, the token also appears in the **session
+transcript**. For a plaintext key without either exposure, export `$<NAME>` from your
+shell profile — same rung, nothing on disk in the checkout and nothing bridged.
 
 Both are legitimate. Nothing in this plugin nags about either.
 
