@@ -44,7 +44,11 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
   confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
 - **Linear** (linear source) — `local-full`: resolve the API key from its
   `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
-  `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
+  `op read`, backed by `$OP_SERVICE_ACCOUNT_TOKEN` (this run is unattended, so
+  there is no human to approve a dialog). **`opx` is not an option here**: it
+  forces a native approval prompt on every read and fails **closed** with no UI
+  to answer it (exit 3), so an auto-pilot probe or run through `opx` would
+  always block. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
   Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
   the team) to confirm auth actually works, not just that it resolves.
 - **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each

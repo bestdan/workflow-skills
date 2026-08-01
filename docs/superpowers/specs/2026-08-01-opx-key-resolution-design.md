@@ -110,9 +110,12 @@ session-invalidation would kill any ambient `op` session the user had. So:
 - Add an `opx` presence line to the prerequisite checks.
 - Gate the resolution probe: probe with `op read` only when
   `$OP_SERVICE_ACCOUNT_TOKEN` is set. When `opx` is present and no service
-  account token is set, report `INFO` — "ref configured; resolution is
+  account token is set, report `PASS` — "ref configured; resolution is
   approval-gated per invocation, not probed here" — instead of resolving.
 - When neither applies, keep today's behavior.
+
+`/doctor`'s status vocabulary stays `PASS`/`WARN`/`FAIL`; no `INFO` status is
+introduced for one check.
 
 ## Out of scope
 
@@ -120,7 +123,7 @@ session-invalidation would kill any ambient `op` session the user had. So:
   Their env-first precedence is exactly what makes this work.
 - Swapping `op read` → `opx` **inside** those scripts. Rejected: breaks the
   unattended service-account path (no UI → exit 3), and because a non-zero exit
-  *is* the gate, the breakage is indistinguishable from "no key configured".
+  _is_ the gate, the breakage is indistinguishable from "no key configured".
 - Pre-loading `eval "$(opx --env LINEAR_API_KEY=…)"` in the launching terminal.
   Rejected: requires knowing at terminal-open time which credentials the session
   will need, and parks a full-account bearer token in every subprocess's
@@ -131,20 +134,22 @@ session-invalidation would kill any ambient `op` session the user had. So:
 
 ## Files in scope
 
-| File | Change |
-| --- | --- |
-| `commands/handlers/linear-common.md` | "Key resolution" rewritten to the selection rule above; failure-legibility paragraph split by cause. Single source of truth. |
-| `commands/handlers/linear-config.md` | "Archive key" documents both mechanisms and which situation each serves. |
-| `commands/doctor.md` | `opx` presence check; resolution probe gated as above. |
-| `skills/auto-pilot/references/launch-preflight.md` | One sentence that opx is explicitly unusable unattended (fails closed, exit 3); existing `op read` guidance stays. |
-| `dev_docs/decisions/linear_read_fastpaths.md` | Addendum noting the opx option and its scoping. No rewrite of history. |
-| `commands/handlers/linear-archive.md` | Interactive invocation re-pointed; the "Run it without an agent" cron section stays on `op`. |
-| `commands/handlers/linear-claim.md` | The `api_key_ref` note (~L24) re-pointed. |
-| `commands/handlers/linear-false-closures.md` | The session/`op signin` guidance (~L101–113) re-pointed. |
-| `commands/handlers/linear-reoptimize.md`, `linear-reconcile.md`, `linear-sweep-complete.md` | Abbreviated invocations kept consistent with linear-common.md. |
+| File                                                                                        | Change                                                                                                                       |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `commands/handlers/linear-common.md`                                                        | "Key resolution" rewritten to the selection rule above; failure-legibility paragraph split by cause. Single source of truth. |
+| `commands/handlers/linear-config.md`                                                        | "Archive key" documents both mechanisms and which situation each serves.                                                     |
+| `commands/doctor.md`                                                                        | `opx` presence check; resolution probe gated as above.                                                                       |
+| `skills/auto-pilot/references/launch-preflight.md`                                          | One sentence that opx is explicitly unusable unattended (fails closed, exit 3); existing `op read` guidance stays.           |
+| `dev_docs/decisions/linear_read_fastpaths.md`                                               | Addendum noting the opx option and its scoping. No rewrite of history.                                                       |
+| `commands/handlers/linear-archive.md`                                                       | Interactive invocation re-pointed; the "Run it without an agent" cron section stays on `op`.                                 |
+| `commands/handlers/linear-claim.md`                                                         | The `api_key_ref` note (~L24) re-pointed.                                                                                    |
+| `commands/handlers/linear-false-closures.md`                                                | The session/`op signin` guidance (~L101–113) re-pointed.                                                                     |
+| `commands/handlers/linear-reoptimize.md`, `linear-reconcile.md`, `linear-sweep-complete.md` | Abbreviated invocations kept consistent with linear-common.md.                                                               |
 
-Version fields on the plugin and on `auto-pilot` are bumped, since skill content
-changes materially.
+**No manual version bump.** `CONTRIBUTING.md` → "Versioning" has CI bump
+`plugin.json`/`marketplace.json` from the merged commit's Conventional Commit
+type, and `docs:` maps to no release. No `SKILL.md` in this repo carries a
+`version:` frontmatter field, so there is nothing to bump there either.
 
 ## Done when
 

@@ -115,7 +115,11 @@ the auth flows):
   `commands/handlers/linear-complete.md`,
   `commands/handlers/linear-sweep-complete.md`, and
   `commands/handlers/linear-reconcile.md` resolve; if any are missing, report
-  `WARN` with the missing path.
+  `WARN` with the missing path. Also note whether `opx` is on `PATH`
+  (`command -v opx`): present → `PASS` "`opx` available; interactive fast-path
+  reads are approval-gated"; absent → `PASS` with a note that fast-path reads
+  will fall back to an ambient `op` session (see `linear-common.md` → "Key
+  resolution"). Never a `WARN` — `opx` is optional, and the `op` path still works.
 - `jira` → the Atlassian MCP is reachable: call
   `<atlassian-mcp>__getAccessibleAtlassianResources` and confirm it returns sites
   (see `commands/handlers/jira-config.md` step 1).
@@ -243,16 +247,29 @@ auto-archive, store an API key). Report against the resolved handler:
   - **Unset** (in neither file) → `WARN`: "no `linear.api_key_ref` — the GraphQL
     archive backstop is unavailable; rely on native auto-archive or add a key to
     `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
-  - **Set** → confirm it actually **resolves**, don't just accept the string.
-    Test resolution without revealing the secret: if `$LINEAR_API_KEY` is already
-    exported, `PASS` (the script will use it directly). Else probe the ref with
-    `op read "<ref>" >/dev/null 2>&1` (redirect — never print the key). Exit 0 →
-    `PASS` "backstop wired; key resolves." Non-zero → `WARN`: "`api_key_ref` is
-    set but did not resolve. The usual cause is no authorized `op` session (the error
-    reads `account is not signed in`) rather than a bad ref — run `op signin` in your
-    own terminal and re-run, or set `OP_SERVICE_ACCOUNT_TOKEN`. If it fails after
-    signing in, fix the `op://vault/item/field` reference." (Still a
-    `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
+  - **Set** → say how it will resolve, and probe **only where probing is free**.
+    Never reveal the secret, and never raise an approval dialog just to run
+    `/doctor`. In order:
+    - `$LINEAR_API_KEY` already exported → `PASS` (the script uses it directly).
+    - `$OP_SERVICE_ACCOUNT_TOKEN` set → this is the unattended path, which
+      resolves non-interactively, so probing is free: `op read "<ref>"
+      > /dev/null 2>&1`(redirect — never print the key). Exit 0 →`PASS`"backstop wired; key resolves." Non-zero →`WARN`: "`api_key_ref`is set
+      but did not resolve under the service account — fix the`op://vault/item/field` reference, or check the service account has access
+      > to that vault."
+    - Otherwise, `opx` on `PATH` → `PASS`: "`api_key_ref` set; `opx` will resolve
+      it behind an approval dialog at each invocation. Not probed here — probing
+      would raise a dialog and invalidate any `op` session you have." Do **not**
+      run `op read` in this branch: `opx` deliberately tears down the `op`
+      session after each read, so a `/doctor` probe would both nag and disrupt.
+    - Otherwise (no `opx`, no service account) → probe the ref with `op read
+      "<ref>" >/dev/null 2>&1`. Exit 0 → `PASS` "backstop wired; key resolves."
+      Non-zero → `WARN`: "`api_key_ref` is set but did not resolve. The usual
+      cause is no authorized `op` session (the error reads `account is not
+      signed in`) rather than a bad ref — run `op signin` in your own terminal
+      and re-run, or set `OP_SERVICE_ACCOUNT_TOKEN`. If it fails after signing
+      in, fix the `op://vault/item/field` reference."
+
+    (All `WARN`/`PASS`, never a failure — this whole check is non-blocking.)
     The same key, when set, also enables the read-only GraphQL fast paths
     (`/do-tasks` find-candidates, `/sweep-for-complete`, `/reconcile-tasks`,
     `/reoptimize-tasks`) via `linear-common.md`'s "Key resolution" step —

@@ -19,7 +19,17 @@ mapping this file reuses.
 > whole thing — query **and** mutate — in GraphQL with one key. This is the one
 > handler whose retire op is not MCP-native.
 
-> **Gotcha: `account is not signed in` means no session, not a forbidden shell.**
+> **Running this from an agent session: use `opx`.** When `opx` is on `PATH`
+> (`command -v opx`), it is the default for an **interactive/agent** run of the
+> archive step — it forces a native approval dialog on each key read and
+> invalidates the `op` session afterwards, so there is no ambient session for
+> the agent's subshell to inherit at all (see `linear-common.md` → "Key
+> resolution"). This is the same invocation shown in "Resolve the API key"
+> below, field-tested against a real workspace. The gotcha and its two
+> workarounds below apply only when `opx` is **absent** or the run is
+> **headless**.
+
+> **Gotcha (opx absent): `account is not signed in` means no session, not a forbidden shell.**
 > `op read` needs an authorized 1Password session, and that message says one has
 > not been established — it is **not** a statement that the agent's tool-spawned
 > subshell is disallowed. Once `op signin` has run in **your own** terminal (with
@@ -35,7 +45,8 @@ mapping this file reuses.
 >   the script/commands; you run them; the key never enters the transcript.
 > - **Headless / scheduled:** set `OP_SERVICE_ACCOUNT_TOKEN` (a 1Password service
 >   account) or drop a Linear key into a CI secret. No desktop app, no terminal
->   authorization — this is the cron/GitHub-Action path.
+>   authorization — this is the cron/GitHub-Action path. `opx` cannot serve this
+>   path either way — no UI to approve, so it fails closed (exit 3).
 >
 > Once a first `op` call from the agent shell has failed with `account is not
 > signed in`, do **not** keep retrying it expecting it to eventually authorize —
@@ -84,15 +95,29 @@ native window, or needs to drain a workspace that has already hit the cap.
    cron/Action sets `$LINEAR_API_KEY_REF` — or `$LINEAR_API_KEY` outright — in the
    job env.
 
+   **Running interactively/as an agent, `opx` on `PATH` (the default).** Resolve
+   the key behind a native approval dialog and hand it straight to the script —
+   no `op` session for the agent's subshell to inherit:
+
+   ```bash
+   opx run --env "LINEAR_API_KEY=$LINEAR_API_KEY_REF" -- \
+     python3 commands/handlers/assets/linear-archive.py --team "<linear.team>" --older-than <N>
+   ```
+
+   **`opx` absent, or a headless/scheduled run.** Resolve the ref with `op read`
+   directly (or by item UUID + field), backed by an authorized `op` session for
+   interactive use, or `OP_SERVICE_ACCOUNT_TOKEN` for cron/CI:
+
    ```bash
    LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # e.g. op://Private/Linear API/credential
    # or, by item UUID + field:
    # LINEAR_API_KEY="$(op item get <uuid> --fields label=<field> --reveal)"
    ```
 
-   Per the gotcha above, this needs an authorized `op` session — establish one with
-   `op signin` in your own terminal (it then works from the agent's subshell too),
-   or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
+   Per the gotcha above, this `op read` form needs an authorized `op` session —
+   establish one with `op signin` in your own terminal (it then works from the
+   agent's subshell too), or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If
+   `linear.api_key_ref` is unset, **stop** with: "Linear archiving
    needs a personal API key. Add `linear.api_key_ref` (a 1Password `op://`
    reference) to the gitignored `dev_docs/tasks/.task-config.local.yml` — see
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a
@@ -211,8 +236,10 @@ over hand-rolling the queries.
 > resolve `completed`/`canceled`/`duplicate` state ids with `<linear-mcp>__list_workflow_states`,
 > then call `<linear-mcp>__list_issues` (`teamId`, optional `projectId`,
 > `includeArchived: false`, those state ids) and filter by age client-side. But
-> the mutation still needs the key in a non-agent shell, so for anything but a
-> tiny manual run, prefer the single-key GraphQL path above end-to-end.
+> the mutation still needs the personal API key, and with `opx` on `PATH` the
+> agent shell can hold that key just fine (see "Resolve the API key" above) — so
+> for anything but a tiny manual run, prefer the single-key GraphQL path above
+> end-to-end.
 
 ### Archive (mutation)
 

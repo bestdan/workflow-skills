@@ -98,24 +98,32 @@ completion instant), so the report is actionable without hand-tracing history.
 
 Fold each project's `ok`/`skip`/`FALSE CLOSURES` output into the command's
 combined report. The key note below applies here too — the asset resolves the key
-itself, so make sure an `op` session exists (`op signin` in your own terminal) or
-run headless with `$OP_SERVICE_ACCOUNT_TOKEN`.
+itself, so hand it over the same way `linear-archive.md` does: `opx run --env
+'LINEAR_API_KEY=<ref>' -- python3 …` when running interactively/as an agent
+with `opx` on `PATH`, or make sure an `op` session exists (`op signin` in your
+own terminal) or run headless with `$OP_SERVICE_ACCOUNT_TOKEN` when it isn't.
 
 ## Security boundary + the op session requirement
 
 Same as `linear-archive.md`: the script needs a Linear **personal API
 key** — a full-account bearer token — which must never enter a claude.ai/
 Claude Code cloud sandbox. It reads the key from `$LINEAR_API_KEY`, else
-`op read "$LINEAR_API_KEY_REF"`. That needs an authorized `op` **session**, not a
+`op read "$LINEAR_API_KEY_REF"`. **Interactively/as an agent**, prefer `opx`
+(see `linear-common.md` → "Key resolution") — it hands the key to the script
+directly, so the agent's subshell never needs an `op` session at all. Without
+`opx`, or **unattended**, that needs an authorized `op` **session**, not a
 particular shell: `op signin` in your own terminal establishes one the agent's
 subshell can use too (it lapses after ~30 min idle) — see `linear-archive.md`'s
 "Gotcha" note for the full explanation and the headless
-`$OP_SERVICE_ACCOUNT_TOKEN` fallback.
+`$OP_SERVICE_ACCOUNT_TOKEN` fallback. `opx` cannot serve the unattended case —
+no UI to approve, so it fails closed (exit 3).
 
 Unlike the read fast paths, this command has **no MCP floor** — the key is
 required, not an optimization — so it does not run behind `linear-common.md`'s
-gate and does **not** inherit that section's "Key resolution" step. Export
-`$LINEAR_API_KEY_REF` (or `$LINEAR_API_KEY`) yourself before invoking.
+gate and does **not** inherit that section's "Key resolution" step (the
+gate/fallback mechanics), though it uses the same `opx`-vs-`op read` choice.
+Export `$LINEAR_API_KEY_REF` (or `$LINEAR_API_KEY`) yourself before invoking,
+or wrap the invocation in `opx run --env 'LINEAR_API_KEY=<ref>' -- …`.
 
 ## Dry-run-default posture
 

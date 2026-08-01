@@ -151,33 +151,54 @@ Three GraphQL reads run behind the **same** gate, defined once here: "Ready-cand
 
 **Key resolution — do this once before invoking any fast-path script.** The scripts read the key from the **environment only**: `$LINEAR_API_KEY`, else `op read "$LINEAR_API_KEY_REF"`. They do **not** read the task config (they are env-in/JSON-out, stdlib-only, and parse no YAML). So a configured `linear.api_key_ref` reaches them only if this step runs — without it the key is inert and every read verb floors, which looks exactly like a deliberately keyless host:
 
-1. If `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF` is **already set** in the environment, change nothing — an inherited value always wins (this is the headless `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case, and the launching-terminal export).
+1. If `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF` is **already set** in the environment, change nothing — an inherited value always wins. Invoke the script plainly, with no credential prefix and no `opx`. This is the headless `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case and the launching-terminal export.
 2. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
-3. If it holds a value, pass it **as a one-shot environment prefix on the same command that runs the script**, in a **single Bash call**:
+3. If it holds a value, hand it to the script on the **same command**, in a **single Bash call**. Which of the two forms you use depends on whether `opx` is on `PATH` — check with `command -v opx`:
+
+   **`opx` present (the default for interactive/agent runs).** `opx` resolves the ref behind a native approval dialog, then spawns the script with the key in _its_ environment and no live `op` session to inherit:
+
+   ```bash
+   opx run --env 'LINEAR_API_KEY=<linear.api_key_ref from merged config>' -- \
+     python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<script>.py" --team "<linear.team>" …
+   ```
+
+   The scripts need no change to support this: they prefer `$LINEAR_API_KEY` over `$LINEAR_API_KEY_REF`, so under `opx run` they never invoke `op` or `opx` themselves. Note the shape — `LINEAR_API_KEY=` is the **variable name**, and the `op://…` ref is its value; the whole `NAME=ref` pair is one `--env` argument.
+
+   **`opx` absent.** Fall back to the environment-prefix form, and let the script resolve the ref with its own `op read`:
+
    ```bash
    LINEAR_API_KEY_REF='<linear.api_key_ref from merged config>' \
      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<script>.py" --team "<linear.team>" …
    ```
-   Two rules, both load-bearing:
-   - **Same call.** Each Bash tool call is a **fresh shell**, so a standalone `export` in an earlier call is gone by the time the script runs — the bridge would be silently inert, which is the exact bug this step exists to fix. Never split the assignment and the invocation across two calls.
+
+   Two rules, load-bearing for **both** forms:
+   - **Same call.** Each Bash tool call is a **fresh shell**, so a standalone `export` in an earlier call is gone by the time the script runs — the bridge would be silently inert, which is the exact bug this step exists to fix. Never split the credential and the invocation across two calls.
    - **Single quotes.** The value comes from a config file; inside double quotes a ref containing `$(…)`, backticks, or `"` would be evaluated by the shell rather than passed literally. Single-quote it. If the value itself contains a single quote, it is not a valid `op://` reference — treat it as a config error and floor rather than trying to escape it.
 4. If it is unset, pass nothing and invoke the script anyway. It exits non-zero and the run floors — the correct behavior for a keyless host. That fallback still logs the gate's ordinary one-line debug message (see "The gate"); what it must **not** add is any further "your key didn't resolve" explanation, since there was no key to resolve.
 
-`op read` needs an authorized 1Password session. `op signin` **in the user's own terminal** establishes one that _is_ visible to the agent's tool-spawned subshell — `op` holds the session in its per-user cache daemon (`--cache`, on by default on UNIX), so it crosses the process boundary. Sessions lapse after roughly 30 minutes of inactivity, at which point the fast path floors until the next `op signin`.
+**Why `opx` is the interactive default.** An `op signin` session is ambient: `op` holds it in a per-user cache daemon, so for roughly 30 minutes _every_ process the user's machine spawns can read the key without the user seeing anything — and this key is a full-account Linear bearer token. `opx` ([github.com/bestdan/opx](https://github.com/bestdan/opx)) forces a native approval dialog on each read and invalidates the `op` session afterwards, so there is no window and no cached credential between invocations. It fails **closed**: with no UI available the confirm collapses to denial (exit 3) rather than hanging, which is why it cannot serve unattended runs at all. It takes no `--account` flag; it follows `$OP_ACCOUNT`.
 
-**Make a configured-but-unresolvable key legible.** When step 3 **did** pass a ref and the script still exits non-zero, add **one** line beyond the gate's debug message, naming the cause and the fix — the usual cause is a lapsed `op` session, and the fix is one `op signin`.
+**What this costs: one dialog per script invocation**, not per turn. Most verbs raise one. `/reconcile-tasks` row 2 invokes `linear-scan.py` **once per resolved scope**, so a single turn can raise several dialogs in sequence; `/sweep-for-complete` batches all configured projects into one call and raises one. Approving each is the point — but say so up front rather than letting a burst of dialogs surprise the user.
 
-**Do not copy the script's stderr verbatim**: it contains the full `op://vault/item/field` pointer, which `linear-config.md` → "Keep `api_key_ref` out of the committed config" classifies as sensitive (it advertises which vault and item hold a full-account bearer token). Report `op`'s reason with the pointer reduced to its vault segment:
+**Unattended runs stay on `op`.** Step 1's inherited-environment path is untouched and is the only one available to cron jobs, `/auto-pilot`, and any other headless context: set `$OP_SERVICE_ACCOUNT_TOKEN` alongside `$LINEAR_API_KEY_REF` and let the script resolve the key itself, or export `$LINEAR_API_KEY` directly. Do **not** route those through `opx` — with no UI to approve, it exits 3 and the run floors as though no key were configured.
+
+**Make a configured-but-unresolvable key legible.** When step 3 **did** hand over a ref and the script still exits non-zero, add **one** line beyond the gate's debug message, naming the cause and the fix. The two forms fail for different reasons and the fixes are not interchangeable, so report the right one:
+
+- **`opx run`, exit 3** — the read was **denied**, or there was no UI to ask. `op signin` does not help. Retry and approve the dialog, or export `$LINEAR_API_KEY` in the launching terminal.
+- **`opx run`, exit 1** — `op` itself failed underneath (bad ref, no such item, `op` not installed). Fix the `op://vault/item/field` reference.
+- **environment-prefix form** — the usual cause is a lapsed or absent `op` session; the fix is one `op signin` in the user's own terminal.
+
+**Do not copy the script's or `opx`'s stderr verbatim**: it contains the full `op://vault/item/field` pointer, which `linear-config.md` → "Keep `api_key_ref` out of the committed config" classifies as sensitive (it advertises which vault and item hold a full-account bearer token). Report the reason with the pointer reduced to its vault segment:
 
 ```
-Configured linear.api_key_ref (op://<vault>/…) did not resolve: <op's reason>. If your op session has lapsed, run `op signin` in your own terminal.
+Configured linear.api_key_ref (op://<vault>/…) did not resolve: <reason>. <the matching fix from the list above>
 ```
 
 This stays **non-fatal**: the run floors to MCP and still succeeds. Say it once per run, not per scope. When step 3 passed nothing (no `api_key_ref` anywhere), add nothing — that host simply has no key, and the gate's own debug line already covers it.
 
 **The gate.** When `Bash` is available, attempt the GraphQL fast-path first. On **any** non-zero exit from the script, or stdout that doesn't parse as the expected JSON object, log one debug line (`Fast-path unavailable (<reason>) — falling back to MCP floor.`) and run the MCP floor instead. There is **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check — the script itself exits fast and non-zero when no key is resolvable, so the fallback **is** the gate. An explicit env pre-check would misgate the headless case where `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` are set but `$LINEAR_API_KEY` itself is not — that case must still attempt the fast path. A host with no `Bash` tool falls to the floor by construction (nothing to gate).
 
-> **This gate is also the security boundary.** A Linear personal API key (what `linear.api_key_ref` points at) is a full-account bearer token — anyone holding it can read and write everything the key's owner can in Linear. It must **never** be injected into a `claude.ai`/Claude Code **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/`$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and attempts the script, it exits non-zero before any GraphQL request (no key resolvable) and the run falls to the MCP floor (OAuth-scoped, no raw key) by design — the guarantee is that the key is never _present_, not that the script is never _invoked_. **The "Key resolution" step above does not weaken this**: `api_key_ref` is only ever an `op://` **pointer**, never a key, and its canonical home is the gitignored `.task-config.local.yml`, which a cloud checkout does not have. Even if a checkout did name a ref, resolving it still requires an authorized `op` — which a cloud sandbox has no session for — so the script exits non-zero before any GraphQL request and the run floors. What the step does change is _who decides_: from "the launching environment exported a ref" to "the checkout's merged config names one." Do not "fix" this by wiring the key into cloud config. (Account-key setup — the `api_key_ref`, the launching-terminal `export`, the headless `$OP_SERVICE_ACCOUNT_TOKEN` path — is in `linear-config.md` "Archive key".)
+> **This gate is also the security boundary.** A Linear personal API key (what `linear.api_key_ref` points at) is a full-account bearer token — anyone holding it can read and write everything the key's owner can in Linear. It must **never** be injected into a `claude.ai`/Claude Code **cloud** sandbox. Cloud sessions never set `$LINEAR_API_KEY`/`$LINEAR_API_KEY_REF`, so even where a cloud host is `Bash`-capable and attempts the script, it exits non-zero before any GraphQL request (no key resolvable) and the run falls to the MCP floor (OAuth-scoped, no raw key) by design — the guarantee is that the key is never _present_, not that the script is never _invoked_. **The "Key resolution" step above does not weaken this**: `api_key_ref` is only ever an `op://` **pointer**, never a key, and its canonical home is the gitignored `.task-config.local.yml`, which a cloud checkout does not have. Even if a checkout did name a ref, resolving it still requires an authorized `op` — which a cloud sandbox has no session for — so the script exits non-zero before any GraphQL request and the run floors. The `opx` form does not change this and in fact tightens it: a cloud sandbox has no `opx` binary, and even if it did, `opx` fails **closed** with no UI to approve the read (exit 3), which is itself a non-zero exit and therefore a floor. What the step does change is _who decides_: from "the launching environment exported a ref" to "the checkout's merged config names one." Do not "fix" this by wiring the key into cloud config. (Account-key setup — the `api_key_ref`, the launching-terminal `export`, the headless `$OP_SERVICE_ACCOUNT_TOKEN` path — is in `linear-config.md` "Archive key".)
 
 **What the gate does NOT own — kept per consumer.** _Fast-path eligibility_ (which searches attempt the fast path) and _fallback granularity_ (what unit falls to the floor) differ by caller and stay local to each:
 
@@ -205,12 +226,12 @@ Either way, resolve state ids by **type only, never display name** (names are us
 **Fast-path invocation.** Behind the gate above, the GraphQL fast path is `linear-scan.py`, invoked with each resolved concrete scope's id as `--project` (repeatable — batch every scope in one call, or one call per scope; the consumer's choice, since the script unions either way) and a `--state-type` flag per state type in the caller's set (omit `--project` for the whole-team scope). **Never** pass the `"__unassigned__"` sentinel as `--project` — the script has no Unassigned-exclusion mode, so if the resolved scope set includes the Unassigned bucket, that scope floors (per-scope fallback):
 
 ```bash
-LINEAR_API_KEY_REF='<from merged config — omit entirely if unset or already in env>' \
+opx run --env 'LINEAR_API_KEY=<from merged config>' -- \
   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
   --project "<scope-id>" --state-type <type> [--state-type <type> …]
 ```
 
-The `LINEAR_API_KEY_REF=` prefix is the "Key resolution" step above, and it must ride on **this same command** — a separate `export` in an earlier Bash call does not survive into this one. Consumers that show a bare `python3 …` invocation are abbreviating; the prefix still applies.
+The `opx run --env …` wrapper is the "Key resolution" step above, in its default form; drop it entirely when a key is already in the environment, and swap it for the `LINEAR_API_KEY_REF='…'` prefix when `opx` is absent. Either way the credential must ride on **this same command** — a separate `export` in an earlier Bash call does not survive into this one. Consumers that show a bare `python3 …` invocation are abbreviating; the credential still applies.
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`. Parse stdout as the `{ meta: { viewer, team, states }, issues: [...] }` object in the script's header; a parse failure is itself a fallback trigger (per the gate). `meta.states` (an array of `{ id, name, type }`) replaces the `list_workflow_states` state-id→type map — cache it the same way.
 

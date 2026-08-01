@@ -230,3 +230,39 @@ harness, so they are opt-in rather than always-on:
    shared spec (step 3) or, for a single-consumer read, via matching
    docstring and consumer prose by hand. Never let a consumer depend on the
    fast path alone.
+
+## Addendum (2026-08-01): `opx` for interactive key resolution
+
+The decision above stands unmodified; this note only adds a caller-side option
+on top of it — see
+[`2026-08-01-opx-key-resolution-design.md`](../../docs/superpowers/specs/2026-08-01-opx-key-resolution-design.md)
+for the full design.
+
+`opx` (github.com/bestdan/opx) is now the documented default for
+**interactive/agent** invocations of the scripts in this family:
+`linear-common.md` → "Key resolution" wraps the call as `opx run --env
+'LINEAR_API_KEY=<ref>' -- python3 <script>.py …` when `opx` is on `PATH`,
+falling back to today's `LINEAR_API_KEY_REF='<ref>' python3 <script>.py …`
+form otherwise. It forces a native approval dialog on each read and
+invalidates the `op` session afterwards, closing the ~30-minute ambient-
+session window described in "The key / security boundary" above.
+
+**Scoped to interactive runs only.** `opx` has no UI to approve a read with no
+human present, so it fails **closed** (exit 3) rather than hanging. Every
+unattended path in this family — the standalone `linear-archive.py` on a cron,
+`OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` generally — is therefore
+unchanged and stays on the scripts' own `get_key()` / `op read` resolution.
+
+**Why `op read` → `opx` was rejected _inside_ the scripts.** The scripts'
+`get_key()` is shared verbatim across the family and used unattended as well
+as interactively. Swapping its `op read` call for `opx` would break the
+unattended service-account path outright — no UI, so every headless read
+would exit 3. And because "The host-gated try-script-then-floor pattern"
+above treats **any** non-zero exit as the fallback trigger with no separate
+`[ -n "$LINEAR_API_KEY" ]` pre-check, that breakage would be silent: a
+correctly-configured `OP_SERVICE_ACCOUNT_TOKEN` cron run would float to the
+MCP floor (or, for `linear-archive.py`/`linear-false-closures.py`, simply
+fail — neither has a floor) indistinguishably from "no key configured at
+all." `opx` therefore stays a **caller-side** wrapper — chosen by whichever
+`.md` file invokes the script, per its own interactive-vs-unattended context —
+never a change to `get_key()` itself.
