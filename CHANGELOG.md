@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.70.0] - 2026-08-01
+
+### Features
+
+- script skeleton — CLI, discovery, block parser, harness (#319) (a1313e6)
+
 ## [1.69.3] - 2026-08-01
 
 ### Fixes
