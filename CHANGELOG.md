@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.77.0] - 2026-08-02
+
+### Features
+
+- the ledgers — derive, store, scoped freshness, --strict tier (#327) (0826945)
+
 ## [1.76.0] - 2026-08-02
 
 ### Features
