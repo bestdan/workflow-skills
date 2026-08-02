@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.75.0] - 2026-08-02
+
+### Features
+
+- decisions and cross-record referential integrity (#325) (3575279)
+
 ## [1.74.0] - 2026-08-02
 
 ### Features
