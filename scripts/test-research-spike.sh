@@ -2090,7 +2090,7 @@ out_r8="$(python3 "$SCRIPT" --root "$DIR_R8" validate 2>&1)"
 exit_r8=$?
 assert_exit "a decided decision with an open question blocking it exits 1" "$exit_r8" 1
 assert_contains "the open-blocker error names both ends" "$out_r8" \
-  "this question is open and blocks decision 'stop-semantics', which is already decided"
+  "this question is not closed and blocks decision 'stop-semantics', which is already decided"
 assert_contains "the open-blocker error states the invariant" "$out_r8" \
   "a decided decision must have zero open blockers"
 assert_contains "the open-blocker error offers the reopen route" "$out_r8" \
@@ -2111,7 +2111,7 @@ out_r9="$(python3 "$SCRIPT" --root "$DIR_R9" validate 2>&1)"
 exit_r9=$?
 assert_exit "a decided decision with an open obligation blocking it exits 1" "$exit_r9" 1
 assert_contains "the open obligation is reported as the blocker" "$out_r9" \
-  "this obligation is open and blocking decision 'stop-semantics', which is already decided"
+  "this obligation is not closed and blocking decision 'stop-semantics', which is already decided"
 
 # A historical, already-closed reference to a decided decision is clean —
 # otherwise deciding anything would mean rewriting the records that led to it.
@@ -2263,6 +2263,580 @@ assert_contains "the sibling-project reference is reported as dangling" "$out_r1
   "blocks names decision 'stop-semantics', which does not exist in project 'alpha'"
 assert_contains "the sibling-project reference says the scope is deliberate" "$out_r16" \
   "a decision of the same name in a sibling project is not visible here"
+
+# --- Fixture (s): status — the convergence report -------------------------
+# Task 6. Readiness is derived on every run, never stored, so every fixture
+# below is one tree whose records make exactly one derivation true — and the
+# report is a report: it writes nothing and exits 0 however blocked the
+# project is. Only `validate` gates.
+
+status_fixture() {
+  # status_fixture <dir> <decisions.md body> <account questions.md body>
+  # One project, one track, one stub card, and one durable file a
+  # `decided_in:` may legitimately point at.
+  mkdir -p "$1/dev_docs/adr"
+  printf '# ADR 7 — stop semantics\n' >"$1/dev_docs/adr/0007-stop-semantics.md"
+  write_file "$1/dev_docs/research/alpha/tracks/account/obligations/keychain.md" '# keychain
+
+```card
+kind: stub
+superseded_when: the keychain invariant is written down
+```'
+  write_file "$1/dev_docs/research/alpha/decisions.md" "# alpha — decisions
+
+$2"
+  write_file "$1/dev_docs/research/alpha/tracks/account/questions.md" "# account
+
+$3"
+}
+
+# Every blocker closed — answered question, discharged obligation — is READY,
+# and READY is deliberately not DECIDED: the decision is waiting on a human.
+DIR_S1="$BASE/status-ready"
+status_fixture "$DIR_S1" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: discharged
+discharged_by: PR 12
+blocking: account-provisioning
+```'
+out_s1="$(python3 "$SCRIPT" --root "$DIR_S1" status alpha 2>&1)"
+exit_s1=$?
+assert_exit "status over a ready project exits 0" "$exit_s1" 0
+assert_contains "a decision whose blockers are all closed is READY" "$out_s1" \
+  "account-provisioning  READY awaiting decision"
+assert_contains "the header counts ready separately from decided" "$out_s1" \
+  "alpha — decisions: 0 decided, 1 ready, 0 blocked"
+
+# One open question is enough. The blocker line names the question and the
+# file its section lives in — the path is what makes the report actionable.
+DIR_S2="$BASE/status-blocked-question"
+status_fixture "$DIR_S2" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: discharged
+discharged_by: PR 12
+blocking: account-provisioning
+```'
+out_s2="$(python3 "$SCRIPT" --root "$DIR_S2" status alpha 2>&1)"
+exit_s2=$?
+assert_exit "status over a blocked project still exits 0" "$exit_s2" 0
+assert_contains "one open question makes the decision BLOCKED" "$out_s2" \
+  "account-provisioning  BLOCKED by 1 question"
+assert_contains "the blocker line names the question and its file" "$out_s2" \
+  "Q: alpha/account/uid-domain-isolation  open  → dev_docs/research/alpha/tracks/account/questions.md"
+assert_contains "the blocked decision is counted as blocked, not ready" "$out_s2" \
+  "0 decided, 0 ready, 1 blocked"
+# A discharged obligation is history, not a blocker: it must not be listed.
+assert_not_contains "a discharged obligation is not a blocker" "$out_s2" \
+  "O: alpha/account/keychain-invariant"
+
+# The other half of the same rule: an open `blocking:` obligation blocks on its
+# own, and its line carries the destination the deferred work is addressed to.
+DIR_S3="$BASE/status-blocked-obligation"
+status_fixture "$DIR_S3" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+blocking: account-provisioning
+```'
+out_s3="$(python3 "$SCRIPT" --root "$DIR_S3" status alpha 2>&1)"
+exit_s3=$?
+assert_exit "an open blocking obligation still exits 0" "$exit_s3" 0
+assert_contains "an open blocking obligation alone makes the decision BLOCKED" "$out_s3" \
+  "account-provisioning  BLOCKED by 1 obligation"
+assert_contains "the obligation blocker line shows its destination" "$out_s3" \
+  "O: alpha/account/keychain-invariant  open  → dev_docs/research/alpha/tracks/account/obligations/keychain.md"
+assert_not_contains "an answered question is not a blocker" "$out_s3" \
+  "Q: alpha/account/uid-domain-isolation"
+
+# `decided` is the project gate, and it is not "ready": a decided decision is
+# counted in the decided column and nowhere else.
+DIR_S4="$BASE/status-decided"
+status_fixture "$DIR_S4" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: the answer owes nothing further
+```'
+out_s4="$(python3 "$SCRIPT" --root "$DIR_S4" status alpha 2>&1)"
+assert_contains "a decided decision is counted as decided" "$out_s4" \
+  "alpha — decisions: 1 decided, 0 ready, 0 blocked"
+assert_contains "the decided line points at its evidence" "$out_s4" \
+  "account-provisioning  DECIDED decided in dev_docs/adr/0007-stop-semantics.md"
+assert_not_contains "a decided decision is never reported READY" "$out_s4" "READY"
+
+# A `proposed` decision is not nearly-decided: it is a decision the organizer
+# has not promoted yet, and the report says where the track filed it.
+DIR_S5="$BASE/status-proposed"
+status_fixture "$DIR_S5" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: the answer owes nothing further
+```
+
+```decision
+id: account-tooling
+state: proposed
+```'
+out_s5="$(python3 "$SCRIPT" --root "$DIR_S5" status alpha 2>&1)"
+assert_contains "a proposed decision prints PROPOSED and its filing track" "$out_s5" \
+  "account-tooling       PROPOSED awaiting promotion (filed in tracks/account)"
+assert_contains "a proposed decision is counted apart from the three" "$out_s5" \
+  "0 decided, 1 ready, 0 blocked, 1 proposed"
+
+# Retirement is legitimate scope reduction — and when it is what removed the
+# last blocker, the decision's line says so rather than reading as though the
+# question had been answered.
+DIR_S6="$BASE/status-ready-by-retirement"
+status_fixture "$DIR_S6" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: retired
+retired_because: the option that needed it was dropped
+blocks: account-provisioning
+```
+
+```obligation
+none: the premise is gone, so nothing is owed
+```'
+out_s6="$(python3 "$SCRIPT" --root "$DIR_S6" status alpha 2>&1)"
+exit_s6=$?
+assert_exit "retiring the last blocker still exits 0" "$exit_s6" 0
+assert_contains "retiring the last open question flips the decision to READY" "$out_s6" \
+  "account-provisioning  READY awaiting decision"
+assert_contains "the READY line says a retirement is what did it" "$out_s6" \
+  "unblocked by retirement: alpha/account/uid-domain-isolation"
+# Never folded into answered: a project that converged by giving up must not
+# look like one that converged by answering.
+assert_contains "a retired question is counted as retired, not answered" "$out_s6" \
+  "Q 0 answered / 0 open / 1 retired"
+
+# Per-track lines print even for a single-track project — a report that drops
+# the breakdown when it looks redundant drops it exactly when nobody is
+# watching — and the totals never appear without them.
+assert_contains "a single-track project still gets its per-track line" "$out_s6" \
+  "  account:  Q 0 answered / 0 open / 1 retired"
+assert_contains "the total line prints below the per-track lines" "$out_s6" \
+  "  total:    Q 0 answered / 0 open / 1 retired"
+assert_contains "the obligation pair prints per track" "$out_s6" \
+  "O 0 discharged / 0 open (1 stub)"
+# A snapshot, not a trend: this script has no history and must not imply one.
+for arrow in "→ 1" "+1" "▲" "▼"; do
+  assert_not_contains "the roll-up prints no trend marker ('$arrow')" "$out_s6" "$arrow"
+done
+
+# --- Fixture (s7): blocking obligations stay scarce -----------------------
+# Warn only, fixed threshold, deliberately not configurable. Two of three open
+# obligations carrying `blocking:` is past a third.
+DIR_S7="$BASE/status-scarcity"
+status_fixture "$DIR_S7" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+blocking: account-provisioning
+```
+
+```obligation
+id: uid-provisioning
+owes: the provisioning steps
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+blocking: account-provisioning
+```
+
+```obligation
+id: uid-docs
+owes: the documentation
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s7="$(python3 "$SCRIPT" --root "$DIR_S7" status alpha 2>&1)"
+exit_s7=$?
+assert_exit "the scarcity warning does not change the exit code" "$exit_s7" 0
+assert_contains "more than a third blocking emits the scarcity warning" "$out_s7" \
+  "2 of 3 open obligations carry \`blocking:\` — more than a third"
+assert_contains "the scarcity warning says why scarcity matters" "$out_s7" \
+  "If everything blocks, nothing converges"
+
+# Exactly a third is not more than a third: the threshold does not fire.
+DIR_S8="$BASE/status-scarcity-under"
+status_fixture "$DIR_S8" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+blocking: account-provisioning
+```
+
+```obligation
+id: uid-provisioning
+owes: the provisioning steps
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```
+
+```obligation
+id: uid-docs
+owes: the documentation
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s8="$(python3 "$SCRIPT" --root "$DIR_S8" status alpha 2>&1)"
+assert_not_contains "exactly a third blocking does not warn" "$out_s8" \
+  "more than a third"
+
+# --- Fixture (s9): status is a report — it never writes -------------------
+# Contents *and* mtimes: a rewrite that happened to produce identical bytes
+# would still be a write, and this verb's contract is that it does not touch
+# the tree at all.
+DIR_S9="$BASE/status-no-write"
+status_fixture "$DIR_S9" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+stamp_tree() {
+  # stamp_tree <dir> — every file's path, size and mtime, sorted.
+  python3 - "$1" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for p in sorted(root.rglob("*")):
+    if p.is_file():
+        s = p.stat()
+        print(p.relative_to(root).as_posix(), s.st_size, s.st_mtime_ns)
+PY
+}
+before_s9="$(stamp_tree "$DIR_S9")"
+cp -r "$DIR_S9/dev_docs" "$BASE/status-no-write-before"
+python3 "$SCRIPT" --root "$DIR_S9" status alpha >/dev/null 2>&1
+after_s9="$(stamp_tree "$DIR_S9")"
+if [ "$before_s9" = "$after_s9" ]; then
+  ok "status leaves every file's size and mtime unchanged"
+else
+  bad "status changed a file's size or mtime"
+fi
+if diff -r "$BASE/status-no-write-before" "$DIR_S9/dev_docs" >"$BASE/status.diff" 2>&1; then
+  ok "status writes nothing (tree byte-identical after a run)"
+else
+  bad "status modified the tree: $(cat "$BASE/status.diff")"
+fi
+
+# --- Fixture (s10): the project argument ----------------------------------
+# No argument reports every project; an unknown one is a **caller** error
+# (exit 2), not a tree-content violation, and names the projects that exist.
+DIR_S10="$BASE/status-projects"
+status_fixture "$DIR_S10" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+write_file "$DIR_S10/dev_docs/research/beta/decisions.md" '# beta — decisions
+
+```decision
+id: stop-semantics
+state: pending
+```'
+out_s10="$(python3 "$SCRIPT" --root "$DIR_S10" status 2>&1)"
+exit_s10=$?
+assert_exit "status with no project argument exits 0" "$exit_s10" 0
+assert_contains "status with no argument reports the first project" "$out_s10" \
+  "alpha — decisions:"
+assert_contains "status with no argument reports every project" "$out_s10" \
+  "beta — decisions:"
+out_s10b="$(python3 "$SCRIPT" --root "$DIR_S10" status alpha 2>&1)"
+assert_not_contains "a named project reports only that project" "$out_s10b" \
+  "beta — decisions:"
+out_s10c="$(python3 "$SCRIPT" --root "$DIR_S10" status gamma 2>&1)"
+exit_s10c=$?
+assert_exit "an unknown project exits 2 (a caller error)" "$exit_s10c" 2
+assert_contains "the unknown-project error names the project" "$out_s10c" \
+  "unknown project 'gamma'"
+assert_contains "the unknown-project error lists the known projects" "$out_s10c" \
+  "known projects: alpha, beta"
+# A project with no tracks still reports, and says so rather than printing a
+# total with no breakdown under it.
+assert_contains "a project with no tracks says so" "$out_s10" "no tracks yet"
+
+# --- Fixture (s11): one sick track inside healthy totals ------------------
+# The reason totals never print alone. `watcher` is converging and `account`
+# is not; the totals read acceptably and the per-track lines do not.
+DIR_S11="$BASE/status-sick-track"
+write_file "$DIR_S11/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: account-provisioning
+state: pending
+```'
+for track in account watcher; do
+  write_file "$DIR_S11/dev_docs/research/alpha/tracks/$track/obligations/card.md" "# $track card
+
+\`\`\`card
+kind: stub
+superseded_when: the work lands
+\`\`\`"
+done
+{
+  printf '# watcher\n'
+  for n in 1 2 3 4; do
+    printf '\n### Q%s. A watcher question\n\n```question\nid: watcher-q%s\nstatus: answered\nanswer: settled\nblocks: none: it gates nothing\n```\n' "$n" "$n"
+    printf '\n```obligation\nid: watcher-o%s\nowes: the follow-up work\ndestination: dev_docs/research/alpha/tracks/watcher/obligations/card.md\nstatus: discharged\ndischarged_by: PR %s\n```\n' "$n" "$n"
+  done
+} >"$DIR_S11/dev_docs/research/alpha/tracks/watcher/questions.md"
+{
+  printf '# account\n'
+  for n in 1 2 3 4; do
+    printf '\n### Q%s. An account question\n\n```question\nid: account-q%s\nstatus: open\nblocks: account-provisioning\n```\n' "$n" "$n"
+    printf '\n```obligation\nid: account-o%s\nowes: the follow-up work\ndestination: dev_docs/research/alpha/tracks/account/obligations/card.md\nstatus: open\n```\n' "$n"
+  done
+} >"$DIR_S11/dev_docs/research/alpha/tracks/account/questions.md"
+out_s11="$(python3 "$SCRIPT" --root "$DIR_S11" status alpha 2>&1)"
+exit_s11=$?
+assert_exit "the sick-track fixture exits 0" "$exit_s11" 0
+assert_contains "the sick track's own numbers are visible" "$out_s11" \
+  "  account:  Q 0 answered / 4 open / 0 retired    O 0 discharged / 4 open (1 stub)"
+assert_contains "the healthy track's numbers are visible" "$out_s11" \
+  "  watcher:  Q 4 answered / 0 open / 0 retired    O 4 discharged / 0 open (1 stub)"
+assert_contains "the totals roll both tracks up" "$out_s11" \
+  "  total:    Q 4 answered / 4 open / 0 retired    O 4 discharged / 4 open (2 stubs)"
+# Four blockers, listed with their paths — the column stays aligned whatever
+# the ids are, because the widths are computed from what is being printed.
+assert_contains "every open blocker is listed" "$out_s11" \
+  "BLOCKED by 4 questions"
+assert_contains "blocker ids and statuses stay in aligned columns" "$out_s11" \
+  "    Q: alpha/account/account-q1  open  → dev_docs/research/alpha/tracks/account/questions.md"
+
+# --- Fixture (s12): readiness fails closed --------------------------------
+# A blocker whose status nobody can classify is still outstanding work. Asking
+# "is it open?" would read a typo'd status as closed and print READY — the
+# report answering "what still blocks building?" answering it by discarding
+# the record it could not understand. So the test is "is it terminal?".
+DIR_S12="$BASE/status-bogus-status"
+status_fixture "$DIR_S12" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: bogus
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s12="$(python3 "$SCRIPT" --root "$DIR_S12" status alpha 2>&1)"
+exit_s12=$?
+assert_exit "a blocker with an unclassifiable status still exits 0" "$exit_s12" 0
+assert_contains "a blocker whose status is not terminal keeps the decision BLOCKED" \
+  "$out_s12" "account-provisioning  BLOCKED by 1 question"
+assert_not_contains "a malformed blocker never reads as closed" "$out_s12" "READY"
+assert_contains "the malformed blocker is listed with the status it declared" "$out_s12" \
+  "Q: alpha/account/uid-domain-isolation  bogus"
+# It is counted in no column either — the same treatment validate's own
+# message promises for a record whose status is outside the enum.
+assert_contains "an unclassifiable status is counted in no question column" "$out_s12" \
+  "Q 0 answered / 0 open / 0 retired"
+
+# --- Fixture (s13): the completeness footer -------------------------------
+# `status` discards discovery's findings on purpose — reprinting them would be
+# a second, weaker gate — but discarding them *silently* is the accrual this
+# instrument exists to prevent: a typo'd `blocks:` resolves to no decision, so
+# it blocks nothing, so the decision prints READY. Counted, never reprinted.
+DIR_S13="$BASE/status-dangling-reference"
+status_fixture "$DIR_S13" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioniing
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s13="$(python3 "$SCRIPT" --root "$DIR_S13" status alpha 2>&1)"
+exit_s13=$?
+assert_exit "a tree with a dangling reference still exits 0" "$exit_s13" 0
+assert_contains "a dangling reference is counted in the footer" "$out_s13" \
+  "1 unresolved reference or validation error"
+assert_contains "the footer says the report may be incomplete" "$out_s13" \
+  "this report may be incomplete; run \`validate\`"
+assert_contains "the footer says why a broken tree reads healthier" "$out_s13" \
+  "reads readier here than it is"
+# A pointer at the gate, not a copy of it: the finding itself stays validate's.
+assert_not_contains "the footer does not reprint the finding" "$out_s13" \
+  "does not exist in project"
+# A clean tree gets no footer at all.
+assert_not_contains "a clean tree prints no completeness footer" "$out_s1" \
+  "may be incomplete"
+
+# A decision whose `state:` is outside the enum falls through to the derived
+# labels as though it were pending. No fourth label for it — record shape is
+# validate's — but the footer has to notice, because `state` is the one stored
+# input the whole derivation reads.
+DIR_S14="$BASE/status-bogus-state"
+status_fixture "$DIR_S14" '```decision
+id: account-provisioning
+state: bogus
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s14="$(python3 "$SCRIPT" --root "$DIR_S14" status alpha 2>&1)"
+exit_s14=$?
+assert_exit "a decision with an unknown state still exits 0" "$exit_s14" 0
+assert_contains "an unknown decision state is counted in the footer" "$out_s14" \
+  "1 unresolved reference or validation error"
+assert_contains "an unknown state still derives from its blockers" "$out_s14" \
+  "account-provisioning  BLOCKED by 1 question"
+
+# --- Fixture (s15): one decision named twice is one blocker ---------------
+# `blocks: d, d` is one blocker to a reader. Counting the reference rather
+# than the record would print the line twice and say "by 2 questions" over a
+# single question.
+DIR_S15="$BASE/status-duplicate-reference"
+status_fixture "$DIR_S15" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning, account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s15="$(python3 "$SCRIPT" --root "$DIR_S15" status alpha 2>&1)"
+exit_s15=$?
+assert_exit "a decision named twice by one question exits 0" "$exit_s15" 0
+assert_contains "a decision named twice by one question is blocked by one" "$out_s15" \
+  "account-provisioning  BLOCKED by 1 question"
+dupes_s15="$(printf '%s\n' "$out_s15" | grep -c "Q: alpha/account/uid-domain-isolation")"
+if [ "$dupes_s15" -eq 1 ]; then
+  ok "the duplicated blocker is listed exactly once"
+else
+  bad "expected the blocker line exactly once, got $dupes_s15"
+fi
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"

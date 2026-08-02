@@ -2,8 +2,9 @@
 title: "research-spike: derived readiness and the status convergence report"
 priority: high
 size: 5
-status: new
+status: done
 created: 2026-08-01
+completed: 2026-08-02
 source_branch: claude/spike-research-plan-jz7ggg
 related_files:
   - dev_docs/designs/research_spike_skill.md

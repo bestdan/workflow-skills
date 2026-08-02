@@ -59,10 +59,10 @@ This file lands the skeleton: CLI dispatch, tree discovery, the fenced-block
 parser and record model, question-section discovery, the reporting shape, and
 `init` — the one verb that legitimately creates files — plus the field
 semantics of every record kind and the referential checks that resolve
-`blocks:`/`blocking:` against the decisions they name. Ledger derivation and
-the `status` report land in the later tasks of the research-spike plan; the
-verbs they own dispatch to an explicit not-implemented-yet error here rather
-than a silent success.
+`blocks:`/`blocking:` against the decisions they name — and the `status`
+report, whose derived readiness reads that same resolution. Ledger derivation
+lands in a later task of the research-spike plan; the verbs it owns dispatch to
+an explicit not-implemented-yet error here rather than a silent success.
 """
 
 from __future__ import annotations
@@ -1931,70 +1931,154 @@ def validate_decisions(
         check_decided_in(rec, state, tree, report)
 
 
-def validate_references(tree: Tree, report: Report) -> None:
-    """Every `blocks:` and `blocking:` reference, resolved against the tree.
+def reference_key(rec: Record) -> str | None:
+    """The field this record names decisions with, or None for other kinds.
+
+    A question `blocks:`; an obligation is `blocking:`. Two spellings of one
+    relation, so the mapping from kind to key lives here rather than being
+    re-derived by every reader of it.
+    """
+    if rec.kind == "question":
+        return "blocks"
+    if rec.kind == "obligation":
+        return "blocking"
+    return None
+
+
+# What it takes for a blocker to stop blocking, per kind. Stated as the
+# **terminal** statuses rather than as "open", and that direction is the whole
+# point: `is_live_blocker` fails closed.
+BLOCKER_TERMINAL_STATUSES: dict[str, frozenset[str]] = {
+    "question": frozenset({"answered", "retired"}),
+    "obligation": frozenset({"discharged"}),
+}
+
+
+def is_live_blocker(rec: Record) -> bool:
+    """True while this record is still outstanding work against its decision.
+
+    An answered or retired question, and a discharged obligation, are history —
+    and history against a decided decision has to stay clean, otherwise
+    deciding anything would require rewriting the records that led to it.
+    Everything else is live.
+
+    Live is the **default**, deliberately. Testing `status == "open"` instead
+    reads a missing or misspelled status as closed, so a blocker nobody can
+    classify would drop out of the derivation and the decision would print
+    READY — the report answering "what still blocks building?" would answer it
+    by discarding the record it could not understand. `validate` rejects any
+    status outside the enum, so on a tree that passes the gate the two
+    formulations agree exactly; they differ only on a tree that is already
+    broken, and there the honest answer is "still blocked".
+
+    The same predicate is what `status` derives readiness from, so the gate and
+    the report cannot disagree about which records hold a decision up.
+    """
+    terminal = BLOCKER_TERMINAL_STATUSES.get(rec.kind, frozenset())
+    return declared(rec, "status") not in terminal
+
+
+@dataclass
+class Blockers:
+    """Every `blocks:`/`blocking:` reference in one tree, resolved.
+
+    `decisions` maps `(project, bare id)` to the decision record; `by_decision`
+    maps the same key to the records naming it, live or not; `dangling` carries
+    the `(record, key, bare id)` references that resolve to no decision at all.
+    """
+
+    decisions: dict[tuple[str, str], Record] = field(default_factory=dict)
+    by_decision: dict[tuple[str, str], list[Record]] = field(default_factory=dict)
+    dangling: list[tuple[Record, str, str]] = field(default_factory=list)
+
+
+def resolve_blockers(tree: Tree) -> Blockers:
+    """Resolve every reference against the decisions the tree declares.
 
     References name decisions by **bare** id and resolve within the enclosing
     project. That is not a shortcut: cross-project destinations are forbidden
     (see `check_destination`) precisely so a project can see every inbound
     dependency in its own ledger, so a reference reaching into a sibling
     project would have no ledger to appear in and is dangling by construction.
+
+    One implementation, two consumers: `validate_references` reports what does
+    not resolve, and `status` derives readiness from what does. A second copy
+    of "which open records block decision D" would be a second answer to the
+    question this whole instrument exists to answer — and the two would drift,
+    with the report being the one nobody thinks to distrust.
     """
-    decisions: dict[tuple[str, str], Record] = {}
+    resolved = Blockers()
     for rec in tree.records:
         bare = declared(rec, "id") if rec.kind == "decision" else None
         if bare is not None:
             # First declaration wins; a second is already reported as a
             # duplicate id, and resolving references against it too would
             # print the same defect twice in different words.
-            decisions.setdefault((rec.project, bare), rec)
+            resolved.decisions.setdefault((rec.project, bare), rec)
 
-    referenced: set[tuple[str, str]] = set()
     for rec in tree.records:
-        if rec.kind == "question":
-            key = "blocks"
-        elif rec.kind == "obligation":
-            key = "blocking"
-        else:
+        key = reference_key(rec)
+        if key is None:
             continue
         value = rec.fields.get(key)
         if value is None or value.is_none:
             continue
-        line = value.line
-        # An open question or an open obligation is a **live** blocker: it is
-        # work still outstanding against the decision. A closed one is history,
-        # and history against a decided decision has to stay clean — otherwise
-        # deciding anything would require rewriting the records that led to it.
-        live = declared(rec, "status") == "open"
         for bare in value.items:
-            target = decisions.get((rec.project, bare))
-            if target is None:
-                report.error(
-                    rec.rel,
-                    line,
-                    f"{key} names decision '{bare}', which does not exist in "
-                    f"project '{rec.project}' — naming a decision does not "
-                    "create one, so this record reads as gating something "
-                    "while gating nothing, and no convergence report can see "
-                    "the gap. References resolve within the enclosing project "
-                    "(a decision of the same name in a sibling project is not "
-                    "visible here, by design). File the decision in "
-                    f"{rec.project}/{DECISIONS_FILENAME}, or file a "
-                    f"`state: {PROPOSED_STATE}` block in this track's "
-                    f"{QUESTIONS_FILENAME} and let the organizer promote it.",
-                )
+            target = (rec.project, bare)
+            if target not in resolved.decisions:
+                resolved.dangling.append((rec, key, bare))
                 continue
-            referenced.add((rec.project, bare))
-            if not live or declared(target, "state") != "decided":
+            blockers = resolved.by_decision.setdefault(target, [])
+            # `blocks: stop-semantics, stop-semantics` names one decision
+            # twice. That is one blocker to a reader, so it is one here: the
+            # report would otherwise print the line twice and count it twice
+            # in "by 2 questions".
+            if not any(r is rec for r in blockers):
+                blockers.append(rec)
+    return resolved
+
+
+def validate_references(tree: Tree, report: Report) -> None:
+    """Every `blocks:` and `blocking:` reference, checked once resolved.
+
+    Resolution is `resolve_blockers`', shared with `status` — see there for why
+    the two must not each carry their own.
+    """
+    resolved = resolve_blockers(tree)
+
+    for rec, key, bare in resolved.dangling:
+        report.error(
+            rec.rel,
+            field_line(rec, key),
+            f"{key} names decision '{bare}', which does not exist in "
+            f"project '{rec.project}' — naming a decision does not "
+            "create one, so this record reads as gating something "
+            "while gating nothing, and no convergence report can see "
+            "the gap. References resolve within the enclosing project "
+            "(a decision of the same name in a sibling project is not "
+            "visible here, by design). File the decision in "
+            f"{rec.project}/{DECISIONS_FILENAME}, or file a "
+            f"`state: {PROPOSED_STATE}` block in this track's "
+            f"{QUESTIONS_FILENAME} and let the organizer promote it.",
+        )
+
+    for target, blockers in resolved.by_decision.items():
+        decision = resolved.decisions[target]
+        if declared(decision, "state") != "decided":
+            continue
+        bare = target[1]
+        for rec in blockers:
+            if not is_live_blocker(rec):
                 continue
+            key = reference_key(rec) or ""
             report.error(
                 rec.rel,
-                line,
-                f"this {rec.kind} is open and {key} decision '{bare}', which "
-                f"is already decided at {target.rel}:{target.line} — a decided "
-                "decision must have zero open blockers, so either this record "
-                "is stale or the decision was taken too early. Close the "
-                "record (answer or retire the question; discharge the "
+                field_line(rec, key),
+                f"this {rec.kind} is not closed and {key} decision '{bare}', "
+                f"which is already decided at {decision.rel}:{decision.line} — "
+                "a decided decision must have zero open blockers, so either this "
+                "record is stale or the decision was taken too early. Close "
+                "the record (answer or retire the question; discharge the "
                 "obligation), or reopen the decision explicitly: "
                 f"{REOPEN_SHAPE}. Reopening is the honest move and the "
                 "records say so afterwards; silently filing new work against "
@@ -2002,9 +2086,9 @@ def validate_references(tree: Tree, report: Report) -> None:
             )
 
     for (_, bare), rec in sorted(
-        decisions.items(), key=lambda kv: (kv[1].rel, kv[1].line)
+        resolved.decisions.items(), key=lambda kv: (kv[1].rel, kv[1].line)
     ):
-        if (rec.project, bare) in referenced:
+        if (rec.project, bare) in resolved.by_decision:
             continue
         report.warn(
             rec.rel,
@@ -2188,6 +2272,446 @@ def insert_track_section(body: list[str], track: str, rel: str) -> list[str]:
             trimmed.pop()
         section += trimmed + [""]
     return body[: start + 1] + section + body[end:]
+
+
+# --------------------------------------------------------------------------
+# Convergence: the `status` report
+# --------------------------------------------------------------------------
+#
+# "What still blocks building?" — the question the maintainer was really asking
+# on day four, answered by derivation rather than by anybody's recollection.
+# Nothing here is stored: readiness is computed from the blockers on every run
+# (`KNOWN_FIELDS` leaves no key to hand-edit a stale copy into), and the counts
+# come from the same walk the ledger and the validator use.
+#
+# `status` is a **report**. It never writes, and it exits 0 even when every
+# decision is blocked — only `validate` gates. A report that could fail is a
+# report people stop running.
+
+# The three derived labels, plus the one stored state that is neither. Widths
+# are computed from whichever of these a project actually uses, so a report
+# with no proposed decisions is not padded for the word.
+LABEL_DECIDED = "DECIDED"
+LABEL_READY = "READY"
+LABEL_BLOCKED = "BLOCKED"
+LABEL_PROPOSED = "PROPOSED"
+
+# Warn above a third. Fixed, and deliberately not configurable: a threshold
+# with a knob is a threshold that gets turned up the first time it fires.
+BLOCKING_SHARE_DENOMINATOR = 3
+
+
+def plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def has_blocking(rec: Record) -> bool:
+    """True for an obligation whose `blocking:` names at least one decision.
+
+    A written-but-empty `blocking:` is a `validate` error, not a blocker: it
+    gates nothing, so counting it here would inflate the scarcity ratio with
+    records that hold nothing up.
+    """
+    value = rec.fields.get("blocking")
+    return value is not None and not value.is_none and bool(value.items)
+
+
+def derive_counts(
+    tree: Tree, project: Project
+) -> tuple[list[tuple[str, Counts]], Counts]:
+    """One project's per-track counts, and their total.
+
+    Track-scoped records only, and the total is exactly the sum of the tracks
+    printed above it — a total that silently included records filed outside any
+    track would be a number the breakdown cannot explain, which is the same
+    hiding place the per-track lines exist to close. Such a record is a
+    `validate` error in its own right; this report does not restate it as an
+    unexplained discrepancy.
+
+    Card tallies come from `tree.cards`, filled by the one walk that counts
+    them, so the ledger, the validator and this report cannot disagree about
+    how many stubs a track has.
+    """
+    fields = (
+        "answered",
+        "open_questions",
+        "retired",
+        "discharged",
+        "open_obligations",
+        "blocking",
+    )
+    tallies = {t.name: dict.fromkeys(fields, 0) for t in project.tracks}
+    for rec in tree.records:
+        if rec.project != project.name or rec.track not in tallies:
+            continue
+        tally = tallies[rec.track]
+        # A record with no status, or one outside its enum, is counted in no
+        # column — the same treatment `validate`'s own message promises.
+        status = declared(rec, "status")
+        if rec.kind == "question":
+            if status == "answered":
+                tally["answered"] += 1
+            elif status == "open":
+                tally["open_questions"] += 1
+            elif status == "retired":
+                tally["retired"] += 1
+        elif rec.kind == "obligation":
+            if status == "discharged":
+                tally["discharged"] += 1
+            elif status == "open":
+                tally["open_obligations"] += 1
+                if has_blocking(rec):
+                    tally["blocking"] += 1
+
+    tracks: list[tuple[str, Counts]] = []
+    for track in project.tracks:
+        cards = tree.cards.get(f"{project.name}/{track.name}", CardCounts())
+        tracks.append(
+            (
+                track.name,
+                Counts(
+                    **tallies[track.name],
+                    stubs=cards.stubs,
+                    external=cards.receipts,
+                ),
+            )
+        )
+    total = Counts(
+        **{f: sum(getattr(c, f) for _, c in tracks) for f in fields},
+        stubs=sum(c.stubs for _, c in tracks),
+        external=sum(c.external for _, c in tracks),
+    )
+    return tracks, total
+
+
+@dataclass(frozen=True)
+class DecisionStatus:
+    """One decision's derived line: what to call it, and why."""
+
+    record: Record
+    name: str
+    label: str
+    note: str
+    blockers: tuple[Record, ...] = ()
+
+
+def decision_status(rec: Record, blockers: list[Record]) -> DecisionStatus:
+    """Derive one decision's status from the records naming it.
+
+    Ready is **not** done: a decision with nothing outstanding against it is
+    waiting on a human, and the project gate is all required decisions
+    `decided`. So the three labels stay distinct, and `proposed` is reported as
+    the fourth thing it is — a decision the organizer has not promoted yet, not
+    a decision that is nearly taken.
+    """
+    name = declared(rec, "id") or "-"
+    state = declared(rec, "state")
+    if state == PROPOSED_STATE:
+        where = f"{TRACKS_DIRNAME}/{rec.track}" if rec.track is not None else rec.rel
+        return DecisionStatus(
+            rec, name, LABEL_PROPOSED, f"awaiting promotion (filed in {where})"
+        )
+    if state == "decided":
+        evidence = declared(rec, "decided_in")
+        note = f"decided in {evidence}" if evidence else "decided"
+        return DecisionStatus(rec, name, LABEL_DECIDED, note)
+
+    live = tuple(r for r in blockers if is_live_blocker(r))
+    if live:
+        counts = [
+            plural(sum(1 for r in live if r.kind == "question"), "question"),
+            plural(sum(1 for r in live if r.kind == "obligation"), "obligation"),
+        ]
+        note = "by " + ", ".join(c for c in counts if not c.startswith("0 "))
+        return DecisionStatus(rec, name, LABEL_BLOCKED, note, live)
+
+    # Rule 4's last clause. Retirement is legitimate scope reduction, but a
+    # decision that came free because a question left the board is a different
+    # fact from one whose questions were answered, and a reader deciding on
+    # this line deserves to know which. Said whenever a retired question names
+    # the decision and nothing live does — with no history, "the last blocker"
+    # is exactly that state, and this report has no history by design.
+    retired = [r for r in blockers if declared(r, "status") == "retired"]
+    if retired:
+        ids = ", ".join(r.qualified_id or declared(r, "id") or "-" for r in retired)
+        return DecisionStatus(
+            rec,
+            name,
+            LABEL_READY,
+            f"awaiting decision (unblocked by retirement: {ids})",
+        )
+    return DecisionStatus(rec, name, LABEL_READY, "awaiting decision")
+
+
+def decision_statuses(
+    tree: Tree, project: Project, resolved: Blockers
+) -> list[DecisionStatus]:
+    """Every decision in one project, in tree order, with its derived status."""
+    statuses: list[DecisionStatus] = []
+    seen: set[str] = set()
+    for rec in tree.records:
+        if rec.kind != "decision" or rec.project != project.name:
+            continue
+        bare = declared(rec, "id")
+        # A decision with no id can be named by nothing and appears in no
+        # report — `validate` says so; this one has no line to print for it.
+        # A duplicate is reported there too, and references resolve to the
+        # first, so the report follows the resolution rather than printing one
+        # name twice.
+        if bare is None or bare in seen:
+            continue
+        seen.add(bare)
+        statuses.append(
+            decision_status(rec, resolved.by_decision.get((project.name, bare), []))
+        )
+    return statuses
+
+
+def blocker_row(rec: Record) -> tuple[str, str, str, str]:
+    """One blocker line's four columns: kind letter, id, status, and path.
+
+    The path is what makes the report actionable — a blocker a reader cannot
+    open is a name, not a next step. An obligation shows its `destination:`,
+    the place the deferred work is addressed to; a question shows the file its
+    section lives in, which is where the answer gets written.
+    """
+    letter = "Q" if rec.kind == "question" else "O"
+    ident = rec.qualified_id or declared(rec, "id") or "-"
+    status = declared(rec, "status") or "-"
+    where = rec.rel
+    if rec.kind == "obligation":
+        where = declared(rec, "destination") or rec.rel
+    return letter, ident, status, where
+
+
+def render_decision_block(statuses: list[DecisionStatus]) -> list[str]:
+    """The per-decision lines, and the blocker lines under the blocked ones.
+
+    Column widths are computed across the whole project, so one long id shifts
+    the table rather than shearing it.
+    """
+    name_width = max(len(s.name) for s in statuses)
+    label_width = max(len(s.label) for s in statuses)
+    rows = [blocker_row(r) for s in statuses for r in s.blockers]
+    ident_width = max((len(r[1]) for r in rows), default=0)
+    status_width = max((len(r[2]) for r in rows), default=0)
+
+    lines: list[str] = []
+    for status in statuses:
+        lines.append(
+            f"  {status.name:<{name_width}}  "
+            f"{status.label:<{label_width}} {status.note}".rstrip()
+        )
+        for blocker in status.blockers:
+            letter, ident, state, where = blocker_row(blocker)
+            lines.append(
+                f"    {letter}: {ident:<{ident_width}}  "
+                f"{state:<{status_width}}  → {where}"
+            )
+    return lines
+
+
+def render_counts_parenthetical(counts: Counts) -> str:
+    """The open-obligation subtotals, zeroes omitted.
+
+    Stubs and receipts mean opposite things — work with nowhere to go yet
+    versus work that went somewhere this validator cannot see — so they are
+    never folded together, and a count that is zero says nothing worth the
+    reader's eye.
+    """
+    parts = []
+    if counts.blocking:
+        parts.append(f"{counts.blocking} blocking")
+    if counts.stubs:
+        parts.append(plural(counts.stubs, "stub"))
+    if counts.external:
+        parts.append(f"{counts.external} external")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def render_track_lines(tracks: list[tuple[str, Counts]], total: Counts) -> list[str]:
+    """The question pair and the obligation pair, per track and then total.
+
+    Totals never print without the per-track breakdown, including for a
+    single-track project: big projects are exactly where one sick track hides
+    inside healthy totals, and a report that drops the breakdown when it looks
+    redundant is a report that drops it exactly when nobody is watching. A
+    snapshot, deliberately — this script has no history, so it prints no trend,
+    delta or arrow.
+    """
+    rows = [*tracks, ("total", total)]
+    label_width = max(len(name) + 1 for name, _ in rows)
+    widths = {
+        f: max(len(str(getattr(c, f))) for _, c in rows)
+        for f in (
+            "answered",
+            "open_questions",
+            "retired",
+            "discharged",
+            "open_obligations",
+        )
+    }
+    lines = []
+    for name, counts in rows:
+        lines.append(
+            f"  {name + ':':<{label_width}}  "
+            f"Q {counts.answered:>{widths['answered']}} answered / "
+            f"{counts.open_questions:>{widths['open_questions']}} open / "
+            f"{counts.retired:>{widths['retired']}} retired    "
+            f"O {counts.discharged:>{widths['discharged']}} discharged / "
+            f"{counts.open_obligations:>{widths['open_obligations']}} open"
+            f"{render_counts_parenthetical(counts)}"
+        )
+    return lines
+
+
+def scarcity_warning(total: Counts) -> str | None:
+    """The blocking-obligation scarcity check — a warning, never a failure.
+
+    `blocking:` is meant to be rare. Past a third of the open obligations the
+    flag has stopped distinguishing anything: if everything blocks, nothing
+    converges, and the report's blocked list becomes the backlog rather than
+    the gate. Reported so somebody looks, not enforced — deciding which
+    obligations really gate a decision is judgment, and a gate here would be
+    answered by deleting the flag rather than by thinking.
+    """
+    if total.open_obligations == 0:
+        return None
+    if total.blocking * BLOCKING_SHARE_DENOMINATOR <= total.open_obligations:
+        return None
+    return (
+        f"  ⚠ {total.blocking} of {total.open_obligations} open obligations "
+        "carry `blocking:` — more than a third. If everything blocks, nothing "
+        "converges and the flag has become emphasis: keep it for the "
+        "obligations that genuinely gate a decision."
+    )
+
+
+def completeness_footer(tree: Tree, report: Report, resolved: Blockers) -> str | None:
+    """One line saying the report may be incomplete, or None when it is not.
+
+    Three sources, all of them already computed and none of them re-walked:
+
+      - the parse and card findings `discover`/`validate_cards` collected;
+      - the references that resolve to no decision — each one a gate that
+        gates nothing, and therefore a decision reading readier than it is;
+      - a decision whose `state:` is outside the enum, which falls through to
+        the derived labels as though it were `pending`.
+
+    The last is the one rule this report re-reads for itself. `state` is the
+    only *stored* input to the derivation, so a malformed one silently changes
+    what every line below it says — and the check is a set membership over
+    records already in hand, not a second run of the validator. Everything else
+    about record shape stays `validate`'s.
+
+    The findings themselves are never reprinted: this is a pointer at the gate,
+    not a copy of it. And it is a footer, not a failure — `status` still exits
+    0, because a report that could fail is a report people stop running.
+    """
+    unstated = sum(
+        1
+        for rec in tree.records
+        if rec.kind == "decision"
+        and declared(rec, "state") not in (*DECISION_STATES, PROPOSED_STATE)
+    )
+    count = len(report.errors) + len(resolved.dangling) + unstated
+    if count == 0:
+        return None
+    noun = (
+        "unresolved reference or validation error"
+        if count == 1
+        else "unresolved references or validation errors"
+    )
+    return (
+        f"⚠ {count} {noun} in this tree — "
+        "this report may be incomplete; run `validate` to see them. Readiness "
+        "is derived only from records that resolve, so a decision whose "
+        "blockers do not parse reads readier here than it is."
+    )
+
+
+def print_project_status(tree: Tree, project: Project, resolved: Blockers) -> None:
+    statuses = decision_statuses(tree, project, resolved)
+    tallied = {label: 0 for label in (LABEL_DECIDED, LABEL_READY, LABEL_BLOCKED)}
+    proposed = 0
+    for status in statuses:
+        if status.label == LABEL_PROPOSED:
+            proposed += 1
+        else:
+            tallied[status.label] += 1
+    # The three counts stay separate: "ready" is not "done", and the project
+    # gate is all required decisions **decided**. Proposed decisions are
+    # counted too, and apart — they are not yet on the organizer's list, and a
+    # header that omitted them would hide a decision the tree already knows it
+    # needs.
+    header = ", ".join(
+        f"{tallied[label]} {label.lower()}"
+        for label in (LABEL_DECIDED, LABEL_READY, LABEL_BLOCKED)
+    )
+    if proposed:
+        header += f", {proposed} proposed"
+    print(f"{project.name} — decisions: {header if statuses else 'none filed'}")
+    print()
+    if statuses:
+        for line in render_decision_block(statuses):
+            print(line)
+        print()
+
+    tracks, total = derive_counts(tree, project)
+    if not tracks:
+        print("  no tracks yet")
+        return
+    for line in render_track_lines(tracks, total):
+        print(line)
+    warning = scarcity_warning(total)
+    if warning is not None:
+        print()
+        print(warning)
+
+
+def verb_status(args: argparse.Namespace, root: Path) -> int:
+    """The convergence report: every project, or the one named.
+
+    Discovery's own findings are `validate`'s, not this report's — a status run
+    that reprinted parse errors would be a second, weaker gate, and one people
+    would start reading instead of the real one. `validate_cards` is called for
+    the same reason it exists at all: it is where cards are counted, and
+    counting them a second time here is how the ledger and the report start to
+    disagree.
+
+    But *discarding* those findings silently is the failure this instrument
+    exists to prevent, wearing the report's own clothes. A `blocks:` with a
+    typo in it resolves to no decision, so it blocks nothing, so the decision
+    prints READY — a broken tree reading healthier than a correct one. So the
+    findings are counted, never reprinted, and the count becomes one footer
+    saying the report may be incomplete.
+    """
+    report = Report()
+    tree = discover(root, report)
+    known = [p.name for p in tree.projects]
+    if args.project is not None and args.project not in known:
+        raise UsageError(
+            f"unknown project '{args.project}' — known projects: "
+            f"{', '.join(known) if known else 'none'}. `status` with no "
+            "project argument reports every one."
+        )
+    validate_cards(tree, report)
+    resolved = resolve_blockers(tree)
+    printed = False
+    for project in tree.projects:
+        if args.project is not None and project.name != args.project:
+            continue
+        if printed:
+            print()
+        print_project_status(tree, project, resolved)
+        printed = True
+
+    footer = completeness_footer(tree, report, resolved)
+    if footer is not None:
+        if printed:
+            print()
+        print(footer)
+    return EXIT_OK
 
 
 # --------------------------------------------------------------------------
@@ -2811,8 +3335,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = subparsers.add_parser(
         "status", help="The convergence report for one project."
     )
-    p_status.add_argument("project", nargs="?", help="Project to report on.")
-    p_status.set_defaults(run=unimplemented("status", "task 6"))
+    p_status.add_argument(
+        "project",
+        nargs="?",
+        help="Project to report on. Omitted, every project is reported.",
+    )
+    p_status.set_defaults(run=verb_status)
 
     p_suggest = subparsers.add_parser(
         "suggest",
