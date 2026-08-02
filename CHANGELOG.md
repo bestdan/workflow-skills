@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.81.0] - 2026-08-02
+
+### Features
+
+- the adoption playbook, with the backfill as its payload (#333) (2cd7b3d)
+
 ## [1.80.0] - 2026-08-02
 
 ### Features
