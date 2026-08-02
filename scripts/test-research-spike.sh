@@ -363,6 +363,7 @@ assert_contains "the inventory prints on a failing run" "$out_g2" \
   "id=alpha/account/second"
 # Same shape without the typo, so the clean-run record count is visible.
 DIR_G3="$BASE/code-span-clean"
+write_file "$DIR_G3/dev_docs/tasks/x.md" '# a task card that exists'
 write_file "$DIR_G3/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 ```obligation``` blocks are opened next to the prose that creates them.
@@ -370,12 +371,14 @@ write_file "$DIR_G3/dev_docs/research/alpha/tracks/account/questions.md" '# acco
 ```obligation
 id: first
 owes: the first thing
+destination: dev_docs/tasks/x.md
 status: open
 ```
 
 ```obligation
 id: second
 owes: the second thing
+destination: dev_docs/tasks/x.md
 status: open
 ```'
 out_g3="$(python3 "$SCRIPT" --root "$DIR_G3" --verbose validate 2>&1)"
@@ -421,6 +424,7 @@ assert_not_contains "an undecodable file does not traceback" "$out_g4" "Tracebac
 # with `encoding="utf-8"` removed from read_md, the old form still passed.
 # Assert on what actually moves — the exit code and the OK summary.
 DIR_G5="$BASE/utf8-prose"
+write_file "$DIR_G5/dev_docs/tasks/x.md" '# a task card that exists'
 write_file "$DIR_G5/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 ```obligation
@@ -624,6 +628,7 @@ assert_contains "the worked example is present, not merely documented" \
 
 # --- Fixture (k4): an HTML comment is inert, and never swallows silently -
 DIR_K4="$BASE/comments"
+write_file "$DIR_K4/dev_docs/tasks/x.md" '# a task card that exists'
 write_file "$DIR_K4/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 <!--
@@ -639,6 +644,7 @@ desination: a typo inside an inert example
 ```obligation
 id: real
 owes: the real thing
+destination: dev_docs/tasks/x.md
 status: open
 ```'
 out_k10="$(python3 "$SCRIPT" --root "$DIR_K4" --verbose validate 2>&1)"
@@ -675,6 +681,7 @@ assert_not_contains "an unterminated comment does not traceback" "$out_k11" "Tra
 # swallow every record and heading after it — reported, on top, as an
 # unterminated comment in a file that had none.
 DIR_K4B="$BASE/indented-comment"
+write_file "$DIR_K4B/dev_docs/tasks/x.md" '# a task card that exists'
 write_file "$DIR_K4B/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 The convention wraps the example in an opener, shown here indented:
@@ -686,6 +693,7 @@ The convention wraps the example in an opener, shown here indented:
 ```obligation
 id: first
 owes: the real thing
+destination: dev_docs/tasks/x.md
 status: open
 ```'
 out_k11b="$(python3 "$SCRIPT" --root "$DIR_K4B" --verbose validate 2>&1)"
@@ -868,6 +876,458 @@ if [ -e "$DIR_K10/dev_docs/research/demo/tracks/bar" ]; then
 else
   ok "a missing PROJECT.md leaves no half-made track either"
 fi
+
+# --- Fixture (l): the destination rules ----------------------------------
+# The load-bearing rule of the instrument: a deferral stayed visible in the
+# origin repo exactly when its destination was a file that already existed.
+# One fixture per rule, and each asserts the *reason* in the message as well
+# as the exit code — the message is part of the mechanism, so a rule that
+# fires with an unreadable explanation is only half-landed.
+
+obligation_fixture() {
+  # obligation_fixture <dir> <destination>
+  # One track, one obligation, and one real file to point at.
+  mkdir -p "$1/dev_docs/tasks" "$1/dev_docs/research/alpha/tracks/account"
+  printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
+  printf '# account\n\n```obligation\nid: keychain-invariant\nowes: the keychain invariant, spelled out\ndestination: %s\nstatus: open\n```\n' \
+    "$2" >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+}
+
+DIR_L1="$BASE/dest-valid"
+obligation_fixture "$DIR_L1" "dev_docs/tasks/real_task.md"
+out_l1="$(python3 "$SCRIPT" --root "$DIR_L1" validate 2>&1)"
+exit_l1=$?
+assert_exit "a destination pointing at an existing regular file passes" "$exit_l1" 0
+assert_contains "the valid tree reports OK" "$out_l1" "research-spike: OK"
+
+DIR_L2="$BASE/dest-missing"
+obligation_fixture "$DIR_L2" "dev_docs/tasks/never_written.md"
+out_l2="$(python3 "$SCRIPT" --root "$DIR_L2" validate 2>&1)"
+exit_l2=$?
+assert_exit "a nonexistent destination exits 1" "$exit_l2" 1
+assert_contains "a nonexistent destination is named" "$out_l2" \
+  "destination 'dev_docs/tasks/never_written.md' does not exist"
+assert_contains "the message says why it matters, not just what broke" "$out_l2" \
+  "this is how deferred work goes dark"
+assert_contains "the message says what to do instead" "$out_l2" \
+  "stub card under tracks/<track>/obligations/"
+
+# The one non-fatal destination rule. Pointing at an in-flight plan is
+# legitimate; the warning is what stops the pointer outliving the folder,
+# since /push-plan deletes plan directories after tracker migration.
+DIR_L3="$BASE/dest-plan-dir"
+obligation_fixture "$DIR_L3" "dev_docs/tasks/foo_plan/foo_plan.md"
+write_file "$DIR_L3/dev_docs/tasks/foo_plan/foo_plan.md" '# foo plan'
+out_l3="$(python3 "$SCRIPT" --root "$DIR_L3" validate 2>&1)"
+exit_l3=$?
+assert_exit "a destination under a *_plan/ directory still exits 0" "$exit_l3" 0
+assert_contains "a plan-directory destination warns" "$out_l3" "is inside a plan directory"
+assert_contains "the plan-directory warning names the deletion hazard" "$out_l3" "/push-plan"
+assert_contains "the plan-directory warning points at the receipt-card route" "$out_l3" \
+  "receipt card under tracks/<track>/obligations/"
+assert_contains "a warning does not fail the run" "$out_l3" "research-spike: OK"
+
+DIR_L4="$BASE/dest-directory"
+obligation_fixture "$DIR_L4" "dev_docs/tasks"
+out_l4="$(python3 "$SCRIPT" --root "$DIR_L4" validate 2>&1)"
+exit_l4=$?
+assert_exit "a directory destination exits 1" "$exit_l4" 1
+assert_contains "a directory destination says a directory says nothing" "$out_l4" \
+  "a directory can exist while saying nothing about the work"
+assert_contains "a directory destination states the fix" "$out_l4" \
+  "point at a specific file that already exists"
+
+DIR_L5="$BASE/dest-absolute"
+obligation_fixture "$DIR_L5" "/etc/hosts"
+out_l5="$(python3 "$SCRIPT" --root "$DIR_L5" validate 2>&1)"
+exit_l5=$?
+assert_exit "an absolute destination exits 1" "$exit_l5" 1
+assert_contains "an absolute destination says why repo-relative matters" "$out_l5" \
+  "is an absolute path"
+
+DIR_L6="$BASE/dest-traversal"
+obligation_fixture "$DIR_L6" "../outside.md"
+printf '# outside the root\n' >"$BASE/outside.md"
+out_l6="$(python3 "$SCRIPT" --root "$DIR_L6" validate 2>&1)"
+exit_l6=$?
+assert_exit "a '../' traversal destination exits 1 even when the target exists" "$exit_l6" 1
+assert_contains "a traversal destination says it escapes the repository" "$out_l6" \
+  "escapes the repository with '../'"
+
+# A symlink is the other door out of the tree, and the lexical check cannot see
+# it: resolve, then re-check containment.
+DIR_L7="$BASE/dest-symlink"
+obligation_fixture "$DIR_L7" "dev_docs/tasks/escape.md"
+printf '# somewhere else entirely\n' >"$BASE/symlink-target.md"
+ln -s "$BASE/symlink-target.md" "$DIR_L7/dev_docs/tasks/escape.md"
+out_l7="$(python3 "$SCRIPT" --root "$DIR_L7" validate 2>&1)"
+exit_l7=$?
+assert_exit "a symlink pointing outside the root exits 1" "$exit_l7" 1
+assert_contains "a symlink escape is reported as one" "$out_l7" \
+  "resolves through a symlink"
+assert_contains "a symlink escape says no clone contains the file" "$out_l7" \
+  "outside the repository"
+
+DIR_L8="$BASE/dest-cross-project"
+obligation_fixture "$DIR_L8" "dev_docs/research/beta/tracks/x/obligations/handoff.md"
+write_file "$DIR_L8/dev_docs/research/beta/tracks/x/obligations/handoff.md" '# handoff
+
+```card
+kind: stub
+superseded_when: the x track files its own measurement card
+```'
+out_l8="$(python3 "$SCRIPT" --root "$DIR_L8" validate 2>&1)"
+exit_l8=$?
+assert_exit "a destination inside a sibling project exits 1" "$exit_l8" 1
+assert_contains "a cross-project destination names the other project" "$out_l8" \
+  "lands in another research project ('beta')"
+assert_contains "a cross-project destination names the receipt-card route" "$out_l8" \
+  "receipt card under tracks/<track>/obligations/"
+
+DIR_L9="$BASE/dest-absent"
+mkdir -p "$DIR_L9/dev_docs/research/alpha/tracks/account"
+write_file "$DIR_L9/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant, spelled out
+status: open
+```'
+out_l9="$(python3 "$SCRIPT" --root "$DIR_L9" validate 2>&1)"
+exit_l9=$?
+assert_exit "an obligation with no destination at all exits 1" "$exit_l9" 1
+assert_contains "the missing-destination error says why the field exists" "$out_l9" \
+  "'destination:' is required"
+assert_contains "the missing-destination error names the accrual it prevents" "$out_l9" \
+  "accrues invisibly"
+
+# --- Fixture (l2): ids are kebab-case and unique once qualified ----------
+# Across two files, because two files each internally consistent is exactly how
+# the reference implementation ended up with an ambiguous reference.
+DIR_L10="$BASE/duplicate-ids"
+write_file "$DIR_L10/dev_docs/tasks/x.md" '# a task card that exists'
+write_file "$DIR_L10/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: keychain-invariant
+owes: the first claim on the name
+destination: dev_docs/tasks/x.md
+status: open
+```'
+write_file "$DIR_L10/dev_docs/research/alpha/tracks/account/contracts/keychain.md" '# keychain
+
+```obligation
+id: keychain-invariant
+owes: the second claim on the same name
+destination: dev_docs/tasks/x.md
+status: open
+```'
+out_l10="$(python3 "$SCRIPT" --root "$DIR_L10" validate 2>&1)"
+exit_l10=$?
+assert_exit "a duplicate id across two files exits 1" "$exit_l10" 1
+assert_contains "the duplicate is reported by its qualified id" "$out_l10" \
+  "duplicate obligation id 'alpha/account/keychain-invariant'"
+# Both source locations, because a duplicate reported at one end is a report
+# the reader has to go looking for the other half of. Files are walked in
+# sorted order, so contracts/keychain.md is the first declaration here and
+# questions.md is where the finding lands.
+assert_contains "the duplicate error locates the second declaration" "$out_l10" \
+  "dev_docs/research/alpha/tracks/account/questions.md:4:"
+assert_contains "the duplicate error also names the first declaration" "$out_l10" \
+  "already declared at dev_docs/research/alpha/tracks/account/contracts/keychain.md:4"
+
+# Qualification is what prevents the collision, so the same bare id in two
+# tracks is not one.
+DIR_L11="$BASE/same-id-two-tracks"
+write_file "$DIR_L11/dev_docs/tasks/x.md" '# a task card that exists'
+for track in account watcher; do
+  write_file "$DIR_L11/dev_docs/research/alpha/tracks/$track/questions.md" "# $track
+
+\`\`\`obligation
+id: keychain-invariant
+owes: the keychain invariant for this track
+destination: dev_docs/tasks/x.md
+status: open
+\`\`\`"
+done
+out_l11="$(python3 "$SCRIPT" --root "$DIR_L11" validate 2>&1)"
+exit_l11=$?
+assert_exit "the same bare id in two tracks is accepted" "$exit_l11" 0
+assert_not_contains "no duplicate is reported for two differently-qualified ids" \
+  "$out_l11" "duplicate obligation id"
+
+DIR_L12="$BASE/bad-id-shape"
+mkdir -p "$DIR_L12/dev_docs/research/alpha/tracks/account"
+write_file "$DIR_L12/dev_docs/tasks/x.md" '# a task card that exists'
+write_file "$DIR_L12/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: Keychain_Invariant
+owes: the keychain invariant
+destination: dev_docs/tasks/x.md
+status: open
+```'
+out_l12="$(python3 "$SCRIPT" --root "$DIR_L12" validate 2>&1)"
+exit_l12=$?
+assert_exit "a non-kebab id exits 1" "$exit_l12" 1
+assert_contains "a non-kebab id says what the shape is" "$out_l12" "is not a valid id shape"
+
+# --- Fixture (l3): status, discharged_by, and owes -----------------------
+status_fixture() {
+  # status_fixture <dir> <extra block lines>
+  mkdir -p "$1/dev_docs/tasks" "$1/dev_docs/research/alpha/tracks/account"
+  printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
+  printf '# account\n\n```obligation\nid: keychain-invariant\nowes: the keychain invariant, spelled out\ndestination: dev_docs/tasks/real_task.md\n%s\n```\n' \
+    "$2" >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+}
+
+DIR_L13="$BASE/discharged-no-by"
+status_fixture "$DIR_L13" "status: discharged"
+out_l13="$(python3 "$SCRIPT" --root "$DIR_L13" validate 2>&1)"
+exit_l13=$?
+assert_exit "discharged without discharged_by exits 1" "$exit_l13" 1
+assert_contains "the discharged_by error says the claim is uncheckable without it" \
+  "$out_l13" "nobody can check"
+
+DIR_L14="$BASE/open-with-by"
+status_fixture "$DIR_L14" "status: open
+discharged_by: https://github.com/o/r/pull/1"
+out_l14="$(python3 "$SCRIPT" --root "$DIR_L14" validate 2>&1)"
+exit_l14=$?
+assert_exit "discharged_by while open exits 1" "$exit_l14" 1
+assert_contains "the open+discharged_by error says one of the two is wrong" "$out_l14" \
+  "is set while status is open"
+
+# discharged_by is free text and deliberately never path-checked — the
+# discharging artifact almost always lives outside the tree.
+DIR_L15="$BASE/discharged-by-url"
+status_fixture "$DIR_L15" "status: discharged
+discharged_by: https://github.com/o/r/pull/1234"
+out_l15="$(python3 "$SCRIPT" --root "$DIR_L15" validate 2>&1)"
+exit_l15=$?
+assert_exit "a PR URL in discharged_by passes (it is never path-checked)" "$exit_l15" 0
+assert_not_contains "discharged_by is never reported as a missing path" "$out_l15" \
+  "does not exist"
+
+DIR_L16="$BASE/bad-status"
+status_fixture "$DIR_L16" "status: in-progress"
+out_l16="$(python3 "$SCRIPT" --root "$DIR_L16" validate 2>&1)"
+exit_l16=$?
+assert_exit "a status outside open|discharged exits 1" "$exit_l16" 1
+assert_contains "the status error says why there is no in-between" "$out_l16" \
+  "no in-between state"
+
+DIR_L17="$BASE/no-owes"
+mkdir -p "$DIR_L17/dev_docs/research/alpha/tracks/account"
+write_file "$DIR_L17/dev_docs/tasks/x.md" '# a task card that exists'
+write_file "$DIR_L17/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: keychain-invariant
+destination: dev_docs/tasks/x.md
+status: open
+```'
+out_l17="$(python3 "$SCRIPT" --root "$DIR_L17" validate 2>&1)"
+exit_l17=$?
+assert_exit "an obligation with no owes exits 1" "$exit_l17" 1
+assert_contains "the owes error says an address with no letter in it" "$out_l17" \
+  "an address with no letter in it"
+
+# `blocking:` is accepted and recorded here; whether it names a real decision
+# is task 5's referential check, so it must not fail on its own yet.
+DIR_L18="$BASE/blocking-accepted"
+status_fixture "$DIR_L18" "status: open
+blocking: stop-semantics"
+python3 "$SCRIPT" --root "$DIR_L18" validate >/dev/null 2>&1
+exit_l18=$?
+assert_exit "an obligation carrying blocking: is accepted" "$exit_l18" 0
+out_l18v="$(python3 "$SCRIPT" --root "$DIR_L18" --verbose validate 2>&1)"
+assert_contains "blocking: is recorded for task 5's referential check" "$out_l18v" \
+  "blocking = 'stop-semantics'"
+
+# The unknown-key rule (fixture (d)) is what catches a `desination:` typo: the
+# constraint must not be silently dropped because the key was misspelled.
+
+# --- Fixture (m): cards --------------------------------------------------
+card_fixture() {
+  # card_fixture <dir> <card block body>
+  mkdir -p "$1/dev_docs/research/alpha/tracks/account/obligations"
+  printf '# a card\n\n```card\n%s\n```\n' "$2" \
+    >"$1/dev_docs/research/alpha/tracks/account/obligations/keychain.md"
+}
+
+DIR_M1="$BASE/card-stub-ok"
+card_fixture "$DIR_M1" "kind: stub
+superseded_when: the account track files its two measurement cards"
+python3 "$SCRIPT" --root "$DIR_M1" validate >/dev/null 2>&1
+exit_m1=$?
+assert_exit "a stub card carrying superseded_when passes" "$exit_m1" 0
+
+DIR_M2="$BASE/card-stub-no-condition"
+card_fixture "$DIR_M2" "kind: stub"
+out_m2="$(python3 "$SCRIPT" --root "$DIR_M2" validate 2>&1)"
+exit_m2=$?
+assert_exit "a stub card without superseded_when exits 1" "$exit_m2" 1
+assert_contains "the stub error says why the condition is required" "$out_m2" \
+  "a new place for work to hide"
+
+DIR_M3="$BASE/card-receipt-no-url"
+card_fixture "$DIR_M3" "kind: receipt
+handler: linear"
+out_m3="$(python3 "$SCRIPT" --root "$DIR_M3" validate 2>&1)"
+exit_m3=$?
+assert_exit "a receipt card without url exits 1" "$exit_m3" 1
+assert_contains "the receipt error names the field" "$out_m3" "requires 'url:'"
+
+# The validator is offline by contract: a url is content, never a request. An
+# unroutable host must pass cleanly, or an outage of somebody else's tracker
+# fails this gate. Deliberately no `timeout` wrapper — coreutils is not on a
+# stock macOS, and a missing binary would fail this fixture for a reason that
+# has nothing to do with the rule. A validator that did fetch would hang the
+# harness on this address, which is a loud enough failure.
+DIR_M4="$BASE/card-receipt-unroutable"
+card_fixture "$DIR_M4" "kind: receipt
+url: https://198.51.100.1/never-routable/ISSUE-1
+handler: linear
+tracker_id: ISSUE-1"
+out_m4="$(python3 "$SCRIPT" --root "$DIR_M4" validate 2>&1)"
+exit_m4=$?
+assert_exit "a receipt's url is never fetched (an unroutable host passes)" "$exit_m4" 0
+assert_contains "the unroutable receipt tree reports OK" "$out_m4" "research-spike: OK"
+
+DIR_M5="$BASE/card-bad-kind"
+card_fixture "$DIR_M5" "kind: memo"
+out_m5="$(python3 "$SCRIPT" --root "$DIR_M5" validate 2>&1)"
+exit_m5=$?
+assert_exit "a card kind outside stub|receipt exits 1" "$exit_m5" 1
+assert_contains "the card-kind error names the two kinds" "$out_m5" "stub | receipt"
+
+DIR_M6="$BASE/card-missing-block"
+mkdir -p "$DIR_M6/dev_docs/research/alpha/tracks/account/obligations"
+write_file "$DIR_M6/dev_docs/research/alpha/tracks/account/obligations/keychain.md" \
+  '# a note somebody left here without a block'
+out_m6="$(python3 "$SCRIPT" --root "$DIR_M6" validate 2>&1)"
+exit_m6=$?
+assert_exit "a file under obligations/ with no card block exits 1" "$exit_m6" 1
+assert_contains "the missing-card error says it is counted nowhere" "$out_m6" \
+  "no card block in this file"
+
+DIR_M7="$BASE/card-outside-obligations"
+write_file "$DIR_M7/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```card
+kind: stub
+superseded_when: never, because this card is filed where nothing walks
+```'
+out_m7="$(python3 "$SCRIPT" --root "$DIR_M7" validate 2>&1)"
+exit_m7=$?
+assert_exit "a card block outside obligations/ exits 1" "$exit_m7" 1
+assert_contains "the misplaced-card error says no ledger will show it" "$out_m7" \
+  "card block outside tracks/<track>/obligations/"
+
+# --- Fixture (m8): a `none:` line is not a way to switch the checks off --
+# The exemption is for a *bare* `none:` block — the coverage rule's explicit
+# declaration. Exempting any block that merely carries the line let a record
+# with a real destination skip every check in the file, missing destination
+# included, which would have made `none:` the off switch.
+DIR_M8="$BASE/none-mixed"
+mkdir -p "$DIR_M8/dev_docs/research/alpha/tracks/account"
+write_file "$DIR_M8/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+none: nothing is owed here
+id: keychain-invariant
+owes: except for this, apparently
+destination: dev_docs/tasks/never_written.md
+status: open
+```'
+out_m8="$(python3 "$SCRIPT" --root "$DIR_M8" validate 2>&1)"
+exit_m8=$?
+assert_exit "a none: line alongside real fields does not exempt the block" "$exit_m8" 1
+assert_contains "the mixed block is reported as trying to be two records" "$out_m8" \
+  "declares 'none:' alongside other fields"
+assert_contains "the mixed block's destination is still checked" "$out_m8" \
+  "destination 'dev_docs/tasks/never_written.md' does not exist"
+
+# --- Fixture (m9): an unresolvable destination is a finding, not a crash -
+# pathlib raises RuntimeError (not OSError) on a symlink loop, so catching
+# only OSError left this tracebacking out of the middle of the walk — and a
+# traceback exits 1, which is indistinguishable from a real finding.
+DIR_M9="$BASE/dest-symlink-loop"
+obligation_fixture "$DIR_M9" "dev_docs/tasks/loop.md"
+ln -s loop.md "$DIR_M9/dev_docs/tasks/loop.md"
+out_m9="$(python3 "$SCRIPT" --root "$DIR_M9" validate 2>&1)"
+exit_m9=$?
+assert_exit "a symlink loop destination exits 1" "$exit_m9" 1
+assert_not_contains "a symlink loop does not traceback" "$out_m9" "Traceback"
+assert_contains "a symlink loop is reported as an address nobody can follow" "$out_m9" \
+  "cannot be resolved"
+
+# --- Fixture (m10): a file directly under dev_docs/research/ is not a project
+# With the containment test at `>= 1`, the file's own name landed in
+# research_parts[0] and README.md was reported as "another research project" —
+# a rule firing on a name it invented.
+DIR_M10="$BASE/dest-research-root"
+obligation_fixture "$DIR_M10" "dev_docs/research/README.md"
+printf '# the research tree\n' >"$DIR_M10/dev_docs/research/README.md"
+out_m10="$(python3 "$SCRIPT" --root "$DIR_M10" validate 2>&1)"
+exit_m10=$?
+assert_exit "a destination directly under dev_docs/research/ passes" "$exit_m10" 0
+assert_not_contains "a research-root file is never called another project" "$out_m10" \
+  "another research project"
+
+# --- Fixture (m11): one card per file ------------------------------------
+DIR_M11="$BASE/card-two-blocks"
+mkdir -p "$DIR_M11/dev_docs/research/alpha/tracks/account/obligations"
+write_file "$DIR_M11/dev_docs/research/alpha/tracks/account/obligations/keychain.md" \
+  '# two cards in one file
+
+```card
+kind: stub
+superseded_when: the account track files its measurement card
+```
+
+```card
+kind: receipt
+url: https://example.invalid/ISSUE-1
+```'
+out_m11="$(python3 "$SCRIPT" --root "$DIR_M11" validate 2>&1)"
+exit_m11=$?
+assert_exit "a second card block in one file exits 1" "$exit_m11" 1
+assert_contains "the second-card error says a file holds exactly one card" "$out_m11" \
+  "a card file holds exactly one card"
+assert_contains "the second-card error names the first block's line" "$out_m11" \
+  "the first is at line 3"
+assert_contains "the second-card error is located at the second block" "$out_m11" \
+  "obligations/keychain.md:8:"
+
+# --- Fixture (m12): obligations/ holds cards, not stray files ------------
+# Globbing only *.md left a notes.txt holding deferred work that no parser
+# reads and no ledger counts — a hiding place inside the one directory whose
+# whole purpose is that work cannot hide in it. Dotfiles stay exempt: `init`
+# writes .gitkeep, and Finder drops .DS_Store into anything it opens.
+DIR_M12="$BASE/obligations-stray-file"
+card_fixture "$DIR_M12" "kind: stub
+superseded_when: the account track files its measurement card"
+M12_DIR="$DIR_M12/dev_docs/research/alpha/tracks/account/obligations"
+printf 'a deferral somebody typed into a text file\n' >"$M12_DIR/notes.txt"
+out_m12="$(python3 "$SCRIPT" --root "$DIR_M12" validate 2>&1)"
+exit_m12=$?
+assert_exit "a non-markdown file under obligations/ exits 1" "$exit_m12" 1
+assert_contains "the stray-file error names the file" "$out_m12" "obligations/notes.txt"
+assert_contains "the stray-file error says it would be counted nowhere" "$out_m12" \
+  "not a markdown card"
+
+DIR_M13="$BASE/obligations-dotfiles"
+card_fixture "$DIR_M13" "kind: stub
+superseded_when: the account track files its measurement card"
+M13_DIR="$DIR_M13/dev_docs/research/alpha/tracks/account/obligations"
+: >"$M13_DIR/.gitkeep"
+printf '\x00\x01macOS junk\n' >"$M13_DIR/.DS_Store"
+out_m13="$(python3 "$SCRIPT" --root "$DIR_M13" validate 2>&1)"
+exit_m13=$?
+assert_exit "dotfiles under obligations/ are exempt (.gitkeep, .DS_Store)" "$exit_m13" 0
+assert_not_contains "a dotfile is never reported as a card" "$out_m13" ".gitkeep"
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
