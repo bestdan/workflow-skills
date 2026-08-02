@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.73.0] - 2026-08-02
+
+### Features
+
+- validate questions and enforce the coverage rule (#323) (1731ae8)
+
 ## [1.72.0] - 2026-08-02
 
 ### Features
