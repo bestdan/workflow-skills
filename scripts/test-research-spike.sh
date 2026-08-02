@@ -158,7 +158,14 @@ for project_dir in sorted(p for p in research.iterdir() if p.is_dir()):
         else:
             qfile.write_text(f"# {track_dir.name}\n\n" + PLACEHOLDER, encoding="utf-8")
 PY
-  python3 "$SCRIPT" --root "$dir" write-ledger >/dev/null 2>&1
+  local out
+  out="$(python3 "$SCRIPT" --root "$dir" write-ledger 2>&1)"
+  if [ $? -ne 0 ]; then
+    # A seeding failure must not surface later as a confusing staleness
+    # error inside an unrelated fixture — name the directory and show why
+    # the seed itself never wrote a fresh ledger.
+    bad "seed_fresh_ledger: write-ledger failed seeding $dir: $out"
+  fi
 }
 
 # --- Fixture (a): an empty root is clean, not an error -------------------
@@ -3288,8 +3295,12 @@ assert_contains "the roll-up's total line sums both tracks" "$out_t_ledger" \
   "- **Questions:** 1 answered, 1 open, 1 retired"
 
 # `write-ledger demo7` with no --track also rewrites LEDGER.md — the
-# round-trip: write-ledger then validate is clean.
+# round-trip: write-ledger then validate is clean. The write's own exit
+# status is asserted here too — a write that silently failed would still let
+# this fixture pass on the strength of validate alone.
 python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 >/dev/null 2>&1
+exit_t5b=$?
+assert_exit "write-ledger demo7 (no --track) exits 0" "$exit_t5b" 0
 python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
 exit_t6=$?
 assert_exit "write-ledger then validate is clean (the round trip)" "$exit_t6" 0
@@ -3372,6 +3383,119 @@ exit_t12=$?
 assert_exit "the same missing markers fail write-ledger" "$exit_t12" 1
 assert_contains "write-ledger's missing-markers error also names init" "$out_t12" \
   "run \`init\` to install them"
+
+# --- Fixture (u): write-ledger's exit code is its own write, not the gate's -
+# `write-ledger` is a writer, not `validate`. A card violation living in a
+# *sibling* track must not fail a scoped write that wrote exactly what it was
+# asked to — and `validate` over the same tree must still catch it, or the
+# gate would have gone soft along with the writer.
+DIR_U="$BASE/write-ledger-scope"
+mkdir -p "$DIR_U"
+python3 "$SCRIPT" --root "$DIR_U" init demo8 --track account >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_U" init demo8 --track broken >/dev/null 2>&1
+write_file "$DIR_U/dev_docs/research/demo8/tracks/broken/obligations/bad.md" '# a bad card
+
+```card
+kind: bogus
+```'
+out_u1="$(python3 "$SCRIPT" --root "$DIR_U" write-ledger demo8 --track account 2>&1)"
+exit_u1=$?
+assert_exit "write-ledger --track <clean> exits 0 despite a card violation in a sibling track" \
+  "$exit_u1" 0
+assert_contains "the scoped write reports writing account's ledger" "$out_u1" "wrote 1 ledger"
+out_u2="$(python3 "$SCRIPT" --root "$DIR_U" validate demo8 2>&1)"
+exit_u2=$?
+assert_exit "validate still catches the sibling track's card violation (the gate still gates)" \
+  "$exit_u2" 1
+assert_contains "validate names the bad card kind" "$out_u2" "card kind 'bogus'"
+
+# --- Fixture (v): --verbose respects the scope it was given ---------------
+# The findings are scoped by `[<project>] [--track <t>]`; the inventory dump
+# has to be too, or `--verbose --track x` prints every sibling track and
+# project right back in, contradicting the flags it was handed.
+DIR_V="$BASE/verbose-scope"
+mkdir -p "$DIR_V"
+python3 "$SCRIPT" --root "$DIR_V" init demo9 --track account >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_V" init demo9 --track watcher >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_V" init demo9-sibling --track x >/dev/null 2>&1
+cat >>"$DIR_V/dev_docs/research/demo9/tracks/account/questions.md" <<'MD'
+
+### Q1. From account.
+
+```question
+id: from-account
+status: open
+```
+MD
+cat >>"$DIR_V/dev_docs/research/demo9/tracks/watcher/questions.md" <<'MD'
+
+### Q1. From watcher.
+
+```question
+id: from-watcher
+status: open
+```
+MD
+cat >>"$DIR_V/dev_docs/research/demo9-sibling/tracks/x/questions.md" <<'MD'
+
+### Q1. From the sibling project.
+
+```question
+id: from-sibling
+status: open
+```
+MD
+out_v="$(python3 "$SCRIPT" --root "$DIR_V" --verbose validate demo9 --track account 2>&1)"
+assert_contains "--verbose --track dumps the resolved track's own record" "$out_v" \
+  "id=demo9/account/from-account"
+assert_contains "--verbose --track dumps the resolved track's own section" "$out_v" \
+  "'From account.'"
+assert_not_contains "--verbose --track omits a sibling track's record" "$out_v" "from-watcher"
+assert_not_contains "--verbose --track omits a sibling track's section" "$out_v" \
+  "'From watcher.'"
+assert_not_contains "--verbose --track omits a sibling project's record" "$out_v" "from-sibling"
+assert_not_contains "--verbose --track omits a sibling project's section" "$out_v" \
+  "'From the sibling project.'"
+
+# --- Fixture (w): scope is resolved before the tree-less early return -----
+# An unknown project is a caller error whether or not a research tree exists
+# at all — `status` already exits 2 on the identical mistake, and `validate`
+# reading it as a clean run on a tree-less root disagreed. A bare `validate`
+# (no scope named) on the same root must stay a clean, silent 0.
+out_w1="$(python3 "$SCRIPT" --root "$DIR_C2" validate nosuch-project 2>&1)"
+exit_w1=$?
+assert_exit "an unknown project on a root with no research tree exits 2" "$exit_w1" 2
+assert_contains "the unknown-project error lists no known projects" "$out_w1" \
+  "known projects: none"
+out_w2="$(python3 "$SCRIPT" --root "$DIR_C2" validate 2>&1)"
+exit_w2=$?
+assert_exit "bare validate on the same tree-less root still exits 0" "$exit_w2" 0
+if [ -z "$out_w2" ]; then
+  ok "bare validate on the same tree-less root is silent"
+else
+  bad "bare validate on the same tree-less root should be silent, got: $out_w2"
+fi
+
+# --- Fixture (x): a deleted LEDGER.md is invisible to a --track run --------
+# `LEDGER.md` lives directly under the project directory, never under
+# `tracks/<track>/`, so a `--track` run's `tracks/<track>/` path-prefix filter
+# drops its finding for free — the same mechanism (design leans on it) that
+# already keeps a stale LEDGER.md out of a `--track` run's findings. A
+# **missing** file takes a different code path than "stale" (report.error
+# fires directly out of `read_ledger_span`, unconditionally, never through the
+# warn/--strict tier — deliberately, and untouched here), so it is pinned
+# separately.
+DIR_X="$BASE/deleted-ledger-md"
+mkdir -p "$DIR_X"
+python3 "$SCRIPT" --root "$DIR_X" init demo10 --track account >/dev/null 2>&1
+rm "$DIR_X/dev_docs/research/demo10/LEDGER.md"
+python3 "$SCRIPT" --root "$DIR_X" validate demo10 --track account >/dev/null 2>&1
+exit_x1=$?
+assert_exit "a deleted LEDGER.md does not fail validate --track <t>" "$exit_x1" 0
+out_x2="$(python3 "$SCRIPT" --root "$DIR_X" validate 2>&1)"
+exit_x2=$?
+assert_exit "bare validate still fails on the deleted LEDGER.md" "$exit_x2" 1
+assert_contains "bare validate names the missing LEDGER.md" "$out_x2" "LEDGER.md does not exist"
 
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"

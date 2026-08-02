@@ -3111,7 +3111,7 @@ def render_value(value: Value) -> str:
     return f"{value.raw!r} items=[{items}]"
 
 
-def print_inventory_for(tree: Tree, project: Project) -> None:
+def print_inventory_for(tree: Tree, project: Project, track: str | None = None) -> None:
     """The verbose dump: what discovery found and what the parser made of it.
 
     This is the observation surface the fixture tests assert on — the parsed
@@ -3119,9 +3119,17 @@ def print_inventory_for(tree: Tree, project: Project) -> None:
     the `none` sentinel) are visible without a validation rule to fail. It is
     also where a record the rules cannot place is still named, so nothing
     the parser saw is invisible.
+
+    `track`, when given, narrows the dump to that track's records and
+    `section @ ...` lines, via the same `tracks/<track>/` prefix
+    `verb_validate` restricts its findings to. Without it `--verbose --track`
+    contradicted its own flags: the findings were scoped and the inventory
+    was not, so a run scoped to one track dumped every sibling track anyway.
     """
     for rec in tree.records:
         if rec.project != project.name:
+            continue
+        if track is not None and rec.track != track:
             continue
         scope = f"{rec.project}/{rec.track}" if rec.track else rec.project
         if rec.qualified_id is not None:
@@ -3137,6 +3145,8 @@ def print_inventory_for(tree: Tree, project: Project) -> None:
         for key, value in rec.fields.items():
             print(f"      {key} = {render_value(value)}")
     prefix = f"{project.path.relative_to(tree.root).as_posix()}/"
+    if track is not None:
+        prefix = f"{prefix}{TRACKS_DIRNAME}/{track}/"
     for rel, sections in sorted(tree.sections.items()):
         if not rel.startswith(prefix):
             continue
@@ -3322,9 +3332,14 @@ def verb_ledger(args: argparse.Namespace, root: Path) -> int:
     """Print the derived ledgers. Writes nothing, ever."""
     report = Report()
     tree = discover(root, report)
+    # Resolved before the tree-less return — see `verb_validate`'s comment:
+    # an unknown project name is a caller error whether or not a research
+    # tree exists, and `resolve_scope` returns `(None, None)` with no
+    # arguments, so a bare `ledger` on a tree-less root still falls through
+    # to the clean exit below unchanged.
+    project, track = resolve_scope(tree, args.project, args.track)
     if not tree.present:
         return EXIT_OK
-    project, track = resolve_scope(tree, args.project, args.track)
     # Populated as a side effect, not for its findings (discarded here, same
     # as discovery's own): `tree.cards` — the stub/receipt tallies `Counts`
     # reads — is only ever filled by walking the cards, and this is that walk.
@@ -3357,18 +3372,33 @@ def verb_write_ledger(args: argparse.Namespace, root: Path) -> int:
 
     Always an explicit act — `validate` never calls this, or a stale ledger
     would stop being checked and start being generated.
+
+    `write-ledger` is a writer, not a gate — `validate` is the gate. So
+    `discover`'s and `validate_cards`'s findings go into a throwaway report
+    and are discarded, exactly what `verb_ledger`'s comment above already
+    says it is doing (it never calls `report.emit()` at all): a card violation
+    in a sibling track or project must not fail a scoped write that wrote
+    exactly what it was asked to, and it must not half-gate either — a report
+    that inherited discovery's and the card check's findings but never ran
+    the question/obligation/decision checks would fail on some violations and
+    not others, arbitrarily. `report` below carries only this verb's own
+    failures — a requested file missing, or missing its ledger markers — so
+    the exit code answers exactly one question: did the write happen.
     """
-    report = Report()
-    tree = discover(root, report)
+    scan_report = Report()
+    tree = discover(root, scan_report)
+    # Resolved before the tree-less return — see `verb_validate`'s comment.
+    project, track = resolve_scope(tree, args.project, args.track)
     if not tree.present:
         return EXIT_OK
-    project, track = resolve_scope(tree, args.project, args.track)
     # Same side effect `verb_ledger` needs, for the same reason — `tree.cards`
     # has to be filled before `derive_counts` reads it, or every written
-    # ledger's stub/receipt subtotals come out pinned to zero.
-    validate_cards(tree, report)
+    # ledger's stub/receipt subtotals come out pinned to zero. Findings go to
+    # the throwaway report per the docstring above.
+    validate_cards(tree, scan_report)
     resolved = resolve_blockers(tree)
 
+    report = Report()
     written: list[str] = []
     for p in tree.projects if project is None else [project]:
         for t in [track] if track is not None else p.tracks:
@@ -3404,10 +3434,16 @@ def count_records(tree: Tree, project_name: str, track_name: str | None) -> int:
 def verb_validate(args: argparse.Namespace, root: Path) -> int:
     report = Report()
     tree = discover(root, report)
+    # Resolved before the tree-less return: an unknown project name is a
+    # caller error whether or not a research tree exists at all — `status`
+    # already treats it that way, and `validate` disagreeing on the identical
+    # caller mistake is confusing on its own. `resolve_scope` returns
+    # `(None, None)` when neither argument is given, so a bare `validate` on a
+    # tree-less root still falls through to the clean exit below unchanged.
+    project, track = resolve_scope(tree, args.project, args.track)
     if not tree.present:
         # No research tree is clean, not an error: nothing to say, exit 0.
         return EXIT_OK
-    project, track = resolve_scope(tree, args.project, args.track)
     # One id namespace, shared by every kind that declares an id: a qualified
     # id that could mean two records is ambiguous whatever their kinds, and
     # `blocks:`/`blocking:` resolve by bare id.
@@ -3428,8 +3464,17 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
         # suppressing it on a failing run withholds it exactly when it is most
         # useful — while a finding at `path:line` is far easier to read against
         # the record it came from. Findings stay last so they end the output.
-        for p in tree.projects:
-            print_inventory_for(tree, p)
+        #
+        # Scoped the same way the findings below are: a resolved project (or
+        # track) dumps only itself, or `--verbose --track x` would contradict
+        # the very flags that asked for x alone.
+        if project is not None:
+            print_inventory_for(
+                tree, project, track.name if track is not None else None
+            )
+        else:
+            for p in tree.projects:
+                print_inventory_for(tree, p)
     if project is not None:
         # Every check above ran over the whole tree — referential integrity
         # needs project-wide records to resolve `blocks:` against — so scoping
@@ -3454,11 +3499,13 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     if project is not None:
         tracks_named = ", ".join(t.name for t in project.tracks) or "none"
         count = count_records(tree, project.name, None)
+        # One line, not two: naming the project's own tracks on a second line
+        # right under a first line that already named the project repeats
+        # itself for no reason the bare (every-project) summary below shares.
         print(
             f"{PROG}: OK — {project.name}: {len(project.tracks)} tracks, "
-            f"{count} records"
+            f"{count} records — tracks: {tracks_named}"
         )
-        print(f"  {project.name} — tracks: {tracks_named} ({count} records)")
         return EXIT_OK
     track_count = sum(len(p.tracks) for p in tree.projects)
     print(
