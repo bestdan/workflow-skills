@@ -28,6 +28,21 @@ load test_helper
   assert_output --partial 'research-spike/scripts/research-spike.py'
 }
 
+@test "the research-spike-tutorial zip carries the script its walkthrough calls" {
+  # Same reasoning as the research-spike zip test above: the tutorial's every
+  # command shells out to research-spike.py too, so a default skills/<name>
+  # copy would ship a walkthrough whose every command points at a file that
+  # was never bundled.
+  command -v zip >/dev/null || skip "zip is not installed"
+  command -v unzip >/dev/null || skip "unzip is not installed"
+  run bash "$REPO_ROOT/scripts/build-claude-ai-zips.sh" "$TEST_TMPDIR/out"
+  assert_success
+  run unzip -Z1 "$TEST_TMPDIR/out/research-spike-tutorial.zip"
+  assert_success
+  assert_output --partial 'research-spike-tutorial/SKILL.md'
+  assert_output --partial 'research-spike-tutorial/scripts/research-spike.py'
+}
+
 @test "coder probe reports missing tools as data" {
   make_stub date 'echo 2026-01-01'
   make_stub sed 'exec /usr/bin/sed "$@"'

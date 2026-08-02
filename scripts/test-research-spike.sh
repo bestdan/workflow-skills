@@ -3647,6 +3647,199 @@ else
   bad "adoption spine: expected exactly one finding, got $findings_z2"
 fi
 
+# --- Fixture (aa): the research-spike-tutorial walkthrough itself ---------
+# skills/research-spike-tutorial/SKILL.md walks a learner through the exact
+# records below, in this exact order, against a disposable tree — it is not
+# a hypothetical, it is the transcript that was run by hand to write the
+# skill. This fixture re-runs that transcript so a later change to the
+# script can't silently rot the tutorial's two load-bearing moments: the
+# deliberate `validate` failure at "the wall" (exact message, so a paraphrase
+# creeping into the skill file would be caught by a diff against this
+# fixture too) and the clean `validate` once the stub card is added. It also
+# asserts the divergence `status` promises the learner will see at the end:
+# questions fully answered while obligations keep climbing.
+DIR_AA="$BASE/tutorial-walkthrough"
+mkdir -p "$DIR_AA"
+python3 "$SCRIPT" --root "$DIR_AA" init onboarding --track auth >/dev/null 2>&1
+printf '\n```decision\nid: sso-rollout\nstate: pending\n```\n' \
+  >>"$DIR_AA/dev_docs/research/onboarding/decisions.md"
+out_aa_init="$(python3 "$SCRIPT" --root "$DIR_AA" validate 2>&1)"
+exit_aa_init=$?
+assert_exit "tutorial: the freshly-scaffolded tree (plus its decision) validates clean" \
+  "$exit_aa_init" 0
+assert_contains "tutorial: the scaffolded tree reports OK" "$out_aa_init" "research-spike: OK"
+
+# Step 3: file Q1, coverage satisfied by a bare `none:` — still clean.
+cat >>"$DIR_AA/dev_docs/research/onboarding/tracks/auth/questions.md" <<'EOF'
+
+### Q1. Should login redirect through the SSO gateway before issuing a session token?
+
+```question
+id: sso-redirect-required
+status: open
+blocks: sso-rollout
+```
+
+```obligation
+none: filing only, no work identified yet
+```
+EOF
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger onboarding --track auth >/dev/null 2>&1
+out_aa_filed="$(python3 "$SCRIPT" --root "$DIR_AA" validate --track auth 2>&1)"
+exit_aa_filed=$?
+assert_exit "tutorial step 3: a filed question with bare none: coverage validates clean" \
+  "$exit_aa_filed" 0
+assert_contains "tutorial step 3: the freshly-filed question reports OK" "$out_aa_filed" \
+  "research-spike: OK"
+
+# Step 4: answer Q1, replace the bare none: with a real obligation pointing
+# at a stub that does not exist yet — the wall.
+python3 - "$DIR_AA" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1]) / "dev_docs/research/onboarding/tracks/auth/questions.md"
+text = path.read_text(encoding="utf-8")
+old = '''```question
+id: sso-redirect-required
+status: open
+blocks: sso-rollout
+```
+
+```obligation
+none: filing only, no work identified yet
+```'''
+new = '''```question
+id: sso-redirect-required
+status: answered
+blocks: sso-rollout
+answer: yes — the gateway must own the redirect, so the session token is only issued after SSO succeeds
+```
+
+Traced through the current login handler: without the redirect, a client
+can request a session token directly and skip SSO entirely.
+
+```obligation
+id: sso-redirect-check
+owes: the pre-issuance redirect check in the login handler
+destination: dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md
+status: open
+```'''
+assert old in text, "tutorial fixture: Q1 template not found verbatim"
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger onboarding --track auth >/dev/null 2>&1
+out_aa_wall="$(python3 "$SCRIPT" --root "$DIR_AA" validate --track auth 2>&1)"
+exit_aa_wall=$?
+assert_exit "tutorial step 4: answering with a not-yet-existing destination fails validate — the wall" \
+  "$exit_aa_wall" 1
+assert_contains "tutorial step 4: the wall's message is exactly what the skill quotes" \
+  "$out_aa_wall" \
+  "destination 'dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md' does not exist — this is how deferred work goes dark: naming a place does not create one"
+
+# Step 5: the stub card that fixes it.
+write_file "$DIR_AA/dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md" \
+  '# sso-redirect-check stub
+
+```card
+kind: stub
+superseded_when: the auth track files its sso-redirect-check implementation task
+```'
+out_aa_stale="$(python3 "$SCRIPT" --root "$DIR_AA" validate --track auth 2>&1)"
+exit_aa_stale=$?
+assert_exit "tutorial step 5: the stub alone isn't enough yet — the stored ledger is now stale" \
+  "$exit_aa_stale" 1
+assert_contains "tutorial step 5: staleness, not a destination error, is the second failure" \
+  "$out_aa_stale" "stored ledger is stale"
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger onboarding --track auth >/dev/null 2>&1
+out_aa_fixed="$(python3 "$SCRIPT" --root "$DIR_AA" validate --track auth 2>&1)"
+exit_aa_fixed=$?
+assert_exit "tutorial step 5: stub card + fresh ledger validates clean" "$exit_aa_fixed" 0
+assert_contains "tutorial step 5: the fixed track reports OK" "$out_aa_fixed" "research-spike: OK"
+
+# Step 6: two more rounds, stubs written up front this time.
+cat >>"$DIR_AA/dev_docs/research/onboarding/tracks/auth/questions.md" <<'EOF'
+
+### Q2. Does the session token need a shorter TTL when SSO is used?
+
+```question
+id: sso-session-ttl
+status: answered
+blocks: sso-rollout
+answer: yes — SSO sessions should expire sooner than password sessions, and logout should revoke them immediately
+```
+
+SSO sessions inherit trust from the identity provider, so a stale token
+is a wider blast radius than a stale password session.
+
+```obligation
+id: ttl-config-change
+owes: a shorter configurable TTL for SSO-issued sessions
+destination: dev_docs/research/onboarding/tracks/auth/obligations/ttl-config-change.md
+status: open
+```
+
+```obligation
+id: revoke-on-logout
+owes: immediate session revocation on logout for SSO sessions
+destination: dev_docs/research/onboarding/tracks/auth/obligations/revoke-on-logout.md
+status: open
+```
+
+### Q3. Should password-based login be disabled once SSO is required?
+
+```question
+id: password-login-disable
+status: answered
+blocks: sso-rollout
+answer: yes, eventually — but not in the same release as the SSO redirect
+```
+
+Turning it off immediately would lock out any account not yet migrated.
+
+```obligation
+id: legacy-password-flag
+owes: a feature flag that gates password login off per-account
+destination: dev_docs/research/onboarding/tracks/auth/obligations/legacy-password-flag.md
+status: open
+```
+
+```obligation
+id: migration-notice-copy
+owes: the in-product notice telling password users to switch to SSO
+destination: dev_docs/research/onboarding/tracks/auth/obligations/migration-notice-copy.md
+status: open
+```
+EOF
+for name in ttl-config-change revoke-on-logout legacy-password-flag migration-notice-copy; do
+  write_file "$DIR_AA/dev_docs/research/onboarding/tracks/auth/obligations/$name.md" \
+    "# $name stub
+
+\`\`\`card
+kind: stub
+superseded_when: the auth track files its $name implementation task
+\`\`\`"
+done
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger onboarding --track auth >/dev/null 2>&1
+out_aa_two_more="$(python3 "$SCRIPT" --root "$DIR_AA" validate 2>&1)"
+exit_aa_two_more=$?
+assert_exit "tutorial step 6: two more rounds, stubs pre-written, validate clean on the first try" \
+  "$exit_aa_two_more" 0
+assert_contains "tutorial step 6: the two-round tree reports OK" "$out_aa_two_more" \
+  "research-spike: OK"
+
+# Step 7: refresh the organizer-owned roll-up and read the divergence.
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger >/dev/null 2>&1
+out_aa_status="$(python3 "$SCRIPT" --root "$DIR_AA" status 2>&1)"
+assert_contains "tutorial step 7: questions read fully converged" \
+  "$out_aa_status" "Q 3 answered / 0 open / 0 retired"
+assert_contains "tutorial step 7: obligations read climbing past the questions that made them" \
+  "$out_aa_status" "O 0 discharged / 5 open (5 stubs)"
+out_aa_final="$(python3 "$SCRIPT" --root "$DIR_AA" validate --strict 2>&1)"
+exit_aa_final=$?
+assert_exit "tutorial step 8: the finished walkthrough tree validates --strict clean" \
+  "$exit_aa_final" 0
+assert_contains "tutorial step 8: the finished tree reports OK" "$out_aa_final" "research-spike: OK"
+
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1
