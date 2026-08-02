@@ -43,13 +43,15 @@ dev_docs/research/<project>/
 
 Multiple projects coexist under `dev_docs/research/`; each is self-contained.
 **Ids are declared bare and qualified by the script**: `project/track/id` for
-questions, obligations and cards; `project/id` for decisions (decisions
-qualify project-wide even when a `proposed` one is filed inside a track, so
-promoting it never changes its id). Two projects can each have an `account`
-track without collision — `blocks:`/`blocking:` references resolve within the
-enclosing project only, and **cross-project destinations are forbidden**:
-work an answer creates for another project is filed in that project, with a
-receipt card recording the handoff back.
+questions and obligations; `project/id` for decisions (decisions qualify
+project-wide even when a `proposed` one is filed inside a track, so promoting
+it never changes its id). Cards carry no `id:` field at all — a card is
+addressed by its file path under `tracks/<track>/obligations/`, which is what
+an obligation's `destination:` points at. Two projects can each have an
+`account` track without collision — `blocks:`/`blocking:` references resolve
+within the enclosing project only, and **cross-project destinations are
+forbidden**: work an answer creates for another project is filed in that
+project, with a receipt card recording the handoff back.
 
 ## The script surface
 
@@ -98,12 +100,22 @@ markdown, then immediately runs `validate`. **The validator, not the
 procedure, is what guarantees the result** — none of what follows is
 trustworthy on its own say-so.
 
+The commands below are abbreviated: each one is missing the
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py"` prefix from the
+section above, and nothing else. What is **not** abbreviated is the leading
+`--root` — it is a global option, so it must sit before the subcommand or
+argparse rejects the whole invocation, and it is written out every time here
+rather than left to a reader's memory.
+
 ### 1. `file` — add a question
 
 1. Confirm the track (`tracks/<track>/questions.md`) and read its existing
    `### Q<n>.` headings to pick the next number.
-2. Pick a kebab-case id, unique within the project (the script rejects a
-   collision at any scope).
+2. Pick a kebab-case id, unique within the track. The script qualifies it as
+   `project/track/id`, so the same bare id in a different track — even in the
+   same project — is fine; it is only a collision within the same qualified
+   scope (and across kinds: a question and an obligation sharing a track
+   cannot reuse each other's bare id either).
 3. Write the section and its `question` block:
 
    ````markdown
@@ -136,9 +148,15 @@ trustworthy on its own say-so.
    none: filing only, no work identified yet
    ```
    ````
-5. Run `write-ledger --root "$(git rev-parse --show-toplevel)"` (the new
-   question changed the track's counts), then
-   `validate --track <name> --root "$(git rev-parse --show-toplevel)"`.
+5. Run `--root "$(git rev-parse --show-toplevel)" write-ledger <project> --track <name>`
+   (the new question changed the track's counts). Scope it explicitly, with
+   **both** the project and the track: `write-ledger` with no scope at all
+   rewrites every track's `questions.md` _and_ every project's
+   organizer-owned `LEDGER.md`, which is exactly what a track procedure must
+   not touch (see "Write-ownership convention" below). `--track <name>` alone
+   is not enough either — if two projects share a track name it is
+   ambiguous, and the script exits 2 asking for the project argument. Then
+   run `--root "$(git rev-parse --show-toplevel)" validate --track <name>`.
 
 ### 2. `answer` — walk a question to `answered`
 
@@ -150,8 +168,9 @@ trustworthy on its own say-so.
    obligations, not new questions. Replace or add the section's `obligation`
    block(s) with what the answer actually implies.
 3. Flip `status: open` to `status: answered`.
-4. Run `write-ledger --root "$(git rev-parse --show-toplevel)"`, then
-   `validate --track <name> --root "$(git rev-parse --show-toplevel)"`.
+4. Run `--root "$(git rev-parse --show-toplevel)" write-ledger <project> --track <name>`
+   (scoped — see procedure 1's note on why the bare form is wrong), then
+   `--root "$(git rev-parse --show-toplevel)" validate --track <name>`.
 
 ### 3. `defer` — register an obligation
 
@@ -180,8 +199,9 @@ yet.
    `blocking: <decision-id>` only when this obligation genuinely gates a
    decision — most should not; scarcity is what keeps convergence
    meaningful.
-4. Run `write-ledger --root "$(git rev-parse --show-toplevel)"`, then
-   `validate --root "$(git rev-parse --show-toplevel)"`.
+4. Run `--root "$(git rev-parse --show-toplevel)" write-ledger <project> --track <name>`
+   (scoped — see procedure 1's note), then
+   `--root "$(git rev-parse --show-toplevel)" validate`.
 
 ### 4. `backfill` — import an existing doc
 
@@ -200,8 +220,9 @@ questions/answers document, converting each into a structured `question`
    here: needing several stub cards to complete a backfill is the finding,
    not an inconvenience.
 3. Once every section in the source is imported, run
-   `write-ledger --root "$(git rev-parse --show-toplevel)"` for the track,
-   then `validate --root "$(git rev-parse --show-toplevel)"` over the whole
+   `--root "$(git rev-parse --show-toplevel)" write-ledger <project> --track <name>`
+   for the track (scoped — see procedure 1's note), then
+   `--root "$(git rev-parse --show-toplevel)" validate` over the whole
    tree — a backfill is the procedure most likely to touch multiple sections
    at once, so scope the final check wide.
 
@@ -216,7 +237,7 @@ Moves a track's `proposed` decision block into the project's `decisions.md`.
    decision may exist in exactly one of the two places, and the script
    rejects a `proposed` block anywhere but a track's own `questions.md`
    (`decisions.md` holds only decisions the organizer has already promoted).
-3. Run `validate --strict --root "$(git rev-parse --show-toplevel)"` —
+3. Run `--root "$(git rev-parse --show-toplevel)" validate --strict` —
    `promote-decision` writes `decisions.md`, which is organizer territory,
    so check it at the organizer's tier.
 
