@@ -71,7 +71,7 @@ never gets claimed.
 
 Capture is destination-agnostic; only the handler decides where the task lands.
 
-A research spike's `defer` procedure can also route through `/add-task` — see the two bridges in `skills/research-spike/SKILL.md`.
+A research spike's `defer` procedure offers `/add-task` as an alternative to a stub when the merged config resolves to an external tracker handler — see the two bridges in `skills/research-spike/SKILL.md`.
 
 ### Handlers and config
 

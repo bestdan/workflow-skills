@@ -3545,6 +3545,32 @@ assert_exit "the same obligation pointing straight at a URL (no card) exits 1" "
 assert_contains "the bare-URL destination is reported as a missing file, not accepted as content" \
   "$out_y2" "does not exist"
 
+# A receipt's `url:` is card *content*, never path-checked — even when it is
+# shaped like a path naming a file that does not exist. This is what proves
+# `url:` isn't secretly validated as a path, and it is the assertion that
+# would catch someone later "helpfully" adding a path check to it.
+DIR_Y3="$BASE/bridge-receipt-url-is-content-not-path"
+write_file "$DIR_Y3/dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md" \
+  '# account-quota-followup receipt
+
+```card
+kind: receipt
+url: dev_docs/research/demo/tracks/account/obligations/does-not-exist.md
+```'
+write_file "$DIR_Y3/dev_docs/research/demo/tracks/account/questions.md" '# account
+
+```obligation
+id: account-quota-followup
+owes: the quota-check helper this answer implies but does not build
+destination: dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md
+status: open
+```'
+seed_fresh_ledger "$DIR_Y3"
+out_y3="$(python3 "$SCRIPT" --root "$DIR_Y3" validate 2>&1)"
+exit_y3=$?
+assert_exit "a receipt url shaped like a nonexistent file's path still validates clean" "$exit_y3" 0
+assert_contains "the path-shaped-url receipt tree reports OK" "$out_y3" "research-spike: OK"
+
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1
