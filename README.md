@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-13 skills, 20 commands, and 1 subagent, organized into seven workflows:
+14 skills, 20 commands, and 1 subagent, organized into seven workflows:
 
 ### PR review
 
