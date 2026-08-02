@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.79.0] - 2026-08-02
+
+### Features
+
+- the two task-loop bridges, via receipt cards (#330) (c804fb3)
+
 ## [1.78.0] - 2026-08-02
 
 ### Features
