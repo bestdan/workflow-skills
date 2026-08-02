@@ -126,6 +126,10 @@ write_file "$DIR_B/dev_docs/research/alpha/tracks/account/questions.md" '# accou
 id: uid-domain-isolation
 status: open
 blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the option is chosen
 ```'
 write_file "$DIR_B/dev_docs/research/alpha/tracks/watcher/questions.md" '# watcher'
 write_file "$DIR_B/dev_docs/research/beta/PROJECT.md" '# beta
@@ -138,7 +142,7 @@ state: pending
 out_b="$(python3 "$SCRIPT" --root "$DIR_B" validate 2>&1)"
 exit_b=$?
 assert_exit "two-project tree exits 0" "$exit_b" 0
-assert_contains "both projects counted" "$out_b" "2 projects, 2 tracks, 2 records"
+assert_contains "both projects counted" "$out_b" "2 projects, 2 tracks, 3 records"
 assert_contains "alpha's tracks are discovered" "$out_b" "alpha — tracks: account, watcher"
 assert_contains "a project with no tracks says so" "$out_b" "beta — tracks: none"
 
@@ -182,7 +186,9 @@ assert_contains "a project-level decision still qualifies as project/id" "$out_b
 # --- Fixture (b3): question-section discovery ----------------------------
 # The `### Q<n>.` convention `init` installs: a section ends at the next
 # heading of the same level or shallower, and a heading written inside a
-# fenced sample is not a heading. Task 4's coverage rule walks these.
+# fenced sample is not a heading. The coverage rule walks these, so this
+# prose-only tree also fails validation — deliberately not asserted here, where
+# the subject is discovery; the rules themselves are fixture (n)'s.
 DIR_B3="$BASE/sections"
 write_file "$DIR_B3/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
@@ -286,6 +292,12 @@ write_file "$DIR_E2/dev_docs/research/alpha/tracks/account/questions.md" '# acco
 
 ### Q1. Which option observes least?
 
+```question
+id: which-option-observes-least
+status: open
+blocks: none: it picks between options the decision already allows
+```
+
 ```obligation
 none: option (A) adds no observation, and owes no tooling
 ```'
@@ -294,7 +306,11 @@ exit_e2=$?
 assert_exit "a bare 'none:' block is a valid record shape" "$exit_e2" 0
 assert_contains "a bare 'none:' block keeps its reason verbatim" "$out_e2" \
   "none = none reason='option (A) adds no observation, and owes no tooling'"
-assert_not_contains "a bare 'none:' reason is never comma-split" "$out_e2" "items="
+# The tail of the comma-split form: quoted on its own, it can only be an item
+# of a list. (A blanket "items=" assertion would now trip on the question
+# block's own ordinary fields, which do render lists.)
+assert_not_contains "a bare 'none:' reason is never comma-split" "$out_e2" \
+  "'and owes no tooling'"
 
 # --- Fixture (f): a malformed fence is an error, not a crash -------------
 DIR_F="$BASE/malformed-fence"
@@ -641,6 +657,12 @@ desination: a typo inside an inert example
 
 ### Q1. A real one.
 
+```question
+id: a-real-one
+status: open
+blocks: stop-semantics
+```
+
 ```obligation
 id: real
 owes: the real thing
@@ -689,6 +711,12 @@ The convention wraps the example in an opener, shown here indented:
     <!-- the opener line, on its own
 
 ### Q2. A real question.
+
+```question
+id: a-real-question
+status: open
+blocks: stop-semantics
+```
 
 ```obligation
 id: first
@@ -1328,6 +1356,352 @@ out_m13="$(python3 "$SCRIPT" --root "$DIR_M13" validate 2>&1)"
 exit_m13=$?
 assert_exit "dotfiles under obligations/ are exempt (.gitkeep, .DS_Store)" "$exit_m13" 0
 assert_not_contains "a dotfile is never reported as a card" "$out_m13" ".gitkeep"
+
+# --- Fixture (n): question records and the coverage rule -----------------
+# The half that matters more. Records alone catch only *malformed* deferrals;
+# the coverage rule is what catches the deferral nobody registered. Every
+# fixture below is one section of one track, so the rule is exercised where it
+# is enforced — per section, not per file.
+
+question_fixture() {
+  # question_fixture <dir> <question block body> [coverage block body]
+  # One track, one `### Q1.` section, and one real file to point at.
+  mkdir -p "$1/dev_docs/tasks" "$1/dev_docs/research/alpha/tracks/account"
+  printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
+  {
+    printf '# account\n\n### Q1. Does the account need an isolated uid domain?\n\n'
+    printf '```question\n%s\n```\n' "$2"
+    if [ -n "${3:-}" ]; then
+      printf '\n```obligation\n%s\n```\n' "$3"
+    fi
+  } >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+}
+
+DIR_N1="$BASE/coverage-declares-nothing"
+question_fixture "$DIR_N1" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning"
+out_n1="$(python3 "$SCRIPT" --root "$DIR_N1" validate 2>&1)"
+exit_n1=$?
+assert_exit "a question section declaring nothing exits 1" "$exit_n1" 1
+assert_contains "the coverage error names the section" "$out_n1" \
+  "Q1 declares nothing it owes"
+assert_contains "the coverage error says why forgetting is the failure" "$out_n1" \
+  "accrue invisibly"
+assert_contains "the coverage error states both ways to satisfy it" "$out_n1" \
+  "bare \`none: <reason>\` block saying why nothing is owed"
+assert_contains "the coverage error is located at the section heading" "$out_n1" \
+  "dev_docs/research/alpha/tracks/account/questions.md:3:"
+
+DIR_N2="$BASE/coverage-none"
+question_fixture "$DIR_N2" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "none: option (A) adds no observation and owes no tooling"
+out_n2="$(python3 "$SCRIPT" --root "$DIR_N2" validate 2>&1)"
+exit_n2=$?
+assert_exit "an explicit 'none: <reason>' satisfies coverage" "$exit_n2" 0
+assert_contains "the covered tree reports OK" "$out_n2" "research-spike: OK"
+
+# An obligation block satisfies coverage the same way — the rule is that the
+# section declared, not that it owes nothing.
+DIR_N3="$BASE/coverage-obligation"
+question_fixture "$DIR_N3" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "id: uid-domain-provisioning
+owes: the provisioning steps this answer implies
+destination: dev_docs/tasks/real_task.md
+status: open"
+python3 "$SCRIPT" --root "$DIR_N3" validate >/dev/null 2>&1
+exit_n3=$?
+assert_exit "a registered obligation satisfies coverage" "$exit_n3" 0
+
+DIR_N4="$BASE/coverage-none-no-reason"
+question_fixture "$DIR_N4" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "none:"
+out_n4="$(python3 "$SCRIPT" --root "$DIR_N4" validate 2>&1)"
+exit_n4=$?
+assert_exit "a 'none' with no reason exits 1" "$exit_n4" 1
+assert_contains "the reasonless none says why a reason is the point" "$out_n4" \
+  "gives no reason"
+assert_contains "the reasonless none names what a reviewer loses" "$out_n4" \
+  "challenge it"
+
+# A `none:` carrying any other field is trying to be two records at once — it
+# is a declaration, not a partially-filled record. (Fixture (m8) asserts the
+# other half of the same rule: the block is still checked in full.)
+DIR_N5="$BASE/coverage-none-with-fields"
+question_fixture "$DIR_N5" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "none: nothing is owed here
+owes: except for this, apparently"
+out_n5="$(python3 "$SCRIPT" --root "$DIR_N5" validate 2>&1)"
+exit_n5=$?
+assert_exit "a 'none' carrying other fields exits 1" "$exit_n5" 1
+assert_contains "the mixed none block is reported as two records at once" "$out_n5" \
+  "declares 'none:' alongside other fields"
+
+# --- Fixture (n6): the `answered` gate -----------------------------------
+# `answered` requires both a recorded conclusion and coverage. Coverage cannot
+# be satisfied by prose alone, and the status cannot be reached without saying
+# what the answer is.
+DIR_N6="$BASE/answered-no-answer"
+question_fixture "$DIR_N6" "id: uid-domain-isolation
+status: answered
+blocks: account-provisioning" "none: the answer creates no new work"
+out_n6="$(python3 "$SCRIPT" --root "$DIR_N6" validate 2>&1)"
+exit_n6=$?
+assert_exit "answered without an answer: field exits 1" "$exit_n6" 1
+assert_contains "the missing-answer error names the field" "$out_n6" \
+  "requires 'answer:'"
+assert_contains "the missing-answer error says a prose conclusion is not enough" \
+  "$out_n6" "two readers can read differently"
+
+DIR_N7="$BASE/answered-no-coverage"
+question_fixture "$DIR_N7" "id: uid-domain-isolation
+status: answered
+answer: yes — the account needs its own uid domain
+blocks: account-provisioning"
+out_n7="$(python3 "$SCRIPT" --root "$DIR_N7" validate 2>&1)"
+exit_n7=$?
+assert_exit "answered with an answer but no coverage exits 1" "$exit_n7" 1
+assert_contains "the uncovered-answer error names the missing declaration" "$out_n7" \
+  "'answered' while its section declares no obligations"
+assert_contains "the uncovered-answer error says prose cannot satisfy coverage" \
+  "$out_n7" "cannot be satisfied by prose alone"
+
+DIR_N8="$BASE/answered-complete"
+question_fixture "$DIR_N8" "id: uid-domain-isolation
+status: answered
+answer: yes — the account needs its own uid domain
+blocks: account-provisioning" "id: uid-domain-provisioning
+owes: the provisioning steps this answer implies
+destination: dev_docs/tasks/real_task.md
+status: open"
+out_n8="$(python3 "$SCRIPT" --root "$DIR_N8" validate 2>&1)"
+exit_n8=$?
+assert_exit "answered with both an answer and coverage passes" "$exit_n8" 0
+assert_contains "the answered tree reports OK" "$out_n8" "research-spike: OK"
+
+# --- Fixture (n9): retirement ---------------------------------------------
+DIR_N9="$BASE/retired-no-because"
+question_fixture "$DIR_N9" "id: uid-domain-isolation
+status: retired
+blocks: account-provisioning" "none: the premise died, so nothing is owed"
+out_n9="$(python3 "$SCRIPT" --root "$DIR_N9" validate 2>&1)"
+exit_n9=$?
+assert_exit "retired without retired_because exits 1" "$exit_n9" 1
+assert_contains "the retirement error names the field" "$out_n9" \
+  "requires 'retired_because:'"
+assert_contains "the retirement error says questions leave without pretending" \
+  "$out_n9" "without pretending to be answered"
+
+DIR_N10="$BASE/retired-with-because"
+question_fixture "$DIR_N10" "id: uid-domain-isolation
+status: retired
+retired_because: the shared-host option was dropped, so the premise is gone
+blocks: account-provisioning" "none: the premise died, so nothing is owed"
+python3 "$SCRIPT" --root "$DIR_N10" validate >/dev/null 2>&1
+exit_n10=$?
+assert_exit "retired with retired_because passes" "$exit_n10" 0
+
+# --- Fixture (n11): the `blocks:` sentinel --------------------------------
+# `blocks: none` bare is refused: a question that gates nothing is worth
+# noticing, and a sentinel with no reason cannot be told from one nobody wired
+# up.
+DIR_N11="$BASE/blocks-bare-none"
+question_fixture "$DIR_N11" "id: uid-domain-isolation
+status: open
+blocks: none" "none: nothing is owed yet"
+out_n11="$(python3 "$SCRIPT" --root "$DIR_N11" validate 2>&1)"
+exit_n11=$?
+assert_exit "a bare 'blocks: none' exits 1" "$exit_n11" 1
+assert_contains "the bare blocks-none error asks for a reason" "$out_n11" \
+  "'blocks: none' gives no reason"
+assert_contains "the bare blocks-none error says why it is worth noticing" \
+  "$out_n11" "gates no decision is worth noticing"
+
+DIR_N12="$BASE/blocks-none-reason"
+question_fixture "$DIR_N12" "id: uid-domain-isolation
+status: open
+blocks: none: it picks between options the decision already allows" \
+  "none: nothing is owed yet"
+out_n12="$(python3 "$SCRIPT" --root "$DIR_N12" validate 2>&1)"
+exit_n12=$?
+assert_exit "'blocks: none: <reason>' passes" "$exit_n12" 0
+assert_contains "the sentinel tree reports OK" "$out_n12" "research-spike: OK"
+
+# A reason containing a comma is **one** reason and **zero** decision ids. The
+# sentinel exempts it from the comma-list rule (task 1); without that the tail
+# becomes a dangling decision reference in task 5's referential check.
+DIR_N13="$BASE/blocks-none-comma"
+question_fixture "$DIR_N13" "id: uid-domain-isolation
+status: open
+blocks: none: it gates nothing, and probably never will" "none: nothing is owed yet"
+out_n13="$(python3 "$SCRIPT" --root "$DIR_N13" --verbose validate 2>&1)"
+exit_n13=$?
+assert_exit "a blocks-none reason containing a comma passes" "$exit_n13" 0
+assert_contains "the comma stays inside one verbatim reason" "$out_n13" \
+  "blocks = none reason='it gates nothing, and probably never will'"
+assert_not_contains "a comma in the reason yields no decision ids" "$out_n13" \
+  "'and probably never will'"
+
+# Both sentinels in one section, meaning different things: `blocks: none:` says
+# the question gates no decision, the bare `none:` block says it owes no
+# obligations. Collapsing them would make the coverage rule undecidable.
+DIR_N14="$BASE/both-sentinels"
+question_fixture "$DIR_N14" "id: uid-domain-isolation
+status: open
+blocks: none: it picks between options the decision already allows" \
+  "none: option (A) adds no observation and owes no tooling"
+out_n14="$(python3 "$SCRIPT" --root "$DIR_N14" --verbose validate 2>&1)"
+exit_n14=$?
+assert_exit "both sentinels in one section validate clean" "$exit_n14" 0
+assert_contains "the gates-nothing meaning survives" "$out_n14" \
+  "blocks = none reason='it picks between options the decision already allows'"
+assert_contains "the owes-nothing meaning survives alongside it" "$out_n14" \
+  "none = none reason='option (A) adds no observation and owes no tooling'"
+
+# --- Fixture (n15): a section is one question, and a question is in one ---
+DIR_N15="$BASE/section-without-question"
+write_file "$DIR_N15/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+### Q3. Should the ceiling be a cgroup?
+
+Some prose, and nothing else at all.'
+out_n15="$(python3 "$SCRIPT" --root "$DIR_N15" validate 2>&1)"
+exit_n15=$?
+assert_exit "a Q3 section with no question block exits 1" "$exit_n15" 1
+assert_contains "the missing-block error names the section" "$out_n15" \
+  "Q3 carries no \`question\` block"
+assert_contains "the missing-block error says the heading is only prose" "$out_n15" \
+  "the heading is prose"
+
+DIR_N16="$BASE/question-outside-section"
+write_file "$DIR_N16/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```'
+out_n16="$(python3 "$SCRIPT" --root "$DIR_N16" validate 2>&1)"
+exit_n16=$?
+assert_exit "a question block outside any section exits 1" "$exit_n16" 1
+assert_contains "the stray-question error says coverage is per section" "$out_n16" \
+  "question block outside a \`### Q<n>.\` section"
+
+DIR_N17="$BASE/two-questions-one-section"
+question_fixture "$DIR_N17" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "none: nothing is owed yet"
+cat >>"$DIR_N17/dev_docs/research/alpha/tracks/account/questions.md" <<'MD'
+
+```question
+id: uid-domain-shape
+status: open
+blocks: account-provisioning
+```
+MD
+out_n17="$(python3 "$SCRIPT" --root "$DIR_N17" validate 2>&1)"
+exit_n17=$?
+assert_exit "a second question block in one section exits 1" "$exit_n17" 1
+assert_contains "the second-question error says one section is one question" \
+  "$out_n17" "one section is one question"
+
+# --- Fixture (n18): a question id shares the tree-wide id namespace -------
+# One namespace across record kinds, not one per kind: `blocks:`/`blocking:`
+# resolve by bare id and the status report prints both kinds under the same
+# project/track/id form, so a name meaning a question here and an obligation
+# there is exactly the ambiguity the uniqueness rule removes.
+DIR_N18="$BASE/id-namespace-shared"
+question_fixture "$DIR_N18" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "id: uid-domain-isolation
+owes: the provisioning steps this answer implies
+destination: dev_docs/tasks/real_task.md
+status: open"
+out_n18="$(python3 "$SCRIPT" --root "$DIR_N18" validate 2>&1)"
+exit_n18=$?
+assert_exit "a question and an obligation sharing one id exits 1" "$exit_n18" 1
+assert_contains "the cross-kind duplicate is reported by qualified id" "$out_n18" \
+  "duplicate question id 'alpha/account/uid-domain-isolation'"
+assert_contains "the cross-kind duplicate says the namespace spans kinds" "$out_n18" \
+  "across record kinds"
+
+# --- Fixture (o): contracts/ coverage ------------------------------------
+# Contract prose states preconditions constantly, and a precondition is work
+# somebody owes. That class hid the worst offender in the origin repo — a
+# precondition that was on no list at all. Unlike arbitrary prose, contracts/
+# is a bounded, opt-in directory the skill owns.
+contracts_fixture() {
+  # contracts_fixture <dir> <contract file body>
+  mkdir -p "$1/dev_docs/tasks" "$1/dev_docs/research/alpha/tracks/account/contracts"
+  printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
+  printf '# account\n' >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+  printf '%s\n' "$2" >"$1/dev_docs/research/alpha/tracks/account/contracts/host.md"
+}
+
+DIR_O1="$BASE/contract-undeclared"
+contracts_fixture "$DIR_O1" '# host contract
+
+This component must not be deployed on a shared host.'
+out_o1="$(python3 "$SCRIPT" --root "$DIR_O1" validate 2>&1)"
+exit_o1=$?
+assert_exit "a contract file declaring nothing exits 1" "$exit_o1" 1
+assert_contains "the contracts error names the precondition class" "$out_o1" \
+  "must not be deployed on a shared host"
+assert_contains "the contracts error says a contract is not a backlog" "$out_o1" \
+  "a contract document is not a backlog"
+assert_contains "the contracts error names the file" "$out_o1" \
+  "dev_docs/research/alpha/tracks/account/contracts/host.md"
+
+DIR_O2="$BASE/contract-obligation"
+contracts_fixture "$DIR_O2" '# host contract
+
+This component must not be deployed on a shared host.
+
+```obligation
+id: shared-host-precondition
+owes: the deployment guard this precondition implies
+destination: dev_docs/tasks/real_task.md
+status: open
+```'
+out_o2="$(python3 "$SCRIPT" --root "$DIR_O2" validate 2>&1)"
+exit_o2=$?
+assert_exit "a contract file carrying an obligation passes" "$exit_o2" 0
+assert_contains "the covered contract tree reports OK" "$out_o2" "research-spike: OK"
+
+DIR_O3="$BASE/contract-none"
+contracts_fixture "$DIR_O3" '# host contract
+
+The preconditions here are all already enforced in code.
+
+```obligation
+none: every precondition below is already asserted by the deploy check
+```'
+out_o3="$(python3 "$SCRIPT" --root "$DIR_O3" validate 2>&1)"
+exit_o3=$?
+assert_exit "a file-level 'none: <reason>' covers a contract file" "$exit_o3" 0
+assert_contains "the declared contract tree reports OK" "$out_o3" "research-spike: OK"
+
+# --- Fixture (o4): coverage is deliberately not universal ----------------
+# Widening the rule to every markdown file would turn the discipline into
+# noise and train people to satisfy it mechanically (design §"What the skill
+# must not do"). A note beside a track, and the project's own charter, declare
+# nothing and are clean.
+DIR_O4="$BASE/coverage-scope"
+write_file "$DIR_O4/dev_docs/research/alpha/PROJECT.md" '# alpha
+
+A charter that defers nothing and declares nothing.'
+write_file "$DIR_O4/dev_docs/research/alpha/tracks/account/questions.md" '# account'
+write_file "$DIR_O4/dev_docs/research/alpha/tracks/account/notes.md" '# scratch notes
+
+Measurements, half-thoughts, and no declaration of any kind.'
+out_o4="$(python3 "$SCRIPT" --root "$DIR_O4" validate 2>&1)"
+exit_o4=$?
+assert_exit "a markdown file outside questions/contracts needs no declaration" "$exit_o4" 0
+assert_contains "the un-covered tree reports OK" "$out_o4" "research-spike: OK"
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
