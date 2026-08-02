@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.78.0] - 2026-08-02
+
+### Features
+
+- SKILL.md — the five procedures and the script/LLM boundary (#329) (544534e)
+
 ## [1.77.0] - 2026-08-02
 
 ### Features
