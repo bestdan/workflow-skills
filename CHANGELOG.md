@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.80.0] - 2026-08-02
+
+### Features
+
+- packaging — README entry, trigger eval, claude.ai zip (#331) (3daa3ee)
+
 ## [1.79.0] - 2026-08-02
 
 ### Features
