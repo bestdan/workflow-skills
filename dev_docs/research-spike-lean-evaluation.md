@@ -18,13 +18,13 @@ than the implementation level — see "The part that _is_ Lean-shaped" below.
 
 `scripts/research-spike.py`, 3,800 lines:
 
-| Category                                    | Lines | Share |
-| ------------------------------------------- | ----: | ----: |
-| Docstrings                                  |   685 |   18% |
-| Comment lines                               |   431 |   11% |
+| Category                                      | Lines | Share |
+| --------------------------------------------- | ----: | ----: |
+| Docstrings                                    |   685 |   18% |
+| Comment lines                                 |   431 |   11% |
 | Non-docstring string literals (message prose) |   848 |   22% |
-| Blank                                       |   437 |   12% |
-| Structure + logic                           | 1,490 |   39% |
+| Blank                                         |   437 |   12% |
+| Structure + logic                             | 1,490 |   39% |
 
 68 `report.error`/`report.warn` call sites. 7 compiled regexes. 35 filesystem
 operations. 93 functions, 17 dataclasses. The 3,577-line Bash fixture suite
@@ -62,18 +62,18 @@ its reputation:
 
 ## Dimension-by-dimension against the Python
 
-| Dimension                | Python (today)                                              | Lean 4                                                                        | Who wins            |
-| ------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------- |
-| Illegal states           | Statuses are `str`; enums checked at validate time           | Inductive types make a bad status unrepresentable post-parse                   | **Lean** (real)     |
-| Exhaustiveness           | `is_live_blocker` fails closed by hand, with a 12-line comment explaining why | Compiler-checked `match` over the status type                  | **Lean** (real)     |
-| Nontrivial proofs        | n/a                                                          | Nothing here needs one — see below                                            | Tie (nothing at stake) |
-| Termination              | All loops trivially finite                                   | A markdown scanner usually needs `partial def` or a fuel argument — i.e. the biggest chunk of the file runs _unverified in Lean anyway_ | **Python**          |
-| Filesystem + `--root`    | 35 path ops, plain                                           | All in `IO`, all unverified; the type system does not know which repo you meant | **Python**          |
-| Message prose            | 848 lines of f-strings, edited constantly                    | Same lines, in a language with worse string ergonomics and a compile step      | **Python**          |
-| Test suite               | Bash fixtures over a temp tree, no build                     | Would need porting; `#guard_msgs` is nice but the fixtures are filesystem trees | **Python**          |
-| Distribution             | `python3 script.py` — present everywhere                     | Ship per-platform binaries in a git-cloned plugin, or make users install elan  | **Python, decisively** |
-| Iteration speed          | Edit, run                                                    | Lake build; toolchains are hundreds of MB each                                 | **Python**          |
-| Contributor pool         | Anyone                                                       | Very few                                                                       | **Python**          |
+| Dimension             | Python (today)                                                                | Lean 4                                                                                                                                  | Who wins               |
+| --------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Illegal states        | Statuses are `str`; enums checked at validate time                            | Inductive types make a bad status unrepresentable post-parse                                                                            | **Lean** (real)        |
+| Exhaustiveness        | `is_live_blocker` fails closed by hand, with a 12-line comment explaining why | Compiler-checked `match` over the status type                                                                                           | **Lean** (real)        |
+| Nontrivial proofs     | n/a                                                                           | Nothing here needs one — see below                                                                                                      | Tie (nothing at stake) |
+| Termination           | All loops trivially finite                                                    | A markdown scanner usually needs `partial def` or a fuel argument — i.e. the biggest chunk of the file runs _unverified in Lean anyway_ | **Python**             |
+| Filesystem + `--root` | 35 path ops, plain                                                            | All in `IO`, all unverified; the type system does not know which repo you meant                                                         | **Python**             |
+| Message prose         | 848 lines of f-strings, edited constantly                                     | Same lines, in a language with worse string ergonomics and a compile step                                                               | **Python**             |
+| Test suite            | Bash fixtures over a temp tree, no build                                      | Would need porting; `#guard_msgs` is nice but the fixtures are filesystem trees                                                         | **Python**             |
+| Distribution          | `python3 script.py` — present everywhere                                      | Ship per-platform binaries in a git-cloned plugin, or make users install elan                                                           | **Python, decisively** |
+| Iteration speed       | Edit, run                                                                     | Lake build; toolchains are hundreds of MB each                                                                                          | **Python**             |
+| Contributor pool      | Anyone                                                                        | Very few                                                                                                                                | **Python**             |
 
 ## The invariants Lean could prove, and why each one is weak here
 
@@ -142,14 +142,14 @@ design. Lean cannot match it.
 The interesting finding: **`research-spike` has independently reinvented Lean's
 proof-obligation model.** Line them up —
 
-| research-spike                                | Lean 4                                     |
-| --------------------------------------------- | ------------------------------------------ |
-| `kind: stub` card                             | `sorry`                                    |
+| research-spike                                                    | Lean 4                                       |
+| ----------------------------------------------------------------- | -------------------------------------------- |
+| `kind: stub` card                                                 | `sorry`                                      |
 | `superseded_when:` — a stub must state its own deletion condition | a `sorry` is a warning that never goes quiet |
-| `LEDGER.md` open-obligation count             | `#print axioms` surfacing `sorryAx`        |
-| `destination:` must point at a file that exists | a proof term must actually elaborate      |
-| "never silently create a destination to make a record resolve" | you cannot discharge a goal by asserting it |
-| derived, never stored — no `ready:` key to hand-edit | proof state is checked, never asserted |
+| `LEDGER.md` open-obligation count                                 | `#print axioms` surfacing `sorryAx`          |
+| `destination:` must point at a file that exists                   | a proof term must actually elaborate         |
+| "never silently create a destination to make a record resolve"    | you cannot discharge a goal by asserting it  |
+| derived, never stored — no `ready:` key to hand-edit              | proof state is checked, never asserted       |
 
 Both systems say the same thing: **unfinished work must have an address, must
 be counted mechanically, and must never be dischargeable by assertion.** SKILL.md's
@@ -203,14 +203,14 @@ The narrowest defensible slice, in decreasing order of sanity:
 
 ## Summary
 
-| Question                                     | Answer                                                     |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| Is there a hard algorithm to verify?          | No — counting, grouping, enum membership                    |
-| Would Lean's type system help?                | Yes, modestly — and `mypy --strict` gets most of it         |
-| Would Lean's proofs help?                     | Barely — the provable properties are trivial or in `IO`     |
-| Would Lean have caught the one real defect?   | No — PRE-611 was a well-typed wrong path                    |
-| Can Lean match the distribution constraint?   | No — the plugin has no build step and cannot get one        |
-| Is Lean the right conceptual model?           | **Yes** — the obligation ledger is `sorry` + `#print axioms` |
+| Question                                    | Answer                                                       |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| Is there a hard algorithm to verify?        | No — counting, grouping, enum membership                     |
+| Would Lean's type system help?              | Yes, modestly — and `mypy --strict` gets most of it          |
+| Would Lean's proofs help?                   | Barely — the provable properties are trivial or in `IO`      |
+| Would Lean have caught the one real defect? | No — PRE-611 was a well-typed wrong path                     |
+| Can Lean match the distribution constraint? | No — the plugin has no build step and cannot get one         |
+| Is Lean the right conceptual model?         | **Yes** — the obligation ledger is `sorry` + `#print axioms` |
 
 Take the idea, keep the Python.
 
@@ -221,4 +221,4 @@ Take the idea, keep the Python.
 - [leanprover/lean4-cli](https://github.com/leanprover/lean4-cli)
 - [pandaman64/lean-regex](https://github.com/pandaman64/lean-regex)
 - [Managing Toolchains with Elan](https://lean-lang.org/doc/reference/latest/Build-Tools-and-Distribution/Managing-Toolchains-with-Elan/)
-- [Lean (proof assistant) — Wikipedia](https://en.wikipedia.org/wiki/Lean_\(proof_assistant\))
+- [Lean (proof assistant) — Wikipedia](https://en.wikipedia.org/wiki/Lean_(proof_assistant))
