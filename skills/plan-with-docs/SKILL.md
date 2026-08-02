@@ -15,6 +15,8 @@ A plan is a set of **tasks** in the same format the task loop uses (`skills/task
 
 > **Legacy migration preflight.** Older versions wrote plans under `dev_docs/todo/`. Before writing, if a legacy `dev_docs/todo/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
 
+> **A research spike's `decided_in:` never points into a `<name>_plan/` folder, for the same deletion reason** — see the two bridges in `skills/research-spike/SKILL.md`.
+
 ## Output layout
 
 For a plan named `<name>` (snake_case, derived from the project/feature):

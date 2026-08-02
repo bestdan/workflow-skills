@@ -180,20 +180,26 @@ yet.
 1. Write the `obligation` block next to the prose that creates the
    deferral — locality is what stops it drifting from the sentence it
    describes.
-2. `destination:` must point at a file that **already exists**. If it
-   doesn't — the common case — **create a stub card first, and say so out
-   loud**: announce that a stub was created, because the stub count is the
-   diagnostic this whole instrument exists to surface.
+2. `destination:` must point at a file that **already exists**.
+   - If the repo's merged task-loop config resolves to an **external
+     tracker handler** (`gh-issue` / `jira` / `linear` — "The two bridges"
+     below has the exact resolution rule and why), offer `/add-task` as an
+     alternative to a stub. On acceptance, write the receipt card that
+     section describes and point `destination:` at it.
+   - Otherwise — the common case, and also the fallback whenever `/add-task`
+     is declined — **create a stub card first, and say so out loud**:
+     announce that a stub was created, because the stub count is the
+     diagnostic this whole instrument exists to surface.
 
-   ````markdown
-   ```card
-   kind: stub
-   superseded_when: the account track files its uid-domain-provisioning task card
-   ```
-   ````
+     ````markdown
+     ```card
+     kind: stub
+     superseded_when: the account track files its uid-domain-provisioning task card
+     ```
+     ````
 
-   Then point the obligation's `destination:` at the stub's path
-   (`tracks/<track>/obligations/<name>.md`).
+     Then point the obligation's `destination:` at the stub's path
+     (`tracks/<track>/obligations/<name>.md`).
 3. Set `status: open` — there is no in-between state; a half-state is a
    place for work to sit and look accounted for. Add
    `blocking: <decision-id>` only when this obligation genuinely gates a
@@ -240,6 +246,100 @@ Moves a track's `proposed` decision block into the project's `decisions.md`.
 3. Run `--root "$(git rev-parse --show-toplevel)" validate --strict` —
    `promote-decision` writes `decisions.md`, which is organizer territory,
    so check it at the organizer's tier.
+
+## The two bridges
+
+The spike machinery stands alone and works in any repo. Two bridges exist —
+and both had their first drafts rejected in review for violating the
+destination-must-exist invariant. Tracker handlers return **URLs, not
+paths**, and `/push-plan` **deletes** plan directories after migration, so
+an obligation or a decision pointing at either rots on first contact. Both
+bridges therefore route through **receipt cards** (`kind: receipt`, field
+reference in `references/record-grammar.md`): the pointer — `destination:`
+for an obligation, `decided_in:` for a decision — names the card file, a
+path that exists, while the external reference lives in card content the
+validator never path-checks and, being offline by contract, could not
+verify anyway.
+
+The `defer` bridge is gated on **the repo's merged task-loop config**
+(`dev_docs/tasks/.task-config.yml` overlaid with the optional
+`dev_docs/tasks/.task-config.local.yml` — see `commands/task-config.md`
+"Resolving the handler") **resolving to an external tracker handler**
+(`gh-issue` / `jira` / `linear`) — not on `.task-config.yml` merely existing.
+With no config at all, resolution defaults to `repo-pr`
+(`skills/task/SKILL.md` → "Handlers and config"), and `repo-pr` local
+staging returns a staged file path and branch name, never a URL
+(`commands/add-task.md` "The drafted task (handler input)") — there is
+nothing for a receipt card's `url:` to carry, so the bridge is inapplicable
+and the stub path (procedure 3) is the right answer. Under an explicit
+`handler: repo-pr` the conclusion is the same, for the same reason: the
+destination is a local file anyway.
+
+### `defer` → task loop
+
+Procedure 3, step 2: when the merged config resolves to an external tracker
+handler, `/add-task` is offered as an alternative to a stub. On acceptance,
+`/add-task` runs and returns the created work item's **URL** — its contract
+does not return a tracker id back to the caller (`commands/add-task.md`
+"The drafted task (handler input)"; a handler such as
+`commands/handlers/linear-add.md` step 5 hands back `issue.url` only). The
+procedure writes a `kind: receipt` card carrying that `url:` and points the
+obligation's `destination:` at the card rather than at a stub.
+`validate_cards` requires only `url:` on a receipt — `tracker_id:` is
+accepted but never enforced (`references/record-grammar.md` → `card`), so
+fill it in only when it's worth restating: for linear/jira/gh-issue the key
+is visible in the URL itself (`PRE-142` in `.../issue/PRE-142/...`). Card
+and obligation, side by side — the shape is the whole point:
+
+```card
+kind: receipt
+handler: linear
+url: https://linear.app/example-team/issue/PRE-142/account-quota-followup
+```
+
+```obligation
+id: account-quota-followup
+owes: the quota-check helper this answer implies but doesn't build
+destination: dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md
+status: open
+```
+
+If `/add-task` is declined, or the merged config resolves to `repo-pr` (no
+config, or set explicitly), fall back to the stub path in procedure 3.
+
+### `decided` → plan-with-docs
+
+A `decided` decision's `decided_in:` must point at **durable** evidence: an
+ADR, a permanent design doc, or a receipt card recording the plan handoff —
+never a plan directory. A plan directory is not durable: `/push-plan`
+deletes it once every task in it has migrated and the overview was written
+to the tracker this run — a **partial** push (anything held by
+`--ready-only`, or a failed create) retains the directory
+(`commands/push-plan.md` §6) — and the validator does not merely warn about
+that the way it does for an obligation's `destination:` — for `decided_in:`
+a plan-directory pointer is an **error** (`check_decided_in`), because a
+decision's evidence has to outlive the work it documents, not just survive
+until the next push.
+
+A handoff receipt survives the same migration for a simpler reason: the
+card lives in the spike's own `tracks/<track>/obligations/` directory, not
+in the plan directory `/push-plan` deletes, so nothing that command does
+touches it. `/push-plan` has no receipt discovery or update step at all —
+it records tracker ids in the plan's own task and epic frontmatter and then
+deletes those files once migrated (`commands/push-plan.md` §6, the §4.5/
+§5b.6 cleanup steps); it has no way to know a receipt card exists.
+**Updating the card's `url:` to the pushed tracker URL is a manual step in
+the handoff**, done by whoever runs `/push-plan` — not something the push
+performs.
+
+### No auto-promotion in either direction
+
+Neither bridge fires on its own. `defer` only offers `/add-task` — accepting
+it is a human choice, same as picking a stub. A decision still moves
+`pending` → `decided` only by a human act, recorded with `decided_in:`.
+Promotion is an explicit act here for the same reason `write-ledger` is:
+fold either into the walk and a number, or a state, stops being checked and
+starts being generated.
 
 ## Write-ownership convention
 
@@ -319,8 +419,11 @@ incidental convenience.
   declared debt, not remaining work — see the granularity note above.
 - **Bridged work is not reconciled.** An obligation whose receipt card
   points at a tracker task stays `open` until a human discharges it by
-  hand, whatever the tracker itself says. The ledger reports declared debt
-  as last hand-updated.
+  hand, whatever the tracker itself says — closing the tracker issue does
+  **not** discharge the local obligation. The ledger reports declared debt
+  as last hand-updated. The receipt cards are what would make a later
+  `sweep` verb possible — walk the receipts, check tracker state, propose
+  discharges — but that verb is deliberately not in v1.
 - **The divergence signal is a snapshot.** The ledgers store no history, so
   "questions converging while obligations climb" is read by a human across
   commits — `git log` on the ledger lines — not computed or trended by the

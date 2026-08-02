@@ -71,6 +71,8 @@ never gets claimed.
 
 Capture is destination-agnostic; only the handler decides where the task lands.
 
+A research spike's `defer` procedure offers `/add-task` as an alternative to a stub when the merged config resolves to an external tracker handler — see the two bridges in `skills/research-spike/SKILL.md`.
+
 ### Handlers and config
 
 The delivery destination is a **handler** named in `dev_docs/tasks/.task-config.yml` — for `repo-pr` this is committed and shared; for the external-tracker handlers (`gh-issue`/`jira`/`linear`) `/task-config` adds it to the repo's local git exclude as local config (see that command for the `repo-pr` exception):
