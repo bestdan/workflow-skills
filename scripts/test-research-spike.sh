@@ -1609,6 +1609,83 @@ assert_exit "a second question block in one section exits 1" "$exit_n17" 1
 assert_contains "the second-question error says one section is one question" \
   "$out_n17" "one section is one question"
 
+# An extra block is a misplacement *and* a record. Checking only the section's
+# first question left the extra's fields unread and its id out of the
+# uniqueness map, so a duplicate id declared in one went unreported entirely —
+# reproduced. Both findings must land alongside the placement error.
+DIR_N17B="$BASE/second-question-still-checked"
+question_fixture "$DIR_N17B" "id: uid-domain-isolation
+status: open
+blocks: account-provisioning" "none: nothing is owed yet"
+cat >>"$DIR_N17B/dev_docs/research/alpha/tracks/account/questions.md" <<'MD'
+
+```question
+id: uid-domain-isolation
+status: half-answered
+blocks: account-provisioning
+```
+MD
+out_n17b="$(python3 "$SCRIPT" --root "$DIR_N17B" validate 2>&1)"
+exit_n17b=$?
+assert_exit "a second question block carrying its own errors exits 1" "$exit_n17b" 1
+assert_contains "the extra block is still reported as misplaced" "$out_n17b" \
+  "one section is one question"
+assert_contains "the extra block's id still enters the uniqueness map" "$out_n17b" \
+  "duplicate question id 'alpha/account/uid-domain-isolation'"
+assert_contains "the extra block's own fields are still checked" "$out_n17b" \
+  "question status 'half-answered' is not one of"
+
+# The same holds outside a section: the placement is wrong, but the record
+# still claims an id the rest of the tree can collide with.
+DIR_N17C="$BASE/stray-question-still-checked"
+write_file "$DIR_N17C/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed yet
+```
+
+## Notes
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```'
+out_n17c="$(python3 "$SCRIPT" --root "$DIR_N17C" validate 2>&1)"
+exit_n17c=$?
+assert_exit "an out-of-section question with a duplicate id exits 1" "$exit_n17c" 1
+assert_contains "the out-of-section block is reported as misplaced" "$out_n17c" \
+  "question block outside a \`### Q<n>.\` section"
+assert_contains "the out-of-section block's id still enters the uniqueness map" \
+  "$out_n17c" "duplicate question id 'alpha/account/uid-domain-isolation'"
+# No coverage error stacks on the placement error: the section that would
+# carry the declaration is the thing that is missing, so restating it would
+# just be a second finding over one wrong line.
+assert_not_contains "no coverage error is stacked on the placement error" \
+  "$out_n17c" "declares nothing it owes"
+
+# --- Fixture (n17d): a separator-only `blocks:` names no decision ---------
+# `blocks: ,` has text in it, parses to zero ids, and is not the sentinel — a
+# raw-emptiness test let the typo through while the question named no decision
+# at all, which is exactly what `blocks:` exists to prevent.
+DIR_N17D="$BASE/blocks-separator-only"
+question_fixture "$DIR_N17D" "id: uid-domain-isolation
+status: open
+blocks: ," "none: nothing is owed yet"
+out_n17d="$(python3 "$SCRIPT" --root "$DIR_N17D" validate 2>&1)"
+exit_n17d=$?
+assert_exit "a separator-only 'blocks: ,' exits 1" "$exit_n17d" 1
+assert_contains "the empty blocks list is reported as missing" "$out_n17d" \
+  "'blocks:' is required"
+
 # --- Fixture (n18): a question id shares the tree-wide id namespace -------
 # One namespace across record kinds, not one per kind: `blocks:`/`blocking:`
 # resolve by bare id and the status report prints both kinds under the same
@@ -1684,6 +1761,44 @@ out_o3="$(python3 "$SCRIPT" --root "$DIR_O3" validate 2>&1)"
 exit_o3=$?
 assert_exit "a file-level 'none: <reason>' covers a contract file" "$exit_o3" 0
 assert_contains "the declared contract tree reports OK" "$out_o3" "research-spike: OK"
+
+# Every file, not just *.md — the same treatment obligations/ gets. Globbing
+# markdown alone left a preconditions.txt stating preconditions that no parser
+# reads and no ledger counts: a labeled hiding place inside the one directory
+# whose whole purpose is that preconditions cannot hide in it.
+DIR_O5="$BASE/contract-stray-file"
+contracts_fixture "$DIR_O5" '# host contract
+
+```obligation
+none: every precondition below is already asserted by the deploy check
+```'
+O5_DIR="$DIR_O5/dev_docs/research/alpha/tracks/account/contracts"
+printf 'This component must not be deployed on a shared host.\n' \
+  >"$O5_DIR/preconditions.txt"
+out_o5="$(python3 "$SCRIPT" --root "$DIR_O5" validate 2>&1)"
+exit_o5=$?
+assert_exit "a non-markdown file under contracts/ exits 1" "$exit_o5" 1
+assert_contains "the stray contract error names the file" "$out_o5" \
+  "contracts/preconditions.txt"
+assert_contains "the stray contract error says nothing can read it" "$out_o5" \
+  "not a markdown contract"
+
+# Dotfiles stay exempt, exactly as under obligations/: Finder drops .DS_Store
+# into anything it opens, and a dotfile cannot plausibly be a contract.
+DIR_O6="$BASE/contract-dotfiles"
+contracts_fixture "$DIR_O6" '# host contract
+
+```obligation
+none: every precondition below is already asserted by the deploy check
+```'
+O6_DIR="$DIR_O6/dev_docs/research/alpha/tracks/account/contracts"
+: >"$O6_DIR/.gitkeep"
+printf '\x00\x01macOS junk\n' >"$O6_DIR/.DS_Store"
+out_o6="$(python3 "$SCRIPT" --root "$DIR_O6" validate 2>&1)"
+exit_o6=$?
+assert_exit "dotfiles under contracts/ are exempt (.gitkeep, .DS_Store)" "$exit_o6" 0
+assert_not_contains "a dotfile is never reported as an uncovered contract" \
+  "$out_o6" ".gitkeep"
 
 # --- Fixture (o4): coverage is deliberately not universal ----------------
 # Widening the rule to every markdown file would turn the discipline into

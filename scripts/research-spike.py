@@ -1382,7 +1382,12 @@ def check_question(
         )
 
     blocks = rec.fields.get("blocks")
-    if blocks is None or not blocks.raw:
+    # A non-sentinel value with nothing in its list is missing, not present:
+    # `blocks: ,` has truthy raw text, parses to zero ids, and is not the
+    # sentinel, so a raw-emptiness test let a separator typo validate clean
+    # while naming no decision at all. The sentinel branch is kept separate
+    # because a `none:` value legitimately has no items.
+    if blocks is None or (not blocks.is_none and not blocks.items):
         report.error(
             rel,
             field_line(rec, "blocks"),
@@ -1461,6 +1466,10 @@ def validate_questions(
             ]
             questions = [r for r in records if r.kind == "question"]
             claimed.update(id(r) for r in questions)
+            # Every question record is checked, not just the section's first.
+            # A second block is a misplacement *and* a record — leaving its
+            # fields unchecked would also leave its id out of `seen`, so a
+            # duplicate declared in an extra block went unreported entirely.
             # Any obligation block satisfies coverage, the bare `none:`
             # declaration included — the rule is that the section *declared*,
             # not that it owes. A malformed declaration is reported by its own
@@ -1500,20 +1509,28 @@ def validate_questions(
                     f"{DECLARE_SOMETHING}.",
                 )
 
-            if questions:
-                check_question(questions[0], covered, seen, report)
+            for rec in questions:
+                check_question(rec, covered, seen, report)
 
     for rec in tree.records:
-        if rec.kind == "question" and id(rec) not in claimed:
-            report.error(
-                rec.rel,
-                rec.line,
-                "question block outside a `### Q<n>.` section — coverage is "
-                "enforced per section, so a question filed outside one is "
-                "never asked to declare what answering it owes, and no "
-                "`### Q<n>.` heading names it for a reader. Move it under a "
-                f"`### Q<n>.` heading in the track's {QUESTIONS_FILENAME}.",
-            )
+        if rec.kind != "question" or id(rec) in claimed:
+            continue
+        report.error(
+            rec.rel,
+            rec.line,
+            "question block outside a `### Q<n>.` section — coverage is "
+            "enforced per section, so a question filed outside one is "
+            "never asked to declare what answering it owes, and no "
+            "`### Q<n>.` heading names it for a reader. Move it under a "
+            f"`### Q<n>.` heading in the track's {QUESTIONS_FILENAME}.",
+        )
+        # Checked in full anyway: the placement is wrong, but the record still
+        # claims an id the rest of the tree can collide with, and a block whose
+        # fields go unread is a block whose duplicate id nobody reports.
+        # `covered=True` because the section that would carry the declaration
+        # is the thing that is missing — a coverage error here would just
+        # restate the placement error in different words.
+        check_question(rec, True, seen, report)
 
 
 def validate_contracts(tree: Tree, report: Report) -> None:
@@ -1531,10 +1548,29 @@ def validate_contracts(tree: Tree, report: Report) -> None:
             directory = track.path / CONTRACTS_DIRNAME
             if not directory.is_dir():
                 continue
-            for entry in sorted(directory.rglob("*.md")):
+            # **Every** file, not just `*.md` — the same treatment the
+            # obligations/ walk gets, and for the same reason: globbing
+            # markdown alone leaves a `preconditions.txt` holding preconditions
+            # no parser reads and no ledger counts, which is precisely the
+            # labeled hiding place this rule exists to close. Dotfiles are
+            # exempt (a dotfile cannot plausibly be a contract, and `.DS_Store`
+            # lands in any directory somebody opens).
+            for entry in sorted(directory.rglob("*")):
                 if not entry.is_file() or entry.name.startswith("."):
                     continue
                 rel = entry.relative_to(tree.root).as_posix()
+                if entry.suffix != ".md":
+                    report.error(
+                        rel,
+                        0,
+                        "not a markdown contract — only markdown is parsed for "
+                        "obligation blocks, so a contract written in any other "
+                        "format states its preconditions where nothing can "
+                        "read them and no ledger will ever count them. Rewrite "
+                        "it as a `.md` file, or move it somewhere the "
+                        "directory's rule does not apply.",
+                    )
+                    continue
                 if any(r.kind == "obligation" for r in index.get(rel, [])):
                     continue
                 report.error(
