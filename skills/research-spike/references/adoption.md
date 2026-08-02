@@ -54,8 +54,10 @@ kind: stub
 superseded_when: the account track files its uid-domain-provisioning task card
 ```
 
-Then point the obligation's `destination:` at the stub's path
-(`tracks/<track>/obligations/<name>.md`) — a path that now exists, so the
+Then point the obligation's `destination:` at the stub's path. `destination:`
+is repo-relative, so the full path is required —
+`dev_docs/research/<project>/tracks/<track>/obligations/<name>.md`, not the
+shortened `tracks/<track>/...` form — a path that now exists, so the
 obligation resolves.
 
 **State the stub count plainly when the backfill finishes** — "N obligations
@@ -82,8 +84,7 @@ Once step 1 has created a real `dev_docs/research/` tree — in the **same
 PR**, not a follow-up — add the gate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" \
-  --root "$(git rev-parse --show-toplevel)" validate --strict
+--root "$(git rev-parse --show-toplevel)" validate --strict
 ```
 
 `--strict` is the organizer's tier: it fails a stale `LEDGER.md` instead of
@@ -96,12 +97,15 @@ own `scripts/check.sh` at merge time.
 itself is documented** — the check's own header comment or contract, not a
 separate doc a reader has to go find. Specifically: `suggest` is deliberately
 **not** part of the gate. It is an advisory lexical scan for unregistered
-deferral prose ("deferred to", "gated on", …), and it can never exit
-non-zero — not as an oversight, but because a lexical scan against English
-prose has false positives (measured: 29 hits on the reference tree, mostly
-prose _describing_ behaviour rather than deferring work), and **a check
-whose false positives have nowhere legal to go must not be able to fail the
-build.** A repo with no baseline file, no allowlist, and no skip flag has no
+deferral prose ("deferred to", "gated on", …), and its scan can never fail a
+build on its findings — not as an oversight, but because a lexical scan
+against English prose has false positives (measured: 29 hits on the
+reference tree, mostly prose _describing_ behaviour rather than deferring
+work), and **a check whose false positives have nowhere legal to go must not
+be able to fail the build.** (A malformed invocation — a bad `--root`, an
+unrecognized flag — still exits non-zero from argument handling, same as any
+other subcommand; the guarantee is about the scan's own findings, not the
+process.) A repo with no baseline file, no allowlist, and no skip flag has no
 legal place to put an exception, so the only sound answer is to keep the
 check itself from being able to block anyone. This is the reasoning to
 restate in the repo's own check contract — not just that `suggest` was
@@ -116,7 +120,7 @@ without gating, a non-blocking check, a warnings-only lane — that constraint
 relaxes, and `suggest` can run there as a non-failing report:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" suggest
+--root "$(git rev-parse --show-toplevel)" suggest
 ```
 
 The rule to carry across an adoption is not "`suggest` never runs in CI." It

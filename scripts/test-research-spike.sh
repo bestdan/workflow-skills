@@ -3640,6 +3640,12 @@ assert_contains "adoption spine: it fails for the missing-destination reason, by
   "destination 'dev_docs/research/adopt/tracks/account/obligations/uid-domain.md' does not exist"
 assert_contains "adoption spine: the negative half is the missing stub, not an unrelated error" \
   "$out_z2" "this is how deferred work goes dark"
+findings_z2="$(printf '%s\n' "$out_z2" | grep -c '  ✘ ')"
+if [ "$findings_z2" -eq 1 ]; then
+  ok "adoption spine: the negative tree reports exactly one finding"
+else
+  bad "adoption spine: expected exactly one finding, got $findings_z2"
+fi
 
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
