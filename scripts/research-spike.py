@@ -1945,17 +1945,37 @@ def reference_key(rec: Record) -> str | None:
     return None
 
 
+# What it takes for a blocker to stop blocking, per kind. Stated as the
+# **terminal** statuses rather than as "open", and that direction is the whole
+# point: `is_live_blocker` fails closed.
+BLOCKER_TERMINAL_STATUSES: dict[str, frozenset[str]] = {
+    "question": frozenset({"answered", "retired"}),
+    "obligation": frozenset({"discharged"}),
+}
+
+
 def is_live_blocker(rec: Record) -> bool:
     """True while this record is still outstanding work against its decision.
 
-    An open question or an open obligation is a **live** blocker. A closed one
-    is history, and history against a decided decision has to stay clean —
-    otherwise deciding anything would require rewriting the records that led to
-    it. The same predicate is what `status` derives readiness from, so the gate
-    and the report cannot disagree about which records are holding a decision
-    up.
+    An answered or retired question, and a discharged obligation, are history —
+    and history against a decided decision has to stay clean, otherwise
+    deciding anything would require rewriting the records that led to it.
+    Everything else is live.
+
+    Live is the **default**, deliberately. Testing `status == "open"` instead
+    reads a missing or misspelled status as closed, so a blocker nobody can
+    classify would drop out of the derivation and the decision would print
+    READY — the report answering "what still blocks building?" would answer it
+    by discarding the record it could not understand. `validate` rejects any
+    status outside the enum, so on a tree that passes the gate the two
+    formulations agree exactly; they differ only on a tree that is already
+    broken, and there the honest answer is "still blocked".
+
+    The same predicate is what `status` derives readiness from, so the gate and
+    the report cannot disagree about which records hold a decision up.
     """
-    return declared(rec, "status") == "open"
+    terminal = BLOCKER_TERMINAL_STATUSES.get(rec.kind, frozenset())
+    return declared(rec, "status") not in terminal
 
 
 @dataclass
@@ -2054,9 +2074,9 @@ def validate_references(tree: Tree, report: Report) -> None:
             report.error(
                 rec.rel,
                 field_line(rec, key),
-                f"this {rec.kind} is open and {key} decision '{bare}', which "
-                f"is already decided at {decision.rel}:{decision.line} — a "
-                "decided decision must have zero open blockers, so either this "
+                f"this {rec.kind} is not closed and {key} decision '{bare}', "
+                f"which is already decided at {decision.rel}:{decision.line} — "
+                "a decided decision must have zero open blockers, so either this "
                 "record is stale or the decision was taken too early. Close "
                 "the record (answer or retire the question; discharge the "
                 "obligation), or reopen the decision explicitly: "
@@ -2567,6 +2587,49 @@ def scarcity_warning(total: Counts) -> str | None:
     )
 
 
+def completeness_footer(tree: Tree, report: Report, resolved: Blockers) -> str | None:
+    """One line saying the report may be incomplete, or None when it is not.
+
+    Three sources, all of them already computed and none of them re-walked:
+
+      - the parse and card findings `discover`/`validate_cards` collected;
+      - the references that resolve to no decision — each one a gate that
+        gates nothing, and therefore a decision reading readier than it is;
+      - a decision whose `state:` is outside the enum, which falls through to
+        the derived labels as though it were `pending`.
+
+    The last is the one rule this report re-reads for itself. `state` is the
+    only *stored* input to the derivation, so a malformed one silently changes
+    what every line below it says — and the check is a set membership over
+    records already in hand, not a second run of the validator. Everything else
+    about record shape stays `validate`'s.
+
+    The findings themselves are never reprinted: this is a pointer at the gate,
+    not a copy of it. And it is a footer, not a failure — `status` still exits
+    0, because a report that could fail is a report people stop running.
+    """
+    unstated = sum(
+        1
+        for rec in tree.records
+        if rec.kind == "decision"
+        and declared(rec, "state") not in (*DECISION_STATES, PROPOSED_STATE)
+    )
+    count = len(report.errors) + len(resolved.dangling) + unstated
+    if count == 0:
+        return None
+    noun = (
+        "unresolved reference or validation error"
+        if count == 1
+        else "unresolved references or validation errors"
+    )
+    return (
+        f"⚠ {count} {noun} in this tree — "
+        "this report may be incomplete; run `validate` to see them. Readiness "
+        "is derived only from records that resolve, so a decision whose "
+        "blockers do not parse reads readier here than it is."
+    )
+
+
 def print_project_status(tree: Tree, project: Project, resolved: Blockers) -> None:
     statuses = decision_statuses(tree, project, resolved)
     tallied = {label: 0 for label in (LABEL_DECIDED, LABEL_READY, LABEL_BLOCKED)}
@@ -2610,12 +2673,21 @@ def verb_status(args: argparse.Namespace, root: Path) -> int:
     """The convergence report: every project, or the one named.
 
     Discovery's own findings are `validate`'s, not this report's — a status run
-    that printed parse errors would be a second, weaker gate. `validate_cards`
-    is called for the same reason it exists at all: it is where cards are
-    counted, and counting them a second time here is how the ledger and the
-    report start to disagree.
+    that reprinted parse errors would be a second, weaker gate, and one people
+    would start reading instead of the real one. `validate_cards` is called for
+    the same reason it exists at all: it is where cards are counted, and
+    counting them a second time here is how the ledger and the report start to
+    disagree.
+
+    But *discarding* those findings silently is the failure this instrument
+    exists to prevent, wearing the report's own clothes. A `blocks:` with a
+    typo in it resolves to no decision, so it blocks nothing, so the decision
+    prints READY — a broken tree reading healthier than a correct one. So the
+    findings are counted, never reprinted, and the count becomes one footer
+    saying the report may be incomplete.
     """
-    tree = discover(root, Report())
+    report = Report()
+    tree = discover(root, report)
     known = [p.name for p in tree.projects]
     if args.project is not None and args.project not in known:
         raise UsageError(
@@ -2623,7 +2695,7 @@ def verb_status(args: argparse.Namespace, root: Path) -> int:
             f"{', '.join(known) if known else 'none'}. `status` with no "
             "project argument reports every one."
         )
-    validate_cards(tree, Report())
+    validate_cards(tree, report)
     resolved = resolve_blockers(tree)
     printed = False
     for project in tree.projects:
@@ -2633,6 +2705,12 @@ def verb_status(args: argparse.Namespace, root: Path) -> int:
             print()
         print_project_status(tree, project, resolved)
         printed = True
+
+    footer = completeness_footer(tree, report, resolved)
+    if footer is not None:
+        if printed:
+            print()
+        print(footer)
     return EXIT_OK
 
 

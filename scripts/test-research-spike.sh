@@ -2090,7 +2090,7 @@ out_r8="$(python3 "$SCRIPT" --root "$DIR_R8" validate 2>&1)"
 exit_r8=$?
 assert_exit "a decided decision with an open question blocking it exits 1" "$exit_r8" 1
 assert_contains "the open-blocker error names both ends" "$out_r8" \
-  "this question is open and blocks decision 'stop-semantics', which is already decided"
+  "this question is not closed and blocks decision 'stop-semantics', which is already decided"
 assert_contains "the open-blocker error states the invariant" "$out_r8" \
   "a decided decision must have zero open blockers"
 assert_contains "the open-blocker error offers the reopen route" "$out_r8" \
@@ -2111,7 +2111,7 @@ out_r9="$(python3 "$SCRIPT" --root "$DIR_R9" validate 2>&1)"
 exit_r9=$?
 assert_exit "a decided decision with an open obligation blocking it exits 1" "$exit_r9" 1
 assert_contains "the open obligation is reported as the blocker" "$out_r9" \
-  "this obligation is open and blocking decision 'stop-semantics', which is already decided"
+  "this obligation is not closed and blocking decision 'stop-semantics', which is already decided"
 
 # A historical, already-closed reference to a decided decision is clean —
 # otherwise deciding anything would mean rewriting the records that led to it.
@@ -2710,6 +2710,133 @@ assert_contains "every open blocker is listed" "$out_s11" \
   "BLOCKED by 4 questions"
 assert_contains "blocker ids and statuses stay in aligned columns" "$out_s11" \
   "    Q: alpha/account/account-q1  open  → dev_docs/research/alpha/tracks/account/questions.md"
+
+# --- Fixture (s12): readiness fails closed --------------------------------
+# A blocker whose status nobody can classify is still outstanding work. Asking
+# "is it open?" would read a typo'd status as closed and print READY — the
+# report answering "what still blocks building?" answering it by discarding
+# the record it could not understand. So the test is "is it terminal?".
+DIR_S12="$BASE/status-bogus-status"
+status_fixture "$DIR_S12" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: bogus
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s12="$(python3 "$SCRIPT" --root "$DIR_S12" status alpha 2>&1)"
+exit_s12=$?
+assert_exit "a blocker with an unclassifiable status still exits 0" "$exit_s12" 0
+assert_contains "a blocker whose status is not terminal keeps the decision BLOCKED" \
+  "$out_s12" "account-provisioning  BLOCKED by 1 question"
+assert_not_contains "a malformed blocker never reads as closed" "$out_s12" "READY"
+assert_contains "the malformed blocker is listed with the status it declared" "$out_s12" \
+  "Q: alpha/account/uid-domain-isolation  bogus"
+# It is counted in no column either — the same treatment validate's own
+# message promises for a record whose status is outside the enum.
+assert_contains "an unclassifiable status is counted in no question column" "$out_s12" \
+  "Q 0 answered / 0 open / 0 retired"
+
+# --- Fixture (s13): the completeness footer -------------------------------
+# `status` discards discovery's findings on purpose — reprinting them would be
+# a second, weaker gate — but discarding them *silently* is the accrual this
+# instrument exists to prevent: a typo'd `blocks:` resolves to no decision, so
+# it blocks nothing, so the decision prints READY. Counted, never reprinted.
+DIR_S13="$BASE/status-dangling-reference"
+status_fixture "$DIR_S13" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioniing
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s13="$(python3 "$SCRIPT" --root "$DIR_S13" status alpha 2>&1)"
+exit_s13=$?
+assert_exit "a tree with a dangling reference still exits 0" "$exit_s13" 0
+assert_contains "a dangling reference is counted in the footer" "$out_s13" \
+  "1 unresolved reference or validation error"
+assert_contains "the footer says the report may be incomplete" "$out_s13" \
+  "this report may be incomplete; run \`validate\`"
+assert_contains "the footer says why a broken tree reads healthier" "$out_s13" \
+  "reads readier here than it is"
+# A pointer at the gate, not a copy of it: the finding itself stays validate's.
+assert_not_contains "the footer does not reprint the finding" "$out_s13" \
+  "does not exist in project"
+# A clean tree gets no footer at all.
+assert_not_contains "a clean tree prints no completeness footer" "$out_s1" \
+  "may be incomplete"
+
+# A decision whose `state:` is outside the enum falls through to the derived
+# labels as though it were pending. No fourth label for it — record shape is
+# validate's — but the footer has to notice, because `state` is the one stored
+# input the whole derivation reads.
+DIR_S14="$BASE/status-bogus-state"
+status_fixture "$DIR_S14" '```decision
+id: account-provisioning
+state: bogus
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s14="$(python3 "$SCRIPT" --root "$DIR_S14" status alpha 2>&1)"
+exit_s14=$?
+assert_exit "a decision with an unknown state still exits 0" "$exit_s14" 0
+assert_contains "an unknown decision state is counted in the footer" "$out_s14" \
+  "1 unresolved reference or validation error"
+assert_contains "an unknown state still derives from its blockers" "$out_s14" \
+  "account-provisioning  BLOCKED by 1 question"
+
+# --- Fixture (s15): one decision named twice is one blocker ---------------
+# `blocks: d, d` is one blocker to a reader. Counting the reference rather
+# than the record would print the line twice and say "by 2 questions" over a
+# single question.
+DIR_S15="$BASE/status-duplicate-reference"
+status_fixture "$DIR_S15" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning, account-provisioning
+```
+
+```obligation
+none: nothing is owed until the decision is taken
+```'
+out_s15="$(python3 "$SCRIPT" --root "$DIR_S15" status alpha 2>&1)"
+exit_s15=$?
+assert_exit "a decision named twice by one question exits 0" "$exit_s15" 0
+assert_contains "a decision named twice by one question is blocked by one" "$out_s15" \
+  "account-provisioning  BLOCKED by 1 question"
+dupes_s15="$(printf '%s\n' "$out_s15" | grep -c "Q: alpha/account/uid-domain-isolation")"
+if [ "$dupes_s15" -eq 1 ]; then
+  ok "the duplicated blocker is listed exactly once"
+else
+  bad "expected the blocker line exactly once, got $dupes_s15"
+fi
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
