@@ -59,15 +59,25 @@ dev_docs/research/<project>/
     obligations/        # stub and receipt cards
 ```
 
+This is the convention `init` scaffolds and the skill relies on — it is not
+what discovery _requires_. `discover()` walks every `*.md` file under each
+project directory recursively (`pdir.rglob("*.md")`); it does not check that
+`PROJECT.md`, `decisions.md`, or any of the `tracks/` subdirectories shown
+above exist, and a record kind is decided per-block by the fence's own info
+string (`` ```question ``, `` ```obligation ``, …), not by which file it sits in.
+A record in an unexpected file — a stray `notes.md` at a project's root, say
+— is still discovered and parsed like any other; only a file under some
+track's `obligations/` directory is required to hold a `card` block (checked
+by `validate_cards`, not by discovery itself).
+
 Multiple research projects coexist under one root; each is self-contained.
 Ids are declared **bare** in a record and qualified by the script:
 `project/track/id` for questions and obligations, `project/id` for decisions
 (a decision qualifies project-wide even while `proposed` inside a track, so
 promoting it into `decisions.md` never changes its id). Cards carry no `id:`
 at all — a card is addressed by its file path under
-`tracks/<track>/obligations/`, which is exactly what an obligation's
-`destination:` points at. In-record references (`blocks:`, `blocking:`) name
-decisions by bare id, resolved within the enclosing project only —
+`tracks/<track>/obligations/`. In-record references (`blocks:`, `blocking:`)
+name decisions by bare id, resolved within the enclosing project only —
 cross-project destinations are forbidden by construction, so no reference
 ever needs qualifying.
 
@@ -83,8 +93,7 @@ Two places, deliberately kept in sync by pointing at the same source:
 
 - **The enforced grammar** is `scripts/research-spike.py` itself — the
   `KNOWN_FIELDS` table, the `*_STATUSES`/`*_STATES` enum constants near the
-  top of the file, and the `validate_*` functions. This is what actually
-  runs; nothing else can drift from it without breaking a fixture.
+  top of the file, and the `validate_*` functions. This is what actually runs.
 - **The human/agent reference** is
   [`skills/research-spike/references/record-grammar.md`](../skills/research-spike/references/record-grammar.md) —
   the full field table for all four record kinds plus the `none:` sentinel,
@@ -93,11 +102,22 @@ Two places, deliberately kept in sync by pointing at the same source:
 
 If the two ever disagree, the script is right and the reference file has
 drifted — fix the doc, not the code, unless the code itself needs to change.
+That is aspirational, not enforced: nothing compares `record-grammar.md`
+against `KNOWN_FIELDS` or the other validator constants, so there is no
+fixture that fails if the two drift apart. The reference is currently kept in
+sync by hand, verified against the code at review time, not by a test pinning
+it — worth knowing precisely because it is the file a maintainer trusts by
+default. Adding that fixture is a known gap, out of scope for this PR.
 
 ## The script surface
 
-Six subcommands, `--root <dir>` global (see the gotcha below on where it must
-sit), defaulting to the current working directory:
+Six subcommands, plus two global options registered on the top-level parser
+(both must precede the subcommand — see the gotcha below): `--root <dir>`,
+defaulting to the current working directory, and `-v`/`--verbose`, which dumps
+every discovered record and its parsed fields. `-v` is accepted before any
+subcommand, but only `validate` reads it (`args.verbose`) — passing it before
+`ledger`, `status`, `write-ledger`, `init`, or `suggest` parses cleanly and
+changes nothing.
 
 | Subcommand                                      | Behavior                                                                                                  |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -108,14 +128,52 @@ sit), defaulting to the current working directory:
 | `status [<project>]`                            | The convergence report — what still blocks each decision, per track and total.                            |
 | `suggest`                                       | Advisory lexical scan for unregistered deferral prose. Always exits `0`.                                  |
 
-Exit-code contract, enforced by the dispatcher in `main()` and never
-overridden by a subcommand: `0` clean, `1` tree-content violations (a rule
-broken by what is actually in the tree), `2` caller errors (unparseable
-arguments, an unknown subcommand, a malformed or already-existing project
-name). Argparse's own usage exit is `2` and always wins — this matters for
-`suggest`, whose _scan_ is exit-0 by design but which still exits `2` on
-`suggest --bogus-flag`, because that is the dispatcher rejecting the
-invocation before the scan ever runs.
+`--track <name>`, on `validate`/`ledger`/`write-ledger`, never guesses. With a
+`<project>` positional given, the track must exist in that project. Without
+one, the bare track name is looked up across every project's every track: it
+resolves only when exactly one match exists tree-wide. Zero matches or more
+than one are both caller errors (exit `2`) — the ambiguous case lists every
+candidate as `project/track` so the caller can copy the disambiguating form
+straight from the message, rather than the script picking one silently. One
+implementation (`resolve_scope`) backs all three verbs, so this is not
+something that can drift between them.
+
+Exit codes are not a flat contract shared by every subcommand — each verb's
+own docstring in `scripts/research-spike.py` is the source of truth, and they
+deliberately diverge:
+
+- `main()`'s dispatcher standardizes only **argument and `--root` errors** as
+  `2` — an unparseable invocation, an unknown subcommand, or a malformed or
+  already-existing project name passed to `init`. Argparse's own usage exit is
+  `2` and always wins; this matters for `suggest`, whose _scan_ is exit-0 by
+  design but which still exits `2` on `suggest --bogus-flag`, because that is
+  the dispatcher rejecting the invocation before the scan ever runs.
+- `validate` is the only real gate: it exits `1` on a tree-content violation
+  (a rule broken by what is actually in the tree) and `0` when clean.
+- `status`, `ledger`, and `suggest` exit `0` even when discovery or the card
+  checks found problems, on purpose — a report that could fail is a report
+  people stop running. What happens to those findings differs by verb:
+  `status` counts them into a completeness footer ("this report may be
+  incomplete") without reprinting them, so a broken tree cannot read as
+  healthier than a correct one, but nothing in the footer can fail the run.
+  `ledger` builds the same discovery/card report and then discards it
+  entirely — it exists only for its side effect of populating stub/receipt
+  tallies — so `ledger` surfaces nothing about tree problems at all. `suggest`
+  never collects discovery's findings in the first place (its own docstring:
+  "discover's findings are validate's, not ours") and prints only its own
+  lexical-scan hits, unconditionally exit `0`.
+- `write-ledger` exits `1` only for a failure of the **requested write itself**
+  (a missing file, missing ledger markers) — never for unrelated tree content.
+  It deliberately discards `discover()`'s and `validate_cards()`'s findings
+  (see gotcha 7): a card violation in a sibling track must not fail a scoped
+  write that did exactly what it was asked. Its exit code answers "did the
+  write happen," not "is the tree otherwise clean" — always follow it with a
+  separate `validate` if you need the latter.
+
+The reason for the divergence, not just its shape: a check whose failure
+stops people from running it is worse than no check at all (the same logic
+gotcha 2 states for `suggest`), so only `validate` — the one verb explicitly
+invoked as the gate — is allowed to fail a run over ordinary tree content.
 
 ## Load-bearing decisions and rationale
 
@@ -213,9 +271,15 @@ This is not asserted by eye. `scripts/test-research-spike.sh` runs
 own `dprint.json`, not a copy or an assumption about its rules — against a
 fixture tree carrying `init`-scaffolded and `write-ledger`-written generated
 markdown, and asserts a clean exit (dprint's exit `20` means "would rewrite,"
-which is treated as a hard failure). The check skips cleanly (not silently)
-when `dprint` is not on `PATH`, so the harness stays runnable on a bare
-machine.
+which is treated as a hard failure). The check skips cleanly (not silently),
+printing which case it hit, in two situations: when `dprint` is not on `PATH`
+at all, and when `dprint` _is_ installed but exits `12` ("could not resolve a
+plugin," e.g. a bare machine with no network) — CI installs `dprint` from
+`mise` and resolves the pinned plugins, so `12` is never how the assertion
+passes in the gate, only how the harness stays runnable offline. Every other
+non-zero, non-`20` exit (a bad invocation, no matching files, a crash) is a
+hard failure, not a skip — a formatter assertion that "passes" without
+actually reading a generated file would be worse than no assertion.
 
 ### 6. `--root` is a global option and must precede the subcommand
 
@@ -275,12 +339,12 @@ for the full setup sequence.
 
 ## File map
 
-| Path                                                 | What it is                                                                 |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `scripts/research-spike.py`                          | The script half — stdlib-only, deterministic, the only thing CI ever runs. |
-| `scripts/test-research-spike.sh`                     | The hermetic fixture harness, wired into `scripts/check.sh`.               |
-| `skills/research-spike/SKILL.md`                     | The judgment half — the five procedures and the script/LLM boundary.       |
-| `skills/research-spike/references/record-grammar.md` | The full field reference, verified against the script's own constants.     |
-| `skills/research-spike/references/adoption.md`       | The setup playbook for turning this on in a repo with real deferred work.  |
-| `dev_docs/designs/research_spike_skill.md`           | The product design — problem, evidence, and the settled architecture.      |
-| `dev_docs/research_spike.md` (this file)             | The engineering record — decisions, rationale, gotchas.                    |
+| Path                                                 | What it is                                                                                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/research-spike.py`                          | The script half — stdlib-only, deterministic — the only research-spike thing CI runs (via `scripts/check.sh`, which runs many other checks besides). |
+| `scripts/test-research-spike.sh`                     | The hermetic fixture harness, wired into `scripts/check.sh`.                                                                                         |
+| `skills/research-spike/SKILL.md`                     | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
+| `skills/research-spike/references/record-grammar.md` | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
+| `skills/research-spike/references/adoption.md`       | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
+| `dev_docs/designs/research_spike_skill.md`           | The product design — problem, evidence, and the settled architecture.                                                                                |
+| `dev_docs/research_spike.md` (this file)             | The engineering record — decisions, rationale, gotchas.                                                                                              |
