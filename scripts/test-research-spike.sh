@@ -3663,11 +3663,15 @@ mkdir -p "$DIR_AA"
 python3 "$SCRIPT" --root "$DIR_AA" init onboarding --track auth >/dev/null 2>&1
 printf '\n```decision\nid: sso-rollout\nstate: pending\n```\n' \
   >>"$DIR_AA/dev_docs/research/onboarding/decisions.md"
+python3 "$SCRIPT" --root "$DIR_AA" write-ledger >/dev/null 2>&1
 out_aa_init="$(python3 "$SCRIPT" --root "$DIR_AA" validate 2>&1)"
 exit_aa_init=$?
 assert_exit "tutorial: the freshly-scaffolded tree (plus its decision) validates clean" \
   "$exit_aa_init" 0
-assert_contains "tutorial: the scaffolded tree reports OK" "$out_aa_init" "research-spike: OK"
+assert_contains "tutorial: the scaffolded tree reports OK" "$out_aa_init" \
+  "research-spike: OK — 1 projects, 1 tracks, 1 records"
+assert_contains "tutorial step 2: the still-unblocked decision warns, harmlessly" \
+  "$out_aa_init" "decision 'onboarding/sso-rollout' is referenced by nothing"
 
 # Step 3: file Q1, coverage satisfied by a bare `none:` — still clean.
 cat >>"$DIR_AA/dev_docs/research/onboarding/tracks/auth/questions.md" <<'EOF'
@@ -3716,7 +3720,8 @@ answer: yes — the gateway must own the redirect, so the session token is only 
 ```
 
 Traced through the current login handler: without the redirect, a client
-can request a session token directly and skip SSO entirely.
+can request a session token directly and skip SSO entirely. The handler
+needs a check added before token issuance.
 
 ```obligation
 id: sso-redirect-check
@@ -3734,7 +3739,8 @@ assert_exit "tutorial step 4: answering with a not-yet-existing destination fail
   "$exit_aa_wall" 1
 assert_contains "tutorial step 4: the wall's message is exactly what the skill quotes" \
   "$out_aa_wall" \
-  "destination 'dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md' does not exist — this is how deferred work goes dark: naming a place does not create one"
+  "research-spike: FAIL
+  ✘ dev_docs/research/onboarding/tracks/auth/questions.md:79: destination 'dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md' does not exist — this is how deferred work goes dark: naming a place does not create one, and a deferral to a path that is not there reads as routed while routing nowhere. Write the file first — a stub card under tracks/<track>/obligations/ carrying its own \`superseded_when:\` is the usual move — then point at it."
 
 # Step 5: the stub card that fixes it.
 write_file "$DIR_AA/dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md" \
@@ -3769,7 +3775,7 @@ answer: yes — SSO sessions should expire sooner than password sessions, and lo
 ```
 
 SSO sessions inherit trust from the identity provider, so a stale token
-is a wider blast radius than a stale password session.
+is a wider blast radius than a stale password session. Two things follow.
 
 ```obligation
 id: ttl-config-change
@@ -3795,6 +3801,7 @@ answer: yes, eventually — but not in the same release as the SSO redirect
 ```
 
 Turning it off immediately would lock out any account not yet migrated.
+The rollout needs a flag and a heads-up to existing users first.
 
 ```obligation
 id: legacy-password-flag
@@ -3830,10 +3837,14 @@ assert_contains "tutorial step 6: the two-round tree reports OK" "$out_aa_two_mo
 # Step 7: refresh the organizer-owned roll-up and read the divergence.
 python3 "$SCRIPT" --root "$DIR_AA" write-ledger >/dev/null 2>&1
 out_aa_status="$(python3 "$SCRIPT" --root "$DIR_AA" status 2>&1)"
-assert_contains "tutorial step 7: questions read fully converged" \
-  "$out_aa_status" "Q 3 answered / 0 open / 0 retired"
-assert_contains "tutorial step 7: obligations read climbing past the questions that made them" \
-  "$out_aa_status" "O 0 discharged / 5 open (5 stubs)"
+assert_contains "tutorial step 7: status reproduces exactly what the skill quotes" \
+  "$out_aa_status" \
+  "onboarding — decisions: 0 decided, 1 ready, 0 blocked
+
+  sso-rollout  READY awaiting decision
+
+  auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)
+  total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)"
 out_aa_final="$(python3 "$SCRIPT" --root "$DIR_AA" validate --strict 2>&1)"
 exit_aa_final=$?
 assert_exit "tutorial step 8: the finished walkthrough tree validates --strict clean" \

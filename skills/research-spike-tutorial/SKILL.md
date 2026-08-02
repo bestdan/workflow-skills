@@ -41,6 +41,29 @@ paraphrase output. If a command in this file ever produces something other
 than what its section says it produces, trust the terminal, not this file,
 and tell the learner what actually happened.
 
+**`$WORK` below is a placeholder for a literal path, not a shell variable you
+can rely on.** Each Bash call runs in a fresh shell, so the assignment in Step
+1 is gone by Step 2. Read the absolute path out of Step 1's `echo` and
+substitute it into every later command yourself.
+
+This is not a tidiness rule, and it is the one mistake that turns this
+tutorial into the thing it promises never to do. An unset `$WORK` expands to
+nothing, leaving `--root ""` — and `Path("")` is `Path(".")`, an existing
+directory, so the script accepts it silently and scaffolds
+`dev_docs/research/` into whatever directory you happen to be standing in.
+That is the learner's own repo. It has already happened once, during this
+skill's own development.
+
+So before every command, check the root you are about to pass:
+
+- it is non-empty;
+- it is the absolute path Step 1 printed;
+- it is **not** inside the learner's repo (compare against
+  `git rev-parse --show-toplevel`).
+
+If any of those fails, stop and re-derive the path. Never fall back to a bare
+`--root ""` or to the current directory.
+
 Say the whole spine up front, once, before starting: _"You'll answer
 questions, and the answered count will go up — that feels like progress. Watch
 what the obligation count does at the same time."_ Don't explain further yet;
@@ -51,19 +74,30 @@ where they are in an 8-step walk.
 
 ## Step 1 of 8 — Build the throwaway tree
 
-Ask once, with `AskUserQuestion` — this changes where the tree actually lands:
+Ask once, with `AskUserQuestion` — this changes only which directory `$WORK`
+is created under, never whether it's freshly created:
 
 - **A fresh `mktemp -d` directory** (default; gone the moment this session
   cleans up, nothing to look at afterward)
-- **This session's scratchpad directory** (also disposable, but the learner
-  can browse the files after the walk before you delete them)
+- **A fresh subdirectory of this session's scratchpad** (also disposable, but
+  the learner can browse the files after the walk before you delete them)
 
-Either way, capture it once and reuse it for every command that follows:
+`$WORK` must always be a directory this walk just created, never a
+pre-existing one — Step 8 deletes it, and it must be impossible for that
+deletion to reach anything the learner didn't just watch you make.
 
 ```bash
-WORK="$(mktemp -d)"   # or the chosen scratchpad path
+WORK="$(mktemp -d)"
+# or, if the scratchpad was chosen, a fresh subdirectory under it instead:
+WORK="$(mktemp -d "<scratchpad-dir>/research-spike-tutorial.XXXXXX")"
 echo "$WORK"
 ```
+
+**Read that printed path and keep it.** It is the value you substitute into
+every command for the rest of the walk — the variable itself does not survive
+into the next Bash call. If `mktemp` fails, the assignment is empty and `echo`
+prints a blank line: that is a hard stop, not something to work around. Do not
+continue with an empty root.
 
 Tell the learner exactly where it is, and that it is not, and will never be,
 anywhere in their repo. Nothing under `dev_docs/research/` in their actual
@@ -76,10 +110,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
   init onboarding --track auth
 ```
 
-`init` is the one verb allowed to create files. Show the learner what it
-printed and what now exists: `PROJECT.md`, `decisions.md`, `LEDGER.md`, and
-`tracks/auth/questions.md` with the ledger markers already in place and a
-worked example sitting inert inside an HTML comment.
+`init` is the only verb that creates _new_ files — `write-ledger` rewrites
+the ledger blocks inside files `init` already created, it never adds one of
+its own. Show the learner what it printed and what now exists: `PROJECT.md`,
+`decisions.md`, `LEDGER.md`, and `tracks/auth/questions.md` with the ledger
+markers already in place and a worked example sitting inert inside an HTML
+comment.
 
 This scaffold has no decision to gate yet. Append one — this is the thing the
 whole spike exists to unblock — to `dev_docs/research/onboarding/decisions.md`:
@@ -89,14 +125,26 @@ id: sso-rollout
 state: pending
 ```
 
-Run `validate` now, before anything else is added, so the learner sees a
-freshly-scaffolded tree pass cleanly:
+Refresh the ledger you just changed, then run `validate`, so the learner sees
+the freshly-scaffolded tree pass:
 
 ```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" write-ledger
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" validate
 ```
 
-`research-spike: OK`. A blank tree is clean, not an achievement yet.
+`validate` exits `0` and prints:
+
+```
+  ⚠ dev_docs/research/onboarding/decisions.md:10: decision 'onboarding/sso-rollout' is referenced by nothing — no question `blocks:` it and no obligation is `blocking:` it, so the convergence report can only ever show it as ready, whatever is actually outstanding. Either it is already settled and belongs in the record of decisions taken, or the questions that gate it have not been wired to it yet. A warning, not an error: a decision with no blockers left is a normal end state.
+research-spike: OK — 1 projects, 1 tracks, 1 records
+  onboarding — tracks: auth (1 records)
+```
+
+A warning, not a bug: nothing `blocks:` the decision yet, and nothing should
+until Step 3 files the question that does. A warning never fails the exit
+code; only an `✘` finding does. A blank tree with one open, unblocked
+decision is clean — just not silent.
 
 ## Step 3 of 8 — File your first question
 
@@ -179,7 +227,8 @@ differ slightly depending on exactly what you typed; the message text will
 not):
 
 ```
-✘ dev_docs/research/onboarding/tracks/auth/questions.md:79: destination 'dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md' does not exist — this is how deferred work goes dark: naming a place does not create one, and a deferral to a path that is not there reads as routed while routing nowhere. Write the file first — a stub card under tracks/<track>/obligations/ carrying its own `superseded_when:` is the usual move — then point at it.
+research-spike: FAIL
+  ✘ dev_docs/research/onboarding/tracks/auth/questions.md:79: destination 'dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md' does not exist — this is how deferred work goes dark: naming a place does not create one, and a deferral to a path that is not there reads as routed while routing nowhere. Write the file first — a stub card under tracks/<track>/obligations/ carrying its own `superseded_when:` is the usual move — then point at it.
 ```
 
 Stop here and make them read it. That sentence — _naming a place does not
@@ -218,7 +267,8 @@ the stub changed the track's true obligation count, so the _stored_ ledger
 (written one command ago, before the stub existed) is now stale:
 
 ```
-✘ …questions.md:3: stored ledger is stale — run `write-ledger` to refresh it. …
+research-spike: FAIL
+  ✘ dev_docs/research/onboarding/tracks/auth/questions.md:3: stored ledger is stale — run `write-ledger` to refresh it. stored: - **Questions:** 1 answered, 0 open, 0 retired | - **Obligations:** 0 discharged, 1 open (0 blocking, 0 stubs, 0 external) — derived: - **Questions:** 1 answered, 0 open, 0 retired | - **Obligations:** 0 discharged, 1 open (0 blocking, 1 stub, 0 external)
 ```
 
 This is not a new bug — it is the same "stored, not computed" contract from
@@ -231,8 +281,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
   validate --track auth
 ```
 
-`research-spike: OK`. One full cycle done: file, answer, hit the wall, fix it
-with an addressed, self-expiring stub.
+`research-spike: OK — onboarding/auth: 3 records`. One full cycle done: file,
+answer, hit the wall, fix it with an addressed, self-expiring stub.
 
 ## Step 6 of 8 — Two more rounds, faster
 
@@ -356,8 +406,12 @@ the first time either one changes.
 ## Step 8 of 8 — Clean up
 
 ```bash
-rm -rf "$WORK"
+[ -n "${WORK:-}" ] && rm -rf "$WORK"
 ```
+
+Refuse to run this against an empty or unset `$WORK` — a blank path there is
+not "nothing to clean up," it is one shell quoting mistake away from deleting
+whatever `rm -rf ""`'s caller happens to be sitting in.
 
 Tell the learner plainly: the tree lived at `$WORK`, it is now gone, and
 nothing under their own repo's `dev_docs/research/` was ever touched. If they
