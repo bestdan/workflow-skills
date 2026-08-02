@@ -132,6 +132,15 @@ blocks: account-provisioning
 none: nothing is owed until the option is chosen
 ```'
 write_file "$DIR_B/dev_docs/research/alpha/tracks/watcher/questions.md" '# watcher'
+# The decision the question above names. Filed because `blocks:` resolves —
+# naming a decision that does not exist is the "track that did not exist" bug,
+# and every tree that means to pass has to declare what it gates.
+write_file "$DIR_B/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: account-provisioning
+state: pending
+```'
 write_file "$DIR_B/dev_docs/research/beta/PROJECT.md" '# beta
 
 ```decision
@@ -142,7 +151,7 @@ state: pending
 out_b="$(python3 "$SCRIPT" --root "$DIR_B" validate 2>&1)"
 exit_b=$?
 assert_exit "two-project tree exits 0" "$exit_b" 0
-assert_contains "both projects counted" "$out_b" "2 projects, 2 tracks, 3 records"
+assert_contains "both projects counted" "$out_b" "2 projects, 2 tracks, 4 records"
 assert_contains "alpha's tracks are discovered" "$out_b" "alpha — tracks: account, watcher"
 assert_contains "a project with no tracks says so" "$out_b" "beta — tracks: none"
 
@@ -645,6 +654,12 @@ assert_contains "the worked example is present, not merely documented" \
 # --- Fixture (k4): an HTML comment is inert, and never swallows silently -
 DIR_K4="$BASE/comments"
 write_file "$DIR_K4/dev_docs/tasks/x.md" '# a task card that exists'
+write_file "$DIR_K4/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: stop-semantics
+state: pending
+```'
 write_file "$DIR_K4/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 <!--
@@ -704,6 +719,12 @@ assert_not_contains "an unterminated comment does not traceback" "$out_k11" "Tra
 # unterminated comment in a file that had none.
 DIR_K4B="$BASE/indented-comment"
 write_file "$DIR_K4B/dev_docs/tasks/x.md" '# a task card that exists'
+write_file "$DIR_K4B/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: stop-semantics
+state: pending
+```'
 write_file "$DIR_K4B/dev_docs/research/alpha/tracks/account/questions.md" '# account
 
 The convention wraps the example in an opener, shown here indented:
@@ -1161,17 +1182,38 @@ assert_exit "an obligation with no owes exits 1" "$exit_l17" 1
 assert_contains "the owes error says an address with no letter in it" "$out_l17" \
   "an address with no letter in it"
 
-# `blocking:` is accepted and recorded here; whether it names a real decision
-# is task 5's referential check, so it must not fail on its own yet.
+# `blocking:` is accepted and recorded here; that it names a real decision is
+# the referential check's business (fixture (r)), so the decision is declared.
 DIR_L18="$BASE/blocking-accepted"
 status_fixture "$DIR_L18" "status: open
 blocking: stop-semantics"
+write_file "$DIR_L18/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: stop-semantics
+state: pending
+```'
 python3 "$SCRIPT" --root "$DIR_L18" validate >/dev/null 2>&1
 exit_l18=$?
 assert_exit "an obligation carrying blocking: is accepted" "$exit_l18" 0
 out_l18v="$(python3 "$SCRIPT" --root "$DIR_L18" --verbose validate 2>&1)"
 assert_contains "blocking: is recorded for task 5's referential check" "$out_l18v" \
   "blocking = 'stop-semantics'"
+
+# A written `blocking:` that names nothing is the same defect as fixture
+# (n17d)'s `blocks: ,` — truthy text, not the sentinel, zero ids — and the
+# field being optional is exactly why it slipped: an intended gate silently
+# dropped reads as wired up while gating nothing.
+DIR_L18B="$BASE/blocking-separator-only"
+status_fixture "$DIR_L18B" "status: open
+blocking: ,"
+out_l18b="$(python3 "$SCRIPT" --root "$DIR_L18B" validate 2>&1)"
+exit_l18b=$?
+assert_exit "a separator-only 'blocking: ,' exits 1" "$exit_l18b" 1
+assert_contains "the empty blocking: is reported as naming no decision" "$out_l18b" \
+  "'blocking:' is written but names no decision"
+assert_contains "the empty blocking: says dropping the line is legitimate" "$out_l18b" \
+  "it is meant to be scarce"
 
 # The unknown-key rule (fixture (d)) is what catches a `desination:` typo: the
 # constraint must not be silently dropped because the key was misspelled.
@@ -1365,9 +1407,14 @@ assert_not_contains "a dotfile is never reported as a card" "$out_m13" ".gitkeep
 
 question_fixture() {
   # question_fixture <dir> <question block body> [coverage block body]
-  # One track, one `### Q1.` section, and one real file to point at.
+  # One track, one `### Q1.` section, and one real file to point at. The
+  # decisions these questions name are declared too: `blocks:` resolves, so a
+  # fixture that meant to isolate the coverage rule would otherwise fail on a
+  # dangling reference instead.
   mkdir -p "$1/dev_docs/tasks" "$1/dev_docs/research/alpha/tracks/account"
   printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
+  printf '# alpha — decisions\n\n```decision\nid: account-provisioning\nstate: pending\n```\n' \
+    >"$1/dev_docs/research/alpha/decisions.md"
   {
     printf '# account\n\n### Q1. Does the account need an isolated uid domain?\n\n'
     printf '```question\n%s\n```\n' "$2"
@@ -1817,6 +1864,405 @@ out_o4="$(python3 "$SCRIPT" --root "$DIR_O4" validate 2>&1)"
 exit_o4=$?
 assert_exit "a markdown file outside questions/contracts needs no declaration" "$exit_o4" 0
 assert_contains "the un-covered tree reports OK" "$out_o4" "research-spike: OK"
+
+# --- Fixture (r): decisions and referential integrity --------------------
+# The convergence hook. `blocks:` and `blocking:` are only worth having if the
+# names resolve, and a decision is only worth calling decided if nothing is
+# still open against it — so every fixture below is one tree in which exactly
+# one of those two things is true or false.
+
+decision_fixture() {
+  # decision_fixture <dir> <decisions.md block body> <question block body> \
+  #                  [coverage block body]
+  # One project, one track, one `### Q1.` section, and the durable files a
+  # `decided_in:` may legitimately point at.
+  mkdir -p "$1/dev_docs/adr" "$1/dev_docs/research/alpha/tracks/account/obligations"
+  printf '# ADR 7 — stop semantics\n' >"$1/dev_docs/adr/0007-stop-semantics.md"
+  printf '# handoff\n\n```card\nkind: receipt\nurl: https://example.invalid/PRE-1\n```\n' \
+    >"$1/dev_docs/research/alpha/tracks/account/obligations/handoff.md"
+  printf '# alpha — decisions\n\n```decision\n%s\n```\n' "$2" \
+    >"$1/dev_docs/research/alpha/decisions.md"
+  {
+    printf '# account\n\n### Q1. Must the baseline stop contain an escapee?\n\n'
+    printf '```question\n%s\n```\n' "$3"
+    printf '\n```obligation\n%s\n```\n' \
+      "${4:-none: nothing is owed until the decision is taken}"
+  } >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+}
+
+# A `blocks:` naming a decision nobody filed is the "track that did not exist"
+# bug wearing a different hat: it reads as wired up and gates nothing.
+DIR_R1="$BASE/blocks-dangling"
+decision_fixture "$DIR_R1" "id: stop-semantics
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantiks"
+out_r1="$(python3 "$SCRIPT" --root "$DIR_R1" validate 2>&1)"
+exit_r1=$?
+assert_exit "a blocks: naming a nonexistent decision exits 1" "$exit_r1" 1
+assert_contains "the dangling reference names the decision it could not find" "$out_r1" \
+  "blocks names decision 'stop-semantiks', which does not exist in project 'alpha'"
+assert_contains "the dangling reference says why it matters" "$out_r1" \
+  "reads as gating something while gating nothing"
+assert_contains "the dangling reference states both ways to fix it" "$out_r1" \
+  "state: proposed"
+
+# A track that discovers it needs a decision files it as `proposed` in its own
+# questions.md, and a `blocks:` naming that is valid — promotion is an
+# organizer act, so requiring promotion first would make the track wait on one.
+DIR_R2="$BASE/blocks-proposed"
+decision_fixture "$DIR_R2" "id: stop-semantics
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics, stop-tooling"
+cat >>"$DIR_R2/dev_docs/research/alpha/tracks/account/questions.md" <<'PROPOSED'
+
+```decision
+id: stop-tooling
+state: proposed
+```
+PROPOSED
+out_r2="$(python3 "$SCRIPT" --root "$DIR_R2" validate 2>&1)"
+exit_r2=$?
+assert_exit "a blocks: naming a proposed decision in the same track passes" "$exit_r2" 0
+assert_contains "the proposed-decision tree reports OK" "$out_r2" "research-spike: OK"
+
+# The other half of the same rule: `proposed` is a track's state, and
+# decisions.md is where the organizer's promoted decisions live.
+DIR_R3="$BASE/proposed-in-decisions"
+decision_fixture "$DIR_R3" "id: stop-semantics
+state: proposed" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics"
+out_r3="$(python3 "$SCRIPT" --root "$DIR_R3" validate 2>&1)"
+exit_r3=$?
+assert_exit "a proposed decision inside decisions.md exits 1" "$exit_r3" 1
+assert_contains "the misplaced proposed decision says where it belongs" "$out_r3" \
+  "files the \`state: proposed\` block in its own questions.md"
+assert_contains "the misplaced proposed decision names promotion as an organizer act" \
+  "$out_r3" "promote-decision"
+
+# Readiness is derived on every run, so there is no key to store it in — the
+# record format itself is what stops a stale number disagreeing with the truth.
+for stored in ready blocked; do
+  DIR_R4="$BASE/decision-stored-$stored"
+  decision_fixture "$DIR_R4" "id: stop-semantics
+state: pending
+$stored: yes" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics"
+  out_r4="$(python3 "$SCRIPT" --root "$DIR_R4" validate 2>&1)"
+  exit_r4=$?
+  assert_exit "a stored '$stored:' on a decision exits 1" "$exit_r4" 1
+  assert_contains "a stored '$stored:' is rejected as an unknown key" "$out_r4" \
+    "decision block: unknown key '$stored'"
+done
+
+# --- Fixture (r5): `decided` and its evidence ----------------------------
+DIR_R5="$BASE/decided-no-evidence"
+decision_fixture "$DIR_R5" "id: stop-semantics
+state: decided" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+out_r5="$(python3 "$SCRIPT" --root "$DIR_R5" validate 2>&1)"
+exit_r5=$?
+assert_exit "a decided decision with no decided_in exits 1" "$exit_r5" 1
+assert_contains "the missing evidence error says what the pointer is for" "$out_r5" \
+  "a decided decision requires 'decided_in:'"
+assert_contains "the missing evidence error names the durable forms" "$out_r5" \
+  "an ADR, a permanent design doc, or a receipt card"
+
+# The durability rule, structurally: /push-plan deletes plan directories after
+# migrating them to a tracker, so evidence filed in one is scheduled for
+# deletion. Unlike an obligation's destination, this is an error.
+DIR_R6="$BASE/decided-in-plan-dir"
+decision_fixture "$DIR_R6" "id: stop-semantics
+state: decided
+decided_in: dev_docs/tasks/foo_plan/foo_plan.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+write_file "$DIR_R6/dev_docs/tasks/foo_plan/foo_plan.md" '# foo plan'
+out_r6="$(python3 "$SCRIPT" --root "$DIR_R6" validate 2>&1)"
+exit_r6=$?
+assert_exit "a decided_in inside a *_plan/ directory exits 1" "$exit_r6" 1
+assert_contains "the plan-directory error names the directory" "$out_r6" \
+  "decided_in 'dev_docs/tasks/foo_plan/foo_plan.md' is inside a plan directory ('foo_plan')"
+assert_contains "the plan-directory error names the /push-plan hazard" "$out_r6" \
+  "/push-plan deletes plan directories"
+assert_contains "the plan-directory error says why a decision differs from an obligation" \
+  "$out_r6" "a decision's evidence has to outlive the work"
+
+# It is rejected at any depth, not just as the parent directory.
+DIR_R6B="$BASE/decided-in-plan-dir-deep"
+decision_fixture "$DIR_R6B" "id: stop-semantics
+state: decided
+decided_in: dev_docs/tasks/foo_plan/notes/decision.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+write_file "$DIR_R6B/dev_docs/tasks/foo_plan/notes/decision.md" '# a note inside a plan'
+out_r6b="$(python3 "$SCRIPT" --root "$DIR_R6B" validate 2>&1)"
+exit_r6b=$?
+assert_exit "a decided_in nested deeper inside a *_plan/ directory exits 1" "$exit_r6b" 1
+assert_contains "the nested plan directory is still named" "$out_r6b" \
+  "is inside a plan directory ('foo_plan')"
+
+# The declared path is checked too, not only the resolved one: a pointer
+# written *into* a plan directory that symlinks out to a durable file resolves
+# somewhere safe and is deleted anyway, because /push-plan removes the folder
+# with the symlink in it.
+DIR_R6E="$BASE/decided-in-plan-dir-symlink"
+decision_fixture "$DIR_R6E" "id: stop-semantics
+state: decided
+decided_in: dev_docs/tasks/foo_plan/decision.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+mkdir -p "$DIR_R6E/dev_docs/tasks/foo_plan"
+ln -s ../../adr/0007-stop-semantics.md "$DIR_R6E/dev_docs/tasks/foo_plan/decision.md"
+out_r6e="$(python3 "$SCRIPT" --root "$DIR_R6E" validate 2>&1)"
+exit_r6e=$?
+assert_exit "a decided_in symlinked out of a *_plan/ directory still exits 1" "$exit_r6e" 1
+assert_contains "the symlinked plan-directory pointer names the directory it sits in" \
+  "$out_r6e" "is inside a plan directory ('foo_plan')"
+assert_contains "the symlinked plan-directory pointer names the /push-plan hazard" \
+  "$out_r6e" "/push-plan deletes plan directories"
+
+# `decided_in:` shares task 3's containment rules, one implementation: a
+# missing file is a pointer to nothing wherever it is written.
+DIR_R6C="$BASE/decided-in-missing"
+decision_fixture "$DIR_R6C" "id: stop-semantics
+state: decided
+decided_in: dev_docs/adr/never-written.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+out_r6c="$(python3 "$SCRIPT" --root "$DIR_R6C" validate 2>&1)"
+exit_r6c=$?
+assert_exit "a decided_in pointing at a nonexistent file exits 1" "$exit_r6c" 1
+assert_contains "the missing decided_in is named" "$out_r6c" \
+  "decided_in 'dev_docs/adr/never-written.md' does not exist"
+assert_contains "the missing decided_in says what evidence is for" "$out_r6c" \
+  "instead of re-litigating it"
+
+DIR_R6D="$BASE/decided-in-traversal"
+decision_fixture "$DIR_R6D" "id: stop-semantics
+state: decided
+decided_in: ../outside-adr.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+printf '# outside the root\n' >"$BASE/outside-adr.md"
+out_r6d="$(python3 "$SCRIPT" --root "$DIR_R6D" validate 2>&1)"
+exit_r6d=$?
+assert_exit "a decided_in escaping with '../' exits 1 even when the target exists" \
+  "$exit_r6d" 1
+assert_contains "the shared containment rule fires for decided_in too" "$out_r6d" \
+  "decided_in '../outside-adr.md' escapes the repository with '../'"
+
+# The passing shapes: an ADR, and a receipt card under obligations/.
+for evidence in "dev_docs/adr/0007-stop-semantics.md" \
+  "dev_docs/research/alpha/tracks/account/obligations/handoff.md"; do
+  DIR_R7="$BASE/decided-in-durable-$(basename "$evidence" .md)"
+  decision_fixture "$DIR_R7" "id: stop-semantics
+state: decided
+decided_in: $evidence" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+  out_r7="$(python3 "$SCRIPT" --root "$DIR_R7" validate 2>&1)"
+  exit_r7=$?
+  assert_exit "a decided_in pointing at $evidence passes" "$exit_r7" 0
+  assert_contains "the durable-evidence tree reports OK" "$out_r7" "research-spike: OK"
+done
+
+# --- Fixture (r8): `decided` requires zero open blockers -----------------
+# Error, not warning: this is what makes hand-editing the files safe to allow.
+DIR_R8="$BASE/decided-open-question"
+decision_fixture "$DIR_R8" "id: stop-semantics
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics"
+out_r8="$(python3 "$SCRIPT" --root "$DIR_R8" validate 2>&1)"
+exit_r8=$?
+assert_exit "a decided decision with an open question blocking it exits 1" "$exit_r8" 1
+assert_contains "the open-blocker error names both ends" "$out_r8" \
+  "this question is open and blocks decision 'stop-semantics', which is already decided"
+assert_contains "the open-blocker error states the invariant" "$out_r8" \
+  "a decided decision must have zero open blockers"
+assert_contains "the open-blocker error offers the reopen route" "$out_r8" \
+  "reopened_because:"
+
+DIR_R9="$BASE/decided-open-obligation"
+decision_fixture "$DIR_R9" "id: stop-semantics
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics" "id: stop-instrumentation
+owes: the instrumentation the answer implies
+destination: dev_docs/research/alpha/tracks/account/obligations/handoff.md
+status: open
+blocking: stop-semantics"
+out_r9="$(python3 "$SCRIPT" --root "$DIR_R9" validate 2>&1)"
+exit_r9=$?
+assert_exit "a decided decision with an open obligation blocking it exits 1" "$exit_r9" 1
+assert_contains "the open obligation is reported as the blocker" "$out_r9" \
+  "this obligation is open and blocking decision 'stop-semantics', which is already decided"
+
+# A historical, already-closed reference to a decided decision is clean —
+# otherwise deciding anything would mean rewriting the records that led to it.
+DIR_R10="$BASE/decided-closed-blockers"
+decision_fixture "$DIR_R10" "id: stop-semantics
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics" "id: stop-instrumentation
+owes: the instrumentation the answer implies
+destination: dev_docs/research/alpha/tracks/account/obligations/handoff.md
+status: discharged
+discharged_by: PR #412
+blocking: stop-semantics"
+out_r10="$(python3 "$SCRIPT" --root "$DIR_R10" validate 2>&1)"
+exit_r10=$?
+assert_exit "closed blockers against a decided decision stay clean" "$exit_r10" 0
+assert_contains "the settled tree reports OK" "$out_r10" "research-spike: OK"
+
+# --- Fixture (r11): reopening --------------------------------------------
+# The same tree twice, differing only in the decision block: a new open blocker
+# is rejected against a decided decision and accepted against a reopened one.
+reopen_fixture() {
+  # reopen_fixture <dir> <decision block body>
+  decision_fixture "$1" "$2" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics" "id: stop-instrumentation
+owes: the instrumentation the new evidence implies
+destination: dev_docs/research/alpha/tracks/account/obligations/handoff.md
+status: open
+blocking: stop-semantics"
+}
+
+DIR_R11="$BASE/new-blocker-on-decided"
+reopen_fixture "$DIR_R11" "id: stop-semantics
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md"
+out_r11="$(python3 "$SCRIPT" --root "$DIR_R11" validate 2>&1)"
+exit_r11=$?
+assert_exit "a new open blocker against a decided decision exits 1" "$exit_r11" 1
+assert_contains "the new blocker is reported against the decided decision" "$out_r11" \
+  "which is already decided"
+
+DIR_R12="$BASE/reopened-accepts-blocker"
+reopen_fixture "$DIR_R12" "id: stop-semantics
+state: pending
+reopened_because: the escapee showed up on a second host
+decided_in: dev_docs/adr/0007-stop-semantics.md"
+out_r12="$(python3 "$SCRIPT" --root "$DIR_R12" validate 2>&1)"
+exit_r12=$?
+assert_exit "the same blocker against a reopened decision passes" "$exit_r12" 0
+assert_contains "the reopened tree reports OK" "$out_r12" "research-spike: OK"
+
+# The retained pointer is the whole mechanism. This validator reads one
+# snapshot with no history, so without it a reopened decision is
+# byte-identical to one that never decided anything.
+DIR_R13="$BASE/reopened-no-retained-evidence"
+reopen_fixture "$DIR_R13" "id: stop-semantics
+state: pending
+reopened_because: the escapee showed up on a second host"
+out_r13="$(python3 "$SCRIPT" --root "$DIR_R13" validate 2>&1)"
+exit_r13=$?
+assert_exit "a reopened_because with no retained decided_in exits 1" "$exit_r13" 1
+assert_contains "the reopen error says there is nothing to reopen" "$out_r13" \
+  "'reopened_because:' with no retained 'decided_in:'"
+assert_contains "the reopen error says why the pointer is the evidence" "$out_r13" \
+  "the only structural evidence that there was a prior decision"
+
+# The pending exemption is for reopen evidence only — otherwise `decided ⇒
+# decided_in` would be satisfiable by a decision that never says it decided.
+DIR_R14="$BASE/pending-with-evidence"
+decision_fixture "$DIR_R14" "id: stop-semantics
+state: pending
+decided_in: dev_docs/adr/0007-stop-semantics.md" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics"
+out_r14="$(python3 "$SCRIPT" --root "$DIR_R14" validate 2>&1)"
+exit_r14=$?
+assert_exit "a decided_in on a pending decision with no reopened_because exits 1" \
+  "$exit_r14" 1
+assert_contains "the pending-with-evidence error names the state it saw" "$out_r14" \
+  "'decided_in:' on a decision whose state is 'pending'"
+assert_contains "the pending-with-evidence error names the one exemption" "$out_r14" \
+  "the only exemption is reopen evidence"
+
+# And the exemption is the whole reopen *shape*, not one field: keyed on
+# `reopened_because:` alone, a `proposed` decision could carry the evidence of
+# a decision nobody ever took and validate clean.
+DIR_R14B="$BASE/proposed-masquerading-as-reopened"
+decision_fixture "$DIR_R14B" "id: stop-semantics
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics, stop-tooling"
+cat >>"$DIR_R14B/dev_docs/research/alpha/tracks/account/questions.md" <<'MASQUERADE'
+
+```decision
+id: stop-tooling
+state: proposed
+reopened_because: it looks like a reopen from here
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```
+MASQUERADE
+out_r14b="$(python3 "$SCRIPT" --root "$DIR_R14B" validate 2>&1)"
+exit_r14b=$?
+assert_exit "a proposed decision carrying reopen evidence exits 1" "$exit_r14b" 1
+assert_contains "the masquerading reopen names the state it saw" "$out_r14b" \
+  "'decided_in:' on a decision whose state is 'proposed'"
+assert_contains "the masquerading reopen says one field does not earn the exemption" \
+  "$out_r14b" "\`reopened_because:\` on its own does not earn it"
+
+# --- Fixture (r15): a decision nothing references ------------------------
+# A warning, not an error: a decision with no blockers left is a normal end
+# state, and failing the tree over it would punish convergence.
+DIR_R15="$BASE/dead-decision"
+decision_fixture "$DIR_R15" "id: stop-semantics
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: none: it picks between options the decision already allows"
+out_r15="$(python3 "$SCRIPT" --root "$DIR_R15" validate 2>&1)"
+exit_r15=$?
+assert_exit "a decision nothing references still exits 0" "$exit_r15" 0
+assert_contains "the unreferenced decision is warned about" "$out_r15" \
+  "decision 'alpha/stop-semantics' is referenced by nothing"
+assert_contains "the dead-decision warning says what the report would show" "$out_r15" \
+  "can only ever show it as ready"
+assert_contains "a warning does not fail the tree" "$out_r15" "research-spike: OK"
+
+# --- Fixture (r16): references never cross a project boundary ------------
+# Cross-project destinations are forbidden by construction (fixture (l8)), so a
+# reference reaching into a sibling project has no ledger to appear in and is
+# dangling — asserted rather than assumed.
+DIR_R16="$BASE/blocks-sibling-project"
+decision_fixture "$DIR_R16" "id: stop-tooling
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics"
+write_file "$DIR_R16/dev_docs/research/beta/decisions.md" '# beta — decisions
+
+```decision
+id: stop-semantics
+state: pending
+```'
+out_r16="$(python3 "$SCRIPT" --root "$DIR_R16" validate 2>&1)"
+exit_r16=$?
+assert_exit "a blocks: naming a decision only in a sibling project exits 1" "$exit_r16" 1
+assert_contains "the sibling-project reference is reported as dangling" "$out_r16" \
+  "blocks names decision 'stop-semantics', which does not exist in project 'alpha'"
+assert_contains "the sibling-project reference says the scope is deliberate" "$out_r16" \
+  "a decision of the same name in a sibling project is not visible here"
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"

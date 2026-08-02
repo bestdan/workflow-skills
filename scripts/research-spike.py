@@ -57,10 +57,12 @@ dispatcher's `2`).
 
 This file lands the skeleton: CLI dispatch, tree discovery, the fenced-block
 parser and record model, question-section discovery, the reporting shape, and
-`init` — the one verb that legitimately creates files. Field *semantics*
-(required/enum/referential rules, ledger derivation, the status report) land in
-the later tasks of the research-spike plan; the verbs they own dispatch to an
-explicit not-implemented-yet error here rather than a silent success.
+`init` — the one verb that legitimately creates files — plus the field
+semantics of every record kind and the referential checks that resolve
+`blocks:`/`blocking:` against the decisions they name. Ledger derivation and
+the `status` report land in the later tasks of the research-spike plan; the
+verbs they own dispatch to an explicit not-implemented-yet error here rather
+than a silent success.
 """
 
 from __future__ import annotations
@@ -97,6 +99,22 @@ QUESTION_STATUSES = ("open", "answered", "retired")
 # states preconditions constantly and a contract document is not a backlog.
 CONTRACTS_DIRNAME = "contracts"
 
+# The organizer-owned file promoted decisions live in, and the decision
+# lifecycle. `proposed` is deliberately **not** in the tuple: it is a real
+# state, but only inside a track's `questions.md`, where a track agent files
+# the decision it discovered it needs. Promotion into `decisions.md` is an
+# organizer act (SKILL.md's `promote-decision`), never something this script
+# performs — a script that promoted would be deciding who owns the decision
+# list.
+#
+# There is no `ready` or `blocked` here, and no key for one either (see
+# `KNOWN_FIELDS`): readiness is derived from the blockers on every run, so a
+# stored copy could only ever disagree with the truth. Storing both was
+# reviewed as a defect, not a convenience.
+DECISIONS_FILENAME = "decisions.md"
+DECISION_STATES = ("pending", "decided")
+PROPOSED_STATE = "proposed"
+
 # Where cards live, and the two enums task 3 owns. `open | discharged` is the
 # obligation's whole lifecycle: there is no `in progress`, because a half-state
 # is a place for work to sit and look accounted for.
@@ -105,15 +123,22 @@ OBLIGATION_STATUSES = ("open", "discharged")
 CARD_KINDS = ("stub", "receipt")
 
 # A plan directory, by the `plan-with-docs` convention (`<name>_plan/`).
-# Matched on the *directory* components of a destination only — a destination
-# under one is a warning, not an error, because `/push-plan` deletes these
-# folders after migrating them to a tracker.
+# Matched on the *directory* components of a path only. `/push-plan` deletes
+# these folders after migrating them to a tracker, so a pointer into one rots
+# on the first push — but the severity differs by field, deliberately. An
+# obligation's `destination:` under a plan directory is a **warning**: pointing
+# at an in-flight plan is legitimate work-routing, and the record is meant to
+# be revisited. A decision's `decided_in:` is an **error**: it is the durable
+# evidence of a decision already taken, so a pointer that is scheduled for
+# deletion is not evidence at all.
 PLAN_DIR_SUFFIX = "_plan"
 
 # Keys each record kind accepts. Unknown keys are an error, not ignored — a
 # `desination:` typo must not silently drop the constraint. Only membership is
 # checked here; which keys are *required*, and what their values may be, is
-# tasks 3-5 of the research-spike plan.
+# the `validate_*` functions'. Note what is **absent** from `decision`: there
+# is no `ready` or `blocked` key, so a derived status has nowhere to be stored
+# and this table is what makes hand-editing one impossible.
 KNOWN_FIELDS: dict[str, frozenset[str]] = {
     "question": frozenset({"id", "status", "blocks", "answer", "retired_because"}),
     "obligation": frozenset(
@@ -287,8 +312,9 @@ class Record:
         None when no id is declared **or** when the rule cannot produce one —
         a non-decision record outside any track. Falling back to the decision
         form there would give a stray obligation an identity indistinguishable
-        from a decision id, which is what task 5 resolves `blocks:` and
-        `blocking:` against. Rejecting the placement is task 3's job; this
+        from a decision id, which is what `validate_references` resolves
+        `blocks:` and `blocking:` against. Rejecting the placement is
+        `validate_obligations`'s job; this
         property only declines to invent an identity for it, and the inventory
         dump reports the record as unplaceable rather than dropping it.
         """
@@ -571,7 +597,7 @@ def parse_block_fields(
             # A bare `none: <reason>` block is the coverage rule's explicit
             # declaration. Re-attach the sentinel so it parses to exactly the
             # same shape as the field-position form (`blocks: none: ...`):
-            # tasks 3-5 then have one representation to read, and the reason
+            # every rule then has one representation to read, and the reason
             # is never comma-split into "ids" the way ordinary prose would be.
             fields[key] = make_value(f"{NONE_KEY}:{raw}", lineno)
             continue
@@ -918,12 +944,169 @@ POINT_AT = (
 )
 
 
-def check_destination(rec: Record, tree: Tree, report: Report) -> None:
-    """The seven destination rules. Rules 1-6 are errors; rule 7 warns.
+@dataclass(frozen=True)
+class PathField:
+    """One path-valued field's name, and the sentences its errors end with.
+
+    `destination:` and `decided_in:` are checked by **one** implementation:
+    both are repo-relative pointers at an existing regular file inside the
+    repo, and two copies of that rule is two places for it to drift — the
+    symlink-escape and symlink-loop cases in particular were each got wrong
+    once already, and getting them wrong twice is what a second copy buys.
+
+    What legitimately differs is *why* each field exists, so each carries its
+    own closing prose: a rule that fires with the wrong field's explanation
+    teaches nobody, and a rule nobody understands is one they route around.
+    What also differs is what happens **after** containment holds — the
+    cross-project rule and the plan-directory severity — and that stays with
+    each caller rather than being flagged into this function.
+    """
+
+    key: str
+    # The "point at …" sentence: how a reader fixes any of these.
+    fix: str
+    # Why a pointer to a file that is not there is the failure it is.
+    missing: str
+    # Optional extra clause on the it-is-a-directory error.
+    dir_hint: str = ""
+
+
+DESTINATION_FIELD = PathField(
+    key="destination",
+    fix=POINT_AT,
+    missing=(
+        "this is how deferred work goes dark: naming a place does not create "
+        "one, and a deferral to a path that is not there reads as routed "
+        "while routing nowhere. Write the file first — a stub card under "
+        "tracks/<track>/obligations/ carrying its own `superseded_when:` is "
+        "the usual move — then point at it."
+    ),
+    dir_hint=(
+        " (If the file you pick sits under a *_plan/ directory, read the "
+        "plan-directory warning first: /push-plan deletes those folders.)"
+    ),
+)
+
+
+def check_contained_file(
+    rec: Record, spec: PathField, raw: str, tree: Tree, report: Report
+) -> Path | None:
+    """The containment rules every path-valued field shares.
+
+    Repo-relative, no `../`, no symlink escape, resolvable, and an existing
+    **regular file**. Returns the resolved path when all of them hold, and
+    None — having reported exactly one finding — when any does not.
 
     Checked in order and reported one at a time: a path that is absolute is
     not also usefully described as missing, and a stack of derived findings
     over one wrong line is how a report stops being read.
+    """
+    rel = rec.rel
+    line = field_line(rec, spec.key)
+    key = spec.key
+
+    pure = PurePosixPath(raw)
+    if pure.is_absolute() or raw.startswith("~"):
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' is an absolute path — these pointers are "
+            "repo-relative so the record means the same thing in every clone; "
+            "an absolute one names somebody's own disk and resolves nowhere "
+            "for the next reader. Write it relative to the repository root.",
+        )
+        return None
+    if ".." in pure.parts:
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' escapes the repository with '../' — a pointer has "
+            "to be reviewable alongside the record that names it, and nothing "
+            f"outside the tree is. {spec.fix}.",
+        )
+        return None
+
+    try:
+        resolved = (tree.root / raw).resolve()
+    except (OSError, RuntimeError) as e:
+        # A symlink loop is the realistic case, and pathlib's own error for it
+        # is a **RuntimeError**, not an OSError — catching only OSError left
+        # this line raising out of the middle of the walk. A traceback exits 1,
+        # which this script's contract reserves for tree-content violations, so
+        # the crash would be indistinguishable from a real finding while hiding
+        # every record the scan never reached.
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' cannot be resolved ({e}) — the address does not "
+            "lead anywhere the filesystem can follow, so neither can a "
+            f"reader. {spec.fix}.",
+        )
+        return None
+    try:
+        resolved.relative_to(tree.root)
+    except ValueError:
+        # No `..` in the text, so the escape came through a symlink. Same
+        # consequence either way: the file it points at is in no clone of this
+        # repo, so the record is addressed to nowhere.
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' resolves through a symlink to '{resolved}', "
+            "outside the repository — no clone of this repo contains that "
+            f"file, so the pointer has no address anyone else can follow. "
+            f"{spec.fix}.",
+        )
+        return None
+
+    if not resolved.exists():
+        report.error(rel, line, f"{key} '{raw}' does not exist — {spec.missing}")
+        return None
+    if resolved.is_dir():
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' is a directory, not a file — a directory can "
+            "exist while saying nothing about the work, whereas a file names "
+            f"it. {spec.fix}.{spec.dir_hint}",
+        )
+        return None
+    if not resolved.is_file():
+        report.error(
+            rel,
+            line,
+            f"{key} '{raw}' is not a regular file — a pointer has to name "
+            f"something a reader can open and a diff can show. {spec.fix}.",
+        )
+        return None
+    return resolved
+
+
+def plan_directory(raw: str, resolved: Path, tree: Tree) -> str | None:
+    """The `*_plan` directory component of a path, declared or resolved.
+
+    Both forms are inspected, and the declared one is why: a pointer written
+    *into* a plan directory that happens to be a symlink out to a durable file
+    resolves somewhere safe and is deleted anyway, because `/push-plan` removes
+    the folder — symlink included. Checking only the resolved path passed that
+    pointer clean and let it dangle on the first push, which is the exact rot
+    this rule exists to catch.
+
+    Directory components only, in both forms: the file itself is not the folder
+    `/push-plan` deletes, and a file legitimately named `<name>_plan.md` is the
+    epic file an in-flight plan is *pointed at* by.
+    """
+    parts = (
+        *PurePosixPath(raw).parts[:-1],
+        *resolved.relative_to(tree.root).parts[:-1],
+    )
+    return next((p for p in parts if p.endswith(PLAN_DIR_SUFFIX)), None)
+
+
+def check_destination(rec: Record, tree: Tree, report: Report) -> None:
+    """The destination rules: the shared containment ones, plus the two this
+    field owns — no cross-project destinations (error), and a plan directory
+    (warning).
     """
     rel = rec.rel
     line = field_line(rec, "destination")
@@ -938,91 +1121,8 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         )
         return
 
-    pure = PurePosixPath(raw)
-    if pure.is_absolute() or raw.startswith("~"):
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' is an absolute path — destinations are "
-            "repo-relative so the record means the same thing in every clone; "
-            "an absolute one names somebody's own disk and resolves nowhere "
-            "for the next reader. Write it relative to the repository root.",
-        )
-        return
-    if ".." in pure.parts:
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' escapes the repository with '../' — a "
-            "deferral has to be reviewable alongside the record that names "
-            f"it, and nothing outside the tree is. {POINT_AT}.",
-        )
-        return
-
-    try:
-        resolved = (tree.root / raw).resolve()
-    except (OSError, RuntimeError) as e:
-        # A symlink loop is the realistic case, and pathlib's own error for it
-        # is a **RuntimeError**, not an OSError — catching only OSError left
-        # this line raising out of the middle of the walk. A traceback exits 1,
-        # which this script's contract reserves for tree-content violations, so
-        # the crash would be indistinguishable from a real finding while hiding
-        # every record the scan never reached.
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' cannot be resolved ({e}) — the address does "
-            "not lead anywhere the filesystem can follow, so neither can a "
-            f"reader. {POINT_AT}.",
-        )
-        return
-    try:
-        inside = resolved.relative_to(tree.root)
-    except ValueError:
-        # No `..` in the text, so the escape came through a symlink. Same
-        # consequence either way: the file it points at is in no clone of this
-        # repo, so the obligation is addressed to nowhere.
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' resolves through a symlink to '{resolved}', "
-            "outside the repository — no clone of this repo contains that "
-            f"file, so the deferral has no address anyone else can follow. "
-            f"{POINT_AT}.",
-        )
-        return
-
-    if not resolved.exists():
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' does not exist — this is how deferred work "
-            "goes dark: naming a place does not create one, and a deferral to "
-            "a path that is not there reads as routed while routing nowhere. "
-            "Write the file first — a stub card under "
-            "tracks/<track>/obligations/ carrying its own "
-            "`superseded_when:` is the usual move — then point at it.",
-        )
-        return
-    if resolved.is_dir():
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' is a directory, not a file — a directory "
-            "can exist while saying nothing about the work, whereas a file "
-            f"names it. {POINT_AT}. (If the file you pick sits under a "
-            "*_plan/ directory, read the plan-directory warning first: "
-            "/push-plan deletes those folders.)",
-        )
-        return
-    if not resolved.is_file():
-        report.error(
-            rel,
-            line,
-            f"destination '{raw}' is not a regular file — a deferral has to "
-            f"point at something a reader can open and a diff can show. "
-            f"{POINT_AT}.",
-        )
+    resolved = check_contained_file(rec, DESTINATION_FIELD, raw, tree, report)
+    if resolved is None:
         return
 
     research_parts: tuple[str, ...] = ()
@@ -1048,10 +1148,7 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         )
         return
 
-    plan_dir = next(
-        (p for p in inside.parts[:-1] if p.endswith(PLAN_DIR_SUFFIX)),
-        None,
-    )
+    plan_dir = plan_directory(raw, resolved, tree)
     if plan_dir is not None:
         report.warn(
             rel,
@@ -1190,8 +1287,26 @@ def validate_obligations(
                 "status, or drop the field.",
             )
 
-        # `blocking:` is accepted and recorded here; whether it names a real
-        # decision is task 5's referential check.
+        # `blocking:` is optional — most obligations should not carry it, and
+        # scarcity is what keeps convergence meaningful. But a `blocking:` that
+        # is *written* and names nothing is the same defect as task 4's
+        # `blocks: ,`: it has truthy text, is not the sentinel, parses to zero
+        # ids, and so declares a gate that gates nothing while reading as
+        # wired up. Whether the ids it does carry name real decisions is
+        # `validate_references`'s, which needs the whole tree.
+        blocking = rec.fields.get("blocking")
+        if blocking is not None and not blocking.is_none and not blocking.items:
+            report.error(
+                rel,
+                blocking.line,
+                "'blocking:' is written but names no decision — a separator or "
+                "an empty value parses to zero ids, so this obligation is "
+                "reported as gating nothing while looking like it gates "
+                "something, and the decision it was meant to hold up converges "
+                "without it. Name the decision, or drop the line: `blocking:` "
+                "is optional, and it is meant to be scarce.",
+            )
+
         check_destination(rec, tree, report)
 
 
@@ -1439,7 +1554,8 @@ def check_question(
             "wiring to the decision it gates.",
         )
     # A `blocks:` naming real decisions is accepted and recorded here; whether
-    # those decisions exist is task 5's referential check.
+    # those decisions exist is `validate_references`'s, which needs the whole
+    # tree before any reference can be resolved.
 
     if status == "retired" and declared(rec, "retired_because") is None:
         report.error(
@@ -1613,6 +1729,294 @@ def validate_contracts(tree: Tree, report: Report) -> None:
                     "is work somebody owes, and a contract document is not a "
                     f"backlog. {DECLARE_SOMETHING}.",
                 )
+
+
+# --------------------------------------------------------------------------
+# Decisions, and referential integrity across record types
+# --------------------------------------------------------------------------
+#
+# The convergence hook. Questions and obligations name the decision they block,
+# so "what still blocks building?" is a derived fact rather than a feeling —
+# and that only holds if the names resolve. A `blocks:` naming a decision
+# nobody ever filed is the "track that did not exist" bug wearing a different
+# hat: it reads as wired up, gates nothing, and no report can see the gap.
+#
+# Two rules below look like one and are worth separating in the reader's head.
+# "A `decided` decision has zero open blockers" and "a new open blocker against
+# a `decided` decision is an error" are the same *condition* seen from either
+# end — so they are one check, reported at the referencing record, because that
+# is where the fix goes.
+
+DECIDED_IN_POINT_AT = (
+    "point at durable evidence that already exists — an ADR, a permanent "
+    "design doc, or a receipt card under tracks/<track>/obligations/"
+)
+
+DECIDED_IN_FIELD = PathField(
+    key="decided_in",
+    fix=DECIDED_IN_POINT_AT,
+    missing=(
+        "a decision's evidence is what the next reader consults instead of "
+        "re-litigating it, and a pointer to a file that is not there records "
+        "only that somebody typed a path. Write the ADR, design doc or "
+        "receipt card first, then point at it."
+    ),
+)
+
+# How a decision is reopened, quoted in three messages because the three rules
+# that mention it are only coherent together.
+REOPEN_SHAPE = (
+    "`state: pending` plus `reopened_because:` plus the **retained** "
+    "`decided_in:` of the decision being reopened"
+)
+
+
+def in_track_questions(rec: Record) -> bool:
+    """True for a record filed in some track's `questions.md`."""
+    return rec.track is not None and rec.path.name == QUESTIONS_FILENAME
+
+
+def check_decided_in(
+    rec: Record, state: str | None, tree: Tree, report: Report
+) -> None:
+    """`decided_in:`, and the reopen exemption that keeps it coherent.
+
+    Required when `decided`, and permitted otherwise **only** as reopen
+    evidence. That exemption is the whole reason a reopened decision can sit
+    at `state: pending` while still carrying the pointer — and the retained
+    pointer is, in turn, the only structural evidence that there was ever a
+    decision to reopen. This validator reads one snapshot of the tree with no
+    history, so without it a legitimately reopened decision is byte-identical
+    to one that never decided anything and says `reopened_because:` anyway.
+    """
+    rel = rec.rel
+    raw = declared(rec, "decided_in")
+    reopened = declared(rec, "reopened_because")
+
+    if raw is None:
+        if reopened is not None:
+            report.error(
+                rel,
+                field_line(rec, "reopened_because"),
+                "'reopened_because:' with no retained 'decided_in:' — a "
+                "decision that was never decided has nothing to reopen, and "
+                "this validator reads one snapshot of the tree with no "
+                "history, so the retained pointer is the only structural "
+                "evidence that there was a prior decision at all. Keep the "
+                f"`decided_in:` of the decision being reopened ({REOPEN_SHAPE}"
+                "), or drop `reopened_because:` and file this as an ordinary "
+                "pending decision.",
+            )
+        elif state == "decided":
+            report.error(
+                rel,
+                field_line(rec, "decided_in"),
+                "a decided decision requires 'decided_in:' — a pointer to the "
+                "durable evidence of the decision: an ADR, a permanent design "
+                "doc, or a receipt card. Without one 'decided' is an assertion "
+                "with nothing behind it, and the next person to ask why "
+                f"re-litigates it from scratch. {DECIDED_IN_POINT_AT}.",
+            )
+        return
+
+    # The exemption is the whole reopen *shape*, not the presence of one field.
+    # Keying it on `reopened_because:` alone let any other state carry the
+    # pointer by adding a single line — a `proposed` decision could claim the
+    # evidence of a decision nobody ever took, and validate clean while doing
+    # it. `pending` **and** `reopened_because:`, together, or nothing.
+    if state != "decided" and not (state == "pending" and reopened is not None):
+        report.error(
+            rel,
+            field_line(rec, "decided_in"),
+            f"'decided_in:' on a decision whose state is {state!r} — the "
+            "pointer belongs to a decision that was taken, and the only "
+            f"exemption is reopen evidence, which is a whole shape: "
+            f"{REOPEN_SHAPE}. `reopened_because:` on its own does not earn it, "
+            "or any state at all could claim evidence of a decision nobody "
+            "took. Either set `state: decided`, or file this as the reopen it "
+            "is.",
+        )
+
+    resolved = check_contained_file(rec, DECIDED_IN_FIELD, raw, tree, report)
+    if resolved is None:
+        return
+    plan_dir = plan_directory(raw, resolved, tree)
+    if plan_dir is not None:
+        report.error(
+            rel,
+            field_line(rec, "decided_in"),
+            f"decided_in '{raw}' is inside a plan directory ('{plan_dir}') — "
+            "/push-plan deletes plan directories once it has migrated them to "
+            "a tracker, so this pointer is scheduled for deletion and the "
+            "evidence for the decision disappears on the first push. Unlike an "
+            "obligation's destination, which may legitimately point at an "
+            "in-flight plan, a decision's evidence has to outlive the work: "
+            f"{DECIDED_IN_POINT_AT}.",
+        )
+
+
+def validate_decisions(
+    tree: Tree, seen: dict[str, tuple[str, int]], report: Report
+) -> None:
+    """Field semantics for every `decision` block in the tree.
+
+    Only the human lifecycle state is stored, so there is very little here on
+    purpose: `state`, the evidence pointer, and where a `proposed` one may be
+    filed. Readiness is derived on every run by the reference walk below, and
+    there is no key to hand-edit it wrongly with — `KNOWN_FIELDS` rejects
+    `ready:`/`blocked:` as unknown keys, which is the record format itself
+    refusing to hold a number that could go stale.
+    """
+    for rec in tree.records:
+        if rec.kind != "decision":
+            continue
+        rel = rec.rel
+
+        if declared(rec, "id") is None:
+            report.error(
+                rel,
+                field_line(rec, "id"),
+                "decision block: 'id:' is required — the id is what a "
+                "question's `blocks:` and an obligation's `blocking:` name, so "
+                "a decision without one can gate nothing and appear in no "
+                "convergence report.",
+            )
+        check_declared_id(rec, seen, report)
+
+        state = declared(rec, "state")
+        if state is None:
+            report.error(
+                rel,
+                field_line(rec, "state"),
+                "decision block: 'state:' is required — "
+                f"{' | '.join(DECISION_STATES)} (plus `{PROPOSED_STATE}`, "
+                "valid only inside a track's questions.md). It is the one "
+                "thing a decision stores; everything else about it — ready, "
+                "blocked, by what — is derived from the questions and "
+                "obligations that name it.",
+            )
+        elif state == PROPOSED_STATE and not in_track_questions(rec):
+            where = (
+                "decisions.md holds decisions the organizer has already promoted"
+                if rec.path.name == DECISIONS_FILENAME
+                else "a proposed decision belongs next to the question that needs it"
+            )
+            report.error(
+                rel,
+                field_line(rec, "state"),
+                f"a '{PROPOSED_STATE}' decision filed here — {where}, and a "
+                "track that discovers it needs a decision files the "
+                f"`state: {PROPOSED_STATE}` block in its own "
+                f"{QUESTIONS_FILENAME}, next to the question. Promoting it "
+                "into decisions.md is an organizer act (the skill's "
+                "promote-decision procedure) and is deliberately not something "
+                "this script does — a script that promoted would be deciding "
+                "who owns the decision list. Move the block into the track's "
+                f"{QUESTIONS_FILENAME}, or promote it by hand and set "
+                f"`state: {DECISION_STATES[0]}`.",
+            )
+        elif state not in DECISION_STATES and state != PROPOSED_STATE:
+            report.error(
+                rel,
+                field_line(rec, "state"),
+                f"decision state {state!r} is not one of "
+                f"{' | '.join(DECISION_STATES)} — a decision is either taken "
+                "or it is not. In particular there is no stored 'ready' or "
+                "'blocked': readiness is derived from the blockers on every "
+                "run, so a stored copy could only ever disagree with the "
+                f"truth. (`{PROPOSED_STATE}` is a state, but only inside a "
+                f"track's {QUESTIONS_FILENAME}.)",
+            )
+
+        check_decided_in(rec, state, tree, report)
+
+
+def validate_references(tree: Tree, report: Report) -> None:
+    """Every `blocks:` and `blocking:` reference, resolved against the tree.
+
+    References name decisions by **bare** id and resolve within the enclosing
+    project. That is not a shortcut: cross-project destinations are forbidden
+    (see `check_destination`) precisely so a project can see every inbound
+    dependency in its own ledger, so a reference reaching into a sibling
+    project would have no ledger to appear in and is dangling by construction.
+    """
+    decisions: dict[tuple[str, str], Record] = {}
+    for rec in tree.records:
+        bare = declared(rec, "id") if rec.kind == "decision" else None
+        if bare is not None:
+            # First declaration wins; a second is already reported as a
+            # duplicate id, and resolving references against it too would
+            # print the same defect twice in different words.
+            decisions.setdefault((rec.project, bare), rec)
+
+    referenced: set[tuple[str, str]] = set()
+    for rec in tree.records:
+        if rec.kind == "question":
+            key = "blocks"
+        elif rec.kind == "obligation":
+            key = "blocking"
+        else:
+            continue
+        value = rec.fields.get(key)
+        if value is None or value.is_none:
+            continue
+        line = value.line
+        # An open question or an open obligation is a **live** blocker: it is
+        # work still outstanding against the decision. A closed one is history,
+        # and history against a decided decision has to stay clean — otherwise
+        # deciding anything would require rewriting the records that led to it.
+        live = declared(rec, "status") == "open"
+        for bare in value.items:
+            target = decisions.get((rec.project, bare))
+            if target is None:
+                report.error(
+                    rec.rel,
+                    line,
+                    f"{key} names decision '{bare}', which does not exist in "
+                    f"project '{rec.project}' — naming a decision does not "
+                    "create one, so this record reads as gating something "
+                    "while gating nothing, and no convergence report can see "
+                    "the gap. References resolve within the enclosing project "
+                    "(a decision of the same name in a sibling project is not "
+                    "visible here, by design). File the decision in "
+                    f"{rec.project}/{DECISIONS_FILENAME}, or file a "
+                    f"`state: {PROPOSED_STATE}` block in this track's "
+                    f"{QUESTIONS_FILENAME} and let the organizer promote it.",
+                )
+                continue
+            referenced.add((rec.project, bare))
+            if not live or declared(target, "state") != "decided":
+                continue
+            report.error(
+                rec.rel,
+                line,
+                f"this {rec.kind} is open and {key} decision '{bare}', which "
+                f"is already decided at {target.rel}:{target.line} — a decided "
+                "decision must have zero open blockers, so either this record "
+                "is stale or the decision was taken too early. Close the "
+                "record (answer or retire the question; discharge the "
+                "obligation), or reopen the decision explicitly: "
+                f"{REOPEN_SHAPE}. Reopening is the honest move and the "
+                "records say so afterwards; silently filing new work against "
+                "a decided decision is how a decision stops meaning anything.",
+            )
+
+    for (_, bare), rec in sorted(
+        decisions.items(), key=lambda kv: (kv[1].rel, kv[1].line)
+    ):
+        if (rec.project, bare) in referenced:
+            continue
+        report.warn(
+            rec.rel,
+            rec.line,
+            f"decision '{rec.qualified_id or bare}' is referenced by nothing — "
+            "no question `blocks:` it and no obligation is `blocking:` it, so "
+            "the convergence report can only ever show it as ready, whatever "
+            "is actually outstanding. Either it is already settled and belongs "
+            "in the record of decisions taken, or the questions that gate it "
+            "have not been wired to it yet. A warning, not an error: a "
+            "decision with no blockers left is a normal end state.",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -2131,8 +2535,8 @@ def print_inventory_for(tree: Tree, project: Project) -> None:
     This is the observation surface the fixture tests assert on — the parsed
     form of every field, so grammar rules (no comment stripping, comma lists,
     the `none` sentinel) are visible without a validation rule to fail. It is
-    also the only consumer of the record model and the section helper until
-    the validation rules land in tasks 3-5.
+    also where a record the rules cannot place is still named, so nothing
+    the parser saw is invisible.
     """
     for rec in tree.records:
         if rec.project != project.name:
@@ -2171,10 +2575,14 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     # id that could mean two records is ambiguous whatever their kinds, and
     # `blocks:`/`blocking:` resolve by bare id.
     seen: dict[str, tuple[str, int]] = {}
+    validate_decisions(tree, seen, report)
     validate_obligations(tree, seen, report)
     validate_questions(tree, seen, report)
     validate_contracts(tree, report)
     validate_cards(tree, report)
+    # Last, and over the whole tree: a reference is only resolvable once every
+    # record that could satisfy it has been discovered.
+    validate_references(tree, report)
     if args.verbose:
         # Printed before the verdict, and whatever the verdict. The inventory
         # is the only view of what the parser actually made of the tree, so
