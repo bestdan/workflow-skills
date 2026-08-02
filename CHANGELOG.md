@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.72.0] - 2026-08-02
+
+### Features
+
+- validate obligations and cards — the destination-must-exist rule (#322) (93a2afb)
+
 ## [1.71.0] - 2026-08-01
 
 ### Features
