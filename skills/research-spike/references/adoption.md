@@ -131,8 +131,8 @@ report-only signal does.
 
 ## This repo's own status
 
-`workflow-skills` has not run this playbook. Plan decision 2
-(`dev_docs/tasks/research_spike_plan/research_spike_plan.md`) deliberately
-defers the first real adoption to whoever initializes the first live
-project — see `scripts/check.sh`'s header comment for the reasoning against
+`workflow-skills` has not run this playbook. The plan that built this skill
+deliberately deferred the first real adoption to whoever initializes the
+first live project — see `dev_docs/research_spike.md` for the engineering
+record and `scripts/check.sh`'s header comment for the reasoning against
 gating on a tree that doesn't exist yet.

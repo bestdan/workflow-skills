@@ -10,6 +10,10 @@ questions before building the thing. This skill is the judgment half of that
 instrument; `scripts/research-spike.py` is the other half, and the two must
 never trade places.
 
+Engineering record — final architecture, load-bearing decisions, and the
+gotchas a maintainer needs before touching the script:
+[`../../dev_docs/research_spike.md`](../../dev_docs/research_spike.md).
+
 ## The boundary, first
 
 Presenting this skill's five procedures next to the script's six subcommands
