@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.74.0] - 2026-08-02
+
+### Features
+
+- suggest — the advisory scan that cannot fail a run (#324) (6129c8d)
+
 ## [1.73.0] - 2026-08-02
 
 ### Features
