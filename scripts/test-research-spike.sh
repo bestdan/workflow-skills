@@ -3497,6 +3497,54 @@ exit_x2=$?
 assert_exit "bare validate still fails on the deleted LEDGER.md" "$exit_x2" 1
 assert_contains "bare validate names the missing LEDGER.md" "$out_x2" "LEDGER.md does not exist"
 
+# --- Fixture (y): the task-loop bridge shape — receipt card, not a bare URL
+# Task 10's whole acceptance criterion in one pair. A tracker handler returns
+# a URL, never a path, so an obligation cannot point `destination:` at one
+# directly — it fails the same "does not exist" check as any other missing
+# file. The bridge instead points at a `kind: receipt` card that carries the
+# URL as content, which the validator never path-checks. Both halves have to
+# hold, or the bridge is only documented, not proven.
+
+DIR_Y1="$BASE/bridge-receipt-ok"
+write_file "$DIR_Y1/dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md" \
+  '# account-quota-followup receipt
+
+```card
+kind: receipt
+handler: linear
+tracker_id: PRE-142
+url: https://linear.app/example-team/issue/PRE-142/account-quota-followup
+```'
+write_file "$DIR_Y1/dev_docs/research/demo/tracks/account/questions.md" '# account
+
+```obligation
+id: account-quota-followup
+owes: the quota-check helper this answer implies but does not build
+destination: dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md
+status: open
+```'
+seed_fresh_ledger "$DIR_Y1"
+out_y1="$(python3 "$SCRIPT" --root "$DIR_Y1" validate 2>&1)"
+exit_y1=$?
+assert_exit "an obligation pointing at a receipt card validates clean" "$exit_y1" 0
+assert_contains "the receipt-card tree reports OK" "$out_y1" "research-spike: OK"
+
+DIR_Y2="$BASE/bridge-url-not-card"
+write_file "$DIR_Y2/dev_docs/research/demo/tracks/account/questions.md" '# account
+
+```obligation
+id: account-quota-followup
+owes: the quota-check helper this answer implies but does not build
+destination: https://linear.app/example-team/issue/PRE-142/account-quota-followup
+status: open
+```'
+seed_fresh_ledger "$DIR_Y2"
+out_y2="$(python3 "$SCRIPT" --root "$DIR_Y2" validate 2>&1)"
+exit_y2=$?
+assert_exit "the same obligation pointing straight at a URL (no card) exits 1" "$exit_y2" 1
+assert_contains "the bare-URL destination is reported as a missing file, not accepted as content" \
+  "$out_y2" "does not exist"
+
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1

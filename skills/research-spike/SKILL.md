@@ -241,6 +241,67 @@ Moves a track's `proposed` decision block into the project's `decisions.md`.
    `promote-decision` writes `decisions.md`, which is organizer territory,
    so check it at the organizer's tier.
 
+## The two bridges
+
+The spike machinery stands alone and works in any repo. Where this repo's
+task loop is configured (`dev_docs/tasks/.task-config.yml` present), two
+bridges exist — and both had their first drafts rejected in review for
+violating the destination-must-exist invariant. Tracker handlers return
+**URLs, not paths**, and `/push-plan` **deletes** plan directories after
+migration, so an obligation or a decision pointing at either rots on first
+contact. Both bridges therefore route through **receipt cards**
+(`kind: receipt`, field reference in `references/record-grammar.md`): the
+pointer — `destination:` for an obligation, `decided_in:` for a decision —
+names the card file, a path that exists, while the external reference lives
+in card content the validator never path-checks and, being offline by
+contract, could not verify anyway.
+
+### `defer` → task loop
+
+When `dev_docs/tasks/.task-config.yml` is present, procedure 3 (`defer`)
+offers an alternative to creating a stub: "`/add-task` this instead." On
+acceptance, `/add-task` runs and returns a tracker id and URL; the procedure
+then writes a `kind: receipt` card carrying `handler:`, `tracker_id:`, and
+that `url:`, and points the obligation's `destination:` at the card rather
+than at a stub. Card and obligation, side by side — the shape is the whole
+point:
+
+```card
+kind: receipt
+handler: linear
+tracker_id: PRE-142
+url: https://linear.app/example-team/issue/PRE-142/account-quota-followup
+```
+
+```obligation
+id: account-quota-followup
+owes: the quota-check helper this answer implies but doesn't build
+destination: dev_docs/research/demo/tracks/account/obligations/account-quota-followup-receipt.md
+status: open
+```
+
+### `decided` → plan-with-docs
+
+A `decided` decision's `decided_in:` must point at **durable** evidence: an
+ADR, a permanent design doc, or a receipt card recording the plan handoff —
+never a plan directory. A plan directory is not durable: `/push-plan`
+deletes it once its tasks migrate to a tracker, and the validator does not
+merely warn about that the way it does for an obligation's `destination:` —
+for `decided_in:` a plan-directory pointer is an **error**
+(`check_decided_in`), because a decision's evidence has to outlive the work
+it documents, not just survive until the next push. A handoff receipt
+survives the same migration because the card is **updated** to the tracker
+URL when the plan is pushed, rather than deleted along with the folder.
+
+### No auto-promotion in either direction
+
+Neither bridge fires on its own. `defer` only offers `/add-task` — accepting
+it is a human choice, same as picking a stub. A decision still moves
+`pending` → `decided` only by a human act, recorded with `decided_in:`.
+Promotion is an explicit act here for the same reason `write-ledger` is:
+fold either into the walk and a number, or a state, stops being checked and
+starts being generated.
+
 ## Write-ownership convention
 
 Track agents touch `tracks/<theirs>/` only — proposed decisions included.
@@ -319,8 +380,11 @@ incidental convenience.
   declared debt, not remaining work — see the granularity note above.
 - **Bridged work is not reconciled.** An obligation whose receipt card
   points at a tracker task stays `open` until a human discharges it by
-  hand, whatever the tracker itself says. The ledger reports declared debt
-  as last hand-updated.
+  hand, whatever the tracker itself says — closing the tracker issue does
+  **not** discharge the local obligation. The ledger reports declared debt
+  as last hand-updated. The receipt cards are what would make a later
+  `sweep` verb possible — walk the receipts, check tracker state, propose
+  discharges — but that verb is deliberately not in v1.
 - **The divergence signal is a snapshot.** The ledgers store no history, so
   "questions converging while obligations climb" is read by a human across
   commits — `git log` on the ledger lines — not computed or trended by the
