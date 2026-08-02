@@ -24,13 +24,6 @@ dev_docs/co-review/
 #   !dev_docs/tasks/<name>_plan/keep-me.md
 dev_docs/tasks/*
 !dev_docs/tasks/.task-config.yml
-# research_spike_plan is force-tracked while in flight so it is reviewable in
-# its PR. research_spike_task_13 deletes these three lines together with the
-# folder — a negation outliving its path is the orphaned reference that plan is
-# about.
-!dev_docs/tasks/research_spike_plan/
-dev_docs/tasks/research_spike_plan/*
-!dev_docs/tasks/research_spike_plan/*.md
 
 # Repo-local mktemp fallback dirs for the shell test suites, used when the
 # system temp dir is denied (e.g. sandboxed runs) — trap-cleaned on exit, but
