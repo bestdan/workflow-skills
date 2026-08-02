@@ -1200,6 +1200,21 @@ out_l18v="$(python3 "$SCRIPT" --root "$DIR_L18" --verbose validate 2>&1)"
 assert_contains "blocking: is recorded for task 5's referential check" "$out_l18v" \
   "blocking = 'stop-semantics'"
 
+# A written `blocking:` that names nothing is the same defect as fixture
+# (n17d)'s `blocks: ,` — truthy text, not the sentinel, zero ids — and the
+# field being optional is exactly why it slipped: an intended gate silently
+# dropped reads as wired up while gating nothing.
+DIR_L18B="$BASE/blocking-separator-only"
+status_fixture "$DIR_L18B" "status: open
+blocking: ,"
+out_l18b="$(python3 "$SCRIPT" --root "$DIR_L18B" validate 2>&1)"
+exit_l18b=$?
+assert_exit "a separator-only 'blocking: ,' exits 1" "$exit_l18b" 1
+assert_contains "the empty blocking: is reported as naming no decision" "$out_l18b" \
+  "'blocking:' is written but names no decision"
+assert_contains "the empty blocking: says dropping the line is legitimate" "$out_l18b" \
+  "it is meant to be scarce"
+
 # The unknown-key rule (fixture (d)) is what catches a `desination:` typo: the
 # constraint must not be silently dropped because the key was misspelled.
 
@@ -1994,6 +2009,27 @@ assert_exit "a decided_in nested deeper inside a *_plan/ directory exits 1" "$ex
 assert_contains "the nested plan directory is still named" "$out_r6b" \
   "is inside a plan directory ('foo_plan')"
 
+# The declared path is checked too, not only the resolved one: a pointer
+# written *into* a plan directory that symlinks out to a durable file resolves
+# somewhere safe and is deleted anyway, because /push-plan removes the folder
+# with the symlink in it.
+DIR_R6E="$BASE/decided-in-plan-dir-symlink"
+decision_fixture "$DIR_R6E" "id: stop-semantics
+state: decided
+decided_in: dev_docs/tasks/foo_plan/decision.md" "id: baseline-stop-escapee
+status: answered
+answer: no — the baseline stop is measured with the escapee excluded
+blocks: stop-semantics"
+mkdir -p "$DIR_R6E/dev_docs/tasks/foo_plan"
+ln -s ../../adr/0007-stop-semantics.md "$DIR_R6E/dev_docs/tasks/foo_plan/decision.md"
+out_r6e="$(python3 "$SCRIPT" --root "$DIR_R6E" validate 2>&1)"
+exit_r6e=$?
+assert_exit "a decided_in symlinked out of a *_plan/ directory still exits 1" "$exit_r6e" 1
+assert_contains "the symlinked plan-directory pointer names the directory it sits in" \
+  "$out_r6e" "is inside a plan directory ('foo_plan')"
+assert_contains "the symlinked plan-directory pointer names the /push-plan hazard" \
+  "$out_r6e" "/push-plan deletes plan directories"
+
 # `decided_in:` shares task 3's containment rules, one implementation: a
 # missing file is a pointer to nothing wherever it is written.
 DIR_R6C="$BASE/decided-in-missing"
@@ -2162,6 +2198,31 @@ assert_contains "the pending-with-evidence error names the state it saw" "$out_r
   "'decided_in:' on a decision whose state is 'pending'"
 assert_contains "the pending-with-evidence error names the one exemption" "$out_r14" \
   "the only exemption is reopen evidence"
+
+# And the exemption is the whole reopen *shape*, not one field: keyed on
+# `reopened_because:` alone, a `proposed` decision could carry the evidence of
+# a decision nobody ever took and validate clean.
+DIR_R14B="$BASE/proposed-masquerading-as-reopened"
+decision_fixture "$DIR_R14B" "id: stop-semantics
+state: pending" "id: baseline-stop-escapee
+status: open
+blocks: stop-semantics, stop-tooling"
+cat >>"$DIR_R14B/dev_docs/research/alpha/tracks/account/questions.md" <<'MASQUERADE'
+
+```decision
+id: stop-tooling
+state: proposed
+reopened_because: it looks like a reopen from here
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```
+MASQUERADE
+out_r14b="$(python3 "$SCRIPT" --root "$DIR_R14B" validate 2>&1)"
+exit_r14b=$?
+assert_exit "a proposed decision carrying reopen evidence exits 1" "$exit_r14b" 1
+assert_contains "the masquerading reopen names the state it saw" "$out_r14b" \
+  "'decided_in:' on a decision whose state is 'proposed'"
+assert_contains "the masquerading reopen says one field does not earn the exemption" \
+  "$out_r14b" "\`reopened_because:\` on its own does not earn it"
 
 # --- Fixture (r15): a decision nothing references ------------------------
 # A warning, not an error: a decision with no blockers left is a normal end

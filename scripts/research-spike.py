@@ -1082,15 +1082,25 @@ def check_contained_file(
     return resolved
 
 
-def plan_directory(resolved: Path, tree: Tree) -> str | None:
-    """The `*_plan` directory component of a contained path, or None.
+def plan_directory(raw: str, resolved: Path, tree: Tree) -> str | None:
+    """The `*_plan` directory component of a path, declared or resolved.
 
-    Directory components only: the file itself is not the folder `/push-plan`
-    deletes, and a file legitimately named `<name>_plan.md` is the epic file
-    an in-flight plan is *pointed at* by.
+    Both forms are inspected, and the declared one is why: a pointer written
+    *into* a plan directory that happens to be a symlink out to a durable file
+    resolves somewhere safe and is deleted anyway, because `/push-plan` removes
+    the folder — symlink included. Checking only the resolved path passed that
+    pointer clean and let it dangle on the first push, which is the exact rot
+    this rule exists to catch.
+
+    Directory components only, in both forms: the file itself is not the folder
+    `/push-plan` deletes, and a file legitimately named `<name>_plan.md` is the
+    epic file an in-flight plan is *pointed at* by.
     """
-    inside = resolved.relative_to(tree.root)
-    return next((p for p in inside.parts[:-1] if p.endswith(PLAN_DIR_SUFFIX)), None)
+    parts = (
+        *PurePosixPath(raw).parts[:-1],
+        *resolved.relative_to(tree.root).parts[:-1],
+    )
+    return next((p for p in parts if p.endswith(PLAN_DIR_SUFFIX)), None)
 
 
 def check_destination(rec: Record, tree: Tree, report: Report) -> None:
@@ -1138,7 +1148,7 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         )
         return
 
-    plan_dir = plan_directory(resolved, tree)
+    plan_dir = plan_directory(raw, resolved, tree)
     if plan_dir is not None:
         report.warn(
             rel,
@@ -1277,8 +1287,26 @@ def validate_obligations(
                 "status, or drop the field.",
             )
 
-        # `blocking:` is accepted and recorded here; whether it names a real
-        # decision is `validate_references`'s, which needs the whole tree.
+        # `blocking:` is optional — most obligations should not carry it, and
+        # scarcity is what keeps convergence meaningful. But a `blocking:` that
+        # is *written* and names nothing is the same defect as task 4's
+        # `blocks: ,`: it has truthy text, is not the sentinel, parses to zero
+        # ids, and so declares a gate that gates nothing while reading as
+        # wired up. Whether the ids it does carry name real decisions is
+        # `validate_references`'s, which needs the whole tree.
+        blocking = rec.fields.get("blocking")
+        if blocking is not None and not blocking.is_none and not blocking.items:
+            report.error(
+                rel,
+                blocking.line,
+                "'blocking:' is written but names no decision — a separator or "
+                "an empty value parses to zero ids, so this obligation is "
+                "reported as gating nothing while looking like it gates "
+                "something, and the decision it was meant to hold up converges "
+                "without it. Name the decision, or drop the line: `blocking:` "
+                "is optional, and it is meant to be scarce.",
+            )
+
         check_destination(rec, tree, report)
 
 
@@ -1791,21 +1819,28 @@ def check_decided_in(
             )
         return
 
-    if state != "decided" and reopened is None:
+    # The exemption is the whole reopen *shape*, not the presence of one field.
+    # Keying it on `reopened_because:` alone let any other state carry the
+    # pointer by adding a single line — a `proposed` decision could claim the
+    # evidence of a decision nobody ever took, and validate clean while doing
+    # it. `pending` **and** `reopened_because:`, together, or nothing.
+    if state != "decided" and not (state == "pending" and reopened is not None):
         report.error(
             rel,
             field_line(rec, "decided_in"),
             f"'decided_in:' on a decision whose state is {state!r} — the "
             "pointer belongs to a decision that was taken, and the only "
-            "exemption is reopen evidence, which has to say so. Either set "
-            "`state: decided`, or add `reopened_because:` if this is a "
-            f"reopened decision ({REOPEN_SHAPE}).",
+            f"exemption is reopen evidence, which is a whole shape: "
+            f"{REOPEN_SHAPE}. `reopened_because:` on its own does not earn it, "
+            "or any state at all could claim evidence of a decision nobody "
+            "took. Either set `state: decided`, or file this as the reopen it "
+            "is.",
         )
 
     resolved = check_contained_file(rec, DECIDED_IN_FIELD, raw, tree, report)
     if resolved is None:
         return
-    plan_dir = plan_directory(resolved, tree)
+    plan_dir = plan_directory(raw, resolved, tree)
     if plan_dir is not None:
         report.error(
             rel,
