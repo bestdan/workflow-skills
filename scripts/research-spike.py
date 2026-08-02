@@ -87,6 +87,16 @@ QUESTIONS_FILENAME = "questions.md"
 
 RECORD_KINDS = ("question", "obligation", "decision", "card")
 
+# The question lifecycle. `retired` is counted separately from `answered`
+# everywhere, deliberately: folding the two together would let a project
+# converge by giving up.
+QUESTION_STATUSES = ("open", "answered", "retired")
+
+# Where contract documents live. Optional and opt-in — `init` does not create
+# it — but once it exists every file in it is covered, because contract prose
+# states preconditions constantly and a contract document is not a backlog.
+CONTRACTS_DIRNAME = "contracts"
+
 # Where cards live, and the two enums task 3 owns. `open | discharged` is the
 # obligation's whole lifecycle: there is no `in progress`, because a half-state
 # is a place for work to sit and look accounted for.
@@ -801,6 +811,56 @@ def is_none_block(rec: Record) -> bool:
     return NONE_KEY in rec.fields and len(rec.fields) == 1
 
 
+def check_declared_id(
+    rec: Record, seen: dict[str, tuple[str, int]], report: Report
+) -> None:
+    """A declared `id:`'s shape and uniqueness — one implementation, every kind.
+
+    `seen` is a **single namespace shared across record kinds** within a
+    project/track, not one map per kind. Two records qualifying to the same
+    string are ambiguous whatever their kinds: `blocks:` and `blocking:`
+    resolve references by bare id, the status report prints questions and
+    obligations under the same `project/track/id` form, and a ledger counting
+    both would show one name twice. Per-kind namespaces would make
+    `alpha/account/keychain-invariant` mean a question here and an obligation
+    there, which is the ambiguity task 3's uniqueness rule exists to remove.
+
+    Says nothing when the id is absent: *whether* a kind requires one, and why,
+    is the caller's — the reasons differ per kind and the message should say
+    the right one.
+    """
+    bare = declared(rec, "id")
+    if bare is None:
+        return
+    line = field_line(rec, "id")
+    if not KEBAB_RE.match(bare):
+        report.error(
+            rec.rel,
+            line,
+            f"{rec.kind} id {bare!r} is not a valid id shape — use "
+            f"{KEBAB_DESCRIPTION}. Ids are qualified as project/track/id "
+            "and read back in reports and references, so an id carrying a "
+            "separator or a space corrupts the qualification.",
+        )
+        return
+    qualified = rec.qualified_id
+    if qualified is None:
+        return
+    prior = seen.get(qualified)
+    if prior is None:
+        seen[qualified] = (rec.rel, line)
+        return
+    report.error(
+        rec.rel,
+        line,
+        f"duplicate {rec.kind} id '{qualified}' — already declared at "
+        f"{prior[0]}:{prior[1]}. Qualified ids must be unique across the whole "
+        "tree, and across record kinds: two records sharing one are counted "
+        "twice in the ledger, and a `blocks:` or `blocking:` reference to them "
+        "names neither. Rename one.",
+    )
+
+
 def in_obligations_dir(tree: Tree, path: Path) -> bool:
     """True for a file under some track's `obligations/` directory."""
     try:
@@ -976,19 +1036,40 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
         )
 
 
-def validate_obligations(tree: Tree, report: Report) -> None:
+def validate_obligations(
+    tree: Tree, seen: dict[str, tuple[str, int]], report: Report
+) -> None:
     """Field semantics for every `obligation` block in the tree.
 
     Uniqueness is checked over the whole tree in one pass, not per file: two
     files each internally consistent is precisely how the reference
     implementation ended up with a `blocking:` reference that could mean
-    either of two records.
+    either of two records. `seen` is passed in because the namespace is shared
+    with every other kind that declares an id — see `check_declared_id`.
     """
-    seen: dict[str, tuple[str, int]] = {}
     for rec in tree.records:
-        if rec.kind != "obligation" or is_none_block(rec):
+        if rec.kind != "obligation":
             continue
         rel = rec.rel
+        if is_none_block(rec):
+            # The coverage rule's explicit declaration. The one field it has is
+            # checked here rather than in the coverage walk, because a bare
+            # `none:` block is the same record wherever it is filed — and it
+            # exists only so a reader can challenge the claim, which an empty
+            # one gives them nothing to do.
+            reason = rec.fields[NONE_KEY]
+            if not reason.reason:
+                report.error(
+                    rel,
+                    reason.line,
+                    "a bare `none:` block gives no reason — the declaration is "
+                    "worth having only because a reviewer can see it and "
+                    "challenge it, and 'none' on its own is indistinguishable "
+                    "from the forgetting this rule exists to remove. Say what "
+                    "makes this owe nothing, e.g. `none: option (A) adds no "
+                    "observation and owes no tooling`.",
+                )
+            continue
 
         if NONE_KEY in rec.fields:
             # Not exempt — reaching here means the block carries `none:` *and*
@@ -1017,8 +1098,7 @@ def validate_obligations(tree: Tree, report: Report) -> None:
                 "track whose work it is.",
             )
 
-        bare = declared(rec, "id")
-        if bare is None:
+        if declared(rec, "id") is None:
             report.error(
                 rel,
                 field_line(rec, "id"),
@@ -1026,32 +1106,7 @@ def validate_obligations(tree: Tree, report: Report) -> None:
                 "id cannot be counted, referenced by `blocking:`, or reported "
                 "as discharged.",
             )
-        elif not KEBAB_RE.match(bare):
-            report.error(
-                rel,
-                field_line(rec, "id"),
-                f"obligation id {bare!r} is not a valid id shape — use "
-                f"{KEBAB_DESCRIPTION}. Ids are qualified as project/track/id "
-                "and read back in reports and references, so an id carrying a "
-                "separator or a space corrupts the qualification.",
-            )
-        else:
-            qualified = rec.qualified_id
-            if qualified is not None:
-                prior = seen.get(qualified)
-                if prior is None:
-                    seen[qualified] = (rel, field_line(rec, "id"))
-                else:
-                    report.error(
-                        rel,
-                        field_line(rec, "id"),
-                        f"duplicate obligation id '{qualified}' — already "
-                        f"declared at {prior[0]}:{prior[1]}. Qualified ids "
-                        "must be unique across the whole tree: two records "
-                        "sharing one are counted twice in the ledger, and a "
-                        "`blocking:` reference to them names neither. Rename "
-                        "one.",
-                    )
+        check_declared_id(rec, seen, report)
 
         if declared(rec, "owes") is None:
             report.error(
@@ -1242,6 +1297,290 @@ def validate_cards(tree: Tree, report: Report) -> None:
                     "block looks filed and is counted nowhere. Add a ```card "
                     "block: kind: stub with superseded_when:, or kind: "
                     "receipt with url:.",
+                )
+
+
+# --------------------------------------------------------------------------
+# Questions and the coverage rule
+# --------------------------------------------------------------------------
+#
+# The half that matters more. Records alone catch only *malformed* deferrals;
+# they cannot catch the deferral nobody registered, which is the actual failure
+# mode — and the naive fix, a grep for deferral vocabulary, asks a question that
+# is unanswerable over English prose. "Is the field present?" is mechanical
+# instead: forgetting stops being available, and only deliberate silence
+# remains, which is a thing a reviewer can see and challenge.
+#
+# Scope is questions files and `contracts/` only. Widening it to every markdown
+# file would turn the discipline into noise and train people to satisfy it
+# mechanically (design §"What the skill must **not** do").
+
+# The one sentence that ends every coverage error, because every one of them is
+# fixed the same way.
+DECLARE_SOMETHING = (
+    "register an ```obligation block per deferral, or a bare "
+    "`none: <reason>` block saying why nothing is owed"
+)
+
+
+def records_by_file(tree: Tree) -> dict[str, list[Record]]:
+    """Every record, grouped by the file it was parsed from."""
+    index: dict[str, list[Record]] = {}
+    for rec in tree.records:
+        index.setdefault(rec.rel, []).append(rec)
+    return index
+
+
+def check_question(
+    rec: Record,
+    covered: bool,
+    seen: dict[str, tuple[str, int]],
+    report: Report,
+) -> None:
+    """Field semantics for one `question` block, given its section's coverage."""
+    rel = rec.rel
+
+    if rec.track is None:
+        report.error(
+            rel,
+            rec.line,
+            "question block is outside any track — a question is identified as "
+            "project/track/id and counted in its track's ledger, so one filed "
+            "outside tracks/<track>/ belongs to no ledger and can be named by "
+            "no reference. Move it into the track whose work it is.",
+        )
+
+    if declared(rec, "id") is None:
+        report.error(
+            rel,
+            field_line(rec, "id"),
+            "question block: 'id:' is required — a question with no id cannot "
+            "be counted in the ledger, named as a decision's blocker, or "
+            "reported answered.",
+        )
+    check_declared_id(rec, seen, report)
+
+    status = declared(rec, "status")
+    if status is None:
+        report.error(
+            rel,
+            field_line(rec, "status"),
+            "question block: 'status:' is required — "
+            f"{' | '.join(QUESTION_STATUSES)}. The question pair is half the "
+            "divergence signal the ledger exists to show, and a record with no "
+            "status is counted in no column of it.",
+        )
+    elif status not in QUESTION_STATUSES:
+        report.error(
+            rel,
+            field_line(rec, "status"),
+            f"question status {status!r} is not one of "
+            f"{' | '.join(QUESTION_STATUSES)} — a question either stands open, "
+            "carries a recorded answer, or has left the board with its premise. "
+            "Retirement is counted separately from answering on purpose: "
+            "folding them together would let a project converge by giving up.",
+        )
+
+    blocks = rec.fields.get("blocks")
+    # A non-sentinel value with nothing in its list is missing, not present:
+    # `blocks: ,` has truthy raw text, parses to zero ids, and is not the
+    # sentinel, so a raw-emptiness test let a separator typo validate clean
+    # while naming no decision at all. The sentinel branch is kept separate
+    # because a `none:` value legitimately has no items.
+    if blocks is None or (not blocks.is_none and not blocks.items):
+        report.error(
+            rel,
+            field_line(rec, "blocks"),
+            "question block: 'blocks:' is required — one or more decision ids, "
+            "or the sentinel `blocks: none: <reason>`. It is the convergence "
+            "hook: a decision's blocker list is derived from these, so a "
+            "question that names nothing is a question no report can place.",
+        )
+    elif blocks.is_none and not blocks.reason:
+        # The reason is what makes the sentinel a claim rather than a shrug.
+        report.error(
+            rel,
+            blocks.line,
+            "'blocks: none' gives no reason — a question that gates no "
+            "decision is worth noticing, so the sentinel has to say why "
+            "(`blocks: none: <reason>`). Without one there is no way to tell a "
+            "genuinely free-standing question from one nobody got round to "
+            "wiring to the decision it gates.",
+        )
+    # A `blocks:` naming real decisions is accepted and recorded here; whether
+    # those decisions exist is task 5's referential check.
+
+    if status == "retired" and declared(rec, "retired_because") is None:
+        report.error(
+            rel,
+            field_line(rec, "retired_because"),
+            "a retired question requires 'retired_because:' — retirement is "
+            "legitimate scope reduction, but a question that leaves the board "
+            "without saying what killed its premise is indistinguishable from "
+            "one quietly dropped. This is how questions leave without "
+            "pretending to be answered.",
+        )
+
+    if status == "answered":
+        if declared(rec, "answer") is None:
+            report.error(
+                rel,
+                field_line(rec, "answer"),
+                "an answered question requires 'answer:' — a one-line "
+                "conclusion in the record. The evidence belongs in the section "
+                "prose, but a conclusion left only in prose is one two readers "
+                "can read differently, so `answered` cannot be reached without "
+                "saying what the answer is.",
+            )
+        if not covered:
+            report.error(
+                rel,
+                field_line(rec, "status"),
+                "question is 'answered' while its section declares no "
+                "obligations — answering a question in a spike mostly creates "
+                "work rather than new questions, and that work is what accrues "
+                "invisibly when it is deferred into prose. Coverage cannot be "
+                f"satisfied by prose alone: {DECLARE_SOMETHING}, then flip the "
+                "status.",
+            )
+
+
+def validate_questions(
+    tree: Tree, seen: dict[str, tuple[str, int]], report: Report
+) -> None:
+    """Question records, and the coverage rule over their sections.
+
+    The section is the unit, not the file: it is what the `### Q<n>.` heading
+    addresses and what a reviewer reads, so it is what has to declare
+    something.
+    """
+    index = records_by_file(tree)
+    claimed: set[int] = set()
+    for rel, sections in sorted(tree.sections.items()):
+        file_records = index.get(rel, [])
+        for section in sections:
+            records = [
+                r
+                for r in file_records
+                if section.start_line <= r.line <= section.end_line
+            ]
+            questions = [r for r in records if r.kind == "question"]
+            claimed.update(id(r) for r in questions)
+            # Every question record is checked, not just the section's first.
+            # A second block is a misplacement *and* a record — leaving its
+            # fields unchecked would also leave its id out of `seen`, so a
+            # duplicate declared in an extra block went unreported entirely.
+            # Any obligation block satisfies coverage, the bare `none:`
+            # declaration included — the rule is that the section *declared*,
+            # not that it owes. A malformed declaration is reported by its own
+            # rule rather than a second time as missing coverage.
+            covered = any(r.kind == "obligation" for r in records)
+
+            if not questions:
+                report.error(
+                    rel,
+                    section.start_line,
+                    f"Q{section.number} carries no `question` block — the "
+                    "heading is prose, and only the block carries the id, "
+                    "status and `blocks:` that the ledger counts and a "
+                    "decision's blocker list resolves against. Add a "
+                    "```question block with `id:`, `status:` and `blocks:`.",
+                )
+            for extra in questions[1:]:
+                report.error(
+                    rel,
+                    extra.line,
+                    f"a second `question` block in Q{section.number} (the "
+                    f"first is at line {questions[0].line}) — one section is "
+                    "one question, because the section is what the coverage "
+                    "rule declares against and what the `### Q<n>.` numbering "
+                    "addresses. Give the second question its own section.",
+                )
+
+            if not covered:
+                report.error(
+                    rel,
+                    section.start_line,
+                    f"Q{section.number} declares nothing it owes — every "
+                    "question section must say what answering it creates, "
+                    "including saying that it creates nothing and why. "
+                    "Deferrals left in prose accrue invisibly, which is the "
+                    f"failure this instrument exists to prevent: "
+                    f"{DECLARE_SOMETHING}.",
+                )
+
+            for rec in questions:
+                check_question(rec, covered, seen, report)
+
+    for rec in tree.records:
+        if rec.kind != "question" or id(rec) in claimed:
+            continue
+        report.error(
+            rec.rel,
+            rec.line,
+            "question block outside a `### Q<n>.` section — coverage is "
+            "enforced per section, so a question filed outside one is "
+            "never asked to declare what answering it owes, and no "
+            "`### Q<n>.` heading names it for a reader. Move it under a "
+            f"`### Q<n>.` heading in the track's {QUESTIONS_FILENAME}.",
+        )
+        # Checked in full anyway: the placement is wrong, but the record still
+        # claims an id the rest of the tree can collide with, and a block whose
+        # fields go unread is a block whose duplicate id nobody reports.
+        # `covered=True` because the section that would carry the declaration
+        # is the thing that is missing — a coverage error here would just
+        # restate the placement error in different words.
+        check_question(rec, True, seen, report)
+
+
+def validate_contracts(tree: Tree, report: Report) -> None:
+    """Coverage over `tracks/<track>/contracts/`.
+
+    Contract documents state preconditions constantly, and a precondition is
+    work somebody owes. That class hid the worst offender in the origin repo —
+    a precondition that was on no list at all. Unlike arbitrary prose this is a
+    bounded, opt-in directory the skill owns, so the mechanical rule is
+    available here; declining it would be building a labeled hiding place.
+    """
+    index = records_by_file(tree)
+    for project in tree.projects:
+        for track in project.tracks:
+            directory = track.path / CONTRACTS_DIRNAME
+            if not directory.is_dir():
+                continue
+            # **Every** file, not just `*.md` — the same treatment the
+            # obligations/ walk gets, and for the same reason: globbing
+            # markdown alone leaves a `preconditions.txt` holding preconditions
+            # no parser reads and no ledger counts, which is precisely the
+            # labeled hiding place this rule exists to close. Dotfiles are
+            # exempt (a dotfile cannot plausibly be a contract, and `.DS_Store`
+            # lands in any directory somebody opens).
+            for entry in sorted(directory.rglob("*")):
+                if not entry.is_file() or entry.name.startswith("."):
+                    continue
+                rel = entry.relative_to(tree.root).as_posix()
+                if entry.suffix != ".md":
+                    report.error(
+                        rel,
+                        0,
+                        "not a markdown contract — only markdown is parsed for "
+                        "obligation blocks, so a contract written in any other "
+                        "format states its preconditions where nothing can "
+                        "read them and no ledger will ever count them. Rewrite "
+                        "it as a `.md` file, or move it somewhere the "
+                        "directory's rule does not apply.",
+                    )
+                    continue
+                if any(r.kind == "obligation" for r in index.get(rel, [])):
+                    continue
+                report.error(
+                    rel,
+                    0,
+                    "this contract file declares no obligations — a contract "
+                    "document states preconditions constantly ('this component "
+                    "must not be deployed on a shared host'), every one of them "
+                    "is work somebody owes, and a contract document is not a "
+                    f"backlog. {DECLARE_SOMETHING}.",
                 )
 
 
@@ -1797,7 +2136,13 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     if not tree.present:
         # No research tree is clean, not an error: nothing to say, exit 0.
         return EXIT_OK
-    validate_obligations(tree, report)
+    # One id namespace, shared by every kind that declares an id: a qualified
+    # id that could mean two records is ambiguous whatever their kinds, and
+    # `blocks:`/`blocking:` resolve by bare id.
+    seen: dict[str, tuple[str, int]] = {}
+    validate_obligations(tree, seen, report)
+    validate_questions(tree, seen, report)
+    validate_contracts(tree, report)
     validate_cards(tree, report)
     if args.verbose:
         # Printed before the verdict, and whatever the verdict. The inventory
