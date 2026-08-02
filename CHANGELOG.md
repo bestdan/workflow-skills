@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.76.0] - 2026-08-02
+
+### Features
+
+- status — derived readiness and the convergence report (#326) (97a16bd)
+
 ## [1.75.0] - 2026-08-02
 
 ### Features
