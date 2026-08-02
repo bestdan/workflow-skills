@@ -2,8 +2,9 @@
 title: "research-spike: packaging — README count, trigger eval, claude.ai zip"
 priority: medium
 size: 2
-status: new
+status: done
 created: 2026-08-01
+completed: 2026-08-02
 source_branch: claude/spike-research-plan-jz7ggg
 related_files:
   - README.md
