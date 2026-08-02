@@ -13,6 +13,21 @@ load test_helper
   assert_file_exists "$TEST_TMPDIR/out/review-facts.zip"
 }
 
+@test "the research-spike zip carries the script its every procedure calls" {
+  # The default skills/<name> copy would ship a skill whose every instruction
+  # points at a file that was never bundled, and nothing above would notice:
+  # the zip exists and unpacks fine. Assert the contents, not the artifact.
+  command -v zip >/dev/null || skip "zip is not installed"
+  command -v unzip >/dev/null || skip "unzip is not installed"
+  run bash "$REPO_ROOT/scripts/build-claude-ai-zips.sh" "$TEST_TMPDIR/out"
+  assert_success
+  run unzip -Z1 "$TEST_TMPDIR/out/research-spike.zip"
+  assert_success
+  assert_output --partial 'research-spike/SKILL.md'
+  assert_output --partial 'research-spike/references/record-grammar.md'
+  assert_output --partial 'research-spike/scripts/research-spike.py'
+}
+
 @test "coder probe reports missing tools as data" {
   make_stub date 'echo 2026-01-01'
   make_stub sed 'exec /usr/bin/sed "$@"'
