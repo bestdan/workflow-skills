@@ -433,3 +433,11 @@ incidental convenience.
 
 Full field reference for all four record types, the parser's exact rules, and
 a worked example of each: [`references/record-grammar.md`](references/record-grammar.md).
+
+## Adoption playbook
+
+The setup sequence for turning this on in a repo with real, live deferred
+work — `init`, then the backfill (the payload step, not a formality), then
+stub cards for what has no destination, then wiring `validate` into the
+repo's own check with the reasoning for what stays out of it:
+[`references/adoption.md`](references/adoption.md).

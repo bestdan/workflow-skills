@@ -8,6 +8,19 @@
 # Usage: scripts/check.sh [--with-evals]
 #   --with-evals  also run the behavioral skill-triggering harness
 #                 (scripts/eval.sh; needs ANTHROPIC_API_KEY)
+#
+# research-spike: this repo does not gate on its own dev_docs/research/ tree.
+# scripts/test-research-spike.sh (below) exercises the script's fixture
+# harness only, under mktemp -d, never the real tree. That is deliberate, not
+# an oversight: this repo has no dev_docs/research/ tree yet, and a
+# `validate` gate over a tree that does not exist measures nothing. The
+# moment a real project is initialized here, the same PR that runs `init`
+# also adds `run python3 "$ROOT/scripts/research-spike.py" --root "$ROOT"
+# validate --strict` to the `run` list below — see
+# skills/research-spike/references/adoption.md, step 4, for the full
+# adoption sequence and why `suggest` stays out of the gate even then (a
+# lexical scan's false positives have nowhere legal to go in this repo's
+# check contract: no baseline file, no allowlist, no skip flag).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
