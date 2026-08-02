@@ -186,6 +186,22 @@ KEBAB_DESCRIPTION = "lowercase letters, digits and single hyphens (a-z0-9, kebab
 LEDGER_BEGIN = "<!-- research-spike:ledger -->"
 LEDGER_END = "<!-- /research-spike:ledger -->"
 
+# The `suggest` phrase list — the advisory lexical scan's whole domain
+# knowledge, kept in this one clearly-labelled constant so an adopting repo
+# can edit it without hunting through the file. It is a **starting point**,
+# not a contract (design §"What is repo-specific": "that repo's idiom").
+# Matched case-insensitively as a literal substring against each non-inert
+# line. "once … lands" is a grammatical shape rather than a fixed string, so
+# it alone gets a small regex instead of living in the literal list.
+SUGGEST_PHRASES: tuple[str, ...] = (
+    "deferred to",
+    "gated on",
+    "belongs to",
+    "handled by",
+    "left to",
+)
+SUGGEST_ONCE_LANDS_RE = re.compile(r"\bonce\b.{0,80}?\blands\b", re.IGNORECASE)
+
 
 # --------------------------------------------------------------------------
 # Values, records, and the tree model
@@ -871,6 +887,21 @@ def in_obligations_dir(tree: Tree, path: Path) -> bool:
         len(parts) >= 5
         and parts[1] == TRACKS_DIRNAME
         and parts[3] == OBLIGATIONS_DIRNAME
+    )
+
+
+def in_contracts_dir(tree: Tree, path: Path) -> bool:
+    """True for a file under some track's `contracts/` directory.
+
+    `suggest`'s only consumer: the contracts coverage rule is file-scoped, not
+    section-scoped, so suppression there follows the same scope.
+    """
+    try:
+        parts = path.relative_to(tree.research_dir).parts
+    except ValueError:
+        return False
+    return (
+        len(parts) >= 5 and parts[1] == TRACKS_DIRNAME and parts[3] == CONTRACTS_DIRNAME
     )
 
 
@@ -2167,6 +2198,95 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     return EXIT_OK
 
 
+def find_deferral_phrase(line: str) -> str | None:
+    """The first `SUGGEST_PHRASES` (or `once … lands`) hit on this line, or
+    None. One hit per line, in list order: a sentence naming two phrases at
+    once is one finding to a human reader, not two, and doubling the entry
+    would be noise rather than signal.
+    """
+    lower = line.lower()
+    for phrase in SUGGEST_PHRASES:
+        if phrase in lower:
+            return phrase
+    m = SUGGEST_ONCE_LANDS_RE.search(line)
+    return m.group(0) if m else None
+
+
+def verb_suggest(args: argparse.Namespace, root: Path) -> int:
+    """The advisory lexical scan (design §"What is deliberately not in the
+    gate"). Measured, not assumed: run against the reference tree this
+    returned 29 hits, most of them prose describing behaviour rather than
+    deferring work — so this is a report, never a gate, and there is no code
+    path below that returns non-zero. A file this run cannot read, or one
+    `discover` cannot fully parse, is reported (or, for `discover`'s own
+    findings, simply not surfaced — they belong to `validate`, not this scan)
+    and the walk moves on to the next file.
+
+    Suppression matters more than the phrase list (per the design), and the
+    interpretation of "immediately adjacent" is a judgment call, stated
+    plainly here rather than left implicit. A hit is suppressed when:
+
+      - it falls inside a `### Q<n>.` section of a `questions.md` whose
+        section already carries an `obligation` block — a real one or a bare
+        `none:` — anywhere in that section. The section is the coverage
+        rule's own unit, so a hit already declared over there is exactly the
+        "done correctly" case the design says would otherwise dominate the
+        output; or
+      - it falls anywhere in a file under `tracks/<track>/contracts/` that
+        carries at least one `obligation` block anywhere in the file — the
+        contracts coverage rule is file-scoped, not section-scoped (see
+        `validate_contracts`), so suppression follows the same scope.
+
+    A hit inside a fenced code block or an HTML comment is suppressed too:
+    both are inert to `validate` for the same reason (a documentation sample
+    is not a record), and a phrase inside a worked example describing the
+    convention is not a deferral either — reporting it would just be noise
+    next to `init`'s own scaffolded example.
+    """
+    tree = discover(root, Report())  # discover's findings are validate's, not ours
+    if not tree.present:
+        return EXIT_OK
+
+    records_by_rel = records_by_file(tree)
+    research_dir = root.joinpath(*RESEARCH_SUBPATH)
+    for path in sorted(p for p in research_dir.rglob("*.md") if p.is_file()):
+        rel = path.relative_to(root).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"{rel}: cannot read — {e}")
+            continue
+
+        lines = text.splitlines()
+        inert = scan_blocks(lines).inert_lines()
+        file_records = records_by_rel.get(rel, [])
+
+        covered_ranges: list[tuple[int, int]] = []
+        contract_covered = False
+        if path.name == QUESTIONS_FILENAME:
+            for section in tree.sections.get(rel, []):
+                if any(
+                    r.kind == "obligation"
+                    and section.start_line <= r.line <= section.end_line
+                    for r in file_records
+                ):
+                    covered_ranges.append((section.start_line, section.end_line))
+        elif in_contracts_dir(tree, path):
+            contract_covered = any(r.kind == "obligation" for r in file_records)
+
+        for index, line in enumerate(lines):
+            if index in inert or contract_covered:
+                continue
+            lineno = index + 1
+            if any(start <= lineno <= end for start, end in covered_ranges):
+                continue
+            phrase = find_deferral_phrase(line)
+            if phrase is None:
+                continue
+            print(f"{rel}:{lineno}: {phrase!r} — {line.strip()}")
+    return EXIT_OK
+
+
 def unimplemented(verb: str, task: str):
     """Verbs whose behaviour lands in a later task of the research-spike plan.
 
@@ -2248,9 +2368,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(run=unimplemented("status", "task 6"))
 
     p_suggest = subparsers.add_parser(
-        "suggest", help="Advisory lexical scan; never fails."
+        "suggest",
+        help=(
+            "Advisory lexical scan for unregistered deferral prose; always "
+            "exits 0 — a false positive matched against English prose has "
+            "nowhere legal to go, so this is a report, never a gate."
+        ),
     )
-    p_suggest.set_defaults(run=unimplemented("suggest", "task 8"))
+    p_suggest.set_defaults(run=verb_suggest)
 
     return parser
 

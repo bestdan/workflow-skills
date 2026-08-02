@@ -1823,6 +1823,158 @@ out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do
   assert_contains "--help lists '$verb'" "$out_j" "$verb"
 done
+assert_contains "--help says suggest is advisory" "$out_j" "Advisory"
+assert_contains "--help says suggest always exits 0" "$out_j" "always exits 0"
+
+# --- Fixture (p): suggest — the advisory lexical scan ---------------------
+# Task 8. Reports unregistered deferral prose with path and line; stays quiet
+# next to a registered obligation or an explicit `none:`; never returns
+# non-zero, including over a file that fails the block parser; writes
+# nothing; and its own usage errors still exit 2 (the dispatcher's contract,
+# not the scan's exit-0 guarantee).
+
+DIR_P1="$BASE/suggest-report"
+write_file "$DIR_P1/dev_docs/research/alpha/PROJECT.md" '# alpha
+
+This work is deferred to the watcher track.'
+out_p1="$(python3 "$SCRIPT" --root "$DIR_P1" suggest 2>&1)"
+exit_p1=$?
+assert_exit "suggest exits 0 on a tree full of hits" "$exit_p1" 0
+assert_contains "suggest reports the phrase with path and line" "$out_p1" \
+  "dev_docs/research/alpha/PROJECT.md:3: 'deferred to'"
+assert_contains "suggest includes the surrounding line text" "$out_p1" \
+  "This work is deferred to the watcher track."
+
+# A hit inside a `question` section that already carries a registered
+# obligation is suppressed — the "done correctly" case the design says would
+# otherwise dominate the output.
+DIR_P2="$BASE/suggest-quiet-obligation"
+write_file "$DIR_P2/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+### Q1. Does the account need an isolated uid domain?
+
+This work is deferred to the watcher track.
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+id: uid-domain-provisioning
+owes: the provisioning steps this answer implies
+destination: dev_docs/tasks/real_task.md
+status: open
+```'
+out_p2="$(python3 "$SCRIPT" --root "$DIR_P2" suggest 2>&1)"
+exit_p2=$?
+assert_exit "suggest exits 0 next to a registered obligation" "$exit_p2" 0
+if [ -z "$out_p2" ]; then
+  ok "suggest stays quiet next to a registered obligation"
+else
+  bad "suggest should be quiet next to a registered obligation, got: $out_p2"
+fi
+
+# Same, but the section declares `none:` instead of registering work.
+DIR_P3="$BASE/suggest-quiet-none"
+write_file "$DIR_P3/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+### Q1. Does the account need an isolated uid domain?
+
+This work is deferred to the watcher track.
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed until the option is chosen
+```'
+out_p3="$(python3 "$SCRIPT" --root "$DIR_P3" suggest 2>&1)"
+exit_p3=$?
+assert_exit "suggest exits 0 next to an explicit none:" "$exit_p3" 0
+if [ -z "$out_p3" ]; then
+  ok "suggest stays quiet next to an explicit none: declaration"
+else
+  bad "suggest should be quiet next to an explicit none:, got: $out_p3"
+fi
+
+# A clean tree (no dev_docs/research at all) is silent, like `validate`.
+DIR_P4="$BASE/suggest-clean"
+mkdir -p "$DIR_P4"
+out_p4="$(python3 "$SCRIPT" --root "$DIR_P4" suggest 2>&1)"
+exit_p4=$?
+assert_exit "suggest exits 0 on a clean (research-less) tree" "$exit_p4" 0
+if [ -z "$out_p4" ]; then
+  ok "suggest is silent on a clean tree"
+else
+  bad "suggest should be silent on a clean tree, got: $out_p4"
+fi
+
+# The scan always exits 0 — even over a file that fails the block parser (an
+# unterminated fence). This is structural, not a policy the scan can opt out
+# of: a parse error is a `validate` finding, not a reason for `suggest` to
+# stop or crash.
+DIR_P5="$BASE/suggest-malformed-fence"
+write_file "$DIR_P5/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+This work is deferred to the watcher track.
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+status: open'
+out_p5="$(python3 "$SCRIPT" --root "$DIR_P5" suggest 2>&1)"
+exit_p5=$?
+assert_exit "suggest exits 0 even when a file fails the block parser" "$exit_p5" 0
+assert_not_contains "suggest does not traceback over a malformed fence" "$out_p5" "Traceback"
+
+# The dispatcher's usage contract is not suppressed by the scan's exit-0
+# guarantee: a genuinely malformed invocation is still a caller error.
+out_p6="$(python3 "$SCRIPT" suggest --bogus-flag 2>&1)"
+exit_p6=$?
+assert_exit "suggest --bogus-flag exits 2" "$exit_p6" 2
+assert_contains "suggest --bogus-flag names the bad flag" "$out_p6" "unrecognized arguments"
+
+# suggest writes nothing: the tree is byte-identical before and after a run.
+DIR_P7="$BASE/suggest-no-write"
+write_file "$DIR_P7/dev_docs/research/alpha/PROJECT.md" '# alpha
+
+This work is deferred to the watcher track, and gated on the account track.'
+cp -r "$DIR_P7/dev_docs" "$BASE/suggest-no-write-before"
+python3 "$SCRIPT" --root "$DIR_P7" suggest >/dev/null 2>&1
+if diff -r "$BASE/suggest-no-write-before" "$DIR_P7/dev_docs" >"$BASE/suggest.diff" 2>&1; then
+  ok "suggest writes nothing (tree unchanged after a run)"
+else
+  bad "suggest modified the tree: $(cat "$BASE/suggest.diff")"
+fi
+
+# A phrase inside a fenced sample or an HTML comment is inert, same as
+# `validate`'s own record scanning — a worked example is not a deferral.
+DIR_P8="$BASE/suggest-inert-regions"
+write_file "$DIR_P8/dev_docs/research/alpha/PROJECT.md" '# alpha
+
+```markdown
+This example shows "deferred to" inside a fenced sample.
+```
+
+<!--
+This one is deferred to a comment nobody reads.
+-->
+
+Once the watcher lands, revisit this.'
+out_p8="$(python3 "$SCRIPT" --root "$DIR_P8" suggest 2>&1)"
+exit_p8=$?
+assert_exit "suggest exits 0 over fenced/commented samples" "$exit_p8" 0
+assert_not_contains "a phrase inside a fenced sample is not reported" "$out_p8" \
+  "inside a fenced sample"
+assert_not_contains "a phrase inside an HTML comment is not reported" "$out_p8" \
+  "a comment nobody reads"
+assert_contains "the 'once … lands' pattern is still caught outside a fence" "$out_p8" \
+  "Once the watcher lands"
 
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
