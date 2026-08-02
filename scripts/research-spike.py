@@ -2217,10 +2217,17 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
     gate"). Measured, not assumed: run against the reference tree this
     returned 29 hits, most of them prose describing behaviour rather than
     deferring work — so this is a report, never a gate, and there is no code
-    path below that returns non-zero. A file this run cannot read, or one
-    `discover` cannot fully parse, is reported (or, for `discover`'s own
-    findings, simply not surfaced — they belong to `validate`, not this scan)
-    and the walk moves on to the next file.
+    path below that returns non-zero, including a directory this run cannot
+    even list (`PermissionError` out of `discover`'s own `iterdir()` calls —
+    `rglob`/`is_file` already swallow that themselves on the Python versions
+    this runs on, but `discover` does not, so the whole body below is wrapped
+    in one `try`). A file this run cannot read is reported and skipped; a file
+    `scan_blocks` cannot fully close (an unterminated fence or HTML comment)
+    is reported by name — the spec's "report it and continue" — rather than
+    silently scanning nothing after it, which would be indistinguishable from
+    a clean file on exactly the file most likely to be hiding something.
+    `discover`'s own parse findings (unknown keys, bad ids, and the like) are
+    `validate`'s business, not this scan's, and are never surfaced here.
 
     Suppression matters more than the phrase list (per the design), and the
     interpretation of "immediately adjacent" is a judgment call, stated
@@ -2237,53 +2244,85 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
         contracts coverage rule is file-scoped, not section-scoped (see
         `validate_contracts`), so suppression follows the same scope.
 
-    A hit inside a fenced code block or an HTML comment is suppressed too:
-    both are inert to `validate` for the same reason (a documentation sample
-    is not a record), and a phrase inside a worked example describing the
-    convention is not a deferral either — reporting it would just be noise
-    next to `init`'s own scaffolded example.
+    Deliberately **not** suppressed: prose sitting above a covered heading.
+    Reading "the next question is covered" backward onto the paragraph before
+    it would be an inference this scan has no basis for — the section is the
+    unit the coverage rule declares over, and text outside its line range
+    made no such declaration. An advisory tool with false positives has to
+    err toward reporting, not toward inventing scope a human never granted it.
+
+    A hit inside a backtick-fenced code block or an HTML comment is
+    suppressed too: both are inert to `validate` for the same reason (a
+    documentation sample is not a record), and a phrase inside a worked
+    example describing the convention is not a deferral either — reporting
+    it would just be noise next to `init`'s own scaffolded example. (Only
+    backtick fences: `scan_blocks` recognizes no other fence syntax, and
+    `suggest` must not disagree with `validate` about what counts as inert.)
     """
-    tree = discover(root, Report())  # discover's findings are validate's, not ours
-    if not tree.present:
-        return EXIT_OK
+    try:
+        tree = discover(root, Report())  # discover's findings are validate's, not ours
+        if not tree.present:
+            return EXIT_OK
 
-    records_by_rel = records_by_file(tree)
-    research_dir = root.joinpath(*RESEARCH_SUBPATH)
-    for path in sorted(p for p in research_dir.rglob("*.md") if p.is_file()):
-        rel = path.relative_to(root).as_posix()
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            print(f"{rel}: cannot read — {e}")
-            continue
-
-        lines = text.splitlines()
-        inert = scan_blocks(lines).inert_lines()
-        file_records = records_by_rel.get(rel, [])
-
-        covered_ranges: list[tuple[int, int]] = []
-        contract_covered = False
-        if path.name == QUESTIONS_FILENAME:
-            for section in tree.sections.get(rel, []):
-                if any(
-                    r.kind == "obligation"
-                    and section.start_line <= r.line <= section.end_line
-                    for r in file_records
-                ):
-                    covered_ranges.append((section.start_line, section.end_line))
-        elif in_contracts_dir(tree, path):
-            contract_covered = any(r.kind == "obligation" for r in file_records)
-
-        for index, line in enumerate(lines):
-            if index in inert or contract_covered:
+        records_by_rel = records_by_file(tree)
+        research_dir = root.joinpath(*RESEARCH_SUBPATH)
+        for path in sorted(p for p in research_dir.rglob("*.md") if p.is_file()):
+            rel = path.relative_to(root).as_posix()
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                print(f"{rel}: cannot read — {e}")
                 continue
-            lineno = index + 1
-            if any(start <= lineno <= end for start, end in covered_ranges):
-                continue
-            phrase = find_deferral_phrase(line)
-            if phrase is None:
-                continue
-            print(f"{rel}:{lineno}: {phrase!r} — {line.strip()}")
+
+            lines = text.splitlines()
+            blocks = scan_blocks(lines)
+            inert = blocks.inert_lines()
+            file_records = records_by_rel.get(rel, [])
+
+            if blocks.unterminated_fence is not None:
+                print(
+                    f"{rel}:{blocks.unterminated_fence.open_index + 1}: "
+                    "unterminated fence — lines after it are not scanned"
+                )
+            unterminated_comment = next(
+                (c for c in blocks.comments if not c.closed), None
+            )
+            if unterminated_comment is not None:
+                print(
+                    f"{rel}:{unterminated_comment.open_index + 1}: "
+                    "unterminated HTML comment — lines after it are not scanned"
+                )
+
+            covered_ranges: list[tuple[int, int]] = []
+            contract_covered = False
+            if path.name == QUESTIONS_FILENAME:
+                for section in tree.sections.get(rel, []):
+                    if any(
+                        r.kind == "obligation"
+                        and section.start_line <= r.line <= section.end_line
+                        for r in file_records
+                    ):
+                        covered_ranges.append((section.start_line, section.end_line))
+            elif in_contracts_dir(tree, path):
+                contract_covered = any(r.kind == "obligation" for r in file_records)
+
+            for index, line in enumerate(lines):
+                if index in inert or contract_covered:
+                    continue
+                lineno = index + 1
+                if any(start <= lineno <= end for start, end in covered_ranges):
+                    continue
+                phrase = find_deferral_phrase(line)
+                if phrase is None:
+                    continue
+                print(f"{rel}:{lineno}: {phrase!r} — {line.strip()}")
+    except OSError as e:
+        # The escape the exit-0 guarantee has to close: a directory this
+        # process cannot even list (chmod 000 on `dev_docs/research` or a
+        # `tracks/` dir) raises out of `discover`'s `iterdir()` calls, not out
+        # of anything caught above — an uncaught traceback there would be
+        # exit 1, indistinguishable from validate's own tree-content failures.
+        print(f"cannot scan — {e}")
     return EXIT_OK
 
 

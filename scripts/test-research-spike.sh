@@ -1931,6 +1931,13 @@ out_p5="$(python3 "$SCRIPT" --root "$DIR_P5" suggest 2>&1)"
 exit_p5=$?
 assert_exit "suggest exits 0 even when a file fails the block parser" "$exit_p5" 0
 assert_not_contains "suggest does not traceback over a malformed fence" "$out_p5" "Traceback"
+# "report it and continue" (the spec), not silent absorption: the file is
+# named, and a hit sitting before the broken fence is still reported rather
+# than the whole file reading as clean.
+assert_contains "suggest reports the unterminated fence by name" "$out_p5" \
+  "dev_docs/research/alpha/tracks/account/questions.md:5: unterminated fence"
+assert_contains "a hit before the unterminated fence is still reported" "$out_p5" \
+  "questions.md:3: 'deferred to' — This work is deferred to the watcher track."
 
 # The dispatcher's usage contract is not suppressed by the scan's exit-0
 # guarantee: a genuinely malformed invocation is still a caller error.
@@ -1975,6 +1982,46 @@ assert_not_contains "a phrase inside an HTML comment is not reported" "$out_p8" 
   "a comment nobody reads"
 assert_contains "the 'once … lands' pattern is still caught outside a fence" "$out_p8" \
   "Once the watcher lands"
+
+# The same "report it and continue" treatment for an unterminated HTML
+# comment — the other door to the same silent-swallowing failure.
+DIR_P9="$BASE/suggest-unterminated-comment"
+write_file "$DIR_P9/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+This work is left to a future track.
+
+<!-- an example nobody closed
+
+More prose that is now inert.'
+out_p9="$(python3 "$SCRIPT" --root "$DIR_P9" suggest 2>&1)"
+exit_p9=$?
+assert_exit "suggest exits 0 even when a comment never closes" "$exit_p9" 0
+assert_contains "suggest reports the unterminated comment by name" "$out_p9" \
+  "dev_docs/research/alpha/tracks/account/questions.md:5: unterminated HTML comment"
+assert_contains "a hit before the unterminated comment is still reported" "$out_p9" \
+  "questions.md:3: 'left to' — This work is left to a future track."
+
+# --- Fixture (q): the exit-0 guarantee survives an unreadable directory --
+# `discover`'s own `iterdir()` calls (unlike `rglob`/`is_file`, which already
+# swallow `PermissionError` on the Python versions this runs on) raise on a
+# directory with no read permission. `verb_suggest` wraps its whole body in
+# one `try`/`except OSError` so this stays exit-0 and reported, not a bare
+# traceback indistinguishable from a real finding.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  … skipped: running as root — chmod 000 does not restrict access"
+else
+  DIR_Q1="$BASE/suggest-unreadable-dir"
+  write_file "$DIR_Q1/dev_docs/research/alpha/PROJECT.md" '# alpha'
+  RESEARCH_Q1="$DIR_Q1/dev_docs/research"
+  chmod 000 "$RESEARCH_Q1"
+  out_q1="$(python3 "$SCRIPT" --root "$DIR_Q1" suggest 2>&1)"
+  exit_q1=$?
+  chmod 755 "$RESEARCH_Q1"
+  assert_exit "suggest exits 0 over an unreadable directory" "$exit_q1" 0
+  assert_contains "suggest reports the scan failure" "$out_q1" "cannot scan —"
+  assert_not_contains "suggest does not traceback over an unreadable directory" "$out_q1" \
+    "Traceback"
+fi
 
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
