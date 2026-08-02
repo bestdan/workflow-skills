@@ -103,6 +103,64 @@ write_file() {
   printf '%s\n' "$2" >"$1"
 }
 
+# seed_fresh_ledger <dir>
+# Task 7 made ledger freshness part of `validate`'s gate: every project's
+# LEDGER.md and every track's questions.md must carry the ledger markers, or
+# `validate` reports it (naming `init`) regardless of what else is under test.
+# Fixtures written for tasks 1-6 predate that contract and build minimal trees
+# without them. This splices in placeholder markers — appended at the end of
+# whatever is already there, never inserted above it, so no existing
+# line-numbered assertion in an older fixture shifts — then runs
+# `write-ledger` to replace the placeholders with the real derived content.
+# Used only by fixtures whose *subject* is unrelated to ledgers, so they are
+# not incidentally broken by a contract that landed after they were written.
+seed_fresh_ledger() {
+  local dir="$1"
+  python3 - "$dir" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+research = root / "dev_docs" / "research"
+if not research.is_dir():
+    sys.exit(0)
+BEGIN = "<!-- research-spike:ledger -->"
+END = "<!-- /research-spike:ledger -->"
+PLACEHOLDER = "\n".join(
+    [
+        BEGIN,
+        "",
+        "- **Questions:** 0 answered, 0 open, 0 retired",
+        "- **Obligations:** 0 discharged, 0 open (0 blocking, 0 stubs, 0 external)",
+        "",
+        END,
+        "",
+    ]
+)
+
+for project_dir in sorted(p for p in research.iterdir() if p.is_dir()):
+    ledger = project_dir / "LEDGER.md"
+    if ledger.exists():
+        text = ledger.read_text(encoding="utf-8")
+        if BEGIN not in text:
+            ledger.write_text(text.rstrip("\n") + "\n\n" + PLACEHOLDER, encoding="utf-8")
+    else:
+        ledger.write_text(f"# {project_dir.name} — ledger\n\n" + PLACEHOLDER, encoding="utf-8")
+    tracks_dir = project_dir / "tracks"
+    if not tracks_dir.is_dir():
+        continue
+    for track_dir in sorted(p for p in tracks_dir.iterdir() if p.is_dir()):
+        qfile = track_dir / "questions.md"
+        if qfile.exists():
+            text = qfile.read_text(encoding="utf-8")
+            if BEGIN not in text:
+                qfile.write_text(text.rstrip("\n") + "\n\n" + PLACEHOLDER, encoding="utf-8")
+        else:
+            qfile.write_text(f"# {track_dir.name}\n\n" + PLACEHOLDER, encoding="utf-8")
+PY
+  python3 "$SCRIPT" --root "$dir" write-ledger >/dev/null 2>&1
+}
+
 # --- Fixture (a): an empty root is clean, not an error -------------------
 DIR_A="$BASE/empty-root"
 mkdir -p "$DIR_A"
@@ -147,6 +205,7 @@ write_file "$DIR_B/dev_docs/research/beta/PROJECT.md" '# beta
 id: stop-semantics
 state: pending
 ```'
+seed_fresh_ledger "$DIR_B"
 
 out_b="$(python3 "$SCRIPT" --root "$DIR_B" validate 2>&1)"
 exit_b=$?
@@ -310,6 +369,7 @@ blocks: none: it picks between options the decision already allows
 ```obligation
 none: option (A) adds no observation, and owes no tooling
 ```'
+seed_fresh_ledger "$DIR_E2"
 out_e2="$(python3 "$SCRIPT" --root "$DIR_E2" --verbose validate 2>&1)"
 exit_e2=$?
 assert_exit "a bare 'none:' block is a valid record shape" "$exit_e2" 0
@@ -348,6 +408,7 @@ write_file "$DIR_G/dev_docs/research/alpha/PROJECT.md" '# alpha
 desination: this is a typo inside a documentation sample
 ```
 ````'
+seed_fresh_ledger "$DIR_G"
 out_g="$(python3 "$SCRIPT" --root "$DIR_G" validate 2>&1)"
 exit_g=$?
 assert_exit "a record inside a four-backtick fenced sample is not parsed" "$exit_g" 0
@@ -406,6 +467,7 @@ owes: the second thing
 destination: dev_docs/tasks/x.md
 status: open
 ```'
+seed_fresh_ledger "$DIR_G3"
 out_g3="$(python3 "$SCRIPT" --root "$DIR_G3" --verbose validate 2>&1)"
 exit_g3=$?
 assert_exit "a code-span line leaves an otherwise-clean tree clean" "$exit_g3" 0
@@ -458,6 +520,7 @@ owes: the receipt — and its durability contract
 destination: dev_docs/tasks/x.md
 status: open
 ```'
+seed_fresh_ledger "$DIR_G5"
 out_g5="$(LC_ALL=C LANG=C PYTHONUTF8=0 PYTHONIOENCODING=utf-8 python3 "$SCRIPT" --root "$DIR_G5" validate 2>&1)"
 exit_g5=$?
 assert_exit "UTF-8 prose decodes under a platform-default (ASCII) codec" "$exit_g5" 0
@@ -491,21 +554,36 @@ exit_i2=$?
 assert_exit "a nonexistent --root exits 2 (a caller error)" "$exit_i2" 2
 assert_contains "a nonexistent --root says so" "$out_i2" "is not a directory"
 
+# `ledger`, like `validate`, is clean-not-error over a root with no research
+# tree at all, and prints nothing — it derives from what `discover` finds, and
+# an absent tree gives it nothing to print.
 out_i3="$(python3 "$SCRIPT" --root "$DIR_A" ledger 2>&1)"
 exit_i3=$?
-assert_exit "an unimplemented verb exits 2, never a silent 0" "$exit_i3" 2
-assert_contains "an unimplemented verb names the task that lands it" "$out_i3" "task 7"
+assert_exit "ledger over an empty root exits 0" "$exit_i3" 0
+if [ -z "$out_i3" ]; then
+  ok "ledger over an empty root prints nothing"
+else
+  bad "ledger over an empty root should be silent, got: $out_i3"
+fi
 
-# validate's scoping surface is task 7's (`validate [<project>] [--track <t>]
-# [--strict]`). Accepting the flags here while ignoring them would be worse
-# than not having them: `--track mine` would silently scan every track and
-# report OK. They must be rejected until their semantics land.
-for opt in --track=account --strict --project=alpha; do
-  out_i4="$(python3 "$SCRIPT" --root "$DIR_B" validate "$opt" 2>&1)"
-  exit_i4=$?
-  assert_exit "validate rejects '$opt' until task 7 lands its semantics" "$exit_i4" 2
-  assert_contains "validate says why it rejected '$opt'" "$out_i4" "unrecognized arguments"
-done
+# validate's scoping surface (`[<project>] [--track <t>] [--strict]`) is task
+# 7's, landed above. `--track` and `--strict` are now real flags; `--project`
+# never was one — the project is a bare positional (mirroring `status
+# <project>`) — so it still must be rejected the same way an unrecognized
+# flag always is.
+python3 "$SCRIPT" --root "$DIR_B" validate --track=account >/dev/null 2>&1
+exit_i4=$?
+assert_exit "validate --track is a real flag now" "$exit_i4" 0
+
+python3 "$SCRIPT" --root "$DIR_B" validate --strict >/dev/null 2>&1
+exit_i4b=$?
+assert_exit "validate --strict is a real flag now" "$exit_i4b" 0
+
+out_i4c="$(python3 "$SCRIPT" --root "$DIR_B" validate --project=alpha 2>&1)"
+exit_i4c=$?
+assert_exit "validate still rejects --project (the project is a bare positional)" \
+  "$exit_i4c" 2
+assert_contains "validate says why it rejected --project" "$out_i4c" "unrecognized arguments"
 
 # --- Fixture (k): init scaffolds a project ------------------------------
 DIR_K="$BASE/init"
@@ -684,6 +762,7 @@ owes: the real thing
 destination: dev_docs/tasks/x.md
 status: open
 ```'
+seed_fresh_ledger "$DIR_K4"
 out_k10="$(python3 "$SCRIPT" --root "$DIR_K4" --verbose validate 2>&1)"
 exit_k10=$?
 assert_exit "a commented-out example leaves an otherwise-clean tree clean" "$exit_k10" 0
@@ -745,6 +824,7 @@ owes: the real thing
 destination: dev_docs/tasks/x.md
 status: open
 ```'
+seed_fresh_ledger "$DIR_K4B"
 out_k11b="$(python3 "$SCRIPT" --root "$DIR_K4B" --verbose validate 2>&1)"
 exit_k11b=$?
 assert_exit "an indented '<!--' sample does not swallow the file" "$exit_k11b" 0
@@ -940,6 +1020,7 @@ obligation_fixture() {
   printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
   printf '# account\n\n```obligation\nid: keychain-invariant\nowes: the keychain invariant, spelled out\ndestination: %s\nstatus: open\n```\n' \
     "$2" >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+  seed_fresh_ledger "$1"
 }
 
 DIR_L1="$BASE/dest-valid"
@@ -1099,6 +1180,7 @@ destination: dev_docs/tasks/x.md
 status: open
 \`\`\`"
 done
+seed_fresh_ledger "$DIR_L11"
 out_l11="$(python3 "$SCRIPT" --root "$DIR_L11" validate 2>&1)"
 exit_l11=$?
 assert_exit "the same bare id in two tracks is accepted" "$exit_l11" 0
@@ -1128,6 +1210,7 @@ status_fixture() {
   printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
   printf '# account\n\n```obligation\nid: keychain-invariant\nowes: the keychain invariant, spelled out\ndestination: dev_docs/tasks/real_task.md\n%s\n```\n' \
     "$2" >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+  seed_fresh_ledger "$1"
 }
 
 DIR_L13="$BASE/discharged-no-by"
@@ -1224,6 +1307,7 @@ card_fixture() {
   mkdir -p "$1/dev_docs/research/alpha/tracks/account/obligations"
   printf '# a card\n\n```card\n%s\n```\n' "$2" \
     >"$1/dev_docs/research/alpha/tracks/account/obligations/keychain.md"
+  seed_fresh_ledger "$1"
 }
 
 DIR_M1="$BASE/card-stub-ok"
@@ -1422,6 +1506,7 @@ question_fixture() {
       printf '\n```obligation\n%s\n```\n' "$3"
     fi
   } >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+  seed_fresh_ledger "$1"
 }
 
 DIR_N1="$BASE/coverage-declares-nothing"
@@ -1764,6 +1849,7 @@ contracts_fixture() {
   printf '# a task card that exists\n' >"$1/dev_docs/tasks/real_task.md"
   printf '# account\n' >"$1/dev_docs/research/alpha/tracks/account/questions.md"
   printf '%s\n' "$2" >"$1/dev_docs/research/alpha/tracks/account/contracts/host.md"
+  seed_fresh_ledger "$1"
 }
 
 DIR_O1="$BASE/contract-undeclared"
@@ -1860,6 +1946,7 @@ write_file "$DIR_O4/dev_docs/research/alpha/tracks/account/questions.md" '# acco
 write_file "$DIR_O4/dev_docs/research/alpha/tracks/account/notes.md" '# scratch notes
 
 Measurements, half-thoughts, and no declaration of any kind.'
+seed_fresh_ledger "$DIR_O4"
 out_o4="$(python3 "$SCRIPT" --root "$DIR_O4" validate 2>&1)"
 exit_o4=$?
 assert_exit "a markdown file outside questions/contracts needs no declaration" "$exit_o4" 0
@@ -1888,6 +1975,7 @@ decision_fixture() {
     printf '\n```obligation\n%s\n```\n' \
       "${4:-none: nothing is owed until the decision is taken}"
   } >"$1/dev_docs/research/alpha/tracks/account/questions.md"
+  seed_fresh_ledger "$1"
 }
 
 # A `blocks:` naming a decision nobody filed is the "track that did not exist"
@@ -3042,6 +3130,248 @@ else
   assert_not_contains "suggest does not traceback over an unreadable directory" "$out_q1" \
     "Traceback"
 fi
+
+# --- Fixture (t): ledger, write-ledger, and validate's freshness gate ----
+# Task 7. One project, two tracks, built through `init` (so the markers and
+# scaffold are the real ones) and then populated with known records, so the
+# rendered lines can be asserted exactly — answered/open/retired, and
+# discharged/open with every obligation subtotal (blocking, stub, external)
+# nonzero for `account` and all-zero for `watcher`, so the zero-omission
+# `status` uses in its parenthetical is provably absent from `render_counts`.
+DIR_T="$BASE/ledger-lifecycle"
+mkdir -p "$DIR_T"
+python3 "$SCRIPT" --root "$DIR_T" init demo7 --track account >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_T" init demo7 --track watcher >/dev/null 2>&1
+T_PROJECT="$DIR_T/dev_docs/research/demo7"
+write_file "$DIR_T/dev_docs/tasks/real.md" '# a task card that exists'
+cat >>"$T_PROJECT/decisions.md" <<'MD'
+
+```decision
+id: stop-semantics
+state: pending
+```
+MD
+cat >>"$T_PROJECT/tracks/account/questions.md" <<'MD'
+
+### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes — the account needs its own uid domain
+blocks: stop-semantics
+```
+
+```obligation
+id: acct-o1
+owes: the provisioning steps this answer implies
+destination: dev_docs/tasks/real.md
+status: discharged
+discharged_by: PR #101
+```
+
+### Q2. What does a trip do when it cannot get the registry lock?
+
+```question
+id: registry-lock-behavior
+status: open
+blocks: none: still gathering evidence
+```
+
+```obligation
+id: acct-o2
+owes: the lock-timeout handling this answer will need
+destination: dev_docs/tasks/real.md
+status: open
+blocking: stop-semantics
+```
+MD
+mkdir -p "$T_PROJECT/tracks/account/obligations"
+write_file "$T_PROJECT/tracks/account/obligations/stub.md" '# a stub
+
+```card
+kind: stub
+superseded_when: the account track files its measurement card
+```'
+write_file "$T_PROJECT/tracks/account/obligations/receipt.md" '# a receipt
+
+```card
+kind: receipt
+url: https://example.invalid/ISSUE-9
+```'
+cat >>"$T_PROJECT/tracks/watcher/questions.md" <<'MD'
+
+### Q1. Should the ceiling be a cgroup?
+
+```question
+id: ceiling-cgroup
+status: retired
+retired_because: the shared-host option was dropped, so the premise is gone
+blocks: none: the premise died, so nothing is owed
+```
+
+```obligation
+none: the premise died, so nothing is owed
+```
+MD
+
+# `init` scaffolds ledger markers at zero counts; every record above was added
+# after, so both tracks (and the roll-up) are stale from the moment they exist
+# — before `write-ledger` has ever run once.
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+exit_t1=$?
+assert_exit "a stale stored track ledger fails validate" "$exit_t1" 1
+
+# validate never repairs: the stale file is untouched, byte for byte. A
+# checksum brackets the run rather than a diff against a saved copy, so the
+# assertion is on what `validate` actually did, not on a copy made earlier.
+T_ACCOUNT_QUESTIONS="$T_PROJECT/tracks/account/questions.md"
+t_sum_before="$(cksum "$T_ACCOUNT_QUESTIONS")"
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+t_sum_after="$(cksum "$T_ACCOUNT_QUESTIONS")"
+if [ "$t_sum_before" = "$t_sum_after" ]; then
+  ok "validate on a stale ledger leaves the file byte-identical (no auto-repair)"
+else
+  bad "validate rewrote a stale ledger it should only have reported"
+fi
+
+# `write-ledger --track watcher` only ever reads/writes watcher's own file, so
+# account's staleness (still unrepaired) must not fail a run scoped to watcher.
+python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 --track watcher >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 --track watcher >/dev/null 2>&1
+exit_t2=$?
+assert_exit "a stale foreign track does not fail validate --track <mine>" "$exit_t2" 0
+
+# Repairing account must not touch watcher's now-fresh file — `write-ledger
+# --track t` rewrites only t.
+T_WATCHER_QUESTIONS="$T_PROJECT/tracks/watcher/questions.md"
+t_watcher_before="$(cksum "$T_WATCHER_QUESTIONS")"
+python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 --track account >/dev/null 2>&1
+exit_t3=$?
+assert_exit "write-ledger repairs the stale track to a passing state" "$exit_t3" 0
+t_watcher_after="$(cksum "$T_WATCHER_QUESTIONS")"
+if [ "$t_watcher_before" = "$t_watcher_after" ]; then
+  ok "write-ledger --track t rewrites only t (the sibling track is untouched)"
+else
+  bad "write-ledger --track account also rewrote watcher's file"
+fi
+
+# Both tracks are fresh now; only the roll-up (never touched by a --track
+# run) is still stale — LEDGER.md's own tier: a warning under plain validate,
+# an error under --strict.
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+exit_t4=$?
+assert_exit "a stale LEDGER.md only warns under plain validate" "$exit_t4" 0
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 --strict >/dev/null 2>&1
+exit_t5=$?
+assert_exit "the same stale LEDGER.md fails under validate --strict" "$exit_t5" 1
+
+# The exact rendered lines, asserted before the roll-up catches up — this is
+# the counts-are-correct fixture: answered/open/retired and discharged/open
+# with every obligation subtotal, nonzero for account and all-zero for
+# watcher (so `render_counts` is proven not to omit zeroes the way `status`'s
+# parenthetical does).
+out_t_ledger="$(python3 "$SCRIPT" --root "$DIR_T" ledger demo7 2>&1)"
+assert_contains "account's exact rendered question line" "$out_t_ledger" \
+  "- **Questions:** 1 answered, 1 open, 0 retired"
+assert_contains "account's exact rendered obligation line, every subtotal nonzero" \
+  "$out_t_ledger" \
+  "- **Obligations:** 1 discharged, 1 open (1 blocking, 1 stub, 1 external)"
+assert_contains "watcher's exact rendered question line" "$out_t_ledger" \
+  "- **Questions:** 0 answered, 0 open, 1 retired"
+assert_contains "watcher's exact rendered obligation line, every subtotal zero" \
+  "$out_t_ledger" \
+  "- **Obligations:** 0 discharged, 0 open (0 blocking, 0 stubs, 0 external)"
+assert_contains "the roll-up's derived Decisions section" "$out_t_ledger" \
+  "- **stop-semantics** — BLOCKED by 1 obligation"
+assert_contains "the roll-up's total line sums both tracks" "$out_t_ledger" \
+  "- **Questions:** 1 answered, 1 open, 1 retired"
+
+# `write-ledger demo7` with no --track also rewrites LEDGER.md — the
+# round-trip: write-ledger then validate is clean.
+python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 >/dev/null 2>&1
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+exit_t6=$?
+assert_exit "write-ledger then validate is clean (the round trip)" "$exit_t6" 0
+
+# dprint fmt over the now-fully-fresh, non-trivial (not just zero-count)
+# ledger produces no diff. Mirrors fixture (k6)'s exit-code discipline.
+if command -v dprint >/dev/null 2>&1; then
+  (cd "$DIR_T" && dprint check --config "$ROOT/dprint.json" --incremental=false \
+    "dev_docs/**/*.md") >"$BASE/dprint-t.out" 2>&1
+  dprint_t_exit=$?
+  case "$dprint_t_exit" in
+    0) ok "dprint leaves a written, non-trivial ledger untouched" ;;
+    20) bad "dprint rewrites a written ledger: $(cat "$BASE/dprint-t.out")" ;;
+    12)
+      echo "  … skipped: dprint cannot resolve its plugins (offline?): $(head -1 "$BASE/dprint-t.out")"
+      ;;
+    *)
+      bad "dprint failed to run the check (exit $dprint_t_exit): $(head -1 "$BASE/dprint-t.out")"
+      ;;
+  esac
+else
+  echo "  … skipped: dprint is not on PATH — install it via mise (see CONTRIBUTING.md)"
+fi
+
+# Mutating one record (a third obligation, in an already-covered section —
+# nothing else about the tree becomes invalid) must make validate fail again:
+# the round trip's other half.
+cat >>"$T_PROJECT/tracks/account/questions.md" <<'MD'
+
+```obligation
+id: acct-o3
+owes: a follow-up measurement this answer also implies
+destination: dev_docs/tasks/real.md
+status: open
+```
+MD
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+exit_t7=$?
+assert_exit "mutating one record makes validate fail again" "$exit_t7" 1
+python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 >/dev/null 2>&1
+
+# `validate <project>` scopes the whole gate to it: a sibling project's own
+# violation must never leak in, while bare `validate` still catches it.
+python3 "$SCRIPT" --root "$DIR_T" init demo7-sibling --track x >/dev/null 2>&1
+python3 - "$DIR_T/dev_docs/research/demo7-sibling/tracks/x/questions.md" <<'PY'
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+p.write_text(
+    p.read_text().replace(
+        "0 answered, 0 open, 0 retired", "9 answered, 0 open, 0 retired"
+    )
+)
+PY
+python3 "$SCRIPT" --root "$DIR_T" validate demo7 >/dev/null 2>&1
+exit_t8=$?
+assert_exit "validate <project> ignores a violation in a sibling project" "$exit_t8" 0
+python3 "$SCRIPT" --root "$DIR_T" validate >/dev/null 2>&1
+exit_t9=$?
+assert_exit "bare validate still catches the sibling's violation" "$exit_t9" 1
+out_t10="$(python3 "$SCRIPT" --root "$DIR_T" validate bogus-project 2>&1)"
+exit_t10=$?
+assert_exit "an unknown project name exits 2" "$exit_t10" 2
+assert_contains "the unknown-project error lists the known ones" "$out_t10" \
+  "known projects: demo7, demo7-sibling"
+
+# A `questions.md` missing its markers entirely (never inserted silently) is
+# an error naming `init` — from both `validate` and `write-ledger`.
+T_WATCHER_NO_MARKERS="$T_PROJECT/tracks/watcher/questions.md"
+grep -v 'research-spike:ledger' "$T_WATCHER_NO_MARKERS" >"$BASE/watcher.tmp"
+mv "$BASE/watcher.tmp" "$T_WATCHER_NO_MARKERS"
+out_t11="$(python3 "$SCRIPT" --root "$DIR_T" validate demo7 --track watcher 2>&1)"
+exit_t11=$?
+assert_exit "a questions.md missing its markers fails validate" "$exit_t11" 1
+assert_contains "the missing-markers error names init" "$out_t11" \
+  "run \`init\` to install them"
+out_t12="$(python3 "$SCRIPT" --root "$DIR_T" write-ledger demo7 --track watcher 2>&1)"
+exit_t12=$?
+assert_exit "the same missing markers fail write-ledger" "$exit_t12" 1
+assert_contains "write-ledger's missing-markers error also names init" "$out_t12" \
+  "run \`init\` to install them"
 
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"

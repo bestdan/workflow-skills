@@ -413,6 +413,19 @@ class Report:
     def warn(self, path: str, line: int, message: str) -> None:
         self.warnings.append(Finding(path, line, message))
 
+    def restrict(self, prefix: str) -> None:
+        """Drop every finding whose path is not under `prefix`, in place.
+
+        `validate`'s scoping (`[<project>] [--track <t>]`) runs every check
+        over the whole tree first — referential integrity needs project-wide
+        records to resolve `blocks:` against — and filters afterward. That
+        ordering is what makes a stale *foreign* track, or a violation in a
+        sibling project, invisible to a scoped run without a second, narrower
+        pass that could disagree with the first.
+        """
+        self.errors = [f for f in self.errors if f.path.startswith(prefix)]
+        self.warnings = [f for f in self.warnings if f.path.startswith(prefix)]
+
     def emit(self) -> int:
         """Print every finding, sorted by path then line, and return the exit
         code the findings imply."""
@@ -2182,13 +2195,19 @@ def render_counts(counts: Counts) -> list[str]:
     ]
 
 
-def render_project_ledger(tracks: list[tuple[str, Counts]], total: Counts) -> list[str]:
+def render_project_ledger(
+    tracks: list[tuple[str, Counts]],
+    total: Counts,
+    decisions: list[str] | None = None,
+) -> list[str]:
     """The `LEDGER.md` roll-up body: decisions, the same lines per track, totals.
 
     Totals never print without the per-track breakdown — big projects are
-    exactly where one sick track hides inside healthy totals.
+    exactly where one sick track hides inside healthy totals. `decisions`
+    defaults to the no-decisions-yet case, so `init`'s call site — a project
+    with no `decisions.md` content to derive from — keeps working unchanged.
     """
-    lines = ["## Decisions", "", "_None yet._", "", "## Tracks", ""]
+    lines = ["## Decisions", "", *(decisions or ["_None yet._"]), "", "## Tracks", ""]
     if not tracks:
         lines += ["_No tracks yet._", ""]
     for name, counts in tracks:
@@ -2465,6 +2484,45 @@ def decision_statuses(
             decision_status(rec, resolved.by_decision.get((project.name, bare), []))
         )
     return statuses
+
+
+def render_decisions_list(statuses: list[DecisionStatus]) -> list[str]:
+    """The `LEDGER.md` Decisions section body: one bullet per decision.
+
+    A bullet list, not `render_decision_block`'s aligned columns — the same
+    reason `render_counts` is one: this section is stored and formatter-
+    checked, and dprint reflows aligned columns while leaving bullets alone.
+    Only `BLOCKED` carries a suffix; `status.note`'s other values (`"decided
+    in ..."`, `"awaiting decision"`, `"awaiting promotion (...)"`) belong to
+    `status`'s report, not to this one-line-per-decision summary.
+    """
+    if not statuses:
+        return ["_None yet._"]
+    lines = []
+    for status in statuses:
+        suffix = f" {status.note}" if status.label == LABEL_BLOCKED else ""
+        lines.append(f"- **{status.name}** — {status.label}{suffix}")
+    return lines
+
+
+def project_ledger_body(tree: Tree, project: Project, resolved: Blockers) -> list[str]:
+    """The derived `LEDGER.md` body for one project: decisions, tracks, totals.
+
+    One derivation, three consumers — `ledger`, `write-ledger`, and
+    `validate`'s freshness check — sharing it rather than each computing its
+    own is what makes "the stored number matches the derived one" a fact
+    instead of a race between two implementations.
+    """
+    tracks, total = derive_counts(tree, project)
+    decisions = render_decisions_list(decision_statuses(tree, project, resolved))
+    return render_project_ledger(tracks, total, decisions)
+
+
+def track_ledger_body(tree: Tree, project: Project, track: str) -> list[str]:
+    """The derived stored-ledger body for one track: its two count lines."""
+    tracks, _ = derive_counts(tree, project)
+    counts = next(c for name, c in tracks if name == track)
+    return render_counts(counts)
 
 
 def blocker_row(rec: Record) -> tuple[str, str, str, str]:
@@ -3089,12 +3147,267 @@ def print_inventory_for(tree: Tree, project: Project) -> None:
             )
 
 
+def resolve_scope(
+    tree: Tree, project_name: str | None, track_name: str | None
+) -> tuple[Project | None, Track | None]:
+    """Resolve `validate`/`ledger`/`write-ledger`'s `[<project>] [--track <t>]`.
+
+    One implementation shared by all three verbs, rather than three that could
+    drift on what "unknown" or "ambiguous" means. `(None, None)` is the
+    whole-tree case. Never guesses: an unknown project, an unknown track, or a
+    track name that names one in more than one project is a caller error
+    (exit 2) naming the choices, the same treatment `verb_status` already
+    gives an unknown project.
+    """
+    known_projects = [p.name for p in tree.projects]
+    project: Project | None = None
+    if project_name is not None:
+        project = tree.project(project_name)
+        if project is None:
+            raise UsageError(
+                f"unknown project '{project_name}' — known projects: "
+                f"{', '.join(known_projects) if known_projects else 'none'}"
+            )
+    if track_name is None:
+        return project, None
+
+    if project is not None:
+        track = next((t for t in project.tracks if t.name == track_name), None)
+        if track is None:
+            names = ", ".join(t.name for t in project.tracks) or "none"
+            raise UsageError(
+                f"unknown track '{track_name}' in project '{project.name}' — "
+                f"known tracks: {names}"
+            )
+        return project, track
+
+    # No project named: a track name resolves only if exactly one project has
+    # it. More than one is ambiguous — guessing would silently scope to the
+    # wrong project's track — and the message lists the candidates as
+    # `project/track` so the caller can copy the disambiguating argument.
+    matches = [(p, t) for p in tree.projects for t in p.tracks if t.name == track_name]
+    if not matches:
+        known = (
+            ", ".join(f"{p.name}/{t.name}" for p in tree.projects for t in p.tracks)
+            or "none"
+        )
+        raise UsageError(f"unknown track '{track_name}' — known tracks: {known}")
+    if len(matches) > 1:
+        listed = ", ".join(f"{p.name}/{track_name}" for p, _ in matches)
+        raise UsageError(
+            f"track '{track_name}' exists in more than one project: {listed} — "
+            "pass the project argument to disambiguate"
+        )
+    return matches[0]
+
+
+def strip_blank_edges(lines: list[str]) -> list[str]:
+    """Drop leading and trailing blank lines.
+
+    A stored ledger block carries a blank line on each side of its content for
+    readability (`init` writes it that way); that whitespace is not part of
+    the number and must not make an otherwise-fresh ledger read stale.
+    """
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def read_ledger_span(
+    path: Path, root: Path, report: Report
+) -> tuple[list[str], int, int] | None:
+    """A file's lines and its ledger-block marker span, or None having
+    reported why.
+
+    Shared by `check_ledger_block` and `write_ledger_block`: both need the
+    same file, read and reported the same way. Built on `read_file_lines`
+    (caught, not propagated) and `find_ledger_block` rather than
+    `ledger_block_body`, which stays a `UsageError` for `init`'s own use
+    (fixture k9 depends on that exit 2) — here a missing file or missing
+    markers is a tree-content violation `validate` names by path, not a
+    caller mistake worth a traceback out of the gate.
+    """
+    rel = path.relative_to(root).as_posix()
+    try:
+        lines = read_file_lines(path, rel)
+    except UsageError as e:
+        report.error(rel, 0, str(e))
+        return None
+    span = find_ledger_block(lines)
+    if span is None:
+        report.error(
+            rel,
+            0,
+            f"{rel} carries no ledger markers ({LEDGER_BEGIN} … {LEDGER_END}) — "
+            "run `init` to install them; they are never inserted silently",
+        )
+        return None
+    begin, end = span
+    return lines, begin, end
+
+
+def check_ledger_block(
+    path: Path, root: Path, derived: list[str], report: Report, *, warn_only: bool
+) -> None:
+    """Compare one file's stored ledger block against its derivation."""
+    found = read_ledger_span(path, root, report)
+    if found is None:
+        return
+    lines, begin, end = found
+    stored = strip_blank_edges(lines[begin + 1 : end])
+    want = strip_blank_edges(derived)
+    if stored == want:
+        return
+    emit = report.warn if warn_only else report.error
+    emit(
+        path.relative_to(root).as_posix(),
+        begin + 1,
+        "stored ledger is stale — run `write-ledger` to refresh it. stored: "
+        f"{' | '.join(stored) if stored else '(empty)'} — derived: "
+        f"{' | '.join(want)}",
+    )
+
+
+def validate_ledger_freshness(
+    tree: Tree, root: Path, resolved: Blockers, report: Report, *, strict: bool
+) -> None:
+    """Every stored ledger block, checked against its derivation.
+
+    Runs over the whole tree regardless of `validate`'s scope — scoping is
+    `verb_validate`'s job, applied afterward by filtering findings — so a
+    stale foreign track's finding exists to be filtered out rather than never
+    having been produced, which is what keeps a scoped and an unscoped run
+    from silently disagreeing about what the tree contains. `LEDGER.md`
+    staleness is a warning outside `--strict`: every track PR would otherwise
+    fail on a file it is forbidden to touch.
+    """
+    for project in tree.projects:
+        for track in project.tracks:
+            path = track.path / QUESTIONS_FILENAME
+            check_ledger_block(
+                path,
+                root,
+                track_ledger_body(tree, project, track.name),
+                report,
+                warn_only=False,
+            )
+        check_ledger_block(
+            project.path / "LEDGER.md",
+            root,
+            project_ledger_body(tree, project, resolved),
+            report,
+            warn_only=not strict,
+        )
+
+
+def write_ledger_block(path: Path, root: Path, body: list[str], report: Report) -> bool:
+    """Replace one file's stored ledger block, or report why it could not.
+
+    Missing markers are `report.error`'d, not raised, and never inserted:
+    `init` is the only place that legitimately writes them. Returns whether
+    the write happened, so the caller can list what it actually wrote.
+    """
+    found = read_ledger_span(path, root, report)
+    if found is None:
+        return False
+    lines, begin, end = found
+    write_lines(path, lines[: begin + 1] + ["", *body, ""] + lines[end:])
+    return True
+
+
+def verb_ledger(args: argparse.Namespace, root: Path) -> int:
+    """Print the derived ledgers. Writes nothing, ever."""
+    report = Report()
+    tree = discover(root, report)
+    if not tree.present:
+        return EXIT_OK
+    project, track = resolve_scope(tree, args.project, args.track)
+    # Populated as a side effect, not for its findings (discarded here, same
+    # as discovery's own): `tree.cards` — the stub/receipt tallies `Counts`
+    # reads — is only ever filled by walking the cards, and this is that walk.
+    # Skipping it would derive every ledger with stubs and receipts pinned to
+    # zero, silently, which is the exact failure this instrument exists to
+    # prevent, just one level up.
+    validate_cards(tree, report)
+    resolved = resolve_blockers(tree)
+
+    entries: list[tuple[str, list[str]]] = []
+    for p in tree.projects if project is None else [project]:
+        for t in [track] if track is not None else p.tracks:
+            rel = (t.path / QUESTIONS_FILENAME).relative_to(root).as_posix()
+            entries.append((rel, track_ledger_body(tree, p, t.name)))
+        if track is None:
+            rel = (p.path / "LEDGER.md").relative_to(root).as_posix()
+            entries.append((rel, project_ledger_body(tree, p, resolved)))
+
+    for i, (rel, body) in enumerate(entries):
+        if i:
+            print()
+        print(rel)
+        for line in body:
+            print(line)
+    return EXIT_OK
+
+
+def verb_write_ledger(args: argparse.Namespace, root: Path) -> int:
+    """Rewrite the stored ledger blocks in place.
+
+    Always an explicit act — `validate` never calls this, or a stale ledger
+    would stop being checked and start being generated.
+    """
+    report = Report()
+    tree = discover(root, report)
+    if not tree.present:
+        return EXIT_OK
+    project, track = resolve_scope(tree, args.project, args.track)
+    # Same side effect `verb_ledger` needs, for the same reason — `tree.cards`
+    # has to be filled before `derive_counts` reads it, or every written
+    # ledger's stub/receipt subtotals come out pinned to zero.
+    validate_cards(tree, report)
+    resolved = resolve_blockers(tree)
+
+    written: list[str] = []
+    for p in tree.projects if project is None else [project]:
+        for t in [track] if track is not None else p.tracks:
+            path = t.path / QUESTIONS_FILENAME
+            if write_ledger_block(
+                path, root, track_ledger_body(tree, p, t.name), report
+            ):
+                written.append(path.relative_to(root).as_posix())
+        if track is None:
+            path = p.path / "LEDGER.md"
+            if write_ledger_block(
+                path, root, project_ledger_body(tree, p, resolved), report
+            ):
+                written.append(path.relative_to(root).as_posix())
+
+    code = report.emit()
+    noun = "ledger" if len(written) == 1 else "ledgers"
+    print(f"{PROG}: wrote {len(written)} {noun}")
+    for rel in written:
+        print(f"  {rel}")
+    return code
+
+
+def count_records(tree: Tree, project_name: str, track_name: str | None) -> int:
+    """Records in scope — one project, or one project/track."""
+    return sum(
+        1
+        for r in tree.records
+        if r.project == project_name and (track_name is None or r.track == track_name)
+    )
+
+
 def verb_validate(args: argparse.Namespace, root: Path) -> int:
     report = Report()
     tree = discover(root, report)
     if not tree.present:
         # No research tree is clean, not an error: nothing to say, exit 0.
         return EXIT_OK
+    project, track = resolve_scope(tree, args.project, args.track)
     # One id namespace, shared by every kind that declares an id: a qualified
     # id that could mean two records is ambiguous whatever their kinds, and
     # `blocks:`/`blocking:` resolve by bare id.
@@ -3107,17 +3420,46 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     # Last, and over the whole tree: a reference is only resolvable once every
     # record that could satisfy it has been discovered.
     validate_references(tree, report)
+    resolved = resolve_blockers(tree)
+    validate_ledger_freshness(tree, root, resolved, report, strict=args.strict)
     if args.verbose:
         # Printed before the verdict, and whatever the verdict. The inventory
         # is the only view of what the parser actually made of the tree, so
         # suppressing it on a failing run withholds it exactly when it is most
         # useful — while a finding at `path:line` is far easier to read against
         # the record it came from. Findings stay last so they end the output.
-        for project in tree.projects:
-            print_inventory_for(tree, project)
+        for p in tree.projects:
+            print_inventory_for(tree, p)
+    if project is not None:
+        # Every check above ran over the whole tree — referential integrity
+        # needs project-wide records to resolve `blocks:` against — so scoping
+        # happens here, as a filter, not as a narrower set of checks. That is
+        # what makes a stale foreign track (or a sibling project's violation)
+        # invisible to a scoped run for free, and correctly drops `LEDGER.md`
+        # findings from a `--track` run: its path never carries the
+        # `tracks/<track>/` prefix.
+        prefix = f"{'/'.join(RESEARCH_SUBPATH)}/{project.name}/"
+        if track is not None:
+            prefix = f"{prefix}{TRACKS_DIRNAME}/{track.name}/"
+        report.restrict(prefix)
     code = report.emit()
     if code != EXIT_OK:
         return code
+    if track is not None:
+        print(
+            f"{PROG}: OK — {project.name}/{track.name}: "
+            f"{count_records(tree, project.name, track.name)} records"
+        )
+        return EXIT_OK
+    if project is not None:
+        tracks_named = ", ".join(t.name for t in project.tracks) or "none"
+        count = count_records(tree, project.name, None)
+        print(
+            f"{PROG}: OK — {project.name}: {len(project.tracks)} tracks, "
+            f"{count} records"
+        )
+        print(f"  {project.name} — tracks: {tracks_named} ({count} records)")
+        return EXIT_OK
     track_count = sum(len(p.tracks) for p in tree.projects)
     print(
         f"{PROG}: OK — {len(tree.projects)} projects, "
@@ -3258,24 +3600,6 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
     return EXIT_OK
 
 
-def unimplemented(verb: str, task: str):
-    """Verbs whose behaviour lands in a later task of the research-spike plan.
-
-    Deliberately exit 2 rather than 0: a stub that reports success is how an
-    instrument becomes theatre, and from the caller's side asking for a verb
-    this build cannot perform is the same class of mistake as naming one that
-    does not exist.
-    """
-
-    def run(args: argparse.Namespace, root: Path) -> int:
-        raise UsageError(
-            f"'{verb}' is not implemented yet — it lands in {task} of the "
-            "research-spike plan"
-        )
-
-    return run
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -3314,23 +3638,71 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_init.set_defaults(run=verb_init)
 
-    # Whole-tree scanning only. `validate [<project>] [--track <t>]
-    # [--strict]` is task 7's, and accepting those options here while
-    # ignoring them would be the silently-green interface this instrument
-    # exists to prevent: `--track mine` would scan every track and report OK,
-    # and `--strict` would pass without ever running the strict tier.
+    # `validate [<project>] [--track <t>] [--strict]`: a bare project
+    # positional scopes the whole gate — records, referential integrity,
+    # ledger freshness, `LEDGER.md` — to one project, mirroring `status
+    # <project>`; `--track` narrows further to one track; `--strict` is the
+    # organizer's tier, where a stale `LEDGER.md` fails instead of warning.
+    # Every check still runs over the whole tree regardless of scope —
+    # referential integrity needs project-wide records to resolve `blocks:`
+    # against — and scoping is applied afterward by filtering the collected
+    # findings, which is what makes a stale *foreign* track invisible to a
+    # `--track` run rather than merely unreported.
     p_validate = subparsers.add_parser(
-        "validate", help="The gate: parse and check the whole tree."
+        "validate", help="The gate: parse and check the tree, or one project/track."
+    )
+    p_validate.add_argument(
+        "project",
+        nargs="?",
+        help="Scope the whole gate to one project. Omitted, every project is scanned.",
+    )
+    p_validate.add_argument(
+        "--track",
+        metavar="NAME",
+        help=(
+            "Narrow further to one track. Resolves without --project if the "
+            "name is unique across the tree."
+        ),
+    )
+    p_validate.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "The organizer's tier: a stale LEDGER.md fails instead of "
+            "warning. Run on merge to the mainline, not by a track agent."
+        ),
     )
     p_validate.set_defaults(run=verb_validate)
 
-    p_ledger = subparsers.add_parser("ledger", help="Print the derived ledgers.")
-    p_ledger.set_defaults(run=unimplemented("ledger", "task 7"))
+    p_ledger = subparsers.add_parser(
+        "ledger", help="Print the derived ledgers. Writes nothing."
+    )
+    p_ledger.add_argument(
+        "project",
+        nargs="?",
+        help="Scope to one project. Omitted, every project is printed.",
+    )
+    p_ledger.add_argument(
+        "--track",
+        metavar="NAME",
+        help="Print only this track's block (no LEDGER.md).",
+    )
+    p_ledger.set_defaults(run=verb_ledger)
 
     p_write = subparsers.add_parser(
         "write-ledger", help="Rewrite the stored ledgers in place."
     )
-    p_write.set_defaults(run=unimplemented("write-ledger", "task 7"))
+    p_write.add_argument(
+        "project",
+        nargs="?",
+        help="Scope to one project. Omitted, every project's ledgers are rewritten.",
+    )
+    p_write.add_argument(
+        "--track",
+        metavar="NAME",
+        help="Rewrite only this track's questions.md — not LEDGER.md.",
+    )
+    p_write.set_defaults(run=verb_write_ledger)
 
     p_status = subparsers.add_parser(
         "status", help="The convergence report for one project."
