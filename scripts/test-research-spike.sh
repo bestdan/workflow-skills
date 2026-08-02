@@ -3571,6 +3571,76 @@ exit_y3=$?
 assert_exit "a receipt url shaped like a nonexistent file's path still validates clean" "$exit_y3" 0
 assert_contains "the path-shaped-url receipt tree reports OK" "$out_y3" "research-spike: OK"
 
+# --- Fixture (z): the adoption playbook's deterministic spine --------------
+# references/adoption.md walks a human through init -> backfill -> stub cards
+# -> wiring the gate. `backfill` itself is an interactive SKILL.md procedure
+# (judgment: deciding whether a sentence is a deferral at all) and is
+# deliberately not exercised here — this fixture covers only the
+# deterministic half the playbook's step 2/3 produce: a hand-written
+# obligation with no resolvable destination, plus the stub card that fixes
+# it, exactly the records a human running `backfill`/`defer` would end up
+# writing. Two trees, built the same way except for the stub card, so the
+# negative half fails for exactly the missing-destination reason and nothing
+# else — proving the stub is load-bearing, not decorative.
+adoption_fixture() {
+  # adoption_fixture <dir> <with_stub: yes|no>
+  local dir="$1" with_stub="$2"
+  python3 "$SCRIPT" --root "$dir" init adopt --track account >/dev/null 2>&1
+  printf '\n```decision\nid: account-provisioning\nstate: pending\n```\n' \
+    >>"$dir/dev_docs/research/adopt/decisions.md"
+  cat >>"$dir/dev_docs/research/adopt/tracks/account/questions.md" <<'EOF'
+
+### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+Evidence goes here.
+
+```obligation
+id: uid-domain-provisioning
+owes: the provisioning steps this answer implies
+destination: dev_docs/research/adopt/tracks/account/obligations/uid-domain.md
+status: open
+```
+EOF
+  if [ "$with_stub" = "yes" ]; then
+    write_file "$dir/dev_docs/research/adopt/tracks/account/obligations/uid-domain.md" \
+      '# uid-domain-provisioning stub
+
+```card
+kind: stub
+superseded_when: the account track files its uid-domain-provisioning task card
+```'
+  fi
+  python3 "$SCRIPT" --root "$dir" write-ledger >/dev/null 2>&1
+}
+
+DIR_Z1="$BASE/adoption-with-stub"
+mkdir -p "$DIR_Z1"
+adoption_fixture "$DIR_Z1" yes
+out_z1="$(python3 "$SCRIPT" --root "$DIR_Z1" validate --strict 2>&1)"
+exit_z1=$?
+assert_exit "adoption spine: hand-written obligation + stub card validates --strict clean" \
+  "$exit_z1" 0
+assert_contains "adoption spine: the stubbed tree reports OK" "$out_z1" "research-spike: OK"
+
+DIR_Z2="$BASE/adoption-without-stub"
+mkdir -p "$DIR_Z2"
+adoption_fixture "$DIR_Z2" no
+out_z2="$(python3 "$SCRIPT" --root "$DIR_Z2" validate --strict 2>&1)"
+exit_z2=$?
+assert_exit "adoption spine: the same tree without the stub card fails validate --strict" \
+  "$exit_z2" 1
+assert_contains "adoption spine: it fails for the missing-destination reason, by exact message" \
+  "$out_z2" \
+  "destination 'dev_docs/research/adopt/tracks/account/obligations/uid-domain.md' does not exist"
+assert_contains "adoption spine: the negative half is the missing stub, not an unrelated error" \
+  "$out_z2" "this is how deferred work goes dark"
+
 echo
 echo "test-research-spike: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1
