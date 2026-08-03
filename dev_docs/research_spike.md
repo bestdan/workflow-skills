@@ -337,6 +337,117 @@ add, and when, once a real project is initialized here. See
 [`skills/research-spike/references/adoption.md`](../skills/research-spike/references/adoption.md)
 for the full setup sequence.
 
+## First adoption — `bestdan/aiutopilot`, August 2026
+
+The first repo to run this on live work. Recorded here because the skill was
+built from that repo's bespoke predecessor, and its numbers are quoted
+throughout these docs as "the reference implementation" — so this is the
+instrument turned back on the tree it was derived from, and the places it
+did not fit are worth more than the places it did.
+
+### What the adoption exercised — and what it did not
+
+**Not exercised: `backfill` (SKILL.md procedure 4), the playbook's payload
+step.** That repo had already backfilled its free-form doc into the bespoke
+predecessor's record format, so this adoption converted 13 existing
+structured records rather than walking prose and judging what counted as a
+deferral at all. **Nothing here is evidence about the backfill's ergonomics,
+and the "4 of 13 had no destination" figure quoted in `adoption.md` remains
+un-replicated.** The next adopter starting from real prose is still the
+first test of that path.
+
+Exercised, and held: `init`, the record grammar, `validate`/`--strict`,
+`write-ledger`, `status`, stub cards with `superseded_when:`, a two-track
+split, and the gate wiring.
+
+### What held up
+
+- **The record grammar was portable without loss.** The predecessor's
+  `id`/`owes`/`destination`/`status`/`discharged_by` mapped one-to-one; 13
+  records and both count pairs (8 answered / 4 open questions, 3 discharged
+  / 10 open obligations) came across identically.
+- **`init`'s scaffold passes its own `validate` immediately**, and the inert
+  HTML-comment worked example survived a real `dprint fmt` pass untouched.
+- **The `--root`-before-subcommand insistence was warranted.** It is stated
+  in three places and needed to be — the adopter reached for the wrong order.
+- **The `_plan/` warning-not-error distinction was right.** Four
+  destinations pointed into in-flight plan directories. Errors would have
+  forced a pointless repoint; warnings recorded the debt and let the work
+  land.
+- **Generated ledgers were `dprint fmt`-stable and `write-ledger`
+  idempotent** — verified by re-running both over an already-fresh tree.
+- **`validate`'s error messages carried the adoption.** They state the
+  failure, the remedy, and why the rule exists, which is why the eventual CI
+  failure needed no interpretation. Worth protecting in future edits.
+
+### The tool correcting its user — the most valuable behaviour observed
+
+1. **`status`' `blocking:` density warning fired, and was right.** The
+   adopter marked 5 of 10 open obligations `blocking:`; the warning said
+   more than a third means the flag has become emphasis. Three were
+   double-counting a gate the question already carried via `blocks:`.
+   Trimmed to 2.
+2. **Derived readiness could not be faked.** There is no field to type a
+   status into, so the number an adopter would most like to flatter is the
+   one they cannot touch.
+
+The first is the behaviour to generalize: a warning that pushes back on the
+person operating the instrument caught a modelling error no reviewer had.
+
+### The two gaps in `adoption.md`, now fixed there
+
+- **Decisions must be named before the backfill is worth anything.**
+  `blocks:` must resolve to a decision record — promoted in `decisions.md`,
+  or `state: proposed` in the track's own `questions.md`, which validates
+  either way. What an unnamed decision list costs is convergence, not
+  validation: `status` reports a `proposed` decision only as "awaiting
+  promotion" and derives ready/blocked for promoted ones alone. The source
+  repo had one implicit decision encoded as a section heading and three real
+  ones; making them explicit was a prerequisite, not a tidy-up. Now step 1a.
+- **The playbook assumed the script is reachable from the gate.** It is not,
+  on a CI runner with no plugin install — and the naive `if [ -f … ]` guard
+  no-ops green, which is the validator's own fail-open relocated into the
+  wiring. Resolved by fetching at a pinned commit with a `sha256` check; the
+  rejected alternative (fall back to the local plugin) reintroduces version
+  drift between laptop and CI. Now a subsection of step 4.
+
+### Where the adopter deviated from step 4, and was wrong
+
+Step 4 says to add `validate --strict` as the gate. The adopter instead put
+it in an advisory, non-blocking lane, reasoning that `validate` bundles three
+checks of which only destination resolution is a property an unrelated commit
+can break. Two independent consults rejected it: coverage and ledger
+freshness derive from the records, so they already fail only the author who
+caused them; and "authoring lapse" does not distinguish them from a formatter
+check, which blocks everywhere.
+
+**The instructive part is what tempted the deviation.** Step 5's
+advisory-tier generalization — "a check whose false positives have nowhere to
+go must not be able to fail the build" — reads as a principle about checks in
+general. It is a statement about `suggest` only. Having built an advisory lane
+for `suggest`, extending it to `validate` felt like applying the documented
+rule rather than departing from it. §5 now carries an explicit limit: the
+boundary falls between the two subcommands, never inside `validate`.
+
+The demotion also inverted the point. **Coverage is the check that carries
+this instrument's purpose**; destination resolution only protects an
+already-recorded obligation from a later rename. Gating on destinations alone
+enforces the weaker property and waves through the stated one.
+
+### Proving the gate fails
+
+Confirmed by deliberate breakage rather than assumed: a removed coverage
+declaration, a renamed destination, and an unregenerated ledger each produced
+the expected error. The coverage break was then pushed to CI, where the
+repo's own check script **passed** the broken tree and the research-spike job
+failed — while the merge button stayed enabled. Then reverted.
+
+That last step surfaced something no adopter should have to rediscover:
+**adding a blocking job to a workflow does not make it a required check.**
+The repo's branch protection listed only its pre-existing context, so the new
+job showed red while the merge button stayed enabled. `adoption.md` now says
+to verify this.
+
 ## File map
 
 | Path                                                 | What it is                                                                                                                                           |
