@@ -72,6 +72,16 @@ let them watch it happen.
 Number every step as you go — "Step 3 of 8" — so the learner always knows
 where they are in an 8-step walk.
 
+## How this walk is paced
+
+**Read [`references/pacing.md`](references/pacing.md) before Step 1** — it
+governs the delivery of every step below, and the walk fails at its purpose
+without it. In one line: **one step per turn, and every step ends by handing
+the terminal back**, because a mechanism the learner scrolled past is one they
+did not see. The reference carries the recap/stop/wait contract, how to handle
+questions asked mid-walk, the say-it-before-you-run-it rule, and the
+terms-of-art glossary each step's checkpoint draws on.
+
 ## Step 1 of 8 — Build the throwaway tree
 
 Ask once, with `AskUserQuestion` — this changes only which directory `$WORK`
@@ -102,6 +112,35 @@ continue with an empty root.
 Tell the learner exactly where it is, and that it is not, and will never be,
 anywhere in their repo. Nothing under `dev_docs/research/` in their actual
 checkout is touched by anything in this walk.
+
+### Get them a window into the tree
+
+Everything from here on happens in a directory the learner is not standing in,
+and half of what this walk teaches is what the _files_ do — the ledger block
+rewriting itself, the stub card appearing, `questions.md` growing a section
+per round. Watching that in an editor is the difference between following
+along and taking your word for it.
+
+So offer, right now, to open the tree in an editor window they keep beside the
+conversation:
+
+```bash
+code "/absolute/path/printed/above"
+```
+
+Substitute the literal path, same rule as everywhere else. `code` is the usual
+one — probe it with `command -v code` first, and fall back to whatever's
+present (`cursor`, `subl`, `zed`, `open` on macOS for the Finder) rather than
+insisting on one editor. If none resolves, say so and offer `open`/`xdg-open`
+on the directory instead; this is a nicety, not a prerequisite, so a missing
+editor never blocks the walk.
+
+Two things to tell them when it opens: the window will be **empty** until
+Step 2 scaffolds the project, and it is worth leaving open until Step 7,
+because Step 8 deletes the directory out from under it.
+
+**Checkpoint.** Empty directory, real path, an editor pointed at it, nothing
+else yet. Stop and ask.
 
 ## Step 2 of 8 — Scaffold a project
 
@@ -146,24 +185,26 @@ until Step 3 files the question that does. A warning never fails the exit
 code; only an `✘` finding does. A blank tree with one open, unblocked
 decision is clean — just not silent.
 
+**Checkpoint.** Four files exist, a decision is pending, `validate` passes
+with one warning. Terms first used here: _spike_, _track_, _decision_,
+_the ledger_ — define each, then stop and ask. This is the natural moment to
+look at the files: if they took the editor window, tell them it just went from
+empty to four files and let them read it there; otherwise offer to show any
+one of them. Don't paste all four unasked either way.
+
+_obligation_ is the exception, and say so rather than letting it pass: the
+word has already gone by twice — in the spine you opened with, and in the
+warning on screen right now — and it is a term of art, not the ordinary
+sense. Name it as one, say its definition is coming at Step 4 where the first
+real obligation appears, and leave it there. Defining it now would spend the
+tease the spine is built on.
+
 ## Step 3 of 8 — File your first question
 
-Show the learner this block before writing it — this is the record they're
-about to create, appended to `tracks/auth/questions.md`:
-
-````markdown
-### Q1. Should login redirect through the SSO gateway before issuing a session token?
-
-```question
-id: sso-redirect-required
-status: open
-blocks: sso-rollout
-```
-
-```obligation
-none: filing only, no work identified yet
-```
-````
+Show the learner **R1** from [`references/records.md`](references/records.md)
+before writing it — that file holds every literal block this walk creates, and
+the ids and paths are wired together, so copy it verbatim rather than
+improvising one.
 
 Name the rule as you write it: **coverage is required the instant the section
 exists**, not once it's answered. That bare `none:` is not decoration — drop
@@ -179,37 +220,23 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
 
 Both succeed. One question filed, nothing owed yet, tree still clean.
 
+**Checkpoint.** Terms first used here: _question record_, and the
+coverage rule — a section owes a declaration of what it owes from the moment
+it exists, even when the honest declaration is `none:`. Stop and ask. Worth
+inviting a specific one before moving on: _what do you think happens if you
+delete that `none:` block?_ — they can guess, and Step 4 is about to reward
+guessing.
+
 ## Step 4 of 8 — Answer it, and hit the wall
 
 Tell the learner plainly, before running anything: **the next `validate` is
 going to fail. Run it anyway — the failure is the lesson.**
 
-Edit the Q1 section in place: flip `status: open` to `status: answered`, add
-one-line `answer:`, add a sentence of evidence in the prose, and replace the
-bare `none:` obligation with a real one — pointing at a stub card **that does
-not exist yet**:
-
-````markdown
-### Q1. Should login redirect through the SSO gateway before issuing a session token?
-
-```question
-id: sso-redirect-required
-status: answered
-blocks: sso-rollout
-answer: yes — the gateway must own the redirect, so the session token is only issued after SSO succeeds
-```
-
-Traced through the current login handler: without the redirect, a client
-can request a session token directly and skip SSO entirely. The handler
-needs a check added before token issuance.
-
-```obligation
-id: sso-redirect-check
-owes: the pre-issuance redirect check in the login handler
-destination: dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md
-status: open
-```
-````
+Replace the Q1 section in place with **R2** from
+[`references/records.md`](references/records.md): `status` flips to
+`answered`, a one-line `answer:` and a sentence of evidence arrive, and the
+bare `none:` becomes a real obligation pointing at a stub card **that does not
+exist yet**. Show it before writing it, as always.
 
 Answering a question mostly _creates_ obligations, not new questions — that's
 the pattern to name here. Now run, for real:
@@ -236,19 +263,19 @@ create one_ — is the entire mechanism this instrument exists to enforce. A
 `destination:` is a promise the filesystem checks, not prose that sounds
 routed.
 
+**Checkpoint — the longest pause in the walk. Do not fix it in this turn.**
+The tree is sitting in a failing state and it should stay there while they
+look at it. Terms first used here: _obligation_ (spend a beat on it: a debt an
+_answer_ created, which is why answering can leave you further from done than
+you started) and _destination_. Then ask them what they'd do about it before
+Step 5 tells them — the fix is guessable from the error text, and guessing it
+is worth more than reading it.
+
 ## Step 5 of 8 — The stub card that fixes it
 
-Show the block, then write it to
-`dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md`:
-
-````markdown
-# sso-redirect-check stub
-
-```card
-kind: stub
-superseded_when: the auth track files its sso-redirect-check implementation task
-```
-````
+Show **R3** from [`references/records.md`](references/records.md), then write
+it to
+`dev_docs/research/onboarding/tracks/auth/obligations/sso-redirect-check.md`.
 
 Say it out loud, the way `SKILL.md`'s `defer` procedure requires: _a stub was
 just created_ — the stub count is the diagnostic this whole instrument exists
@@ -284,73 +311,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
 `research-spike: OK — onboarding/auth: 3 records`. One full cycle done: file,
 answer, hit the wall, fix it with an addressed, self-expiring stub.
 
+**Checkpoint.** Two failures and a pass, and the second failure was not the
+one anyone predicted — say that plainly, it's the most instructive surprise in
+the walk. Terms first used here: _stub card_, _`superseded_when:`_, _stale
+ledger_. Stop and ask, and flag what to watch next — without numbers, they're
+Step 7's to spend: whether the obligation count keeps pace with the question
+count.
+
 ## Step 6 of 8 — Two more rounds, faster
 
 Now that the mechanism is familiar, compress it: write the stub cards _before_
 running `validate`, so the next two rounds pass clean on the first try — same
 rule, no more waiting on it. Append both sections to the same
-`tracks/auth/questions.md`, each answer creating **two** obligations, not one
-— this is deliberate: real answers routinely fan out into more than one
-component, which is exactly how the count outpaces the question that made it:
+`tracks/auth/questions.md` — that's **R4** in
+[`references/records.md`](references/records.md), where each answer creates
+**two** obligations rather than one. That fan-out is deliberate: real answers
+routinely land across more than one component, which is exactly how the count
+outpaces the question that made it.
 
-````markdown
-### Q2. Does the session token need a shorter TTL when SSO is used?
-
-```question
-id: sso-session-ttl
-status: answered
-blocks: sso-rollout
-answer: yes — SSO sessions should expire sooner than password sessions, and logout should revoke them immediately
-```
-
-SSO sessions inherit trust from the identity provider, so a stale token
-is a wider blast radius than a stale password session. Two things follow.
-
-```obligation
-id: ttl-config-change
-owes: a shorter configurable TTL for SSO-issued sessions
-destination: dev_docs/research/onboarding/tracks/auth/obligations/ttl-config-change.md
-status: open
-```
-
-```obligation
-id: revoke-on-logout
-owes: immediate session revocation on logout for SSO sessions
-destination: dev_docs/research/onboarding/tracks/auth/obligations/revoke-on-logout.md
-status: open
-```
-
-### Q3. Should password-based login be disabled once SSO is required?
-
-```question
-id: password-login-disable
-status: answered
-blocks: sso-rollout
-answer: yes, eventually — but not in the same release as the SSO redirect
-```
-
-Turning it off immediately would lock out any account not yet migrated.
-The rollout needs a flag and a heads-up to existing users first.
-
-```obligation
-id: legacy-password-flag
-owes: a feature flag that gates password login off per-account
-destination: dev_docs/research/onboarding/tracks/auth/obligations/legacy-password-flag.md
-status: open
-```
-
-```obligation
-id: migration-notice-copy
-owes: the in-product notice telling password users to switch to SSO
-destination: dev_docs/research/onboarding/tracks/auth/obligations/migration-notice-copy.md
-status: open
-```
-````
-
-Write the four stub cards up front (same shape as Step 5's, one
-`superseded_when:` each, filenames matching the four `destination:` paths
-above: `ttl-config-change.md`, `revoke-on-logout.md`, `legacy-password-flag.md`,
-`migration-notice-copy.md`), then:
+Then write the four stub cards up front — **R5** in the same file, one per
+`destination:` R4 names — and run:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
@@ -364,6 +344,12 @@ Clean on the first try this time — you'll likely also see a warning that
 `write-ledger onboarding --track auth` deliberately only ever touches the
 track's own `questions.md`, never the organizer-owned `LEDGER.md` — leave it
 for Step 7.
+
+**Checkpoint.** Faster, but still one turn — this step wrote two questions,
+four obligations and four stub cards, which is more new state than any step so
+far. Recap what the tree holds now, and stop and ask before Step 7 pulls the
+numbers. Don't preview the counts here; Step 7 is the payoff and stating it
+early spends it.
 
 ## Step 7 of 8 — Read the divergence
 
@@ -397,6 +383,18 @@ predicts how much work is left. Don't supply the answer if they can get there
 themselves — that's the whole instrument, on one screen, and it's real
 output from a real run, not a mocked-up table.
 
+Terms first used here: _discharged_ versus _open_ (worth the extra beat —
+discharged means the work was actually done, not closed, deferred, or routed),
+_retired_, and _convergence_. The `ledger` and `status` reports answer
+different questions and it's worth saying which is which: `ledger` is the
+stored roll-up, `status` is what's computed live from the tree right now.
+
+**Checkpoint — the one that matters most.** Do not move to cleanup in the same
+turn under any circumstances: the tree still exists, and the numbers are still
+on screen only until you delete it. Stop, ask what they make of it, and stay
+for follow-ups. Offer to look at anything in the tree that would help — the
+stub cards, the questions file, the roll-up.
+
 If they want to be checked on whether that actually landed — the wall, the
 stub, the two counts diverging, why — offer `/tutor` now rather than quizzing
 them yourself here; that loop (elicit, diagnose, verify with a counterfactual)
@@ -405,15 +403,33 @@ the first time either one changes.
 
 ## Step 8 of 8 — Clean up
 
+Confirm first that they're done looking — this is the step that destroys the
+evidence, and it is the one step in the walk that cannot be re-run. If they
+have the Step 1 editor window open, say plainly that this is what empties it,
+so the files vanishing reads as the cleanup working rather than something
+breaking.
+
+Substitute the literal absolute path from Step 1, exactly as everywhere else
+in this walk. **Do not paste `$WORK` here.** The variable is unset in this
+fresh shell, so `[ -n "${WORK:-}" ]` is false, the `&&` short-circuits, and
+the command exits quietly having deleted nothing — leaving the tutorial's one
+promise (nothing survives this walk) broken with no error to notice:
+
 ```bash
-[ -n "${WORK:-}" ] && rm -rf "$WORK"
+rm -rf "/absolute/path/printed/by/step/1"
 ```
 
-Refuse to run this against an empty or unset `$WORK` — a blank path there is
-not "nothing to clean up," it is one shell quoting mistake away from deleting
-whatever `rm -rf ""`'s caller happens to be sitting in.
+Before running it, check the path the same three ways Step 1 did: non-empty,
+the absolute path Step 1 printed, and not inside the learner's repo. A blank
+path there is not "nothing to clean up," it is one quoting mistake away from
+deleting whatever the shell happens to be sitting in. Then confirm the
+directory is actually gone rather than assuming it:
 
-Tell the learner plainly: the tree lived at `$WORK`, it is now gone, and
+```bash
+[ -e "/absolute/path/printed/by/step/1" ] && echo "STILL THERE" || echo "gone"
+```
+
+Tell the learner plainly: the tree lived at that path, it is now gone, and
 nothing under their own repo's `dev_docs/research/` was ever touched. If they
 want to try the real thing next, point at
 [`references/adoption.md`](../research-spike/references/adoption.md) in the
