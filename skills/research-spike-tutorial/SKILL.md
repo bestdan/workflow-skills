@@ -108,7 +108,7 @@ Each step opens with a sentence of intent in plain language — _what_ this
 command is about to do and _why the walk needs it now_ — before the command
 runs. The learner should never watch a command execute without knowing what
 it was for. Same on the way out: the recap says what actually happened, which
-is not always what you intended (Step 5's second `validate` is the case in
+is not always what you intended (Step 5's stale-ledger failure is the case in
 point).
 
 ### Terms of art: define at first use, every one of them
@@ -219,6 +219,13 @@ decision is clean — just not silent.
 with one warning. Terms first used here: _spike_, _track_, _decision_,
 _the ledger_ — define each, then stop and ask. This is the natural moment to
 offer to show them any of the four files; don't paste all four unasked.
+
+_obligation_ is the exception, and say so rather than letting it pass: the
+word has already gone by twice — in the spine you opened with, and in the
+warning on screen right now — and it is a term of art, not the ordinary
+sense. Name it as one, say its definition is coming at Step 4 where the first
+real obligation appears, and leave it there. Defining it now would spend the
+tease the spine is built on.
 
 ## Step 3 of 8 — File your first question
 
@@ -376,8 +383,9 @@ answer, hit the wall, fix it with an addressed, self-expiring stub.
 **Checkpoint.** Two failures and a pass, and the second failure was not the
 one anyone predicted — say that plainly, it's the most instructive surprise in
 the walk. Terms first used here: _stub card_, _`superseded_when:`_, _stale
-ledger_. Stop and ask, and flag what to watch next: three questions are about
-to become five obligations.
+ledger_. Stop and ask, and flag what to watch next — without numbers, they're
+Step 7's to spend: whether the obligation count keeps pace with the question
+count.
 
 ## Step 6 of 8 — Two more rounds, faster
 
