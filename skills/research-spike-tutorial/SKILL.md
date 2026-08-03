@@ -170,7 +170,34 @@ Tell the learner exactly where it is, and that it is not, and will never be,
 anywhere in their repo. Nothing under `dev_docs/research/` in their actual
 checkout is touched by anything in this walk.
 
-**Checkpoint.** Empty directory, real path, nothing else yet. Stop and ask.
+### Get them a window into the tree
+
+Everything from here on happens in a directory the learner is not standing in,
+and half of what this walk teaches is what the _files_ do — the ledger block
+rewriting itself, the stub card appearing, `questions.md` growing a section
+per round. Watching that in an editor is the difference between following
+along and taking your word for it.
+
+So offer, right now, to open the tree in an editor window they keep beside the
+conversation:
+
+```bash
+code "/absolute/path/printed/above"
+```
+
+Substitute the literal path, same rule as everywhere else. `code` is the usual
+one — probe it with `command -v code` first, and fall back to whatever's
+present (`cursor`, `subl`, `zed`, `open` on macOS for the Finder) rather than
+insisting on one editor. If none resolves, say so and offer `open`/`xdg-open`
+on the directory instead; this is a nicety, not a prerequisite, so a missing
+editor never blocks the walk.
+
+Two things to tell them when it opens: the window will be **empty** until
+Step 2 scaffolds the project, and it is worth leaving open until Step 7,
+because Step 8 deletes the directory out from under it.
+
+**Checkpoint.** Empty directory, real path, an editor pointed at it, nothing
+else yet. Stop and ask.
 
 ## Step 2 of 8 — Scaffold a project
 
@@ -218,7 +245,9 @@ decision is clean — just not silent.
 **Checkpoint.** Four files exist, a decision is pending, `validate` passes
 with one warning. Terms first used here: _spike_, _track_, _decision_,
 _the ledger_ — define each, then stop and ask. This is the natural moment to
-offer to show them any of the four files; don't paste all four unasked.
+look at the files: if they took the editor window, tell them it just went from
+empty to four files and let them read it there; otherwise offer to show any
+one of them. Don't paste all four unasked either way.
 
 _obligation_ is the exception, and say so rather than letting it pass: the
 word has already gone by twice — in the spine you opened with, and in the
@@ -527,7 +556,10 @@ the first time either one changes.
 ## Step 8 of 8 — Clean up
 
 Confirm first that they're done looking — this is the step that destroys the
-evidence, and it is the one step in the walk that cannot be re-run.
+evidence, and it is the one step in the walk that cannot be re-run. If they
+have the Step 1 editor window open, say plainly that this is what empties it,
+so the files vanishing reads as the cleanup working rather than something
+breaking.
 
 Substitute the literal absolute path from Step 1, exactly as everywhere else
 in this walk. **Do not paste `$WORK` here.** The variable is unset in this
