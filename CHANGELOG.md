@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.2] - 2026-08-03
+
+### Fixes
+
+- unbreak the dprint gate and cut its wall-clock in half (#337) (990cff4)
+
 ## [1.82.1] - 2026-08-03
 
 ### Fixes
