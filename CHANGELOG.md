@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.1] - 2026-08-03
+
+### Fixes
+
+- pace the walk so the learner can actually watch it (#336) (02fa785)
+
 ## [1.82.0] - 2026-08-03
 
 ### Features
