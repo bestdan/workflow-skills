@@ -72,6 +72,73 @@ let them watch it happen.
 Number every step as you go — "Step 3 of 8" — so the learner always knows
 where they are in an 8-step walk.
 
+## How this walk is paced
+
+**One step per turn. Every step ends by handing the terminal back.** The
+learner is here to watch a mechanism work, and a mechanism they scrolled past
+is one they did not see. Running three steps in one turn buries the failure in
+Step 4 under the fix in Step 5, which is exactly the pair the walk exists to
+separate.
+
+So at the end of every step, before touching the next one:
+
+1. **Recap in two or three lines** — what the command did, what changed on
+   disk, and the one rule that step was there to teach. Not a summary of the
+   step's prose; the specific thing that just happened in their terminal.
+2. **Stop and ask.** A bare, one-keystroke prompt: _"Questions on that, or
+   press on? (Enter to continue)"_. Use plain prose, not `AskUserQuestion` —
+   the point is room for an arbitrary question, not a menu.
+3. **Wait.** Do not run the next step's commands in the same turn. There is no
+   step so small it can be bundled with its neighbour.
+
+When they do ask something, answer it from what is already on their screen —
+the output of the commands run so far. If the honest answer is "Step 6 shows
+you", say so and offer to skip ahead rather than previewing it in prose; a
+spoiled surprise costs more here than a deferred one. If an answer runs long,
+answer it and re-offer the same continue prompt rather than sliding into the
+next step on momentum.
+
+If the learner asks to stop early, at any step: go straight to Step 8 and
+delete the tree. A half-finished walk still leaves a directory behind, and
+abandoning it is the one outcome this skill promised wouldn't happen.
+
+### Say what you are about to do, before you do it
+
+Each step opens with a sentence of intent in plain language — _what_ this
+command is about to do and _why the walk needs it now_ — before the command
+runs. The learner should never watch a command execute without knowing what
+it was for. Same on the way out: the recap says what actually happened, which
+is not always what you intended (Step 5's second `validate` is the case in
+point).
+
+### Terms of art: define at first use, every one of them
+
+This instrument runs on a small private vocabulary, and every one of these
+words also has a loose everyday meaning that will quietly mislead. Whenever
+one appears for the first time, define it in one sentence, inline, before
+using it as though it were shared:
+
+| Term                   | Say something like                                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **spike**              | A bounded stretch of investigation that exists to unblock a decision, not to ship a feature.                                   |
+| **track**              | One thread of related questions inside a project — `auth` here — with its own ledger.                                          |
+| **question record**    | A filed, addressable question with a status, not a note; the unit the ledger counts.                                           |
+| **decision**           | The thing the spike exists to unblock; questions `blocks:` it, and it stays `pending` until they clear.                        |
+| **obligation**         | Work an _answer_ created — a debt the answer incurred — as distinct from a question, which is something not yet known.         |
+| **discharged**         | An obligation that was actually done, as opposed to closed, deferred, or routed somewhere.                                     |
+| **stub card**          | A real file standing in for work not done yet, so a deferral points at something on disk instead of at prose.                  |
+| **`superseded_when:`** | The stated condition under which a stub is allowed to be deleted — required so stubs can't accumulate silently forever.        |
+| **destination**        | A filesystem path an obligation is routed to, which `validate` checks exists; naming one does not create one.                  |
+| **the ledger**         | The counts stored _in_ the markdown, written by `write-ledger` — stored, not computed live, which is why it can go stale.      |
+| **stale ledger**       | Stored counts that no longer match what the tree actually contains; an error, and the mechanism catching its own contract.     |
+| **retired**            | A question withdrawn as no longer worth answering — closed without an answer, tracked separately so it can't pose as progress. |
+| **convergence**        | Whether the spike is actually approaching a decision, measured by what's left blocking it — not by how many questions closed.  |
+
+Two of these do most of the work and are worth a beat longer than one line:
+**obligation** (Step 4, where the first one appears) and **discharged versus
+open** (Step 7, where the divergence lands). If the learner already knows the
+vocabulary, they'll say so — take them at their word and stop defining.
+
 ## Step 1 of 8 — Build the throwaway tree
 
 Ask once, with `AskUserQuestion` — this changes only which directory `$WORK`
@@ -102,6 +169,8 @@ continue with an empty root.
 Tell the learner exactly where it is, and that it is not, and will never be,
 anywhere in their repo. Nothing under `dev_docs/research/` in their actual
 checkout is touched by anything in this walk.
+
+**Checkpoint.** Empty directory, real path, nothing else yet. Stop and ask.
 
 ## Step 2 of 8 — Scaffold a project
 
@@ -146,6 +215,11 @@ until Step 3 files the question that does. A warning never fails the exit
 code; only an `✘` finding does. A blank tree with one open, unblocked
 decision is clean — just not silent.
 
+**Checkpoint.** Four files exist, a decision is pending, `validate` passes
+with one warning. Terms first used here: _spike_, _track_, _decision_,
+_the ledger_ — define each, then stop and ask. This is the natural moment to
+offer to show them any of the four files; don't paste all four unasked.
+
 ## Step 3 of 8 — File your first question
 
 Show the learner this block before writing it — this is the record they're
@@ -178,6 +252,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
 ```
 
 Both succeed. One question filed, nothing owed yet, tree still clean.
+
+**Checkpoint.** Terms first used here: _question record_, and the
+coverage rule — a section owes a declaration of what it owes from the moment
+it exists, even when the honest declaration is `none:`. Stop and ask. Worth
+inviting a specific one before moving on: _what do you think happens if you
+delete that `none:` block?_ — they can guess, and Step 4 is about to reward
+guessing.
 
 ## Step 4 of 8 — Answer it, and hit the wall
 
@@ -236,6 +317,14 @@ create one_ — is the entire mechanism this instrument exists to enforce. A
 `destination:` is a promise the filesystem checks, not prose that sounds
 routed.
 
+**Checkpoint — the longest pause in the walk. Do not fix it in this turn.**
+The tree is sitting in a failing state and it should stay there while they
+look at it. Terms first used here: _obligation_ (spend a beat on it: a debt an
+_answer_ created, which is why answering can leave you further from done than
+you started) and _destination_. Then ask them what they'd do about it before
+Step 5 tells them — the fix is guessable from the error text, and guessing it
+is worth more than reading it.
+
 ## Step 5 of 8 — The stub card that fixes it
 
 Show the block, then write it to
@@ -283,6 +372,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" \
 
 `research-spike: OK — onboarding/auth: 3 records`. One full cycle done: file,
 answer, hit the wall, fix it with an addressed, self-expiring stub.
+
+**Checkpoint.** Two failures and a pass, and the second failure was not the
+one anyone predicted — say that plainly, it's the most instructive surprise in
+the walk. Terms first used here: _stub card_, _`superseded_when:`_, _stale
+ledger_. Stop and ask, and flag what to watch next: three questions are about
+to become five obligations.
 
 ## Step 6 of 8 — Two more rounds, faster
 
@@ -365,6 +460,12 @@ Clean on the first try this time — you'll likely also see a warning that
 track's own `questions.md`, never the organizer-owned `LEDGER.md` — leave it
 for Step 7.
 
+**Checkpoint.** Faster, but still one turn — this step wrote two questions,
+four obligations and four stub cards, which is more new state than any step so
+far. Recap what the tree holds now, and stop and ask before Step 7 pulls the
+numbers. Don't preview the counts here; Step 7 is the payoff and stating it
+early spends it.
+
 ## Step 7 of 8 — Read the divergence
 
 Refresh the organizer-owned roll-up, then pull both reports:
@@ -397,6 +498,18 @@ predicts how much work is left. Don't supply the answer if they can get there
 themselves — that's the whole instrument, on one screen, and it's real
 output from a real run, not a mocked-up table.
 
+Terms first used here: _discharged_ versus _open_ (worth the extra beat —
+discharged means the work was actually done, not closed, deferred, or routed),
+_retired_, and _convergence_. The `ledger` and `status` reports answer
+different questions and it's worth saying which is which: `ledger` is the
+stored roll-up, `status` is what's computed live from the tree right now.
+
+**Checkpoint — the one that matters most.** Do not move to cleanup in the same
+turn under any circumstances: the tree still exists, and the numbers are still
+on screen only until you delete it. Stop, ask what they make of it, and stay
+for follow-ups. Offer to look at anything in the tree that would help — the
+stub cards, the questions file, the roll-up.
+
 If they want to be checked on whether that actually landed — the wall, the
 stub, the two counts diverging, why — offer `/tutor` now rather than quizzing
 them yourself here; that loop (elicit, diagnose, verify with a counterfactual)
@@ -405,15 +518,30 @@ the first time either one changes.
 
 ## Step 8 of 8 — Clean up
 
+Confirm first that they're done looking — this is the step that destroys the
+evidence, and it is the one step in the walk that cannot be re-run.
+
+Substitute the literal absolute path from Step 1, exactly as everywhere else
+in this walk. **Do not paste `$WORK` here.** The variable is unset in this
+fresh shell, so `[ -n "${WORK:-}" ]` is false, the `&&` short-circuits, and
+the command exits quietly having deleted nothing — leaving the tutorial's one
+promise (nothing survives this walk) broken with no error to notice:
+
 ```bash
-[ -n "${WORK:-}" ] && rm -rf "$WORK"
+rm -rf "/absolute/path/printed/by/step/1"
 ```
 
-Refuse to run this against an empty or unset `$WORK` — a blank path there is
-not "nothing to clean up," it is one shell quoting mistake away from deleting
-whatever `rm -rf ""`'s caller happens to be sitting in.
+Before running it, check the path the same three ways Step 1 did: non-empty,
+the absolute path Step 1 printed, and not inside the learner's repo. A blank
+path there is not "nothing to clean up," it is one quoting mistake away from
+deleting whatever the shell happens to be sitting in. Then confirm the
+directory is actually gone rather than assuming it:
 
-Tell the learner plainly: the tree lived at `$WORK`, it is now gone, and
+```bash
+[ -e "/absolute/path/printed/by/step/1" ] && echo "STILL THERE" || echo "gone"
+```
+
+Tell the learner plainly: the tree lived at that path, it is now gone, and
 nothing under their own repo's `dev_docs/research/` was ever touched. If they
 want to try the real thing next, point at
 [`references/adoption.md`](../research-spike/references/adoption.md) in the
