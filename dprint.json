@@ -16,7 +16,9 @@
   "excludes": [
     "**/node_modules",
     "**/*-lock.json",
-    "test/vendor/**"
+    "test/vendor/**",
+    ".worktrees/**",
+    ".claude/**"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.96.0.wasm",
