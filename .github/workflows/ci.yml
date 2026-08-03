@@ -29,7 +29,7 @@ jobs:
         # v7.6.0 while upstream ships v9 -- and Dependabot cannot see past a
         # floating tag. Pinning the SHA makes it track real releases again
         # (it rewrites the SHA and the trailing version comment together).
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.11.16"
           # Nothing cacheable here (the only lockfile is a uv *script* lock);
@@ -48,7 +48,7 @@ jobs:
         # trust root moved from this file to that registry. Commit a mise.lock
         # (`mise settings lockfile=true`) if that tradeoff stops being
         # acceptable.
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@v4.2.3
         with:
           cache: true
 
