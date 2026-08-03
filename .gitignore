@@ -1,6 +1,12 @@
 .DS_Store
 temp/
 .claude/
+# Nested git worktrees of this same repo. Git already refuses to recurse into
+# them (each has its own .git file), but they still show up as one untracked
+# entry, and file-walking tools that don't read .git — dprint especially —
+# happily descend and lint another branch's checkout. See dprint.json's
+# matching exclude.
+.worktrees/
 .firecrawl/
 dist/
 __pycache__/
