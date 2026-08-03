@@ -2,12 +2,19 @@
 
 The mechanism is worthless empty. This is the sequence for turning it on in a
 repo that has real, live deferred work — not a checklist of equally-weighted
-steps, but one payload step (2) bracketed by setup (1) and cleanup (3–5). In
+steps, but one payload step (2) bracketed by setup (1–1a) and cleanup (3–5),
+then one proof (6) that the gate the cleanup installed can actually fail. In
 the reference implementation the payload step alone produced **13 records,
 and 4 of them had no destination at all**. Needing stub cards to complete a
 backfill **is the finding, not an inconvenience** — it is the first
 measurement the instrument ever produces about the repo it was just installed
 into, and it is worth reporting exactly like one.
+
+**That 4-of-13 figure is un-replicated, and you should treat it as a shape
+rather than a rate.** It comes from the bespoke predecessor this skill was
+extracted from, not from a run of this playbook — the first adoption
+(below) converted already-structured records rather than walking prose, so
+step 2's own yield has never been measured by this tool.
 
 Every invocation below carries `--root` explicitly, and it is written
 **before** the subcommand — `--root` is a global option, and argparse rejects
@@ -30,14 +37,20 @@ into it. This step is cheap and mechanical; it is not where the finding is.
 
 ## 1a. Name the decisions the spike exists to unblock — before backfilling
 
-**This step is not optional and not cosmetic: the backfill cannot validate
-without it.** Every question carries `blocks:`, which must name a decision id
-that exists in `decisions.md` or the sentinel `none: <reason>`. Naming a
-decision that isn't there fails validation — deliberately, it is the
-"track that did not exist" bug prevented for decisions. So a backfill
-attempted against an empty `decisions.md` can only produce questions that
-block `none:`, which quietly throws away the thing the roll-up and `status`
-exist to compute.
+**This step is not optional and not cosmetic.** Every question carries
+`blocks:`, which must name a decision that exists as a record somewhere in
+the project, or the sentinel `none: <reason>`. Naming a decision that isn't
+there fails validation — deliberately, it is the "track that did not exist"
+bug prevented for decisions.
+
+A decision counts as existing whether it is promoted in `decisions.md` or
+still a `state: proposed` block in the track's own `questions.md` (`SKILL.md`
+procedure 1), so a backfill against an empty `decisions.md` **can** validate.
+What it cannot do is converge: `status` reports a `proposed` decision only as
+"awaiting promotion" and computes ready/blocked solely for promoted ones. So a
+backfill run before the decisions are named produces either questions that
+block `none:` or a wall of proposals — and either way throws away the thing
+the roll-up and `status` exist to compute.
 
 Expect this to be harder than it sounds, and expect it to be informative.
 A repo that has been tracking questions in prose usually has **one implicit
@@ -159,16 +172,20 @@ env:
 ```
 
 ```bash
-curl -fsSL -o research-spike.py \
+d=$(mktemp -d)
+curl -fsSL -o "$d/research-spike.py" \
   "https://raw.githubusercontent.com/<owner>/workflow-skills/${RESEARCH_SPIKE_COMMIT}/scripts/research-spike.py"
-echo "${RESEARCH_SPIKE_SHA256}  research-spike.py" | sha256sum -c -
+echo "${RESEARCH_SPIKE_SHA256}  $d/research-spike.py" | sha256sum -c -
+python3 "$d/research-spike.py" --root "$GITHUB_WORKSPACE" validate --strict
 ```
 
-Two rules that came out of getting this wrong:
+Two rules that came out of getting this wrong, both visible in that snippet:
 
 - **Fetch into a scratch directory, not the workspace.** `--root` points at
   the checkout the script is about to scan; dropping an untracked `.py`
-  inside that tree is how a checker ends up reading itself.
+  inside that tree is how a checker ends up reading itself. The `mktemp -d`
+  and the explicit `--root` are the two halves of keeping the checker and the
+  checked apart.
 - **Do not resolve the script from a local plugin install as a fallback.**
   It is the obvious shortcut and it reintroduces version drift: the
   maintainer's laptop runs whatever version is installed while CI runs the
@@ -238,7 +255,7 @@ between the two subcommands, never inside `validate`.** If a repo puts
 that **step**, not the job, so it cannot silently come to cover `validate`
 sitting above it.
 
-## Prove the gate fails, before trusting it
+## 6. Prove the gate fails, before trusting it
 
 A gate observed only passing is indistinguishable from a gate that is inert.
 Before an adoption is finished, break the tree on purpose and watch it fail:

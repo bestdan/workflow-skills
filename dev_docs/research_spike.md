@@ -396,11 +396,14 @@ person operating the instrument caught a modelling error no reviewer had.
 
 ### The two gaps in `adoption.md`, now fixed there
 
-- **Decisions must be named before the backfill can validate.** `blocks:`
-  must resolve, so an empty `decisions.md` forces every question to `none:`.
-  The source repo had one implicit decision encoded as a section heading and
-  three real ones; making them explicit was a prerequisite, not a tidy-up.
-  Now step 1a.
+- **Decisions must be named before the backfill is worth anything.**
+  `blocks:` must resolve to a decision record — promoted in `decisions.md`,
+  or `state: proposed` in the track's own `questions.md`, which validates
+  either way. What an unnamed decision list costs is convergence, not
+  validation: `status` reports a `proposed` decision only as "awaiting
+  promotion" and derives ready/blocked for promoted ones alone. The source
+  repo had one implicit decision encoded as a section heading and three real
+  ones; making them explicit was a prerequisite, not a tidy-up. Now step 1a.
 - **The playbook assumed the script is reachable from the gate.** It is not,
   on a CI runner with no plugin install — and the naive `if [ -f … ]` guard
   no-ops green, which is the validator's own fail-open relocated into the
@@ -436,8 +439,8 @@ enforces the weaker property and waves through the stated one.
 Confirmed by deliberate breakage rather than assumed: a removed coverage
 declaration, a renamed destination, and an unregenerated ledger each produced
 the expected error. The coverage break was then pushed to CI, where the
-repo's own check script **passed** the broken tree, the research-spike job
-failed, and the pull request flipped to blocked — then reverted.
+repo's own check script **passed** the broken tree and the research-spike job
+failed — while the merge button stayed enabled. Then reverted.
 
 That last step surfaced something no adopter should have to rediscover:
 **adding a blocking job to a workflow does not make it a required check.**
