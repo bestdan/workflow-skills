@@ -37,6 +37,17 @@ for arg in "$@"; do
   esac
 done
 
+# Initialize the vendored bats submodules ONCE, before the fan-out. Both
+# lint-shell.sh and test-shell.sh call ensure-bats.sh, and on a tree where
+# test/vendor is unpopulated its recovery path runs `git submodule update`
+# against the shared index — two of those concurrently collide on the lock and
+# fail the gate in exactly the fresh-worktree case the helper exists to rescue.
+# CI checks out with submodules already recursive, so the exposure is the local
+# `git worktree add` flow (which does not populate submodules). Hoisting it
+# here leaves both child calls on the bats_ready() fast path, and is what makes
+# the "writes nothing into the repo" claim below true.
+scripts/ensure-bats.sh || exit 2
+
 # Every check below is independent — each builds its own fixtures under its own
 # mktemp dir and none writes into the repo — so they run CONCURRENTLY and the
 # gate costs one slowest check (~60s, test-shell.sh) instead of their sum
@@ -44,6 +55,13 @@ done
 # so an interleaved run still reads exactly like the old serial one.
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")" || exit 2
 trap 'rm -rf "$tmp"' EXIT
+# Bash sets SIGINT to ignore for asynchronously-started commands in a
+# non-job-control shell, so Ctrl-C kills this runner while every backgrounded
+# check runs on to completion — a regression from the serial version, where the
+# foreground child took the signal and died with the script. Kill the direct
+# children explicitly. `:-` because set -u is on and this can fire before any
+# pid is recorded.
+trap 'kill "${pids[@]:-}" 2>/dev/null; rm -rf "$tmp"; exit 130' INT TERM
 
 checks=()
 pids=()
@@ -58,7 +76,6 @@ run dprint check --incremental=false
 run claude plugin validate . --strict
 run uv run scripts/validate.py
 run scripts/lint-shell.sh
-run scripts/test-shell.sh
 run scripts/test-task-scan.sh
 run scripts/test-validate.sh
 run scripts/test-plan-graph.sh
@@ -67,6 +84,10 @@ run scripts/test-claim-scan.sh
 run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
 run scripts/test-secret-resolve.sh
+# Scheduled LAST because the replay loop is strictly index-ordered: this is the
+# ~60s check, and anything after it would have its output held back behind it.
+# At the end, the fast checks drain as they finish and only this one blocks.
+run scripts/test-shell.sh
 
 if [[ "$with_evals" == 1 ]]; then
   if [[ -x scripts/eval.sh ]]; then

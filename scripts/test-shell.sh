@@ -12,6 +12,10 @@ scripts/ensure-bats.sh || exit 2
 # still reads serially. Keep any new suite added here fixture-isolated.
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/test-shell.XXXXXX")" || exit 2
 trap 'rm -rf "$tmp"' EXIT
+# Asynchronous children ignore SIGINT in a non-job-control shell, so Ctrl-C
+# would otherwise leave the long orchestrator suite running after this wrapper
+# exits. See the matching trap in check.sh.
+trap 'kill "${pids[@]:-}" 2>/dev/null; rm -rf "$tmp"; exit 130' INT TERM
 
 suites=()
 pids=()
