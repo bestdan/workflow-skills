@@ -37,13 +37,21 @@ for arg in "$@"; do
   esac
 done
 
-fail=0
+# Every check below is independent — each builds its own fixtures under its own
+# mktemp dir and none writes into the repo — so they run CONCURRENTLY and the
+# gate costs one slowest check (~60s, test-shell.sh) instead of their sum
+# (~110s). Output is buffered per check and replayed in list order afterwards,
+# so an interleaved run still reads exactly like the old serial one.
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")" || exit 2
+trap 'rm -rf "$tmp"' EXIT
+
+checks=()
+pids=()
 run() {
-  echo "→ $*"
-  if ! "$@"; then
-    echo "  ✘ failed: $*" >&2
-    fail=1
-  fi
+  local i="${#checks[@]}"
+  checks+=("$*")
+  "$@" >"$tmp/$i.out" 2>&1 &
+  pids+=("$!")
 }
 
 run dprint check --incremental=false
@@ -67,6 +75,18 @@ if [[ "$with_evals" == 1 ]]; then
     echo "→ evals: scripts/eval.sh not present yet (added in step 4) — skipping"
   fi
 fi
+
+fail=0
+for i in "${!checks[@]}"; do
+  wait "${pids[$i]}"
+  rc=$?
+  echo "→ ${checks[$i]}"
+  cat "$tmp/$i.out"
+  if [[ "$rc" != 0 ]]; then
+    echo "  ✘ failed: ${checks[$i]}" >&2
+    fail=1
+  fi
+done
 
 if [[ "$fail" != 0 ]]; then
   echo "check.sh: FAIL" >&2
