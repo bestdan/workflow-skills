@@ -14,3 +14,4 @@ select-coder	prompts/select-coder.txt	6
 assess-task	prompts/assess-task.txt	6
 tutor	prompts/tutor.txt	6
 research-spike	prompts/research-spike.txt	6
+research-spike-tutorial	prompts/research-spike-tutorial.txt	6

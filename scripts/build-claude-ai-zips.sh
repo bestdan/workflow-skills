@@ -16,6 +16,8 @@
 #                     shells out to it) and a CLAUDE-AI-NOTE.md pointing at
 #                     its bundled location, since $CLAUDE_PLUGIN_ROOT doesn't
 #                     resolve on claude.ai
+#   research-spike-tutorial -> same reason, same fix: the walkthrough shells
+#                     out to scripts/research-spike.py too
 #
 # Usage:
 #   scripts/build-claude-ai-zips.sh [output_dir]
@@ -105,6 +107,27 @@ EOF
   zip_skill research-spike
 }
 
+bundle_research_spike_tutorial() {
+  local dest
+  dest="$(stage_skill research-spike-tutorial)"
+  mkdir -p "$dest/scripts"
+  cp scripts/research-spike.py "$dest/scripts/"
+  cat >"$dest/CLAUDE-AI-NOTE.md" <<'EOF'
+# Using this skill on claude.ai
+
+This skill was authored as a Claude Code plugin, where every command in the
+walkthrough invokes `scripts/research-spike.py` as
+`"${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py"`. That environment
+variable and the plugin checkout it points at don't exist on claude.ai.
+
+In this zip, the script sits at `scripts/research-spike.py`, alongside
+`SKILL.md`. Run it as `python3 scripts/research-spike.py --root <disposable
+dir> <subcommand>` (path relative to wherever this skill folder was
+unpacked) instead of the `${CLAUDE_PLUGIN_ROOT}`-prefixed form in SKILL.md.
+EOF
+  zip_skill research-spike-tutorial
+}
+
 bundle_default() {
   # Skill with no extra bundling — just zip what's in skills/<name>/.
   local name="$1"
@@ -123,6 +146,7 @@ for skill_dir in skills/*/; do
     review-facts) bundle_review_facts ;;
     task) bundle_task ;;
     research-spike) bundle_research_spike ;;
+    research-spike-tutorial) bundle_research_spike_tutorial ;;
     *) bundle_default "$name" ;;
   esac
 done
