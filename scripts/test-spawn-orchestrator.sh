@@ -4514,7 +4514,11 @@ GHWEOF
   mkdir -p "$PSSTUB"
   printf '#!/bin/sh\nexit 1\n' >"$PSSTUB/ps"
   chmod +x "$PSSTUB/ps"
-  PSSTUB_PATH="$PSSTUB:$GUARD:/usr/bin:/bin:/usr/sbin:/sbin"
+  # Prepend rather than replace: unlike the other stub sites here, this PATH is
+  # used to run `doctor`, which shells out to git constantly. A fixed list would
+  # hide git on any host that keeps it outside /usr/bin. $GUARD is already on
+  # $PATH (exported above), and $PSSTUB still wins for `ps` by being first.
+  PSSTUB_PATH="$PSSTUB:$PATH"
 
   # _pid_state itself, isolated from doctor: a live pid whose start time can't
   # be read must report `unknown`, never `mismatch` and never `live`.
@@ -4535,6 +4539,31 @@ GHWEOF
   have "_pid_state via status: ps-unreadable live pid reports pid=unknown" 'pid=unknown' "$psout"
   lack "_pid_state via status: ps-unreadable live pid never reports mismatch" 'pid=mismatch' "$psout"
   lack "_pid_state via status: ps-unreadable live pid never reports live" 'pid=live' "$psout"
+
+  # The other half of the same undetermined bucket, and the one a working `ps`
+  # does NOT rescue: the pid was recorded but the start time was not (a
+  # truncated or hand-edited RUN.md). `ps` reads fine, so `actual` is populated
+  # and the comparison against an EMPTY recorded value fails — which used to
+  # print `mismatch` and hand doctor a prune. Nothing was contradicted here, so
+  # the verdict must be `unknown`. Deliberately NOT run under PSSTUB_PATH: the
+  # point is that this misreads even where `ps` works perfectly.
+  RUNMD5NS="$DOC/run-no-started-at/.auto-pilot"
+  mkdir -p "$RUNMD5NS"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'orchestrator_pid: %s\n' "$LIVE_PID"
+    printf 'orchestrator_started_at: ""\n'
+    printf 'until: 2026-07-10T06:00:00\n'
+    printf -- '---\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+  } >"$RUNMD5NS/RUN.md"
+  nsout="$("$SCRIPT" status --label com.autopilot.test5ns --dir "$DOC/run-no-started-at" 2>&1)"
+  have "_pid_state via status: live pid with NO recorded start time reports pid=unknown" 'pid=unknown' "$nsout"
+  lack "_pid_state via status: live pid with NO recorded start time never reports mismatch" 'pid=mismatch' "$nsout"
+  lack "_pid_state via status: live pid with NO recorded start time never reports live" 'pid=live' "$nsout"
 
   D5PS="$DOC/i5-ps-unreadable"
   RUN_ID5PS="doctor-i5-ps-unreadable"

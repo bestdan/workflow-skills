@@ -639,7 +639,8 @@ the request the doctor just filed.
    "Stale-orchestrator guard"; [`launch-runtime.md`](launch-runtime.md) "Orphan /
    stale detection"): `RUN.md`'s `orchestrator_pid` + `orchestrator_started_at`,
    where a **recycled** pid (start-time mismatch) counts as dead but an
-   **undetermined** read — no pid recorded, `ps` unreadable — does **not**, and
+   **undetermined** read — no pid recorded, no start time recorded, or `ps`
+   unreadable — does **not**, and
    fails closed to `skipped`, the same D2 posture as invariants 3 and 6. This
    duplicates `resume.md`'s own guard on purpose: a `git worktree remove
    --force` must not depend for its safety on a step ordering that no code

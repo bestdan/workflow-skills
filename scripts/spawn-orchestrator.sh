@@ -5222,7 +5222,14 @@ _front_field() {
 # `mismatch`: nothing has been read that CONTRADICTS the recorded start time,
 # the probe just couldn't see it, so folding this into `mismatch` would let an
 # unreadable-but-live process read back as a confirmed recycle and get its
-# worktree pruned out from under it. `none` = nothing recorded, so liveness is
+# worktree pruned out from under it. A recorded start time that is ABSENT gets
+# the same verdict for the same reason — a half-recorded identity (pid without
+# start time, e.g. a truncated or hand-edited RUN.md) contradicts nothing
+# either, so there is no comparison to fail. Note both tests live INSIDE the
+# `kill -0` branch deliberately: once the pid is not alive, `dead` is provably
+# right whatever was recorded, and hoisting them would turn every genuine
+# orphan into `unknown` and leak its worktree forever — trading this data-loss
+# bug for a cleanup one. `none` = nothing recorded, so liveness is
 # UNDETERMINED, not "dead". ONE implementation, shared by `status` and doctor's
 # invariant 5 — a second, divergent liveness check is exactly how the two would
 # drift apart on the one question a destructive prune depends on.
@@ -5235,7 +5242,7 @@ _pid_state() {
   if kill -0 "$pid" 2>/dev/null; then
     local actual
     actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
-    if [ -z "$actual" ]; then
+    if [ -z "$actual" ] || [ -z "$started" ]; then
       printf 'unknown'
     elif [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
       printf 'live'
