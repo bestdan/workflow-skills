@@ -5213,10 +5213,16 @@ _front_field() {
 
 # The stale-orchestrator check (launch-runtime.md "Orphan / stale detection"):
 # given RUN.md's recorded `orchestrator_pid` / `orchestrator_started_at`, print
-# exactly one of live | dead | mismatch | none. LIVE only if the PID is alive
-# AND its process start-time matches the recorded one — the start-time is what
-# tells a live orchestrator apart from a RECYCLED pid (`mismatch`, i.e. the
-# recorded process is gone). `none` = nothing recorded, so liveness is
+# exactly one of live | dead | mismatch | unknown | none. LIVE only if the PID
+# is alive AND its process start-time matches the recorded one — the start-time
+# is what tells a live orchestrator apart from a RECYCLED pid (`mismatch`, i.e.
+# the recorded process is gone). `unknown` = the PID IS alive (`kill -0`
+# succeeded) but its start time could not be read at all — `ps` missing,
+# restricted, or stripped out of a sandboxed/hardened host. That is NOT a
+# `mismatch`: nothing has been read that CONTRADICTS the recorded start time,
+# the probe just couldn't see it, so folding this into `mismatch` would let an
+# unreadable-but-live process read back as a confirmed recycle and get its
+# worktree pruned out from under it. `none` = nothing recorded, so liveness is
 # UNDETERMINED, not "dead". ONE implementation, shared by `status` and doctor's
 # invariant 5 — a second, divergent liveness check is exactly how the two would
 # drift apart on the one question a destructive prune depends on.
@@ -5229,7 +5235,9 @@ _pid_state() {
   if kill -0 "$pid" 2>/dev/null; then
     local actual
     actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
-    if [ -n "$actual" ] && [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
+    if [ -z "$actual" ]; then
+      printf 'unknown'
+    elif [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
       printf 'live'
     else
       printf 'mismatch'
@@ -6039,8 +6047,9 @@ doctor() {
   # gates on (resume.md "Stale-orchestrator guard"; launch-runtime.md "Orphan /
   # stale detection"): RUN.md's `orchestrator_pid` + `orchestrator_started_at`
   # via _pid_state, not a second liveness check of doctor's own. `live` skips,
-  # and so does an UNDETERMINED read (`none` — no pid recorded, or `ps`
-  # unreadable): same D2 posture as I3/I6, an undetermined signal never
+  # and so does an UNDETERMINED read — `none` (no pid recorded) or `unknown`
+  # (the pid IS alive but its start time couldn't be read, e.g. `ps` missing
+  # or restricted): same D2 posture as I3/I6, an undetermined signal never
   # green-lights a destructive action. A recycled pid (`mismatch`) means the
   # recorded process is gone, which IS provably dead.
   local run_root workers_root
