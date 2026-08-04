@@ -72,11 +72,59 @@ fi
 # Sandboxed runs may deny the system temp dir — fall back to a repo-local base.
 # Resolve to the physical path (pwd -P): the renderer canonicalizes every path,
 # so fixtures must be canonical too or /var vs /private/var would mismatch.
-BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.so-test.XXXXXX")"
+#
+# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS — it resolves
+# _CS_DARWIN_USER_TEMP_DIR via confstr and always targets /var/folders/...,
+# which a sandbox denies regardless of what $TMPDIR is set to. So the first
+# arm alone is not a real $TMPDIR attempt; it has to fail before $TMPDIR is
+# even consulted. The second arm targets $TMPDIR explicitly (falling back to
+# /tmp if unset) so a sandboxed run actually lands fixtures in the writable
+# tree it was granted, instead of skipping straight to the repo-local
+# fallback. The repo-local fallback stays last, and is now only ever reached
+# when both temp dirs are unwritable too: under the primary checkout a
+# sandbox denies git's metadata-preserving template copy into it ("cannot
+# copy .../hooks/commit-msg.sample ... Operation not permitted"), which
+# cascaded ~139 failures through every fixture that git-inits a subdir.
+#
+# Latent coupling, for whoever touches either side of this next: a sandboxed
+# $TMPDIR is typically /tmp/claude-<uid>, which MATCHES the renderer's
+# ambient harness-grant regex (see "harness /tmp runtime granted by
+# uid-independent pattern" below, and grep the renderer for
+# "/private/tmp/claude"). So every profile this suite renders while running
+# under such a sandbox ambient-grants write access to the fixture tree BASE
+# sits in. That is harmless ONLY because the seatbelt capability probe below
+# (SEATBELT_OK) causes this environment to skip every runtime-denial
+# assertion that would otherwise depend on that tree NOT being writable —
+# change the probe's skip conditions without noticing this, and a
+# behavioral-denial test could start passing for the same wrong reason the
+# six nested-sandbox false greens did (see the SEATBELT_OK probe below).
+BASE="$(mktemp -d 2>/dev/null \
+  || mktemp -d "${TMPDIR:-/tmp}/so-test.XXXXXX" 2>/dev/null \
+  || mktemp -d "$ROOT/.so-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 # If the cd fails, exit rather than falling through with an empty BASE (which
 # would make every later "$BASE/x" resolve to a root-relative /x).
 BASE="$(cd "$BASE" && pwd -P)" || exit 2
+
+# --- Seatbelt capability probe -------------------------------------------------
+# `command -v sandbox-exec` only proves the BINARY is present, not that it can
+# actually apply a profile. Inside a nested sandbox (e.g. this suite itself run
+# under sandbox-exec/Solo), sandbox_apply is refused with "Operation not
+# permitted" (rc=71) before the profile's own rules are ever consulted. The six
+# blocks below that used to gate on presence alone therefore misbehaved in two
+# ways when run nested: assertions that need a profile to SUCCEED failed
+# outright, and assertions written as "if sandbox-exec denies X, ok" passed for
+# entirely the wrong reason — sandbox_apply failing IS a denial, so the assert
+# reports ok on evidence it never gathered (the profile's own deny rule was
+# never reached). Probing once here with a trivial always-allow profile turns
+# both failure modes into an honest, loud skip instead of a false pass/fail.
+SEATBELT_OK=0
+if command -v sandbox-exec >/dev/null 2>&1; then
+  printf '(version 1)\n(allow default)\n' >"$BASE/seatbelt-probe.sb"
+  if sandbox-exec -f "$BASE/seatbelt-probe.sb" /usr/bin/true >/dev/null 2>&1; then
+    SEATBELT_OK=1
+  fi
+fi
 
 # The belt to the snapshot above (the braces): git must NEVER discover a repo at
 # or above BASE. A ceiling at BASE stops the upward repo-discovery walk before it
@@ -145,6 +193,7 @@ export PATH="$GUARD:$PATH"
 
 pass=0
 fail=0
+skip=0
 ok() {
   pass=$((pass + 1))
   echo "ok   - $1"
@@ -154,6 +203,14 @@ bad() {
   echo "FAIL - $1"
   [ -n "${2:-}" ] && echo "       $2"
   return 0
+}
+# Only the six seatbelt-behavioral blocks below (gated on $SEATBELT_OK) count
+# here — the file's other pre-existing "skip - ..." notes (Homebrew Cellar,
+# python3, PS_OK) stay bare echoes so this counter means exactly one thing:
+# tests skipped for lack of a usable seatbelt, not "any skip anywhere".
+skipped() {
+  skip=$((skip + 1))
+  echo "skip - $1"
 }
 # assert helpers use if/else — `cond && bad || ok` double-fires when bad returns non-zero.
 have() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1"; fi; }
@@ -278,21 +335,28 @@ o="$("$SCRIPT" bogus 2>&1)"
   && ok "usage: unknown subcommand exits 2" || bad "usage: unknown subcommand exits 2" "$o"
 
 # --- Seatbelt compile check (macOS only; skip-with-note elsewhere) ------------
-if command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$SEATBELT_OK" = 1 ]; then
   if o="$("$SCRIPT" check-profile "$prof" 2>&1)"; then
     ok "check-profile: rendered profile compiles"
   else
     bad "check-profile: rendered profile compiles" "$o"
   fi
-  # a malformed profile must be rejected
+  # a malformed profile must be rejected. This assertion is a DENIAL check —
+  # without SEATBELT_OK it would "pass" whenever sandbox_apply itself is
+  # refused (nested sandbox), which is a denial for the wrong reason: the
+  # profile's own malformed content is never parsed at all.
   echo '(version 1) (this-is-not-valid' >"$BASE/bad.sb"
   if "$SCRIPT" check-profile "$BASE/bad.sb" >/dev/null 2>&1; then
     bad "check-profile: rejects a malformed profile"
   else
     ok "check-profile: rejects a malformed profile"
   fi
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "check-profile: rendered profile compiles (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "check-profile: rejects a malformed profile (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - check-profile: sandbox-exec not available on this host (non-macOS)"
+  skipped "check-profile: rendered profile compiles (sandbox-exec not available on this host, non-macOS)"
+  skipped "check-profile: rejects a malformed profile (sandbox-exec not available on this host, non-macOS)"
 fi
 
 # --- exec-dir: toolchain-exec mode (subpath, coarser than --exec) -------------
@@ -301,14 +365,16 @@ edprof="$BASE/execdir.sb"
 edbody="$(cat "$edprof" 2>/dev/null)"
 have "exec-dir: emits subpath for /usr/bin" '(subpath "/usr/bin")' "$edbody"
 
-if command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$SEATBELT_OK" = 1 ]; then
   if o="$("$SCRIPT" check-profile "$edprof" 2>&1)"; then
     ok "check-profile: --exec-dir profile compiles"
   else
     bad "check-profile: --exec-dir profile compiles" "$o"
   fi
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "check-profile: --exec-dir profile compiles (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - check-profile: --exec-dir profile compiles (sandbox-exec not available)"
+  skipped "check-profile: --exec-dir profile compiles (sandbox-exec not available)"
 fi
 
 fc "exec-dir /" "refusing --exec-dir /" --exec-dir /
@@ -375,7 +441,7 @@ else
   echo "skip - toolchain: grants Homebrew's Cellar (no /opt/homebrew/Cellar on this host)"
 fi
 
-if command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$SEATBELT_OK" = 1 ]; then
   EDBIN=""
   # Prefer no-arg zero-exit binaries so the success check is portable — BSD/macOS
   # `sed --version` exits non-zero (unknown flag), which would false-fail even when
@@ -415,8 +481,14 @@ if command -v sandbox-exec >/dev/null 2>&1; then
   else
     echo "skip - exec-dir: confinement checks (no sed/env fixture found)"
   fi
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "exec-dir: exec inside allowed dir succeeds (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "exec-dir: write outside rw scope still denied (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "exec-dir: exec outside allowed dirs still denied (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - exec-dir: confinement checks (sandbox-exec not available)"
+  skipped "exec-dir: exec inside allowed dir succeeds (sandbox-exec not available)"
+  skipped "exec-dir: write outside rw scope still denied (sandbox-exec not available)"
+  skipped "exec-dir: exec outside allowed dirs still denied (sandbox-exec not available)"
 fi
 
 # --- out-of-jail launch escape is closed (toolchain exec + mach brokers) -------
@@ -431,7 +503,7 @@ have "escape: denies mach-lookup to launchservices" 'com.apple.coreservices.laun
 have "escape: denies exec of launchctl" '(literal "/bin/launchctl")' "$escbody"
 have "escape: denies exec of open" '(literal "/usr/bin/open")' "$escbody"
 have "escape: denies exec of osascript" '(literal "/usr/bin/osascript")' "$escbody"
-if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
+if [ "$SEATBELT_OK" = 1 ] && [ -x /bin/launchctl ]; then
   # /bin is exec-allowed here, so only the explicit process-exec deny can block
   # launchctl — a clean signal the escape binary is walled off, not merely absent.
   if sandbox-exec -f "$escprof" /bin/launchctl help >/dev/null 2>&1; then
@@ -439,8 +511,12 @@ if command -v sandbox-exec >/dev/null 2>&1 && [ -x /bin/launchctl ]; then
   else
     ok "escape: launchctl exec denied even with /bin allowed"
   fi
+elif [ ! -x /bin/launchctl ]; then
+  echo "skip - escape: launchctl runtime deny (launchctl absent on this host)"
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "escape: launchctl exec denied even with /bin allowed (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - escape: launchctl runtime deny (sandbox-exec or launchctl absent)"
+  skipped "escape: launchctl exec denied even with /bin allowed (sandbox-exec not available)"
 fi
 
 # --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
@@ -580,7 +656,7 @@ fc "cred-ro is a dir" "not a file" --cred-ro "$STATE"
 
 # behavioral proof (macOS only): the state dir is writable, the token is not,
 # and the token is still READABLE (the deny is write-only).
-if command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$SEATBELT_OK" = 1 ]; then
   if o="$("$SCRIPT" check-profile "$crprof" 2>&1)"; then
     ok "check-profile: cred-ro profile compiles"
   else
@@ -610,8 +686,16 @@ if command -v sandbox-exec >/dev/null 2>&1; then
     bad "cred-ro: the credential file is still readable"
   fi
   rm -f "$STATE/session" 2>/dev/null
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "check-profile: cred-ro profile compiles (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "cred-ro: write to the state dir is allowed (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "cred-ro: write to the credential file is denied (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "cred-ro: the credential file is still readable (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - cred-ro: behavioral checks (sandbox-exec not available)"
+  skipped "check-profile: cred-ro profile compiles (sandbox-exec not available)"
+  skipped "cred-ro: write to the state dir is allowed (sandbox-exec not available)"
+  skipped "cred-ro: write to the credential file is denied (sandbox-exec not available)"
+  skipped "cred-ro: the credential file is still readable (sandbox-exec not available)"
 fi
 
 # --- --workdir: the pause-exempt LEDGER's own file stays RO inside an RW workdir -
@@ -695,7 +779,7 @@ have "--workdir: still denies the (not-yet-existing) literal" \
 lack "--workdir: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nowd.sb" 2>/dev/null)"
 # fail-closed: a relative --workdir is refused.
 fc "--workdir must be absolute" "must be absolute" --rw "$WDROOT" --workdir "wd" --exec "$BIN"
-if command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$SEATBELT_OK" = 1 ]; then
   if o="$("$SCRIPT" check-profile "$wdprof" 2>&1)"; then
     ok "check-profile: --workdir profile compiles"
   else
@@ -715,8 +799,14 @@ if command -v sandbox-exec >/dev/null 2>&1; then
     ok "--workdir: write to the supervisor-state ledger is denied"
   fi
   rm -f "$WDROOT/.auto-pilot/other" 2>/dev/null
+elif command -v sandbox-exec >/dev/null 2>&1; then
+  skipped "check-profile: --workdir profile compiles (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "--workdir: write elsewhere in the run worktree is allowed (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+  skipped "--workdir: write to the supervisor-state ledger is denied (sandbox-exec present but cannot apply a profile here, nested sandbox)"
 else
-  echo "skip - --workdir: behavioral checks (sandbox-exec not available)"
+  skipped "check-profile: --workdir profile compiles (sandbox-exec not available)"
+  skipped "--workdir: write elsewhere in the run worktree is allowed (sandbox-exec not available)"
+  skipped "--workdir: write to the supervisor-state ledger is denied (sandbox-exec not available)"
 fi
 
 # allowLocalBinding flag flips to true (task 3, Fable #6)
@@ -5649,5 +5739,26 @@ if [ "$CALLER_IS_GIT" = 1 ]; then
       "before=[$CALLER_TRACKED_BEFORE] after=[$caller_tracked_after]"
 fi
 
-echo "test-spawn-orchestrator: $pass passed, $fail failed"
+# --- opt-in strict mode: demand full seatbelt coverage --------------------
+# Exists so a future macos-latest CI job can DEMAND the 14 seatbelt-behavioral
+# assertions above actually ran, instead of quietly passing while skipping
+# everything it was set up to run. Runs unconditionally (not folded into the
+# probe above) so it always counts as a real failure when requested, rather
+# than depending on where in the file the probe happens to sit.
+if [ "${SO_TEST_REQUIRE_SEATBELT:-0}" = 1 ] && [ "$SEATBELT_OK" != 1 ]; then
+  bad "seatbelt capability required (SO_TEST_REQUIRE_SEATBELT=1) but unavailable"
+fi
+
+# A quiet skip count buries the fact that a whole behavioral layer went
+# unexercised — loud enough to notice, not loud enough to fail a run that
+# never claimed seatbelt coverage in the first place (that's what
+# SO_TEST_REQUIRE_SEATBELT is for).
+if [ "$skip" -gt 0 ] && [ "$SEATBELT_OK" != 1 ] && command -v sandbox-exec >/dev/null 2>&1; then
+  echo
+  echo "NOTE: $skip seatbelt-behavioral tests were SKIPPED — sandbox-exec cannot apply a"
+  echo "      profile here (nested sandbox). Run this suite unsandboxed for full coverage."
+  echo
+fi
+
+echo "test-spawn-orchestrator: $pass passed, $fail failed, $skip skipped"
 [ "$fail" = 0 ]
