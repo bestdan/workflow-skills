@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.3] - 2026-08-07
+
+### Fixes
+
+- never prune a live worktree on an unreadable start-time probe (#340) (4fb3c8f)
+
 ## [1.82.2] - 2026-08-03
 
 ### Fixes
