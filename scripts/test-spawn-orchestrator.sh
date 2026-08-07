@@ -1101,6 +1101,16 @@ have "status: dead pid reports pid=dead" 'pid=dead' "$sout"
 # still report not-live: kill -0 succeeds, but the start-time can't match a
 # fabricated value (and ps is unavailable in some jails, which also falls to
 # the not-live branch) — either way this must never read "pid=live".
+#
+# Whether that not-live report is `mismatch` (a real start-time was read and it
+# differed) or `unknown` (the start-time couldn't be read at all, e.g. `ps
+# -o lstart=` denied under a sandbox) depends on whether ps actually works
+# here. Probe it once: without a real start time to compare against, asserting
+# `pid=mismatch` specifically would pass for the wrong reason — it never
+# established that a comparison happened, only that the pid wasn't reported
+# live. That's exactly the false-green this suite exists to catch elsewhere.
+PS_OK=0
+[ -n "$(ps -o lstart= -p $$ 2>/dev/null)" ] && PS_OK=1
 RUNMD2="$BASE/run2/.auto-pilot"
 mkdir -p "$RUNMD2"
 {
@@ -1116,7 +1126,11 @@ mkdir -p "$RUNMD2"
 } >"$RUNMD2/RUN.md"
 sout2="$("$SCRIPT" status --label com.autopilot.test2 --dir "$BASE/run2" 2>&1)"
 lack "status: mismatched start-time never reports live" 'pid=live' "$sout2"
-have "status: mismatched start-time reports mismatch" 'pid=mismatch' "$sout2"
+if [ "$PS_OK" = 1 ]; then
+  have "status: mismatched start-time reports mismatch" 'pid=mismatch' "$sout2"
+else
+  echo "skip - status: mismatched start-time reports mismatch (ps -o lstart= unreadable here, so a start-time MISMATCH can't be distinguished from an unreadable probe)"
+fi
 
 # front-matter parser: a double-quoted `until` with a trailing comment, and a
 # `paused_until` line that precedes `until`, must yield the BARE until value
@@ -4486,6 +4500,96 @@ GHWEOF
   [ -d "$D5U/workers/w-nopid" ] && ok "doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES (fail closed)" \
     || bad "doctor I5 (undetermined liveness): no orchestrator_pid recorded -> the worktree SURVIVES"
   have "doctor I5 (undetermined liveness): reported as skipped" 'skipped (unsafe to prune)' "$d5uout"
+
+  # --- I5 (PS UNREADABLE): pid alive, start time unreadable -> `unknown`, ----
+  # NOT `mismatch`, and the worktree must still SURVIVE. The data-loss bug this
+  # test guards: `ps` is missing/restricted on a sandbox, stripped container,
+  # or hardened host, so `ps -o lstart=` in `_pid_state` comes back empty even
+  # though `kill -0` says the pid is very much alive. Reading that emptiness as
+  # a confirmed `mismatch` (a recycled pid) let doctor treat a live orchestrator
+  # as provably dead and prune a live worker's worktree out from under it.
+  # Shadow `ps` with a stub that prints nothing and exits non-zero — the exact
+  # shape an unreadable `ps` takes — without depending on an actual sandbox.
+  PSSTUB="$DOC/ps-unreadable-bin"
+  mkdir -p "$PSSTUB"
+  printf '#!/bin/sh\nexit 1\n' >"$PSSTUB/ps"
+  chmod +x "$PSSTUB/ps"
+  # Prepend rather than replace: unlike the other stub sites here, this PATH is
+  # used to run `doctor`, which shells out to git constantly. A fixed list would
+  # hide git on any host that keeps it outside /usr/bin. $GUARD is already on
+  # $PATH (exported above), and $PSSTUB still wins for `ps` by being first.
+  PSSTUB_PATH="$PSSTUB:$PATH"
+
+  # _pid_state itself, isolated from doctor: a live pid whose start time can't
+  # be read must report `unknown`, never `mismatch` and never `live`.
+  RUNMD5PS="$DOC/run-ps-unreadable/.auto-pilot"
+  mkdir -p "$RUNMD5PS"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'orchestrator_pid: %s\n' "$LIVE_PID"
+    printf 'orchestrator_started_at: "%s"\n' "$LIVE_STARTED"
+    printf 'until: 2026-07-10T06:00:00\n'
+    printf -- '---\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+  } >"$RUNMD5PS/RUN.md"
+  psout="$(PATH="$PSSTUB_PATH" "$SCRIPT" status --label com.autopilot.test5ps --dir "$DOC/run-ps-unreadable" 2>&1)"
+  have "_pid_state via status: ps-unreadable live pid reports pid=unknown" 'pid=unknown' "$psout"
+  lack "_pid_state via status: ps-unreadable live pid never reports mismatch" 'pid=mismatch' "$psout"
+  lack "_pid_state via status: ps-unreadable live pid never reports live" 'pid=live' "$psout"
+
+  # The other half of the same undetermined bucket, and the one a working `ps`
+  # does NOT rescue: the pid was recorded but the start time was not (a
+  # truncated or hand-edited RUN.md). `ps` reads fine, so `actual` is populated
+  # and the comparison against an EMPTY recorded value fails — which used to
+  # print `mismatch` and hand doctor a prune. Nothing was contradicted here, so
+  # the verdict must be `unknown`. Deliberately NOT run under PSSTUB_PATH: the
+  # point is that this misreads even where `ps` works perfectly.
+  RUNMD5NS="$DOC/run-no-started-at/.auto-pilot"
+  mkdir -p "$RUNMD5NS"
+  {
+    printf -- '---\n'
+    printf 'status: active\n'
+    printf 'orchestrator_pid: %s\n' "$LIVE_PID"
+    printf 'orchestrator_started_at: ""\n'
+    printf 'until: 2026-07-10T06:00:00\n'
+    printf -- '---\n'
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| T-1  | claimed | b1   | main | -        | -  | -     |\n'
+  } >"$RUNMD5NS/RUN.md"
+  nsout="$("$SCRIPT" status --label com.autopilot.test5ns --dir "$DOC/run-no-started-at" 2>&1)"
+  have "_pid_state via status: live pid with NO recorded start time reports pid=unknown" 'pid=unknown' "$nsout"
+  lack "_pid_state via status: live pid with NO recorded start time never reports mismatch" 'pid=mismatch' "$nsout"
+  lack "_pid_state via status: live pid with NO recorded start time never reports live" 'pid=live' "$nsout"
+
+  D5PS="$DOC/i5-ps-unreadable"
+  RUN_ID5PS="doctor-i5-ps-unreadable"
+  _doctor_new_run "$D5PS" "$RUN_ID5PS"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n' "$RUN_ID5PS"
+    printf 'orchestrator_pid: %s\norchestrator_started_at: "%s"\n---\n\n' "$LIVE_PID" "$LIVE_STARTED"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_live | pending | - | main | - | - | |\n'
+  } >"$D5PS/run/.auto-pilot/RUN.md"
+  : >"$D5PS/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D5PS/run/.auto-pilot/REPORT.md"
+  git -C "$D5PS/run" add .auto-pilot
+  git -C "$D5PS/run" commit -q -m "seed run state"
+  mkdir -p "$D5PS/workers"
+  git -C "$D5PS/run" worktree add -q -b bestdan/t-ps-unreadable-work "$D5PS/workers/w-ps-unreadable" main
+
+  d5psout="$(PATH="$PSSTUB_PATH" "$SCRIPT" doctor --dir "$D5PS/run" --run-id "$RUN_ID5PS" 2>&1)"
+  [ -d "$D5PS/workers/w-ps-unreadable" ] \
+    && ok "doctor I5 (ps unreadable): a live orchestrator's worktree SURVIVES when ps can't confirm its start time" \
+    || bad "doctor I5 (ps unreadable): a live orchestrator's worktree SURVIVES — it was destroyed"
+  have "doctor I5 (ps unreadable): reported as skipped" 'skipped (unsafe to prune)' "$d5psout"
+  have "doctor I5 (ps unreadable): the skip names the actual pid_state (unknown), not mismatch" \
+    'orchestrator is unknown, not provably dead' "$d5psout"
+  lack "doctor I5 (ps unreadable): nothing is reported as removed" 'I5: removed' "$d5psout"
 
   # --- I5 (CORRUPT git state): a failed git read must skip, not fail-open ---
   # The bug this task exists to fix: `status --porcelain`, `rev-parse HEAD`,
