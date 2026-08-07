@@ -204,10 +204,13 @@ bad() {
   [ -n "${2:-}" ] && echo "       $2"
   return 0
 }
-# Only the six seatbelt-behavioral blocks below (gated on $SEATBELT_OK) count
-# here — the file's other pre-existing "skip - ..." notes (Homebrew Cellar,
-# python3, PS_OK) stay bare echoes so this counter means exactly one thing:
-# tests skipped for lack of a usable seatbelt, not "any skip anywhere".
+# Only the six seatbelt-behavioral blocks below count here — the file's other
+# pre-existing "skip - ..." notes (Homebrew Cellar, python3, PS_OK) stay bare
+# echoes so this counter means exactly one thing: seatbelt-behavioral
+# assertions that did not run, not "any skip anywhere". Note that is a broader
+# reason than "no usable seatbelt" — a skip for a missing host fixture inside
+# a block counts too, because SO_TEST_REQUIRE_SEATBELT gates on this number
+# and an assertion that didn't run is uncovered whatever the cause.
 skipped() {
   skip=$((skip + 1))
   echo "skip - $1"
@@ -463,10 +466,24 @@ if [ "$SEATBELT_OK" = 1 ]; then
     fi
     # Write outside the RW scope is denied — target the test's own temp tree
     # ($BASE is outside --rw "$RUN_WT"), never the real $HOME.
-    if sandbox-exec -f "$edcprof" bash -c "echo x > $BASE/exec-dir-denied" >/dev/null 2>&1; then
-      bad "exec-dir: write outside rw scope still denied"
-    else
+    #
+    # This needs its OWN profile, exec-granting the shell's dir rather than
+    # $EDDIR. Under $edcprof the only exec grant is $EDDIR (/usr/bin, from
+    # /usr/bin/true), and macOS bash is /bin/bash — so sandbox-exec denied the
+    # EXEC and never reached the write, leaving this assertion green on
+    # evidence it never gathered ("execvp() of '/bin/bash' failed: Operation
+    # not permitted"). Grant exec where the shell actually lives so the write
+    # rule is the only thing that can deny, then verify that's what happened:
+    # a failure whose stderr says execvp is an exec denial masquerading as a
+    # write denial, which is the very false green this file exists to catch.
+    edwbin="$(command -v bash)"
+    edwprof="$BASE/execdir-write.sb"
+    "$SCRIPT" render-profile --exec-dir "$(dirname "$edwbin")" --rw "$RUN_WT" --out "$edwprof" >/dev/null 2>&1
+    edwout="$(sandbox-exec -f "$edwprof" "$edwbin" -c "echo x > $BASE/exec-dir-denied" 2>&1)"
+    if [ ! -f "$BASE/exec-dir-denied" ] && ! printf '%s' "$edwout" | grep -q 'execvp'; then
       ok "exec-dir: write outside rw scope still denied"
+    else
+      bad "exec-dir: write outside rw scope still denied" "$edwout"
     fi
     rm -f "$BASE/exec-dir-denied" 2>/dev/null
     if [ -x "$BIN" ] && [ "$(dirname "$BIN")" != "$EDDIR" ]; then
@@ -476,10 +493,12 @@ if [ "$SEATBELT_OK" = 1 ]; then
         ok "exec-dir: exec outside allowed dirs still denied"
       fi
     else
-      echo "skip - exec-dir: exec outside allowed dirs still denied (no distinct fixture binary)"
+      skipped "exec-dir: exec outside allowed dirs still denied (no distinct fixture binary)"
     fi
   else
-    echo "skip - exec-dir: confinement checks (no sed/env fixture found)"
+    skipped "exec-dir: exec inside allowed dir succeeds (no sed/env fixture found)"
+    skipped "exec-dir: write outside rw scope still denied (no sed/env fixture found)"
+    skipped "exec-dir: exec outside allowed dirs still denied (no sed/env fixture found)"
   fi
 elif command -v sandbox-exec >/dev/null 2>&1; then
   skipped "exec-dir: exec inside allowed dir succeeds (sandbox-exec present but cannot apply a profile here, nested sandbox)"
@@ -511,12 +530,17 @@ if [ "$SEATBELT_OK" = 1 ] && [ -x /bin/launchctl ]; then
   else
     ok "escape: launchctl exec denied even with /bin allowed"
   fi
-elif [ ! -x /bin/launchctl ]; then
-  echo "skip - escape: launchctl runtime deny (launchctl absent on this host)"
-elif command -v sandbox-exec >/dev/null 2>&1; then
+elif command -v sandbox-exec >/dev/null 2>&1 && [ "$SEATBELT_OK" != 1 ]; then
   skipped "escape: launchctl exec denied even with /bin allowed (sandbox-exec present but cannot apply a profile here, nested sandbox)"
-else
+elif ! command -v sandbox-exec >/dev/null 2>&1; then
   skipped "escape: launchctl exec denied even with /bin allowed (sandbox-exec not available)"
+else
+  # Seatbelt works but the escape binary itself is missing. Ordered LAST on
+  # purpose: tested first, this arm swallowed every Linux run (no launchctl
+  # there either) and attributed the skip to a missing binary rather than to
+  # the missing seatbelt — which both undercounted the skip tally by one and
+  # left the no-seatbelt arms below unreachable on the hosts they describe.
+  skipped "escape: launchctl exec denied even with /bin allowed (launchctl absent on this host)"
 fi
 
 # --- render-settings: layer-2 egress allowlist narrowing (task 2) -------------
@@ -5745,8 +5769,17 @@ fi
 # everything it was set up to run. Runs unconditionally (not folded into the
 # probe above) so it always counts as a real failure when requested, rather
 # than depending on where in the file the probe happens to sit.
-if [ "${SO_TEST_REQUIRE_SEATBELT:-0}" = 1 ] && [ "$SEATBELT_OK" != 1 ]; then
-  bad "seatbelt capability required (SO_TEST_REQUIRE_SEATBELT=1) but unavailable"
+#
+# Gates on the SKIP COUNT, not on SEATBELT_OK. Gating on the capability alone
+# left the flag asserting less than it advertises: a usable seatbelt with a
+# missing host fixture (no distinct fixture binary, no sed/env, no launchctl)
+# skips real assertions inside the blocks below while SEATBELT_OK stays 1, so
+# the job would pass having silently run as few as 10 of the 14 — precisely
+# the "green while skipping what it exists to run" outcome this flag exists to
+# make impossible. A zero skip count is the only thing that means full
+# coverage, and SEATBELT_OK=0 already forces skip>=14, so it needs no arm here.
+if [ "${SO_TEST_REQUIRE_SEATBELT:-0}" = 1 ] && [ "$skip" -gt 0 ]; then
+  bad "seatbelt coverage required (SO_TEST_REQUIRE_SEATBELT=1) but $skip of 14 behavioral assertions did not run (SEATBELT_OK=$SEATBELT_OK)"
 fi
 
 # A quiet skip count buries the fact that a whole behavioral layer went
