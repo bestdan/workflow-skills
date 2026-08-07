@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.4] - 2026-08-07
+
+### Fixes
+
+- build fixtures outside the repo, gate seatbelt tests on capability (#341) (c28c3ae)
+
 ## [1.82.3] - 2026-08-07
 
 ### Fixes
