@@ -24,7 +24,12 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
-BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.claim-scan-test.XXXXXX")"
+# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
+# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# repo-local, where a sandboxed git init can't copy its hook templates.
+BASE="$(mktemp -d 2>/dev/null \
+  || mktemp -d "${TMPDIR:-/tmp}/claim-scan-test.XXXXXX" 2>/dev/null \
+  || mktemp -d "$ROOT/.claim-scan-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 # Canonicalize to the physical path (mktemp -d can land under macOS's
 # /var -> /private/var symlink) and stop git's upward repo-discovery walk at
