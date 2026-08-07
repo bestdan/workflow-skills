@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.5] - 2026-08-07
+
+### Fixes
+
+- place remaining suites' fixtures outside the repo (#343) (9daaedb)
+
 ## [1.82.4] - 2026-08-07
 
 ### Fixes
