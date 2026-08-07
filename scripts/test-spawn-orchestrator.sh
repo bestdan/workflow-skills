@@ -204,13 +204,16 @@ bad() {
   [ -n "${2:-}" ] && echo "       $2"
   return 0
 }
-# Only the six seatbelt-behavioral blocks below count here — the file's other
-# pre-existing "skip - ..." notes (Homebrew Cellar, python3, PS_OK) stay bare
-# echoes so this counter means exactly one thing: seatbelt-behavioral
-# assertions that did not run, not "any skip anywhere". Note that is a broader
-# reason than "no usable seatbelt" — a skip for a missing host fixture inside
-# a block counts too, because SO_TEST_REQUIRE_SEATBELT gates on this number
-# and an assertion that didn't run is uncovered whatever the cause.
+# Only the seatbelt-behavioral blocks below count here — the file's other
+# pre-existing "skip - ..." notes (e.g. Homebrew Cellar, python3, plutil, the
+# git-absent ones) stay bare echoes and MUST stay bare: folding a non-seatbelt
+# skip in would fail SO_TEST_REQUIRE_SEATBELT on hosts where seatbelt coverage
+# is in fact complete, since the git-absent skips fire on every Linux runner.
+# So this counter means exactly one thing: seatbelt-behavioral assertions that
+# did not run, not "any skip anywhere". Note that is a broader reason than "no
+# usable seatbelt" — a skip for a missing host fixture inside a block counts
+# too, because SO_TEST_REQUIRE_SEATBELT gates on this number and an assertion
+# that didn't run is uncovered whatever the cause.
 skipped() {
   skip=$((skip + 1))
   echo "skip - $1"
@@ -471,19 +474,35 @@ if [ "$SEATBELT_OK" = 1 ]; then
     # $EDDIR. Under $edcprof the only exec grant is $EDDIR (/usr/bin, from
     # /usr/bin/true), and macOS bash is /bin/bash — so sandbox-exec denied the
     # EXEC and never reached the write, leaving this assertion green on
-    # evidence it never gathered ("execvp() of '/bin/bash' failed: Operation
-    # not permitted"). Grant exec where the shell actually lives so the write
-    # rule is the only thing that can deny, then verify that's what happened:
-    # a failure whose stderr says execvp is an exec denial masquerading as a
-    # write denial, which is the very false green this file exists to catch.
-    edwbin="$(command -v bash)"
+    # evidence it never gathered ("execvp() of '/bin/bash' failed").
+    #
+    # Assert on POSITIVE evidence, not on the target's absence. Absence is the
+    # observable for EVERY way this can fail to run — an unrendered profile, a
+    # malformed one, a denied exec — so inferring "the write rule fired" from
+    # it is unsound, and greppng for execvp would patch only one of those. The
+    # shell's own refusal message names the target, so require that instead;
+    # every not-run mode then fails loudly rather than passing silently.
+    #
+    # /bin/bash explicitly, NOT `command -v bash`: on a host with Homebrew
+    # bash first on PATH that resolves into the Cellar symlink farm, and
+    # Seatbelt matches the RESOLVED path — so --exec-dir would not cover it
+    # and the exec would be denied (see the Cellar grant above, same hazard).
+    # This block only runs when SEATBELT_OK=1, which implies macOS.
+    edwbin=/bin/bash
     edwprof="$BASE/execdir-write.sb"
-    "$SCRIPT" render-profile --exec-dir "$(dirname "$edwbin")" --rw "$RUN_WT" --out "$edwprof" >/dev/null 2>&1
-    edwout="$(sandbox-exec -f "$edwprof" "$edwbin" -c "echo x > $BASE/exec-dir-denied" 2>&1)"
-    if [ ! -f "$BASE/exec-dir-denied" ] && ! printf '%s' "$edwout" | grep -q 'execvp'; then
-      ok "exec-dir: write outside rw scope still denied"
+    if ! "$SCRIPT" render-profile --exec-dir "$(dirname "$edwbin")" --rw "$RUN_WT" --out "$edwprof" >/dev/null 2>&1; then
+      bad "exec-dir: write outside rw scope still denied" "render-profile failed — assertion never ran"
     else
-      bad "exec-dir: write outside rw scope still denied" "$edwout"
+      # Target passed as a quoted positional so a space/metachar in $BASE
+      # cannot reparse the redirect (the convention the cred-ro block below
+      # documents); $1 expands to the real path, so the grep matches exactly.
+      edwout="$(sandbox-exec -f "$edwprof" "$edwbin" -c 'echo x > "$1"' _ "$BASE/exec-dir-denied" 2>&1)"
+      if [ ! -f "$BASE/exec-dir-denied" ] \
+        && printf '%s' "$edwout" | grep -qF "$BASE/exec-dir-denied: Operation not permitted"; then
+        ok "exec-dir: write outside rw scope still denied"
+      else
+        bad "exec-dir: write outside rw scope still denied" "$edwout"
+      fi
     fi
     rm -f "$BASE/exec-dir-denied" 2>/dev/null
     if [ -x "$BIN" ] && [ "$(dirname "$BIN")" != "$EDDIR" ]; then
@@ -496,9 +515,9 @@ if [ "$SEATBELT_OK" = 1 ]; then
       skipped "exec-dir: exec outside allowed dirs still denied (no distinct fixture binary)"
     fi
   else
-    skipped "exec-dir: exec inside allowed dir succeeds (no sed/env fixture found)"
-    skipped "exec-dir: write outside rw scope still denied (no sed/env fixture found)"
-    skipped "exec-dir: exec outside allowed dirs still denied (no sed/env fixture found)"
+    skipped "exec-dir: exec inside allowed dir succeeds (no true/echo/env fixture binary found)"
+    skipped "exec-dir: write outside rw scope still denied (no true/echo/env fixture binary found)"
+    skipped "exec-dir: exec outside allowed dirs still denied (no true/echo/env fixture binary found)"
   fi
 elif command -v sandbox-exec >/dev/null 2>&1; then
   skipped "exec-dir: exec inside allowed dir succeeds (sandbox-exec present but cannot apply a profile here, nested sandbox)"
@@ -5779,7 +5798,7 @@ fi
 # make impossible. A zero skip count is the only thing that means full
 # coverage, and SEATBELT_OK=0 already forces skip>=14, so it needs no arm here.
 if [ "${SO_TEST_REQUIRE_SEATBELT:-0}" = 1 ] && [ "$skip" -gt 0 ]; then
-  bad "seatbelt coverage required (SO_TEST_REQUIRE_SEATBELT=1) but $skip of 14 behavioral assertions did not run (SEATBELT_OK=$SEATBELT_OK)"
+  bad "seatbelt coverage required (SO_TEST_REQUIRE_SEATBELT=1) but $skip seatbelt-behavioral assertions did not run (SEATBELT_OK=$SEATBELT_OK)"
 fi
 
 # A quiet skip count buries the fact that a whole behavioral layer went
