@@ -61,7 +61,12 @@ if git -C "$CALLER_REPO" rev-parse --git-dir >/dev/null 2>&1; then
   CALLER_TRACKED_BEFORE="$(git -C "$CALLER_REPO" status --porcelain --untracked-files=no 2>/dev/null)"
 fi
 
-BASE="$(mktemp -d 2>/dev/null || mktemp -d "$ROOT/.task-scan-test.XXXXXX")"
+# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
+# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# repo-local, where a sandboxed git init can't copy its hook templates.
+BASE="$(mktemp -d 2>/dev/null \
+  || mktemp -d "${TMPDIR:-/tmp}/task-scan-test.XXXXXX" 2>/dev/null \
+  || mktemp -d "$ROOT/.task-scan-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 # Canonicalize to the physical path: on macOS mktemp -d returns a path under
 # the /var -> /private/var symlink, and the ceiling below is a literal-prefix
