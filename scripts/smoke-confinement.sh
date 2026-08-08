@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # smoke-confinement.sh — the PRE-484 confinement smoke, as an executable so it
 # never has to be pasted. Proves the generated jail actually REFUSES disallowed
-# filesystem writes/reads and unlisted exec. check.sh proves generation+compile;
-# THIS proves confinement.
+# filesystem WRITES and unlisted exec. check.sh proves generation+compile; THIS
+# proves confinement — on those two axes and no others.
 #
 # RETIRED — SUPERSEDED BY nono (https://nono.sh) IN THE aiutopilot REPO. The
 # jail this exercises is an explicitly unsupported fallback that dies in place;
 # aiutopilot's docs/charter §3.2 retires the renderer by name. Fix containment
 # there, not here.
 #
-# SCOPE, STATED UP FRONT: network egress is NOT tested and is NOT closed. It was
-# never closed — the "layer 2" §2 used to grade cannot run inside this jail at
-# all (macOS refuses nested Seatbelt profiles), so that section is deleted rather
-# than left printing green rows. What remains is a real, passing test of the
-# filesystem and exec walls, and nothing more.
+# SCOPE, STATED UP FRONT — two walls are tested, two are not:
+#   TESTED    write-scope (RW worktree only) and exec (allow-listed binaries).
+#   NOT TESTED, and NOT CLOSED:
+#     - network egress. Never was closed: the "layer 2" §2 used to grade cannot
+#       run inside this jail at all (macOS refuses nested Seatbelt profiles), so
+#       that section is deleted rather than left printing green rows.
+#     - reads. The profile grants a blanket `(allow file-read*)`, so reads are
+#       bounded only by Unix permissions, not by the jail.
 #
 # Run:  bash scripts/smoke-confinement.sh
 # macOS only (sandbox-exec / launchctl). Runs a few real `claude -p` invocations
@@ -80,12 +83,12 @@ CLAUDE="$(command -v claude || true)"
 # has nothing to do with what they test. It reproduces only on a cold cache, which
 # is exactly what makes it a nasty intermittent. This is a SMOKE-only grant: a real
 # launch passes --toolchain, which already covers it via the /usr/bin subpath.
-# /usr/bin/curl is granted for the same reason, and its absence was corrupting §2's
-# VERDICT: with curl unexecutable, every curl-based egress probe returned rc=126
-# ("cannot execute") — so (b) and (c) reported "blocked, PASS" while proving
-# nothing, because curl never ran to be blocked. An egress test that passes when
-# the network is wide open is worse than no test. Grant it, and let layer 2 be what
-# blocks it.
+# /usr/bin/curl is granted for the same reason. It is kept as plain exec plumbing
+# — nothing here blocks what it reaches, since egress is open (see the template's
+# network section). Historical note, because it is the same lesson §2 died of:
+# when curl was NOT exec-granted, every curl-based egress probe returned rc=126
+# ("cannot execute") and §2 scored that as "blocked, PASS" while proving nothing,
+# because curl never ran to be blocked.
 "$SO" render-profile --confine-under "$D/run" \
   --rw "$D/run/wt" --ro "$ROOT" --ro "$HOME/.claude" \
   --tmpdir "$D/run/wt/tmp" \
@@ -140,7 +143,17 @@ allowed() {
 echo "== 1. Layer 1 — filesystem + exec =="
 denied "write outside the worktree" bash -c "echo x > $HOME/AUTOPILOT_SMOKE_SHOULD_NOT_EXIST"
 allowed "write inside the worktree" bash -c "echo x > $D/run/wt/ok"
-denied "read /etc/sudoers" bash -c "cat /etc/sudoers"
+# A `denied "read /etc/sudoers"` row used to sit here. DELETED, same reason as
+# §2's decider (d): it passed for a reason that had nothing to do with the jail.
+# /etc/sudoers is 0440 root:wheel, so `cat` returns non-zero for a normal user
+# with no Seatbelt in the picture at all (measured), and denied() passes on ANY
+# non-zero exit. It could never fail, and it never tested the profile.
+#
+# There is also nothing honest to replace it with: the profile grants a blanket
+# `(allow file-read*)` (orchestrator.sb.tmpl), so READS ARE NOT CONFINED by this
+# jail — only Unix permissions bound them. Asserting otherwise would be the same
+# lie in a new costume. Narrowing reads is the tracked follow-up noted in the
+# template; a read row belongs here only once that lands.
 denied "exec unlisted /usr/bin/python3" /usr/bin/python3 -c "print(1)"
 # The harness-runtime grant (task 12) opens ~/.claude/session-env for writes. It
 # must NOT have opened the rest of ~/.claude — a blanket state-dir write would
@@ -226,13 +239,17 @@ JSON="$(cat "$D/settings.json")"
 EC_LOG="$D/exit-code.log"
 # TMPDIR is part of the launch CONTRACT, not ambience: write-launch exports the
 # profile's @spawn-tmpdir stamp — the exact dir the srt-mux socket grant is
-# anchored to — and fails closed on a render/launch mismatch precisely because a
-# drift makes the harness's inner sandbox silently degrade. Invoking claude here
-# through bare sandbox-exec does NOT inherit that, so without this export the
-# harness binds its mux socket in the ambient /var/folders TMPDIR, which the
-# profile does not grant; the inner sandbox then disables ITSELF, layer 2 stops
-# enforcing, and §2's egress deciders below grade a jail that has quietly become
-# one-layer. Reproduce the launch contract, or §2 is theatre.
+# anchored to — and fails closed on a render/launch mismatch. Invoking claude
+# here through bare sandbox-exec does NOT inherit that, so without this export
+# the harness binds its mux socket in the ambient /var/folders TMPDIR, which the
+# profile does not grant.
+#
+# This still matters with §2 gone, for a narrower reason. It is NOT that a drift
+# would stop "layer 2 enforcing" — nothing enforces there; the inner sandbox
+# cannot start inside this jail whatever TMPDIR says. It is that the checks
+# BELOW run through the real harness, and a harness flailing at an ungranted
+# socket path is not the harness a launch actually gets. Reproduce the launch
+# contract so §1b grades the configuration that ships.
 JAIL_TMPDIR="$D/run/wt/tmp"
 mkdir -p "$JAIL_TMPDIR"
 jailed_claude() { TMPDIR="$JAIL_TMPDIR" sandbox-exec -f "$D/profile.sb" "$CLAUDE" "$@"; }
@@ -326,9 +343,10 @@ launchctl print "gui/$(id -u)/com.autopilot.smoke" >/dev/null 2>&1 \
 echo
 echo "== Summary =="
 printf '  %d passed, %d failed, %d indeterminate\n' "$pass" "$fail" "$indet"
-# Scoped claim only. This proves the FILESYSTEM and EXEC walls, which is all
-# this jail has: network egress is open by design here (see orchestrator.sb.tmpl)
-# and is NOT tested — the §2 that used to claim otherwise is deleted above.
-[ "$fail" = 0 ] && echo "  ✅ filesystem + exec confinement holds. Network egress is OPEN and untested — use nono (aiutopilot) if you need it closed." \
+# Scoped claim only — write-scope and exec, the two walls this jail actually
+# enforces. Egress is open by design here (see orchestrator.sb.tmpl) and reads
+# are unconfined (blanket file-read*); neither is tested, and the §2 that used
+# to claim otherwise is deleted above.
+[ "$fail" = 0 ] && echo "  ✅ write-scope + exec confinement holds. Egress is OPEN and reads are UNCONFINED — neither is tested; use nono (aiutopilot) if you need egress closed." \
   || echo "  ❌ a wall did NOT hold — see FAIL lines."
 [ "$fail" = 0 ]

@@ -55,12 +55,17 @@
 ;;     is now DECLARED open, rather than being covered by a layer-2 claim that
 ;;     nothing enforces. Anything needing real egress control uses nono.
 (allow network-outbound)
-;; NOT a loopback restriction, despite how it reads: Seatbelt's host field
-;; accepts only `*` or `localhost` (an explicit 127.0.0.1 does not compile), so
-;; a process under this grant can bind, listen, and accept on the host's LAN IP.
-;; The port half IS enforced. It is kept only because removing it is a behavior
-;; change to a profile nothing new should be built on; it grants no layer-2
-;; capability, since layer 2 cannot run here at all (see the header).
+;; BIND ONLY — this grants no listener. Seatbelt gates listen/accept under
+;; `network-inbound`, which this profile does not grant, so a TCP listen inside
+;; the jail fails with `Operation not permitted` (measured: `nc -l 127.0.0.1`).
+;; That is precisely why the harness's own egress proxy dies at startup.
+;;
+;; The host filter is also NOT a loopback restriction, despite how it reads:
+;; Seatbelt's host field accepts only `*` or `localhost` (an explicit 127.0.0.1
+;; does not compile), so were `network-inbound` ever added, this grant would not
+;; confine the listener to loopback. The port half IS enforced. Kept only
+;; because removing it is a behavior change to a profile nothing new should be
+;; built on.
 (allow network-bind (local ip "localhost:*"))
 (allow system-socket)
 
@@ -68,9 +73,10 @@
 ;;     list makes programs abort (SIGABRT) — macOS needs *content* read, not just
 ;;     metadata, to traverse to a writable target, and that traversal crosses
 ;;     ancestors above any repo/worktree (/Users, /private/var/folders, …). So v1
-;;     allows all reads and enforces confinement on the axes that matter: WRITES
-;;     (worktrees only, below), EXEC (the allow-listed block below only), and
-;;     NETWORK (layer 2).
+;;     allows all reads and enforces confinement on the two axes it actually
+;;     covers: WRITES (worktrees only, below) and EXEC (the allow-listed block
+;;     below only). NETWORK is NOT one of them — egress is open here (see the
+;;     network section above); there is no second layer covering it.
 ;;     Reads are still Unix-perm-bounded (a non-root sandboxed process can't read
 ;;     root/other-user secrets). Narrowing reads (traverse-allow the ancestor chain
 ;;     of each RO/RW path instead of allow-all) is a tracked follow-up; it must be
@@ -99,9 +105,11 @@
 ;;       - $TMPDIR/srt-mux-*.sock: the unix socket the harness's OWN inner
 ;;         sandbox binds/listens on to mediate its own permission checks. A denied
 ;;         bind/listen makes the inner sandbox silently DISABLE itself for the
-;;         session ("Sandbox is enabled but failed to initialize"), so the
-;;         two-layer posture this file documents (outer sandbox-exec here, plus
-;;         the harness's own inner sandbox) quietly degrades to one layer.
+;;         session ("Sandbox is enabled but failed to initialize"). Granting the
+;;         socket does NOT buy back a second layer, though: that inner sandbox
+;;         cannot run inside this profile at all (nested Seatbelt — see the
+;;         header), and its real blocker is a refused loopback listen, not this
+;;         socket. Kept because the harness needs it, not as a containment claim.
 ;;       - /tmp/claude-<uid>/…: the harness's per-project/per-session scratch +
 ;;         cwd tree. This is a DIRECTORY TREE it mkdir's into, not a single file —
 ;;         a file-only grant does not permit the enclosing mkdir, so the Bash tool
@@ -157,8 +165,9 @@
 ;;     --exec-dir is used, whole bin dirs (subpath) so the orchestrator can
 ;;     shell out to the dozens of coreutils/git-core/uv/node/etc. helpers a
 ;;     real run needs. Exec breadth here is a COARSE guard, not the enforced
-;;     wall — WRITES (RW_PATHS, above) and NETWORK (layer 2) are what actually
-;;     bound what a permitted binary can do once it runs. [§4]
+;;     wall — WRITES (RW_PATHS, above) is what actually bounds what a permitted
+;;     binary can do once it runs. Network does NOT bound it: egress is open
+;;     (see the network section), so a permitted binary can reach anywhere. [§4]
 @@EXEC_PATHS@@
 
 ;; --- defense-in-depth on top of the mach-lookup denies above: refuse to exec

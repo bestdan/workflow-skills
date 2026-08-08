@@ -328,10 +328,13 @@
 #             the sentinel is the single file, so it carries the distinction
 #             rather than a sibling marker being invented for it.
 #
-#   render-settings  Emit the ephemeral `claude -p --settings` JSON: layer-2
-#                    network egress (sandbox.network.allowedDomains) narrowed to
-#                    the resolved coders + source, deny-by-default. Fail-closed on
-#                    an unresolvable required host (e.g. agy without --agy-host).
+#   render-settings  Emit the ephemeral `claude -p --settings` JSON: a
+#                    sandbox.network.allowedDomains set narrowed to the resolved
+#                    coders + source. Fail-closed on an unresolvable required
+#                    host (e.g. agy without --agy-host). NOTE: this allowlist
+#                    ENFORCES NOTHING inside this jail — Claude Code's sandbox
+#                    cannot start under a nested Seatbelt profile, so it is an
+#                    emitted artifact, not a containment layer (see header).
 #
 #   render-profile  Render the Seatbelt (.sb) profile from resolved paths into
 #                   --out. Every path must be ABSOLUTE and EXIST; a relative or
@@ -1077,11 +1080,16 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   echo "spawn-orchestrator: profile OK $out"
 }
 
-# Build the narrowed egress host set (sorted, unique), fail-closed. This is
-# layer 2 of the jail: Seatbelt can't filter by hostname, so egress is enforced
-# by the detached `claude -p`'s own sandbox.network allowlist. The set is
+# Build the narrowed egress host set (sorted, unique), fail-closed. The set is
 # narrowed to the run's resolved coders + source so a linear+codex run never
 # opens devin's or agy's endpoints. Args are parsed by render_settings below.
+#
+# THIS ENFORCES NOTHING HERE. It feeds `claude -p`'s own sandbox.network
+# allowlist, and that sandbox cannot initialize inside this jail (nested
+# Seatbelt; see the file header) — it dies at startup and the harness then runs
+# blocked commands unsandboxed. Egress from inside the jail is UNFILTERED
+# regardless of what this computes. The host set is still worth keeping: it is
+# the input a real allowlisting proxy (nono, in aiutopilot) needs.
 render_network_allowlist() {
   local source="" agy_host="" npm=0
   local -a coders=() mcp=() add_task=()
@@ -1284,8 +1292,9 @@ render_plist() {
 # Emit the self-contained launch script + the launchd plist from resolved inputs.
 # The launch script is what the plist runs: it composes the jail
 # (sandbox-exec -f <profile>) around `claude -p --permission-mode bypassPermissions`
-# with the layer-2 --settings, reads the run prompt from a file, and redirects to
-# the log. %q-quoting keeps every interpolated path/string shell-safe.
+# with the rendered --settings (passed through, but non-enforcing inside the jail
+# — see the file header), reads the run prompt from a file, and redirects to the
+# log. %q-quoting keeps every interpolated path/string shell-safe.
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
     label="" interval="300" throttle="30" out_script="" out_plist="" \
