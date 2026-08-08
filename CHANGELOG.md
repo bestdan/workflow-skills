@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.82.6] - 2026-08-08
+
+### Fixes
+
+- smoke-confinement must not rm -rf the caller's cwd (#344) (337aa54)
+
 ## [1.82.5] - 2026-08-07
 
 ### Fixes
