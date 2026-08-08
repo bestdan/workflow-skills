@@ -2,10 +2,20 @@
 ;; auto-pilot detached orchestrator. Rendered by scripts/spawn-orchestrator.sh
 ;; (render-profile): the placeholder tokens below (each on its own line,
 ;; delimited by double-at signs) are replaced with concrete allow rules built
-;; from the run's resolved paths. This is layer 1 of the two-layer jail
-;; (filesystem + process/exec); host-level network egress is layer 2, the
-;; detached `claude -p`'s own sandbox.network allowlist — see
-;; skills/auto-pilot/references/launch-runtime.md "Sandbox profile".
+;; from the run's resolved paths.
+;;
+;; RETIRED — SUPERSEDED BY nono (https://nono.sh) IN THE aiutopilot REPO.
+;; This renderer is an explicitly unsupported fallback that dies in place. The
+;; supported containment posture is nono's Seatbelt sandbox + host-allowlisting
+;; local proxy; see aiutopilot's docs/charter §3.2, which retires this template
+;; by name. Do not invest here — fix it in aiutopilot instead.
+;;
+;; THERE IS ONLY ONE ENFORCING LAYER, AND IT IS THIS ONE. The "layer 2" this
+;; file used to name — the detached `claude -p`'s own sandbox.network allowlist
+;; — CANNOT run inside this profile: macOS refuses to apply a nested Seatbelt
+;; profile (`sandbox_apply: Operation not permitted`), so Claude Code's egress
+;; filter dies at startup and the harness then fails OPEN, silently re-running
+;; blocked commands unsandboxed. Measured, twice; see PR #212's plan doc.
 ;;
 ;; Do not hand-edit a rendered copy; change this template + the renderer.
 
@@ -31,11 +41,26 @@
   (global-name "com.apple.xpc.launchd")
   (global-name "com.apple.coreservices.launchservicesd"))
 
-;; --- network CLASS only (launch-runtime §"Sandbox profile"): Seatbelt gates
-;;     network by socket/class, NOT by hostname. Allow outbound as a class and
-;;     permit loopback bind so the layer-2 egress proxy (which DOES filter by
-;;     host) can run; all hostname allowlisting lives in layer 2, not here.
+;; --- network: OPEN, and that is a KNOWN GAP, not a design.
+;;     Seatbelt cannot filter by hostname — true. The conclusion this comment
+;;     used to draw from that ("so allow outbound as a class; hostname
+;;     allowlisting lives in layer 2") is FALSE, and it is the leap that made
+;;     the jail porous. Seatbelt CAN pin egress to a `remote ip:port`, which is
+;;     how Claude Code's own sandbox does it — its profile carries no blanket
+;;     network-outbound, only a grant to its proxy's port.
+;;
+;;     Pinning it here would mean standing up our own egress proxy — option A
+;;     of PR #212, deliberately NOT taken, because nono already provides exactly
+;;     that in aiutopilot and this renderer is retired. So egress stays open and
+;;     is now DECLARED open, rather than being covered by a layer-2 claim that
+;;     nothing enforces. Anything needing real egress control uses nono.
 (allow network-outbound)
+;; NOT a loopback restriction, despite how it reads: Seatbelt's host field
+;; accepts only `*` or `localhost` (an explicit 127.0.0.1 does not compile), so
+;; a process under this grant can bind, listen, and accept on the host's LAN IP.
+;; The port half IS enforced. It is kept only because removing it is a behavior
+;; change to a profile nothing new should be built on; it grants no layer-2
+;; capability, since layer 2 cannot run here at all (see the header).
 (allow network-bind (local ip "localhost:*"))
 (allow system-socket)
 

@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034 # Some state arrays are consumed indirectly by generated scripts.
 # spawn-orchestrator.sh — materialize the auto-pilot detached orchestrator's
-# launch wrapper and its two-layer jail from a run's resolved inputs, so an
-# agent never hand-authors a sandbox-exec profile at launch (PRE-484).
+# launch wrapper and its jail from a run's resolved inputs, so an agent never
+# hand-authors a sandbox-exec profile at launch (PRE-484).
 #
-# The jail is two layers (skills/auto-pilot/references/launch-runtime.md
-# "Sandbox profile"):
-#   1. filesystem + process/exec  → this script's Seatbelt profile (below)
-#   2. host-level network egress  → the detached `claude -p`'s own
-#      sandbox.network allowlist (added by a later task)
+# RETIRED — SUPERSEDED BY nono (https://nono.sh) IN THE aiutopilot REPO, whose
+# docs/charter §3.2 retires this renderer by name. This harness stays here as an
+# explicitly unsupported fallback and dies in place. Do not build on it.
 #
-# Ships the layer-1 profile renderer + compile check (render-profile /
-# check-profile) and the layer-2 egress-allowlist emitter (render-settings).
+# THE JAIL HAS ONE ENFORCING LAYER, NOT TWO. This file's Seatbelt profile
+# confines filesystem + process/exec, and that part demonstrably works. The
+# "layer 2" this header used to promise — the detached `claude -p`'s own
+# sandbox.network allowlist — CANNOT run inside layer 1: macOS refuses to apply
+# a nested Seatbelt profile, so Claude Code's egress filter dies at startup and
+# the harness then fails OPEN, re-running blocked commands unsandboxed. Network
+# egress from inside this jail is therefore UNFILTERED. See PR #212's plan doc
+# for the measurements; use nono if you need egress actually closed.
+#
+# Ships the profile renderer + compile check (render-profile / check-profile).
 # Subcommands added by sibling tasks: write-launch, detach, teardown.
 #
 # Verify broker (task 4 — run the run's verify_command OUTSIDE the jail): the

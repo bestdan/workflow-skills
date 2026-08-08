@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # smoke-confinement.sh — the PRE-484 confinement smoke, as an executable so it
 # never has to be pasted. Proves the generated jail actually REFUSES disallowed
-# filesystem writes/reads, unlisted exec, and — the load-bearing test — raw-socket
-# network egress. check.sh proves generation+compile; THIS proves confinement.
+# filesystem writes/reads and unlisted exec. check.sh proves generation+compile;
+# THIS proves confinement.
+#
+# RETIRED — SUPERSEDED BY nono (https://nono.sh) IN THE aiutopilot REPO. The
+# jail this exercises is an explicitly unsupported fallback that dies in place;
+# aiutopilot's docs/charter §3.2 retires the renderer by name. Fix containment
+# there, not here.
+#
+# SCOPE, STATED UP FRONT: network egress is NOT tested and is NOT closed. It was
+# never closed — the "layer 2" §2 used to grade cannot run inside this jail at
+# all (macOS refuses nested Seatbelt profiles), so that section is deleted rather
+# than left printing green rows. What remains is a real, passing test of the
+# filesystem and exec walls, and nothing more.
 #
 # Run:  bash scripts/smoke-confinement.sh
 # macOS only (sandbox-exec / launchctl). Runs a few real `claude -p` invocations
@@ -245,40 +256,51 @@ exit_code_check() { # <desc> <expect-rc> <shell-command> <rcfile-suffix>
 }
 exit_code_check "true reports exit 0" 0 true true
 exit_code_check "false reports exit 1" 1 false false
-# The inner sandbox must actually initialize — a denied mux-socket bind/listen
-# makes the harness silently disable its own sandboxing, degrading the documented
-# two-layer posture to one layer.
-if grep -q 'Sandbox is enabled but failed to initialize' "$EC_LOG" 2>/dev/null; then
-  FAIL "inner sandbox initializes (found 'failed to initialize' — mux socket denied)"
-else
-  PASS "inner sandbox initializes (no 'failed to initialize' line)"
-fi
+# The "inner sandbox initializes" assertion that used to sit here is DELETED for
+# the same reason §2 is: it demanded that layer 2 come up inside layer 1, which
+# macOS makes impossible, so it could only ever FAIL — an unfixable red row that
+# says nothing about this jail's actual walls.
+#
+# Its failure message was also wrong on the cause. It blamed a denied mux-socket
+# bind, and the renderer grants that socket both file-write* and network-bind.
+# Measured directly: a unix socket matching the rendered srt-mux pattern binds
+# fine inside the jail. The real error is `Failed to listen at 127.0.0.1` — the
+# egress filter is a loopback TCP proxy, and layer 1 grants network-bind but not
+# network-inbound, so the listen is refused.
+#
+# Do NOT "fix" that by adding network-inbound. It makes the harness report the
+# sandbox as healthy, and then every Bash command dies at `sandbox_apply` (the
+# nesting rule) and gets silently re-run unsandboxed — turning a jail that is
+# visibly open into one that lies convincingly. Measured; see PR #212.
+#
+# What survives above is the part that tests THIS jail: exit-code integrity
+# (finding #20) — a jail that cannot report a correct exit code is broken, and
+# those two rows still prove it doesn't.
 
-echo "== 2. Layer 2 — network egress (through claude --settings) =="
-# egress_check writes the curl/socket exit code to a file in the RW worktree from
-# INSIDE the jailed claude, so we read a deterministic rc instead of parsing prose.
-egress_check() { # <desc> <expect: reach|block> <rcfile-name> <shell-command>
-  local desc="$1" expect="$2" name="$3" cmd="$4"
-  local rcf="$D/run/wt/$name"
-  rm -f "$rcf"
-  jailed_claude -p \
-    "Run exactly this one bash command and then stop, nothing else: { $cmd ; } ; printf '%s' \$? > $rcf" \
-    --permission-mode bypassPermissions --settings "$JSON" --max-turns 4 >/dev/null 2>&1
-  if [ ! -s "$rcf" ]; then
-    INDET "$desc (claude didn't record an rc — check manually)"
-    return
-  fi
-  local rc
-  rc="$(cat "$rcf")"
-  case "$expect" in
-    reach) [ "$rc" = 0 ] && PASS "$desc (reached, rc=0)" || FAIL "$desc (rc=$rc — allowlisted host was blocked)" ;;
-    block) [ "$rc" != 0 ] && PASS "$desc (blocked, rc=$rc)" || FAIL "$desc (rc=0 — EGRESS ESCAPED)" ;;
-  esac
-}
-egress_check "(a) allowlisted api.github.com" reach rc_a 'curl -sS --max-time 8 -o /dev/null https://api.github.com'
-egress_check "(b) non-allowlisted example.com" block rc_b 'curl -sS --max-time 8 -o /dev/null https://example.com'
-egress_check "(c) raw IP 1.1.1.1 [decider]" block rc_c 'curl -sS --max-time 8 -o /dev/null http://1.1.1.1'
-egress_check "(d) raw socket /dev/tcp [decider]" block rc_d 'exec 3<>/dev/tcp/1.1.1.1/80'
+# == 2. Layer 2 — network egress == DELETED, NOT SKIPPED.
+#
+# It graded a layer that cannot exist here, and it graded it wrongly in BOTH
+# directions, so every row it printed was noise dressed as evidence:
+#
+#   - Layer 2 is Claude Code's own per-command sandbox, which works by applying
+#     a nested Seatbelt profile. macOS refuses that outright
+#     (`sandbox_apply: Operation not permitted`). Its egress proxy never starts,
+#     the harness fails OPEN, and it silently re-runs the blocked command
+#     unsandboxed — measured, in this script's own §1b log ("the first attempt
+#     was blocked by the sandbox; I re-ran it unsandboxed").
+#   - So a "blocked" verdict could not distinguish a working allowlist from a
+#     command that escaped the layer entirely, and a "reached" verdict could
+#     equally be an unsandboxed retry. The rc file it keyed on saw neither.
+#   - Decider (d) was worse than vacuous: `exec 3<>/dev/tcp/…` is a bashism, the
+#     Bash tool's shell is zsh, so it returned rc!=0 on a syntax error and was
+#     scored "PASS (blocked)". A HEALTHY jail runs commands under bash where the
+#     probe works; a DEAD one falls back to zsh. It reported success exactly in
+#     the failure case.
+#
+# Restoring egress testing means having an enforcement mechanism to test. That
+# is nono, in aiutopilot — not this script. Per PR #212, a §2 replacement must
+# gate every "blocked" row on the same run proving the mechanism was alive AND
+# a positive control reached; without that, do not re-add it.
 
 echo "== 3. Detach + supervisor lifecycle =="
 printf 'noop\n' >"$D/run/wt/prompt.txt"
@@ -304,6 +326,9 @@ launchctl print "gui/$(id -u)/com.autopilot.smoke" >/dev/null 2>&1 \
 echo
 echo "== Summary =="
 printf '  %d passed, %d failed, %d indeterminate\n' "$pass" "$fail" "$indet"
-[ "$fail" = 0 ] && echo "  ✅ confinement holds — the (c)/(d) egress deciders passed if listed above." \
-  || echo "  ❌ a wall did NOT hold — see FAIL lines (a (c)/(d) FAIL means raw egress escaped → layer-1 fix needed)."
+# Scoped claim only. This proves the FILESYSTEM and EXEC walls, which is all
+# this jail has: network egress is open by design here (see orchestrator.sb.tmpl)
+# and is NOT tested — the §2 that used to claim otherwise is deleted above.
+[ "$fail" = 0 ] && echo "  ✅ filesystem + exec confinement holds. Network egress is OPEN and untested — use nono (aiutopilot) if you need it closed." \
+  || echo "  ❌ a wall did NOT hold — see FAIL lines."
 [ "$fail" = 0 ]
