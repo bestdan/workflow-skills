@@ -9,6 +9,21 @@ linear:
       # project may name its own; without it the command falls back to the
       # current repo's origin. Example: repo: bestdan/workflow-skills
       repo: bestdan/workflow-skills
+    - id: dff1565c-9aea-49cf-86e9-3254eb14e4fa
+      name: workflow-skills backlog
+      repo: bestdan/workflow-skills
+    - id: 51f4672a-9ae2-42d2-973f-3045c62f04be
+      name: Deterministic-script extraction
+      repo: bestdan/workflow-skills
+    - id: 9ed5183f-68c8-4f59-aab4-edb99facd3a8
+      name: Linear MCP token-cost fix — GraphQL fast-path for find-candidates
+      repo: bestdan/workflow-skills
+    - id: 0d25cc1f-8e9e-43e1-92e7-24cb4fb91fc4
+      name: reconcile-tasks
+      repo: bestdan/workflow-skills
+    - id: d0598803-5d87-4c7b-9099-7db80b10bd7d
+      name: "Auto-pilot mode — /deliver-task + /auto-pilot"
+      repo: bestdan/workflow-skills
 # The Linear API key is PERSONAL and machine-specific — none of the three keys below
 # belong in this committed, public config. Put them in the gitignored local override,
 # dev_docs/tasks/.task-config.local.yml:
