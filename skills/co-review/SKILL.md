@@ -257,9 +257,11 @@ Why this is narrow:
    - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
 9. **Reconcile and present** to the user. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
+
+   **Escalate architectural/design judgment calls to Fable before asking the user.** A medium-confidence item is frequently a technical question with a defensible "right" answer — signal handling, test design patterns, harness structure, and similar calls a reasonable engineer could resolve from the code and conventions alone — not a matter of what the user wants. For those, consult Fable (the Agent tool's `model: fable`) for a decisive recommendation **before** the item reaches the user, then turn the ask into a go/no-go on that recommendation rather than an open-ended "which do you want" question. Reserve a genuinely open question for items that are actual user-preference (priority, scope, whether the work is worth doing at all) — Fable has no standing to answer those on the user's behalf. Note in the summary which items were escalated and what Fable recommended. This does not apply under `--non-interactive` (step 11 already skips every medium item there; there's no question to escalate).
    - **Default (your PR):**
      - Auto-fix list (high confidence) — state what you will change.
-     - Ask list (medium) — one yes/no question per item.
+     - Ask list (medium) — one yes/no question per item, per the escalation rule above.
      - Skip list (low) — name them so the user can override if they disagree.
    - **`--post` mode (someone else's PR):**
      - Post-candidate list — **high + medium** findings, as a single numbered list. For each: `file:line`, the issue, the suggested fix, and its tier. These are what _may_ be posted, pending your vetting (step 10).
@@ -308,6 +310,7 @@ The remaining steps depend on disposition.
 - Don't re-litigate decisions the user made earlier in the conversation.
 - If a bot or local-agent comment is wrong for this codebase (e.g., over-engineering for a personal repo, worktree-handling on a directly-cloned repo), the reconciler should mark it low — say so explicitly so the user sees why it was skipped.
 - Never auto-fix items the user has already declined in this session.
+- Architectural/design judgment calls (signal handling, test design patterns, harness structure, and similar calls with a defensible "right" answer) get escalated to Fable for a recommendation before they reach the user as a question; genuine user-preference calls (priority, scope, whether to do the work) go to the user directly. See step 9.
 - A local agent that fails to run is noted and skipped, never fatal.
 - `gemini` is retired (the Gemini CLI was sunset). Never probe for or invoke it; silently skip any `gemini` entry left in an existing config, note that it was ignored, and offer to drop it.
 - Don't re-ask the local-reviewer question once a config (including an explicit empty list) exists.
