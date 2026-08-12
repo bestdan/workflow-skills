@@ -37,11 +37,11 @@ proxy. Discover that at the start, not four slices in.
 
 | Slice                   | Sources                                                                                                                                                      | What you're after                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Agentic correctness     | Terminal-Bench board (tbench.ai); Artificial Analysis Coding Agent Index                                                                                     | One comparable figure per model, harness named                            |
-| Multi-file correctness  | Scale's SWE-bench Pro leaderboard; aggregators when it lags                                                                                                  | A fallback figure where no agentic score exists                           |
+| Agentic correctness     | `tbench.ai/leaderboard/terminal-bench/<version>` — **not** `/leaderboard`, which is an index; Artificial Analysis Coding Agent Index                         | One comparable figure per model, harness named                            |
+| Multi-file correctness  | SWE-bench Pro leaderboard at `labs.scale.com` (`scale.com` 308s to it); aggregators when it lags                                                             | A fallback figure where no agentic score exists                           |
 | Pricing, tiers, context | Each vendor's pricing page and model cards — but for the **Claude** rows use the `claude-api` skill, which is authoritative on model ids, pricing and limits | The cost tier and the context window                                      |
 | Model rosters           | `devin models list`, `agy models`, `~/.codex/config.toml`, the session's `availableModels`                                                                   | Models that appeared or disappeared since the last refresh                |
-| Integrity / safety      | METR evaluations, vendor system cards                                                                                                                        | Anything that makes a coder's self-report untrustworthy                   |
+| Integrity / safety      | METR evaluations, vendor system cards, Terminal-Bench's per-run **Hacks** column and its `tbench.ai/news` integrity posts                                    | Anything that makes a coder's self-report untrustworthy                   |
 | Secret exposure         | Each vendor's ToS, privacy policy, security/data-usage docs; CVE and incident search                                                                         | Who may read what the agent reads, and how durably                        |
 | Containment             | Each CLI's sandboxing docs and open issues; our own pilot-run behavior                                                                                       | Whether the workspace boundary is OS-enforced, prompt-enforced, or absent |
 
@@ -51,18 +51,34 @@ at the proxy rather than by the page, WebSearch is the only path left — and wh
 it returns is aggregator evidence, which the next section says you may not set a
 number from.
 
+**The correctness slice needs firecrawl specifically**, and firecrawl bills per
+call — so raise the spend at the start, not four slices in. Both leaderboards
+render client-side: WebFetch returns navigation chrome and reads as an empty
+board rather than erroring, which is the failure mode that invites an
+aggregator number. The working recipe is `firecrawl map <site> --search
+leaderboard` to find the versioned path, then `firecrawl scrape` it. Guessing
+the path doesn't work — plausible spellings 404, and a 404 is easy to misread as
+"that board was retired".
+
 ## How to read the sources
 
 - **Coverage is not disagreement.** Absence from a leaderboard means the vendor
   didn't submit — never that the model is weak or unmeasured. Look for an
   independent index that covers it before concluding anything.
-- **Check the board itself for staleness.** A leaderboard that lists no
-  current-generation model is stale, not authoritative, however official it looks.
+- **Check each board for staleness separately.** A leaderboard that lists no
+  current-generation model is stale, not authoritative, however official it
+  looks — and staleness is per-board, not per-refresh. As of the last pass
+  Terminal-Bench was current while SWE-bench Pro was a full generation behind,
+  so a `Pro` figure and a `TB` figure fetched the same afternoon are not equally
+  fresh. Mark the stale board's column, don't average across them.
 - **Vendor self-reports are upper bounds.** Mark them in the matrix (`*`) and
   prefer an independent run when both exist. Where a vendor publishes only
   relative deltas, the row is unbenchmarked — say so rather than implying a number.
 - **Score the harness, not just the weights.** A coder backend is agent + model;
   a figure that doesn't name the agent is weaker evidence than one that does.
+  When the board names a _different_ harness than the row you're filling, the
+  number does not transfer — it's evidence about the weights. Mark the row, or
+  leave it unbenchmarked.
 - **Never break a tie on a SWE-bench Pro delta alone** — the harness isn't
   pinned across aggregators and part of the public split is reported broken.
 - **Aggregator-only evidence flags a row; it never sets one.** When the primary

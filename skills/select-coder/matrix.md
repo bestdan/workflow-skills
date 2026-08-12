@@ -1,11 +1,18 @@
 # Coder capability matrix
 
-Decision reference only: which coder to use, and what disqualifies one. It
-carries no sourcing, no provenance, and no argument — [`refresh-coder-comparison.md`](refresh-coder-comparison.md)
-(`/refresh-coder-comparison`) is where the numbers come from and how to redo them.
+Decision reference only: which coder to use, and what disqualifies one.
+
+[`refresh-coder-comparison.md`](refresh-coder-comparison.md) is where the numbers come from and how to refresh them.
 
 **Cached: 2026-07-28.** Refresh when this is older than ~2 months, or when a
-model in play isn't listed. Don't answer from a stale table as if it were current.
+model in play isn't listed. Don't answer from a stale table as if it were current. If we are within one week of needing a refresh, let the user know.
+
+**Partial pass 2026-08-12** — date deliberately not bumped. Verified: model
+rosters, the Terminal-Bench 2.1 board, the SWE-bench Pro board, and every gate
+citation link. **Not checked: pricing/tiers/context, secret exposure,
+containment, and integrity beyond the boards' own hack penalties.** SWE-bench
+Pro's board is itself a generation behind — it lists no Opus 5, GPT-5.6, or
+Gemini 3.6 — so every `Pro` figure here is a fallback, not a current reading.
 
 **Two dimensions are per-backend, not per-model:** secret exposure and
 containment are properties of the harness. Swapping `agy:Gemini 3.6 Flash` for
@@ -104,21 +111,32 @@ codex — say so instead of routing a 1M-token read at an unverified window.
 `devin:kimi-k3` is deliberately absent despite the strongest open-weights
 numbers here: reach for it manually on a public repo, not as a default.
 
+Meta's **Muse Spark 1.1** is absent for a different reason: it leads SWE-bench
+Pro (61.5%) and scores 76.2% on TB 2.1, but no backend here can reach it. It
+fails the "an account that can actually reach it" test, not the capability one —
+revisit if it lands in a backend's roster.
+
 ## Models by backend
 
 Correctness is one figure per row: **TB** = Terminal-Bench 2.1, **Pro** =
 SWE-bench Pro, **SWE-V** = SWE-bench Verified. `*` marks a vendor-reported
-number (an upper bound, not an independent run).
+number (an upper bound, not an independent run). `‡` marks a figure that does
+**not** appear on the primary board and whose provenance is unverified — it is
+retained, not trusted, and must not break a tie.
 
 ### opus (native Claude subagent — always available)
 
 | Spec                    | Cost | Speed  | Context  | Correctness | Best for                                                                                    |
 | ----------------------- | ---- | ------ | -------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `opus:claude-opus-5`    | $$$  | medium | 1M       | TB ~85%     | **Default for hard packets.** Architecture, long-horizon, agentic; honest self-verification |
+| `opus:claude-opus-5`    | $$$  | medium | 1M       | TB ~85%‡    | **Default for hard packets.** Architecture, long-horizon, agentic; honest self-verification |
 | `opus:claude-fable-5`   | $$$  | slow   | 1M       | TB 83.8%    | The hardest problems. Ask before selecting unless the task is hard-but-small                |
 | `opus:claude-sonnet-5`  | $$   | fast   | 1M       | TB 74.6%    | Default PR-sized implementation; best cost/quality balance                                  |
 | `opus:claude-opus-4-8`  | $$$  | medium | 1M       | TB 78.9%    | Fallback only — Opus 5 dominates it at identical price                                      |
 | `opus:claude-haiku-4-5` | $    | fast   | **200K** | modest      | Mechanical edits, renames, config churn, high-volume simple packets                         |
+
+`claude-opus-5` has never been submitted to Terminal-Bench 2.1 — the 17-entry
+board tops out at Fable 5. Its `~85%` is an estimate of unverified origin, so
+the row's ranking rests on the operational modifiers below, not on that number.
 
 Haiku's 200K is the one to watch when fanning out over large files. Claude
 models carry the strongest consensus on design taste and convention-following —
@@ -145,7 +163,7 @@ sandboxing; slightly weaker design taste than Claude.
 | Spec                          | Cost | Speed | Context | Correctness | Best for                                                                   |
 | ----------------------------- | ---- | ----- | ------- | ----------- | -------------------------------------------------------------------------- |
 | `agy:Gemini 3.6 Flash (High)` | $    | fast  | 1M      | TB 78.0%*   | Fast agentic default; supersedes 3.5 Flash on every published benchmark    |
-| `agy:Gemini 3.5 Flash (High)` | $    | fast  | 1M      | Pro 55.1%   | Fallback if 3.6 is unavailable                                             |
+| `agy:Gemini 3.5 Flash (High)` | $    | fast  | 1M      | Pro 55.1%‡  | Fallback if 3.6 is unavailable                                             |
 | `agy:Gemini 3.1 Pro (High)`   | $$   | slow  | 1M      | TB 65.8%    | Deliberate reasoning/debugging — loses to both Flash tiers on agentic work |
 | `agy:gpt-oss-120b (Medium)`   | $    | fast  | —       | none        | Not recommended; no data to justify routing to it                          |
 
@@ -164,10 +182,14 @@ Always name the model.
 | `devin:swe-1.7`           | Cognition         | free (Pro)   | fast    | 262K       | unbenchmarked | Cheap scoped edits when cost dominates                 |
 | `devin:swe-1.7-lightning` | Cognition         | $$           | fastest | 203K       | unbenchmarked | Latency-critical iteration loops                       |
 | `devin:swe-1.6-fast`      | Cognition         | $            | fastest | 200K       | unbenchmarked | Latency loop fallback                                  |
-| `devin:kimi-k3`           | Moonshot          | $$           | —       | 1M         | TB 80.9%      | Open-weights leader; frontier-adjacent on public repos |
-| `devin:glm-5.2`           | Zhipu             | free at 200K | —       | 200K or 1M | Pro 62.1%     | Best price/performance for bulk work on clean repos    |
-| `devin:grok-4.5`          | xAI               | $            | —       | 500K       | TB 79.3%      | Strong and cheap                                       |
+| `devin:kimi-k3`           | Moonshot          | $$           | —       | 1M         | TB 80.9%‡     | Open-weights leader; frontier-adjacent on public repos |
+| `devin:glm-5.2`           | Zhipu             | free at 200K | —       | 200K or 1M | Pro 62.1%‡    | Best price/performance for bulk work on clean repos    |
+| `devin:grok-4.5`          | xAI               | $            | —       | 500K       | TB 79.3%§     | Strong and cheap                                       |
 | `devin:inkling`           | Thinking Machines | $            | —       | 1M         | SWE-V 77.6%   | Cheapest 1M-context option with a real score           |
+
+§`grok-4.5`'s 79.3% was scored under **Cursor CLI**, not devin — a different
+harness, and the run carries the board's largest hack penalty (−9.0%). Read it
+as evidence about the weights, not about `devin:grok-4.5`.
 
 The swe-1.x family has **no published absolute benchmark standing** — free and
 unmeasured is what produces silent quality regressions in a fan-out. Never use
