@@ -17,7 +17,9 @@ Two inputs drive the choice:
    `dev_docs/orchestrate-coders/.coders.yml` (pre-flight below). Never
    recommend a backend/model the machine can't run.
 2. **What the task needs** — scored against the capability matrix in
-   [`matrix.md`](matrix.md).
+   [`matrix.md`](matrix.md). The matrix is decisions only; its numbers are
+   re-researched by [`refresh-coder-comparison.md`](refresh-coder-comparison.md)
+   (`/refresh-coder-comparison`), not by this skill.
 
 Availability means "runnable by the orchestrator," not "registered as a Claude
 `Agent` tool subagent." `opus` is native to the Agent tool. `codex`, `agy`, and
@@ -225,9 +227,11 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
 
 - Never recommend an unavailable backend/model without flagging it as such.
 - The matrix carries a cache date. If it is older than ~2 months, or the
-  user asks about a model the matrix doesn't list, refresh per the protocol
-  at the top of `matrix.md` before recommending — don't answer from a stale
-  table as if it were current.
+  user asks about a model the matrix doesn't list, refresh before
+  recommending — run `/refresh-coder-comparison` (procedure:
+  [`refresh-coder-comparison.md`](refresh-coder-comparison.md)) — and don't
+  answer from a stale table as if it were current. That is a different clock
+  from `--refresh` above, which re-probes local availability only.
 - Cost figures are directional, not billing-grade: subscription-quota
   backends (agy, devin) don't map cleanly to $/Mtok. Use the tiers.
 - When two candidates are within noise on the task's primary dimension,
