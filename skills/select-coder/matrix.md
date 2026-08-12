@@ -43,8 +43,12 @@ Fires when packets run unattended or in parallel near the main checkout.
 - Drop **`agy`** — `--sandbox` imposes terminal restrictions only and is inert
   under `--dangerously-skip-permissions` ([issue #36][agy-36]); nothing pins a
   workspace root, and a pilot run escaped its worktree.
-- **Exception:** a CAO-dispatched `agy` runs inside CAO's own isolated worktree,
-  which is the containment boundary — the gate does not fire for it.
+- **Standing exception (`--cao-fleet`), carried from `SKILL.md`:** a CAO-dispatched
+  `agy` is pointed at a caller-owned worktree rather than the main checkout, so
+  the gate does not fire for it. Be precise about what that is: a configured
+  working directory, not an OS-enforced boundary. It moves agy's blast radius;
+  it does not fence it. The exemption exists because `--cao-fleet` has only two
+  dispatchable backends — it is a scoping decision, not a containment guarantee.
 
 ### Non-interactive runs
 

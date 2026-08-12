@@ -64,9 +64,12 @@ matrix.md is decisions only — tier, one score, one line. Anything you learn th
 doesn't change a routing choice doesn't go in it, and doesn't come back here
 either. Update in this order:
 
-1. **Gate verdicts and their citation links.** Only a documented change in a
-   vendor's binding terms, a new incident, or a new integrity finding moves a
-   gate — a benchmark move never does. If a verdict changes, check whether
+1. **Gate verdicts and their citation links.** A gate moves on a documented
+   change in a vendor's binding terms, a change in what a CLI's sandbox actually
+   enforces (a fix that closes an escape, or a newly demonstrated one), a new
+   incident, or a new integrity finding. A benchmark move never does — and note
+   that a gate can move in both directions: a sandbox that becomes enforceable
+   clears gate 2 as surely as a new escape fires it. If a verdict changes, check whether
    `SKILL.md` steps 3–4 (which restate the gates and modifiers inline) still
    agree; they are the copy a caller actually reads.
 2. **The routing table.** Substitute models within a row before reordering rows.
@@ -75,9 +78,12 @@ either. Update in this order:
    existing units, with `*` on vendor-reported numbers.
 4. **The operational modifiers**, if a pilot run or a published evaluation
    contradicted one.
-5. **Bump `Cached:`** to today's date. If a slice couldn't be re-verified, leave
-   the old figure and say which slice is stale — a bumped date over an unchecked
-   number is worse than no refresh.
+5. **Bump `Cached:`** — on a full refresh only, and only if every slice was
+   actually checked. A single-backend or single-model pass updates its rows and
+   **leaves the date alone**: a bumped date marks every unchecked slice fresh and
+   suppresses the next real refresh, which is worse than not refreshing at all.
+   If a full pass left a slice unverified, keep the old figure, keep the old
+   date, and say which slice is stale.
 
 ## Adding or retiring a model
 
