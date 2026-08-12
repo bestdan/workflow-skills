@@ -2,7 +2,7 @@
 
 Decision reference only: which coder to use, and what disqualifies one.
 
-[`refresh-coder-comparison.md`](refresh-coder-comparison.md) is where the numbers come from and how to refresh them.
+[`refresh-coder-comparison.md`](refresh-coder-comparison.md) is where the numbers come from and how to refresh them; `/refresh-coder-comparison` runs it.
 
 **Cached: 2026-07-28.** Refresh when this is older than ~2 months, or when a
 model in play isn't listed. Don't answer from a stale table as if it were current. If we are within one week of needing a refresh, let the user know.
