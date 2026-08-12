@@ -24,20 +24,32 @@ when both are stale.
 Not on every select-coder invocation. Routing off a two-month-old table is fine;
 routing off one that predates a model generation is not.
 
+## Run this on a local machine
+
+Not from a remote/web session. Two of the slices below need the coder CLIs
+themselves (`devin`, `agy`, `codex`), and a managed remote environment's egress
+policy will block most of the source hosts outright — a dry run from Claude Code
+on the web reached `code.claude.com` and nothing else, with `tbench.ai`,
+`artificialanalysis.ai`, `metr.org`, and `antigravity.google` all refused at the
+proxy. Discover that at the start, not four slices in.
+
 ## What to re-check, and where
 
-| Slice                   | Sources                                                                                    | What you're after                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Agentic correctness     | Terminal-Bench board (tbench.ai); Artificial Analysis Coding Agent Index                   | One comparable figure per model, harness named                            |
-| Multi-file correctness  | Scale's SWE-bench Pro leaderboard; aggregators when it lags                                | A fallback figure where no agentic score exists                           |
-| Pricing, tiers, context | Each vendor's pricing page and model cards                                                 | The cost tier and the context window                                      |
-| Model rosters           | `devin models list`, `agy models`, `~/.codex/config.toml`, the session's `availableModels` | Models that appeared or disappeared since the last refresh                |
-| Integrity / safety      | METR evaluations, vendor system cards                                                      | Anything that makes a coder's self-report untrustworthy                   |
-| Secret exposure         | Each vendor's ToS, privacy policy, security/data-usage docs; CVE and incident search       | Who may read what the agent reads, and how durably                        |
-| Containment             | Each CLI's sandboxing docs and open issues; our own pilot-run behavior                     | Whether the workspace boundary is OS-enforced, prompt-enforced, or absent |
+| Slice                   | Sources                                                                                                                                                      | What you're after                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Agentic correctness     | Terminal-Bench board (tbench.ai); Artificial Analysis Coding Agent Index                                                                                     | One comparable figure per model, harness named                            |
+| Multi-file correctness  | Scale's SWE-bench Pro leaderboard; aggregators when it lags                                                                                                  | A fallback figure where no agentic score exists                           |
+| Pricing, tiers, context | Each vendor's pricing page and model cards — but for the **Claude** rows use the `claude-api` skill, which is authoritative on model ids, pricing and limits | The cost tier and the context window                                      |
+| Model rosters           | `devin models list`, `agy models`, `~/.codex/config.toml`, the session's `availableModels`                                                                   | Models that appeared or disappeared since the last refresh                |
+| Integrity / safety      | METR evaluations, vendor system cards                                                                                                                        | Anything that makes a coder's self-report untrustworthy                   |
+| Secret exposure         | Each vendor's ToS, privacy policy, security/data-usage docs; CVE and incident search                                                                         | Who may read what the agent reads, and how durably                        |
+| Containment             | Each CLI's sandboxing docs and open issues; our own pilot-run behavior                                                                                       | Whether the workspace boundary is OS-enforced, prompt-enforced, or absent |
 
 Fetching: `firecrawl` (CLI) or WebFetch for pages that block plain fetches;
-WebSearch to catch entrants nobody thought to look for.
+WebSearch to catch entrants nobody thought to look for. When a host is refused
+at the proxy rather than by the page, WebSearch is the only path left — and what
+it returns is aggregator evidence, which the next section says you may not set a
+number from.
 
 ## How to read the sources
 
@@ -53,6 +65,12 @@ WebSearch to catch entrants nobody thought to look for.
   a figure that doesn't name the agent is weaker evidence than one that does.
 - **Never break a tie on a SWE-bench Pro delta alone** — the harness isn't
   pinned across aggregators and part of the public split is reported broken.
+- **Aggregator-only evidence flags a row; it never sets one.** When the primary
+  board is unreachable and all you have is a search summary or an SEO round-up,
+  you have learned that a row may be stale — not what its number is. Record it as
+  stale, leave the old figure, and finish the slice when you can reach the board.
+  This is the rule the pre-split matrix quietly broke: its SWE-bench Pro column
+  was aggregator-sourced and read like measurement.
 - **A served window is not a model-card window.** When a CLI reportedly serves
   less than the card advertises, record the card as an upper bound and flag it.
 - **Prefer the binding document over the marketing page** for exposure and
@@ -87,10 +105,12 @@ either. Update in this order:
 
 ## Adding or retiring a model
 
-- **Adding.** It needs a cost tier, a context window, and one correctness figure
-  before it earns a model-table row. It earns a _routing-table_ slot only by
-  displacing something on the dimension that row is about — being new is not a
-  reason. On a gated backend, mark the row `†`.
+- **Adding.** It needs a cost tier, a context window, one correctness figure, and
+  an account that can actually reach it — a limited-release or
+  institution-gated model is noise in a routing table however good it is
+  (`claude-mythos-5` is the standing example). It earns a _routing-table_ slot
+  only by displacing something on the dimension that row is about — being new is
+  not a reason. On a gated backend, mark the row `†`.
 - **Retiring.** Keep a superseded model only while it's a plausible fallback
   (the successor may not be available in a given session); drop it once the
   successor is universal.
