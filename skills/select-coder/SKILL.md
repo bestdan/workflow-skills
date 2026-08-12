@@ -153,7 +153,7 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    can never rank — a non-CAO winner would have no named `cao-*` coder and
    force the unattended run into a re-dispatch loop or park.
 
-3. **Run the two gates first** (`matrix.md` → "Secret exposure and containment").
+3. **Run the two gates first** (`matrix.md` → "Gates — run before ranking").
    They filter candidates rather than penalize them, and they are the only
    dimensions that can disqualify a backend outright.
    - **Secret exposure.** The trigger is whether the agent could read a live
