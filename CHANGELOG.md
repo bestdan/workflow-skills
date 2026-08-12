@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.83.0] - 2026-08-12
+
+### Features
+
+- split the coder matrix, then correct the figures the split inherited (#353) (ffe3902)
+
 ## [1.82.6] - 2026-08-08
 
 ### Fixes
