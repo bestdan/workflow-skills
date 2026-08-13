@@ -8,9 +8,10 @@ argument-hint: "<task description> [--plan <name>] [--refresh] [-n N]"
 
 Invoke the **select-coder** skill with the arguments as given. The skill
 (`skills/select-coder/SKILL.md`) owns all behavior — the availability
-pre-flight and its cache, the capability matrix and its refresh protocol,
-task profiling, and the routing rules. This command adds nothing beyond
-routing; do not re-derive or restate the workflow here.
+pre-flight and its cache, the capability matrix, task profiling, and the
+routing rules. This command adds nothing beyond routing; do not re-derive or
+restate the workflow here. `--refresh` below re-probes this machine only;
+re-researching the matrix itself is `/refresh-coder-comparison`.
 Treat installed CLI coders as available delegates even though they are not
 Claude Agent-tool subagents; the orchestrator dispatches them through Bash.
 

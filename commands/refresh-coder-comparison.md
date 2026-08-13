@@ -1,5 +1,5 @@
 ---
-description: Re-research the coder capability matrix — re-check benchmark boards, pricing, model rosters, safety evaluations, and each vendor's terms, then write the results back into select-coder's matrix.md and bump its cache date. The occasional (~2-month) world-state refresh, distinct from /select-coder --refresh, which only re-probes which backends this machine can run
+description: Re-research the coder capability matrix — re-check benchmark boards, pricing, model rosters, safety evaluations, and each vendor's terms, then write the results back into select-coder's matrix.md — bumping its cache date only on a full refresh in which every slice was actually checked. The occasional (~2-month) world-state refresh, distinct from /select-coder --refresh, which only re-probes which backends this machine can run
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, WebSearch, WebFetch
 argument-hint: "[backend | model]"
 ---

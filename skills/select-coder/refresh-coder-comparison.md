@@ -126,7 +126,10 @@ either. Update in this order:
   institution-gated model is noise in a routing table however good it is
   (`claude-mythos-5` is the standing example). It earns a _routing-table_ slot
   only by displacing something on the dimension that row is about — being new is
-  not a reason. On a gated backend, mark the row `†`.
+  not a reason. If the model sits on a backend a **gate** removes, mark the row
+  `†` — matrix.md's routing-table footnote, not the account-gating sense used
+  above. Mark every such row, not just some: an unmarked row on a gated backend
+  reads as unconditionally available.
 - **Retiring.** Keep a superseded model only while it's a plausible fallback
   (the successor may not be available in a given session); drop it once the
   successor is universal.

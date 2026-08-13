@@ -90,19 +90,23 @@ trusted.
 select-coder consumes that profile rather than re-deriving one. The final
 `cross-vendor` row is a select-coder routing modifier, not an assess-task label.
 
-| `label`                  | Task profile                                    | 1st                                                              | 2nd                           | 3rd                                                    |
-| ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------ |
-| `architecture`           | Architecture / multi-file refactor / hard bug   | `opus:claude-opus-5`                                             | `codex:gpt-5.6-sol`           | `opus:claude-fable-5`                                  |
-| `standard-pr`            | Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.6-terra`         | `agy:Gemini 3.6 Flash (High)`                          |
-| `mechanical-bulk`        | Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.6-luna`                                             | `opus:claude-haiku-4-5`       | `devin:glm-5.2`†                                       |
-| `frontend-creative`      | Frontend / design / creative naming & API shape | `opus:claude-opus-5`                                             | `opus:claude-sonnet-5`        | `codex:gpt-5.6-sol`                                    |
-| `latency-loop`           | Latency-critical tight loop                     | `devin:swe-1.6-fast`†                                            | `agy:Gemini 3.6 Flash (High)` | `codex:gpt-5.6-luna`                                   |
-| `whole-codebase`         | Whole-codebase context (1M-token reads)         | `opus:claude-sonnet-5`                                           | `agy:Gemini 3.6 Flash (High)` | `codex:gpt-5.6-terra`*                                 |
-| `verification-sensitive` | Verification-sensitive (the check IS the task)  | `opus:claude-opus-5`                                             | `opus:claude-sonnet-5`        | — (**never `gpt-5.6-sol`**; avoid devin/codex-sandbox) |
-| `long-horizon`           | Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-5`                                             | `opus:claude-fable-5`         | `codex:gpt-5.6-sol`                                    |
-| `cross-vendor`           | Cross-vendor diversity (2nd opinion / review)   | pick a different vendor than the 1st author — codex ↔ opus ↔ agy |                               |                                                        |
+| `label`                  | Task profile                                    | 1st                                                              | 2nd                            | 3rd                                                    |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------ |
+| `architecture`           | Architecture / multi-file refactor / hard bug   | `opus:claude-opus-5`                                             | `codex:gpt-5.6-sol`            | `opus:claude-fable-5`                                  |
+| `standard-pr`            | Standard PR-sized feature or fix                | `opus:claude-sonnet-5`                                           | `codex:gpt-5.6-terra`          | `agy:Gemini 3.6 Flash (High)`†                         |
+| `mechanical-bulk`        | Mechanical / bulk / high-volume simple packets  | `codex:gpt-5.6-luna`                                             | `opus:claude-haiku-4-5`        | `devin:glm-5.2`†                                       |
+| `frontend-creative`      | Frontend / design / creative naming & API shape | `opus:claude-opus-5`                                             | `opus:claude-sonnet-5`         | `codex:gpt-5.6-sol`                                    |
+| `latency-loop`           | Latency-critical tight loop                     | `devin:swe-1.6-fast`†                                            | `agy:Gemini 3.6 Flash (High)`† | `codex:gpt-5.6-luna`                                   |
+| `whole-codebase`         | Whole-codebase context (1M-token reads)         | `opus:claude-sonnet-5`                                           | `agy:Gemini 3.6 Flash (High)`† | `codex:gpt-5.6-terra`*                                 |
+| `verification-sensitive` | Verification-sensitive (the check IS the task)  | `opus:claude-opus-5`                                             | `opus:claude-sonnet-5`         | — (**never `gpt-5.6-sol`**; avoid devin/codex-sandbox) |
+| `long-horizon`           | Long-horizon autonomous (overnight-scale)       | `opus:claude-opus-5`                                             | `opus:claude-fable-5`          | `codex:gpt-5.6-sol`                                    |
+| `cross-vendor`           | Cross-vendor diversity (2nd opinion / review)   | pick a different vendor than the 1st author — codex ↔ opus ↔ agy |                                |                                                        |
 
-†Gated out on any repo with secrets — these rows apply to clean or public repos only.
+†Removed by gate 1 on any repo with live secrets — these rows apply to clean or
+public repos only. `agy` additionally fails **gate 2** for unattended or parallel
+work near the main checkout, so its rows survive only an attended, scoped run
+(or a `--cao-fleet` dispatch). Run the gates before reading a rank: a marked row
+is a candidate only once its gate has been shown not to fire.
 
 *`whole-codebase` is ranked by the window **actually served**, not the advertised
 one. If gate 1 removes agy, the 2nd slot is **empty** rather than filled by
@@ -111,10 +115,11 @@ codex — say so instead of routing a 1M-token read at an unverified window.
 `devin:kimi-k3` is deliberately absent despite the strongest open-weights
 numbers here: reach for it manually on a public repo, not as a default.
 
-Meta's **Muse Spark 1.1** is absent for a different reason: it leads SWE-bench
-Pro (61.5%) and scores 76.2% on TB 2.1, but no backend here can reach it. It
-fails the "an account that can actually reach it" test, not the capability one —
-revisit if it lands in a backend's roster.
+Meta's **Muse Spark 1.1** is absent for a different reason: it tops the
+SWE-bench Pro **board** (61.5% — the higher 62.1% shown for `devin:glm-5.2`
+below is a `‡` figure, not a board entry) and scores 76.2% on TB 2.1, but no
+backend here can reach it. It fails the "an account that can actually reach it"
+test, not the capability one — revisit if it lands in a backend's roster.
 
 ## Models by backend
 
