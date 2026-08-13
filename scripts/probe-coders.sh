@@ -28,8 +28,13 @@ codex_model=unknown
 codex_auth=unknown
 if command -v codex >/dev/null 2>&1; then
   codex_installed=true
-  m=$(codex config get model 2>/dev/null)
-  if [ -z "$m" ] && [ -f "$HOME/.codex/config.toml" ]; then
+  # `codex config get model` was the primary lookup here until it turned out
+  # there is no `codex config` subcommand (checked on codex-cli 0.146.0) — the
+  # 2>/dev/null hid the error and this sed was silently doing all the work.
+  # `codex doctor` resolves the layered config, but it makes network reachability
+  # checks; a probe shouldn't block on those, so read the user layer directly.
+  m=""
+  if [ -f "$HOME/.codex/config.toml" ]; then
     m=$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$HOME/.codex/config.toml" | head -1)
   fi
   [ -n "$m" ] && codex_model=$m
