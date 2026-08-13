@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.83.1] - 2026-08-13
+
+### Fixes
+
+- repair the cross-references and markers the matrix split left behind (#354) (4149323)
+
 ## [1.83.0] - 2026-08-12
 
 ### Features
