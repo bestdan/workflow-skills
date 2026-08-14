@@ -52,7 +52,7 @@ jobs:
           fetch-tags: true
           # main is protected, and the built-in GITHUB_TOKEN can't be on a bypass
           # list -- so the release commit is pushed with a fine-grained PAT whose
-          # owner is on the branch bypass list. See CONTRIBUTING.md "Versioning".
+          # owner is on the branch bypass list. See dev_docs/releasing.md.
           # Its pushes re-trigger workflows, hence the [skip ci] + `if:` guards.
           token: ${{ secrets.RELEASE_TOKEN }}
           # Keep the PAT out of .git/config. Steps below this one run

@@ -316,7 +316,7 @@ linear:
   api_key_resolver: opx
 ```
 
-No manual version bump: `CONTRIBUTING.md` → "Versioning" states versions bump
+No manual version bump: `dev_docs/releasing.md` → "Versioning" states versions bump
 automatically on merge to `main` via the Release workflow, driven by the commit type.
 
 ## Operational note

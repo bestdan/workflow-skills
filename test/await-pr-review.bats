@@ -19,10 +19,26 @@ make_gh() {
 
 json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
 
+# Safety net for the tests that assert a review LANDS, deliberately not a small
+# number. Those tests are about the poll transition (wait -> landed), not about
+# the deadline: with --interval 0 the loop is bounded by how fast it can poll,
+# and --timeout only decides when to give up. Setting it low makes the success
+# path race real elapsed time, because the timeout is checked only between
+# polls -- so one slow poll ends the run before the landed fixture is ever
+# fetched. That is not hypothetical: at --timeout 5 this suite failed under
+# scripts/check.sh (13 checks running concurrently) with
+# `AWAIT_REVIEW: timeout reviewer=copilot after=6s` and gh called exactly once,
+# while passing whenever it was run on its own. Keep this comfortably above any
+# plausible poll latency, and keep it BOUNDED so a genuine regression fails the
+# suite instead of hanging it. The timeout-asserting tests below pass their own
+# small --timeout: they never land, so elapsing is guaranteed and they are not
+# racy.
+LAND_TIMEOUT=60
+
 @test "returns when Copilot review already landed" {
   json "$TEST_TMPDIR/landed" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
   make_gh "$TEST_TMPDIR/landed"
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout 5
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT"
   assert_success
   assert_output --partial 'AWAIT_REVIEW: landed'
 }
@@ -31,7 +47,7 @@ json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
   json "$TEST_TMPDIR/wait" '[]' '[{"login":"Copilot"}]'
   json "$TEST_TMPDIR/landed" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
   make_gh "$TEST_TMPDIR/wait" "$TEST_TMPDIR/landed"
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout 5
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT"
   assert_success
   assert_output --partial 'AWAIT_REVIEW: landed'
 }
@@ -40,7 +56,7 @@ json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
   json "$TEST_TMPDIR/requested" '[]' '[{"login":"Copilot"}]'
   json "$TEST_TMPDIR/cleared" '[]' '[]'
   make_gh "$TEST_TMPDIR/requested" "$TEST_TMPDIR/cleared"
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout 5
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT"
   assert_success
   assert_output --partial 'AWAIT_REVIEW: landed'
 }
@@ -60,7 +76,7 @@ json() { printf '{"reviews":%s,"reviewRequests":%s}\n' "$2" "$3" >"$1"; }
   assert_failure 1
   assert_output --partial 'AWAIT_REVIEW: timeout'
   rm -f "$TEST_TMPDIR/responses/count"
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --reviewer Copilot --reviewer gemini-code-assist --mode any --interval 0 --timeout 5
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --reviewer Copilot --reviewer gemini-code-assist --mode any --interval 0 --timeout "$LAND_TIMEOUT"
   assert_success
 }
 
