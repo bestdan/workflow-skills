@@ -1,6 +1,6 @@
 # Lean concepts worth importing into research-spike
 
-Companion to [`dev_docs/research-spike-lean-evaluation.md`](../research-spike-lean-evaluation.md),
+Companion to [`dev_docs/research/research-spike-lean-evaluation.md`](../research/research-spike-lean-evaluation.md),
 which concluded that Lean is the wrong _implementation_ language for
 `scripts/research-spike.py` but the right _conceptual model_ for it. This
 document is the follow-through: which specific concepts the instrument is
