@@ -165,12 +165,23 @@ sandboxing; slightly weaker design taste than Claude.
 
 ### agy (Google Antigravity CLI — subscription quota, not per-token)
 
-| Spec                          | Cost | Speed | Context | Correctness | Best for                                                                   |
-| ----------------------------- | ---- | ----- | ------- | ----------- | -------------------------------------------------------------------------- |
-| `agy:Gemini 3.6 Flash (High)` | $    | fast  | 1M      | TB 78.0%*   | Fast agentic default; supersedes 3.5 Flash on every published benchmark    |
-| `agy:Gemini 3.5 Flash (High)` | $    | fast  | 1M      | Pro 55.1%‡  | Fallback if 3.6 is unavailable                                             |
-| `agy:Gemini 3.1 Pro (High)`   | $$   | slow  | 1M      | TB 65.8%    | Deliberate reasoning/debugging — loses to both Flash tiers on agentic work |
-| `agy:gpt-oss-120b (Medium)`   | $    | fast  | —       | none        | Not recommended; no data to justify routing to it                          |
+| Spec                               | Cost | Speed | Context | Correctness   | Best for                                                                   |
+| ---------------------------------- | ---- | ----- | ------- | ------------- | -------------------------------------------------------------------------- |
+| `agy:Gemini 3.6 Flash (High)`      | $    | fast  | 1M      | TB 78.0%*     | Fast agentic default; supersedes 3.5 Flash on every published benchmark    |
+| `agy:Gemini 3.5 Flash (High)`      | $    | fast  | 1M      | Pro 55.1%‡    | Fallback if 3.6 is unavailable                                             |
+| `agy:Gemini 3.1 Pro (High)`        | $$   | slow  | 1M      | TB 65.8%      | Deliberate reasoning/debugging — loses to both Flash tiers on agentic work |
+| `agy:gpt-oss-120b (Medium)`        | $    | fast  | —       | none          | Not recommended; no data to justify routing to it                          |
+| `agy:Claude Opus 4.6 (Thinking)`   | $$   | slow  | 1M      | Pro 51.9%     | **Don't** — pass-through, see below                                        |
+| `agy:Claude Sonnet 4.6 (Thinking)` | $    | fast  | 1M      | unbenchmarked | **Don't** — pass-through, see below                                        |
+
+**agy also passes through Claude — don't route to it.** `agy models` serves
+`Claude Opus 4.6 (Thinking)` and `Claude Sonnet 4.6 (Thinking)`, and the same
+rule that governs devin's pass-throughs applies here with more force: it inserts
+an undocumented intermediary in front of a vendor the `opus` backend reaches
+directly, for zero capability gain — and it drags the Claude models under agy's
+gate-1 exposure and gate-2 containment verdicts, which `opus` doesn't carry.
+Both are also a generation behind what `opus` serves. They are listed so the
+question is answered where it gets asked, not because either is routable.
 
 Quota, not tokens: 5-hour refresh windows, and background sub-agents burn quota
 independently. **1M context is no longer agy's differentiator** — Claude is 1M
