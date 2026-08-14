@@ -73,9 +73,12 @@ job's `if:` guard exists; both are load-bearing here.
 
 ### One-time: the first run seeds a baseline
 
-With no `v*` tag yet, the first qualifying merge only creates a
+With no `v*` tag yet, the **first Release workflow run** only creates a
 `v<current-version>` tag (no bump); every merge after that has a boundary to
-diff against and bumps normally.
+diff against and bumps normally. Note this is not conditional on the commit
+type: `bump-version.py` returns as soon as it finds no `v*` tag, before it ever
+inspects commits, so a `docs:` or `chore:` merge seeds the baseline just as a
+`feat:` one would.
 
 ## Landing a stack of PRs
 
@@ -101,17 +104,24 @@ the wrong tree and merges a stale base.
    git fetch origin && git checkout <branch-A> && git rebase origin/main && git push --force-with-lease
    ```
 3. **Squash-merge once green:** `gh pr merge <A> --squash`. The PR title's
-   Conventional-Commit type drives the version bump, so keep it accurate. The
-   Release workflow then pushes a `chore: release … [skip ci]` commit, advancing
-   `main` — **but it runs asynchronously, so wait for it before step 4.**
-   `gh pr merge` returns as soon as the squash lands; fetching immediately grabs
-   the _pre-release_ tip (the stale base this section warns about) and, if
-   `main` requires up-to-date branches, bounces you into a redundant second
-   rebase. Watch the run with
-   `gh run watch $(gh run list --workflow=Release --branch=main --limit=1 --json databaseId --jq '.[0].databaseId')`,
-   or just confirm the bump landed:
-   `git fetch origin && git log origin/main -1 --oneline` should show the
-   `chore: release …` commit.
+   Conventional-Commit type drives the version bump, so keep it accurate — and
+   it also decides whether step 4 has anything to wait for:
+   - **Release-worthy title** (`feat:` / `fix:` / `perf:` / breaking): the
+     Release workflow pushes a `chore: release … [skip ci]` commit, advancing
+     `main` — **but it runs asynchronously, so wait for it before step 4.**
+     `gh pr merge` returns as soon as the squash lands; fetching immediately
+     grabs the _pre-release_ tip (the stale base this section warns about) and,
+     if `main` requires up-to-date branches, bounces you into a redundant second
+     rebase. Watch the run with
+     `gh run watch $(gh run list --workflow=Release --branch=main --limit=1 --json databaseId --jq '.[0].databaseId')`,
+     or just confirm the bump landed:
+     `git fetch origin && git log origin/main -1 --oneline` should show the
+     `chore: release …` commit.
+   - **No-bump title** (`docs:` / `chore:` / `ci:` / `test:`, per
+     [Versioning](#versioning)): no release commit is ever pushed, so there is
+     nothing to wait for — `main`'s tip is the squash commit itself. Don't watch
+     for a `chore: release …` line that will never arrive; fetch and go straight
+     to step 4 once the squash lands.
 4. **Rebase the next child onto the new `main` tip** — replaying _only its own_
    commits — retarget it to `main`, force-push, and repeat from step 1 for the
    rest of the stack:
