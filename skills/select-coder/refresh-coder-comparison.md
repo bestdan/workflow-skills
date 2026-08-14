@@ -63,8 +63,11 @@ the path doesn't work — plausible spellings 404, and a 404 is easy to misread 
 ## How to read the sources
 
 - **Coverage is not disagreement.** Absence from a leaderboard means the vendor
-  didn't submit — never that the model is weak or unmeasured. Look for an
-  independent index that covers it before concluding anything.
+  didn't submit — never that the model is weak or unmeasured. Terminal-Bench and
+  SWE-bench Pro both have known coverage gaps, so check **Artificial Analysis**
+  (`artificialanalysis.ai` — Coding Agent Index for agentic work, Intelligence
+  Index otherwise) before concluding a missing model is unranked. It is the
+  independent index that most often covers what the two boards skip.
 - **Check each board for staleness separately.** A leaderboard that lists no
   current-generation model is stale, not authoritative, however official it
   looks — and staleness is per-board, not per-refresh. As of the last pass
