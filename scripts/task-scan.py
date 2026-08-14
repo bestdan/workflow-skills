@@ -469,6 +469,21 @@ def main() -> None:
 
         slug = path.stem
         status = data.get("status")
+        # Rejected at ingestion, not tolerated downstream. Frontmatter is
+        # user-written YAML, so `status:` can arrive as any type — and an
+        # unhashable one (a list, a mapping) reached `TERMINAL_STATUSES`
+        # membership and `cards_by_status.setdefault` as a dict key, where it
+        # raised a bare `TypeError: unhashable type` traceback. That is the one
+        # failure mode this scanner must not have: its contract is fail-closed
+        # with a located message (the two `die`s above), and a traceback names
+        # no file, so the card that caused it stays hidden. Checked here rather
+        # than trusted from the annotation below, which cannot constrain what
+        # `yaml.safe_load` returns through an unparameterized dict.
+        if status is not None and not isinstance(status, str):
+            die(
+                f"invalid status in {path}: expected a string, got "
+                f"{type(status).__name__} ({status!r})"
+            )
         # Slugs resolve globally by filename stem, so two files in different
         # subdirectories can share one. For blocker readiness, fail toward
         # "still blocked": never let a later terminal (done) duplicate clear an
