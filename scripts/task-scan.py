@@ -460,30 +460,38 @@ def main() -> None:
         if not isinstance(data, dict):
             die(f"unparseable frontmatter in {path}: expected a mapping, got {data!r}")
 
-        dtype = data.get("type")
-        if dtype == "epic":
-            epics.append({"path": path, "data": data})
-            continue
-        if dtype is not None and dtype != "task":
-            continue  # non-task reference doc (e.g. type: design) — not a card
-
-        slug = path.stem
-        status = data.get("status")
-        # Rejected at ingestion, not tolerated downstream. Frontmatter is
-        # user-written YAML, so `status:` can arrive as any type — and an
-        # unhashable one (a list, a mapping) reached `TERMINAL_STATUSES`
-        # membership and `cards_by_status.setdefault` as a dict key, where it
+        # Rejected at ingestion, not tolerated downstream — and above the
+        # epic/card split, so it covers every record this scanner ingests
+        # rather than cards alone. Frontmatter is
+        # user-written YAML, so `status:` can arrive as any type: an unhashable
+        # one (a list, a mapping) reached `TERMINAL_STATUSES` membership and
+        # `cards_by_status.setdefault` as a dict key on the card path, where it
         # raised a bare `TypeError: unhashable type` traceback. That is the one
         # failure mode this scanner must not have: its contract is fail-closed
         # with a located message (the two `die`s above), and a traceback names
-        # no file, so the card that caused it stays hidden. Checked here rather
-        # than trusted from the annotation below, which cannot constrain what
-        # `yaml.safe_load` returns through an unparameterized dict.
+        # no file, so the card that caused it stays hidden. Epics cannot crash
+        # on it today — their consumers only `!= "done"` and `.get` it into
+        # JSON — but that reads a malformed status as silently not-done, and
+        # the guarantee is only as durable as the next edit to the epic path.
+        # Checked here rather than trusted from the annotation below, which
+        # cannot constrain what `yaml.safe_load` returns through an
+        # unparameterized dict.
+        dtype = data.get("type")
+        if dtype is not None and dtype not in ("epic", "task"):
+            continue  # non-task reference doc (e.g. type: design) — not a card
+
+        status = data.get("status")
         if status is not None and not isinstance(status, str):
             die(
                 f"invalid status in {path}: expected a string, got "
                 f"{type(status).__name__} ({status!r})"
             )
+
+        if dtype == "epic":
+            epics.append({"path": path, "data": data})
+            continue
+
+        slug = path.stem
         # Slugs resolve globally by filename stem, so two files in different
         # subdirectories can share one. For blocker readiness, fail toward
         # "still blocked": never let a later terminal (done) duplicate clear an

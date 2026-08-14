@@ -314,6 +314,54 @@ else
   bad "malformed frontmatter: stderr was empty"
 fi
 
+# --- Fixture 6b: a non-string status fails closed, and says which file ------
+# `status:` is user-written YAML, so it can arrive unhashable (a list, a
+# mapping). Before it was rejected at ingestion it reached a dict key and
+# raised a bare `TypeError: unhashable type` — a traceback that names no file,
+# the one failure mode this scanner must not have. Asserting on the located
+# message, not just the exit code, is what keeps that from regressing.
+DIR6B="$BASE/badstatus"
+write_task "$DIR6B/bad.md" "title: status is a list
+priority: medium
+size: 2
+status: [done, ready]
+created: 2026-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01" "$(std_body)"
+
+if "$SCRIPT" "$DIR6B" >/dev/null 2>"$BASE/badstatus.stderr"; then
+  bad "non-string status: script should exit non-zero, exited 0"
+else
+  ok "non-string status: script exits non-zero"
+fi
+if grep -q 'invalid status in .*bad\.md' "$BASE/badstatus.stderr"; then
+  ok "non-string status: stderr names the offending file"
+else
+  bad "non-string status: stderr did not locate the card: $(cat "$BASE/badstatus.stderr")"
+fi
+
+# The check sits above the epic/card split, so an epic is rejected the same
+# way. An epic's own consumers only `!= "done"` and `.get` it into JSON, so a
+# malformed status there reads as silently not-done rather than crashing —
+# which is why it has to fail closed here instead of being traced case by case.
+DIR6C="$BASE/badstatus-epic"
+write_task "$DIR6C/widget_plan.md" "type: epic
+title: Epic whose status is a list
+status: [done, active]
+created: 2026-01-01" "$(std_body)"
+
+if "$SCRIPT" "$DIR6C" >/dev/null 2>"$BASE/badstatus-epic.stderr"; then
+  bad "non-string status (epic): script should exit non-zero, exited 0"
+else
+  ok "non-string status (epic): script exits non-zero"
+fi
+if grep -q 'invalid status in .*widget_plan\.md' "$BASE/badstatus-epic.stderr"; then
+  ok "non-string status (epic): stderr names the offending file"
+else
+  bad "non-string status (epic): stderr did not locate the epic: $(cat "$BASE/badstatus-epic.stderr")"
+fi
+
 # --- Fixture 7: promote gate (deterministic HIGH checks) --------------------
 DIR7="$BASE/promote"
 write_task "$DIR7/high.md" "title: Passes all deterministic checks

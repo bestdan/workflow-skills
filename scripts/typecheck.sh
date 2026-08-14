@@ -47,6 +47,15 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
+# uvx installs the tool under ~/.local/share/uv/tools by default, which a
+# command sandbox that grants the uv *cache* is not obliged to grant — and
+# there the whole gate fails at this stage with "Could not create temporary
+# file … Operation not permitted", a red gate for a reason unrelated to the
+# code. Pointed at the cache dir instead, so one warm (network-permitting) run
+# leaves every later sandboxed `just check` green. Set here rather than in CI
+# config so the two cannot drift, which is the same reason this script exists.
+export UV_TOOL_DIR="${UV_TOOL_DIR:-${UV_CACHE_DIR:-$HOME/.cache/uv}/tools}"
+
 MYPY_VERSION="1.18.2"
 # Stub-only package for the `import yaml` in the default-tier scripts. Without
 # it mypy reports `import-untyped` on all three and checks none of their yaml
