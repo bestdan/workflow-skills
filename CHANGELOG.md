@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.83.2] - 2026-08-14
+
+### Fixes
+
+- use exact-match allow-rules for agy/devin dispatch, one per pinned model (#347) (41a9946)
+
 ## [1.83.1] - 2026-08-13
 
 ### Fixes
