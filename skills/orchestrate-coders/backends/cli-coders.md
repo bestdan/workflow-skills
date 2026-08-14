@@ -96,7 +96,7 @@ learned in co-review:
   overrides) so the coder identity doesn't drift between runs.
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy --model "Gemini 3.6 Flash (High)" -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop."
+[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop." --model "Gemini 3.6 Flash (High)"
 ```
 
 Run it with cwd `<dir>`. Do **not** pass `--sandbox` here (unlike co-review's
@@ -112,7 +112,7 @@ directly in the worktree cwd; the older cloud-session model below is a
 fallback). Canonical invocation, cwd `<dir>`:
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --model swe-1.6 --permission-mode accept-edits
+[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --permission-mode accept-edits --model swe-1.6
 ```
 
 Use `--prompt-file`, **not** piped stdin — `devin -p` with piped stdin panics.
