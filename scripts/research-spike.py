@@ -68,8 +68,10 @@ an explicit not-implemented-yet error here rather than a silent success.
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -3051,7 +3053,13 @@ def verb_init(args: argparse.Namespace, root: Path) -> int:
     # fails on "track already exists", so the caller is stuck with a tree only
     # a manual `rm` gets them out of.
     pending: list[tuple[Path, list[str]]] = []
-    index_missing = False
+    # The track whose PROJECT.md index entry could not be written, or None.
+    # Carries the name rather than a bare flag: the flag can only ever be set
+    # inside the `track is not None` branch below, and holding the name is what
+    # makes that invariant structural instead of a fact a reader has to
+    # reconstruct from two distant blocks — the note at the bottom needs the
+    # name anyway.
+    unindexed_track: str | None = None
     if track is not None and not scaffolded_project:
         project_path = project_dir / "PROJECT.md"
         ledger_path = project_dir / "LEDGER.md"
@@ -3063,7 +3071,7 @@ def verb_init(args: argparse.Namespace, root: Path) -> int:
             read_file_lines(project_path, f"{rel}/PROJECT.md"), track, rel
         )
         if indexed is None:
-            index_missing = True
+            unindexed_track = track
         else:
             pending.append((project_path, indexed))
 
@@ -3082,10 +3090,10 @@ def verb_init(args: argparse.Namespace, root: Path) -> int:
     for path in created:
         suffix = "/" if path.is_dir() else ""
         print(f"  {path.relative_to(root).as_posix()}{suffix}")
-    if index_missing:
+    if unindexed_track is not None:
         print(
             f"  note: {rel}/PROJECT.md has no '## Tracks' heading — add "
-            f"'{track_index_entry(track)}' to its index by hand"
+            f"'{track_index_entry(unindexed_track)}' to its index by hand"
         )
     if track_dir is None:
         print(f"  next: add a track — init {project} --track <name>")
@@ -3490,7 +3498,13 @@ def verb_validate(args: argparse.Namespace, root: Path) -> int:
     code = report.emit()
     if code != EXIT_OK:
         return code
-    if track is not None:
+    # `project is not None` is redundant at runtime — `resolve_scope` never
+    # returns a track without its project — but the invariant lives in that
+    # function's control flow, not in its `tuple[Project | None, Track | None]`
+    # return type, so nothing here can see it. Stated as a guard rather than
+    # asserted: `assert` is stripped under `-O`, and the honest reading is that
+    # this branch wants both.
+    if project is not None and track is not None:
         print(
             f"{PROG}: OK — {project.name}/{track.name}: "
             f"{count_records(tree, project.name, track.name)} records"
@@ -3782,15 +3796,28 @@ def main(argv: list[str] | None = None) -> int:
     # *redirected* stdout, which is how a plugin invocation captures it, uses
     # the ANSI codepage, and cp1252 has no `✘`), and the encode failure would
     # land on the FAIL path — the one that matters.
+    #
+    # Guarded by isinstance rather than assumed: `reconfigure` is
+    # `io.TextIOWrapper`'s, not the `TextIO` protocol's, and a caller that has
+    # replaced `sys.stdout` with a `StringIO` (a test harness capturing output,
+    # a plugin runner wrapping the stream) would otherwise take an
+    # `AttributeError` here — crashing before argparse on the one line whose
+    # whole purpose is to make output survive a hostile console.
     for stream in (sys.stdout, sys.stderr):
-        stream.reconfigure(encoding="utf-8", errors="replace")
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         root = Path(args.root)
         if not root.is_dir():
             raise UsageError(f"--root '{args.root}' is not a directory")
-        return args.run(args, root.resolve())
+        # Named with its type rather than called straight off the Namespace:
+        # `args.run` is `Any` to a type checker, so calling it inline silently
+        # erases the return type this function declares. Every `set_defaults`
+        # in `build_parser` installs exactly this signature.
+        run: Callable[[argparse.Namespace, Path], int] = args.run
+        return run(args, root.resolve())
     except UsageError as e:
         print(f"{PROG}: {e}", file=sys.stderr)
         return EXIT_USAGE
