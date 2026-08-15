@@ -1,9 +1,14 @@
 name: CI
 
-# Deterministic, blocking quality gate. Runs the exact same entrypoint
-# (scripts/check.sh) that contributors run locally via `just check`, so CI and
-# local can never drift. Behavioral evals are NOT here — they are opt-in and
-# live in evals.yml (manual workflow_dispatch).
+# Deterministic, blocking quality gate. The `quality` job runs the exact same
+# entrypoint (scripts/check.sh) that contributors run locally via `just check`,
+# so CI and local can never drift. Behavioral evals are NOT here — they are
+# opt-in and live in evals.yml (manual workflow_dispatch).
+#
+# The `macos` job is deliberately NOT that entrypoint — see its own comment for
+# why running check.sh twice would buy nothing. It is a second HOST, not a
+# second gate: the union of the two jobs is the coverage, because neither
+# platform is a superset of the other.
 
 on:
   pull_request:
@@ -64,6 +69,42 @@ jobs:
       # and manifest cross-consistency.
       - name: Deterministic quality gate
         run: bash scripts/check.sh
+
+  macos:
+    name: Host-sensitive suites (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Runs the shell/bats layer only, NOT scripts/check.sh. Everything else
+      # in that script (dprint, validate.py, typecheck, the python suites) is
+      # host-independent, so a second run of it would cost a mise + uv + npm
+      # toolchain install on macOS to re-assert what `quality` already proved.
+      # This job exists for the assertions that are host-DEPENDENT, and
+      # scripts/test-shell.sh is exactly those: the bats files plus the
+      # orchestrator suite. It needs only bash, git and the vendored bats
+      # submodules, which is why there are no install steps above.
+      #
+      # SO_TEST_REQUIRE_SEATBELT=1 is the point of the job. Without it the
+      # suite reports a green "N passed, 14 skipped" on a host that never
+      # applied a profile, which is precisely the false comfort this job is
+      # meant to remove; with it, a run is green only when ZERO
+      # seatbelt-behavioral assertions were skipped. Verified reachable before
+      # this job was written rather than assumed — a throwaway probe on this
+      # branch (runs 31872616800 / 31872828322) confirmed macos-latest can
+      # apply a profile and that the flag passes there.
+      #
+      # Note the flag gates on the SKIP COUNT, not on seatbelt capability, and
+      # several skip sites are host-fixture ones (launchctl, plutil, distinct
+      # fixture binaries). All were present on the macos26 image; a future
+      # runner image that drops one would fail this job for a reason unrelated
+      # to seatbelt. Read the skip reasons before assuming a regression.
+      - name: Shell + bats suites, full seatbelt coverage required
+        env:
+          SO_TEST_REQUIRE_SEATBELT: 1
+        run: bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no
