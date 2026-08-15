@@ -57,7 +57,12 @@ export SO_TEST_TALLY_DIR="$tally"
 
 pids=()
 for i in "${!parts[@]}"; do
-  bash "scripts/test-spawn-orchestrator-${parts[$i]}.sh" >"$tmp/$i.out" 2>&1 &
+  # "$BASH", not `bash`: every part carries the assertions, so a bare `bash`
+  # here would re-resolve through PATH and land the whole suite on whatever
+  # interpreter is first — discarding the one CI pinned two levels up. $BASH is
+  # this script's own interpreter, so the pin propagates without an export.
+  # See dev_docs/testing.md (the Bash 3.2 floor).
+  "$BASH" "scripts/test-spawn-orchestrator-${parts[$i]}.sh" >"$tmp/$i.out" 2>&1 &
   pids+=("$!")
 done
 

@@ -16,6 +16,26 @@
 #
 # Sourced, never executed: `set -uo pipefail` is the caller's job, because the
 # exit status of the whole part depends on it.
+
+# --- The Bash 3.2 floor, verified rather than assumed -------------------------
+# CI's macOS job pins /bin/bash by name and every hop below it re-passes that
+# interpreter as "$BASH" (see dev_docs/testing.md). Delivery is not proof of
+# arrival: a bare `bash` anywhere on that path silently re-resolves through
+# PATH, which is exactly the hop this file's own pin missed the first time, so
+# the parts ran on whatever PATH offered under a CI comment claiming 3.2. This
+# check runs in every part, including parts that do not exist yet, so a future
+# bare `bash` fails loudly instead of quietly reopening the hole.
+#
+# Opt-in, because the floor is a property of the macOS job and not of a
+# developer's laptop — a Linux contributor's Bash 5 must not fail this suite.
+# Set alongside SO_TEST_REQUIRE_SEATBELT in .github/workflows/ci.yml.
+if [ "${SO_TEST_REQUIRE_BASH3:-0}" = 1 ] && [ "${BASH_VERSINFO[0]}" -ne 3 ]; then
+  echo "FAIL - Bash floor: this part is running under ${BASH_VERSION}, not the 3.2 floor." >&2
+  echo "       The interpreter pin was dropped somewhere between /bin/bash and here" >&2
+  echo "       — look for a bare \`bash\` that should be \"\$BASH\"." >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/spawn-orchestrator.sh"
 
