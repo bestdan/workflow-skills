@@ -33,14 +33,24 @@ Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 
 ```sh
-just check     # the full deterministic gate (what CI runs on every PR)
-just fmt       # auto-format everything with dprint + shfmt
-just validate  # only the repo-native structural/consistency validator
-just eval      # gate + behavioral skill-triggering evals (opt-in, needs auth)
+just check       # the full deterministic gate (what CI runs on every PR)
+just check-fast  # edit loop: skips the long suites, lints only what you touched
+just fmt         # auto-format everything with dprint + shfmt
+just validate    # only the repo-native structural/consistency validator
+just eval        # gate + behavioral skill-triggering evals (opt-in, needs auth)
 ```
 
 `just check` is a thin wrapper around `scripts/check.sh` — the script is the
 source of truth, and CI calls it directly.
+
+`just check-fast` is for the edit loop: ~8s against the full gate's ~66s. It
+skips the two long test suites and narrows the shell lint to the files your
+branch has touched — that is skipped coverage, not sharded or sampled, so
+`just check` still has to pass before you push and CI always runs the gate with
+no flags. It announces exactly what it dropped, on entry and again at the end.
+Why those particular things are slow, and what it would take to make `just check`
+itself faster, is in [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)
+— read it before adding concurrency anywhere in the gate.
 
 ## The gate (`just check`)
 
