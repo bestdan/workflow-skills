@@ -300,13 +300,27 @@ else
         fi
       fi
 
+      # This checks that the allowlist RENDERS, and nothing more. It is not a
+      # containment check, and the wording must never imply that it is: the
+      # settings it inspects enforce NOTHING inside this jail. Claude Code's
+      # sandbox is applied by nesting a Seatbelt profile, macOS refuses that
+      # (`sandbox_apply: Operation not permitted`), so the sandbox dies at
+      # startup and the harness then re-runs blocked commands unsandboxed.
+      # Egress from inside the jail is UNFILTERED regardless of what renders
+      # here. See scripts/orchestrator.sb.tmpl's header and PR #212.
+      #
+      # The check is kept because a render failure still signals a broken
+      # renderer, and removing it is coupled to deleting the settings emitter
+      # itself (a larger change, deliberately deferred). Its MESSAGE is fixed
+      # now, because this is the launch gate a human reads before starting an
+      # unattended run — it must not certify a layer that does not exist.
       settings="$scratch/preflight-settings.json"
       if bash "$SPAWN" render-settings --source "$source_arg" --out "$settings" >/dev/null 2>&1 \
         && grep -q '"allowedDomains"' "$settings" && grep -q '"enabled":true' "$settings"; then
-        echo "PREFLIGHT SMOKE_EGRESS: pass (layer-2 allowlist renders enabled + deny-by-default)"
+        echo "PREFLIGHT SMOKE_EGRESS: pass (allowlist RENDERS; it does NOT enforce in-jail — egress is OPEN)"
       else
         echo "PREFLIGHT SMOKE_EGRESS: FAIL"
-        blockers+=("confinement smoke: layer-2 egress allowlist did not render as an enabled, deny-by-default allowlist")
+        blockers+=("confinement smoke: the egress allowlist did not render (renderer is broken) — note the allowlist does not enforce anything in-jail either way")
       fi
     else
       echo "PREFLIGHT SMOKE: FAIL (render-profile failed for this environment's fingerprint)"
