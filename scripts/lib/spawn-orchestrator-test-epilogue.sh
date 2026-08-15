@@ -41,9 +41,24 @@ esac
 #      source: under EVERY composite PATH this part builds, osascript must resolve
 #      to something inside $BASE (a stub, or the guard) — never a real system
 #      binary. Each name is optional because each part builds only its own: the
-#      supervisor part has GT_PATH, the alarm part ALPATH/ALFAIL, the
-#      exit-contract part STUB_PATH/STUBF, doctor PSSTUB_PATH, status-report
-#      SRW_PATH/SRL_PATH/SR_LEAK. A part that builds none checks none.
+#      supervisor part has GT_PATH, the alarm part ALPATH/ALFAIL_PATH, the
+#      exit-contract part STUB_PATH/STUBF_PATH, doctor PSSTUB_PATH,
+#      status-report SRW_PATH/SRL_PATH. A part that builds none checks none.
+#
+#      Every name here must be the composite PATH a fixture RUNS UNDER, stored
+#      whole at its own call site. Do not reconstruct one here: the guard dir
+#      lives inside $BASE, so any reconstruction that re-injects $GUARD to make
+#      itself pass can no longer fail, and one that omits it reports a leak at
+#      call sites that are in fact safe. Either way the assertion stops tracking
+#      the fixture — which is the failure this check exists to catch, wearing
+#      the check's own clothes. (STUBF_PATH and ALFAIL_PATH were reconstructed
+#      here until a review caught exactly that; they are stored variables now.)
+#
+#      status-report's leak probe is deliberately absent: it runs under
+#      `PATH="$SR_LEAK:$PATH"`, i.e. the INHERITED PATH, which the prelude has
+#      already prefixed with $GUARD. That shape is covered by the resolution
+#      checks above, not by this loop, and pinning it here would only assert
+#      the prelude's own export a second time.
 #
 #      THIS LIST IS THE WEAK POINT: it is enumerated, so a part that invents a
 #      new composite PATH and does not add it here escapes the check silently —
@@ -52,7 +67,7 @@ esac
 #      BEFORE they were defined); the epilogue runs last in every part, so it
 #      can. Keep it exhaustive:
 #        grep -n 'PATH="\$' scripts/test-spawn-orchestrator-*.sh
-for _pv in GT_PATH ALPATH STUB_PATH PSSTUB_PATH SRW_PATH SRL_PATH; do
+for _pv in GT_PATH ALPATH ALFAIL_PATH STUB_PATH STUBF_PATH PSSTUB_PATH SRW_PATH SRL_PATH; do
   eval "_pval=\"\${$_pv:-}\""
   [ -n "$_pval" ] || continue
   _osa="$(PATH="$_pval" command -v osascript 2>/dev/null || true)"
@@ -61,19 +76,6 @@ for _pv in GT_PATH ALPATH STUB_PATH PSSTUB_PATH SRW_PATH SRL_PATH; do
     *) bad "notifier guard: \$$_pv routes osascript to a REAL binary (a suite run would pop a desktop notification)" "resolved to: ${_osa:-(not found)}" ;;
   esac
 done
-# The stub DIRS that are composed inline at the call site rather than stored as a
-# whole PATH (the failing-bootout and task-26 unwritable-sentinel fixtures, and
-# status-report's notifier-leak probe) get the same assertion, against a
-# reconstruction of the PATH the fixture actually builds.
-for _pv in "${STUBF:-}" "${ALFAIL:-}" "${SR_LEAK:-}"; do
-  [ -n "$_pv" ] || continue
-  _osa="$(PATH="$_pv:$GUARD:/usr/bin:/bin" command -v osascript 2>/dev/null || true)"
-  case "$_osa" in
-    "$BASE"/*) ok "notifier guard: the inline stub PATH ${_pv##*/} routes osascript inside the test tree" ;;
-    *) bad "notifier guard: the inline stub PATH ${_pv##*/} routes osascript to a REAL binary" "resolved to: ${_osa:-(not found)}" ;;
-  esac
-done
-
 #   3. behavioral — alarms really did route through the guard. This is the one
 #      assertion the split could not keep per-part. It exists so a guard that has
 #      quietly stopped covering the alarm path fails loudly instead of passing on

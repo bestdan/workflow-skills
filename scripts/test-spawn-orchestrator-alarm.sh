@@ -304,10 +304,12 @@ if command -v git >/dev/null 2>&1; then
   printf '#!/bin/sh\nexit 1\n' >"$ALFAIL/osascript"
   printf '#!/bin/sh\nexit 1\n' >"$ALFAIL/terminal-notifier"
   chmod +x "$ALFAIL/osascript" "$ALFAIL/terminal-notifier"
+  # Stored whole for the epilogue's guard loop — see the note in exit-contract.
+  ALFAIL_PATH="$ALFAIL:$GUARD:/usr/bin:/bin"
   A9="$AL/nonotify"
   mkrun "$A9" active 2099-01-01T00:00:00 0
   printf 'API Error: 401 Invalid authentication credentials\n' >"$A9/.auto-pilot/orchestrator.log"
-  n9="$(PATH="$ALFAIL:$GUARD:/usr/bin:/bin" "$SCRIPT" supervisor-check --exit-code 1 \
+  n9="$(PATH="$ALFAIL_PATH" "$SCRIPT" supervisor-check --exit-code 1 \
     --log "$A9/.auto-pilot/orchestrator.log" --dir "$A9" --label com.autopilot.test.nonotify \
     --state "$A9/.auto-pilot/supervisor-state" 2>&1)"
   have "alarm/no-notifier: says the notification failed" 'NOTIFY FAILED' "$n9"

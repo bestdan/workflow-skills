@@ -502,6 +502,11 @@ esac
 exit 0
 LCFEOF
   chmod +x "$STUBF/launchctl"
+  # Stored whole rather than composed at each call site, so the epilogue's
+  # notifier-guard loop can assert against the PATH these fixtures really run
+  # under. A reconstruction there would have to re-inject $GUARD to pass, which
+  # makes the assertion unfalsifiable — see the epilogue's enumeration.
+  STUBF_PATH="$STUBF:$GUARD:/usr/bin:/bin"
   BF="$EC/bootout-fails"
   mkdir -p "$BF/.auto-pilot"
   (cd "$BF" && git init -q)
@@ -516,7 +521,7 @@ LCFEOF
   printf '# report\n' >"$BF/.auto-pilot/REPORT.md"
   printf 'ok\n' >"$BF/log"
   : >"$BF/launchctl.log"
-  bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+  bferr="$(STUB_LAUNCHCTL_LOG="$BF/launchctl.log" PATH="$STUBF_PATH" \
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$BF/log" --dir "$BF" \
     --label com.autopilot.ec.bf --state "$BF/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
   bfboots="$(grep -c 'bootout' "$BF/launchctl.log" 2>/dev/null)"
@@ -564,7 +569,7 @@ LCFEOF
   # Break the side channel: every mktemp under .auto-pilot/ (the done-sentinel,
   # the RUN.md rewrite, the ALARM sentinel) now fails with EACCES.
   chmod -w "$HB/.auto-pilot"
-  hbout="$(STUB_LAUNCHCTL_LOG="$HB/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+  hbout="$(STUB_LAUNCHCTL_LOG="$HB/launchctl.log" PATH="$STUBF_PATH" \
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$HB/log" --dir "$HB" \
     --label com.autopilot.ec.hb --state "$HB/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
   hbrc=$?
@@ -594,7 +599,7 @@ LCFEOF
   printf 'ok\n' >"$DS/log"
   : >"$DS/launchctl.log"
   chmod -w "$DS/.auto-pilot"
-  dsout="$(STUB_LAUNCHCTL_LOG="$DS/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+  dsout="$(STUB_LAUNCHCTL_LOG="$DS/launchctl.log" PATH="$STUBF_PATH" \
     "$SCRIPT" supervisor-check --exit-code 0 --wake-start 1 --log "$DS/log" --dir "$DS" \
     --label com.autopilot.ec.ds --state "$DS/.auto-pilot/supervisor-state" 2>&1 >/dev/null)"
   dsrc=$?
@@ -636,7 +641,7 @@ LCFEOF
   # BOTH streams: the halt's own line and the STILL-LOADED warning go to stderr, but
   # the `ALARM no-progress` announcement goes to stdout — an stderr-only capture
   # would silently miss the very signal this test exists to prove.
-  npout="$(STUB_LAUNCHCTL_LOG="$NP26/launchctl.log" PATH="$STUBF:$GUARD:/usr/bin:/bin" \
+  npout="$(STUB_LAUNCHCTL_LOG="$NP26/launchctl.log" PATH="$STUBF_PATH" \
     "$SCRIPT" supervisor-check --exit-code 1 --wake-start 1 --log "$NP26/log" --dir "$NP26" \
     --label com.autopilot.ec.np26 --no-progress-limit 1 \
     --state "$NP26/.auto-pilot/supervisor-state" 2>&1)"
