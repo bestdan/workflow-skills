@@ -118,6 +118,82 @@ run() {
   "$@" || fail=1
 }
 
+# --- The Bash 3.2 floor, checked statically -----------------------------------
+# AGENTS.md requires every script here to run under Bash 3.2, because scripts/
+# ships runtime helpers that execute on installed users' machines, where stock
+# macOS /bin/bash is 3.2.57.
+#
+# CI's macOS job enforces that by EXECUTING the suites under /bin/bash (see
+# dev_docs/testing.md), which is the stronger check — it catches semantic
+# differences no pattern can see, like empty-array "${arr[@]}" under set -u
+# before 4.4. But it only reaches lines a test actually runs. A `declare -A` in
+# a branch no assertion covers ships undetected. This check is the complement:
+# every line, every PR, on the ubuntu job, with no dependence on which bash a
+# runner image happens to put first.
+#
+# The `bash -n` below is not that complement, despite appearances: it parses
+# with whatever bash is running the lint, which on the ubuntu job is Bash 5, and
+# Bash 5 parses every construct banned here without complaint. It only rejects
+# them on a developer's Mac — the machines that need the check least.
+#
+# It is deliberately approximate. It catches the accidental introduction of
+# common bash-4+ constructs, which is the realistic failure; it is not a
+# portability proof, and a green run here is not one either.
+bash4_re=()
+bash4_why=()
+bash4_ban() {
+  bash4_re+=("$1")
+  bash4_why+=("$2")
+}
+# The escape hatch is a trailing `# bash4-lint: allow` on the offending line.
+# The seven definitions below are its first users, and the reason it exists at
+# all: a table of patterns for banned constructs necessarily contains those
+# constructs, so without an opt-out this check's only finding would be itself.
+# Use it for text that merely mentions a construct, never to keep one.
+bash4_ban '(^|[^A-Za-z0-9_])(declare|typeset|local)[[:space:]]+-[A-Za-z]*A([[:space:]]|$)' 'associative array (declare -A) — bash 4.0' # bash4-lint: allow
+bash4_ban '(^|[^A-Za-z0-9_])(mapfile|readarray)([^A-Za-z0-9_]|$)' 'mapfile/readarray — bash 4.0'                                       # bash4-lint: allow
+bash4_ban '(^|[^A-Za-z0-9_])coproc([^A-Za-z0-9_]|$)' 'coproc — bash 4.0'                                                               # bash4-lint: allow
+# One class, not four alternatives: `^` is only literal inside brackets when it
+# is not first, and every escaped form of it dies somewhere on the way through
+# awk's -v assignment. `${v,` and `${v^` also cover the doubled forms.
+bash4_ban '[$][{][A-Za-z_][A-Za-z0-9_]*[,^]' 'case modification ${var,,} / ${var^^} — bash 4.0' # bash4-lint: allow
+bash4_ban '&>>' '&>> append redirection — bash 4.0'                                             # bash4-lint: allow
+bash4_ban '[|]&' '|& pipe-stderr shorthand — bash 4.0'                                          # bash4-lint: allow
+bash4_ban ';;&' ';;& case fallthrough — bash 4.0'                                               # bash4-lint: allow
+
+bash4_files=()
+[ "${#shell_files[@]}" -gt 0 ] && bash4_files+=("${shell_files[@]}")
+[ "${#bats_files[@]}" -gt 0 ] && bash4_files+=("${bats_files[@]}")
+if [ "${#bash4_files[@]}" -gt 0 ]; then
+  echo "→ bash 3.2 floor (no bash-4+ constructs)"
+  for i in "${!bash4_re[@]}"; do
+    # The awk pass re-tests the match against a comment-stripped copy of the
+    # line, so prose ABOUT a banned construct doesn't fail the lint — there is
+    # one such comment in scripts/pr-fix-guard.sh explaining why it hand-rolls
+    # a `mapfile`. Stripping uses the shell's own rule (`#` at line start or
+    # after whitespace), which means a `#` inside a quoted string ends the
+    # scanned portion early. That direction is deliberate: it can hide a
+    # violation, never invent one, and a lint that cries wolf gets disabled.
+    # An explicit `# bash4-lint: allow` on the line skips it outright.
+    while IFS= read -r hit; do
+      [ -n "$hit" ] || continue
+      echo "  $hit: ${bash4_why[$i]}" >&2
+      fail=1
+    done < <(grep -nE -- "${bash4_re[$i]}" "${bash4_files[@]}" 2>/dev/null \
+      | awk -v re="${bash4_re[$i]}" -F: '
+        {
+          file = $1; line = $2
+          code = $0
+          sub(/^[^:]*:[^:]*:/, "", code)
+          if (code ~ /bash4-lint: allow/) next
+          sub(/^[[:space:]]*#.*/, "", code)
+          sub(/[[:space:]]#.*/, "", code)
+          if (code ~ re) printf "%s:%s\n", file, line
+        }')
+  done
+  [ "$fail" -eq 0 ] || echo "  → these are bash 4+ only; this repo's floor is 3.2 (see AGENTS.md)" >&2
+fi
+
 if [ "${#shell_files[@]}" -gt 0 ]; then
   run bash -n "${shell_files[@]}"
   run shfmt -i 2 -ci -bn -d "${shell_files[@]}"

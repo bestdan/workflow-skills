@@ -121,10 +121,31 @@ pin broke or the pin's target moved — so a separate CI guard step checks
 questions: the guard asks _is `/bin/bash` still the floor_, the suites ask _did
 the floor reach me_.
 
-None of this catches a bash-ism in code no test executes. That gap wants a
-construct grep (`declare -A`, `mapfile`, `${var,,}`, …) in
-[`scripts/lint-shell.sh`](../scripts/lint-shell.sh), which would run on every
-PR on ubuntu and needs no host assumptions at all; it doesn't exist yet.
+None of this catches a bash-ism in code no test executes — execution only
+checks the lines a test reaches. That is what the construct grep in
+[`scripts/lint-shell.sh`](../scripts/lint-shell.sh) is for: it bans
+`declare -A`, `mapfile`/`readarray`, `coproc`, `${var,,}`/`${var^^}`, `&>>`,
+`|&`, and `;;&` by pattern, over every line of every shell file, on the ubuntu
+job, with no dependence on any host's `PATH`.
+
+The two halves fail in opposite directions, which is why both exist. Execution
+is exact but partial: it catches semantics a pattern can't see (empty-array
+`"${arr[@]}"` under `set -u` before 4.4) and only where a test runs. The grep
+is total but approximate: every line, but only the constructs someone thought
+to list, and only where they are written literally. **A green lint is not a
+portability proof.**
+
+Two things to know before editing it. Prose _about_ a banned construct doesn't
+fail the lint — matches are re-tested against a comment-stripped copy of the
+line — and a line ending in `# bash4-lint: allow` is skipped outright. The
+pattern table is its own first user, since a table of patterns for banned
+constructs necessarily contains those constructs. Use the marker for text that
+mentions a construct, never to keep one.
+
+And don't mistake the neighbouring `bash -n` for this check: it parses with
+whatever bash runs the lint, which on the ubuntu job is Bash 5, and Bash 5
+accepts every construct listed above. It rejects them only on a developer's
+Mac — the machines that need the check least.
 
 ## The seatbelt probe has three states, not two
 
