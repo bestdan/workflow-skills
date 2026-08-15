@@ -13,6 +13,11 @@ Review the change and report findings. Focus only on:
 
 Skip nitpicks, pure formatting, and pre-existing issues outside the diff.
 
+If you recommend pinning or SHA-pinning a GitHub Action to a version/tag, you
+almost certainly cannot check whether that version is current from the diff
+alone — say so. Mark the recommendation UNVERIFIED rather than asserting
+currency, and never withhold the finding just because you can't verify it.
+
 For each finding, give:
 
 - `file:line`
