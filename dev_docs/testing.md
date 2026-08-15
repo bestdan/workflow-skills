@@ -19,8 +19,10 @@ wasn't, or adding a test that depends on the host.
 | `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each       |
 
 `scripts/test-shell.sh` runs the Bats files and the orchestrator suite;
-`scripts/check.sh` runs everything. The Bats files live in git submodules under
-`test/vendor/`, so a fresh `git worktree add` starts with them unpopulated —
+`scripts/check.sh` runs everything. The `test/*.bats` files are ordinary tracked
+sources — it is the Bats **runner and helper libraries** (`bats-core`,
+`bats-assert`, `bats-file`, `bats-support`) that live in git submodules under
+`test/vendor/`. A fresh `git worktree add` starts those submodules unpopulated;
 `scripts/ensure-bats.sh` recovers that automatically.
 
 ## What runs where
@@ -35,7 +37,7 @@ actually apply a sandbox profile.
 | Seatbelt behavioral (33 skip sites)        | **runs**                | ≥14 skipped             | ≥14 skipped       |
 | `confinement smoke rejects non-macOS`      | skipped                 | skipped                 | **runs**          |
 | `zip`/`unzip` round-trips (3)              | runs if installed       | runs if installed       | runs if installed |
-| Host-fixture blocks (13: git, `plutil`, …) | runs if fixture present | runs if fixture present | several skip      |
+| Host-fixture blocks (13: `plutil`, git, …) | runs if fixture present | runs if fixture present | several skip      |
 | Everything else                            | runs                    | runs                    | runs              |
 
 Two consequences worth internalizing:
@@ -79,7 +81,8 @@ The second is a false pass, which is why the probe exists: it converts both
 failure modes into a loud skip. So a skip here means "this did not run", never
 "this was checked and was fine".
 
-The three states report distinguishable messages:
+Two of the three states are skips, and they report distinguishable messages (the
+third simply runs the assertions, so it announces nothing):
 
 ```
 sandbox-exec present but cannot apply a profile here, nested sandbox
@@ -116,13 +119,19 @@ deliberate:
   Not all 33 fire in a given run — several sit inside blocks with further
   conditions — but `SEATBELT_OK=0` forces at least 14, which is why an
   unseatbelted host reports `14 skipped` rather than `33`.
-- **Bare echo** — `echo "skip - ..."` (13 sites: Homebrew Cellar, `python3`,
-  `plutil`, `shasum`, `ps -o lstart`, and six git-absent blocks) does **not**
-  increment it.
+- **Bare echo** — `echo "skip - ..."` (13 sites: `plutil` ×2, seven git-absent
+  blocks, and one each for Homebrew Cellar, `python3`, `shasum`, and
+  `ps -o lstart`) does **not** increment it.
 
-Keep new skips on the correct side. Folding a host-fixture skip into the
-counter would break `SO_TEST_REQUIRE_SEATBELT` on hosts where seatbelt coverage
-is in fact complete, because the git-absent skips fire on every Linux runner.
+Keep new skips on the correct side. Folding a host-fixture skip into the counter
+would break `SO_TEST_REQUIRE_SEATBELT` on a Mac whose seatbelt coverage is in
+fact complete: the Homebrew Cellar check, for instance, skips whenever
+`/opt/homebrew/Cellar` is absent, which says nothing at all about whether the
+seatbelt layer ran.
+
+(The comment in the suite justifying this says the _git_-absent skips fire on
+every Linux runner. They don't — each is guarded by `command -v git`, and CI's
+`ubuntu-latest` ships git. The rule is right; that particular example isn't.)
 
 ## Forcing full coverage
 
@@ -131,7 +140,8 @@ SO_TEST_REQUIRE_SEATBELT=1 scripts/test-spawn-orchestrator.sh
 ```
 
 Fails the run if **any** seatbelt assertion was skipped. A zero skip count is
-the only thing that means full coverage. Use it on a macOS host, outside any
+the only thing that means full **seatbelt** coverage — it says nothing about the
+host-fixture or inverted-test skips above. Use it on a macOS host, outside any
 nesting sandbox, when you have changed confinement/seatbelt behavior and need
 the layer actually exercised rather than reported.
 
@@ -162,8 +172,16 @@ isolation. It now uses `LAND_TIMEOUT`, a bounded hang-bound rather than a
 duration; the timeout-asserting cases keep a small budget, since delay can only
 slow those, never fake a pass.
 
-The rule that generalizes: **a test's success path must not be bounded by wall
-time.** Bound the condition instead, and reserve elapsed-time budgets for
-assertions whose expected outcome is a timeout. Before adding concurrency
-anywhere in the gate, grep for `sleep`, `SECONDS`, `--timeout`, and polling
-loops in the suites it touches.
+The rule that generalizes: **a test's success path must never have to win a race
+against the clock.** That is not the same as banning timeouts on success paths —
+`LAND_TIMEOUT=60` is one, and it is correct. The distinction is what the number
+means. A deadline that a healthy run misses by three orders of magnitude is a
+_hang backstop_: it bounds how long a broken script can wedge the suite, and no
+amount of load reaches it. A deadline a loaded machine can plausibly exhaust is a
+_duration expectation_, and it makes the test a coin flip.
+
+So: keep success-path budgets far above any plausible runtime, and keep them
+bounded so a genuine regression fails rather than hangs. Reserve _small_ budgets
+for assertions whose expected outcome is itself a timeout. Before adding
+concurrency anywhere in the gate, grep for `sleep`, `SECONDS`, `--timeout`, and
+polling loops in the suites it touches.
