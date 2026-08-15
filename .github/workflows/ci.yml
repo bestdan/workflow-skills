@@ -101,10 +101,27 @@ jobs:
       # fixture binaries). All were present on the macos26 image; a future
       # runner image that drops one would fail this job for a reason unrelated
       # to seatbelt. Read the skip reasons before assuming a regression.
+      # This job is also the ONLY place the Bash 3.2 floor that AGENTS.md
+      # requires is exercised — the ubuntu job runs Bash 5, and no script
+      # asserts a version. That used to hold incidentally, because this image
+      # happens to keep /bin/bash ahead of Homebrew's bash on PATH, so the
+      # `#!/usr/bin/env bash` scripts landed on 3.2. An image that reordered
+      # PATH would have retired the check silently. Invoking /bin/bash by name
+      # makes it a contract instead; test-shell.sh passes the same interpreter
+      # down to the orchestrator suite via "$BASH".
+      - name: Assert /bin/bash is the 3.2 floor
+        run: |
+          /bin/bash -c '
+            printf "%s\n" "$BASH_VERSION"
+            [ "${BASH_VERSINFO[0]}" -eq 3 ] || {
+              echo "::error::/bin/bash is no longer 3.2 — the Bash floor this job pins is not being exercised. Re-read dev_docs/testing.md before deciding what to do." >&2
+              exit 1
+            }'
+
       - name: Shell + bats suites, full seatbelt coverage required
         env:
           SO_TEST_REQUIRE_SEATBELT: 1
-        run: bash scripts/test-shell.sh
+        run: /bin/bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no

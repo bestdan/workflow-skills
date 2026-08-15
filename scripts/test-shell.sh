@@ -67,7 +67,10 @@ else
   # Scheduled LAST because the replay loop below is strictly index-ordered: this
   # is the longer of the two, and anything after it would have its output held
   # back behind it. Same reasoning as the tail of check.sh's run list.
-  run bash scripts/test-spawn-orchestrator.sh
+  # "$BASH", not `bash`: a bare `bash` re-resolves through PATH, which would
+  # drop the interpreter CI pinned when it invoked this wrapper as
+  # /bin/bash (the Bash 3.2 floor — see dev_docs/testing.md).
+  run "$BASH" scripts/test-spawn-orchestrator.sh
 fi
 
 fail=0

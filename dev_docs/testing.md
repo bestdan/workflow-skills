@@ -82,22 +82,33 @@ Three consequences worth internalizing:
 anywhere in `scripts/`, and the ubuntu job runs Bash 5, so the rule was upheld by
 care alone.
 
-The macOS job checks it incidentally but genuinely. On the runner image Homebrew's
-bash is **not** ahead of `/bin/bash` on `PATH`:
+The macOS job checks it, and does so by name rather than by luck. It invokes
+`/bin/bash scripts/test-shell.sh`, and `test-shell.sh` hands that same
+interpreter to the orchestrator suite as `"$BASH"` — a bare `bash` there would
+re-resolve through `PATH` and undo the pin for the largest suite in the repo.
+So the scripts under it execute on 3.2, and a `declare -A` fails the job.
+
+It did not always work that way. The job originally ran `bash …`, and the floor
+held only because that image happens to keep `/bin/bash` ahead of Homebrew's
+bash on `PATH`:
 
 ```
 env bash : /bin/bash
          : GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
 ```
 
-so the 31 scripts carrying `#!/usr/bin/env bash` execute under 3.2 there, and a
-`declare -A` would fail the job.
+That is a property of the image (measured on `macos26 / 20260728.0273.1`, macOS
+26.5.2, arm64), not a contract, so an image that reordered `PATH` would have
+retired the check with nothing to announce it. Worth knowing because the pin
+only reaches what this job invokes: anything that resolves an interpreter
+through `PATH` on its own — bats spawning the `#!/usr/bin/env bash` scripts a
+`.bats` file exercises, most obviously — is still riding the image's ordering.
 
-Treat that as observed, not guaranteed. It is a property of that image's `PATH`
-(measured on `macos26 / 20260728.0273.1`, macOS 26.5.2, arm64), not a contract —
-if a future image puts Homebrew's bash first, the floor silently stops being
-checked and nothing will announce it. Pin an explicit `/bin/bash` invocation if
-that floor ever needs to be guaranteed rather than merely likely.
+The one remaining silent failure is Apple shipping a newer `/bin/bash`, which
+would leave the pin pointing at something that is no longer the floor. A guard
+step asserts `BASH_VERSINFO[0]` is 3 and fails the job with an explicit message
+if it isn't, so that lands as a decision to make rather than as coverage
+quietly disappearing.
 
 ## The seatbelt probe has three states, not two
 
