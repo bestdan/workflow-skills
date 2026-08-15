@@ -160,13 +160,16 @@ Two cautions if you reproduce this:
   then reports a parse error and exits before doing the expensive analysis, which
   looks like a spectacular speedup. Check `bash -n` on the prefix first. Every row
   above is a valid prefix.
-- **Length alone does not predict cost.** `scripts/spawn-orchestrator.sh` is 6408
-  lines — longer than the monolith ever was — and lints in ~6.3s. So the curve
-  above is a property of that file's content, not a universal constant. Measure
-  the file in front of you rather than extrapolating from its line count.
+- **Length alone does not predict cost across files.** The curve above is steep
+  _within_ one file, but its coefficient is not universal:
+  `scripts/spawn-orchestrator.sh` is 6408 lines — longer than the monolith ever
+  was — and lints in ~5.5s, while the monolith wanted ~31s at 5816. So splitting
+  a long file is a good bet, not a guarantee. Measure the file in front of you
+  rather than extrapolating from its line count.
 
 The largest single-file lint costs now are `scripts/test-research-spike.sh`
-(~9.5s, 3862 lines) and `scripts/spawn-orchestrator.sh` (~6.3s, 6408 lines).
+(~7.7s, 3862 lines) and `scripts/spawn-orchestrator.sh` (~5.5s, 6408 lines) —
+reproduce the ranking with:
 
 ```sh
 # the per-file lint bill, worst first
