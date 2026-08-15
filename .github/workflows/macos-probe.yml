@@ -2,17 +2,22 @@ name: macOS seatbelt probe
 
 # THROWAWAY. Delete this file before the branch merges.
 #
-# Answers one question that has to be settled before any conditional-macOS-CI
-# design is worth drawing: can a GitHub `macos-latest` runner actually APPLY a
-# seatbelt profile? `scripts/test-spawn-orchestrator.sh` gates its 14
-# behavioral assertions on that capability, not on the presence of the
-# `sandbox-exec` binary (see dev_docs/testing.md on #358). If the runner cannot
-# apply a profile, a macOS job would skip precisely the assertions it was added
-# to run, and the whole path-filter question is moot.
+# Round 1 (run 31872616800) already answered the load-bearing question: on
+# macos-latest the orchestrator suite passes under SO_TEST_REQUIRE_SEATBELT=1,
+# which by that flag's own contract means ZERO seatbelt-behavioral assertions
+# were skipped. A macOS runner can apply a profile, so a macOS job would deliver
+# coverage that ubuntu-latest structurally cannot.
 #
-# Triggers on push to this branch rather than workflow_dispatch: dispatch is
-# only offered for workflows that already exist on the default branch, and the
-# point is to answer this WITHOUT landing anything on main first.
+# Round 2 (this file) collects the remaining host facts only. The suite steps
+# are gone: re-running 2x68s to re-learn something already recorded would be
+# waste, and the facts below are what the recommendation still hangs on —
+# specifically WHICH bash a macOS runner resolves. 31 of 35 scripts use
+# `#!/usr/bin/env bash` and the Bash 3.2 floor in AGENTS.md has no mechanized
+# check anywhere in the repo, so whether a macOS job would exercise that floor
+# is currently an assumption, not an observation.
+#
+# Writes to $GITHUB_STEP_SUMMARY as well as stdout: the round-1 log ran to
+# ~1100 lines and the interesting six were unreadable behind the suite output.
 
 on:
   push:
@@ -22,60 +27,37 @@ permissions:
   contents: read
 
 jobs:
-  probe:
-    name: Can macos-latest apply a seatbelt profile?
+  facts:
+    name: macOS runner host facts
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Host facts
         run: |
-          echo "runner image : $ImageOS / $ImageVersion"
-          echo "uname        : $(uname -a)"
-          echo "macOS        : $(sw_vers -productVersion)"
-          echo
-          # The Bash 3.2 floor in AGENTS.md is a hand-followed convention with
-          # no mechanized check. 31 of 35 scripts use `#!/usr/bin/env bash`, so
-          # what a macOS RUNNER exercises is whatever bash is first on PATH —
-          # which on these images is Homebrew's bash 5, not /bin/bash. Print
-          # both so the claim stops being an inference.
-          echo "env bash     : $(command -v bash) -> $(bash --version | head -1)"
-          echo "/bin/bash    : $(/bin/bash --version | head -1)"
-
-      - name: Seatbelt capability probe
-        # Byte-for-byte the probe from scripts/test-spawn-orchestrator.sh, run
-        # standalone so its result is legible even if the suite below dies for
-        # an unrelated reason. Reports the three states the suite distinguishes:
-        # absent / present-but-cannot-apply / usable.
-        run: |
-          probe="$(mktemp -d)/probe.sb"
-          if ! command -v sandbox-exec >/dev/null 2>&1; then
-            echo "VERDICT: sandbox-exec ABSENT — a macOS job buys nothing"
-            exit 0
-          fi
-          echo "sandbox-exec : $(command -v sandbox-exec)"
-          printf '(version 1)\n(allow default)\n' >"$probe"
-          if sandbox-exec -f "$probe" /usr/bin/true >/dev/null 2>&1; then
-            echo "VERDICT: seatbelt USABLE — SEATBELT_OK=1, the layer would run"
-          else
-            rc=$?
-            echo "sandbox_apply refused, rc=$rc"
-            echo "VERDICT: present but CANNOT APPLY — same skips as Linux, job buys nothing"
-          fi
-
-      - name: Orchestrator suite, unforced
-        # The honest baseline: whatever this runner reports, skips and all.
-        # `|| true` because the answer we want is the counted summary line, not
-        # the exit status — a failure here is itself a finding worth reading.
-        run: bash scripts/test-spawn-orchestrator.sh 2>&1 | tail -30 || true
-
-      - name: Orchestrator suite, seatbelt coverage REQUIRED
-        # The authoritative check. This flag exists in the suite for exactly
-        # this job and fails the run if ANY seatbelt assertion was skipped, so a
-        # green here is the only evidence that a macOS runner delivers coverage
-        # Linux cannot. Not `|| true`: this step's pass/fail IS the result.
-        env:
-          SO_TEST_REQUIRE_SEATBELT: 1
-        run: bash scripts/test-spawn-orchestrator.sh
+          {
+            echo '## macOS runner host facts'
+            echo
+            echo '```'
+            echo "image        : $ImageOS / $ImageVersion"
+            echo "macOS        : $(sw_vers -productVersion)"
+            echo "arch         : $(uname -m)"
+            echo
+            # The whole point of round 2. `env bash` is what every script here
+            # actually gets; /bin/bash is the 3.2 floor AGENTS.md writes about.
+            # If these differ, a macOS CI job does NOT exercise that floor.
+            echo "env bash     : $(command -v bash)"
+            echo "             : $(bash --version | head -1)"
+            echo "/bin/bash    : $(/bin/bash --version | head -1)"
+            echo
+            # Restated standalone so the capability claim does not rest solely
+            # on reading a pass/fail out of round 1.
+            probe="$(mktemp -d)/probe.sb"
+            printf '(version 1)\n(allow default)\n' >"$probe"
+            if sandbox-exec -f "$probe" /usr/bin/true >/dev/null 2>&1; then
+              echo "seatbelt     : USABLE (sandbox_apply succeeded)"
+            else
+              echo "seatbelt     : CANNOT APPLY (rc=$?)"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
