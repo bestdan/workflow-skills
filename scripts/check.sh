@@ -51,15 +51,16 @@ fi
 
 # --fast is the edit-loop gate, not the pre-push one. Three things account for
 # essentially all of a full run's wall time, measured on a 4-core Linux box:
-# test-spawn-orchestrator.sh at ~60s (347 sequential invocations of the script
-# under test), test-research-spike.sh at ~31s (305 python invocations, most of
-# it interpreter startup), and shellcheck inside lint-shell.sh at ~35s. Every
-# other check here finishes inside ~4s.
+# test-research-spike.sh at ~25s (305 python invocations, most of it interpreter
+# startup), shellcheck inside lint-shell.sh at ~23s, and the orchestrator suite
+# at ~21s. Every other check here finishes inside ~4s.
 #
-# Note what those three have in common: scripts/test-spawn-orchestrator.sh is
-# 5816 lines, and shellcheck's cost is superlinear in file size, so ~31s of
-# lint-shell's ~35s is that ONE file. Splitting that monolith would cut the
-# gate's two largest costs at once — until then, --fast just steps around them.
+# Those three used to be one dominant cost and two also-rans: the orchestrator
+# harness was a single 5816-line file that cost ~60s to run and, because
+# ShellCheck's cost is superlinear in the size of a file's top-level scope, ~31s
+# of lint-shell's own bill. Splitting it into scripts/test-spawn-orchestrator-*.sh
+# cut both. What is left is three co-equal ~21-25s members and no single lever —
+# see dev_docs/gate-performance.md before trying to make this faster.
 #
 # Coverage is SKIPPED here, not sharded or sampled: it is simply gone. So
 # `just check` still has to pass before you push, and CI runs this script
@@ -93,9 +94,11 @@ scripts/ensure-bats.sh || exit 2
 
 # Every check below is independent — each builds its own fixtures under its own
 # mktemp dir and none writes into the repo — so they run CONCURRENTLY and the
-# gate costs one slowest check (~60s, test-shell.sh) instead of their sum
-# (~110s). Output is buffered per check and replayed in list order afterwards,
-# so an interleaved run still reads exactly like the old serial one.
+# gate costs its slowest check rather than their sum. Output is buffered per
+# check and replayed in list order afterwards, so an interleaved run still reads
+# exactly like the old serial one. Note the gate no longer costs exactly one
+# check: three members now sit within a few seconds of each other and a 4-core
+# box cannot run them all flat out, so a full run lands above the slowest.
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")" || exit 2
 trap 'rm -rf "$tmp"' EXIT
 # Bash sets SIGINT to ignore for asynchronously-started commands in a
@@ -133,8 +136,8 @@ run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
 run scripts/test-secret-resolve.sh
 # Scheduled LAST because the replay loop is strictly index-ordered: this is the
-# ~60s check, and anything after it would have its output held back behind it.
-# At the end, the fast checks drain as they finish and only this one blocks.
+# longest check, and anything after it would have its output held back behind
+# it. At the end, the fast checks drain as they finish and only this one blocks.
 if [[ "$fast" == 1 ]]; then
   run scripts/test-shell.sh --fast
 else
