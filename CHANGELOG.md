@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.84.0] - 2026-08-15
+
+### Features
+
+- add a pinned mypy type gate, and fix what it found (#357) (32f9629)
+
 ## [1.83.2] - 2026-08-14
 
 ### Fixes
