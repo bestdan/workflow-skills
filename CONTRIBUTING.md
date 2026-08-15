@@ -43,7 +43,7 @@ just eval        # gate + behavioral skill-triggering evals (opt-in, needs auth)
 `just check` is a thin wrapper around `scripts/check.sh` — the script is the
 source of truth, and CI calls it directly.
 
-`just check-fast` is for the edit loop: ~8s against the full gate's ~37s. It
+`just check-fast` is for the edit loop: ~8s against the full gate's ~41s. It
 skips the two long test suites and narrows the shell lint to the files your
 branch has touched — that is skipped coverage, not sharded or sampled, so
 `just check` still has to pass before you push and CI always runs the gate with

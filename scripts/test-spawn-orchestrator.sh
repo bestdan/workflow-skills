@@ -33,8 +33,21 @@ parts=(
   alarm
 )
 
-tally="$(mktemp -d "${TMPDIR:-/tmp}/so-tally.XXXXXX")" || exit 2
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/so-parts.XXXXXX")" || exit 2
+# Same three-arm fallback as the prelude's BASE, and for the same reason: a
+# sandboxed run may deny the system temp dir, and bare `mktemp -d` ignores
+# $TMPDIR on macOS. Without this the DRIVER dies before any part starts, so the
+# normal full-suite entry point would fail in exactly the environment the parts
+# themselves are built to survive. The repo-local arm reuses the `.so-test.`
+# prefix .gitignore already covers.
+so_scratch() { # <name> -> a temp dir, preferring the system temp dir
+  mktemp -d 2>/dev/null \
+    || mktemp -d "${TMPDIR:-/tmp}/so-$1.XXXXXX" 2>/dev/null \
+    || mktemp -d "$ROOT/.so-test.$1.XXXXXX"
+}
+tally="$(so_scratch tally)" || exit 2
+# Armed before the second allocation, so a failure there does not leak $tally.
+trap 'rm -rf "$tally"' EXIT
+tmp="$(so_scratch parts)" || exit 2
 trap 'rm -rf "$tally" "$tmp"' EXIT
 # Asynchronous children ignore SIGINT in a non-job-control shell, so Ctrl-C
 # would otherwise leave every part running after this driver exits. Same trap as
