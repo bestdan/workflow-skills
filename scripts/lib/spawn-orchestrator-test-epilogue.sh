@@ -8,9 +8,9 @@
 # Each part reads $SO_PART for its name and leaves the shell's exit status set
 # from its own failure count.
 #
-# Under the monolith these ran once, over the whole file. Two of them are
-# strictly BETTER per-part — a caller-repo escape now names the part that
-# escaped — and one could not survive the move unchanged; see the tally below.
+# Under the monolith these ran once, over the whole file. Most of them are at
+# least as strong per-part, and one could not survive the move unchanged; see
+# the tally below.
 
 # --- the notifier guard held --------------------------------------------------
 # The acceptance criterion for the desktop-spam bug: no test, present or FUTURE,
@@ -103,8 +103,10 @@ fi
 # was missing when it first happened. (Untracked files are excluded on purpose: a
 # repo-local BASE fallback is trap-cleaned on exit and is not corruption.)
 #
-# Per-part is strictly stronger than the whole-suite version it replaces: the
-# failure now names which part escaped instead of only that something did.
+# Per-part detection is at least as strong as the whole-suite version it
+# replaces. It does NOT reliably name the offender, though: the parts run
+# concurrently, so a persistent escape fails every part whose epilogue runs
+# after it, narrowing the culprit to a set rather than to one part.
 if [ "$CALLER_IS_GIT" = 1 ]; then
   # The after-probes must observe the caller's repo the way the caller's own
   # git does — otherwise a pinned-config view of a tree checked out under the

@@ -123,6 +123,15 @@ resharding has to keep them:
   drops its count in `$SO_TEST_TALLY_DIR` and the driver asserts the sum. That is
   the one whole-suite claim in this harness; if you reshard again, it has to move
   with the driver, not be dropped.
+
+  One trap worth knowing, because it survived the monolith and then survived a
+  first pass at this split: the per-PATH half must assert against the composite
+  `PATH` a fixture **actually runs under**, stored whole at its call site. An
+  assertion that _reconstructs_ that PATH cannot do its job — re-inject `$GUARD`
+  and it can never fail (the guard dir is inside `$BASE`, which is what the check
+  looks for), omit it and it reports leaks at safe call sites. Either way it
+  stops tracking the fixture while still printing `ok`. The epilogue's enumerated
+  list carries this warning; keep it exhaustive with the grep it names.
 - **Opt-in strict seatbelt mode.** `SO_TEST_REQUIRE_SEATBELT=1` demands the
   seatbelt-behavioral assertions actually ran. It gates on the skip count, and
   per-part gating is equivalent to the old whole-suite one: the run fails if any
@@ -132,14 +141,20 @@ resharding has to keep them:
   a split balanced only on Linux is not balanced. They are all in the `profile`
   part.
 
-The suite reports **760 passed / 14 skipped** on Linux, against the monolith's
-726/14. The extra 34 break down as: the epilogue's per-part assertions (two
+The suite reports **759 passed / 14 skipped** on Linux, against the monolith's
+726/14. The extra 33 break down as: the epilogue's per-part assertions (two
 notifier-guard structural checks and three caller-repo checks, now ×7 instead of
 ×1) give +30 net of the whole-suite notifier count that moved to the driver, and
-four composite PATHs the monolith could not check give +4. Those four
-(`PSSTUB_PATH`, `SRW_PATH`, `SRL_PATH`, `SR_LEAK`) are defined LATER in the
+the per-PATH guard loop covers 8 composite PATHs where the monolith covered 5,
+giving +3. `PSSTUB_PATH`, `SRW_PATH` and `SRL_PATH` are defined LATER in the
 monolith than the point where it asserted, so they were unreachable there; the
 epilogue runs last in every part, so they are covered now.
+
+On macOS the same suite reports **777 passed / 0 skipped** — the 14 Linux skips
+run for real, plus three host-fixture assertions Linux reports as bare notes.
+CI runs that as a second job (`Host-sensitive suites (macOS)`, added in #360)
+with `SO_TEST_REQUIRE_SEATBELT=1`, so the zero-skip claim is enforced rather
+than hoped for. That job only starts once a PR leaves draft.
 
 ## ShellCheck's cost is superlinear in file length
 
