@@ -186,10 +186,12 @@ the require/prefer bit on the task route.
 
 Per [`launch-runtime.md`](launch-runtime.md):
 
-1. Write the self-contained **launch script** — env, the sandbox wrapper (the
-   two-layer profile: seatbelt/bwrap for filesystem+process, the harness network
-   allowlist narrowed to this run's tools for host egress), and log redirection
-   to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
+1. Write the self-contained **launch script** — env, the sandbox wrapper
+   (seatbelt/bwrap for filesystem+process, the **only** enforcing layer; plus
+   the harness network allowlist narrowed to this run's tools, which **renders
+   but enforces nothing in-jail** — egress is OPEN, see
+   [`launch-runtime.md`](launch-runtime.md) "Sandbox profile"), and log
+   redirection to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
    pre-flight's resolved `/add-task` destination host via `render-settings
    --add-task-host`, so the run's own settings never deny its own follow-up
    filing regardless of work source.

@@ -227,11 +227,11 @@ echo "PREFLIGHT DEST_HOST: $dest_host"
 echo "PREFLIGHT HANDLER: $handler"
 
 # --- 4. Confinement smoke ---------------------------------------------------
-# Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
-# egress) is the settings.json render-settings emits — see
-# skills/auto-pilot/references/launch-runtime.md "Sandbox profile". Nested
-# sandbox-exec is itself denied in some sandboxed dev environments, so probe
-# that capability first and degrade to a logged SKIP rather than a blocker.
+# There is ONE enforcing layer: the rendered Seatbelt profile (filesystem/exec).
+# The settings.json render-settings emits enforces NOTHING in-jail — see the
+# EGRESS_ALLOWLIST_RENDER block below and scripts/orchestrator.sb.tmpl's header.
+# Nested sandbox-exec is itself denied in some sandboxed dev environments, so
+# probe that capability first and degrade to a logged SKIP rather than a blocker.
 
 if ! command -v sandbox-exec >/dev/null 2>&1; then
   echo "PREFLIGHT SMOKE: skip (sandbox-exec not available — non-macOS host)"
@@ -317,9 +317,9 @@ else
       settings="$scratch/preflight-settings.json"
       if bash "$SPAWN" render-settings --source "$source_arg" --out "$settings" >/dev/null 2>&1 \
         && grep -q '"allowedDomains"' "$settings" && grep -q '"enabled":true' "$settings"; then
-        echo "PREFLIGHT SMOKE_EGRESS: pass (allowlist RENDERS; it does NOT enforce in-jail — egress is OPEN)"
+        echo "PREFLIGHT EGRESS_ALLOWLIST_RENDER: pass (allowlist RENDERS; it does NOT enforce in-jail — egress is OPEN)"
       else
-        echo "PREFLIGHT SMOKE_EGRESS: FAIL"
+        echo "PREFLIGHT EGRESS_ALLOWLIST_RENDER: FAIL"
         blockers+=("confinement smoke: the egress allowlist did not render (renderer is broken) — note the allowlist does not enforce anything in-jail either way")
       fi
     else
