@@ -75,6 +75,7 @@ run() {
 run dprint check --incremental=false
 run claude plugin validate . --strict
 run uv run scripts/validate.py
+run scripts/typecheck.sh
 run scripts/lint-shell.sh
 run scripts/test-task-scan.sh
 run scripts/test-validate.sh

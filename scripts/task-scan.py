@@ -67,6 +67,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
 
@@ -82,7 +83,7 @@ HEADING_RE = re.compile(r"^#{2,6}\s+(.*)$")
 BULLET_RE = re.compile(r"^\s*[-*]\s+\S")
 
 
-def die(msg: str) -> None:
+def die(msg: str) -> NoReturn:
     print(f"task-scan: {msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -232,7 +233,15 @@ def rank_key(data: dict):
     impact/size descending (no-score sorts last within tier), then oldest
     created first."""
     priority = data.get("priority")
-    priority_rank = PRIORITY_ORDER.get(priority, UNKNOWN_PRIORITY_RANK)
+    # Frontmatter is user-written YAML, so `priority` can be absent, or a
+    # non-string (`priority: 1` parses as an int). Both already ranked as
+    # unknown — via `.get`'s default — but only by accident of `dict.get`
+    # accepting any key; stated explicitly so the intent survives.
+    priority_rank = (
+        PRIORITY_ORDER.get(priority, UNKNOWN_PRIORITY_RANK)
+        if isinstance(priority, str)
+        else UNKNOWN_PRIORITY_RANK
+    )
 
     impact = data.get("impact")
     size = data.get("size")
@@ -243,7 +252,16 @@ def rank_key(data: dict):
         isinstance(impact, int) and not isinstance(impact, bool) and impact in FIBONACCI
     )
     has_score = size_valid and impact_valid
-    score = (impact / size) if has_score else 0.0
+    # The isinstance checks are repeated inline rather than read off
+    # `has_score`: narrowing does not survive a round trip through a bool, so
+    # the division is otherwise `None / None` as far as any checker can tell.
+    # Same condition, same result — `has_score` stays because it is what the
+    # caller sorts on.
+    score = (
+        impact / size
+        if isinstance(size, int) and isinstance(impact, int) and has_score
+        else 0.0
+    )
 
     created = parse_date(data.get("created"))
     # A missing/unparseable created date can't win an age tie-break honestly,
@@ -427,7 +445,11 @@ def main() -> None:
 
     epics: list[dict] = []
     cards: list[dict] = []
-    slug_status: dict[str, str] = {}
+    # `str | None`, not `str`: a card with no `status:` in its frontmatter
+    # stores None here, and the readiness check below treats that as
+    # non-terminal (correctly — a card with no status is not done). The
+    # annotation says so rather than claiming a str that is not always there.
+    slug_status: dict[str, str | None] = {}
 
     for path in files:
         data, body = split_frontmatter(path)
@@ -438,15 +460,38 @@ def main() -> None:
         if not isinstance(data, dict):
             die(f"unparseable frontmatter in {path}: expected a mapping, got {data!r}")
 
+        # Rejected at ingestion, not tolerated downstream — and above the
+        # epic/card split, so it covers every record this scanner ingests
+        # rather than cards alone. Frontmatter is
+        # user-written YAML, so `status:` can arrive as any type: an unhashable
+        # one (a list, a mapping) reached `TERMINAL_STATUSES` membership and
+        # `cards_by_status.setdefault` as a dict key on the card path, where it
+        # raised a bare `TypeError: unhashable type` traceback. That is the one
+        # failure mode this scanner must not have: its contract is fail-closed
+        # with a located message (the two `die`s above), and a traceback names
+        # no file, so the card that caused it stays hidden. Epics cannot crash
+        # on it today — their consumers only `!= "done"` and `.get` it into
+        # JSON — but that reads a malformed status as silently not-done, and
+        # the guarantee is only as durable as the next edit to the epic path.
+        # Checked here rather than trusted from the annotation below, which
+        # cannot constrain what `yaml.safe_load` returns through an
+        # unparameterized dict.
         dtype = data.get("type")
+        if dtype is not None and dtype not in ("epic", "task"):
+            continue  # non-task reference doc (e.g. type: design) — not a card
+
+        status = data.get("status")
+        if status is not None and not isinstance(status, str):
+            die(
+                f"invalid status in {path}: expected a string, got "
+                f"{type(status).__name__} ({status!r})"
+            )
+
         if dtype == "epic":
             epics.append({"path": path, "data": data})
             continue
-        if dtype is not None and dtype != "task":
-            continue  # non-task reference doc (e.g. type: design) — not a card
 
         slug = path.stem
-        status = data.get("status")
         # Slugs resolve globally by filename stem, so two files in different
         # subdirectories can share one. For blocker readiness, fail toward
         # "still blocked": never let a later terminal (done) duplicate clear an

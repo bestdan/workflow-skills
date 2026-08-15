@@ -44,7 +44,7 @@ source of truth, and CI calls it directly.
 
 ## The gate (`just check`)
 
-Three deterministic, blocking checks, plus the shell lint and Bats suites:
+Four deterministic, blocking checks, plus the shell lint and Bats suites:
 
 1. **`dprint check`** — formatting (config in `dprint.json`).
 2. **`claude plugin validate . --strict`** — official manifest/frontmatter
@@ -55,6 +55,14 @@ Three deterministic, blocking checks, plus the shell lint and Bats suites:
      ≤1024 chars; SKILL.md body ≤500 lines;
    - `plugin.json` and `marketplace.json` versions are present and **equal**;
    - the README "N skills, M commands, K subagent" sentence matches reality.
+4. **`scripts/typecheck.sh`** — mypy over the repo's Python, at a version pinned
+   in the script (fetched by `uvx`, so it needs network on the first run of a
+   given pin). Two tiers, split by annotation coverage rather than by what
+   ships: `--strict` on `scripts/research-spike.py`, default settings on the
+   other `scripts/` entrypoints and the handler assets. Both tiers always run
+   and the exit code is their OR, so one failing never hides the other's
+   findings. The script's header carries the full rationale, including why not
+   `ty`.
 
 `scripts/validate.py` is dev/CI-only tooling (never shipped to plugin
 consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.

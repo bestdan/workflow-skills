@@ -42,6 +42,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
 
@@ -53,7 +54,7 @@ ID_SHAPES = {
 }
 
 
-def die(msg: str) -> None:
+def die(msg: str) -> NoReturn:
     print(f"plan-graph: {msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -162,7 +163,18 @@ def main() -> None:
     # it), so two files sharing a stem across phase dirs would silently collapse
     # to one node and drop the other's edges — fail-closed instead (§ contract).
     seen: set[str] = set()
-    dups = sorted({s for t in tasks if (s := t["slug"]) in seen or seen.add(s)})
+    # `or seen.add(s)` is the deliberate add-and-test idiom, not a mistake:
+    # `set.add` returns None, so the right operand is always falsy and the
+    # condition is exactly `s in seen`, with the insertion happening as its
+    # side effect. Type checkers flag a None-returning call in a boolean
+    # context because it is usually a bug; here it is the point.
+    dups = sorted(
+        {
+            s
+            for t in tasks
+            if (s := t["slug"]) in seen or seen.add(s)  # type: ignore[func-returns-value]
+        }
+    )
     if dups:
         die(f"duplicate task slug(s): {', '.join(dups)} — rename so each is unique")
 
