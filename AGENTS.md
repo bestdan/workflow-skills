@@ -9,6 +9,7 @@ deeper is one link away.
 | Install and use the plugin                                     | [`README.md`](README.md)                                       |
 | Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           |
 | Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)               |
+| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                   |
 | Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md) |
 | Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)   |
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)   |
@@ -115,7 +116,10 @@ whether it belongs one level down instead. The answer is usually yes.
   `scripts/lint-shell.sh`; both run in `just check`.
 - macOS ships Bash 3.2 and `scripts/test-shell.sh` deliberately exercises that
   floor — no associative arrays, no `declare -A`. Prefer indexed arrays and
-  plain loops.
+  plain loops. CI's macOS job runs that suite under `/bin/bash` 3.2, so a
+  violation fails the PR rather than only a maintainer's laptop — see
+  [`dev_docs/testing.md`](dev_docs/testing.md) for why that holds incidentally
+  rather than by contract.
 - Test harnesses that build git fixtures must pin `GIT_CONFIG_GLOBAL=/dev/null`.
   A `git init` fixture otherwise inherits the developer's global config — a
   machine-wide `core.hooksPath` with a `pre-commit` that refuses commits to
