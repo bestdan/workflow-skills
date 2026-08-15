@@ -13,6 +13,13 @@ Review the change and report findings. Focus only on:
 
 Skip nitpicks, pure formatting, and pre-existing issues outside the diff.
 
+If you recommend pinning or SHA-pinning a GitHub Action to a specific
+version/tag, check that version against the action's current release first
+(e.g. the action repo's releases page or tags) — don't endorse a pin without
+knowing whether it's current. If the version you'd otherwise recommend is
+significantly behind the latest (more than one major version stale), say so
+as a finding rather than passing it through silently.
+
 For each finding, give:
 
 - `file:line`
