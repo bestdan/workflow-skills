@@ -41,9 +41,18 @@ esac
 #      source: under EVERY composite PATH this part builds, osascript must resolve
 #      to something inside $BASE (a stub, or the guard) — never a real system
 #      binary. Each name is optional because each part builds only its own: the
-#      gate part has GT_PATH, the alarm part ALPATH/ALFAIL, the exit-contract part
-#      STUB_PATH/STUBF. A part that builds none checks none, which is correct.
-for _pv in GT_PATH ALPATH STUB_PATH; do
+#      supervisor part has GT_PATH, the alarm part ALPATH/ALFAIL, the
+#      exit-contract part STUB_PATH/STUBF, doctor PSSTUB_PATH, status-report
+#      SRW_PATH/SRL_PATH/SR_LEAK. A part that builds none checks none.
+#
+#      THIS LIST IS THE WEAK POINT: it is enumerated, so a part that invents a
+#      new composite PATH and does not add it here escapes the check silently —
+#      which is the same shape as the original leak. The monolith could not
+#      cover the status-report names at all (it asserted at a point in the file
+#      BEFORE they were defined); the epilogue runs last in every part, so it
+#      can. Keep it exhaustive:
+#        grep -n 'PATH="\$' scripts/test-spawn-orchestrator-*.sh
+for _pv in GT_PATH ALPATH STUB_PATH PSSTUB_PATH SRW_PATH SRL_PATH; do
   eval "_pval=\"\${$_pv:-}\""
   [ -n "$_pval" ] || continue
   _osa="$(PATH="$_pval" command -v osascript 2>/dev/null || true)"
@@ -52,9 +61,11 @@ for _pv in GT_PATH ALPATH STUB_PATH; do
     *) bad "notifier guard: \$$_pv routes osascript to a REAL binary (a suite run would pop a desktop notification)" "resolved to: ${_osa:-(not found)}" ;;
   esac
 done
-# The two PATHs built inline rather than stored in a var (the failing-bootout and
-# task-26 unwritable-sentinel fixtures) get the same assertion.
-for _pv in "${STUBF:-}" "${ALFAIL:-}"; do
+# The stub DIRS that are composed inline at the call site rather than stored as a
+# whole PATH (the failing-bootout and task-26 unwritable-sentinel fixtures, and
+# status-report's notifier-leak probe) get the same assertion, against a
+# reconstruction of the PATH the fixture actually builds.
+for _pv in "${STUBF:-}" "${ALFAIL:-}" "${SR_LEAK:-}"; do
   [ -n "$_pv" ] || continue
   _osa="$(PATH="$_pv:$GUARD:/usr/bin:/bin" command -v osascript 2>/dev/null || true)"
   case "$_osa" in

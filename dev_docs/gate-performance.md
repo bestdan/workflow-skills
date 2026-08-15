@@ -110,9 +110,12 @@ resharding has to keep them:
   git-mutating fixtures, some deliberately in a dir that is not its own repo, so
   git walks upward and can reach the caller's. Search for
   `# --- Caller-repo safety snapshot` in the prelude and
-  `# --- PRE-618 caller-repo integrity assertion` in the epilogue. Per-part is
-  _stronger_ than the whole-suite version it replaced: a failure now names which
-  part escaped.
+  `# --- PRE-618 caller-repo integrity assertion` in the epilogue. Per-part
+  detection is _at least_ as strong as the whole-suite version it replaced. Be
+  careful about the attribution claim, though: the parts run concurrently, so a
+  persistent escape fails every part whose epilogue runs after it. That narrows
+  the offender to a set, not to one part. (A transient mutate-then-restore
+  inside a single run is still invisible — it was in the monolith too.)
 - **The notifier guard.** Installed in the prelude (`# --- The notifier guard`),
   asserted in the epilogue (`# --- the notifier guard held`). Its structural
   halves are per-part. Its **behavioral** half could not be — it asserts the
@@ -129,10 +132,14 @@ resharding has to keep them:
   a split balanced only on Linux is not balanced. They are all in the `profile`
   part.
 
-The suite reports **756 passed / 14 skipped** on Linux, against the monolith's
-726/14. The extra 30 are the epilogue's per-part assertions (two notifier-guard
-structural checks and three caller-repo checks, now ×7 instead of ×1) minus the
-whole-suite notifier count, which moved to the driver.
+The suite reports **760 passed / 14 skipped** on Linux, against the monolith's
+726/14. The extra 34 break down as: the epilogue's per-part assertions (two
+notifier-guard structural checks and three caller-repo checks, now ×7 instead of
+×1) give +30 net of the whole-suite notifier count that moved to the driver, and
+four composite PATHs the monolith could not check give +4. Those four
+(`PSSTUB_PATH`, `SRW_PATH`, `SRL_PATH`, `SR_LEAK`) are defined LATER in the
+monolith than the point where it asserted, so they were unreachable there; the
+epilogue runs last in every part, so they are covered now.
 
 ## ShellCheck's cost is superlinear in file length
 
@@ -151,7 +158,7 @@ valid prefixes of the old monolith:
 | 5816  | 31.03s |
 
 Roughly quadratic over this range. The payoff is direct: the same assertions,
-linted as 10 files instead of 1, cost **9.3s instead of 32.7s — with 330 more
+linted as 10 files instead of 1, cost **8.3s instead of 33.3s — with 343 more
 total lines**.
 
 Two cautions if you reproduce this:
@@ -168,7 +175,7 @@ Two cautions if you reproduce this:
   rather than extrapolating from its line count.
 
 The largest single-file lint costs now are `scripts/test-research-spike.sh`
-(~7.7s, 3862 lines) and `scripts/spawn-orchestrator.sh` (~5.5s, 6408 lines) —
+(~10s, 3862 lines) and `scripts/spawn-orchestrator.sh` (~5.5s, 6408 lines) —
 reproduce the ranking with:
 
 ```sh
@@ -196,14 +203,29 @@ bats serial   37.4s  38.5s  40.5s   (mean 38.8s)
 bats fanned   39.0s  38.0s  44.6s   (mean 40.5s)
 ```
 
-No better, and noisier — the extra jobs contend with the suite that is actually
-the critical path, which now runs seven of its own parts concurrently. But note
-what changed: the old margin was 17s of bats against a 60s suite, and it is now
-18s against 21s. **This conclusion is close to inverting** — close enough that
-bats serial no longer reliably finishes first. Anything that takes a few seconds
-off the orchestrator parts flips it, and at that point the condition in
-`scripts/test-shell.sh` (search for `if [ "$fast" -eq 1 ]`) is worth revisiting
-— as a measurement, not a preference.
+Read that honestly: at n=3, with a ~3s spread on a ~40s measurement, a 1.7s mean
+difference is **indistinguishable from noise**, not a demonstrated regression —
+the gap rests entirely on one 44.6s outlier. What it does establish is that
+fanning out buys nothing measurable, and a tie goes to the configuration with
+fewer jobs feeding the wall-clock hazard below.
+
+The margin is also much thinner than it was: 17s of bats against a 60s suite
+before, 18s against 21s now. **This conclusion is close to inverting.**
+
+Don't try to settle that with more whole-gate A/B passes — the noise floor is
+larger than the effect. Measure the margin directly instead, which is
+noise-independent because both numbers come from the same run:
+
+```sh
+# does serial bats still finish inside the orchestrator suite?
+( time test/vendor/bats-core/bin/bats test/*.bats >/dev/null 2>&1 ) 2>&1 | grep real &
+( time bash scripts/test-spawn-orchestrator.sh >/dev/null 2>&1 ) 2>&1 | grep real &
+wait
+```
+
+If bats stops finishing first, the fan-out condition in `scripts/test-shell.sh`
+(search for `if [ "$fast" -eq 1 ]`) should change — as a measurement, not a
+preference. Re-run this whenever the orchestrator parts get faster.
 
 **The split's own concurrency.** The driver running its seven parts concurrently
 versus serially, interleaved A/B of the full `check.sh`:

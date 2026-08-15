@@ -44,25 +44,19 @@ run() {
 # The bats files fan out ONLY when the orchestrator suite is skipped, because
 # only then are they on the critical path.
 #
-# Serially the ten files cost ~15s; one job per file costs the slowest (~5s). In
-# a full run they sit alongside the orchestrator suite, which is ~21s since it
-# was split into scripts/test-spawn-orchestrator-*.sh — so serial bats still
-# finishes inside it and the fan-out cannot shorten this wrapper. Re-measured
-# after the split, interleaved A/B on a 4-core Linux box: full `check.sh`
-# averaged 38.8s with bats serial vs 40.5s fanned. Still no better, and for the
-# same reason as before — the extra jobs contend with the suite that is actually
-# the critical path, which now runs seven of its own parts concurrently.
+# In a full run the bats files sit alongside the orchestrator suite, and serial
+# bats still finishes inside it — so fanning out here cannot shorten this
+# wrapper, and the extra jobs only contend with the suite that is the actual
+# critical path (which since the split runs seven of its own parts
+# concurrently). Under --fast the orchestrator is gone, bats becomes the
+# critical path, and the fan-out is the whole difference.
 #
-# But the margin is thin now, not structural. It used to be 17s of bats against
-# a 60s suite; it is 15s against 21s. Anything that takes another few seconds
-# off the orchestrator parts flips this, so re-measure rather than assume — and
-# see the wall-clock hazard in dev_docs/gate-performance.md before adding jobs,
-# because oversubscription is what pushed test/await-pr-review.bats past its
-# budget (see 1ddb13e).
-#
-# Under --fast the orchestrator is gone, bats becomes the critical path, and the
-# fan-out is the whole difference: `check.sh --fast` measures ~6.7s fanned vs
-# ~18s serial.
+# That margin used to be structural and is now thin — re-measure rather than
+# assume before changing this condition. dev_docs/gate-performance.md carries
+# the numbers, the interleaved A/B behind them, and a one-liner that checks the
+# margin directly; it is also where the wall-clock hazard is written up, which
+# is what makes "just add more jobs" costly here (oversubscription is what
+# pushed test/await-pr-review.bats past its budget, see 1ddb13e).
 if [ "$fast" -eq 1 ]; then
   for suite in test/*.bats; do
     [ -f "$suite" ] || continue
