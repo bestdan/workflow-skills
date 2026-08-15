@@ -83,10 +83,20 @@ anywhere in `scripts/`, and the ubuntu job runs Bash 5, so the rule was upheld b
 care alone.
 
 The macOS job checks it, and does so by name rather than by luck. It invokes
-`/bin/bash scripts/test-shell.sh`, and `test-shell.sh` hands that same
-interpreter to the orchestrator suite as `"$BASH"` — a bare `bash` there would
-re-resolve through `PATH` and undo the pin for the largest suite in the repo.
-So the scripts under it execute on 3.2, and a `declare -A` fails the job.
+`/bin/bash scripts/test-shell.sh` — but naming the interpreter once is not
+enough, because **every bare `bash` below that point re-resolves through
+`PATH`** and silently discards the pin. So it is carried down by hand, at each
+hop, as `"$BASH"` (a shell's own path, so it propagates without an export):
+
+```
+/bin/bash → test-shell.sh → test-spawn-orchestrator.sh → its seven parts
+```
+
+Miss one hop and the pin still _looks_ applied while the assertions run on
+something else — the second hop was missed in the change that added the first,
+and the parts kept resolving through `PATH` under a job whose comment claimed
+otherwise. With both in place the scripts under it execute on 3.2, and a
+`declare -A` fails the job.
 
 It did not always work that way. The job originally ran `bash …`, and the floor
 held only because that image happens to keep `/bin/bash` ahead of Homebrew's

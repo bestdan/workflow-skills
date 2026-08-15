@@ -107,8 +107,10 @@ jobs:
       # happens to keep /bin/bash ahead of Homebrew's bash on PATH, so the
       # `#!/usr/bin/env bash` scripts landed on 3.2. An image that reordered
       # PATH would have retired the check silently. Invoking /bin/bash by name
-      # makes it a contract instead; test-shell.sh passes the same interpreter
-      # down to the orchestrator suite via "$BASH".
+      # makes it a contract instead. The pin has to be carried the whole way
+      # down by hand — test-shell.sh to the orchestrator driver, the driver to
+      # each of its seven parts — because every bare `bash` on that path
+      # re-resolves through PATH. Both hops use "$BASH".
       - name: Assert /bin/bash is the 3.2 floor
         run: |
           /bin/bash -c '
