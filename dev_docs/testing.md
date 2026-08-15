@@ -124,8 +124,9 @@ the floor reach me_.
 None of this catches a bash-ism in code no test executes — execution only
 checks the lines a test reaches. That is what the construct grep in
 [`scripts/lint-shell.sh`](../scripts/lint-shell.sh) is for: it bans
-`declare -A`, `mapfile`/`readarray`, `coproc`, `${var,,}`/`${var^^}`, `&>>`,
-`|&`, and `;;&` by pattern, over every line of every shell file, on the ubuntu
+`declare -A` (in any option-word spelling — `declare -Ar`, `local -r -A`),
+`mapfile`/`readarray`, `coproc`, `${var,,}`/`${var^^}`, `&>>`, `|&`, and both
+`;&` and `;;&` by pattern, over every line of every shell file, on the ubuntu
 job, with no dependence on any host's `PATH`.
 
 The two halves fail in opposite directions, which is why both exist. Execution
@@ -137,10 +138,18 @@ portability proof.**
 
 Two things to know before editing it. Prose _about_ a banned construct doesn't
 fail the lint — matches are re-tested against a comment-stripped copy of the
-line — and a line ending in `# bash4-lint: allow` is skipped outright. The
-pattern table is its own first user, since a table of patterns for banned
-constructs necessarily contains those constructs. Use the marker for text that
-mentions a construct, never to keep one.
+line — and a line whose **trailing comment** is `# bash4-lint: allow` is skipped
+outright. The pattern table is its own first user, since a table of patterns for
+banned constructs necessarily contains those constructs. Use the marker for text
+that mentions a construct, never to keep one.
+
+The marker is anchored to end-of-line on purpose. Matched loosely it would also
+fire from inside a string, so a line that merely _discussed_ the marker could
+hide a real violation sharing that line. The same instinct explains the `-H` on
+the `grep`: the awk pass assumes `file:line:code`, and a single-file scan — the
+common case under `--fast` — otherwise emits `line:code`, shifting every field
+and turning a violation into a silent pass. Both were false-pass bugs in the
+first cut of this check, which is the failure mode a lint least survives.
 
 And don't mistake the neighbouring `bash -n` for this check: it parses with
 whatever bash runs the lint, which on the ubuntu job is Bash 5, and Bash 5
