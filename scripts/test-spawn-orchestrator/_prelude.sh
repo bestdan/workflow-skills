@@ -6,7 +6,10 @@
 #
 # The suites together are the test harness for scripts/spawn-orchestrator.sh:
 # self-contained and offline, building real fixture dirs/binaries in a temp base
-# and asserting the script's output + exit codes. No network, no stubs. The
+# and asserting the script's output + exit codes. Everything that would reach
+# outside the fixture tree — notifiers, launchctl, sandbox-exec, gh, claude —
+# is a recording stub built under $BASE; nothing touches the network or the
+# developer's machine. The
 # Seatbelt compile checks run only where `sandbox-exec` can actually apply a
 # profile (macOS), and skip-with-note elsewhere so the harness stays green on
 # Linux CI.
