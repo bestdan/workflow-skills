@@ -9,6 +9,7 @@ deeper is one link away.
 | Install and use the plugin                                     | [`README.md`](README.md)                                     |
 | Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                         |
 | Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)             |
+| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                 |
 | Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md) |
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md) |
 | Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                   |
