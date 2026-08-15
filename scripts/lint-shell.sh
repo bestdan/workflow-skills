@@ -41,10 +41,10 @@ done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bash' '*.ba
 done)
 
 # --fast narrows the file set to what this branch has touched. ShellCheck is the
-# reason: it costs ~35s over the whole tree, and its cost is superlinear in file
-# size, so ~31s of that is ONE file (scripts/test-spawn-orchestrator.sh, 5816
-# lines) that most edits never go near. Re-linting it on every loop is the
-# difference between a lint you run constantly and one you run once.
+# reason: its cost is superlinear in file size, so a handful of big files most
+# edits never go near (scripts/spawn-orchestrator.sh, test-research-spike.sh)
+# dominate a whole-tree pass. Re-linting them on every loop is the difference
+# between a lint you run constantly and one you run once.
 #
 # "Touched" = everything differing from the merge-base with the default branch,
 # UNION the dirty working tree — so it still covers work you have already
