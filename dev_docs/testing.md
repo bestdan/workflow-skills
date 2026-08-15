@@ -2,8 +2,11 @@
 
 What the suites are, and — the part that surprises people — **which of them
 actually run on a given host**. The gate does not execute the same set of
-assertions everywhere, so "729 passed" means different things on a Linux runner
-and on a Mac. CI runs both, precisely because neither is enough on its own.
+assertions everywhere. On the same commit, CI's two jobs report
+`744 passed, 0 skipped` (macOS, usable seatbelt) and `726 passed, 14 skipped`
+(Linux) — and note those totals are 744 and 740, so four assertions don't merely
+skip on Linux, they never run at all. Counts are not comparable across hosts.
+CI runs both, precisely because neither is enough on its own.
 
 Day-to-day contributing doesn't require any of this; see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the dev loop and the gate. Read this
@@ -12,11 +15,11 @@ wasn't, or adding a test that depends on the host.
 
 ## The suites
 
-| Suite                                | Shape                            | Size            |
-| ------------------------------------ | -------------------------------- | --------------- |
-| `test/*.bats`                        | Bats, 10 files                   | 66 tests        |
-| `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file | ~729 assertions |
-| `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each       |
+| Suite                                | Shape                            | Size           |
+| ------------------------------------ | -------------------------------- | -------------- |
+| `test/*.bats`                        | Bats, 10 files                   | 66 tests       |
+| `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file | 744 assertions |
+| `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each      |
 
 `scripts/test-shell.sh` runs the Bats files and the orchestrator suite;
 `scripts/check.sh` runs everything. The `test/*.bats` files are ordinary tracked
