@@ -17,7 +17,7 @@ wasn't, or adding a test that depends on the host.
 
 | Suite                                | Shape                            | Size           |
 | ------------------------------------ | -------------------------------- | -------------- |
-| `test/*.bats`                        | Bats, 10 files                   | 66 tests       |
+| `test/*.bats`                        | Bats, 11 files                   | 75 tests       |
 | `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file | 744 assertions |
 | `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each      |
 
@@ -150,6 +150,16 @@ the `grep`: the awk pass assumes `file:line:code`, and a single-file scan — th
 common case under `--fast` — otherwise emits `line:code`, shifting every field
 and turning a violation into a silent pass. Both were false-pass bugs in the
 first cut of this check, which is the failure mode a lint least survives.
+
+Both are now pinned by `test/lint-bash4.bats`, and that suite is the reason the
+check lives in its own `scripts/lint-bash4.sh` taking **files as arguments**
+rather than inlined in `lint-shell.sh` discovering its own. A check that finds
+its own inputs can only be tested by planting a fixture in the repo working
+tree — which is exactly the caller-repo leakage the orchestrator prelude exists
+to prevent — so in practice it went untested, and both false passes shipped.
+If you extend the pattern table, add the case here; the suite runs the real
+script over fixtures in a temp dir, and its last test runs it over this repo's
+own shell files.
 
 And don't mistake the neighbouring `bash -n` for this check: it parses with
 whatever bash runs the lint, which on the ubuntu job is Bash 5, and Bash 5

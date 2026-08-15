@@ -1,0 +1,10 @@
+declare -A colors
+mapfile -t lines <in
+readarray -t other <in
+coproc worker { cat; }
+echo "${name,,}"
+echo "${name^^}"
+echo hi &>>out
+cat f |& tee log
+case x in a) : ;& esac
+case y in b) : ;;& esac
