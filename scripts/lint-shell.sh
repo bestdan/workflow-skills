@@ -41,10 +41,15 @@ done < <(git ls-files --cached --others --exclude-standard '*.sh' '*.bash' '*.ba
 done)
 
 # --fast narrows the file set to what this branch has touched. ShellCheck is the
-# reason: it costs ~35s over the whole tree, and its cost is superlinear in file
-# size, so ~31s of that is ONE file (scripts/test-spawn-orchestrator.sh, 5816
-# lines) that most edits never go near. Re-linting it on every loop is the
-# difference between a lint you run constantly and one you run once.
+# reason: it costs ~23s over the whole tree, and its cost is superlinear in the
+# size of a file's top-level scope, so a handful of long files carry nearly all
+# of it while most edits never go near them. Re-linting them on every loop is
+# the difference between a lint you run constantly and one you run once.
+#
+# The corollary, for anyone reading a surprising --fast time: this narrowing is
+# by TOUCHED FILE, so a branch that adds several long shell files pays their
+# full lint cost on every --fast run. That is the mechanism working, not a
+# regression — see dev_docs/gate-performance.md.
 #
 # "Touched" = everything differing from the merge-base with the default branch,
 # UNION the dirty working tree — so it still covers work you have already

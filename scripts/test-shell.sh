@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Usage: scripts/test-shell.sh [--fast]
-#   --fast  skip the orchestrator harness (the ~60s suite). NOT the gate — see
+#   --fast  skip the orchestrator harness (the ~21s suite). NOT the gate — see
 #           the fast_skips list in scripts/check.sh for what that costs you.
 set -uo pipefail
 
@@ -44,20 +44,19 @@ run() {
 # The bats files fan out ONLY when the orchestrator suite is skipped, because
 # only then are they on the critical path.
 #
-# Serially the ten files cost ~17s; one job per file costs the slowest (~4s,
-# utilities.bats). But a full run also carries the ~60s orchestrator suite in
-# parallel, so bats is hidden behind it either way and the fan-out cannot move
-# the total — 17s and 4s are both < 60s. That is structural, not a property of
-# this machine: the fan-out could only help if the orchestrator suite dropped
-# under ~17s. Measured A/B on a 4-core box, full `check.sh` was 66.8s serial-bats
-# vs 68.9s fanned, and test-shell.sh alone 61.0s vs 66.3s — i.e. fanning out here
-# is measurably WORSE, because ten extra concurrent jobs just steal cores from
-# the suite that actually is the critical path. That oversubscription is also
-# what pushed test/await-pr-review.bats past its wall-clock budget (see 1ddb13e).
+# In a full run the bats files sit alongside the orchestrator suite, and serial
+# bats still finishes inside it — so fanning out here cannot shorten this
+# wrapper, and the extra jobs only contend with the suite that is the actual
+# critical path (which since the split runs seven of its own parts
+# concurrently). Under --fast the orchestrator is gone, bats becomes the
+# critical path, and the fan-out is the whole difference.
 #
-# Under --fast the orchestrator is gone, bats becomes the critical path, and the
-# fan-out is the whole difference: `check.sh --fast` measures ~7.2s fanned vs
-# ~18.2s serial.
+# That margin used to be structural and is now thin — re-measure rather than
+# assume before changing this condition. dev_docs/gate-performance.md carries
+# the numbers, the interleaved A/B behind them, and a one-liner that checks the
+# margin directly; it is also where the wall-clock hazard is written up, which
+# is what makes "just add more jobs" costly here (oversubscription is what
+# pushed test/await-pr-review.bats past its budget, see 1ddb13e).
 if [ "$fast" -eq 1 ]; then
   for suite in test/*.bats; do
     [ -f "$suite" ] || continue
@@ -66,8 +65,8 @@ if [ "$fast" -eq 1 ]; then
 else
   run test/vendor/bats-core/bin/bats test/*.bats
   # Scheduled LAST because the replay loop below is strictly index-ordered: this
-  # is the ~60s suite, and anything after it would have its output held back
-  # behind it. Same reasoning as the tail of check.sh's run list.
+  # is the longer of the two, and anything after it would have its output held
+  # back behind it. Same reasoning as the tail of check.sh's run list.
   run bash scripts/test-spawn-orchestrator.sh
 fi
 
