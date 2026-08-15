@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.85.0] - 2026-08-15
+
+### Features
+
+- add a --fast edit-loop gate (#356) (b786e7b)
+
 ## [1.84.0] - 2026-08-15
 
 ### Features
