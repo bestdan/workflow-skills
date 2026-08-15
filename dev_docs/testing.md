@@ -78,11 +78,10 @@ Three consequences worth internalizing:
 ## The Bash 3.2 floor is checked by the macOS job, and nowhere else
 
 `AGENTS.md` requires shell here to run under Bash 3.2 — no associative arrays, no
-`declare -A`. Nothing asserts that directly: there is no `BASH_VERSINFO` gate
-anywhere in `scripts/`, and the ubuntu job runs Bash 5, so the rule was upheld by
-care alone.
+`declare -A`. The ubuntu job runs Bash 5, so the macOS job is the only place that
+requirement meets an interpreter that can enforce it.
 
-The macOS job checks it, and does so by name rather than by luck. It invokes
+It does so by name rather than by luck. The job invokes
 `/bin/bash scripts/test-shell.sh` — but naming the interpreter once is not
 enough, because **every bare `bash` below that point re-resolves through
 `PATH`** and silently discards the pin. So it is carried down by hand, at each
@@ -92,33 +91,40 @@ hop, as `"$BASH"` (a shell's own path, so it propagates without an export):
 /bin/bash → test-shell.sh → test-spawn-orchestrator.sh → its seven parts
 ```
 
-Miss one hop and the pin still _looks_ applied while the assertions run on
-something else — the second hop was missed in the change that added the first,
-and the parts kept resolving through `PATH` under a job whose comment claimed
-otherwise. With both in place the scripts under it execute on 3.2, and a
-`declare -A` fails the job.
+Delivery is not arrival, and a dropped hop is invisible: the pin still _looks_
+applied while the assertions run on something else. That is not hypothetical —
+the second hop was missed in the change that added the first, and the parts kept
+resolving through `PATH` under a job comment claiming otherwise. So the chain is
+checked rather than trusted. `SO_TEST_REQUIRE_BASH3=1`, set beside
+`SO_TEST_REQUIRE_SEATBELT` on the macOS job, makes `test-shell.sh` and the
+shared part prelude assert `BASH_VERSINFO[0]` is 3 and fail loudly if it isn't.
+Because the assertion lives in the prelude, it covers parts that don't exist
+yet — add one with a bare `bash` and the job tells you.
 
-It did not always work that way. The job originally ran `bash …`, and the floor
-held only because that image happens to keep `/bin/bash` ahead of Homebrew's
-bash on `PATH`:
+It's opt-in for a reason: the floor is a property of that job, not of a
+contributor's laptop, and a Linux developer's Bash 5 must not fail the suite.
 
-```
-env bash : /bin/bash
-         : GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
-```
+(Before the pin, the job ran `bash …` and the floor held only because the
+`macos26 / 20260728.0273.1` image happens to keep `/bin/bash` — 3.2.57 — ahead
+of Homebrew's bash on `PATH`. An image that reordered `PATH` would have retired
+the check with nothing to announce it.)
 
-That is a property of the image (measured on `macos26 / 20260728.0273.1`, macOS
-26.5.2, arm64), not a contract, so an image that reordered `PATH` would have
-retired the check with nothing to announce it. Worth knowing because the pin
-only reaches what this job invokes: anything that resolves an interpreter
+The pin only reaches what this job invokes: anything that resolves an interpreter
 through `PATH` on its own — bats spawning the `#!/usr/bin/env bash` scripts a
 `.bats` file exercises, most obviously — is still riding the image's ordering.
 
-The one remaining silent failure is Apple shipping a newer `/bin/bash`, which
-would leave the pin pointing at something that is no longer the floor. A guard
-step asserts `BASH_VERSINFO[0]` is 3 and fails the job with an explicit message
-if it isn't, so that lands as a decision to make rather than as coverage
-quietly disappearing.
+The other silent failure is Apple shipping a newer `/bin/bash`, which would
+leave the pin aimed at something that is no longer the floor. The suite
+assertions can't see that — to them a 5.x interpreter looks the same whether the
+pin broke or the pin's target moved — so a separate CI guard step checks
+`/bin/bash` itself and fails with an explicit message. Two checks, two
+questions: the guard asks _is `/bin/bash` still the floor_, the suites ask _did
+the floor reach me_.
+
+None of this catches a bash-ism in code no test executes. That gap wants a
+construct grep (`declare -A`, `mapfile`, `${var,,}`, …) in
+[`scripts/lint-shell.sh`](../scripts/lint-shell.sh), which would run on every
+PR on ubuntu and needs no host assumptions at all; it doesn't exist yet.
 
 ## The seatbelt probe has three states, not two
 

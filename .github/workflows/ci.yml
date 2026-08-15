@@ -107,10 +107,12 @@ jobs:
       # happens to keep /bin/bash ahead of Homebrew's bash on PATH, so the
       # `#!/usr/bin/env bash` scripts landed on 3.2. An image that reordered
       # PATH would have retired the check silently. Invoking /bin/bash by name
-      # makes it a contract instead. The pin has to be carried the whole way
-      # down by hand — test-shell.sh to the orchestrator driver, the driver to
-      # each of its seven parts — because every bare `bash` on that path
-      # re-resolves through PATH. Both hops use "$BASH".
+      # makes it a contract instead. The pin is carried down by hand —
+      # test-shell.sh to the orchestrator driver, the driver to each of its
+      # seven parts, both hops via "$BASH" — because every bare `bash` on that
+      # path re-resolves through PATH. SO_TEST_REQUIRE_BASH3 is what makes that
+      # chain trustworthy: the suites assert on arrival, so a hop dropped by a
+      # future edit fails the job instead of silently reopening the hole.
       - name: Assert /bin/bash is the 3.2 floor
         run: |
           /bin/bash -c '
@@ -123,6 +125,7 @@ jobs:
       - name: Shell + bats suites, full seatbelt coverage required
         env:
           SO_TEST_REQUIRE_SEATBELT: 1
+          SO_TEST_REQUIRE_BASH3: 1
         run: /bin/bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally

@@ -5,6 +5,16 @@
 #           the fast_skips list in scripts/check.sh for what that costs you.
 set -uo pipefail
 
+# The first link in the Bash 3.2 floor: CI invokes this script as
+# /bin/bash, and it passes that interpreter on as "$BASH". Assert arrival here
+# too, so a broken pin fails at the entry point rather than only inside the
+# orchestrator parts. Opt-in — see the matching block in
+# scripts/lib/spawn-orchestrator-test-prelude.sh.
+if [ "${SO_TEST_REQUIRE_BASH3:-0}" = 1 ] && [ "${BASH_VERSINFO[0]}" -ne 3 ]; then
+  echo "FAIL - Bash floor: test-shell.sh is running under ${BASH_VERSION}, not the 3.2 floor." >&2
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
