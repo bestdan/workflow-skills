@@ -1,0 +1,3 @@
+# Portable to bash 3.2 — no `mapfile` here.
+  # and no declare -A, coproc, or ${var,,} either
+x=1 # avoid mapfile in this function

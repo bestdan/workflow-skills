@@ -17,7 +17,7 @@ wasn't, or adding a test that depends on the host.
 
 | Suite                                | Shape                            | Size           |
 | ------------------------------------ | -------------------------------- | -------------- |
-| `test/*.bats`                        | Bats, 10 files                   | 66 tests       |
+| `test/*.bats`                        | Bats, 11 files                   | 75 tests       |
 | `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file | 744 assertions |
 | `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each      |
 
@@ -121,10 +121,50 @@ pin broke or the pin's target moved — so a separate CI guard step checks
 questions: the guard asks _is `/bin/bash` still the floor_, the suites ask _did
 the floor reach me_.
 
-None of this catches a bash-ism in code no test executes. That gap wants a
-construct grep (`declare -A`, `mapfile`, `${var,,}`, …) in
-[`scripts/lint-shell.sh`](../scripts/lint-shell.sh), which would run on every
-PR on ubuntu and needs no host assumptions at all; it doesn't exist yet.
+None of this catches a bash-ism in code no test executes — execution only
+checks the lines a test reaches. That is what the construct grep in
+[`scripts/lint-shell.sh`](../scripts/lint-shell.sh) is for: it bans
+`declare -A` (in any option-word spelling — `declare -Ar`, `local -r -A`),
+`mapfile`/`readarray`, `coproc`, `${var,,}`/`${var^^}`, `&>>`, `|&`, and both
+`;&` and `;;&` by pattern, over every line of every shell file, on the ubuntu
+job, with no dependence on any host's `PATH`.
+
+The two halves fail in opposite directions, which is why both exist. Execution
+is exact but partial: it catches semantics a pattern can't see (empty-array
+`"${arr[@]}"` under `set -u` before 4.4) and only where a test runs. The grep
+is total but approximate: every line, but only the constructs someone thought
+to list, and only where they are written literally. **A green lint is not a
+portability proof.**
+
+Two things to know before editing it. Prose _about_ a banned construct doesn't
+fail the lint — matches are re-tested against a comment-stripped copy of the
+line — and a line whose **trailing comment** is `# bash4-lint: allow` is skipped
+outright. The pattern table is its own first user, since a table of patterns for
+banned constructs necessarily contains those constructs. Use the marker for text
+that mentions a construct, never to keep one.
+
+The marker is anchored to end-of-line on purpose. Matched loosely it would also
+fire from inside a string, so a line that merely _discussed_ the marker could
+hide a real violation sharing that line. The same instinct explains the `-H` on
+the `grep`: the awk pass assumes `file:line:code`, and a single-file scan — the
+common case under `--fast` — otherwise emits `line:code`, shifting every field
+and turning a violation into a silent pass. Both were false-pass bugs in the
+first cut of this check, which is the failure mode a lint least survives.
+
+Both are now pinned by `test/lint-bash4.bats`, and that suite is the reason the
+check lives in its own `scripts/lint-bash4.sh` taking **files as arguments**
+rather than inlined in `lint-shell.sh` discovering its own. A check that finds
+its own inputs can only be tested by planting a fixture in the repo working
+tree — which is exactly the caller-repo leakage the orchestrator prelude exists
+to prevent — so in practice it went untested, and both false passes shipped.
+If you extend the pattern table, add the case here; the suite runs the real
+script over fixtures in a temp dir, and its last test runs it over this repo's
+own shell files.
+
+And don't mistake the neighbouring `bash -n` for this check: it parses with
+whatever bash runs the lint, which on the ubuntu job is Bash 5, and Bash 5
+accepts every construct listed above. It rejects them only on a developer's
+Mac — the machines that need the check least.
 
 ## The seatbelt probe has three states, not two
 

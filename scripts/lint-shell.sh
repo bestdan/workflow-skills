@@ -118,6 +118,15 @@ run() {
   "$@" || fail=1
 }
 
+# The Bash 3.2 floor. scripts/lint-bash4.sh owns the patterns and the reasoning
+# behind them; it takes its files as ARGUMENTS rather than discovering them,
+# which is what lets test/lint-bash4.bats exercise it against fixtures in a temp
+# dir instead of only through this script's whole-tree scan.
+bash4_files=()
+[ "${#shell_files[@]}" -gt 0 ] && bash4_files+=("${shell_files[@]}")
+[ "${#bats_files[@]}" -gt 0 ] && bash4_files+=("${bats_files[@]}")
+[ "${#bash4_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${bash4_files[@]}"
+
 if [ "${#shell_files[@]}" -gt 0 ]; then
   run bash -n "${shell_files[@]}"
   run shfmt -i 2 -ci -bn -d "${shell_files[@]}"
