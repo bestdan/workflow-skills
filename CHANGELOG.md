@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.86.0] - 2026-08-16
+
+### Features
+
+- ban bash-4+ constructs so the 3.2 floor covers unexercised code (#365) (767b587)
+
 ## [1.85.0] - 2026-08-15
 
 ### Features
