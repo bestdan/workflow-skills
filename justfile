@@ -44,6 +44,13 @@ validate:
 eval:
     scripts/check.sh --with-evals
 
+# Bundle the full post-fix verification sequence (full run, stability
+# repeats, process/orphan watch, confinement smoke, final gate check) into
+# one invocation instead of hand-composing it. `just verify-fix "fixed X"`,
+# or pass flags through: `just verify-fix --runs 5 "fixed X"`.
+verify-fix *args:
+    scripts/verify-fix.sh {{ args }}
+
 # Preview the next Conventional-Commits version bump (no writes, no tags).
 bump-preview:
     python3 scripts/bump-version.py

@@ -38,10 +38,17 @@ just check-fast  # edit loop: skips the long suites, lints only what you touched
 just fmt         # auto-format everything with dprint + shfmt
 just validate    # only the repo-native structural/consistency validator
 just eval        # gate + behavioral skill-triggering evals (opt-in, needs auth)
+just verify-fix "<description>"  # the standard post-fix verification bundle (below)
 ```
 
 `just check` is a thin wrapper around `scripts/check.sh` — the script is the
 source of truth, and CI calls it directly.
+
+Once a fix is ready to verify, use `just verify-fix "<description>"`
+(`scripts/verify-fix.sh`) instead of hand-composing the check sequence —
+it bundles the full run, a multi-round stability check, a process/orphan
+watch, the confinement smoke (macOS-only, skipped elsewhere), and a final
+gate check into one invocation, and always dumps diagnostics on failure.
 
 `just check-fast` is for the edit loop: ~8s against the full gate's ~41s. It
 skips the two long test suites and narrows the shell lint to the files your
