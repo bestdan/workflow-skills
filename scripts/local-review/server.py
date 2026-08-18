@@ -70,8 +70,9 @@ def resolve_gh(pr, repo, diff_file):
     args = ["gh", "pr", "view", str(pr), "--json", "url,number,headRefOid"]
     if repo:
         args += ["--repo", repo]
+    out = sh(args)  # RuntimeError (gh failed) propagates to main()'s handler
     try:
-        j = json.loads(sh(args))
+        j = json.loads(out)
         m = re.match(r"https?://github\.com/([^/]+)/([^/]+)/pull/", j.get("url", ""))
         if not m:
             return None
@@ -86,8 +87,9 @@ def get_meta(pr, repo, diff_file):
     args = ["gh", "pr", "view", str(pr), "--json", "title,url,number"]
     if repo:
         args += ["--repo", repo]
+    out = sh(args)  # RuntimeError (gh failed) propagates to main()'s handler
     try:
-        return json.loads(sh(args))
+        return json.loads(out)
     except Exception:
         return {"title": f"PR #{pr}", "url": "", "number": pr}
 
@@ -835,37 +837,46 @@ class Handler(BaseHTTPRequestHandler):
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
-        # Post the GitHub-flagged comments to the PR before writing out_path: the
-        # skill kills this process the moment out_path appears, so posting first
-        # keeps a slow multi-comment loop from being cut off mid-post.
-        gh_posted, gh_failed = [], []
-        if Handler.gh:
-            for c in payload.get("comments", []):
-                if not c.get("github"):
-                    continue
-                url, err = post_pr_comment(Handler.gh, c)
-                if err:
-                    gh_failed.append({"file": c.get("file"), "line": c.get("line"), "error": err})
-                else:
-                    gh_posted.append(url)
-            if gh_posted or gh_failed:
-                print(f"GITHUB: posted {len(gh_posted)}, failed {len(gh_failed)}", flush=True)
-                for u in gh_posted:
-                    print(f"  posted: {u}", flush=True)
-                for f in gh_failed:
-                    print(f"  FAILED {f['file']}:{f['line']}: {f['error']}", flush=True)
-        print("============================\n", flush=True)
-
-        if Handler.gh:
-            payload["github_posted"] = gh_posted
-            payload["github_failed"] = gh_failed
+        # The temp file is created before posting, not just before the write: an
+        # unwritable/missing --out directory is then caught up front, instead of
+        # after comments were already posted (a 500 with nothing posted is safe
+        # to retry; a 500 after posting is not).
         out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
         fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
         try:
+            # Post the GitHub-flagged comments to the PR before writing out_path:
+            # the skill kills this process the moment out_path appears, so
+            # posting first keeps a slow multi-comment loop from being cut off
+            # mid-post.
+            gh_posted, gh_failed = [], []
+            if Handler.gh:
+                for c in payload.get("comments", []):
+                    if not c.get("github"):
+                        continue
+                    url, err = post_pr_comment(Handler.gh, c)
+                    if err:
+                        gh_failed.append({"file": c.get("file"), "line": c.get("line"), "error": err})
+                    else:
+                        gh_posted.append(url)
+                if gh_posted or gh_failed:
+                    print(f"GITHUB: posted {len(gh_posted)}, failed {len(gh_failed)}", flush=True)
+                    for u in gh_posted:
+                        print(f"  posted: {u}", flush=True)
+                    for f in gh_failed:
+                        print(f"  FAILED {f['file']}:{f['line']}: {f['error']}", flush=True)
+            print("============================\n", flush=True)
+
+            if Handler.gh:
+                payload["github_posted"] = gh_posted
+                payload["github_failed"] = gh_failed
             with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2)
             os.replace(tmp_path, self.out_path)
         except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
             os.unlink(tmp_path)
             raise
 

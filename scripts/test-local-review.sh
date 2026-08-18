@@ -292,6 +292,8 @@ except Exception as e:
 # them all. Each server is started with --diff-file (no `gh` needed) and no
 # --port, so the OS picks a free port and the server reports it.
 import re as _re
+import selectors as _selectors
+import shutil as _shutil
 import subprocess as _subprocess
 import tempfile as _tempfile
 import time as _time
@@ -310,29 +312,65 @@ index 1111111..2222222 100644
 """
 
 
-def start_server(extra_args):
+def start_server(extra_args, env=None):
     patch_fd, patch_path = _tempfile.mkstemp(suffix=".patch")
     with os.fdopen(patch_fd, "w") as f:
         f.write(PATCH)
     proc = _subprocess.Popen(
         [sys.executable, server_path, "--diff-file", patch_path] + extra_args,
-        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=env,
     )
     return proc, patch_path
 
 
+def make_fake_gh_dir():
+    # A `gh` stand-in that always fails, so a PR-mode run exercises the same
+    # "gh command failed" path a real unauthenticated/misconfigured gh would.
+    d = _tempfile.mkdtemp(prefix="fakegh-")
+    gh_path = os.path.join(d, "gh")
+    with open(gh_path, "w") as f:
+        f.write("#!/bin/sh\necho 'gh: authentication required' >&2\nexit 1\n")
+    os.chmod(gh_path, 0o755)
+    return d
+
+
 def read_url(proc, deadline=5.0):
+    # readline() blocks until a line arrives or the pipe closes, so a server
+    # that goes quiet without exiting would hang this forever. Read the raw fd
+    # in non-blocking chunks, gated by select() against a real deadline, and
+    # split lines ourselves -- selecting on proc.stdout itself is not enough:
+    # a single raw read can pull multiple lines into its buffer, leaving the
+    # fd not-yet-readable again while an unread line is already sitting in
+    # that buffer.
+    fd = proc.stdout.fileno()
+    os.set_blocking(fd, False)
+    sel = _selectors.DefaultSelector()
+    sel.register(fd, _selectors.EVENT_READ)
     start = _time.monotonic()
-    while _time.monotonic() - start < deadline:
-        line = proc.stdout.readline()
-        if not line:
-            if proc.poll() is not None:
+    buf = ""
+    try:
+        while True:
+            remaining = deadline - (_time.monotonic() - start)
+            if remaining <= 0:
                 return None
-            continue
-        m = _re.search(r"LOCAL_REVIEW_URL=(\S+)", line)
-        if m:
-            return m.group(1)
-    return None
+            if not sel.select(timeout=remaining):
+                continue
+            try:
+                chunk = os.read(fd, 4096)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                if proc.poll() is not None:
+                    return None
+                continue
+            buf += chunk.decode(errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                m = _re.search(r"LOCAL_REVIEW_URL=(\S+)", line)
+                if m:
+                    return m.group(1)
+    finally:
+        sel.close()
 
 
 # -- launching without --port autoselects a free port and prints the URL ----
@@ -399,6 +437,68 @@ finally:
     os.unlink(patch_path)
     if os.path.exists(out_path):
         os.unlink(out_path)
+
+# -- PR-mode startup with gh unavailable: the RuntimeError from sh() must ----
+# propagate to main()'s handler (a one-line stderr error, exit 1) instead of
+# resolve_gh/get_meta swallowing it and starting degraded (gh=None).
+fake_gh_dir = make_fake_gh_dir()
+gh_fail_env = dict(os.environ)
+gh_fail_env["PATH"] = fake_gh_dir + os.pathsep + os.environ.get("PATH", "")
+pr_out_fd, pr_out_path = _tempfile.mkstemp(suffix=".json")
+os.close(pr_out_fd)
+os.unlink(pr_out_path)
+proc = _subprocess.Popen(
+    [sys.executable, server_path, "999999", "--out", pr_out_path],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=gh_fail_env,
+)
+try:
+    try:
+        rc = proc.wait(timeout=5)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        rc = None
+    output = proc.stdout.read()
+    check("server: PR-mode startup with gh unavailable exits 1 (not starting degraded)",
+          rc == 1, rc)
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    check("server: PR-mode startup with gh unavailable prints a one-line stderr error, no traceback",
+          len(lines) == 1 and lines[0].startswith("error:") and "Traceback" not in output, output)
+    check("server: PR-mode startup with gh unavailable never serves (no LOCAL_REVIEW_URL)",
+          "LOCAL_REVIEW_URL=" not in output, output)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    _shutil.rmtree(fake_gh_dir, ignore_errors=True)
+    if os.path.exists(pr_out_path):
+        os.unlink(pr_out_path)
+
+# -- --diff-file run still works with gh absent/failing: resolve_gh/get_meta -
+# short-circuit on diff_file before ever calling sh(), so this path must be
+# unaffected by gh being broken.
+fake_gh_dir2 = make_fake_gh_dir()
+gh_fail_env2 = dict(os.environ)
+gh_fail_env2["PATH"] = fake_gh_dir2 + os.pathsep + os.environ.get("PATH", "")
+proc2, patch2 = start_server(["--once"], env=gh_fail_env2)
+try:
+    url2 = read_url(proc2)
+    check("server: --diff-file run still works with gh absent/failing (fallback preserved)",
+          bool(url2), url2)
+finally:
+    if proc2.poll() is None:
+        proc2.terminate()
+        try:
+            proc2.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc2.kill()
+            proc2.wait(timeout=5)
+    os.unlink(patch2)
+    _shutil.rmtree(fake_gh_dir2, ignore_errors=True)
 
 print(f"# {pass_count} passed, {fail_count} failed")
 sys.exit(1 if fail_count else 0)
