@@ -21,7 +21,34 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-GENERATED = re.compile(r"\.(g|gr|gql|freezed|config|mocks|fakes|req|data|var|schema)\.dart$|\.lock$|\.g\.dart$|\.pb\.dart$")
+# Files matching any of these render auto-collapsed: the ones a human almost
+# never needs to read line-by-line. Path-segment patterns anchor at the start
+# of the path or right after a "/" so they can't fire on a mere substring
+# (e.g. "src/vendors.py" must not match the "vendor/" tree pattern).
+GENERATED_PATTERNS = [
+    # lockfiles
+    r"\.lock$",
+    r"(^|/)package-lock\.json$",
+    r"(^|/)go\.sum$",
+    # generated code
+    r"\.pb\.go$",
+    r"_pb2\.py$",
+    r"_pb2_grpc\.py$",
+    r"\.generated\.[^/]+$",
+    r"(^|/)__generated__/",
+    r"(^|/)generated/",
+    # bundles and snapshots
+    r"\.min\.(js|css)$",
+    r"\.map$",
+    r"(^|/)__snapshots__/",
+    r"\.snap$",
+    # vendored trees
+    r"(^|/)vendor/",
+    # Dart (this tool was first written for a Flutter codebase)
+    r"\.(g|gr|gql|freezed|config|mocks|fakes|req|data|var|schema)\.dart$",
+    r"\.pb\.dart$",
+]
+GENERATED = re.compile("|".join(GENERATED_PATTERNS))
 
 
 def sh(args):
@@ -374,17 +401,23 @@ const root = document.getElementById('root');
 
 // Syntax highlighting via highlight.js (vendored). Pick a language per file from
 // its extension; fall back to auto-detection when the extension is unknown.
+// Runtime contract: langForFile guards every mapping with hljs.getLanguage(),
+// so a value naming a language the bundle lacks falls back to highlightAuto —
+// wrong values degrade quality, never break rendering. getLanguage also
+// accepts registered aliases, so the grammar-name grep below is an audit aid
+// (the factory names), not the complete set of accepted names:
+//   grep -o 'grmr_[a-zA-Z0-9_]*' vendor/highlight.min.js | sort -u
 const LANG_MAP = {
-  dart:'dart', swift:'swift', kt:'kotlin', kts:'kotlin', java:'java', groovy:'groovy',
+  dart:'dart', swift:'swift', kt:'kotlin', kts:'kotlin', java:'java',
   js:'javascript', jsx:'javascript', mjs:'javascript', cjs:'javascript',
   ts:'typescript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
   c:'c', h:'c', cc:'cpp', cpp:'cpp', cxx:'cpp', hpp:'cpp', hh:'cpp', cs:'csharp',
-  m:'objectivec', mm:'objectivec', php:'php', scala:'scala',
+  m:'objectivec', mm:'objectivec', php:'php',
   sh:'bash', bash:'bash', zsh:'bash', yml:'yaml', yaml:'yaml', json:'json',
   xml:'xml', html:'xml', htm:'xml', vue:'xml', svg:'xml', plist:'xml',
   css:'css', scss:'scss', less:'less', sql:'sql', md:'markdown', markdown:'markdown',
   toml:'ini', ini:'ini', lua:'lua', r:'r', pl:'perl', pm:'perl',
-  make:'makefile', mk:'makefile', gradle:'groovy', dockerfile:'dockerfile',
+  make:'makefile', mk:'makefile',
 };
 function langForFile(file){
   if(typeof hljs==='undefined') return null;

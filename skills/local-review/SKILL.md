@@ -36,8 +36,8 @@ reviewing:
   parser handles standard `git diff` output, so any range works.
 - **A patch the user already has** — pass its path to `--diff-file` directly.
 
-Generated files (lockfiles, `*.g.dart`, …) render auto-collapsed; the user can
-expand them.
+Generated files (lockfiles, protobuf/codegen output, minified bundles,
+snapshots, vendored trees) render auto-collapsed; the user can expand them.
 
 ## 2. Launch the server + open the browser
 
