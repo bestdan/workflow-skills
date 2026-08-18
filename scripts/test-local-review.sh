@@ -28,6 +28,8 @@ trap 'rm -rf "$tmp"' EXIT
 
 cat >"$tmp/test_parse_diff.py" <<'PYEOF'
 import importlib.util
+import json
+import os
 import sys
 
 server_path = sys.argv[1]
@@ -275,6 +277,434 @@ check("generated: foo.py not flagged generated", parse_diff(diff_not_generated)[
 
 # --- empty input -> [] --------------------------------------------------------
 check("empty input: returns []", parse_diff("") == [], parse_diff(""))
+
+# --- sh() on a failing command raises RuntimeError, not CalledProcessError --
+try:
+    server.sh(["false"])
+    bad("sh(): failing command raises", "no exception raised")
+except RuntimeError as e:
+    check("sh(): failing command raises RuntimeError with the command in the message",
+          "false" in str(e), str(e))
+except Exception as e:
+    bad("sh(): failing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
+
+# --- sh() on a MISSING command (gh absent from PATH) also raises RuntimeError
+try:
+    server.sh(["definitely-not-a-real-command-xyzzy"])
+    bad("sh(): missing command raises", "no exception raised")
+except RuntimeError as e:
+    check("sh(): missing command raises RuntimeError, not FileNotFoundError",
+          "definitely-not-a-real-command-xyzzy" in str(e), str(e))
+except Exception as e:
+    bad("sh(): missing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
+
+# --- server-behavior cases: real subprocesses, one python3 process launches ---
+# them all. Each server is started with --diff-file (no `gh` needed) and no
+# --port, so the OS picks a free port and the server reports it.
+import re as _re
+import selectors as _selectors
+import shutil as _shutil
+import socket as _socket
+import subprocess as _subprocess
+import tempfile as _tempfile
+import threading as _threading
+import time as _time
+import urllib.error as _urlerror
+import urllib.request as _urlrequest
+
+PATCH = """diff --git a/foo.py b/foo.py
+index 1111111..2222222 100644
+--- a/foo.py
++++ b/foo.py
+@@ -1,3 +1,3 @@ def foo():
+ line one
+-line two
++line two changed
+ line three
+"""
+
+
+def start_server(extra_args, env=None):
+    patch_fd, patch_path = _tempfile.mkstemp(suffix=".patch")
+    with os.fdopen(patch_fd, "w") as f:
+        f.write(PATCH)
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--diff-file", patch_path] + extra_args,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=env,
+    )
+    return proc, patch_path
+
+
+def make_fake_gh_dir(diff_ok=False):
+    # A `gh` stand-in that fails, so a PR-mode run exercises the same
+    # "gh command failed" path a real unauthenticated/misconfigured gh would.
+    # With diff_ok, `gh pr diff` succeeds (emits a small patch) while `gh pr
+    # view` still fails — that exercises the get_meta/resolve_gh propagation
+    # specifically, past a successful get_diff.
+    d = _tempfile.mkdtemp(prefix="fakegh-")
+    gh_path = os.path.join(d, "gh")
+    if diff_ok:
+        body = ("#!/bin/sh\n"
+                "if [ \"$1\" = pr ] && [ \"$2\" = diff ]; then\n"
+                "  printf 'diff --git a/x b/x\\n--- a/x\\n+++ b/x\\n@@ -1,1 +1,1 @@\\n-a\\n+b\\n'\n"
+                "  exit 0\n"
+                "fi\n"
+                "echo 'gh: authentication required' >&2\nexit 1\n")
+    else:
+        body = "#!/bin/sh\necho 'gh: authentication required' >&2\nexit 1\n"
+    with open(gh_path, "w") as f:
+        f.write(body)
+    os.chmod(gh_path, 0o755)
+    return d
+
+
+def read_url(proc, deadline=5.0):
+    # readline() blocks until a line arrives or the pipe closes, so a server
+    # that goes quiet without exiting would hang this forever. Read the raw fd
+    # in non-blocking chunks, gated by select() against a real deadline, and
+    # split lines ourselves -- selecting on proc.stdout itself is not enough:
+    # a single raw read can pull multiple lines into its buffer, leaving the
+    # fd not-yet-readable again while an unread line is already sitting in
+    # that buffer.
+    fd = proc.stdout.fileno()
+    os.set_blocking(fd, False)
+    sel = _selectors.DefaultSelector()
+    sel.register(fd, _selectors.EVENT_READ)
+    start = _time.monotonic()
+    buf = ""
+    try:
+        while True:
+            remaining = deadline - (_time.monotonic() - start)
+            if remaining <= 0:
+                return None
+            if not sel.select(timeout=remaining):
+                continue
+            try:
+                chunk = os.read(fd, 4096)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                if proc.poll() is not None:
+                    return None
+                continue
+            buf += chunk.decode(errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                m = _re.search(r"LOCAL_REVIEW_URL=(\S+)", line)
+                if m:
+                    return m.group(1)
+    finally:
+        sel.close()
+
+
+# -- launching without --port autoselects a free port and prints the URL ----
+proc1, patch1 = start_server([])
+proc2, patch2 = start_server([])
+try:
+    url1 = read_url(proc1)
+    url2 = read_url(proc2)
+    check("server: autoselect prints LOCAL_REVIEW_URL for server1", bool(url1), url1)
+    check("server: autoselect prints LOCAL_REVIEW_URL for server2", bool(url2), url2)
+    check("server: two autoselected servers get distinct ports",
+          bool(url1) and bool(url2) and url1 != url2, (url1, url2))
+finally:
+    for p in (proc1, proc2):
+        p.terminate()
+        try:
+            p.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=5)
+    for p in (patch1, patch2):
+        os.unlink(p)
+
+# -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
+out_fd, out_path = _tempfile.mkstemp(suffix=".json")
+os.close(out_fd)
+os.unlink(out_path)  # server must create it; --once poller checks for existence
+proc, patch_path = start_server(["--once", "--out", out_path])
+try:
+    url = read_url(proc)
+    check("server: --once run prints LOCAL_REVIEW_URL", bool(url), url)
+    if url:
+        with _urlrequest.urlopen(f"{url}/", timeout=5) as resp:
+            body = resp.read().decode()
+            check("server: GET / returns 200", resp.status == 200, resp.status)
+            check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
+        payload = {"meta": {}, "summary": "looks good", "approved": True, "comments": []}
+        req = _urlrequest.Request(
+            f"{url}/submit", data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit returns 200", resp.status == 200, resp.status)
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: --once exits after a successful /submit", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: --once exits after a successful /submit", "did not exit within 5s")
+        check("server: $OUT exists after submit", os.path.exists(out_path), out_path)
+        if os.path.exists(out_path):
+            with open(out_path) as f:
+                written = json.load(f)
+            check("server: $OUT parses as JSON with the submitted fields",
+                  written.get("summary") == "looks good" and written.get("approved") is True,
+                  written)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(out_path):
+        os.unlink(out_path)
+
+# -- unwritable --out directory: /submit 500s before any side effect --------
+bad_out_root = _tempfile.mkdtemp(prefix="lr-gone-")
+bad_out = os.path.join(bad_out_root, "missing", "out.json")
+proc, patch_path = start_server(["--out", bad_out])
+try:
+    url = read_url(proc)
+    check("server: unwritable-out run still starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: unwritable --out returns 500", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            body = json.loads(e.read().decode())
+            check("server: unwritable --out returns 500", e.code == 500, e.code)
+            check("server: unwritable --out reports the error", body.get("ok") is False and "cannot write --out" in body.get("error", ""), body)
+        check("server: unwritable --out does not crash the server", proc.poll() is None, proc.poll())
+        check("server: no OUT file appears", not os.path.exists(bad_out), bad_out)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(bad_out_root, ignore_errors=True)
+
+# -- client disconnect mid-response: --once still exits, OUT still lands ----
+dc_fd, dc_out = _tempfile.mkstemp(suffix=".json")
+os.close(dc_fd)
+os.unlink(dc_out)
+proc, patch_path = start_server(["--once", "--out", dc_out])
+try:
+    url = read_url(proc)
+    check("server: disconnect run starts", bool(url), url)
+    if url:
+        host_port = url.split("//", 1)[1]
+        host, port_s = host_port.split(":")
+        body = b'{"meta":{},"summary":"gone","approved":true,"comments":[]}'
+        raw = (b"POST /submit HTTP/1.1\r\nHost: " + host_port.encode()
+               + b"\r\nContent-Type: application/json\r\nContent-Length: "
+               + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+        s = _socket.create_connection((host, int(port_s)), timeout=5)
+        s.sendall(raw)
+        s.close()  # walk away without reading the response
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: --once exits despite client disconnect", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: --once exits despite client disconnect", "did not exit within 5s")
+        check("server: OUT is durable despite client disconnect",
+              os.path.exists(dc_out) and json.load(open(dc_out)).get("summary") == "gone", dc_out)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(dc_out):
+        os.unlink(dc_out)
+
+# -- submission slot: concurrent posts don't race, sequential rounds still work
+slot_fd, slot_out = _tempfile.mkstemp(suffix=".json")
+os.close(slot_fd)
+os.unlink(slot_out)
+proc, patch_path = start_server(["--out", slot_out])  # stay-alive: no --once
+try:
+    url = read_url(proc)
+    check("server: slot run starts", bool(url), url)
+    if url:
+        def submit_once(results, idx):
+            req = _urlrequest.Request(
+                f"{url}/submit", data=b'{"meta":{},"summary":"race","approved":false,"comments":[]}',
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            try:
+                with _urlrequest.urlopen(req, timeout=5) as resp:
+                    results[idx] = resp.status
+            except _urlerror.HTTPError as e:
+                results[idx] = e.code
+            except Exception as e:
+                results[idx] = str(e)
+        results = [None] * 4
+        threads = [_threading.Thread(target=submit_once, args=(results, i)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        check("server: concurrent submits each get 200 or 409, nothing else",
+              all(r in (200, 409) for r in results), results)
+        check("server: at least one concurrent submit wins", 200 in results, results)
+        check("server: OUT is whole JSON after the race",
+              os.path.exists(slot_out) and json.load(open(slot_out)).get("summary") == "race", slot_out)
+        # sequential second round on a stay-alive server must still be allowed
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"round 2","approved":true,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: a sequential second round still returns 200", resp.status == 200, resp.status)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(slot_out):
+        os.unlink(slot_out)
+
+# -- --out pointing at an existing DIRECTORY: preflight must 500, not post ---
+dir_out = _tempfile.mkdtemp(prefix="lr-isdir-")
+proc, patch_path = start_server(["--out", dir_out])
+try:
+    url = read_url(proc)
+    check("server: dir-out run still starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: --out as existing directory returns 500", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            body = json.loads(e.read().decode())
+            check("server: --out as existing directory returns 500", e.code == 500, e.code)
+            check("server: --out as existing directory names the problem",
+                  body.get("ok") is False and "cannot write --out" in body.get("error", ""), body)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(dir_out, ignore_errors=True)
+
+# -- PR-mode startup with gh unavailable: the RuntimeError from sh() must ----
+# propagate to main()'s handler (a one-line stderr error, exit 1) instead of
+# resolve_gh/get_meta swallowing it and starting degraded (gh=None).
+fake_gh_dir = make_fake_gh_dir()
+gh_fail_env = dict(os.environ)
+gh_fail_env["PATH"] = fake_gh_dir + os.pathsep + os.environ.get("PATH", "")
+pr_out_fd, pr_out_path = _tempfile.mkstemp(suffix=".json")
+os.close(pr_out_fd)
+os.unlink(pr_out_path)
+proc = _subprocess.Popen(
+    [sys.executable, server_path, "999999", "--out", pr_out_path],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=gh_fail_env,
+)
+try:
+    try:
+        rc = proc.wait(timeout=5)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        rc = None
+    output = proc.stdout.read()
+    check("server: PR-mode startup with gh unavailable exits 1 (not starting degraded)",
+          rc == 1, rc)
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    check("server: PR-mode startup with gh unavailable prints a one-line stderr error, no traceback",
+          len(lines) == 1 and lines[0].startswith("error:") and "Traceback" not in output, output)
+    check("server: PR-mode startup with gh unavailable never serves (no LOCAL_REVIEW_URL)",
+          "LOCAL_REVIEW_URL=" not in output, output)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    _shutil.rmtree(fake_gh_dir, ignore_errors=True)
+    if os.path.exists(pr_out_path):
+        os.unlink(pr_out_path)
+
+# -- PR-mode startup where `gh pr diff` succeeds but `gh pr view` fails: the -
+# propagation being pinned is specifically get_meta/resolve_gh's — get_diff
+# succeeding must not let a later gh failure start the server degraded.
+fake_gh_dir_v = make_fake_gh_dir(diff_ok=True)
+gh_view_env = dict(os.environ)
+gh_view_env["PATH"] = fake_gh_dir_v + os.pathsep + os.environ.get("PATH", "")
+proc = _subprocess.Popen(
+    [sys.executable, server_path, "999999"],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=gh_view_env,
+)
+try:
+    try:
+        rc = proc.wait(timeout=5)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        rc = None
+    output = proc.stdout.read()
+    check("server: gh-view failure after a good diff exits 1 (get_meta/resolve_gh propagate)",
+          rc == 1, rc)
+    check("server: gh-view failure never serves (no LOCAL_REVIEW_URL)",
+          "LOCAL_REVIEW_URL=" not in output and "Traceback" not in output, output)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    _shutil.rmtree(fake_gh_dir_v, ignore_errors=True)
+
+# -- --diff-file run still works with gh absent/failing: resolve_gh/get_meta -
+# short-circuit on diff_file before ever calling sh(), so this path must be
+# unaffected by gh being broken.
+fake_gh_dir2 = make_fake_gh_dir()
+gh_fail_env2 = dict(os.environ)
+gh_fail_env2["PATH"] = fake_gh_dir2 + os.pathsep + os.environ.get("PATH", "")
+proc2, patch2 = start_server(["--once"], env=gh_fail_env2)
+try:
+    url2 = read_url(proc2)
+    check("server: --diff-file run still works with gh absent/failing (fallback preserved)",
+          bool(url2), url2)
+finally:
+    if proc2.poll() is None:
+        proc2.terminate()
+        try:
+            proc2.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc2.kill()
+            proc2.wait(timeout=5)
+    os.unlink(patch2)
+    _shutil.rmtree(fake_gh_dir2, ignore_errors=True)
 
 print(f"# {pass_count} passed, {fail_count} failed")
 sys.exit(1 if fail_count else 0)
