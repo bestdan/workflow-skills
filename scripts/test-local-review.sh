@@ -275,6 +275,51 @@ index 1111111..2222222 100644
 check("generated: foo.py not flagged generated", parse_diff(diff_not_generated)[0]["generated"] is False,
       parse_diff(diff_not_generated)[0]["generated"])
 
+# --- table-driven: GENERATED pattern coverage across languages/ecosystems ---
+# One multi-file diff fixture built from a path list, rather than 24 hand-
+# written fixtures, keeps this table cheap to extend.
+GENERATED_TRUE_PATHS = [
+    "uv.lock", "package-lock.json", "go.sum",
+    "api.pb.go", "models_pb2.py", "models_pb2_grpc.py",
+    "types.generated.ts", "src/__generated__/schema.ts", "app/generated/client.py",
+    "bundle.min.js", "styles.min.css", "bundle.js.map",
+    "tests/__snapshots__/foo.test.js.snap", "widget.snap",
+    "vendor/lib.js", "third/vendor/lib.js",
+    "foo.g.dart", "foo.freezed.dart",
+]
+GENERATED_FALSE_PATHS = [
+    "src/vendors.py", "lockfile_test.go", "generated_report.md", "minify.js",
+    "snapshot.py", "golden.snapshot.md",
+]
+
+
+def diff_for_paths(paths):
+    parts = []
+    for p in paths:
+        parts.append(
+            f"diff --git a/{p} b/{p}\n"
+            f"index 1111111..2222222 100644\n"
+            f"--- a/{p}\n"
+            f"+++ b/{p}\n"
+            f"@@ -1,1 +1,1 @@\n"
+            f"-old\n"
+            f"+new\n"
+        )
+    return "".join(parts)
+
+
+table_paths = GENERATED_TRUE_PATHS + GENERATED_FALSE_PATHS
+table_files = parse_diff(diff_for_paths(table_paths))
+check("generated table: one file per path", len(table_files) == len(table_paths),
+      f"got {len(table_files)}")
+table_by_path = {f["new"]: f["generated"] for f in table_files}
+for p in GENERATED_TRUE_PATHS:
+    check(f"generated table: {p} flagged generated", table_by_path.get(p) is True,
+          table_by_path.get(p))
+for p in GENERATED_FALSE_PATHS:
+    check(f"generated table: {p} not flagged generated (near-miss stays expanded)",
+          table_by_path.get(p) is False, table_by_path.get(p))
+
 # --- empty input -> [] --------------------------------------------------------
 check("empty input: returns []", parse_diff("") == [], parse_diff(""))
 
