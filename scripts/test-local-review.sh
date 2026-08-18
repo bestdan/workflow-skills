@@ -147,7 +147,8 @@ rename to new_name.py
 """
 f = parse_diff(diff_renamed)[0]
 check("rename: status renamed", f["status"] == "renamed", f["status"])
-check("rename: old != new", f["old"] != f["new"], (f["old"], f["new"]))
+check("rename: exact old path", f["old"] == "old_name.py", f["old"])
+check("rename: exact new path", f["new"] == "new_name.py", f["new"])
 
 # --- Binary files line -> binary True, no rows -------------------------------
 diff_binary = """diff --git a/img.png b/img.png
@@ -194,7 +195,7 @@ diff_multifile = """diff --git a/one.py b/one.py
 index 1111111..2222222 100644
 --- a/one.py
 +++ b/one.py
-@@ -1,0 +1,2 @@
+@@ -0,0 +1,2 @@
 +added one
 +added two
 diff --git a/two.py b/two.py
