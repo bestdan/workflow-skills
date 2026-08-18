@@ -918,16 +918,20 @@ class Handler(BaseHTTPRequestHandler):
             os.unlink(tmp_path)
             raise
 
-        # Schedule the --once shutdown before touching the response: the review
-        # is durably saved at this point, and a client disconnect mid-response
-        # (BrokenPipeError) must not leave the server running.
-        if Handler.once and Handler.srv:
-            threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
-                                     "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
+        # The --once shutdown is scheduled in a finally AFTER the response
+        # write attempt: in the try so the flushed 200 can't race interpreter
+        # exit (daemon handler threads die with serve_forever), in the finally
+        # so a client disconnect mid-response still shuts the server down.
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
+                                         "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
+            self.wfile.flush()
+        finally:
+            if Handler.once and Handler.srv:
+                threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
 
 
 
