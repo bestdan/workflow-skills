@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.90.0] - 2026-08-18
+
+### Features
+
+- generalize generated-file detection beyond Flutter (46ae349)
+
 ## [1.89.0] - 2026-08-18
 
 ### Features
