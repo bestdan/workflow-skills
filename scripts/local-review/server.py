@@ -921,11 +921,13 @@ class Handler(BaseHTTPRequestHandler):
         # Durability is signalled via self._durable (set right after
         # os.replace), not a return value: a BrokenPipeError while writing the
         # response must not release the slot of a completed --once submission.
+        # A durable stay-alive submission released its own slot before the
+        # response (see _do_submit); this finally only covers failure paths.
         self._durable = False
         try:
             self._do_submit(payload)
         finally:
-            if not (self._durable and Handler.once):
+            if not self._durable:
                 with Handler._submit_lock:
                     Handler._submitted = False
 
@@ -995,6 +997,14 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump(payload, f, indent=2)
             os.replace(tmp_path, self.out_path)
             self._durable = True
+            # Release the slot HERE for a stay-alive server, before the
+            # response goes out: a sequential caller that has seen the 200 must
+            # never race the release (do_POST's finally runs after the flush,
+            # and CI hit exactly that window as a spurious 409). A --once
+            # server keeps the slot; do_POST's finally handles failure paths.
+            if not Handler.once:
+                with Handler._submit_lock:
+                    Handler._submitted = False
         except BaseException:
             try:
                 os.close(fd)
