@@ -663,7 +663,7 @@ try:
             bad("server: GET /<token> (no slash) redirects to /<token>/", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: GET /<token> (no slash) redirects to /<token>/",
-                  e.code == 301 and e.headers.get("Location", "").endswith(f"{token_path}/"),
+                  e.code == 301 and e.headers.get("Location", "") == token_path,
                   (e.code, e.headers.get("Location")))
 
         req = _urlrequest.Request(
