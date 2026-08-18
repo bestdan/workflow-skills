@@ -46,6 +46,7 @@ OUT=<scratch>/lr_comments.json; rm -f "$OUT"
 nohup python3 "${CLAUDE_PLUGIN_ROOT}/scripts/local-review/server.py" \
   <PR [--repo o/r] | --diff-file PATCH> \
   --port <port> --out "$OUT" > <scratch>/lr_server.log 2>&1 &
+echo $! > <scratch>/lr_server.pid
 ```
 
 Pick a port unlikely to collide (e.g. 8765; if the log shows "Address already
@@ -60,8 +61,8 @@ Then open `http://127.0.0.1:<port>` for the user:
 - Without browser tooling: print the URL and ask the user to open it. The tool
   is fully usable by hand.
 
-The server keeps running after submit — kill the background process once the
-round is collected.
+The server keeps running after submit — once the round is collected, kill it
+via the recorded PID: `kill "$(cat <scratch>/lr_server.pid)"`.
 
 ## 3. What the user does in the UI
 
