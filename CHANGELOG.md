@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.88.0] - 2026-08-18
+
+### Features
+
+- harden the agent-facing handoff contract (3a6ae7d)
+
 ## [1.87.0] - 2026-08-18
 
 ### Features
