@@ -130,6 +130,7 @@ fi
 run scripts/test-task-scan.sh
 run scripts/test-validate.sh
 run scripts/test-plan-graph.sh
+run scripts/test-local-review.sh
 [[ "$fast" == 1 ]] || run scripts/test-research-spike.sh
 run scripts/test-claim-scan.sh
 run scripts/test-linear-archive.sh
