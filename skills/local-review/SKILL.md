@@ -72,6 +72,10 @@ means startup failed (the log's `error:` line says why — usually a `gh`
 failure in PR mode), and a silent-but-alive server was killed after the 10s
 timeout. Either way, report the log's error instead of proceeding.
 
+The URL carries a random per-launch token (`http://127.0.0.1:<port>/<token>/`);
+never rebuild it from the port alone, and don't paste it anywhere persistent
+(chat history, a committed file, a ticket).
+
 Then open the reported URL for the user:
 
 - With browser tooling available (`mcp__claude-in-chrome__*`): create a tab

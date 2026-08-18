@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -360,8 +361,8 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     </div>
   </div>
 </div>
-<script src="/vendor/highlight.min.js"></script>
-<script src="/vendor/dart.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
+<script src="vendor/dart.min.js"></script>
 <script>
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
@@ -633,7 +634,7 @@ let refreshArmed = false, refreshArmTimer = null;
 function disarmRefresh(){ refreshArmed = false; clearTimeout(refreshArmTimer); refreshBtn.textContent = REFRESH_LABEL; }
 async function checkSync(){
   try{
-    const r = await fetch('/state', {cache:'no-store'});
+    const r = await fetch('state', {cache:'no-store'});
     if(!r.ok) return;
     const s = await r.json();
     refreshBtn.hidden = !s.stale;
@@ -643,7 +644,7 @@ async function checkSync(){
 async function doRefresh(){
   refreshBtn.disabled = true; refreshBtn.textContent = 'Refreshing…';
   try{
-    const r = await fetch('/refresh', {method:'POST'});
+    const r = await fetch('refresh', {method:'POST'});
     if(!r.ok) throw new Error(await r.text());
     location.reload();
   }catch(e){
@@ -692,7 +693,7 @@ async function doSubmit(approved){          // step 2: submit the round, optiona
   const payload = {meta:META, summary:finishSummary.value.trim(), approved, comments:Object.values(comments)};
   finishSubmit.disabled = true; finishApprove.disabled = true;
   try{
-    const res = await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
     const info = await res.json().catch(()=>({}));
     finishBg.classList.remove('show');
@@ -730,6 +731,8 @@ class Handler(BaseHTTPRequestHandler):
     page = b""
     out_path = "pr_comments.json"
     vendor_dir = ""
+    token = ""  # random path segment every route is mounted under
+    port = 0  # bound port, needed to validate Origin on POSTs
     # source the diff was generated from, so the server can recompute it on demand
     pr = None
     repo = None
@@ -772,19 +775,50 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _route_path(self):
+        # Every route is mounted under /<token>/. A request whose first path
+        # segment isn't the token gets a bare 404 from the caller — this just
+        # strips the prefix so route code below is unchanged. Returns None
+        # when the token segment doesn't match.
+        prefix = "/" + Handler.token
+        p = self.path
+        if p == prefix:
+            return "/"
+        if p.startswith(prefix + "/"):
+            return p[len(prefix):]
+        return None
+
+    def _origin_ok(self):
+        # Belt-and-braces behind the path token: reject a cross-origin POST
+        # outright. Requests with no Origin header (curl, urllib, and the
+        # served page's own same-origin fetches, which may omit it) pass.
+        sfs = self.headers.get("Sec-Fetch-Site")
+        if sfs == "cross-site":
+            return False
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        allowed = {f"http://127.0.0.1:{Handler.port}", f"http://localhost:{Handler.port}"}
+        return origin in allowed
+
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path = self._route_path()
+        if path is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        if path in ("/", "/index.html"):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(self.page)
             return
-        if self.path == "/state":
+        if path == "/state":
             sig = self.current_sig()
             self._send_json(200, {"stale": sig != Handler.diff_sig, "sig": sig})
             return
-        if self.path.startswith("/vendor/"):
-            name = self.path[len("/vendor/"):].split("?", 1)[0]
+        if path.startswith("/vendor/"):
+            name = path[len("/vendor/"):].split("?", 1)[0]
             fp = os.path.join(self.vendor_dir, name)
             if re.fullmatch(r"[\w.\-]+\.js", name) and os.path.isfile(fp):
                 with open(fp, "rb") as f:
@@ -799,7 +833,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if self.path == "/refresh":
+        path = self._route_path()
+        if path is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        if not self._origin_ok():
+            self.send_response(403)
+            self.end_headers()
+            return
+        if path == "/refresh":
             try:
                 diff = get_diff(Handler.pr, Handler.repo, Handler.diff_file)
                 meta = get_meta(Handler.pr, Handler.repo, Handler.diff_file)
@@ -815,7 +858,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, {"ok": True, "files": len(files)})
             return
-        if self.path != "/submit":
+        if path != "/submit":
             self.send_response(404)
             self.end_headers()
             return
@@ -943,19 +986,38 @@ def build_page(files, meta):
     if meta.get("number"):
         title = f"#{meta['number']} · {meta.get('title','')}"
     if meta.get("url"):
-        title_html = f'<a href="{meta["url"]}" target="_blank">#{meta.get("number","")}</a> {esc_py(meta.get("title",""))}'
+        title_html = f'<a href="{esc_py(meta["url"])}" target="_blank">#{meta.get("number","")}</a> {esc_py(meta.get("title",""))}'
     else:
         title_html = esc_py(meta.get("title", "local diff"))
     html = (PAGE
             .replace("__TITLE__", esc_py(title))
             .replace("__TITLE_HTML__", title_html)
-            .replace("/*__DIFF_JSON__*/[]", json.dumps(files))
-            .replace("/*__META_JSON__*/{}", json.dumps(meta)))
+            .replace("/*__DIFF_JSON__*/[]", _json_for_script(files))
+            .replace("/*__META_JSON__*/{}", _json_for_script(meta)))
     return html.encode("utf-8")
 
 
 def esc_py(s):
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _json_for_script(obj):
+    # Interpolated into a <script> element: a diff line containing </script>
+    # (or a raw U+2028/U+2029 line terminator, which json.dumps leaves as-is)
+    # must not be able to break out of the script context or the JS string.
+    return (
+        json.dumps(obj)
+        .replace("<", "\\u003c")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def main():
@@ -990,12 +1052,15 @@ def main():
     Handler.diff_sig = source_sig(diff)
     Handler.gh = gh
     Handler.once = args.once
+    Handler.token = secrets.token_urlsafe(16)
 
     srv = ThreadingHTTPServer(("127.0.0.1", args.port or 0), Handler)
     Handler.srv = srv
     port = srv.server_address[1]
-    print(f"PR review UI: http://127.0.0.1:{port}   ({len(files)} files)  out={args.out}", flush=True)
-    print(f"LOCAL_REVIEW_URL=http://127.0.0.1:{port}", flush=True)
+    Handler.port = port
+    url = f"http://127.0.0.1:{port}/{Handler.token}/"
+    print(f"PR review UI: {url}   ({len(files)} files)  out={args.out}", flush=True)
+    print(f"LOCAL_REVIEW_URL={url}", flush=True)
     srv.serve_forever()
 
 
