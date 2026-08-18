@@ -294,6 +294,7 @@ except Exception as e:
 import re as _re
 import selectors as _selectors
 import shutil as _shutil
+import socket as _socket
 import subprocess as _subprocess
 import tempfile as _tempfile
 import threading as _threading
@@ -482,6 +483,43 @@ finally:
             proc.wait(timeout=5)
     os.unlink(patch_path)
     _shutil.rmtree(bad_out_root, ignore_errors=True)
+
+# -- client disconnect mid-response: --once still exits, OUT still lands ----
+dc_fd, dc_out = _tempfile.mkstemp(suffix=".json")
+os.close(dc_fd)
+os.unlink(dc_out)
+proc, patch_path = start_server(["--once", "--out", dc_out])
+try:
+    url = read_url(proc)
+    check("server: disconnect run starts", bool(url), url)
+    if url:
+        host_port = url.split("//", 1)[1]
+        host, port_s = host_port.split(":")
+        body = b'{"meta":{},"summary":"gone","approved":true,"comments":[]}'
+        raw = (b"POST /submit HTTP/1.1\r\nHost: " + host_port.encode()
+               + b"\r\nContent-Type: application/json\r\nContent-Length: "
+               + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+        s = _socket.create_connection((host, int(port_s)), timeout=5)
+        s.sendall(raw)
+        s.close()  # walk away without reading the response
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: --once exits despite client disconnect", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: --once exits despite client disconnect", "did not exit within 5s")
+        check("server: OUT is durable despite client disconnect",
+              os.path.exists(dc_out) and json.load(open(dc_out)).get("summary") == "gone", dc_out)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(dc_out):
+        os.unlink(dc_out)
 
 # -- submission slot: concurrent posts don't race, sequential rounds still work
 slot_fd, slot_out = _tempfile.mkstemp(suffix=".json")

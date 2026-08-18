@@ -833,11 +833,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(409, {"ok": False, "error": "a submission is already in progress or completed"})
                 return
             Handler._submitted = True
-        done = False
+        # Durability is signalled via self._durable (set right after
+        # os.replace), not a return value: a BrokenPipeError while writing the
+        # response must not release the slot of a completed --once submission.
+        self._durable = False
         try:
-            done = self._do_submit(payload)
+            self._do_submit(payload)
         finally:
-            if not (done and Handler.once):
+            if not (self._durable and Handler.once):
                 with Handler._submit_lock:
                     Handler._submitted = False
 
@@ -906,6 +909,7 @@ class Handler(BaseHTTPRequestHandler):
             with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2)
             os.replace(tmp_path, self.out_path)
+            self._durable = True
         except BaseException:
             try:
                 os.close(fd)
@@ -924,7 +928,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
                                      "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
-        return True
 
 
 
