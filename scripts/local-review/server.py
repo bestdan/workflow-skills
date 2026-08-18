@@ -737,6 +737,11 @@ class Handler(BaseHTTPRequestHandler):
     gh = None  # {owner, repo, pr, sha} when the diff is an associated PR, else None
     srv = None  # the running server, set by main() so a handler can shut it down
     once = False  # shut the server down after a successful /submit
+    # Serializes submissions across handler threads: the browser's double-click
+    # guard doesn't bind other local callers, and concurrent /submit posts
+    # would duplicate GitHub comments and race the OUT write.
+    _submit_lock = threading.Lock()
+    _submitted = False
 
     def log_message(self, *a):
         pass
@@ -820,6 +825,23 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(str(e).encode())
             return
+        # Claim the single submission slot: concurrent posts are rejected, and
+        # in --once mode a completed submission keeps the slot (the server is
+        # going down; stragglers get 409 instead of a duplicate post).
+        with Handler._submit_lock:
+            if Handler._submitted:
+                self._send_json(409, {"ok": False, "error": "a submission is already in progress or completed"})
+                return
+            Handler._submitted = True
+        done = False
+        try:
+            done = self._do_submit(payload)
+        finally:
+            if not (done and Handler.once):
+                with Handler._submit_lock:
+                    Handler._submitted = False
+
+    def _do_submit(self, payload):
         # The temp file is created before posting, not just before the write: an
         # unwritable/missing --out directory is then caught up front, instead of
         # after comments were already posted (a 500 with nothing posted is safe
@@ -902,6 +924,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
                                      "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
+        return True
+
 
 
 def build_page(files, meta):

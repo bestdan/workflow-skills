@@ -296,6 +296,7 @@ import selectors as _selectors
 import shutil as _shutil
 import subprocess as _subprocess
 import tempfile as _tempfile
+import threading as _threading
 import time as _time
 import urllib.error as _urlerror
 import urllib.request as _urlrequest
@@ -481,6 +482,57 @@ finally:
             proc.wait(timeout=5)
     os.unlink(patch_path)
     _shutil.rmtree(bad_out_root, ignore_errors=True)
+
+# -- submission slot: concurrent posts don't race, sequential rounds still work
+slot_fd, slot_out = _tempfile.mkstemp(suffix=".json")
+os.close(slot_fd)
+os.unlink(slot_out)
+proc, patch_path = start_server(["--out", slot_out])  # stay-alive: no --once
+try:
+    url = read_url(proc)
+    check("server: slot run starts", bool(url), url)
+    if url:
+        def submit_once(results, idx):
+            req = _urlrequest.Request(
+                f"{url}/submit", data=b'{"meta":{},"summary":"race","approved":false,"comments":[]}',
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            try:
+                with _urlrequest.urlopen(req, timeout=5) as resp:
+                    results[idx] = resp.status
+            except _urlerror.HTTPError as e:
+                results[idx] = e.code
+            except Exception as e:
+                results[idx] = str(e)
+        results = [None] * 4
+        threads = [_threading.Thread(target=submit_once, args=(results, i)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        check("server: concurrent submits each get 200 or 409, nothing else",
+              all(r in (200, 409) for r in results), results)
+        check("server: at least one concurrent submit wins", 200 in results, results)
+        check("server: OUT is whole JSON after the race",
+              os.path.exists(slot_out) and json.load(open(slot_out)).get("summary") == "race", slot_out)
+        # sequential second round on a stay-alive server must still be allowed
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"round 2","approved":true,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: a sequential second round still returns 200", resp.status == 200, resp.status)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(slot_out):
+        os.unlink(slot_out)
 
 # -- --out pointing at an existing DIRECTORY: preflight must 500, not post ---
 dir_out = _tempfile.mkdtemp(prefix="lr-isdir-")
