@@ -401,10 +401,11 @@ const root = document.getElementById('root');
 
 // Syntax highlighting via highlight.js (vendored). Pick a language per file from
 // its extension; fall back to auto-detection when the extension is unknown.
-// Every value here must name a language grmr_-registered by the vendored
-// highlight.min.js (or by vendor/dart.min.js for dart) -- an extension mapped
-// to a grammar the bundle lacks silently renders unhighlighted instead of
-// falling back to hljs.highlightAuto(). Verified against the bundle with:
+// Runtime contract: langForFile guards every mapping with hljs.getLanguage(),
+// so a value naming a language the bundle lacks falls back to highlightAuto —
+// wrong values degrade quality, never break rendering. getLanguage also
+// accepts registered aliases, so the grammar-name grep below is an audit aid
+// (the factory names), not the complete set of accepted names:
 //   grep -o 'grmr_[a-zA-Z0-9_]*' vendor/highlight.min.js | sort -u
 const LANG_MAP = {
   dart:'dart', swift:'swift', kt:'kotlin', kts:'kotlin', java:'java',
