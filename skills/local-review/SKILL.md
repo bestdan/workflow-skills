@@ -45,15 +45,15 @@ expand them.
 OUT=<scratch>/lr_comments.json; rm -f "$OUT"
 nohup python3 "${CLAUDE_PLUGIN_ROOT}/scripts/local-review/server.py" \
   <PR [--repo o/r] | --diff-file PATCH> \
-  --port <port> --out "$OUT" > <scratch>/lr_server.log 2>&1 &
+  --once --out "$OUT" > <scratch>/lr_server.log 2>&1 &
 echo $! > <scratch>/lr_server.pid
 ```
 
-Pick a port unlikely to collide (e.g. 8765; if the log shows "Address already
-in use", relaunch on another). Confirm startup by reading the log — it prints
-`PR review UI: http://127.0.0.1:<port>` on success.
+The server picks its own port and reports it. Confirm startup by grepping the
+log for the machine-readable line — `grep LOCAL_REVIEW_URL= <scratch>/lr_server.log`
+— and use that URL verbatim.
 
-Then open `http://127.0.0.1:<port>` for the user:
+Then open the reported URL for the user:
 
 - With browser tooling available (`mcp__claude-in-chrome__*`): create a tab
   with `tabs_create_mcp`, `navigate` to the URL, and confirm it rendered with
@@ -61,8 +61,8 @@ Then open `http://127.0.0.1:<port>` for the user:
 - Without browser tooling: print the URL and ask the user to open it. The tool
   is fully usable by hand.
 
-The server keeps running after submit — once the round is collected, kill it
-via the recorded PID: `kill "$(cat <scratch>/lr_server.pid)"`.
+With `--once` the server shuts itself down after a successful submit. The
+recorded PID is only cleanup for an abandoned round: `kill "$(cat <scratch>/lr_server.pid)"`.
 
 ## 3. What the user does in the UI
 

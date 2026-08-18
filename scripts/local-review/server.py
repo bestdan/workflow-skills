@@ -15,6 +15,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -22,7 +24,10 @@ GENERATED = re.compile(r"\.(g|gr|gql|freezed|config|mocks|fakes|req|data|var|sch
 
 
 def sh(args):
-    return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(args, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"command failed: {' '.join(args)}: {out.stderr.strip()}")
+    return out.stdout
 
 
 def get_diff(pr, repo, diff_file):
@@ -680,6 +685,7 @@ document.getElementById('finishCancel').onclick = () => finishBg.classList.remov
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
 async function doSubmit(approved){          // step 2: submit the round, optionally approving
   const payload = {meta:META, summary:finishSummary.value.trim(), approved, comments:Object.values(comments)};
+  finishSubmit.disabled = true; finishApprove.disabled = true;
   try{
     const res = await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
@@ -692,7 +698,10 @@ async function doSubmit(approved){          // step 2: submit the round, optiona
     if(info.github_failed) msg += ` · ${info.github_failed} GitHub post(s) failed`;
     toast(msg);
     submitBtn.textContent = approved ? 'Approved ✓' : 'Submitted ✓'; submitBtn.disabled = true;
-  }catch(e){ toast('Submit failed: '+e.message); }
+  }catch(e){
+    toast('Submit failed: '+e.message);
+    finishSubmit.disabled = false; finishApprove.disabled = false;
+  }
 }
 finishSubmit.onclick = () => doSubmit(false);
 finishApprove.onclick = () => doSubmit(true);
@@ -724,6 +733,8 @@ class Handler(BaseHTTPRequestHandler):
     _last_sig = None
     _last_check = 0.0
     gh = None  # {owner, repo, pr, sha} when the diff is an associated PR, else None
+    srv = None  # the running server, set by main() so a handler can shut it down
+    once = False  # shut the server down after a successful /submit
 
     def log_message(self, *a):
         pass
@@ -782,6 +793,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 diff = get_diff(Handler.pr, Handler.repo, Handler.diff_file)
                 meta = get_meta(Handler.pr, Handler.repo, Handler.diff_file)
+                Handler.gh = resolve_gh(Handler.pr, Handler.repo, Handler.diff_file)
                 meta["github"] = bool(Handler.gh)
                 files = parse_diff(diff)
                 Handler.page = build_page(files, meta)
@@ -806,13 +818,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(str(e).encode())
             return
-        with open(self.out_path, "w") as f:
-            json.dump(payload, f, indent=2)
         # human-readable to stdout
         header = "REVIEW APPROVED" if payload.get("approved") else "REVIEW SUBMITTED"
         print(f"\n===== {header} =====", flush=True)
         if payload.get("approved"):
-            print("APPROVED: ensure the PR is pushed to GitHub and marked ready for review.", flush=True)
+            if Handler.gh:
+                print("APPROVED: ensure the PR is pushed to GitHub and marked ready for review.", flush=True)
+            else:
+                print("APPROVED: local review — no PR to update.", flush=True)
         if payload.get("summary"):
             print(f"SUMMARY: {payload['summary']}", flush=True)
         for c in payload.get("comments", []):
@@ -822,7 +835,9 @@ class Handler(BaseHTTPRequestHandler):
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
-        # Post the GitHub-flagged comments to the PR now, at submit time.
+        # Post the GitHub-flagged comments to the PR before writing out_path: the
+        # skill kills this process the moment out_path appears, so posting first
+        # keeps a slow multi-comment loop from being cut off mid-post.
         gh_posted, gh_failed = [], []
         if Handler.gh:
             for c in payload.get("comments", []):
@@ -840,11 +855,27 @@ class Handler(BaseHTTPRequestHandler):
                 for f in gh_failed:
                     print(f"  FAILED {f['file']}:{f['line']}: {f['error']}", flush=True)
         print("============================\n", flush=True)
+
+        if Handler.gh:
+            payload["github_posted"] = gh_posted
+            payload["github_failed"] = gh_failed
+        out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp_path, self.out_path)
+        except BaseException:
+            os.unlink(tmp_path)
+            raise
+
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
                                      "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
+        if Handler.once and Handler.srv:
+            threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
 
 
 def build_page(files, meta):
@@ -872,17 +903,22 @@ def main():
     ap.add_argument("pr", nargs="?", help="PR number")
     ap.add_argument("--repo")
     ap.add_argument("--diff-file")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--out", default="pr_comments.json")
+    ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
     args = ap.parse_args()
 
     if not args.pr and not args.diff_file:
         print("error: provide a PR number or --diff-file", file=sys.stderr)
         sys.exit(2)
 
-    diff = get_diff(args.pr, args.repo, args.diff_file)
-    meta = get_meta(args.pr, args.repo, args.diff_file)
-    gh = resolve_gh(args.pr, args.repo, args.diff_file)
+    try:
+        diff = get_diff(args.pr, args.repo, args.diff_file)
+        meta = get_meta(args.pr, args.repo, args.diff_file)
+        gh = resolve_gh(args.pr, args.repo, args.diff_file)
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     meta["github"] = bool(gh)
     files = parse_diff(diff)
     Handler.page = build_page(files, meta)
@@ -893,9 +929,13 @@ def main():
     Handler.diff_file = args.diff_file
     Handler.diff_sig = source_sig(diff)
     Handler.gh = gh
+    Handler.once = args.once
 
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"PR review UI: http://127.0.0.1:{args.port}   ({len(files)} files)  out={args.out}", flush=True)
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port or 0), Handler)
+    Handler.srv = srv
+    port = srv.server_address[1]
+    print(f"PR review UI: http://127.0.0.1:{port}   ({len(files)} files)  out={args.out}", flush=True)
+    print(f"LOCAL_REVIEW_URL=http://127.0.0.1:{port}", flush=True)
     srv.serve_forever()
 
 

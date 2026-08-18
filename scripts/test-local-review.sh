@@ -28,6 +28,8 @@ trap 'rm -rf "$tmp"' EXIT
 
 cat >"$tmp/test_parse_diff.py" <<'PYEOF'
 import importlib.util
+import json
+import os
 import sys
 
 server_path = sys.argv[1]
@@ -275,6 +277,128 @@ check("generated: foo.py not flagged generated", parse_diff(diff_not_generated)[
 
 # --- empty input -> [] --------------------------------------------------------
 check("empty input: returns []", parse_diff("") == [], parse_diff(""))
+
+# --- sh() on a failing command raises RuntimeError, not CalledProcessError --
+try:
+    server.sh(["false"])
+    bad("sh(): failing command raises", "no exception raised")
+except RuntimeError as e:
+    check("sh(): failing command raises RuntimeError with the command in the message",
+          "false" in str(e), str(e))
+except Exception as e:
+    bad("sh(): failing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
+
+# --- server-behavior cases: real subprocesses, one python3 process launches ---
+# them all. Each server is started with --diff-file (no `gh` needed) and no
+# --port, so the OS picks a free port and the server reports it.
+import re as _re
+import subprocess as _subprocess
+import tempfile as _tempfile
+import time as _time
+import urllib.error as _urlerror
+import urllib.request as _urlrequest
+
+PATCH = """diff --git a/foo.py b/foo.py
+index 1111111..2222222 100644
+--- a/foo.py
++++ b/foo.py
+@@ -1,3 +1,3 @@ def foo():
+ line one
+-line two
++line two changed
+ line three
+"""
+
+
+def start_server(extra_args):
+    patch_fd, patch_path = _tempfile.mkstemp(suffix=".patch")
+    with os.fdopen(patch_fd, "w") as f:
+        f.write(PATCH)
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--diff-file", patch_path] + extra_args,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+    )
+    return proc, patch_path
+
+
+def read_url(proc, deadline=5.0):
+    start = _time.monotonic()
+    while _time.monotonic() - start < deadline:
+        line = proc.stdout.readline()
+        if not line:
+            if proc.poll() is not None:
+                return None
+            continue
+        m = _re.search(r"LOCAL_REVIEW_URL=(\S+)", line)
+        if m:
+            return m.group(1)
+    return None
+
+
+# -- launching without --port autoselects a free port and prints the URL ----
+proc1, patch1 = start_server([])
+proc2, patch2 = start_server([])
+try:
+    url1 = read_url(proc1)
+    url2 = read_url(proc2)
+    check("server: autoselect prints LOCAL_REVIEW_URL for server1", bool(url1), url1)
+    check("server: autoselect prints LOCAL_REVIEW_URL for server2", bool(url2), url2)
+    check("server: two autoselected servers get distinct ports",
+          bool(url1) and bool(url2) and url1 != url2, (url1, url2))
+finally:
+    for p in (proc1, proc2):
+        p.terminate()
+        try:
+            p.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=5)
+    for p in (patch1, patch2):
+        os.unlink(p)
+
+# -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
+out_fd, out_path = _tempfile.mkstemp(suffix=".json")
+os.close(out_fd)
+os.unlink(out_path)  # server must create it; --once poller checks for existence
+proc, patch_path = start_server(["--once", "--out", out_path])
+try:
+    url = read_url(proc)
+    check("server: --once run prints LOCAL_REVIEW_URL", bool(url), url)
+    if url:
+        with _urlrequest.urlopen(f"{url}/", timeout=5) as resp:
+            body = resp.read().decode()
+            check("server: GET / returns 200", resp.status == 200, resp.status)
+            check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
+        payload = {"meta": {}, "summary": "looks good", "approved": True, "comments": []}
+        req = _urlrequest.Request(
+            f"{url}/submit", data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit returns 200", resp.status == 200, resp.status)
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: --once exits after a successful /submit", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: --once exits after a successful /submit", "did not exit within 5s")
+        check("server: $OUT exists after submit", os.path.exists(out_path), out_path)
+        if os.path.exists(out_path):
+            with open(out_path) as f:
+                written = json.load(f)
+            check("server: $OUT parses as JSON with the submitted fields",
+                  written.get("summary") == "looks good" and written.get("approved") is True,
+                  written)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(out_path):
+        os.unlink(out_path)
 
 print(f"# {pass_count} passed, {fail_count} failed")
 sys.exit(1 if fail_count else 0)
