@@ -298,6 +298,39 @@ except RuntimeError as e:
 except Exception as e:
     bad("sh(): missing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
 
+# --- esc_py escapes quotes as well as angle brackets/ampersand --------------
+esc_out = server.esc_py('"><script>')
+check("esc_py: no raw double quote in output", '"' not in esc_out, esc_out)
+check("esc_py: no raw angle brackets in output", "<" not in esc_out and ">" not in esc_out, esc_out)
+check("esc_py: single quote is also escaped", "'" not in server.esc_py("it's"), server.esc_py("it's"))
+
+# --- build_page: a diff line containing </script> cannot break out of the ---
+# <script> element the DIFF/META JSON is interpolated into (PR #369
+# copilot+codex finding).
+evil_files = [{
+    "old": "x", "new": "x", "display": "x", "status": "modified", "generated": False,
+    "binary": False, "adds": 1, "dels": 0,
+    "hunks": [{"header": "@@ -1,1 +1,1 @@", "section": "", "rows": [
+        {"l": {"t": "empty"}, "r": {"t": "add", "n": 1, "s": "</script><script>alert(1)</script>"}},
+    ]}],
+}]
+page_html = server.build_page(evil_files, {"title": "t"}).decode("utf-8")
+check("build_page: the raw injected payload does not survive",
+      "</script><script>alert(1)</script>" not in page_html, page_html)
+check("build_page: the diff's </script> is escaped to \\u003c/script>",
+      "\\u003c/script>" in page_html, page_html)
+# PAGE has exactly three structural </script> closes: the two vendored
+# <script src=...></script> includes and the one inline block. A diff/meta
+# payload that could inject a fourth would mean the escaping regressed.
+check("build_page: exactly the 3 structural </script> closes remain, none injected from the diff",
+      page_html.count("</script>") == 3, page_html.count("</script>"))
+
+# --- build_page: meta['url'] is escaped before landing in the href ----------
+evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
+page_html2 = server.build_page([], evil_meta).decode("utf-8")
+check("build_page: meta['url'] quotes are escaped before the href interpolation",
+      'href="&quot;' in page_html2 and "&gt;" in page_html2, page_html2)
+
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no
 # --port, so the OS picks a free port and the server reports it.
@@ -397,6 +430,15 @@ def read_url(proc, deadline=5.0):
         sel.close()
 
 
+def url_parts(url):
+    # url is "http://host:port/token/" -- split into (host, port, "/token/")
+    # for callers that need to build a raw HTTP request by hand.
+    scheme_rest = url.split("//", 1)[1]
+    host_port, token_path = scheme_rest.split("/", 1)
+    host, port_s = host_port.split(":")
+    return host, int(port_s), host_port, "/" + token_path
+
+
 # -- launching without --port autoselects a free port and prints the URL ----
 proc1, patch1 = start_server([])
 proc2, patch2 = start_server([])
@@ -427,13 +469,13 @@ try:
     url = read_url(proc)
     check("server: --once run prints LOCAL_REVIEW_URL", bool(url), url)
     if url:
-        with _urlrequest.urlopen(f"{url}/", timeout=5) as resp:
+        with _urlrequest.urlopen(url, timeout=5) as resp:
             body = resp.read().decode()
             check("server: GET / returns 200", resp.status == 200, resp.status)
             check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
         payload = {"meta": {}, "summary": "looks good", "approved": True, "comments": []}
         req = _urlrequest.Request(
-            f"{url}/submit", data=json.dumps(payload).encode(),
+            f"{url}submit", data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -471,7 +513,7 @@ try:
     check("server: unwritable-out run still starts", bool(url), url)
     if url:
         req = _urlrequest.Request(
-            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
@@ -503,13 +545,12 @@ try:
     url = read_url(proc)
     check("server: disconnect run starts", bool(url), url)
     if url:
-        host_port = url.split("//", 1)[1]
-        host, port_s = host_port.split(":")
+        host, port, host_port, token_path = url_parts(url)
         body = b'{"meta":{},"summary":"gone","approved":true,"comments":[]}'
-        raw = (b"POST /submit HTTP/1.1\r\nHost: " + host_port.encode()
+        raw = (b"POST " + (token_path + "submit").encode() + b" HTTP/1.1\r\nHost: " + host_port.encode()
                + b"\r\nContent-Type: application/json\r\nContent-Length: "
                + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
-        s = _socket.create_connection((host, int(port_s)), timeout=5)
+        s = _socket.create_connection((host, port), timeout=5)
         s.sendall(raw)
         s.close()  # walk away without reading the response
         try:
@@ -542,7 +583,7 @@ try:
     if url:
         def submit_once(results, idx):
             req = _urlrequest.Request(
-                f"{url}/submit", data=b'{"meta":{},"summary":"race","approved":false,"comments":[]}',
+                f"{url}submit", data=b'{"meta":{},"summary":"race","approved":false,"comments":[]}',
                 headers={"Content-Type": "application/json"}, method="POST",
             )
             try:
@@ -565,7 +606,7 @@ try:
               os.path.exists(slot_out) and json.load(open(slot_out)).get("summary") == "race", slot_out)
         # sequential second round on a stay-alive server must still be allowed
         req = _urlrequest.Request(
-            f"{url}/submit", data=b'{"meta":{},"summary":"round 2","approved":true,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"round 2","approved":true,"comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -582,6 +623,124 @@ finally:
     if os.path.exists(slot_out):
         os.unlink(slot_out)
 
+# -- security: path token gates every route; Origin/Sec-Fetch-Site gate POSTs
+sec_fd, sec_out = _tempfile.mkstemp(suffix=".json")
+os.close(sec_fd)
+os.unlink(sec_out)
+proc, patch_path = start_server(["--out", sec_out])  # stay-alive: several requests in sequence
+try:
+    url = read_url(proc)
+    check("server: security-test run starts", bool(url), url)
+    if url:
+        host, port, host_port, token_path = url_parts(url)
+        base = f"http://{host_port}"
+
+        try:
+            _urlrequest.urlopen(f"{base}/", timeout=5)
+            bad("server: GET / (no token) returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET / (no token) returns 404", e.code == 404, e.code)
+
+        try:
+            _urlrequest.urlopen(f"{base}/not-the-token/", timeout=5)
+            bad("server: GET /<wrong-token>/ returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET /<wrong-token>/ returns 404", e.code == 404, e.code)
+
+        with _urlrequest.urlopen(url, timeout=5) as resp:
+            body = resp.read().decode()
+            check("server: GET tokenized URL returns 200", resp.status == 200, resp.status)
+            check("server: GET tokenized URL body contains 'Submit review'", "Submit review" in body, "")
+
+        # slashless token alias must redirect, not serve a page whose relative
+        # asset/fetch URLs resolve outside the token prefix
+        class _NoRedirect(_urlrequest.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        opener = _urlrequest.build_opener(_NoRedirect)
+        try:
+            opener.open(url.rstrip("/"), timeout=5)
+            bad("server: GET /<token> (no slash) redirects to /<token>/", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET /<token> (no slash) redirects to /<token>/",
+                  e.code == 301 and e.headers.get("Location", "") == token_path,
+                  (e.code, e.headers.get("Location")))
+
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"sfs","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with Sec-Fetch-Site cross-site returns 403", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with Sec-Fetch-Site cross-site returns 403", e.code == 403, e.code)
+        check("server: Sec-Fetch-Site cross-site POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"evil","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": "https://evil.example"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with a cross-origin Origin returns 403", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with a cross-origin Origin returns 403", e.code == 403, e.code)
+        check("server: cross-origin POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"noorigin","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit with no Origin header returns 200", resp.status == 200, resp.status)
+        check("server: OUT written after no-Origin submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "noorigin", sec_out)
+        os.unlink(sec_out)
+
+        same_origin = f"http://127.0.0.1:{port}"
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"sameorigin","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": same_origin}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit with a matching Origin returns 200", resp.status == 200, resp.status)
+        check("server: OUT written after same-origin submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "sameorigin", sec_out)
+
+        # Vendor path traversal, sent as a raw request line so dot-segments
+        # reach the server unnormalized (urllib normalizes them client-side
+        # before the request ever goes out, so a urlopen() call can't exercise
+        # this path).
+        raw = (b"GET " + (token_path + "vendor/../../server.py").encode() + b" HTTP/1.1\r\nHost: "
+               + host_port.encode() + b"\r\nConnection: close\r\n\r\n")
+        s = _socket.create_connection((host, port), timeout=5)
+        s.sendall(raw)
+        s.settimeout(5)
+        resp_bytes = b""
+        try:
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                resp_bytes += chunk
+        except _socket.timeout:
+            pass
+        s.close()
+        status_line = resp_bytes.split(b"\r\n", 1)[0].decode(errors="replace")
+        check("server: GET vendor path traversal (../..) returns 404", " 404 " in status_line, status_line)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(sec_out):
+        os.unlink(sec_out)
+
 # -- --out pointing at an existing DIRECTORY: preflight must 500, not post ---
 dir_out = _tempfile.mkdtemp(prefix="lr-isdir-")
 proc, patch_path = start_server(["--out", dir_out])
@@ -590,7 +749,7 @@ try:
     check("server: dir-out run still starts", bool(url), url)
     if url:
         req = _urlrequest.Request(
-            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
