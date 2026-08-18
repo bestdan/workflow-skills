@@ -24,7 +24,10 @@ GENERATED = re.compile(r"\.(g|gr|gql|freezed|config|mocks|fakes|req|data|var|sch
 
 
 def sh(args):
-    out = subprocess.run(args, capture_output=True, text=True)
+    try:
+        out = subprocess.run(args, capture_output=True, text=True)
+    except OSError as e:  # gh not on PATH, not executable, ...
+        raise RuntimeError(f"command failed: {' '.join(args)}: {e}") from e
     if out.returncode != 0:
         raise RuntimeError(f"command failed: {' '.join(args)}: {out.stderr.strip()}")
     return out.stdout

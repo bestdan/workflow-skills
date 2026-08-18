@@ -288,6 +288,16 @@ except RuntimeError as e:
 except Exception as e:
     bad("sh(): failing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
 
+# --- sh() on a MISSING command (gh absent from PATH) also raises RuntimeError
+try:
+    server.sh(["definitely-not-a-real-command-xyzzy"])
+    bad("sh(): missing command raises", "no exception raised")
+except RuntimeError as e:
+    check("sh(): missing command raises RuntimeError, not FileNotFoundError",
+          "definitely-not-a-real-command-xyzzy" in str(e), str(e))
+except Exception as e:
+    bad("sh(): missing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
+
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no
 # --port, so the OS picks a free port and the server reports it.
