@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.87.0] - 2026-08-18
+
+### Features
+
+- port CaseyDiff as a human-in-the-loop diff review skill (5ea10b4)
+
 ## [1.86.0] - 2026-08-16
 
 ### Features
