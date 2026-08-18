@@ -13,15 +13,16 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-15 skills, 21 commands, and 1 subagent, organized into seven workflows. Each
+16 skills, 21 commands, and 1 subagent, organized into seven workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
 ### PR review
 
-| Skill                                      | Trigger                                                               | What it does                                                                                                                                                                                                                 |
-| ------------------------------------------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**co-review**](skills/co-review/SKILL.md) | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls. |
+| Skill                                            | Trigger                                                               | What it does                                                                                                                                                                                                                               |
+| ------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**co-review**](skills/co-review/SKILL.md)       | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.               |
+| [**local-review**](skills/local-review/SKILL.md) | "let me look over these changes", "open the diff so I can comment"    | Open a GitHub-style split-diff UI on localhost so _you_ read an agent's changes and leave inline line comments; the feedback is written to a file the agent acts on. Local-only — nothing touches GitHub unless you flag a comment for it. |
 
 **Approve the reviewer commands once.** co-review hands each local reviewer a
 fixed input file on stdin (or via `--prompt-file` for devin), so the command

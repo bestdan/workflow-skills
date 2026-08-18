@@ -17,6 +17,7 @@
     "**/node_modules",
     "**/*-lock.json",
     "test/vendor/**",
+    "scripts/local-review/**",
     ".worktrees/**",
     ".claude/**"
   ],

@@ -72,6 +72,7 @@ STRICT_FILES=(scripts/research-spike.py)
 # 83 untyped parameters between them), which is why they sit on this tier and
 # not the strict one; they pass here as-is.
 DEFAULT_FILES=(
+  scripts/local-review/server.py
   scripts/plan-graph.py
   scripts/task-scan.py
   scripts/validate.py
