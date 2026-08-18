@@ -73,8 +73,10 @@ failure in PR mode), and a silent-but-alive server was killed after the 10s
 timeout. Either way, report the log's error instead of proceeding.
 
 The URL carries a random per-launch token (`http://127.0.0.1:<port>/<token>/`);
-never rebuild it from the port alone, and don't paste it anywhere persistent
-(chat history, a committed file, a ticket).
+never rebuild it from the port alone, and don't record it anywhere persistent
+(a committed file, a ticket, a log that outlives the round). Showing it to the
+user so they can open it — including the no-browser fallback below, which
+prints it in chat — is fine: the token dies with the server.
 
 Then open the reported URL for the user:
 

@@ -782,8 +782,6 @@ class Handler(BaseHTTPRequestHandler):
         # when the token segment doesn't match.
         prefix = "/" + Handler.token
         p = self.path
-        if p == prefix:
-            return "/"
         if p.startswith(prefix + "/"):
             return p[len(prefix):]
         return None
@@ -802,6 +800,14 @@ class Handler(BaseHTTPRequestHandler):
         return origin in allowed
 
     def do_GET(self):
+        if self.path == "/" + Handler.token:
+            # Redirect the slashless alias: the page's asset/fetch URLs are
+            # relative, so serving it here would resolve them outside the
+            # token prefix and render a 200 that doesn't work.
+            self.send_response(301)
+            self.send_header("Location", "/" + Handler.token + "/")
+            self.end_headers()
+            return
         path = self._route_path()
         if path is None:
             self.send_response(404)

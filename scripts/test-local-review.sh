@@ -652,6 +652,31 @@ try:
             check("server: GET tokenized URL returns 200", resp.status == 200, resp.status)
             check("server: GET tokenized URL body contains 'Submit review'", "Submit review" in body, "")
 
+        # slashless token alias must redirect, not serve a page whose relative
+        # asset/fetch URLs resolve outside the token prefix
+        class _NoRedirect(_urlrequest.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        opener = _urlrequest.build_opener(_NoRedirect)
+        try:
+            opener.open(url.rstrip("/"), timeout=5)
+            bad("server: GET /<token> (no slash) redirects to /<token>/", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET /<token> (no slash) redirects to /<token>/",
+                  e.code == 301 and e.headers.get("Location", "").endswith(f"{token_path}/"),
+                  (e.code, e.headers.get("Location")))
+
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"sfs","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with Sec-Fetch-Site cross-site returns 403", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with Sec-Fetch-Site cross-site returns 403", e.code == 403, e.code)
+        check("server: Sec-Fetch-Site cross-site POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
         req = _urlrequest.Request(
             f"{url}submit", data=b'{"meta":{},"summary":"evil","approved":false,"comments":[]}',
             headers={"Content-Type": "application/json", "Origin": "https://evil.example"}, method="POST",
