@@ -23,7 +23,7 @@ When the configured handler is an external tracker, the same scoring runs agains
 
 ### 0. Resolve the handler
 
-Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `task-config.md` → "Resolving the handler"):
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `commands/task-config.md` → "Resolving the handler"):
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
