@@ -53,16 +53,24 @@ The server picks its own port and reports it. An immediate one-shot grep can
 race startup, so poll the log with a bound, bailing out if the server died:
 
 ```bash
+url=""
 for i in $(seq 1 20); do
-  grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log && break
-  kill -0 "$(cat <scratch>/lr_server.pid)" || { cat <scratch>/lr_server.log; break; }
+  url="$(grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log)" && break
+  kill -0 "$(cat <scratch>/lr_server.pid)" || break
   sleep 0.5
 done
+if [ -n "$url" ]; then echo "$url"; else
+  cat <scratch>/lr_server.log
+  kill "$(cat <scratch>/lr_server.pid)" 2>/dev/null
+  echo "local-review: server startup failed or timed out"
+fi
 ```
 
-A `LOCAL_REVIEW_URL=` line means the server is up — use that URL verbatim. If
-the loop instead printed the log, the server exited at startup; the log's
-`error:` line says why (usually a `gh` failure in PR mode).
+A `LOCAL_REVIEW_URL=` line means the server is up — use that URL verbatim.
+Otherwise the block printed the log and reported the failure: a dead process
+means startup failed (the log's `error:` line says why — usually a `gh`
+failure in PR mode), and a silent-but-alive server was killed after the 10s
+timeout. Either way, report the log's error instead of proceeding.
 
 Then open the reported URL for the user:
 
