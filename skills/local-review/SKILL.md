@@ -80,10 +80,12 @@ Split diff by file, per-file and per-section collapse, syntax highlighting
 - Clicks **Submit review** → a finish window with an optional overall comment
   and two buttons: **Submit review** (feedback to act on) or **Approve** (the
   change is good).
-- If the source files change while the page is open, a **↻ Refresh** button
-  appears in the header. The user triggers it manually; it reloads the diff and
-  discards unsaved comments (with an inline confirm when comments are pending).
-  Take one round at a time and re-open between rounds.
+- If the diff **source** changes while the page is open — the PR on GitHub, or
+  the patch file itself — a **↻ Refresh** button appears in the header. Edits
+  to the worktree are NOT detected in `--diff-file` mode (the server re-reads
+  the patch, not the repo): regenerate the patch file to make new changes
+  visible. Refresh discards unsaved comments (with an inline confirm when
+  comments are pending). Take one round at a time and re-open between rounds.
 
 ## 4. Collect the round
 
