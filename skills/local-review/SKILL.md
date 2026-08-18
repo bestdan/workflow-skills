@@ -26,8 +26,11 @@ reviewing:
 
 - **A GitHub PR** — pass the number and `--repo <owner/repo>` (needs an
   authenticated `gh`).
-- **Uncommitted work in a worktree** — `git -C <dir> diff > <scratch>/review.patch`
-  (add `--staged` for the index).
+- **Uncommitted work in a worktree** — `git -C <dir> diff HEAD > <scratch>/review.patch`
+  (`HEAD`, not bare `git diff` — bare misses staged changes, `--staged` misses
+  unstaged ones). Untracked files never appear in `git diff`; include them with
+  `git -C <dir> diff --no-index /dev/null <file> >> <scratch>/review.patch` per
+  new file (or `git add -N` them first), so the review covers the whole change.
 - **A branch against its base** — `git -C <dir> diff <base>...<head> > <scratch>/review.patch`.
 - **Any two refs or a commit range** — `git -C <dir> diff <A> <B> > …`. The
   parser handles standard `git diff` output, so any range works.
