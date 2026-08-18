@@ -49,9 +49,20 @@ nohup python3 "${CLAUDE_PLUGIN_ROOT}/scripts/local-review/server.py" \
 echo $! > <scratch>/lr_server.pid
 ```
 
-The server picks its own port and reports it. Confirm startup by grepping the
-log for the machine-readable line — `grep LOCAL_REVIEW_URL= <scratch>/lr_server.log`
-— and use that URL verbatim.
+The server picks its own port and reports it. An immediate one-shot grep can
+race startup, so poll the log with a bound, bailing out if the server died:
+
+```bash
+for i in $(seq 1 20); do
+  grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log && break
+  kill -0 "$(cat <scratch>/lr_server.pid)" || { cat <scratch>/lr_server.log; break; }
+  sleep 0.5
+done
+```
+
+A `LOCAL_REVIEW_URL=` line means the server is up — use that URL verbatim. If
+the loop instead printed the log, the server exited at startup; the log's
+`error:` line says why (usually a `gh` failure in PR mode).
 
 Then open the reported URL for the user:
 
