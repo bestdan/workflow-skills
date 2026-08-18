@@ -820,6 +820,18 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(str(e).encode())
             return
+        # The temp file is created before posting, not just before the write: an
+        # unwritable/missing --out directory is then caught up front, instead of
+        # after comments were already posted (a 500 with nothing posted is safe
+        # to retry; a 500 after posting is not).
+        out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
+        except OSError as e:
+            # Fail before any comment posts: a retry after a partial post would
+            # duplicate the posted comments.
+            self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
+            return
         # human-readable to stdout
         header = "REVIEW APPROVED" if payload.get("approved") else "REVIEW SUBMITTED"
         print(f"\n===== {header} =====", flush=True)
@@ -837,18 +849,6 @@ class Handler(BaseHTTPRequestHandler):
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
-        # The temp file is created before posting, not just before the write: an
-        # unwritable/missing --out directory is then caught up front, instead of
-        # after comments were already posted (a 500 with nothing posted is safe
-        # to retry; a 500 after posting is not).
-        out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
-        try:
-            fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
-        except OSError as e:
-            # Fail before any comment posts: a retry after a partial post would
-            # duplicate the posted comments.
-            self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
-            return
         try:
             # Post the GitHub-flagged comments to the PR before writing out_path:
             # the skill kills this process the moment out_path appears, so

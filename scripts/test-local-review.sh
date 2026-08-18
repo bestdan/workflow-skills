@@ -323,13 +323,25 @@ def start_server(extra_args, env=None):
     return proc, patch_path
 
 
-def make_fake_gh_dir():
-    # A `gh` stand-in that always fails, so a PR-mode run exercises the same
+def make_fake_gh_dir(diff_ok=False):
+    # A `gh` stand-in that fails, so a PR-mode run exercises the same
     # "gh command failed" path a real unauthenticated/misconfigured gh would.
+    # With diff_ok, `gh pr diff` succeeds (emits a small patch) while `gh pr
+    # view` still fails — that exercises the get_meta/resolve_gh propagation
+    # specifically, past a successful get_diff.
     d = _tempfile.mkdtemp(prefix="fakegh-")
     gh_path = os.path.join(d, "gh")
+    if diff_ok:
+        body = ("#!/bin/sh\n"
+                "if [ \"$1\" = pr ] && [ \"$2\" = diff ]; then\n"
+                "  printf 'diff --git a/x b/x\\n--- a/x\\n+++ b/x\\n@@ -1,1 +1,1 @@\\n-a\\n+b\\n'\n"
+                "  exit 0\n"
+                "fi\n"
+                "echo 'gh: authentication required' >&2\nexit 1\n")
+    else:
+        body = "#!/bin/sh\necho 'gh: authentication required' >&2\nexit 1\n"
     with open(gh_path, "w") as f:
-        f.write("#!/bin/sh\necho 'gh: authentication required' >&2\nexit 1\n")
+        f.write(body)
     os.chmod(gh_path, 0o755)
     return d
 
@@ -507,6 +519,38 @@ finally:
     _shutil.rmtree(fake_gh_dir, ignore_errors=True)
     if os.path.exists(pr_out_path):
         os.unlink(pr_out_path)
+
+# -- PR-mode startup where `gh pr diff` succeeds but `gh pr view` fails: the -
+# propagation being pinned is specifically get_meta/resolve_gh's — get_diff
+# succeeding must not let a later gh failure start the server degraded.
+fake_gh_dir_v = make_fake_gh_dir(diff_ok=True)
+gh_view_env = dict(os.environ)
+gh_view_env["PATH"] = fake_gh_dir_v + os.pathsep + os.environ.get("PATH", "")
+proc = _subprocess.Popen(
+    [sys.executable, server_path, "999999"],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=gh_view_env,
+)
+try:
+    try:
+        rc = proc.wait(timeout=5)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        rc = None
+    output = proc.stdout.read()
+    check("server: gh-view failure after a good diff exits 1 (get_meta/resolve_gh propagate)",
+          rc == 1, rc)
+    check("server: gh-view failure never serves (no LOCAL_REVIEW_URL)",
+          "LOCAL_REVIEW_URL=" not in output and "Traceback" not in output, output)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    _shutil.rmtree(fake_gh_dir_v, ignore_errors=True)
 
 # -- --diff-file run still works with gh absent/failing: resolve_gh/get_meta -
 # short-circuit on diff_file before ever calling sh(), so this path must be
