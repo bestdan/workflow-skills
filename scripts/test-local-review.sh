@@ -451,7 +451,8 @@ finally:
         os.unlink(out_path)
 
 # -- unwritable --out directory: /submit 500s before any side effect --------
-bad_out = os.path.join(_tempfile.mkdtemp(prefix="lr-gone-"), "missing", "out.json")
+bad_out_root = _tempfile.mkdtemp(prefix="lr-gone-")
+bad_out = os.path.join(bad_out_root, "missing", "out.json")
 proc, patch_path = start_server(["--out", bad_out])
 try:
     url = read_url(proc)
@@ -479,6 +480,37 @@ finally:
             proc.kill()
             proc.wait(timeout=5)
     os.unlink(patch_path)
+    _shutil.rmtree(bad_out_root, ignore_errors=True)
+
+# -- --out pointing at an existing DIRECTORY: preflight must 500, not post ---
+dir_out = _tempfile.mkdtemp(prefix="lr-isdir-")
+proc, patch_path = start_server(["--out", dir_out])
+try:
+    url = read_url(proc)
+    check("server: dir-out run still starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: --out as existing directory returns 500", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            body = json.loads(e.read().decode())
+            check("server: --out as existing directory returns 500", e.code == 500, e.code)
+            check("server: --out as existing directory names the problem",
+                  body.get("ok") is False and "cannot write --out" in body.get("error", ""), body)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(dir_out, ignore_errors=True)
 
 # -- PR-mode startup with gh unavailable: the RuntimeError from sh() must ----
 # propagate to main()'s handler (a one-line stderr error, exit 1) instead of

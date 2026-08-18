@@ -826,6 +826,8 @@ class Handler(BaseHTTPRequestHandler):
         # to retry; a 500 after posting is not).
         out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
         try:
+            if os.path.isdir(self.out_path):
+                raise OSError(f"{self.out_path} is a directory")
             fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
         except OSError as e:
             # Fail before any comment posts: a retry after a partial post would
@@ -875,6 +877,10 @@ class Handler(BaseHTTPRequestHandler):
             if Handler.gh:
                 payload["github_posted"] = gh_posted
                 payload["github_failed"] = gh_failed
+            # Residual risk accepted: disk exhaustion between the preflight and
+            # this write can still fail after posting. Closing it would need the
+            # payload written before posting, but the posting outcome is part of
+            # the payload and OUT's appearance is the caller's kill signal.
             with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2)
             os.replace(tmp_path, self.out_path)
