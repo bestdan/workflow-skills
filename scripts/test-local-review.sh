@@ -438,6 +438,36 @@ finally:
     if os.path.exists(out_path):
         os.unlink(out_path)
 
+# -- unwritable --out directory: /submit 500s before any side effect --------
+bad_out = os.path.join(_tempfile.mkdtemp(prefix="lr-gone-"), "missing", "out.json")
+proc, patch_path = start_server(["--out", bad_out])
+try:
+    url = read_url(proc)
+    check("server: unwritable-out run still starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}/submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: unwritable --out returns 500", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            body = json.loads(e.read().decode())
+            check("server: unwritable --out returns 500", e.code == 500, e.code)
+            check("server: unwritable --out reports the error", body.get("ok") is False and "cannot write --out" in body.get("error", ""), body)
+        check("server: unwritable --out does not crash the server", proc.poll() is None, proc.poll())
+        check("server: no OUT file appears", not os.path.exists(bad_out), bad_out)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+
 # -- PR-mode startup with gh unavailable: the RuntimeError from sh() must ----
 # propagate to main()'s handler (a one-line stderr error, exit 1) instead of
 # resolve_gh/get_meta swallowing it and starting degraded (gh=None).

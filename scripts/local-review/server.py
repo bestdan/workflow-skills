@@ -842,7 +842,13 @@ class Handler(BaseHTTPRequestHandler):
         # after comments were already posted (a 500 with nothing posted is safe
         # to retry; a 500 after posting is not).
         out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
-        fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
+        except OSError as e:
+            # Fail before any comment posts: a retry after a partial post would
+            # duplicate the posted comments.
+            self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
+            return
         try:
             # Post the GitHub-flagged comments to the PR before writing out_path:
             # the skill kills this process the moment out_path appears, so
@@ -880,13 +886,16 @@ class Handler(BaseHTTPRequestHandler):
             os.unlink(tmp_path)
             raise
 
+        # Schedule the --once shutdown before touching the response: the review
+        # is durably saved at this point, and a client disconnect mid-response
+        # (BrokenPipeError) must not leave the server running.
+        if Handler.once and Handler.srv:
+            threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
                                      "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
-        if Handler.once and Handler.srv:
-            threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
 
 
 def build_page(files, meta):
