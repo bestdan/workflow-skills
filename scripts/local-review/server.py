@@ -127,6 +127,78 @@ def get_meta(pr, repo, diff_file):
 
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
+# Per-side optional quoting: git quotes a path (core.quotepath) only when it
+# needs to, so a header can be fully quoted, fully unquoted, or mixed.
+QUOTED_GIT_HEADER = re.compile(
+    r'^diff --git (?:"((?:[^"\\]|\\.)*)"|a/(\S+)) (?:"((?:[^"\\]|\\.)*)"|b/(\S+))$'
+)
+
+
+def _unquote_git_path(s):
+    """Decode a git-quoted path: \\\\, \\", \\t, \\n, and \\NNN octal byte
+    escapes, then decode the resulting bytes as UTF-8."""
+    out = bytearray()
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\" and i + 1 < n:
+            nc = s[i + 1]
+            if nc == "\\":
+                out.append(0x5C)
+                i += 2
+                continue
+            if nc == '"':
+                out.append(0x22)
+                i += 2
+                continue
+            if nc == "t":
+                out.append(0x09)
+                i += 2
+                continue
+            if nc == "n":
+                out.append(0x0A)
+                i += 2
+                continue
+            if nc.isdigit() and i + 4 <= n:
+                out.append(int(s[i + 1:i + 4], 8) & 0xFF)
+                i += 4
+                continue
+        out.extend(c.encode("utf-8"))
+        i += 1
+    return bytes(out).decode("utf-8", errors="replace")
+
+
+def _parse_git_header(raw):
+    """Return (old, new) paths from a `diff --git` line. Tries the plain,
+    unquoted form first; falls back to git's per-side quoted form (emitted
+    under core.quotepath for non-ASCII paths)."""
+    m = re.match(r"diff --git a/(.*) b/(.*)$", raw)
+    if m:
+        return m.group(1), m.group(2)
+    qm = QUOTED_GIT_HEADER.match(raw)
+    if not qm:
+        return "", ""
+    if qm.group(1) is not None:
+        old = _unquote_git_path(qm.group(1))
+        old = old[2:] if old.startswith("a/") else old
+    else:
+        old = qm.group(2)
+    if qm.group(3) is not None:
+        new = _unquote_git_path(qm.group(3))
+        new = new[2:] if new.startswith("b/") else new
+    else:
+        new = qm.group(4)
+    return old, new
+
+
+def _strip_diff_path(s):
+    """Strip a trailing tab-plus-timestamp (git and `diff -u` both append one
+    on plain ---/+++ lines) and a leading a/ or b/ prefix, if present."""
+    s = s.split("\t", 1)[0]
+    if s != "/dev/null" and (s.startswith("a/") or s.startswith("b/")):
+        s = s[2:]
+    return s
+
 
 def parse_diff(text):
     files = []
@@ -135,6 +207,8 @@ def parse_diff(text):
     old_ln = new_ln = 0
     pend_del = []
     pend_add = []
+    headerless = False  # cur was opened from a bare ---/+++ pair, no `diff --git`
+    pend_old_path = None  # a `--- ` line seen while awaiting its `+++ ` pair
 
     def flush_pairs():
         nonlocal pend_del, pend_add
@@ -148,13 +222,13 @@ def parse_diff(text):
     for raw in text.split("\n"):
         if raw.startswith("diff --git"):
             flush_pairs() if hunk else None
-            m = re.match(r"diff --git a/(.*) b/(.*)$", raw)
+            old, new = _parse_git_header(raw)
             cur = {
-                "old": m.group(1) if m else "",
-                "new": m.group(2) if m else "",
-                "display": (m.group(2) if m else ""),
+                "old": old,
+                "new": new,
+                "display": new,
                 "status": "modified",
-                "generated": bool(GENERATED.search(m.group(2))) if m else False,
+                "generated": bool(GENERATED.search(new)) if new else False,
                 "binary": False,
                 "hunks": [],
                 "adds": 0,
@@ -162,6 +236,40 @@ def parse_diff(text):
             }
             files.append(cur)
             hunk = None
+            headerless = False
+            pend_old_path = None
+            continue
+        if raw.startswith("--- ") and (cur is None or headerless):
+            # No `diff --git` header preceded this: fall back to opening a
+            # file entry from the ---/+++ pair (a plain unified patch, or the
+            # next file in a headerless multi-file patch).
+            flush_pairs() if hunk else None
+            pend_old_path = raw[4:]
+            hunk = None
+            continue
+        if pend_old_path is not None and raw.startswith("+++ "):
+            old = _strip_diff_path(pend_old_path)
+            new = _strip_diff_path(raw[4:])
+            if new == "/dev/null":
+                status, name = "deleted", old
+            elif old == "/dev/null":
+                status, name = "added", new
+            else:
+                status, name = "modified", new
+            cur = {
+                "old": name if old == "/dev/null" else old,
+                "new": name if new == "/dev/null" else new,
+                "display": name,
+                "status": status,
+                "generated": bool(GENERATED.search(name)) if name else False,
+                "binary": False,
+                "hunks": [],
+                "adds": 0,
+                "dels": 0,
+            }
+            files.append(cur)
+            headerless = True
+            pend_old_path = None
             continue
         if cur is None:
             continue

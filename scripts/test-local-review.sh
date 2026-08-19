@@ -320,6 +320,103 @@ for p in GENERATED_FALSE_PATHS:
     check(f"generated table: {p} not flagged generated (near-miss stays expanded)",
           table_by_path.get(p) is False, table_by_path.get(p))
 
+# --- plain unified patch (no `diff --git` header) ---------------------------
+diff_plain = """--- a.txt\t2024-01-01 00:00:00.000000000 +0000
++++ b.txt\t2024-01-01 00:00:00.000000000 +0000
+@@ -1,1 +1,1 @@
+-old line
++new line
+"""
+files = parse_diff(diff_plain)
+check("plain unified: one file", len(files) == 1, f"got {len(files)}")
+f = files[0]
+check("plain unified: display name b.txt (no a/ b/ prefix to strip)", f["display"] == "b.txt", f["display"])
+check("plain unified: status modified", f["status"] == "modified", f["status"])
+rows = f["hunks"][0]["rows"]
+check("plain unified: one del/add row", len(rows) == 1
+      and rows[0]["l"]["s"] == "old line" and rows[0]["r"]["s"] == "new line", rows)
+
+# --- headerless multi-file patch: two ---/+++ pairs, no `diff --git` --------
+diff_headerless_multi = """--- a1.txt
++++ b1.txt
+@@ -1,1 +1,1 @@
+-old1
++new1
+--- a2.txt
++++ b2.txt
+@@ -1,1 +1,1 @@
+-old2
++new2
+"""
+files = parse_diff(diff_headerless_multi)
+check("headerless multi-file: two files", len(files) == 2, f"got {len(files)}")
+check("headerless multi-file: file0 name b1.txt", files[0]["display"] == "b1.txt", files[0]["display"])
+check("headerless multi-file: file1 name b2.txt", files[1]["display"] == "b2.txt", files[1]["display"])
+rows0 = files[0]["hunks"][0]["rows"]
+rows1 = files[1]["hunks"][0]["rows"]
+check("headerless multi-file: file0 has exactly its own row",
+      len(rows0) == 1 and rows0[0]["l"]["s"] == "old1" and rows0[0]["r"]["s"] == "new1", rows0)
+check("headerless multi-file: file1 has exactly its own row (not file0's leaked in)",
+      len(rows1) == 1 and rows1[0]["l"]["s"] == "old2" and rows1[0]["r"]["s"] == "new2", rows1)
+
+# --- plain patch with a/ b/ prefixes but no `diff --git` header -------------
+diff_plain_prefixed = """--- a/foo.txt
++++ b/foo.txt
+@@ -1,1 +1,1 @@
+-x
++y
+"""
+f = parse_diff(diff_plain_prefixed)[0]
+check("plain unified with a/b prefix: prefix stripped", f["display"] == "foo.txt", f["display"])
+
+# --- /dev/null on old side -> added; on new side -> deleted (headerless) ----
+diff_plain_added = """--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,1 @@
++content
+"""
+f = parse_diff(diff_plain_added)[0]
+check("plain unified /dev/null old: status added", f["status"] == "added", f["status"])
+check("plain unified /dev/null old: name new.txt", f["new"] == "new.txt", f["new"])
+
+diff_plain_deleted = """--- a/old.txt
++++ /dev/null
+@@ -1,1 +0,0 @@
+-content
+"""
+f = parse_diff(diff_plain_deleted)[0]
+check("plain unified /dev/null new: status deleted", f["status"] == "deleted", f["status"])
+check("plain unified /dev/null new: name old.txt", f["old"] == "old.txt", f["old"])
+
+# --- quoted `diff --git` header (core.quotepath, non-ASCII path) ------------
+diff_quoted = r"""diff --git "a/p\303\244th.py" "b/p\303\244th.py"
+index 1111111..2222222 100644
+--- "a/p\303\244th.py"
++++ "b/p\303\244th.py"
+@@ -1,1 +1,1 @@
+-old
++new
+"""
+f = parse_diff(diff_quoted)[0]
+check("quoted header: new decodes non-ASCII octal escapes", f["new"] == "päth.py", f["new"])
+check("quoted header: old decodes non-ASCII octal escapes", f["old"] == "päth.py", f["old"])
+rows = f["hunks"][0]["rows"]
+check("quoted header: hunk row still parses", len(rows) == 1
+      and rows[0]["l"]["s"] == "old" and rows[0]["r"]["s"] == "new", rows)
+
+# --- mixed quoting: plain a-side, quoted b-side ------------------------------
+diff_mixed_quote = r"""diff --git a/plain.py "b/quot\303\251.py"
+index 1111111..2222222 100644
+--- a/plain.py
++++ "b/quot\303\251.py"
+@@ -1,1 +1,1 @@
+-old
++new
+"""
+f = parse_diff(diff_mixed_quote)[0]
+check("mixed quoting: old is the plain a-side", f["old"] == "plain.py", f["old"])
+check("mixed quoting: new decodes the quoted b-side", f["new"] == "quoté.py", f["new"])
+
 # --- empty input -> [] --------------------------------------------------------
 check("empty input: returns []", parse_diff("") == [], parse_diff(""))
 
