@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.91.1] - 2026-08-19
+
+### Fixes
+
+- left-side comments no longer split the diff row (1e2c344)
+
 ## [1.91.0] - 2026-08-19
 
 ### Features
