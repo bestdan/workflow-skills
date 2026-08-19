@@ -40,6 +40,7 @@ parse_diff = server.parse_diff
 
 pass_count = 0
 fail_count = 0
+skip_count = 0
 
 
 def ok(name):
@@ -59,6 +60,12 @@ def check(name, cond, detail=""):
         ok(name)
     else:
         bad(name, detail)
+
+
+def skip(name, why):
+    global skip_count
+    skip_count += 1
+    print(f"# skip - {name}: {why}")
 
 
 # --- plain modification hunk: context/add/del rows, independent line numbers -
@@ -1496,7 +1503,51 @@ try:
 finally:
     _shutil.rmtree(git_dir4, ignore_errors=True)
 
-print(f"# {pass_count} passed, {fail_count} failed")
+# --- the page's inline <script> parses -------------------------------------
+# PAGE is a Python string, so a broken edit to the client JS is invisible to
+# every other assertion here and to mypy — it surfaces only when a human opens
+# the browser. `node --check` parses without executing, which is all that is
+# needed to catch it. This is a parse check, not a behavior check: nothing here
+# exercises the DOM, so render/mode-switch/comment-restoration remain
+# eyeball-only.
+_node = _shutil.which("node")
+if _node is None:
+    # mise installs node without putting it on PATH unless a config pins it.
+    try:
+        _mise = _subprocess.run(["mise", "which", "node"], capture_output=True, text=True)
+        if _mise.returncode == 0 and _mise.stdout.strip():
+            _node = _mise.stdout.strip()
+    except OSError:
+        pass
+
+if _node is None:
+    skip("page JS parses under node --check", "no node on PATH and none resolvable via mise")
+else:
+    _page = server.PAGE
+    _blocks = _re.findall(r"<script>(.*?)</script>", _page, _re.S)
+    check("page JS: exactly one inline <script> block to check",
+          len(_blocks) == 1, f"got {len(_blocks)}")
+    # No placeholder substitution is needed: the two payload markers are
+    # comment-wrapped, and __TITLE__/__TITLE_HTML__ live in the HTML, not in
+    # the script. So the block is already valid JS as it stands.
+    _js = "\n".join(_blocks)
+    # encoding is pinned on both the write and the read. The page JS carries
+    # non-ASCII (· × – — … ↻ ⊘ ▾ ✎ ✓), so under a non-UTF-8 locale the write
+    # raises UnicodeEncodeError and kills the whole harness, and node's own
+    # error output — which echoes the offending source line — comes back as a
+    # UnicodeDecodeError exactly when the message matters most.
+    _fd, _js_path = _tempfile.mkstemp(suffix=".js")
+    try:
+        with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(_js)
+        _r = _subprocess.run([_node, "--check", _js_path],
+                             capture_output=True, encoding="utf-8")
+        check("page JS parses under node --check", _r.returncode == 0,
+              (_r.stderr or _r.stdout).strip())
+    finally:
+        os.unlink(_js_path)
+
+print(f"# {pass_count} passed, {fail_count} failed, {skip_count} skipped")
 sys.exit(1 if fail_count else 0)
 PYEOF
 
@@ -1507,9 +1558,10 @@ echo "$out"
 
 pass_count="$(printf '%s\n' "$out" | grep -c '^ok - ')"
 fail_count="$(printf '%s\n' "$out" | grep -c '^not ok - ')"
+skip_count="$(printf '%s\n' "$out" | grep -c '^# skip - ')"
 
 echo
-echo "test-local-review: $pass_count passed, $fail_count failed"
+echo "test-local-review: $pass_count passed, $fail_count failed, $skip_count skipped"
 if [ "$rc" -ne 0 ]; then
   exit 1
 fi
