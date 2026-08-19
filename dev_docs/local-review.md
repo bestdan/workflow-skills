@@ -63,7 +63,9 @@ history that anchored every hardening change to a small diff.
   exhaustion between the preflight and the write can still fail after posting
   (the posting outcome is part of the payload, so it cannot be written first).
 - **Payload:** `{meta, summary, approved, comments:[{file, side, line, code,
-  text}]}`. A `kind: "dismiss-comments"` entry adds `endLine` (delete lines
+  text}]}`, plus — in PR mode only — `github_posted` (list of comment URLs)
+  and `github_failed` (list of `{file, line, error}`). A
+  `kind: "dismiss-comments"` entry adds `endLine` (delete lines
   `line`–`endLine` on `side`); `github: true` marks a comment the server also
   posted to the PR. `code` is the anchor if line numbers shifted.
 - **Submission slot:** concurrent `/submit`s get 409; the slot releases before
@@ -85,7 +87,9 @@ dies with the server.
 ## Testing
 
 `scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~160
-checks in **one** python3 process: parse_diff fixtures, real-subprocess server
+checks from **one** python3 harness invocation (interpreter startup dominates
+suite time at this repo's scale) — the harness itself spawns real server
+subprocesses for the live cases: parse_diff fixtures, server
 cases (`--once` round trip, port autoselect, gh-failure propagation, security
 gates, disconnect, submission races). Two Bash 3.2 traps it documents: a
 quoted heredoc containing an apostrophe breaks inside `$(...)`, and
