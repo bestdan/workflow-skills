@@ -417,6 +417,80 @@ f = parse_diff(diff_mixed_quote)[0]
 check("mixed quoting: old is the plain a-side", f["old"] == "plain.py", f["old"])
 check("mixed quoting: new decodes the quoted b-side", f["new"] == "quoté.py", f["new"])
 
+# --- mixed quoting with an unquoted spaced a-side + quoted b-side -----------
+# Git never C-quotes an ordinary space, so a spaced path can appear unquoted
+# right alongside a quoted counterpart.
+diff_mixed_quote_space_a = r"""diff --git a/old name.py "b/n\303\251w.py"
+index 1111111..2222222 100644
+--- a/old name.py
++++ "b/n\303\251w.py"
+@@ -1,1 +1,1 @@
+-old
++new
+"""
+f = parse_diff(diff_mixed_quote_space_a)[0]
+check("mixed quoting, spaced unquoted a-side: old keeps its space", f["old"] == "old name.py", f["old"])
+check("mixed quoting, spaced unquoted a-side: new decodes the quoted b-side", f["new"] == "néw.py", f["new"])
+
+# --- mixed quoting with a quoted a-side + unquoted spaced b-side ------------
+diff_mixed_quote_space_b = r"""diff --git "a/\303\244ld.py" b/new name.py
+index 1111111..2222222 100644
+--- "a/\303\244ld.py"
++++ b/new name.py
+@@ -1,1 +1,1 @@
+-old
++new
+"""
+f = parse_diff(diff_mixed_quote_space_b)[0]
+check("mixed quoting, spaced unquoted b-side: old decodes the quoted a-side", f["old"] == "äld.py", f["old"])
+check("mixed quoting, spaced unquoted b-side: new keeps its space", f["new"] == "new name.py", f["new"])
+
+# --- headerless ambiguity: a deleted/added line whose content itself starts
+# with "-- "/"++ " (raw "--- "/"+++ ") must stay part of the active hunk, not
+# be mistaken for the next file's ---/+++ pair -------------------------------
+diff_headerless_ambiguous = """--- a.txt
++++ b.txt
+@@ -1,2 +1,2 @@
+ context line
+--- deleted content
++++ added content
+"""
+files = parse_diff(diff_headerless_ambiguous)
+check("headerless ambiguity: exactly one file (no bogus second file)", len(files) == 1, f"got {len(files)}")
+rows = files[0]["hunks"][0]["rows"]
+check("headerless ambiguity: two rows (context, then the del/add pair)", len(rows) == 2, f"got {len(rows)}")
+check("headerless ambiguity: row0 is the context line",
+      rows[0]["l"]["t"] == "ctx" and rows[0]["l"]["s"] == "context line", rows[0])
+check("headerless ambiguity: row1 is del '-- deleted content' / add '++ added content'",
+      rows[1]["l"]["s"] == "-- deleted content" and rows[1]["r"]["s"] == "++ added content", rows[1])
+
+# --- headerless ambiguity: multi-line hunk correctly exhausts its @@ counts
+# before the next file's `--- ` is recognized as a new file boundary --------
+diff_headerless_multiline = """--- a1.txt
++++ b1.txt
+@@ -1,2 +1,2 @@
+ ctx
+-old1
++new1
+--- a2.txt
++++ b2.txt
+@@ -1,1 +1,1 @@
+-old2
++new2
+"""
+files = parse_diff(diff_headerless_multiline)
+check("headerless multiline: two files (second --- recognized only after counts exhausted)",
+      len(files) == 2, f"got {len(files)}")
+check("headerless multiline: file0 name b1.txt", files[0]["display"] == "b1.txt", files[0]["display"])
+check("headerless multiline: file1 name b2.txt", files[1]["display"] == "b2.txt", files[1]["display"])
+f0rows = files[0]["hunks"][0]["rows"]
+f1rows = files[1]["hunks"][0]["rows"]
+check("headerless multiline: file0 has its context row then its del/add row",
+      len(f0rows) == 2 and f0rows[0]["l"]["s"] == "ctx"
+      and f0rows[1]["l"]["s"] == "old1" and f0rows[1]["r"]["s"] == "new1", f0rows)
+check("headerless multiline: file1 has exactly its own row",
+      len(f1rows) == 1 and f1rows[0]["l"]["s"] == "old2" and f1rows[0]["r"]["s"] == "new2", f1rows)
+
 # --- empty input -> [] --------------------------------------------------------
 check("empty input: returns []", parse_diff("") == [], parse_diff(""))
 
