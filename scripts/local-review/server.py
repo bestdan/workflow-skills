@@ -707,7 +707,18 @@ const META = /*__META_JSON__*/{};
 const comments = {}; // anchor -> {file,line,side,code,text}
 // path -> view mode the user picked. Survives /refresh (unlike comments, which
 // refresh discards): a view preference cannot go stale the way an anchor can.
-const viewModes = {};
+// Refresh ends in location.reload(), so this has to outlive the page, not just
+// the render — an in-memory map would silently drop every override. Keyed by
+// the per-launch token path so a later review on the same port cannot inherit
+// the previous one's choices, and scoped to sessionStorage so it dies with the
+// tab. Guarded because a storage-disabled browser would otherwise throw here
+// and take the whole page script down with it.
+const VIEW_MODES_KEY = 'local-review:viewModes:' + location.pathname;
+let viewModes = {};
+try{ viewModes = JSON.parse(sessionStorage.getItem(VIEW_MODES_KEY)) || {}; }catch(e){}
+function saveViewModes(){
+  try{ sessionStorage.setItem(VIEW_MODES_KEY, JSON.stringify(viewModes)); }catch(e){}
+}
 const HAS_PR = !!(META && META.github);   // only offer GitHub posting when the diff is a PR
 const GH_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" style="vertical-align:-2px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>';
 const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -774,7 +785,10 @@ function modeFor(file){
   // A file's status can move under /refresh — a new file gets committed, an
   // append picks up a deletion — and an override that is no longer legal is
   // dropped rather than honoured.
-  if(pick && legalModes(file).indexOf(pick) === -1) delete viewModes[file.display];
+  if(pick && legalModes(file).indexOf(pick) === -1){
+    delete viewModes[file.display];
+    saveViewModes();
+  }
   return viewModes[file.display] || defaultMode(file);
 }
 
@@ -850,6 +864,7 @@ function renderFile(file, fi){
   el.querySelectorAll('.modes button').forEach(b => b.addEventListener('click', e => {
     e.stopPropagation();                       // the file-head click toggles collapse
     viewModes[file.display] = b.dataset.mode;
+    saveViewModes();
     el.replaceWith(renderFile(file, fi));
   }));
   // head interactions
@@ -1419,8 +1434,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
-PAYLOAD_MARKERS = ("/*__DIFF_JSON__*/[]", "/*__META_JSON__*/{}")
-PAYLOAD_MARKER = re.compile("|".join(re.escape(m) for m in PAYLOAD_MARKERS))
+# Longest first, so an alternation can never match a prefix of another marker.
+TEMPLATE_MARKERS = ("/*__DIFF_JSON__*/[]", "/*__META_JSON__*/{}", "__TITLE_HTML__", "__TITLE__")
+TEMPLATE_MARKER = re.compile("|".join(re.escape(m) for m in TEMPLATE_MARKERS))
 
 
 def build_page(files, meta):
@@ -1431,17 +1447,18 @@ def build_page(files, meta):
         title_html = f'<a href="{esc_py(meta["url"])}" target="_blank">#{meta.get("number","")}</a> {esc_py(meta.get("title",""))}'
     else:
         title_html = esc_py(meta.get("title", "local diff"))
-    # One pass, not chained .replace() calls: reviewing a diff of this very file
-    # puts the literal marker text into the payload, and a second .replace()
-    # would substitute into the JSON it just inserted and corrupt it.
+    # Every placeholder in ONE pass, never chained .replace() calls. Each
+    # substituted value can itself contain another marker's literal text — a
+    # diff of this very file carries all four, and a PR title can carry any of
+    # them — so a second pass would substitute into what the first just
+    # inserted and corrupt it. re.sub never rescans its own replacements.
     subs = {
         "/*__DIFF_JSON__*/[]": _json_for_script(files),
         "/*__META_JSON__*/{}": _json_for_script(meta),
+        "__TITLE__": esc_py(title),
+        "__TITLE_HTML__": title_html,
     }
-    html = (PAGE
-            .replace("__TITLE__", esc_py(title))
-            .replace("__TITLE_HTML__", title_html))
-    html = PAYLOAD_MARKER.sub(lambda m: subs[m.group(0)], html)
+    html = TEMPLATE_MARKER.sub(lambda m: subs[m.group(0)], PAGE)
     return html.encode("utf-8")
 
 

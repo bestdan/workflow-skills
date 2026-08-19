@@ -640,6 +640,16 @@ except ValueError as e:
     decoded, ok_self, why = None, False, str(e)
 check("build_page: the DIFF payload is still valid JSON when the diff quotes the markers",
       ok_self, why)
+# A PR title can carry a marker too. Assert on the rendered <title> element
+# specifically: the literal marker also appears in the META JSON (re.sub does
+# not rescan its own replacement), so a whole-page substring check passes even
+# when the title itself has been corrupted to "Review · fix the [] ...".
+page_title = server.build_page(
+    [], {"title": "fix the /*__DIFF_JSON__*/[] substitution"}).decode("utf-8")
+title_el = page_title.split("<title>")[1].split("</title>")[0]
+check("build_page: a marker inside the PR TITLE survives as data, unsubstituted",
+      "/*__DIFF_JSON__*/[]" in title_el, title_el)
+
 check("build_page: a marker inside the diff text survives as data, unsubstituted",
       ok_self and any("/*__META_JSON__*/{};" in r["l"]["s"]
                       for r in decoded[0]["hunks"][0]["rows"] if r["l"]["t"] == "del"),
