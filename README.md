@@ -24,6 +24,30 @@ support live.
 | [**co-review**](skills/co-review/SKILL.md)       | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.               |
 | [**local-review**](skills/local-review/SKILL.md) | "let me look over these changes", "open the diff so I can comment"    | Open a GitHub-style split-diff UI on localhost so _you_ read an agent's changes and leave inline line comments; the feedback is written to a file the agent acts on. Local-only — nothing touches GitHub unless you flag a comment for it. |
 
+**Run local-review by hand** (no agent needed): the server is a plain script —
+alias it once and review any patch:
+
+```bash
+# ~/.zshrc — a function, not an alias: the cache keeps one directory per
+# installed plugin version, so pick the newest deterministically instead of
+# letting a glob expand to several paths.
+local-review() {
+  python3 "$(ls -d "$HOME"/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/local-review/server.py | sort -V | tail -1)" "$@"
+}
+
+cd my-worktree
+local-review --git main       # committed diff of my-branch vs main
+local-review --git uncommitted  # live diff of uncommitted worktree edits
+```
+
+Open the printed `Review UI:` URL. `--git uncommitted` re-reads the worktree
+live, so further edits show up via the Refresh button; `--git <ref>` and
+`--git <A>...<B>` diff commit-to-commit, so Refresh only picks up new content
+when the refs themselves move (a new commit, a rebase), not a worktree edit.
+For a patch file instead, pass `--diff-file PATCH --title "<label>"` (a
+static snapshot; `--title` names the change in the header, otherwise the
+patch path is shown).
+
 **Approve the reviewer commands once.** co-review hands each local reviewer a
 fixed input file on stdin (or via `--prompt-file` for devin), so the command
 string never changes and you can approve each reviewer with an exact-match,

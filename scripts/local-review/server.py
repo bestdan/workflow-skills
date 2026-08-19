@@ -4,6 +4,7 @@
 Usage:
   python3 server.py <pr-number> [--repo OWNER/REPO] [--port 8765] [--out PATH]
   python3 server.py --diff-file some.patch [--port 8765] [--out PATH]
+  python3 server.py --git uncommitted|<ref>|<A>...<B> [--port 8765] [--out PATH]
 
 On Submit the page POSTs all comments to /submit; the server writes them to
 --out (JSON) and prints them to stdout. Watch that file to collect the review.
@@ -201,10 +202,34 @@ def sh(args):
     return out.stdout
 
 
-def get_diff(pr, repo, diff_file):
+def _git_diff_args(git_dir, spec):
+    """Map a --git spec to a `git diff` argv, pinned at the given repo dir.
+    `uncommitted` -> diff HEAD; an explicit `A...B` range is passed through
+    verbatim; any other spec is treated as a single ref diffed against HEAD.
+    A spec starting with `-` would reach git as an option (e.g. --output=
+    writes a file), so it is rejected, and --end-of-options backstops any
+    other option-shaped ref."""
+    if spec.startswith("-"):
+        raise RuntimeError(f"invalid --git spec: {spec!r} (must be 'uncommitted', a ref, or A...B)")
+    if spec == "uncommitted":
+        return ["git", "-C", git_dir, "diff", "--end-of-options", "HEAD"]
+    if "..." in spec:
+        return ["git", "-C", git_dir, "diff", "--end-of-options", spec]
+    return ["git", "-C", git_dir, "diff", "--end-of-options", f"{spec}...HEAD"]
+
+
+def get_diff(pr, repo, diff_file, git_dir=None, git_spec=None):
     if diff_file:
         with open(diff_file) as f:
             return f.read()
+    if git_spec:
+        # Re-run the git command every call rather than caching it, so /state
+        # and /refresh see whatever the command would report now. For
+        # `uncommitted` that means worktree edits. For a ref or an A...B
+        # range the diff is commit-to-commit: it only changes if the refs
+        # themselves move (a new commit on the branch, a rebase, ...), not on
+        # a worktree edit that hasn't been committed.
+        return sh(_git_diff_args(git_dir, git_spec))
     args = ["gh", "pr", "diff", str(pr)]
     if repo:
         args += ["--repo", repo]
@@ -234,9 +259,9 @@ def post_pr_comment(g, c):
         return None, str(e)
 
 
-def resolve_gh(pr, repo, diff_file):
+def resolve_gh(pr, repo, diff_file, git_spec=None):
     """Owner/repo/pr/head-sha for posting inline comments, or None when there is no PR."""
-    if diff_file or not pr:
+    if diff_file or git_spec or not pr:
         return None
     args = ["gh", "pr", "view", str(pr), "--json", "url,number,headRefOid"]
     if repo:
@@ -252,9 +277,14 @@ def resolve_gh(pr, repo, diff_file):
         return None
 
 
-def get_meta(pr, repo, diff_file):
-    if diff_file or not pr:
-        return {"title": diff_file or "local diff", "url": "", "number": pr or ""}
+def get_meta(pr, repo, diff_file, title=None, git_dir=None, git_spec=None):
+    if diff_file or git_spec or not pr:
+        if git_spec:
+            label = "uncommitted changes" if git_spec == "uncommitted" else git_spec
+            repo_name = os.path.basename(git_dir) if git_dir else ""
+            default = f"{label} ({repo_name})" if repo_name else label
+            return {"title": title or default, "url": "", "number": ""}
+        return {"title": title or diff_file or "local diff", "url": "", "number": pr or ""}
     args = ["gh", "pr", "view", str(pr), "--json", "title,url,number"]
     if repo:
         args += ["--repo", repo]
@@ -531,10 +561,6 @@ header .title.clamped{-webkit-mask-image:linear-gradient(to bottom,#000 48%,tran
 header .title a{color:var(--accent);text-decoration:none}
 header .controls{flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:12px;
   flex-wrap:wrap;justify-content:flex-end}
-header .brand{flex:none;display:flex;align-items:center;white-space:nowrap;
-  font-weight:800;font-size:26px;line-height:1;letter-spacing:.2px;color:var(--accent);
-  user-select:none;padding-left:2px}
-header .brand .tm{font-size:.42em;font-weight:700;align-self:flex-start;margin-top:.15em;margin-left:1px}
 .btn{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--border);
   border-radius:7px;padding:6px 12px;cursor:pointer}
 .btn:hover{border-color:var(--accent)}
@@ -639,7 +665,6 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <button class="btn" id="collapseAll">Collapse all</button>
     <button class="btn" id="theme">◐</button>
     <button class="btn primary" id="submit" disabled>Submit review (0)</button>
-    <span class="brand">CaseyDiff<span class="tm">™</span></span>
   </div>
 </header>
 <main id="root"></main>
@@ -690,9 +715,11 @@ const LANG_MAP = {
 function langForFile(file){
   if(typeof hljs==='undefined') return null;
   const base = (file.new || file.display || '').toLowerCase().split('/').pop();
-  if(base==='makefile' || base==='dockerfile') return base;
   const ext = base.includes('.') ? base.split('.').pop() : '';
-  const l = LANG_MAP[ext];
+  // Filename special cases route through the same getLanguage guard as the
+  // extension map: the vendored bundle has makefile but no dockerfile grammar,
+  // and an unguarded name made hlLine catch the error and render plain text.
+  const l = (base==='makefile' || base==='dockerfile') ? base : LANG_MAP[ext];
   return (l && hljs.getLanguage(l)) ? l : null;
 }
 // Highlight one source line and report whether the whole line is a comment.
@@ -1038,12 +1065,15 @@ class Handler(BaseHTTPRequestHandler):
     pr = None
     repo = None
     diff_file = None
+    git_dir = None  # repo pinned at startup, for --git mode
+    git_spec = None  # --git spec: "uncommitted", a ref, or an A...B range
     diff_sig = ""
     _last_sig = None
     _last_check = 0.0
     gh = None  # {owner, repo, pr, sha} when the diff is an associated PR, else None
     srv = None  # the running server, set by main() so a handler can shut it down
     once = False  # shut the server down after a successful /submit
+    title = None  # --title override for the header (diff-file mode)
     # Serializes submissions across handler threads: the browser's double-click
     # guard doesn't bind other local callers, and concurrent /submit posts
     # would duplicate GitHub comments and race the OUT write.
@@ -1061,7 +1091,8 @@ class Handler(BaseHTTPRequestHandler):
         if Handler._last_sig is not None and (now - Handler._last_check) < 4.0:
             return Handler._last_sig
         try:
-            sig = source_sig(get_diff(Handler.pr, Handler.repo, Handler.diff_file))
+            sig = source_sig(get_diff(Handler.pr, Handler.repo, Handler.diff_file,
+                                       Handler.git_dir, Handler.git_spec))
         except Exception:
             return Handler.diff_sig
         Handler._last_sig = sig
@@ -1155,9 +1186,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/refresh":
             try:
-                diff = get_diff(Handler.pr, Handler.repo, Handler.diff_file)
-                meta = get_meta(Handler.pr, Handler.repo, Handler.diff_file)
-                Handler.gh = resolve_gh(Handler.pr, Handler.repo, Handler.diff_file)
+                diff = get_diff(Handler.pr, Handler.repo, Handler.diff_file,
+                                 Handler.git_dir, Handler.git_spec)
+                meta = get_meta(Handler.pr, Handler.repo, Handler.diff_file, Handler.title,
+                                 Handler.git_dir, Handler.git_spec)
+                Handler.gh = resolve_gh(Handler.pr, Handler.repo, Handler.diff_file, Handler.git_spec)
                 meta["github"] = bool(Handler.gh)
                 files = parse_diff(diff)
                 Handler.page = build_page(files, meta)
@@ -1361,21 +1394,33 @@ def main():
     ap.add_argument("pr", nargs="?", help="PR number")
     ap.add_argument("--repo")
     ap.add_argument("--diff-file")
+    ap.add_argument("--git", help="live diff spec: uncommitted | <ref> | <A>...<B>")
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--out", default="pr_comments.json")
+    ap.add_argument("--title", help="human title for the header (else the --diff-file path is shown)")
     ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
     args = ap.parse_args()
 
-    if not args.pr and not args.diff_file:
-        print("error: provide a PR number or --diff-file", file=sys.stderr)
+    if sum(bool(x) for x in (args.pr, args.diff_file, args.git)) != 1:
+        print("error: provide exactly one of a PR number, --diff-file, or --git", file=sys.stderr)
         sys.exit(2)
 
+    git_dir = None
     try:
-        diff = get_diff(args.pr, args.repo, args.diff_file)
-        meta = get_meta(args.pr, args.repo, args.diff_file)
-        gh = resolve_gh(args.pr, args.repo, args.diff_file)
+        if args.git:
+            # Pin the repo once at startup: every later git diff runs against
+            # this dir, so a cwd change after launch can't shift the source.
+            git_dir = sh(["git", "rev-parse", "--show-toplevel"]).strip()
+        diff = get_diff(args.pr, args.repo, args.diff_file, git_dir, args.git)
+        meta = get_meta(args.pr, args.repo, args.diff_file, args.title, git_dir, args.git)
+        gh = resolve_gh(args.pr, args.repo, args.diff_file, args.git)
     except RuntimeError as e:
-        print(f"error: {e}", file=sys.stderr)
+        # Flatten here, not in sh(): the /refresh JSON error path reuses the
+        # same RuntimeError and wants its full multiline stderr (e.g. git's
+        # "unknown revision" fatal plus its usage hint), while this one-line
+        # stderr message is the startup contract the skill polls for.
+        msg = "; ".join(ln.strip() for ln in str(e).splitlines() if ln.strip())
+        print(f"error: {msg}", file=sys.stderr)
         sys.exit(1)
     meta["github"] = bool(gh)
     files = parse_diff(diff)
@@ -1385,6 +1430,9 @@ def main():
     Handler.pr = args.pr
     Handler.repo = args.repo
     Handler.diff_file = args.diff_file
+    Handler.git_dir = git_dir
+    Handler.git_spec = args.git
+    Handler.title = args.title
     Handler.diff_sig = source_sig(diff)
     Handler.gh = gh
     Handler.once = args.once

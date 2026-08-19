@@ -597,6 +597,22 @@ check("WORDLIST: every entry is 3-7 lowercase letters",
       all(_wordlist_re.fullmatch(r"[a-z]{3,7}", w) for w in server.WORDLIST),
       [w for w in server.WORDLIST if not _wordlist_re.fullmatch(r"[a-z]{3,7}", w)])
 
+# --- _git_diff_args: the three --git spec forms map to the right git argv ---
+check("_git_diff_args: uncommitted -> diff HEAD",
+      server._git_diff_args("/repo", "uncommitted") == ["git", "-C", "/repo", "diff", "--end-of-options", "HEAD"],
+      server._git_diff_args("/repo", "uncommitted"))
+check("_git_diff_args: a single ref -> diff <ref>...HEAD",
+      server._git_diff_args("/repo", "main") == ["git", "-C", "/repo", "diff", "--end-of-options", "main...HEAD"],
+      server._git_diff_args("/repo", "main"))
+check("_git_diff_args: an explicit A...B range passes through verbatim",
+      server._git_diff_args("/repo", "abc123...def456") == ["git", "-C", "/repo", "diff", "--end-of-options", "abc123...def456"],
+      server._git_diff_args("/repo", "abc123...def456"))
+try:
+    server._git_diff_args("/repo", "--output=/tmp/pwned")
+    bad("_git_diff_args: option-like spec is rejected", "no exception raised")
+except RuntimeError as e:
+    check("_git_diff_args: option-like spec is rejected", "invalid --git spec" in str(e), str(e))
+
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no
 # --port, so the OS picks a free port and the server reports it.
@@ -1198,6 +1214,220 @@ finally:
             proc2.wait(timeout=5)
     os.unlink(patch2)
     _shutil.rmtree(fake_gh_dir2, ignore_errors=True)
+
+# -- --git mode: throwaway git fixture repos. Pin GIT_CONFIG_GLOBAL/SYSTEM to
+# /dev/null and an explicit `git init -b main` so the fixture cannot inherit
+# the developer machine's global git config (a global core.hooksPath
+# pre-commit that refuses commits to main is exactly what a fresh fixture
+# looks like, and would otherwise fail this suite on such a machine while
+# passing in CI).
+def make_git_fixture():
+    d = _tempfile.mkdtemp(prefix="lr-gitfixture-")
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    env["GIT_CONFIG_SYSTEM"] = "/dev/null"
+
+    def git(*args):
+        r = _subprocess.run(["git"] + list(args), cwd=d, env=env,
+                             capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stdout, r.stderr)
+        return r.stdout
+
+    git("init", "-b", "main")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    with open(os.path.join(d, "file.txt"), "w") as f:
+        f.write("line one\nline two\nline three\n")
+    git("add", "file.txt")
+    git("commit", "-m", "initial")
+    return d, env, git
+
+
+def wait_exit(proc, timeout=5.0):
+    try:
+        return proc.wait(timeout=timeout)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        return None
+
+
+def stop_proc(proc):
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+# -- --git uncommitted: server starts on a modified tracked file, page shows -
+# it, and /state reports fresh right after startup.
+git_dir1, git_env1, git1 = make_git_fixture()
+try:
+    file_path1 = os.path.join(git_dir1, "file.txt")
+    with open(file_path1, "w") as f:
+        f.write("line one\nline two CHANGED\nline three\n")
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "uncommitted"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir1, env=git_env1,
+    )
+    try:
+        url = read_url(proc)
+        check("git uncommitted: server starts and prints LOCAL_REVIEW_URL", bool(url), url)
+        if url:
+            with _urlrequest.urlopen(url, timeout=5) as resp:
+                body = resp.read().decode()
+                check("git uncommitted: page contains the modified file", "file.txt" in body, "")
+            with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+                state = json.loads(resp.read().decode())
+                check("git uncommitted: /state reports fresh right after startup",
+                      state.get("stale") is False, state)
+
+            # LIVE REFRESH: edit the file again, then use POST /refresh (which
+            # always recomputes, unlike the throttled /state poll) for the
+            # fastest deterministic check that the new content and a changed
+            # sig are picked up live.
+            old_sig = state.get("sig")
+            with open(file_path1, "w") as f:
+                f.write("line one\nline two CHANGED AGAIN\nline three\n")
+            req = _urlrequest.Request(f"{url}refresh", data=b"", method="POST")
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                refresh_body = json.loads(resp.read().decode())
+                check("git uncommitted: POST /refresh returns ok", refresh_body.get("ok") is True, refresh_body)
+            with _urlrequest.urlopen(url, timeout=5) as resp:
+                body2 = resp.read().decode()
+                check("git uncommitted: page after refresh shows the new edit", "CHANGED AGAIN" in body2, "")
+            with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+                state2 = json.loads(resp.read().decode())
+                check("git uncommitted: sig changed after refresh picks up the live edit",
+                      state2.get("sig") != old_sig, (old_sig, state2.get("sig")))
+    finally:
+        stop_proc(proc)
+finally:
+    _shutil.rmtree(git_dir1, ignore_errors=True)
+
+# -- --git <ref> (branch mode): shows the committed diff of the branch vs ----
+# the given ref (here main).
+git_dir2, git_env2, git2 = make_git_fixture()
+try:
+    git2("checkout", "-b", "feature")
+    with open(os.path.join(git_dir2, "file.txt"), "w") as f:
+        f.write("line one\nline two on the feature branch\nline three\n")
+    git2("commit", "-am", "feature change")
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "main"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir2, env=git_env2,
+    )
+    try:
+        url = read_url(proc)
+        check("git branch mode: server starts and prints LOCAL_REVIEW_URL", bool(url), url)
+        if url:
+            with _urlrequest.urlopen(url, timeout=5) as resp:
+                body = resp.read().decode()
+                check("git branch mode: page shows the committed diff vs main",
+                      "feature branch" in body, "")
+    finally:
+        stop_proc(proc)
+finally:
+    _shutil.rmtree(git_dir2, ignore_errors=True)
+
+# -- --git in a non-repo cwd: sh()'s RuntimeError from the startup pin -------
+# propagates as a one-line stderr error, exit 1, no traceback.
+nonrepo_dir = _tempfile.mkdtemp(prefix="lr-nonrepo-")
+try:
+    nonrepo_env = dict(os.environ)
+    nonrepo_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    nonrepo_env["GIT_CONFIG_SYSTEM"] = "/dev/null"
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "uncommitted"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=nonrepo_dir, env=nonrepo_env,
+    )
+    rc = wait_exit(proc)
+    output = proc.stdout.read()
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    check("git non-repo cwd: exits 1", rc == 1, rc)
+    check("git non-repo cwd: one-line stderr error, no traceback",
+          len(lines) == 1 and lines[0].startswith("error:") and "Traceback" not in output, output)
+finally:
+    _shutil.rmtree(nonrepo_dir, ignore_errors=True)
+
+# -- --git with an invalid spec (no such ref): same one-line error contract -
+git_dir3, git_env3, git3 = make_git_fixture()
+try:
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "no-such-branch-xyz"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir3, env=git_env3,
+    )
+    rc = wait_exit(proc)
+    output = proc.stdout.read()
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    check("git invalid spec: exits 1", rc == 1, rc)
+    # git's own "unknown revision" fatal carries a multi-line usage hint, but
+    # main() flattens it to one line before printing, so the one-line error:
+    # contract holds even though the underlying RuntimeError is multiline.
+    check("git invalid spec: one-line stderr error, no traceback",
+          len(lines) == 1 and lines[0].startswith("error:") and "Traceback" not in output, output)
+finally:
+    _shutil.rmtree(git_dir3, ignore_errors=True)
+
+# -- exactly-one-input validation: --git and --diff-file together exits 2 ---
+patch_fd5, patch_path5 = _tempfile.mkstemp(suffix=".patch")
+os.close(patch_fd5)
+proc = _subprocess.Popen(
+    [sys.executable, server_path, "--diff-file", patch_path5, "--git", "uncommitted"],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+)
+try:
+    rc = wait_exit(proc)
+    output = proc.stdout.read()
+    check("both --git and --diff-file: exits 2", rc == 2, rc)
+    check("both --git and --diff-file: clear one-of-three error message",
+          "exactly one" in output, output)
+finally:
+    os.unlink(patch_path5)
+
+# -- --title: --diff-file with an explicit --title shows that label ---------
+proc, patch6 = start_server(["--title", "Custom Label"])
+try:
+    url = read_url(proc)
+    check("title: --diff-file with --title starts", bool(url), url)
+    if url:
+        with _urlrequest.urlopen(url, timeout=5) as resp:
+            body = resp.read().decode()
+            check("title: --diff-file page contains the custom --title label",
+                  "Custom Label" in body, "")
+finally:
+    stop_proc(proc)
+    os.unlink(patch6)
+
+# -- --title: --git uncommitted with no --title gets the generated default --
+git_dir4, git_env4, git4 = make_git_fixture()
+try:
+    repo_name = os.path.basename(git_dir4)
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "uncommitted"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir4, env=git_env4,
+    )
+    try:
+        url = read_url(proc)
+        check("title: --git uncommitted with no --title starts", bool(url), url)
+        if url:
+            with _urlrequest.urlopen(url, timeout=5) as resp:
+                body = resp.read().decode()
+                expected = f"uncommitted changes ({repo_name})"
+                check("title: --git uncommitted default title names the change and repo dir",
+                      expected in body, (expected, body))
+    finally:
+        stop_proc(proc)
+finally:
+    _shutil.rmtree(git_dir4, ignore_errors=True)
 
 print(f"# {pass_count} passed, {fail_count} failed")
 sys.exit(1 if fail_count else 0)
