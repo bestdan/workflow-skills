@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.94.0] - 2026-08-19
+
+### Features
+
+- single-column view for one-sided files (#380) (973aba8)
+
 ## [1.93.0] - 2026-08-19
 
 ### Features
