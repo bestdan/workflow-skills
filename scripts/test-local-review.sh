@@ -522,6 +522,39 @@ except RuntimeError as e:
 except Exception as e:
     bad("sh(): missing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
 
+# --- bind_server: only EADDRINUSE triggers the autoselect fallback ----------
+import errno as _errno
+
+
+class _FakeSrv:
+    def __init__(self, addr, handler, err=None):
+        if err is not None:
+            raise OSError(err, "boom")
+        self.server_address = addr
+
+
+_real_srv = server.ThreadingHTTPServer
+try:
+    calls = []
+    def fake_addrinuse(addr, handler):
+        calls.append(addr[1])
+        return _FakeSrv(addr, handler, _errno.EADDRINUSE if addr[1] == 8765 else None)
+    server.ThreadingHTTPServer = fake_addrinuse
+    srv, fell_back = server.bind_server(None)
+    check("bind_server: EADDRINUSE on 8765 falls back to autoselect",
+          fell_back and calls == [8765, 0], (fell_back, calls))
+
+    def fake_eacces(addr, handler):
+        return _FakeSrv(addr, handler, _errno.EACCES if addr[1] == 8765 else None)
+    server.ThreadingHTTPServer = fake_eacces
+    try:
+        server.bind_server(None)
+        bad("bind_server: non-EADDRINUSE OSError propagates", "no exception raised")
+    except OSError as e:
+        check("bind_server: non-EADDRINUSE OSError propagates", e.errno == _errno.EACCES, e.errno)
+finally:
+    server.ThreadingHTTPServer = _real_srv
+
 # --- esc_py escapes quotes as well as angle brackets/ampersand --------------
 esc_out = server.esc_py('"><script>')
 check("esc_py: no raw double quote in output", '"' not in esc_out, esc_out)

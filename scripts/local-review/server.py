@@ -9,6 +9,7 @@ On Submit the page POSTs all comments to /submit; the server writes them to
 --out (JSON) and prints them to stdout. Watch that file to collect the review.
 """
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -1349,7 +1350,9 @@ def bind_server(port):
         return ThreadingHTTPServer(("127.0.0.1", port), Handler), False
     try:
         return ThreadingHTTPServer(("127.0.0.1", 8765), Handler), False
-    except OSError:
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise  # permission/resource errors are not contention; fail loud
         return ThreadingHTTPServer(("127.0.0.1", 0), Handler), True
 
 
