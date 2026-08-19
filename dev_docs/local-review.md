@@ -50,8 +50,10 @@ history that anchored every hardening change to a small diff.
   on its own line. Port is autoselected (bind 0) unless `--port` is given. Use
   the URL verbatim — never rebuild it from the port; the token is the
   authorization. Poll the log for the line with a bound (the skill shows the
-  loop); a dead process means startup failed and the log's `error:` line says
-  why.
+  loop); a dead process means startup failed and the log has the details —
+  gh failures are normalized to a one-line `error:`, other failures (an
+  unreadable `--diff-file`, an occupied explicit `--port`) surface as a
+  traceback.
 - **`--once`:** the server exits after a successful submit. The skill launches
   with it; the recorded PID is only cleanup for an abandoned round.
 - **`--out`:** written via temp file + `os.replace` — a poller checking
@@ -93,6 +95,8 @@ quoted heredoc containing an apostrophe breaks inside `$(...)`, and
 
 - **`/co-review` / `/deliver-task` integration** — wiring the human round into
   the review pipeline was scoped out until the standalone skill had real use.
-- **`langForFile`'s Dockerfile/makefile special case** names a grammar the
-  vendored bundle lacks — harmless (the `hljs.getLanguage` guard falls back to
-  auto-detection), noted here so nobody rediscovers it as a bug.
+- **`langForFile`'s Dockerfile special case** returns `dockerfile` _before_
+  the `hljs.getLanguage` guard, and the vendored bundle has no Dockerfile
+  grammar — `hlLine` catches the highlight error and renders escaped plain
+  text (not `highlightAuto`). Cosmetic-only; noted so nobody rediscovers it
+  as a bug. (`makefile` is fine — that grammar is in the bundle.)
