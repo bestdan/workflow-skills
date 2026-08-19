@@ -58,6 +58,28 @@ history that anchored every hardening change to a small diff.
 5. **Hand off** — `/submit` posts GitHub-flagged comments first, then writes
    `--out` atomically; the agent polls that file.
 
+## View modes
+
+Each file renders in one of three per-file modes — `split`, `single`,
+`preview` — picked by heuristic and overridable from a segmented control in the
+file header. `parse_diff()` supplies the fact the heuristic reads:
+`file["single"]` is `"r"` when the diff deletes nothing, `"l"` when it adds
+nothing, and `None` when both sides are live. Defaults: one-sided → `single`,
+everything else → `split` (wholly-added markdown → `preview`, once that lands).
+
+`single` emits a genuine two-column grid rather than hiding two of four, so
+`insertAfterRow()` reads the column count from `grid.dataset.cols` instead of
+assuming 4. It is offered **only** when one side is empty; a mixed
+modification never gets it. Overrides live in `viewModes` and survive
+`/refresh` (comments do not — refresh discards those on purpose); an override
+that stops being legal falls back to the default. Collapse and "Viewed" live in
+`fileUi` for the same reason: a mode switch re-renders one file via
+`renderFile()`, which also re-materialises saved comment chips from the
+`comments` store so the submit counter never disagrees with the page.
+
+The reasoning, and the two constraints that look arbitrary from outside, are in
+[`decisions/local_review_view_modes.md`](decisions/local_review_view_modes.md).
+
 ## The agent contract
 
 - **Startup:** the server prints `LOCAL_REVIEW_URL=http://127.0.0.1:<port>/<token>/`

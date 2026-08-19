@@ -122,7 +122,10 @@ recorded PID is only cleanup for an abandoned round: `kill "$(cat <scratch>/lr_s
 ## 3. What the user does in the UI
 
 Split diff by file, per-file and per-section collapse, syntax highlighting
-(language auto-detected per file). The user:
+(language auto-detected per file). A file with nothing on one side — a new
+file, a deletion, a pure append — opens in **Single** instead, dropping the
+empty column; a **Split | Single** control in the file header switches it. The
+user:
 
 - Clicks a line to add a comment; a saved comment has **✎ edit** and **×**
   delete controls.

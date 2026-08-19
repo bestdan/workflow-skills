@@ -512,6 +512,17 @@ def parse_diff(text):
             hunk_new_left -= 1
     if hunk:
         flush_pairs()
+    for f in files:
+        # Which side, if either, carries all the content. "r" covers added
+        # files and pure appends (context + adds, nothing deleted); "l" covers
+        # deletions. None means both sides are live, so only a split view can
+        # show the change honestly.
+        if f["dels"] == 0 and f["adds"] > 0:
+            f["single"] = "r"
+        elif f["adds"] == 0 and f["dels"] > 0:
+            f["single"] = "l"
+        else:
+            f["single"] = None
     return files
 
 
@@ -588,10 +599,16 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .file-head .stat .a{color:var(--add-num)} .file-head .stat .d{color:var(--del-num)}
 .file-head .grow{flex:1}
 .file-head label{display:flex;gap:5px;align-items:center;color:var(--dim);font-size:12px;cursor:pointer}
+.modes{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex:none}
+.modes button{background:var(--surface);color:var(--dim);border:0;border-left:1px solid var(--border);
+  font:inherit;font-size:11px;padding:2px 9px;cursor:pointer}
+.modes button:first-child{border-left:0}
+.modes button[aria-pressed="true"]{background:var(--accent-bg);color:var(--accent);font-weight:600}
 .file-body{overflow-x:auto}
 .hunk-head{font-family:var(--mono);font-size:12px;color:var(--dim);background:var(--surface2);
   padding:3px 12px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
 .grid{display:grid;grid-template-columns:46px minmax(0,1fr) 46px minmax(0,1fr);min-width:760px}
+.grid.single{grid-template-columns:46px minmax(0,1fr);min-width:380px}
 .num{font-family:var(--mono);font-size:12px;color:var(--dim);text-align:right;padding:1px 8px;
   user-select:none;border-right:1px solid var(--border);white-space:nowrap}
 .code{font-family:var(--mono);font-size:12.5px;padding:1px 10px;white-space:pre-wrap;word-break:break-word;
@@ -613,6 +630,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .code.mark-remove{text-decoration:line-through;text-decoration-color:var(--del-num);opacity:.55}
 .cmt-saved.dismiss{border-left:3px solid var(--del-num)}
 .cmt-saved.dismiss .del{color:var(--del-num);font-weight:700;font-size:18px}
+.grid.single .cmt-row{grid-column:1/3}
 .cmt-row{grid-column:1/5;background:var(--surface2);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);padding:10px 12px}
 .cmt-anchor{font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:6px}
@@ -687,6 +705,20 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
 const comments = {}; // anchor -> {file,line,side,code,text}
+// path -> view mode the user picked. Survives /refresh (unlike comments, which
+// refresh discards): a view preference cannot go stale the way an anchor can.
+// Refresh ends in location.reload(), so this has to outlive the page, not just
+// the render — an in-memory map would silently drop every override. Keyed by
+// the per-launch token path so a later review on the same port cannot inherit
+// the previous one's choices, and scoped to sessionStorage so it dies with the
+// tab. Guarded because a storage-disabled browser would otherwise throw here
+// and take the whole page script down with it.
+const VIEW_MODES_KEY = 'local-review:viewModes:' + location.pathname;
+let viewModes = {};
+try{ viewModes = JSON.parse(sessionStorage.getItem(VIEW_MODES_KEY)) || {}; }catch(e){}
+function saveViewModes(){
+  try{ sessionStorage.setItem(VIEW_MODES_KEY, JSON.stringify(viewModes)); }catch(e){}
+}
 const HAS_PR = !!(META && META.github);   // only offer GitHub posting when the diff is a PR
 const GH_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" style="vertical-align:-2px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>';
 const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -742,64 +774,120 @@ function hlLine(src, lang){
   return {html, isComment};
 }
 
+// View modes. `split` is the two-sided diff; `single` drops the dead side and
+// is offered only when one side carries all the content (parse_diff decides
+// that, and reports it as file.single === 'r' | 'l' | null).
+const MODE_LABEL = {split:'Split', single:'Single'};
+function legalModes(file){ return file.single ? ['split','single'] : ['split']; }
+function defaultMode(file){ return file.single ? 'single' : 'split'; }
+function modeFor(file){
+  const pick = viewModes[file.display];
+  // A file's status can move under /refresh — a new file gets committed, an
+  // append picks up a deletion — and an override that is no longer legal is
+  // dropped rather than honoured.
+  if(pick && legalModes(file).indexOf(pick) === -1){
+    delete viewModes[file.display];
+    saveViewModes();
+  }
+  return viewModes[file.display] || defaultMode(file);
+}
+
 function anchorOf(file, cell){
   const path = cell.t==='del' ? file.old : file.new;
   const side = cell.t==='del' ? 'L' : 'R';
   return {key:`${path}|${side}${cell.n}`, path, side, line:cell.n, code:cell.s};
 }
 
+// Collapse/"Viewed" live outside the DOM so switching a file's view mode
+// re-renders that file without silently unchecking it.
+const fileUi = {};
+function uiFor(file){
+  if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false};
+  return fileUi[file.display];
+}
+
 function render(){
   root.innerHTML='';
   if(!DIFF.length){root.innerHTML='<div class="empty-note">No changes in this diff.</div>';return;}
-  DIFF.forEach((file, fi) => {
-    const el = document.createElement('section');
-    el.className = 'file' + (file.generated ? ' collapsed' : '');
-    el.dataset.fi = fi;
-    const stat = `<span class="stat"><span class="a">+${file.adds}</span> <span class="d">-${file.dels}</span></span>`;
-    const gen = file.generated ? '<span class="badge">generated</span>' : '';
-    const status = file.status!=='modified' ? `<span class="badge">${file.status}</span>` : '';
-    el.innerHTML = `<div class="file-head">
-        <span class="chev">▾</span>
-        <span class="path">${esc(file.display)}</span>
-        ${status}${gen}
-        <span class="grow"></span>
-        ${stat}
-        <label><input type="checkbox" class="viewed"> Viewed</label>
-      </div><div class="file-body"></div>`;
-    const body = el.querySelector('.file-body');
-    if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
-    else{
-      const lang = langForFile(file);
-      file.hunks.forEach(h => {
-        const hunkEl = document.createElement('div'); hunkEl.className='hunk';
-        const hh = document.createElement('div'); hh.className='hunk-head';
-        hh.innerHTML = `<span class="hchev">▾</span><span>${esc(h.header)}${h.section? '  '+esc(h.section):''}</span>`;
-        hh.addEventListener('click', () => hunkEl.classList.toggle('collapsed'));
-        hunkEl.appendChild(hh);
-        const g = document.createElement('div'); g.className='grid';
-        const rlines = [];
-        h.rows.forEach(row => { const made = addRow(g, file, row, lang); if(made.r) rlines.push(made.r); });
-        assignCommentBlocks(rlines, file, g);
-        hunkEl.appendChild(g);
-        body.appendChild(hunkEl);
-      });
-    }
-    // head interactions
-    el.querySelector('.file-head').addEventListener('click', e => {
-      if(e.target.closest('label')) return;
-      el.classList.toggle('collapsed');
-    });
-    el.querySelector('.viewed').addEventListener('change', e => {
-      el.classList.toggle('collapsed', e.target.checked);
-    });
-    root.appendChild(el);
-  });
+  DIFF.forEach((file, fi) => root.appendChild(renderFile(file, fi)));
   refreshCounts();
 }
 
-function addRow(g, file, row, lang){
+function renderFile(file, fi){
+  const ui = uiFor(file);
+  const el = document.createElement('section');
+  el.className = 'file' + (ui.collapsed ? ' collapsed' : '');
+  el.dataset.fi = fi;
+  const stat = `<span class="stat"><span class="a">+${file.adds}</span> <span class="d">-${file.dels}</span></span>`;
+  const gen = file.generated ? '<span class="badge">generated</span>' : '';
+  const status = file.status!=='modified' ? `<span class="badge">${file.status}</span>` : '';
+  const modes = legalModes(file), mode = modeFor(file);
+  const modeCtl = modes.length>1 ? `<span class="modes">${modes.map(m =>
+    `<button data-mode="${m}" aria-pressed="${m===mode}">${MODE_LABEL[m]}</button>`).join('')}</span>` : '';
+  el.innerHTML = `<div class="file-head">
+      <span class="chev">▾</span>
+      <span class="path">${esc(file.display)}</span>
+      ${status}${gen}
+      <span class="grow"></span>
+      ${stat}
+      ${modeCtl}
+      <label><input type="checkbox" class="viewed"> Viewed</label>
+    </div><div class="file-body"></div>`;
+  const body = el.querySelector('.file-body');
+  if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
+  else{
+    const lang = langForFile(file);
+    file.hunks.forEach(h => {
+      const hunkEl = document.createElement('div'); hunkEl.className='hunk';
+      const hh = document.createElement('div'); hh.className='hunk-head';
+      hh.innerHTML = `<span class="hchev">▾</span><span>${esc(h.header)}${h.section? '  '+esc(h.section):''}</span>`;
+      hh.addEventListener('click', () => hunkEl.classList.toggle('collapsed'));
+      hunkEl.appendChild(hh);
+      const g = document.createElement('div');
+      g.className = mode==='single' ? 'grid single' : 'grid';
+      g.dataset.cols = mode==='single' ? '2' : '4';
+      const rlines = [], made = [];
+      h.rows.forEach(row => { const m = addRow(g, file, row, lang, mode); if(m.r) rlines.push(m.r);
+        if(m.l) made.push(m.l); if(m.r) made.push(m.r); });
+      assignCommentBlocks(rlines, file, g);
+      // Comments outlive the DOM that created them: a mode switch rebuilds
+      // this grid, and every saved comment has to come back with it or the
+      // "Submit review (N)" count claims comments the page cannot show.
+      made.forEach(m => {
+        const c = comments[anchorOf(file, m.cell).key];
+        if(c && c.kind !== 'dismiss-comments') rerenderSaved(g, file, m.cell, m.codeEl);
+      });
+      hunkEl.appendChild(g);
+      body.appendChild(hunkEl);
+    });
+  }
+  el.querySelectorAll('.modes button').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();                       // the file-head click toggles collapse
+    viewModes[file.display] = b.dataset.mode;
+    saveViewModes();
+    el.replaceWith(renderFile(file, fi));
+  }));
+  // head interactions
+  el.querySelector('.file-head').addEventListener('click', e => {
+    if(e.target.closest('label') || e.target.closest('.modes')) return;
+    ui.collapsed = el.classList.toggle('collapsed');
+  });
+  const viewedBox = el.querySelector('.viewed');
+  viewedBox.checked = ui.viewed;
+  viewedBox.addEventListener('change', e => {
+    ui.viewed = e.target.checked;
+    ui.collapsed = e.target.checked;
+    el.classList.toggle('collapsed', e.target.checked);
+  });
+  return el;
+}
+
+function addRow(g, file, row, lang, mode){
   const made = {l:null, r:null};
-  ['l','r'].forEach(sideKey => {
+  // In single mode only the live side is emitted, so the grid is two columns
+  // wide and there are no `empty` filler cells at all.
+  const sides = mode==='single' ? [file.single] : ['l','r'];
+  sides.forEach(sideKey => {
     const cell = row[sideKey];
     const num = document.createElement('div');
     const code = document.createElement('div');
@@ -836,6 +924,12 @@ function assignCommentBlocks(rlines, file, g){
     let b=i; while(b<rlines.length-1 && rlines[b+1].isComment && rlines[b+1].cell.n===rlines[b].cell.n+1) b++;
     const run = rlines.slice(a, b+1);
     rc.kill.onclick = ev => { ev.stopPropagation(); dismissBlock(file, run, g); };
+    // Restore a dismissal the user already made, so a mode switch that rebuilds
+    // this grid does not lose the strike-through and its chip.
+    if(rc === run[0] && (comments[`${file.new}|R${run[0].cell.n}`] || {}).kind === 'dismiss-comments'){
+      run.forEach(x => x.codeEl.classList.add('mark-remove'));
+      showDismissChip(g, run, `${file.new}|R${run[0].cell.n}`);
+    }
   }
 }
 
@@ -923,14 +1017,15 @@ function rerenderSaved(grid, file, cell, codeEl){
   insertAfterRow(grid, codeEl, chip);
 }
 function insertAfterRow(grid, codeEl, node){
-  // codeEl is the l-code or r-code cell of a 4-column visual row
-  // [l-num, l-code, r-num, r-code]. Inserting a full-width .cmt-row right
-  // after an l-code would split the row and shove the right-side cells onto
-  // the next line, so advance to the row's last cell (skipping .cmt-row
+  // codeEl is a code cell of a visual row: [l-num, l-code, r-num, r-code] in
+  // split mode, [num, code] in single mode. Inserting a full-width .cmt-row
+  // right after an l-code would split the row and shove the right-side cells
+  // onto the next line, so advance to the row's last cell (skipping .cmt-row
   // nodes, which sit between rows), then past any comment rows already there.
+  const cols = Number(grid.dataset.cols) || 4;
   const cells = Array.from(grid.children).filter(c=>!c.classList.contains('cmt-row'));
   const idx = cells.indexOf(codeEl);
-  let ref = cells[Math.min(idx - (idx % 4) + 3, cells.length - 1)];
+  let ref = cells[Math.min(idx - (idx % cols) + (cols - 1), cells.length - 1)];
   while(ref.nextSibling && ref.nextSibling.classList.contains('cmt-row')) ref = ref.nextSibling;
   if(ref.nextSibling) grid.insertBefore(node, ref.nextSibling); else grid.appendChild(node);
 }
@@ -943,10 +1038,14 @@ function refreshCounts(){
     `${DIFF.length} file${DIFF.length!==1?'s':''} · ${n} comment${n!==1?'s':''}`;
 }
 
-document.getElementById('expandAll').onclick = () =>
-  document.querySelectorAll('.file').forEach(f=>f.classList.remove('collapsed'));
-document.getElementById('collapseAll').onclick = () =>
-  document.querySelectorAll('.file').forEach(f=>f.classList.add('collapsed'));
+// Keep fileUi in step with the DOM, or a later mode switch re-renders the file
+// from a stale collapsed flag and appears to undo the button.
+function setAllCollapsed(on){
+  document.querySelectorAll('.file').forEach(f => f.classList.toggle('collapsed', on));
+  DIFF.forEach(file => { uiFor(file).collapsed = on; });
+}
+document.getElementById('expandAll').onclick = () => setAllCollapsed(false);
+document.getElementById('collapseAll').onclick = () => setAllCollapsed(true);
 document.getElementById('theme').onclick = () => {
   const r=document.documentElement;
   const cur=r.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
@@ -1335,6 +1434,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+# Longest first, so an alternation can never match a prefix of another marker.
+TEMPLATE_MARKERS = ("/*__DIFF_JSON__*/[]", "/*__META_JSON__*/{}", "__TITLE_HTML__", "__TITLE__")
+TEMPLATE_MARKER = re.compile("|".join(re.escape(m) for m in TEMPLATE_MARKERS))
+
+
 def build_page(files, meta):
     title = f"Review · {meta.get('title','diff')}"
     if meta.get("number"):
@@ -1343,11 +1447,18 @@ def build_page(files, meta):
         title_html = f'<a href="{esc_py(meta["url"])}" target="_blank">#{meta.get("number","")}</a> {esc_py(meta.get("title",""))}'
     else:
         title_html = esc_py(meta.get("title", "local diff"))
-    html = (PAGE
-            .replace("__TITLE__", esc_py(title))
-            .replace("__TITLE_HTML__", title_html)
-            .replace("/*__DIFF_JSON__*/[]", _json_for_script(files))
-            .replace("/*__META_JSON__*/{}", _json_for_script(meta)))
+    # Every placeholder in ONE pass, never chained .replace() calls. Each
+    # substituted value can itself contain another marker's literal text — a
+    # diff of this very file carries all four, and a PR title can carry any of
+    # them — so a second pass would substitute into what the first just
+    # inserted and corrupt it. re.sub never rescans its own replacements.
+    subs = {
+        "/*__DIFF_JSON__*/[]": _json_for_script(files),
+        "/*__META_JSON__*/{}": _json_for_script(meta),
+        "__TITLE__": esc_py(title),
+        "__TITLE_HTML__": title_html,
+    }
+    html = TEMPLATE_MARKER.sub(lambda m: subs[m.group(0)], PAGE)
     return html.encode("utf-8")
 
 
