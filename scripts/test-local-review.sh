@@ -400,6 +400,14 @@ index 1111111..2222222 100644
 f = parse_diff(diff_quoted)[0]
 check("quoted header: new decodes non-ASCII octal escapes", f["new"] == "päth.py", f["new"])
 check("quoted header: old decodes non-ASCII octal escapes", f["old"] == "päth.py", f["old"])
+
+# _unquote_git_path: the full git escape set, and malformed octal doesn't raise
+uq = server._unquote_git_path
+check("unquote: full C escape set", uq(r"a\ab\bc\fd\ne\rf\tg\vh") == "a\ab\bc\fd\ne\rf\tg\vh",
+      repr(uq(r"a\ab\bc\fd\ne\rf\tg\vh")))
+check("unquote: malformed octal \\800 passes through without raising",
+      uq(r"x\800y") == "x\\800y", repr(uq(r"x\800y")))
+check("unquote: octal requires all three digits octal", uq(r"\079") == "\\079", repr(uq(r"\079")))
 rows = f["hunks"][0]["rows"]
 check("quoted header: hunk row still parses", len(rows) == 1
       and rows[0]["l"]["s"] == "old" and rows[0]["r"]["s"] == "new", rows)

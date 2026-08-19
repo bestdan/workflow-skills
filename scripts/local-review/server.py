@@ -142,32 +142,26 @@ _HEADER_PATTERNS = [
 ]
 
 
+_GIT_ESCAPES = {"\\": 0x5C, '"': 0x22, "a": 0x07, "b": 0x08, "f": 0x0C,
+                "n": 0x0A, "r": 0x0D, "t": 0x09, "v": 0x0B}
+_OCTAL = set("01234567")
+
+
 def _unquote_git_path(s):
-    """Decode a git-quoted path: \\\\, \\", \\t, \\n, and \\NNN octal byte
-    escapes, then decode the resulting bytes as UTF-8."""
+    """Decode a git-quoted path: the full C escape set git emits (\\a \\b \\f
+    \\n \\r \\t \\v \\\\ \\") plus \\NNN octal byte escapes (all three digits
+    must be octal), then decode the resulting bytes as UTF-8."""
     out = bytearray()
     i, n = 0, len(s)
     while i < n:
         c = s[i]
         if c == "\\" and i + 1 < n:
             nc = s[i + 1]
-            if nc == "\\":
-                out.append(0x5C)
+            if nc in _GIT_ESCAPES:
+                out.append(_GIT_ESCAPES[nc])
                 i += 2
                 continue
-            if nc == '"':
-                out.append(0x22)
-                i += 2
-                continue
-            if nc == "t":
-                out.append(0x09)
-                i += 2
-                continue
-            if nc == "n":
-                out.append(0x0A)
-                i += 2
-                continue
-            if nc.isdigit() and i + 4 <= n:
+            if i + 4 <= n and all(d in _OCTAL for d in s[i + 1:i + 4]):
                 out.append(int(s[i + 1:i + 4], 8) & 0xFF)
                 i += 4
                 continue
