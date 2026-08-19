@@ -157,7 +157,8 @@ WORDLIST = (
     "turkey", "turn", "turnip", "turtle", "tweed", "twist", "two", "unlock",
     "urban", "urchin", "valley", "valve", "van", "velvet", "verify", "vest",
 )
-assert len(set(WORDLIST)) == 1024, "WORDLIST must contain exactly 1024 distinct words"
+assert len(WORDLIST) == 1024 and len(set(WORDLIST)) == 1024, \
+    "WORDLIST must contain exactly 1024 distinct words"
 
 # Files matching any of these render auto-collapsed: the ones a human almost
 # never needs to read line-by-line. Path-segment patterns anchor at the start

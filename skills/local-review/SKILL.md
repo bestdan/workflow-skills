@@ -56,47 +56,53 @@ startup, so poll the log with a bound, bailing out if the server died:
 
 ```bash
 url=""
+review_url=""
 for i in $(seq 1 20); do
-  url="$(grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log)" && break
+  url="$(grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log)" && {
+    review_url="$(grep -m1 '^Review UI: ' <scratch>/lr_server.log | awk '{print $3}')"
+    break
+  }
   kill -0 "$(cat <scratch>/lr_server.pid)" || break
   sleep 0.5
 done
-if [ -n "$url" ]; then echo "$url"; else
+if [ -n "$url" ]; then echo "$review_url"; else
   cat <scratch>/lr_server.log
   kill "$(cat <scratch>/lr_server.pid)" 2>/dev/null
   echo "local-review: server startup failed or timed out"
 fi
 ```
 
-A `LOCAL_REVIEW_URL=` line means the server is up — use that URL verbatim (it
-is the machine-readable contract: `http://127.0.0.1:<port>/<token>/`).
-Otherwise the block printed the log and reported the failure: a dead process
-means startup failed (the log's `error:` line says why — usually a `gh`
-failure in PR mode), and a silent-but-alive server was killed after the 10s
-timeout. Either way, report the log's error instead of proceeding.
+A `LOCAL_REVIEW_URL=` line means the server is up — that is the
+machine-readable readiness contract (`http://127.0.0.1:<port>/<token>/`); use
+it to detect startup, not to hand to the human. Otherwise the block printed
+the log and reported the failure: a dead process means startup failed (the
+log's `error:` line says why — usually a `gh` failure in PR mode), and a
+silent-but-alive server was killed after the 10s timeout. Either way, report
+the log's error instead of proceeding.
 
-The URL carries a random per-launch token, now four hyphenated words (e.g.
+The URL carries a random per-launch token, four hyphenated words (e.g.
 `amber-falcon-tide-quiet`) instead of an opaque base64 blob, so a human can
 read and retype it; never rebuild it from the port alone, and don't record it
 anywhere persistent (a committed file, a ticket, a log that outlives the
 round). Showing it to the user so they can open it — including the
-no-browser fallback below, which prints it in chat — is fine: the token dies
-with the server.
+no-browser fallback below — is fine: the token dies with the server.
 
 The log's `Review UI:` line gives the human the same token under the vanity
 host `review.localhost` (e.g. `http://review.localhost:<port>/<token>/`).
-Chrome and Firefox resolve any `*.localhost` name straight to loopback with no
-DNS lookup (RFC 6761), so this opens exactly like the 127.0.0.1 form. If the
-user's browser can't resolve it, the `LOCAL_REVIEW_URL` (127.0.0.1) form is
-equivalent — give them that instead.
+**This is the URL to open and to print for the user** — Chrome and Firefox
+resolve any `*.localhost` name straight to loopback with no DNS lookup
+(RFC 6761), so it opens exactly like the 127.0.0.1 form but reads far better.
+If the user's browser can't resolve it, fall back to the `LOCAL_REVIEW_URL`
+(127.0.0.1) form — the two are equivalent.
 
-Then open the reported URL for the user:
+Then open `$review_url` for the user:
 
 - With browser tooling available (`mcp__claude-in-chrome__*`): create a tab
-  with `tabs_create_mcp`, `navigate` to the URL, and confirm it rendered with
-  `read_page` (look for the diff title and the **Submit review** button).
-- Without browser tooling: print the URL and ask the user to open it. The tool
-  is fully usable by hand.
+  with `tabs_create_mcp`, `navigate` to `$review_url`, and confirm it rendered
+  with `read_page` (look for the diff title and the **Submit review**
+  button).
+- Without browser tooling: print `$review_url` and ask the user to open it.
+  The tool is fully usable by hand.
 
 With `--once` the server shuts itself down after a successful submit. The
 recorded PID is only cleanup for an abandoned round: `kill "$(cat <scratch>/lr_server.pid)"`.

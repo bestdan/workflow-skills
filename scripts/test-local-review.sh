@@ -700,16 +700,23 @@ finally:
     for p in (patch1, patch2):
         os.unlink(p)
 
-# -- default-port fallback: 8765 held by us -> server must land elsewhere ---
-# Bind our own socket on 8765 FIRST (whether or not it was already busy on
-# this machine, our hold guarantees the server can't land there while we
-# have it), then launch with no --port and confirm it comes up on a
-# different port and still prints a parseable LOCAL_REVIEW_URL.
+# -- default-port fallback: 8765 held -> server must land elsewhere ---------
+# Try to bind our own socket on 8765 first. If that succeeds, our hold
+# guarantees the server can't land there. If it raises (already busy on this
+# machine, e.g. another process or a leftover from a previous run), the port
+# is already held by someone else, which serves the same purpose -- either
+# way the server must not land on 8765 while it's occupied. Only close the
+# socket in the finally when we actually acquired it.
 hold_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
 hold_sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+acquired = False
 try:
     hold_sock.bind(("127.0.0.1", 8765))
     hold_sock.listen(1)
+    acquired = True
+except OSError:
+    pass
+try:
     proc3, patch3 = start_server([])
     try:
         url3 = read_url(proc3)
@@ -727,7 +734,8 @@ try:
             proc3.wait(timeout=5)
         os.unlink(patch3)
 finally:
-    hold_sock.close()
+    if acquired:
+        hold_sock.close()
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")

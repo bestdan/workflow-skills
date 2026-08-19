@@ -90,8 +90,10 @@ page can POST to localhost, and `/submit` writes the file the agent acts on —
 in PR mode it posts to GitHub through the user's authenticated `gh`. Hence:
 every route mounts under a path segment of four `secrets.choice()`-drawn words
 from the 1024-word `WORDLIST` (bare 404 otherwise, slashless alias 301s),
-POSTs reject foreign `Origin` (now including the `review.localhost` vanity
-host, port-scoped) and `Sec-Fetch-Site: cross-site`, and the vendor route's
+POSTs reject any foreign `Origin` — the allowlist is `127.0.0.1`, `localhost`,
+and the port-scoped vanity `http://review.localhost:<port>` only, so an
+arbitrary `*.localhost` origin (e.g. `evil.localhost`) is still rejected — and
+`Sec-Fetch-Site: cross-site`, and the vendor route's
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.
 
