@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.91.0] - 2026-08-19
+
+### Features
+
+- parse plain unified diffs and quoted git headers (3bdf7df)
+
 ## [1.90.1] - 2026-08-18
 
 ### Fixes
