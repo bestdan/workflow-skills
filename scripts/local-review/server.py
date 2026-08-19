@@ -218,8 +218,12 @@ def get_diff(pr, repo, diff_file, git_dir=None, git_spec=None):
         with open(diff_file) as f:
             return f.read()
     if git_spec:
-        # Live source: re-run the git command every call so /state and
-        # /refresh pick up worktree edits made after the server started.
+        # Re-run the git command every call rather than caching it, so /state
+        # and /refresh see whatever the command would report now. For
+        # `uncommitted` that means worktree edits. For a ref or an A...B
+        # range the diff is commit-to-commit: it only changes if the refs
+        # themselves move (a new commit on the branch, a rebase, ...), not on
+        # a worktree edit that hasn't been committed.
         return sh(_git_diff_args(git_dir, git_spec))
     args = ["gh", "pr", "diff", str(pr)]
     if repo:
@@ -1406,7 +1410,12 @@ def main():
         meta = get_meta(args.pr, args.repo, args.diff_file, args.title, git_dir, args.git)
         gh = resolve_gh(args.pr, args.repo, args.diff_file, args.git)
     except RuntimeError as e:
-        print(f"error: {e}", file=sys.stderr)
+        # Flatten here, not in sh(): the /refresh JSON error path reuses the
+        # same RuntimeError and wants its full multiline stderr (e.g. git's
+        # "unknown revision" fatal plus its usage hint), while this one-line
+        # stderr message is the startup contract the skill polls for.
+        msg = "; ".join(ln.strip() for ln in str(e).splitlines() if ln.strip())
+        print(f"error: {msg}", file=sys.stderr)
         sys.exit(1)
     meta["github"] = bool(gh)
     files = parse_diff(diff)

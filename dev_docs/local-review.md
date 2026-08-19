@@ -27,17 +27,21 @@ history that anchored every hardening change to a small diff.
 1. **Acquire** — `get_diff()`: `--diff-file`, `--git <spec>` (via
    `_git_diff_args()`, one helper mapping `uncommitted` → `git diff HEAD`, a
    single ref → `git diff <ref>...HEAD`, and an explicit `A...B` range
-   straight through), or `gh pr diff`. `--git` mode is the only _live_ source:
-   `main()` pins the repo once at startup with `git rev-parse
-   --show-toplevel`, and every later call re-runs `git -C <dir> diff ...`
-   against that pinned dir, so `/state` and `/refresh` see worktree edits made
-   after launch. `sh()` converts every subprocess failure (nonzero _or_
-   missing binary) into `RuntimeError`; `main()` reports one line on stderr
-   and exits 1 — this covers a non-repo cwd or bad `--git` spec the same way
-   it covers a gh failure. `get_meta()`/`resolve_gh()` propagate gh failures
-   too — PR mode fails loud, never degrades silently. Exactly one of PR
-   number, `--diff-file`, `--git` must be given; `main()` validates this and
-   exits 2 otherwise.
+   straight through), or `gh pr diff`. `main()` pins the repo once at startup
+   with `git rev-parse --show-toplevel`, and every later call re-runs `git -C
+   <dir> diff ...` against that pinned dir instead of caching the result —
+   but only `uncommitted` is a live *worktree* source: `/state` and
+   `/refresh` see worktree edits under that spec because `git diff HEAD`
+   re-reads the working tree every time. A ref or an `A...B` range diffs
+   commit-to-commit, so re-running it only surfaces something new when the
+   refs themselves move (a new commit, a rebase) — a worktree edit alone
+   doesn't. `sh()` converts every subprocess failure (nonzero _or_ missing
+   binary) into `RuntimeError`; `main()` reports one line on stderr and exits
+   1 — this covers a non-repo cwd or bad `--git` spec the same way it covers
+   a gh failure. `get_meta()`/`resolve_gh()` propagate gh failures too — PR
+   mode fails loud, never degrades silently. Exactly one of PR number,
+   `--diff-file`, `--git` must be given; `main()` validates this and exits 2
+   otherwise.
 2. **Parse** — `parse_diff()`: unified diff → `files → hunks → rows`, pairing
    pending `-`/`+` runs into left/right cells. Also accepts **headerless**
    `---`/`+++` patches (hunk extents tracked from the `@@` counts, so a deleted

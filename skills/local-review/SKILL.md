@@ -137,14 +137,17 @@ Split diff by file, per-file and per-section collapse, syntax highlighting
   and two buttons: **Submit review** (feedback to act on) or **Approve** (the
   change is good).
 - If the diff **source** changes while the page is open — the PR on GitHub,
-  the patch file, or (in `--git` mode) the worktree itself — a **↻ Refresh**
-  button appears in the header. `--git` mode re-runs the pinned `git diff` on
-  every check, so further worktree edits are picked up automatically — no
-  regenerating anything. `--diff-file` mode is a static snapshot: the server
-  re-reads the patch file, not the repo, so a worktree edit needs a
-  regenerated patch to show up. Refresh discards unsaved comments (with an
-  inline confirm when comments are pending). Take one round at a time and
-  re-open between rounds.
+  the patch file, or (in `--git` mode) the pinned repo — a **↻ Refresh**
+  button appears in the header. `--git uncommitted` re-runs `git diff HEAD`
+  on every check, so further worktree edits are picked up automatically — no
+  regenerating anything. `--git <ref>` and `--git <A>...<B>` diff
+  commit-to-commit, so Refresh only surfaces new content when the refs
+  themselves move (a new commit made mid-review, a rebase) — a worktree edit
+  that hasn't been committed does not appear. `--diff-file` mode is a static
+  snapshot: the server re-reads the patch file, not the repo, so a worktree
+  edit needs a regenerated patch to show up. Refresh discards unsaved
+  comments (with an inline confirm when comments are pending). Take one
+  round at a time and re-open between rounds.
 
 ## 4. Collect the round
 

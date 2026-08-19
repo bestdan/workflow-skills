@@ -36,10 +36,13 @@ local-review --git main       # committed diff of my-branch vs main
 local-review --git uncommitted  # live diff of uncommitted worktree edits
 ```
 
-Open the printed `Review UI:` URL. `--git` mode re-reads the repo live, so
-worktree edits made after launch show up via the Refresh button. For a patch
-file instead, pass `--diff-file PATCH --title "<label>"` (a static snapshot;
-`--title` names the change in the header, otherwise the patch path is shown).
+Open the printed `Review UI:` URL. `--git uncommitted` re-reads the worktree
+live, so further edits show up via the Refresh button; `--git <ref>` and
+`--git <A>...<B>` diff commit-to-commit, so Refresh only picks up new content
+when the refs themselves move (a new commit, a rebase), not a worktree edit.
+For a patch file instead, pass `--diff-file PATCH --title "<label>"` (a
+static snapshot; `--title` names the change in the header, otherwise the
+patch path is shown).
 
 **Approve the reviewer commands once.** co-review hands each local reviewer a
 fixed input file on stdin (or via `--prompt-file` for devin), so the command

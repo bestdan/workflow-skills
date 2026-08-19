@@ -1363,11 +1363,11 @@ try:
     output = proc.stdout.read()
     lines = [ln for ln in output.splitlines() if ln.strip()]
     check("git invalid spec: exits 1", rc == 1, rc)
-    # git's own "unknown revision" fatal carries a multi-line usage hint, so
-    # this only pins the normalized-error contract (starts with "error:", no
-    # Python traceback) rather than a strict single line.
-    check("git invalid spec: normalized stderr error, no traceback",
-          bool(lines) and lines[0].startswith("error:") and "Traceback" not in output, output)
+    # git's own "unknown revision" fatal carries a multi-line usage hint, but
+    # main() flattens it to one line before printing, so the one-line error:
+    # contract holds even though the underlying RuntimeError is multiline.
+    check("git invalid spec: one-line stderr error, no traceback",
+          len(lines) == 1 and lines[0].startswith("error:") and "Traceback" not in output, output)
 finally:
     _shutil.rmtree(git_dir3, ignore_errors=True)
 
@@ -1386,6 +1386,43 @@ try:
           "exactly one" in output, output)
 finally:
     os.unlink(patch_path5)
+
+# -- --title: --diff-file with an explicit --title shows that label ---------
+proc, patch6 = start_server(["--title", "Custom Label"])
+try:
+    url = read_url(proc)
+    check("title: --diff-file with --title starts", bool(url), url)
+    if url:
+        with _urlrequest.urlopen(url, timeout=5) as resp:
+            body = resp.read().decode()
+            check("title: --diff-file page contains the custom --title label",
+                  "Custom Label" in body, "")
+finally:
+    stop_proc(proc)
+    os.unlink(patch6)
+
+# -- --title: --git uncommitted with no --title gets the generated default --
+git_dir4, git_env4, git4 = make_git_fixture()
+try:
+    repo_name = os.path.basename(git_dir4)
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "uncommitted"],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir4, env=git_env4,
+    )
+    try:
+        url = read_url(proc)
+        check("title: --git uncommitted with no --title starts", bool(url), url)
+        if url:
+            with _urlrequest.urlopen(url, timeout=5) as resp:
+                body = resp.read().decode()
+                expected = f"uncommitted changes ({repo_name})"
+                check("title: --git uncommitted default title names the change and repo dir",
+                      expected in body, (expected, body))
+    finally:
+        stop_proc(proc)
+finally:
+    _shutil.rmtree(git_dir4, ignore_errors=True)
 
 print(f"# {pass_count} passed, {fail_count} failed")
 sys.exit(1 if fail_count else 0)
