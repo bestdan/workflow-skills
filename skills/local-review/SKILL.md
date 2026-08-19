@@ -20,21 +20,23 @@ only; vendored highlight.js in `scripts/local-review/vendor/`). If
 
 ## 1. Produce the diff to review
 
-The server takes either a PR number (it shells out to `gh pr diff`) or a
-unified-diff patch via `--diff-file`. Pick the source from what the user is
-reviewing:
+The server takes a PR number (it shells out to `gh pr diff`), a live git diff
+via `--git <spec>`, or a unified-diff patch via `--diff-file`. Pick the source
+from what the user is reviewing:
 
 - **A GitHub PR** — pass the number and `--repo <owner/repo>` (needs an
   authenticated `gh`).
-- **Uncommitted work in a worktree** — `git -C <dir> diff HEAD > <scratch>/review.patch`
-  (`HEAD`, not bare `git diff` — bare misses staged changes, `--staged` misses
-  unstaged ones). Untracked files never appear in `git diff`; include them with
-  `git -C <dir> diff --no-index /dev/null <file> >> <scratch>/review.patch` per
-  new file (or `git add -N` them first), so the review covers the whole change.
-- **A branch against its base** — `git -C <dir> diff <base>...<head> > <scratch>/review.patch`.
-- **Any two refs or a commit range** — `git -C <dir> diff <A> <B> > …`. The
-  parser handles standard `git diff` output, so any range works.
-- **A patch the user already has** — pass its path to `--diff-file` directly.
+- **Uncommitted work in a worktree** — `--git uncommitted` (`git diff HEAD`,
+  not bare `git diff` — bare misses staged changes, `--staged` misses
+  unstaged ones). The server is launched from inside the repo/worktree to
+  review; it pins that directory at startup and re-runs the diff live, so
+  further edits show up via Refresh. Untracked files never appear in `git
+  diff`; `git add -N` them first so the review covers the whole change.
+- **A branch against its base** — `--git <base>` (`git diff <base>...HEAD`).
+- **An explicit commit range** — `--git <A>...<B>` (`git diff A...B`),
+  passed straight through.
+- **A patch the user already has** — pass its path to `--diff-file` directly
+  (a static snapshot: worktree edits made after launch are not detected).
 
 Generated files (lockfiles, protobuf/codegen output, minified bundles,
 snapshots, vendored trees) render auto-collapsed; the user can expand them.
@@ -44,10 +46,20 @@ snapshots, vendored trees) render auto-collapsed; the user can expand them.
 ```bash
 OUT=<scratch>/lr_comments.json; rm -f "$OUT"
 nohup python3 "${CLAUDE_PLUGIN_ROOT}/scripts/local-review/server.py" \
-  <PR [--repo o/r] | --diff-file PATCH> \
+  <PR [--repo o/r] | --diff-file PATCH | --git SPEC> [--title "<label>"] \
   --once --out "$OUT" > <scratch>/lr_server.log 2>&1 &
 echo $! > <scratch>/lr_server.pid
 ```
+
+`--git` pins the repo at the CWD the server is launched from, so launch it
+from inside the worktree/repo being reviewed.
+
+In `--diff-file` mode ALWAYS pass `--title` with a label that names the
+change, not the scratch file — the header otherwise shows the patch path,
+which reads like a branch name and confuses the reviewer. Good labels:
+`"<branch> vs <base>"` for a branch diff, the PR title for a patch of a PR.
+`--git` mode already defaults to a human title (`"uncommitted changes"` or
+the spec, plus the repo directory name); `--title` still overrides it.
 
 The server binds port 8765 by default — stable across rounds — and only
 autoselects a free port if 8765 is already in use (noted in the log). Pass
@@ -124,12 +136,15 @@ Split diff by file, per-file and per-section collapse, syntax highlighting
 - Clicks **Submit review** → a finish window with an optional overall comment
   and two buttons: **Submit review** (feedback to act on) or **Approve** (the
   change is good).
-- If the diff **source** changes while the page is open — the PR on GitHub, or
-  the patch file itself — a **↻ Refresh** button appears in the header. Edits
-  to the worktree are NOT detected in `--diff-file` mode (the server re-reads
-  the patch, not the repo): regenerate the patch file to make new changes
-  visible. Refresh discards unsaved comments (with an inline confirm when
-  comments are pending). Take one round at a time and re-open between rounds.
+- If the diff **source** changes while the page is open — the PR on GitHub,
+  the patch file, or (in `--git` mode) the worktree itself — a **↻ Refresh**
+  button appears in the header. `--git` mode re-runs the pinned `git diff` on
+  every check, so further worktree edits are picked up automatically — no
+  regenerating anything. `--diff-file` mode is a static snapshot: the server
+  re-reads the patch file, not the repo, so a worktree edit needs a
+  regenerated patch to show up. Refresh discards unsaved comments (with an
+  inline confirm when comments are pending). Take one round at a time and
+  re-open between rounds.
 
 ## 4. Collect the round
 
