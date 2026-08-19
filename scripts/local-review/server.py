@@ -756,16 +756,16 @@ function rerenderSaved(grid, file, cell, codeEl){
   insertAfterRow(grid, codeEl, chip);
 }
 function insertAfterRow(grid, codeEl, node){
-  // codeEl is a grid cell; find the last cell of its visual row (the r-code, index%4==3) then insert node after
+  // codeEl is the l-code or r-code cell of a 4-column visual row
+  // [l-num, l-code, r-num, r-code]. Inserting a full-width .cmt-row right
+  // after an l-code would split the row and shove the right-side cells onto
+  // the next line, so advance to the row's last cell (skipping .cmt-row
+  // nodes, which sit between rows), then past any comment rows already there.
   const cells = Array.from(grid.children).filter(c=>!c.classList.contains('cmt-row'));
-  const idx = Array.from(grid.children).indexOf(codeEl);
-  // insert after the current grid row's 4th cell
-  let insertRef = grid.children[idx];
-  // advance to end of this 4-col row
-  let col = 0, p = idx;
-  // find start of row
-  // simpler: insert immediately after codeEl
-  if(codeEl.nextSibling) grid.insertBefore(node, codeEl.nextSibling); else grid.appendChild(node);
+  const idx = cells.indexOf(codeEl);
+  let ref = cells[Math.min(idx - (idx % 4) + 3, cells.length - 1)];
+  while(ref.nextSibling && ref.nextSibling.classList.contains('cmt-row')) ref = ref.nextSibling;
+  if(ref.nextSibling) grid.insertBefore(node, ref.nextSibling); else grid.appendChild(node);
 }
 
 function refreshCounts(){
