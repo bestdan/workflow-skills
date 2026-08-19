@@ -1527,14 +1527,21 @@ else:
     _blocks = _re.findall(r"<script>(.*?)</script>", _page, _re.S)
     check("page JS: exactly one inline <script> block to check",
           len(_blocks) == 1, f"got {len(_blocks)}")
-    # The payload markers are comment-wrapped, so the template is already valid
-    # JS; only the bare title placeholders need standing in for.
-    _js = "\n".join(_blocks).replace("__TITLE_HTML__", "t").replace("__TITLE__", "t")
+    # No placeholder substitution is needed: the two payload markers are
+    # comment-wrapped, and __TITLE__/__TITLE_HTML__ live in the HTML, not in
+    # the script. So the block is already valid JS as it stands.
+    _js = "\n".join(_blocks)
+    # encoding is pinned on both the write and the read. The page JS carries
+    # non-ASCII (· × – — … ↻ ⊘ ▾ ✎ ✓), so under a non-UTF-8 locale the write
+    # raises UnicodeEncodeError and kills the whole harness, and node's own
+    # error output — which echoes the offending source line — comes back as a
+    # UnicodeDecodeError exactly when the message matters most.
     _fd, _js_path = _tempfile.mkstemp(suffix=".js")
     try:
-        with os.fdopen(_fd, "w") as _f:
+        with os.fdopen(_fd, "w", encoding="utf-8") as _f:
             _f.write(_js)
-        _r = _subprocess.run([_node, "--check", _js_path], capture_output=True, text=True)
+        _r = _subprocess.run([_node, "--check", _js_path],
+                             capture_output=True, encoding="utf-8")
         check("page JS parses under node --check", _r.returncode == 0,
               (_r.stderr or _r.stdout).strip())
     finally:

@@ -26,6 +26,6 @@
 
 [tools]
 dprint = "0.55.2"
-node = "22"
+node = "22.22.3"
 shellcheck = "0.11.0"
 shfmt = "3.10.0"
