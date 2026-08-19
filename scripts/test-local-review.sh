@@ -141,6 +141,37 @@ index 1111111..0000000
 check("deleted file mode: status deleted", parse_diff(diff_deleted)[0]["status"] == "deleted",
       parse_diff(diff_deleted)[0]["status"])
 
+# --- file["single"]: which side, if either, carries all the content ---------
+# This is what decides whether the page offers the single-column view mode.
+check("single: added file is right-only", parse_diff(diff_added)[0]["single"] == "r",
+      parse_diff(diff_added)[0]["single"])
+check("single: deleted file is left-only", parse_diff(diff_deleted)[0]["single"] == "l",
+      parse_diff(diff_deleted)[0]["single"])
+check("single: a mixed modification is neither", parse_diff(diff_mod)[0]["single"] is None,
+      parse_diff(diff_mod)[0]["single"])
+
+diff_append = """diff --git a/plan.md b/plan.md
+--- a/plan.md
++++ b/plan.md
+@@ -1,2 +1,4 @@
+ # Plan
+
++## New section
++more
+"""
+f = parse_diff(diff_append)[0]
+check("single: a pure append is right-only despite its context rows",
+      f["single"] == "r", f["single"])
+check("single: a pure append is still status modified", f["status"] == "modified", f["status"])
+
+diff_nochange = """diff --git a/a.py b/b.py
+similarity index 100%
+rename from a.py
+rename to b.py
+"""
+check("single: a rename with no content change is neither",
+      parse_diff(diff_nochange)[0]["single"] is None, parse_diff(diff_nochange)[0]["single"])
+
 # --- rename from/rename to -> status renamed, old != new --------------------
 diff_renamed = """diff --git a/old_name.py b/new_name.py
 similarity index 100%
@@ -587,6 +618,32 @@ evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
 page_html2 = server.build_page([], evil_meta).decode("utf-8")
 check("build_page: meta['url'] quotes are escaped before the href interpolation",
       'href="&quot;' in page_html2 and "&gt;" in page_html2, page_html2)
+
+# --- build_page: the payload markers are substituted in ONE pass ------------
+# Reviewing a diff of server.py itself puts the literal marker text into the
+# diff payload. Chained .replace() calls substituted into the JSON they had
+# just inserted, corrupting it — so dogfooding this tool on itself broke the
+# page. Both markers must survive as data.
+self_files = parse_diff("""diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@ -1,2 +1,2 @@
+-const META = /*__META_JSON__*/{};
++const DIFF = /*__DIFF_JSON__*/[];
+""")
+page_self = server.build_page(self_files, {"title": "self"}).decode("utf-8")
+i = page_self.index("const DIFF = ") + len("const DIFF = ")
+try:
+    decoded, _ = json.JSONDecoder().raw_decode(page_self[i:])
+    ok_self, why = True, ""
+except ValueError as e:
+    decoded, ok_self, why = None, False, str(e)
+check("build_page: the DIFF payload is still valid JSON when the diff quotes the markers",
+      ok_self, why)
+check("build_page: a marker inside the diff text survives as data, unsubstituted",
+      ok_self and any("/*__META_JSON__*/{};" in r["l"]["s"]
+                      for r in decoded[0]["hunks"][0]["rows"] if r["l"]["t"] == "del"),
+      decoded)
 
 # --- WORDLIST sanity: exactly 1024 distinct lowercase 3-7 letter words ------
 import re as _wordlist_re
