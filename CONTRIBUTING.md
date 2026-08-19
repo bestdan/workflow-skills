@@ -99,7 +99,8 @@ Skill files split into two tiers with different audiences, and confusing them
 silently drops behavior:
 
 - **Runtime-loaded** — `SKILL.md` itself, in full, every time the skill
-  triggers. This is the only file the running agent reads on invocation.
+  triggers (its frontmatter `description` loads even earlier, at session
+  start, as the trigger surface). No other file is read on invocation.
 - **Contributor-only / loaded on demand** — sibling `references/` files and
   everything under `dev_docs/`. The agent opens a `references/` file only if
   `SKILL.md`'s own text tells it to and it chooses to; `dev_docs/` is
@@ -110,9 +111,10 @@ belongs in `SKILL.md` itself, never only in a `references/` file.** A fix that
 spans both and only lands in the reference file is invisible to the agent at
 runtime — that gap has already shipped a silent bug once, past a first
 co-review pass, before a second pass caught it. The same split applies to
-`commands/<name>.md` (loaded when the command runs) and `agents/<name>.md`
-(loaded when the subagent spawns): their bodies are runtime prompts, not
-documentation.
+`commands/<name>.md` (loaded when the command runs),
+`commands/handlers/<handler>.md` (loaded when a task command dispatches into
+it), and `agents/<name>.md` (loaded when the subagent spawns): their bodies are
+runtime prompts, not documentation.
 
 ## Adding a command
 
