@@ -47,13 +47,23 @@ history that anchored every hardening change to a small diff.
 ## The agent contract
 
 - **Startup:** the server prints `LOCAL_REVIEW_URL=http://127.0.0.1:<port>/<token>/`
-  on its own line. Port is autoselected (bind 0) unless `--port` is given. Use
-  the URL verbatim — never rebuild it from the port; the token is the
-  authorization. Poll the log for the line with a bound (the skill shows the
-  loop); a dead process means startup failed and the log has the details —
-  gh failures are normalized to a one-line `error:`, other failures (an
-  unreadable `--diff-file`, an occupied explicit `--port`) surface as a
-  traceback.
+  on its own line — the machine contract, unchanged. Port defaults to the
+  stable `8765`; if that's busy, `bind_server()` falls back to autoselect
+  (bind 0) and logs the fallback to stderr. An explicit `--port` binds exactly
+  as asked (its `OSError` propagates rather than falling back). The token is
+  now four hyphenated words drawn from a 1024-word list (40 bits of entropy) —
+  a deliberate reduction from the prior 128-bit `secrets.token_urlsafe(16)`,
+  traded for a URL a human can read and retype; both forms are `secrets`-based
+  and the token remains the authorization. A second, human-facing line —
+  `Review UI: http://review.localhost:<port>/<token>/ …` — shows the same
+  token under the vanity `review.localhost` host, which `*.localhost` browsers
+  resolve straight to loopback (RFC 6761); `LOCAL_REVIEW_URL` stays the
+  machine-parsed line either way. Use the URL verbatim — never rebuild it from
+  the port; the token is the authorization. Poll the log for the
+  `LOCAL_REVIEW_URL=` line with a bound (the skill shows the loop); a dead
+  process means startup failed and the log has the details — gh failures are
+  normalized to a one-line `error:`, other failures (an unreadable
+  `--diff-file`, an occupied explicit `--port`) surface as a traceback.
 - **`--once`:** the server exits after a successful submit. The skill launches
   with it; the recorded PID is only cleanup for an abandoned round.
 - **`--out`:** written via temp file + `os.replace` — a poller checking
@@ -78,15 +88,16 @@ history that anchored every hardening change to a small diff.
 Binding `127.0.0.1` does not protect against the user's own browser: any web
 page can POST to localhost, and `/submit` writes the file the agent acts on —
 in PR mode it posts to GitHub through the user's authenticated `gh`. Hence:
-every route mounts under a `secrets.token_urlsafe(16)` path segment (bare 404
-otherwise, slashless alias 301s), POSTs reject foreign `Origin` and
-`Sec-Fetch-Site: cross-site`, and the vendor route's `[\w.\-]+\.js` fullmatch
-blocks traversal. The token is per-launch; showing it to the user is fine — it
-dies with the server.
+every route mounts under a path segment of four `secrets.choice()`-drawn words
+from the 1024-word `WORDLIST` (bare 404 otherwise, slashless alias 301s),
+POSTs reject foreign `Origin` (now including the `review.localhost` vanity
+host, port-scoped) and `Sec-Fetch-Site: cross-site`, and the vendor route's
+`[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
+to the user is fine — it dies with the server.
 
 ## Testing
 
-`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~160
+`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~170
 checks from **one** python3 harness invocation (interpreter startup dominates
 suite time at this repo's scale) — the harness itself spawns real server
 subprocesses for the live cases: parse_diff fixtures, server

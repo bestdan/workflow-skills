@@ -21,6 +21,144 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Human-readable token words: 4 are drawn via secrets.choice() and joined with
+# hyphens (4 * 10 bits = 40 bits of entropy — a deliberate reduction from the
+# 128-bit secrets.token_urlsafe(16) this replaces, traded for a URL a human
+# can read and retype). All lowercase, 3-7 letters, [a-z]+ only, no
+# duplicates. The assert below is cheap and prevents a typo'd duplicate from
+# silently shrinking the entropy.
+WORDLIST = (
+    "abbey", "actor", "adjust", "agate", "almond", "amber", "anchor", "ancient",
+    "anise", "ankle", "ant", "ape", "apple", "apricot", "apron", "arc",
+    "archery", "argue", "arid", "arm", "arrive", "arrow", "artist", "ash",
+    "asp", "autumn", "axe", "badge", "badger", "bag", "bagel", "bake",
+    "baker", "balmy", "bamboo", "banana", "band", "banjo", "banner", "barber",
+    "barley", "baron", "barrel", "barter", "basalt", "basil", "basket", "bass",
+    "bat", "bay", "beach", "beacon", "bean", "bear", "beaver", "bee",
+    "beetle", "begin", "beige", "bell", "belt", "bend", "bendy", "berry",
+    "big", "bike", "birch", "bitter", "black", "blanket", "blend", "blender",
+    "blind", "blink", "bloom", "blossom", "blouse", "blue", "boat", "boil",
+    "bold", "bolt", "boot", "boulder", "bounce", "bow", "bowl", "bowling",
+    "boxing", "boxy", "brass", "brave", "bread", "bream", "breezy", "brew",
+    "brick", "bridge", "bright", "brisk", "broad", "bronze", "brook", "broth",
+    "brow", "brown", "bucket", "buckle", "build", "builder", "bulb", "bumpy",
+    "burly", "bus", "butter", "button", "cabbage", "cabin", "cabinet", "cable",
+    "cactus", "calf", "calm", "camel", "camping", "candle", "canoe", "canvas",
+    "canyon", "cap", "car", "carp", "carpet", "carrot", "carry", "cart",
+    "carve", "cascade", "cashew", "castle", "cat", "catfish", "cave", "cavern",
+    "cedar", "ceiling", "celery", "cello", "ceramic", "chain", "chair", "chant",
+    "chapel", "char", "chart", "chat", "check", "cheek", "cheese", "chef",
+    "cherry", "chess", "chest", "chewy", "chick", "chilly", "chime", "chin",
+    "chisel", "chop", "cider", "circle", "clam", "clamp", "classic", "clay",
+    "clever", "cliff", "climb", "close", "cloud", "cloudy", "clove", "clover",
+    "cloves", "coat", "cobra", "cocoa", "coconut", "cod", "coffee", "coin",
+    "collect", "comet", "compass", "condor", "cone", "cook", "cooker", "cookie",
+    "cool", "copper", "coral", "corn", "cottage", "cotton", "couch", "count",
+    "cove", "cow", "cozy", "crab", "cracker", "craft", "crane", "crate",
+    "cream", "creamy", "creek", "crest", "cricket", "crimson", "crisp", "crow",
+    "crown", "crunchy", "crystal", "cub", "cube", "cumin", "cup", "curtain",
+    "curve", "curved", "cyan", "cycling", "dagger", "daisy", "dancer", "dart",
+    "dash", "date", "dawn", "debate", "decade", "deep", "deer", "delta",
+    "denim", "depart", "desert", "design", "desk", "dew", "diamond", "dice",
+    "dill", "dim", "discuss", "distant", "dive", "diving", "dock", "doctor",
+    "dodge", "doe", "dog", "dolphin", "domino", "donkey", "door", "dot",
+    "double", "dove", "dozen", "drag", "dragon", "drape", "draw", "drawer",
+    "dreary", "dress", "drill", "driver", "drum", "duck", "duke", "dull",
+    "dune", "dusk", "dust", "eager", "eagle", "ear", "earn", "ebony",
+    "eel", "eerie", "egret", "eight", "elbow", "elk", "elm", "emblem",
+    "emerald", "emu", "end", "enter", "estuary", "etch", "evening", "ewe",
+    "exit", "eye", "fabric", "fade", "faint", "falcon", "fancy", "farmer",
+    "fawn", "fence", "fencing", "fennel", "fern", "ferret", "ferry", "field",
+    "fig", "file", "finch", "finger", "finish", "fish", "fishing", "five",
+    "fix", "fizzy", "flag", "flare", "flat", "flicker", "flimsy", "flint",
+    "float", "floor", "flour", "flute", "fly", "fog", "foggy", "foot",
+    "forest", "forge", "fork", "four", "fox", "fragile", "freezer", "fresh",
+    "fridge", "frog", "frost", "frosty", "frown", "fry", "galaxy", "game",
+    "garden", "garlic", "garnet", "gate", "gather", "gauge", "gecko", "gentle",
+    "gerbil", "giant", "ginger", "glacier", "glass", "gleam", "glide", "glider",
+    "glimmer", "global", "gloomy", "glove", "glow", "gnu", "goat", "gold",
+    "golden", "golf", "gong", "goose", "grain", "granite", "grape", "grate",
+    "gravel", "gravy", "gray", "green", "grey", "grill", "grim", "grin",
+    "grinder", "grove", "grow", "guard", "guava", "guitar", "gulf", "guppy",
+    "hail", "hair", "hammer", "hamster", "hand", "happy", "harbor", "hard",
+    "hare", "harp", "hat", "haul", "hawk", "hazel", "hazy", "head",
+    "heap", "heavy", "heel", "hen", "heron", "herring", "hiking", "hill",
+    "hinge", "hip", "hockey", "hog", "honey", "hook", "hop", "horn",
+    "horse", "hose", "hover", "huge", "hum", "humble", "humid", "hunting",
+    "hut", "hyena", "indigo", "iris", "island", "ivory", "ivy", "jackal",
+    "jacket", "jade", "jagged", "jam", "jar", "jasmine", "jasper", "jay",
+    "jeans", "jelly", "jetty", "jogging", "jolly", "journal", "jug", "juice",
+    "jump", "jungle", "kayak", "keeper", "kettle", "key", "khaki", "kind",
+    "king", "kite", "kitten", "kiwi", "knee", "knife", "knight", "koala",
+    "lace", "ladder", "ladle", "lady", "lagoon", "lake", "lamb", "lamp",
+    "lance", "lantern", "lash", "latch", "laugh", "lean", "leap", "learn",
+    "leather", "leave", "ledger", "leek", "leg", "lemon", "lentil", "letter",
+    "lettuce", "level", "lift", "light", "lily", "lime", "line", "linen",
+    "lion", "lip", "listen", "lively", "llama", "lobster", "local", "lock",
+    "lodge", "lord", "loud", "lychee", "lynx", "mamba", "mango", "manor",
+    "map", "maple", "marble", "marina", "market", "maroon", "marsh", "mason",
+    "massive", "mast", "maze", "meadow", "medal", "melon", "memo", "mend",
+    "merry", "messy", "metal", "meteor", "mild", "milk", "mince", "mineral",
+    "mini", "minnow", "mint", "mirror", "mist", "misty", "mitten", "mix",
+    "mixer", "modern", "mold", "mole", "month", "moon", "moose", "mop",
+    "morning", "moss", "moth", "mouse", "mouth", "muffin", "mug", "mule",
+    "mullet", "murky", "murmur", "mussel", "nail", "narrow", "navy", "nearby",
+    "neat", "nebula", "neck", "newt", "night", "nimble", "nine", "noble",
+    "noodle", "noon", "nose", "note", "notice", "nurse", "nutmeg", "oak",
+    "oar", "oat", "oboe", "ocean", "olive", "one", "onion", "onyx",
+    "opal", "open", "orange", "orbit", "orc", "orchard", "orchid", "organ",
+    "osprey", "ostrich", "otter", "oval", "oven", "owl", "oyster", "paddle",
+    "paint", "pair", "pajama", "pale", "palm", "pan", "panda", "pantry",
+    "pants", "papaya", "paper", "parrot", "parsley", "pasta", "pastry", "pasture",
+    "patch", "pause", "peach", "peacock", "peak", "peanut", "pear", "pearl",
+    "pebble", "pecan", "peel", "peg", "pelican", "pennant", "pepper", "perch",
+    "pewter", "piano", "pier", "pig", "pigeon", "pile", "pillow", "pilot",
+    "pine", "pink", "pipe", "pitcher", "plain", "plan", "plane", "planet",
+    "plastic", "plate", "plateau", "plaza", "pliers", "plug", "plum", "plumber",
+    "polish", "pond", "poplar", "poppy", "porch", "possum", "poster", "pot",
+    "potato", "pouch", "pour", "prairie", "pretzel", "prince", "print", "prism",
+    "proud", "pull", "pumpkin", "pup", "puppet", "puppy", "purple", "purse",
+    "push", "puzzle", "pyramid", "python", "quad", "quail", "quartz", "queen",
+    "quiet", "quince", "quint", "quiver", "quiz", "rabbit", "rack", "radish",
+    "raft", "rain", "rainy", "ram", "ranger", "rapids", "rat", "raven",
+    "read", "red", "reed", "reef", "remote", "repair", "resume", "return",
+    "rhino", "rib", "ribbon", "rice", "riddle", "ridge", "rigid", "ring",
+    "rinse", "river", "roach", "roast", "robe", "robin", "rock", "rocket",
+    "roll", "roof", "rooster", "rope", "rose", "rosy", "rough", "round",
+    "row", "rowing", "rubber", "ruby", "rudder", "rug", "rugby", "rugged",
+    "run", "running", "rural", "rustic", "sack", "saffron", "sage", "sail",
+    "sailing", "sailor", "salad", "salmon", "salty", "sand", "sandal", "satin",
+    "sauce", "savanna", "save", "savory", "saw", "scalp", "scarf", "scarlet",
+    "scepter", "scooter", "scout", "screw", "scroll", "scrub", "sea", "seal",
+    "season", "seven", "shack", "shallow", "shape", "share", "shark", "sharp",
+    "sheep", "shelf", "shield", "shin", "shine", "ship", "shirt", "shoe",
+    "shore", "short", "shout", "shrew", "shrimp", "shrine", "shutter", "shuttle",
+    "shy", "silk", "silver", "simmer", "sing", "singer", "single", "six",
+    "skating", "sketch", "skid", "skiing", "skip", "skirt", "skunk", "sky",
+    "slate", "sled", "sleek", "sleet", "sleigh", "slice", "slide", "slipper",
+    "sloth", "small", "smile", "smooth", "snail", "snake", "snow", "snowy",
+    "snug", "soar", "soccer", "sock", "socket", "soda", "sofa", "soft",
+    "sort", "soup", "sour", "sparkle", "sparrow", "spatula", "speak", "spear",
+    "spend", "sphere", "spicy", "spider", "spin", "spinach", "spine", "sponge",
+    "spoon", "spread", "spring", "sprint", "sprout", "spruce", "square", "squash",
+    "squire", "stack", "stairs", "stale", "star", "stare", "start", "steam",
+    "steamy", "steppe", "stern", "stew", "stiff", "stir", "stone", "stork",
+    "storm", "stormy", "stout", "stove", "stream", "study", "sturdy", "suede",
+    "sugar", "summer", "summit", "sun", "sundial", "sunny", "sunrise", "sunset",
+    "supple", "surfing", "swamp", "swan", "sweater", "sweep", "sweet", "swift",
+    "swim", "switch", "sword", "syrup", "table", "tailor", "talk", "tall",
+    "tangy", "tart", "tassel", "tea", "teach", "teacher", "teal", "temple",
+    "ten", "tennis", "test", "thick", "thigh", "thin", "thistle", "three",
+    "thumb", "thyme", "ticket", "tidy", "tie", "tiger", "tiny", "toad",
+    "toast", "toaster", "toasty", "today", "toe", "token", "tomato", "tongs",
+    "tonight", "tooth", "top", "topaz", "torch", "tote", "tow", "tower",
+    "trace", "trade", "train", "tram", "triple", "trolley", "trout", "truck",
+    "trumpet", "tuba", "tulip", "tumble", "tuna", "tundra", "tune", "tunnel",
+    "turkey", "turn", "turnip", "turtle", "tweed", "twist", "two", "unlock",
+    "urban", "urchin", "valley", "valve", "van", "velvet", "verify", "vest",
+)
+assert len(set(WORDLIST)) == 1024, "WORDLIST must contain exactly 1024 distinct words"
+
 # Files matching any of these render auto-collapsed: the ones a human almost
 # never needs to read line-by-line. Path-segment patterns anchor at the start
 # of the path or right after a "/" so they can't fire on a mere substring
@@ -957,7 +1095,11 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin is None:
             return True
-        allowed = {f"http://127.0.0.1:{Handler.port}", f"http://localhost:{Handler.port}"}
+        allowed = {
+            f"http://127.0.0.1:{Handler.port}",
+            f"http://localhost:{Handler.port}",
+            f"http://review.localhost:{Handler.port}",
+        }
         return origin in allowed
 
     def do_GET(self):
@@ -1197,6 +1339,19 @@ def _json_for_script(obj):
     )
 
 
+def bind_server(port):
+    """Bind the ThreadingHTTPServer. An explicit --port must bind exactly as
+    asked, so its OSError propagates. With no --port, try the stable default
+    8765 first and fall back to autoselect (port 0) if that one's busy.
+    Returns (server, fell_back)."""
+    if port is not None:
+        return ThreadingHTTPServer(("127.0.0.1", port), Handler), False
+    try:
+        return ThreadingHTTPServer(("127.0.0.1", 8765), Handler), False
+    except OSError:
+        return ThreadingHTTPServer(("127.0.0.1", 0), Handler), True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pr", nargs="?", help="PR number")
@@ -1229,15 +1384,18 @@ def main():
     Handler.diff_sig = source_sig(diff)
     Handler.gh = gh
     Handler.once = args.once
-    Handler.token = secrets.token_urlsafe(16)
+    Handler.token = "-".join(secrets.choice(WORDLIST) for _ in range(4))
 
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port or 0), Handler)
+    srv, fell_back = bind_server(args.port)
     Handler.srv = srv
     port = srv.server_address[1]
     Handler.port = port
-    url = f"http://127.0.0.1:{port}/{Handler.token}/"
-    print(f"PR review UI: {url}   ({len(files)} files)  out={args.out}", flush=True)
-    print(f"LOCAL_REVIEW_URL={url}", flush=True)
+    if fell_back:
+        print(f"port 8765 busy; using {port}", file=sys.stderr)
+    machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
+    vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
+    print(f"Review UI: {vanity_url}   ({len(files)} files)  out={args.out}", flush=True)
+    print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 
 
