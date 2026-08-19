@@ -127,14 +127,86 @@ def get_meta(pr, repo, diff_file):
 
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
+# Per-side optional quoting: git quotes a path (core.quotepath) only when it
+# needs to, so a header can be fully quoted, fully unquoted, or mixed. Git
+# never C-quotes an ordinary space, so an unquoted side may itself contain
+# spaces; the plain (both-unquoted) pattern is tried first since a lone " b/"
+# literal is the only delimiter it has, and each quoted/mixed pattern anchors
+# on the quote(s) instead so an unquoted counterpart's spaces don't confuse it.
+_HEADER_QUOTED = r'"((?:[^"\\]|\\.)*)"'
+_HEADER_PATTERNS = [
+    (re.compile(r"^diff --git a/(.*) b/(.*)$"), False, False),
+    (re.compile(rf"^diff --git {_HEADER_QUOTED} {_HEADER_QUOTED}$"), True, True),
+    (re.compile(rf"^diff --git {_HEADER_QUOTED} b/(.*)$"), True, False),
+    (re.compile(rf"^diff --git a/(.*) {_HEADER_QUOTED}$"), False, True),
+]
+
+
+_GIT_ESCAPES = {"\\": 0x5C, '"': 0x22, "a": 0x07, "b": 0x08, "f": 0x0C,
+                "n": 0x0A, "r": 0x0D, "t": 0x09, "v": 0x0B}
+_OCTAL = set("01234567")
+
+
+def _unquote_git_path(s):
+    """Decode a git-quoted path: the full C escape set git emits (\\a \\b \\f
+    \\n \\r \\t \\v \\\\ \\") plus \\NNN octal byte escapes (all three digits
+    must be octal), then decode the resulting bytes as UTF-8."""
+    out = bytearray()
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\" and i + 1 < n:
+            nc = s[i + 1]
+            if nc in _GIT_ESCAPES:
+                out.append(_GIT_ESCAPES[nc])
+                i += 2
+                continue
+            if i + 4 <= n and all(d in _OCTAL for d in s[i + 1:i + 4]):
+                out.append(int(s[i + 1:i + 4], 8) & 0xFF)
+                i += 4
+                continue
+        out.extend(c.encode("utf-8"))
+        i += 1
+    return bytes(out).decode("utf-8", errors="replace")
+
+
+def _parse_git_header(raw):
+    """Return (old, new) paths from a `diff --git` line. Tries the plain,
+    unquoted form first; falls back to git's per-side quoted form (emitted
+    under core.quotepath for non-ASCII paths), quoted or not per side."""
+    for pattern, old_quoted, new_quoted in _HEADER_PATTERNS:
+        m = pattern.match(raw)
+        if not m:
+            continue
+        old = _unquote_git_path(m.group(1)) if old_quoted else m.group(1)
+        new = _unquote_git_path(m.group(2)) if new_quoted else m.group(2)
+        if old_quoted and old.startswith("a/"):
+            old = old[2:]
+        if new_quoted and new.startswith("b/"):
+            new = new[2:]
+        return old, new
+    return "", ""
+
+
+def _strip_diff_path(s):
+    """Strip a trailing tab-plus-timestamp (git and `diff -u` both append one
+    on plain ---/+++ lines) and a leading a/ or b/ prefix, if present."""
+    s = s.split("\t", 1)[0]
+    if s != "/dev/null" and (s.startswith("a/") or s.startswith("b/")):
+        s = s[2:]
+    return s
+
 
 def parse_diff(text):
     files = []
     cur = None
     hunk = None
     old_ln = new_ln = 0
+    hunk_old_left = hunk_new_left = 0  # old/new lines the active hunk still owes, per its @@ counts
     pend_del = []
     pend_add = []
+    headerless = False  # cur was opened from a bare ---/+++ pair, no `diff --git`
+    pend_old_path = None  # a `--- ` line seen while awaiting its `+++ ` pair
 
     def flush_pairs():
         nonlocal pend_del, pend_add
@@ -145,16 +217,24 @@ def parse_diff(text):
             hunk["rows"].append({"l": left, "r": right})
         pend_del, pend_add = [], []
 
+    def hunk_exhausted():
+        # A unified diff's hunk extent is exactly its @@ header counts, so
+        # this is the only reliable way to tell "no more hunk body lines
+        # coming" from "the next line just happens to start with --- /+++"
+        # (e.g. a deleted/added line whose content itself starts with "-- "
+        # or "++ ").
+        return hunk is None or (hunk_old_left <= 0 and hunk_new_left <= 0)
+
     for raw in text.split("\n"):
         if raw.startswith("diff --git"):
             flush_pairs() if hunk else None
-            m = re.match(r"diff --git a/(.*) b/(.*)$", raw)
+            old, new = _parse_git_header(raw)
             cur = {
-                "old": m.group(1) if m else "",
-                "new": m.group(2) if m else "",
-                "display": (m.group(2) if m else ""),
+                "old": old,
+                "new": new,
+                "display": new,
                 "status": "modified",
-                "generated": bool(GENERATED.search(m.group(2))) if m else False,
+                "generated": bool(GENERATED.search(new)) if new else False,
                 "binary": False,
                 "hunks": [],
                 "adds": 0,
@@ -162,6 +242,43 @@ def parse_diff(text):
             }
             files.append(cur)
             hunk = None
+            headerless = False
+            pend_old_path = None
+            continue
+        if raw.startswith("--- ") and (cur is None or headerless) and hunk_exhausted():
+            # No `diff --git` header preceded this: fall back to opening a
+            # file entry from the ---/+++ pair (a plain unified patch, or the
+            # next file in a headerless multi-file patch). Gated on
+            # hunk_exhausted() so a deleted line that itself starts with
+            # "--- " mid-hunk falls through to ordinary hunk-body parsing
+            # instead.
+            flush_pairs() if hunk else None
+            pend_old_path = raw[4:]
+            hunk = None
+            continue
+        if pend_old_path is not None and raw.startswith("+++ "):
+            old = _strip_diff_path(pend_old_path)
+            new = _strip_diff_path(raw[4:])
+            if new == "/dev/null":
+                status, name = "deleted", old
+            elif old == "/dev/null":
+                status, name = "added", new
+            else:
+                status, name = "modified", new
+            cur = {
+                "old": name if old == "/dev/null" else old,
+                "new": name if new == "/dev/null" else new,
+                "display": name,
+                "status": status,
+                "generated": bool(GENERATED.search(name)) if name else False,
+                "binary": False,
+                "hunks": [],
+                "adds": 0,
+                "dels": 0,
+            }
+            files.append(cur)
+            headerless = True
+            pend_old_path = None
             continue
         if cur is None:
             continue
@@ -177,9 +294,14 @@ def parse_diff(text):
         if raw.startswith("Binary files"):
             cur["binary"] = True
             continue
-        if raw.startswith("--- "):
+        # In headerless mode these would swallow a deleted/added line whose
+        # content itself happens to start with "-- "/"++ " (raw "--- "/"+++
+        # "); such lines belong to an active hunk and are handled by the
+        # tag-based body parsing below instead. After a `diff --git` header,
+        # these are always the real ---/+++ path lines to skip.
+        if not headerless and raw.startswith("--- "):
             continue
-        if raw.startswith("+++ "):
+        if not headerless and raw.startswith("+++ "):
             continue
         hm = HUNK.match(raw)
         if hm:
@@ -187,6 +309,8 @@ def parse_diff(text):
                 flush_pairs()
             old_ln = int(hm.group(1))
             new_ln = int(hm.group(3))
+            hunk_old_left = int(hm.group(2)) if hm.group(2) else 1
+            hunk_new_left = int(hm.group(4)) if hm.group(4) else 1
             hunk = {"header": raw, "section": hm.group(5).strip(), "rows": []}
             cur["hunks"].append(hunk)
             continue
@@ -204,14 +328,18 @@ def parse_diff(text):
             })
             old_ln += 1
             new_ln += 1
+            hunk_old_left -= 1
+            hunk_new_left -= 1
         elif tag == "-":
             pend_del.append({"t": "del", "n": old_ln, "s": body})
             old_ln += 1
             cur["dels"] += 1
+            hunk_old_left -= 1
         elif tag == "+":
             pend_add.append({"t": "add", "n": new_ln, "s": body})
             new_ln += 1
             cur["adds"] += 1
+            hunk_new_left -= 1
     if hunk:
         flush_pairs()
     return files
