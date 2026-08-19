@@ -522,6 +522,39 @@ except RuntimeError as e:
 except Exception as e:
     bad("sh(): missing command raises RuntimeError", f"raised {type(e).__name__} instead: {e}")
 
+# --- bind_server: only EADDRINUSE triggers the autoselect fallback ----------
+import errno as _errno
+
+
+class _FakeSrv:
+    def __init__(self, addr, handler, err=None):
+        if err is not None:
+            raise OSError(err, "boom")
+        self.server_address = addr
+
+
+_real_srv = server.ThreadingHTTPServer
+try:
+    calls = []
+    def fake_addrinuse(addr, handler):
+        calls.append(addr[1])
+        return _FakeSrv(addr, handler, _errno.EADDRINUSE if addr[1] == 8765 else None)
+    server.ThreadingHTTPServer = fake_addrinuse
+    srv, fell_back = server.bind_server(None)
+    check("bind_server: EADDRINUSE on 8765 falls back to autoselect",
+          fell_back and calls == [8765, 0], (fell_back, calls))
+
+    def fake_eacces(addr, handler):
+        return _FakeSrv(addr, handler, _errno.EACCES if addr[1] == 8765 else None)
+    server.ThreadingHTTPServer = fake_eacces
+    try:
+        server.bind_server(None)
+        bad("bind_server: non-EADDRINUSE OSError propagates", "no exception raised")
+    except OSError as e:
+        check("bind_server: non-EADDRINUSE OSError propagates", e.errno == _errno.EACCES, e.errno)
+finally:
+    server.ThreadingHTTPServer = _real_srv
+
 # --- esc_py escapes quotes as well as angle brackets/ampersand --------------
 esc_out = server.esc_py('"><script>')
 check("esc_py: no raw double quote in output", '"' not in esc_out, esc_out)
@@ -554,6 +587,15 @@ evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
 page_html2 = server.build_page([], evil_meta).decode("utf-8")
 check("build_page: meta['url'] quotes are escaped before the href interpolation",
       'href="&quot;' in page_html2 and "&gt;" in page_html2, page_html2)
+
+# --- WORDLIST sanity: exactly 1024 distinct lowercase 3-7 letter words ------
+import re as _wordlist_re
+check("WORDLIST: exactly 1024 entries", len(server.WORDLIST) == 1024, len(server.WORDLIST))
+check("WORDLIST: all entries distinct", len(set(server.WORDLIST)) == 1024,
+      len(set(server.WORDLIST)))
+check("WORDLIST: every entry is 3-7 lowercase letters",
+      all(_wordlist_re.fullmatch(r"[a-z]{3,7}", w) for w in server.WORDLIST),
+      [w for w in server.WORDLIST if not _wordlist_re.fullmatch(r"[a-z]{3,7}", w)])
 
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no
@@ -673,6 +715,13 @@ try:
     check("server: autoselect prints LOCAL_REVIEW_URL for server2", bool(url2), url2)
     check("server: two autoselected servers get distinct ports",
           bool(url1) and bool(url2) and url1 != url2, (url1, url2))
+    TOKEN_RE = _re.compile(r"^[a-z]{3,7}(-[a-z]{3,7}){3}$")
+    tok1 = url_parts(url1)[3].strip("/") if url1 else None
+    tok2 = url_parts(url2)[3].strip("/") if url2 else None
+    check("server: token is four hyphenated 3-7 letter words",
+          bool(tok1) and bool(TOKEN_RE.match(tok1)), tok1)
+    check("server: two launches produce different tokens",
+          bool(tok1) and bool(tok2) and tok1 != tok2, (tok1, tok2))
 finally:
     for p in (proc1, proc2):
         p.terminate()
@@ -683,6 +732,43 @@ finally:
             p.wait(timeout=5)
     for p in (patch1, patch2):
         os.unlink(p)
+
+# -- default-port fallback: 8765 held -> server must land elsewhere ---------
+# Try to bind our own socket on 8765 first. If that succeeds, our hold
+# guarantees the server can't land there. If it raises (already busy on this
+# machine, e.g. another process or a leftover from a previous run), the port
+# is already held by someone else, which serves the same purpose -- either
+# way the server must not land on 8765 while it's occupied. Only close the
+# socket in the finally when we actually acquired it.
+hold_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+hold_sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+acquired = False
+try:
+    hold_sock.bind(("127.0.0.1", 8765))
+    hold_sock.listen(1)
+    acquired = True
+except OSError:
+    pass
+try:
+    proc3, patch3 = start_server([])
+    try:
+        url3 = read_url(proc3)
+        check("server: fallback run still prints LOCAL_REVIEW_URL", bool(url3), url3)
+        if url3:
+            _, port3, _, _ = url_parts(url3)
+            check("server: fallback lands on a port other than the held 8765",
+                  port3 != 8765, port3)
+    finally:
+        proc3.terminate()
+        try:
+            proc3.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc3.kill()
+            proc3.wait(timeout=5)
+        os.unlink(patch3)
+finally:
+    if acquired:
+        hold_sock.close()
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")
@@ -931,6 +1017,30 @@ try:
             check("server: POST /submit with a matching Origin returns 200", resp.status == 200, resp.status)
         check("server: OUT written after same-origin submit",
               os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "sameorigin", sec_out)
+        os.unlink(sec_out)
+
+        vanity_origin = f"http://review.localhost:{port}"
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"vanity","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": vanity_origin}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit with Origin review.localhost returns 200", resp.status == 200, resp.status)
+        check("server: OUT written after review.localhost-origin submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "vanity", sec_out)
+        os.unlink(sec_out)
+
+        evil_vanity_origin = f"http://evil.localhost:{port}"
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"evilvanity","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": evil_vanity_origin}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with Origin evil.localhost returns 403", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with Origin evil.localhost returns 403", e.code == 403, e.code)
+        check("server: evil.localhost-origin POST does not write OUT", not os.path.exists(sec_out), sec_out)
 
         # Vendor path traversal, sent as a raw request line so dot-segments
         # reach the server unnormalized (urllib normalizes them client-side
