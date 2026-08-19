@@ -205,12 +205,17 @@ def sh(args):
 def _git_diff_args(git_dir, spec):
     """Map a --git spec to a `git diff` argv, pinned at the given repo dir.
     `uncommitted` -> diff HEAD; an explicit `A...B` range is passed through
-    verbatim; any other spec is treated as a single ref diffed against HEAD."""
+    verbatim; any other spec is treated as a single ref diffed against HEAD.
+    A spec starting with `-` would reach git as an option (e.g. --output=
+    writes a file), so it is rejected, and --end-of-options backstops any
+    other option-shaped ref."""
+    if spec.startswith("-"):
+        raise RuntimeError(f"invalid --git spec: {spec!r} (must be 'uncommitted', a ref, or A...B)")
     if spec == "uncommitted":
-        return ["git", "-C", git_dir, "diff", "HEAD"]
+        return ["git", "-C", git_dir, "diff", "--end-of-options", "HEAD"]
     if "..." in spec:
-        return ["git", "-C", git_dir, "diff", spec]
-    return ["git", "-C", git_dir, "diff", f"{spec}...HEAD"]
+        return ["git", "-C", git_dir, "diff", "--end-of-options", spec]
+    return ["git", "-C", git_dir, "diff", "--end-of-options", f"{spec}...HEAD"]
 
 
 def get_diff(pr, repo, diff_file, git_dir=None, git_spec=None):

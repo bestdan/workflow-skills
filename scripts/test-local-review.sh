@@ -599,14 +599,19 @@ check("WORDLIST: every entry is 3-7 lowercase letters",
 
 # --- _git_diff_args: the three --git spec forms map to the right git argv ---
 check("_git_diff_args: uncommitted -> diff HEAD",
-      server._git_diff_args("/repo", "uncommitted") == ["git", "-C", "/repo", "diff", "HEAD"],
+      server._git_diff_args("/repo", "uncommitted") == ["git", "-C", "/repo", "diff", "--end-of-options", "HEAD"],
       server._git_diff_args("/repo", "uncommitted"))
 check("_git_diff_args: a single ref -> diff <ref>...HEAD",
-      server._git_diff_args("/repo", "main") == ["git", "-C", "/repo", "diff", "main...HEAD"],
+      server._git_diff_args("/repo", "main") == ["git", "-C", "/repo", "diff", "--end-of-options", "main...HEAD"],
       server._git_diff_args("/repo", "main"))
 check("_git_diff_args: an explicit A...B range passes through verbatim",
-      server._git_diff_args("/repo", "abc123...def456") == ["git", "-C", "/repo", "diff", "abc123...def456"],
+      server._git_diff_args("/repo", "abc123...def456") == ["git", "-C", "/repo", "diff", "--end-of-options", "abc123...def456"],
       server._git_diff_args("/repo", "abc123...def456"))
+try:
+    server._git_diff_args("/repo", "--output=/tmp/pwned")
+    bad("_git_diff_args: option-like spec is rejected", "no exception raised")
+except RuntimeError as e:
+    check("_git_diff_args: option-like spec is rejected", "invalid --git spec" in str(e), str(e))
 
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no

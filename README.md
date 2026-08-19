@@ -28,8 +28,12 @@ support live.
 alias it once and review any patch:
 
 ```bash
-# ~/.zshrc (adjust the plugin path to your install)
-alias local-review='python3 ~/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/local-review/server.py'
+# ~/.zshrc — a function, not an alias: the cache keeps one directory per
+# installed plugin version, so pick the newest deterministically instead of
+# letting a glob expand to several paths.
+local-review() {
+  python3 "$(ls -d "$HOME"/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/local-review/server.py | sort -V | tail -1)" "$@"
+}
 
 cd my-worktree
 local-review --git main       # committed diff of my-branch vs main
