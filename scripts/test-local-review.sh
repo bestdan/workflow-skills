@@ -1978,6 +1978,44 @@ out.fenceTags = [...fenceTags].sort();
 out.fenceTokenized = [...fenceClasses].some(c => c.indexOf('hljs-') === 0);
 out.fenceBodyIntact = fenceText.includes(fenceBody);
 
+// ...but ONLY a labelled fence. An unlabelled or unknown-labelled one must
+// render plain rather than reach highlightAuto, which runs every vendored
+// grammar over a body a fork PR chooses, in the default view for an added
+// markdown file. Either way the body stays visible.
+const probeFence = src => {
+  const classes = new Set(); let text = '';
+  walk(describe(src), n => {
+    if(n.attrs && n.attrs.class) classes.add(n.attrs.class);
+    if(n.text) text += n.text;
+  });
+  return {tokenized: [...classes].some(c => c.indexOf('hljs-') === 0), text};
+};
+const unlabelled = probeFence('```\n' + fenceBody + '\n```\n');
+const unknownLabel = probeFence('```notalanguage\nconst x = 1;\n```\n');
+out.unlabelledTokenized = unlabelled.tokenized;
+out.unlabelledBodyIntact = unlabelled.text.includes(fenceBody);
+out.unknownLabelTokenized = unknownLabel.tokenized;
+out.unknownLabelBodyIntact = unknownLabel.text.includes('const x = 1;');
+
+// hljs does not only fail by throwing: its `illegal` and safeMode
+// `errorRaised` branches RETURN a partial emitter next to a complete escaped
+// `value`. Reaching those through hlTree's own call shapes is hard —
+// ignoreIllegals:true suppresses the illegal branch — which is exactly why the
+// guard needs a direct test. Fabricate both result shapes and require null.
+const realHighlight = hljs.highlight;
+const partialTree = {children: ['const ']};          // half of the source below
+out.guard = {};
+for(const [name, extra] of [['illegal', {illegal: true}],
+                            ['errorRaised', {errorRaised: new Error('synthetic')}]]){
+  hljs.highlight = () => Object.assign({
+    language: 'javascript', value: 'const LOST = 1;', relevance: 0,
+    _emitter: {rootNode: partialTree},
+  }, extra);
+  out.guard[name] = hlTree('const LOST = 1;', 'javascript');
+}
+hljs.highlight = realHighlight;
+out.guard.healthyStillWorks = !!hlTree('const OK = 1;', 'javascript');
+
 console.log(JSON.stringify(out));
 """
     _src = _harness.replace("__PURE__", _pure)
@@ -2051,6 +2089,22 @@ console.log(JSON.stringify(out));
                   _o["fenceTokenized"] is True, _o["fenceTags"])
             check("highlight: a hostile fence body survives intact as text",
                   _o["fenceBodyIntact"] is True, _o["fenceTags"])
+            check("highlight: an UNLABELLED fence is not auto-detected",
+                  _o["unlabelledTokenized"] is False,
+                  "an unlabelled fence reached highlightAuto")
+            check("highlight: an unlabelled fence still shows its body",
+                  _o["unlabelledBodyIntact"] is True, _o["unlabelledBodyIntact"])
+            check("highlight: an UNKNOWN fence label is not auto-detected",
+                  _o["unknownLabelTokenized"] is False,
+                  "an unknown fence label fell through to highlightAuto")
+            check("highlight: an unknown-labelled fence still shows its body",
+                  _o["unknownLabelBodyIntact"] is True, _o["unknownLabelBodyIntact"])
+            check("highlight: an hljs `illegal` result is rejected, not rendered partial",
+                  _o["guard"]["illegal"] is None, _o["guard"]["illegal"])
+            check("highlight: an hljs `errorRaised` result is rejected too",
+                  _o["guard"]["errorRaised"] is None, _o["guard"]["errorRaised"])
+            check("highlight: the failure guard does not reject healthy results",
+                  _o["guard"]["healthyStillWorks"] is True, _o["guard"])
     finally:
         os.unlink(_hp)
 

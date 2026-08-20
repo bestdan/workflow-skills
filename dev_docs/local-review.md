@@ -76,9 +76,13 @@ originally-planned "disable raw HTML and allowlist the output" was not
 buildable. `describe()` is a pure token-tree → description-tree function with
 no DOM, which is what makes the security property testable under bare `node`;
 `materialize()` adds no logic. Comments anchor to leaf blocks — a list item, a
-table row — and carry `kind: "block"` with `endLine`. Fenced code is
+table row — and carry `kind: "block"` with `endLine`. A **labelled** fence is
 highlighted through the same structural token-tree path the diff view uses
-(#385), the server sends
+(#385); an unlabelled or unknown-labelled one renders plain rather than reach
+`highlightAuto`, which would run all 36 vendored grammars over a body a fork
+PR chooses — 2.7s of synchronous work for 512 KiB, against 248ms for the same
+body labelled. A per-fence size cap would not fix that, because the cost is
+additive across fences. The server sends
 `Referrer-Policy: no-referrer` because the token is in the URL (see #386), and
 the whole design including eight corrections to its first draft is in
 [`designs/local-review-markdown-preview.md`](designs/local-review-markdown-preview.md).
@@ -201,7 +205,9 @@ that is what the page reads now: `hlNodes()` turns it into the same
 `{tag, text, attrs, kids}` descriptors preview already used, `materialize()`
 creates `<span>`s and assigns source text with `textContent`, and the diff view
 and preview share that one path — which is why fenced code in preview is
-highlighted again rather than deliberately plain. Whole-line comment detection
+highlighted again rather than deliberately plain — for a **labelled** fence;
+auto-detection stays refused there on cost grounds, per **View modes** above.
+Whole-line comment detection
 (the ⊘ affordance) walks the same tree instead of re-parsing hljs's output.
 With the last interpolation gone the page carries **no HTML-escaping helper at
 all**; every diff-derived value — file paths, `@@` headers, section labels —
@@ -215,7 +221,7 @@ developer-authored markup with no interpolation of untrusted content.
 
 ## Testing
 
-`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~260
+`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~270
 checks from **one** python3 harness invocation (interpreter startup dominates
 suite time at this repo's scale) — the harness itself spawns real server
 subprocesses for the live cases: parse_diff fixtures, server

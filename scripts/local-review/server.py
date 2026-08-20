@@ -854,7 +854,14 @@ function hlTree(src, langHint){
     res = lang ? hljs.highlight(src, {language:lang, ignoreIllegals:true})
                : hljs.highlightAuto(src);
   }catch(e){ return null; }
-  return (res && res._emitter && res._emitter.rootNode) || null;
+  // hljs does not always signal failure by throwing. Its `illegal` and
+  // safeMode `errorRaised` branches both return the FULL escaped source in
+  // `value` alongside a PARTIAL `_emitter` — so trusting the tree there would
+  // silently drop the tail of the line (measured: a json line losing
+  // everything after the object, a java line rendering as nothing at all).
+  // Treat either flag as no tree, which takes the plain-text fallback.
+  if(!res || res.illegal || res.errorRaised) return null;
+  return (res._emitter && res._emitter.rootNode) || null;
 }
 
 // Scope to CSS class, mirroring hljs's own HTMLRenderer so the stylesheet
@@ -1045,11 +1052,21 @@ function describeBlock(t, ln, depth){
     case 'code': {
       // Highlighted through the same token-tree path as the diff view, so the
       // fence body is described as spans of text rather than parsed as HTML.
-      // The fence info string is a hint only: hlTree drops anything
-      // getLanguage does not know and auto-detects instead.
+      //
+      // A LABELLED fence only — never auto-detection. hlTree would otherwise
+      // fall through to highlightAuto, which runs all 36 vendored grammars
+      // over the whole body; preview is the default view for a wholly-added
+      // markdown file and allows 512 KiB, both of which a fork PR chooses, and
+      // an unlabelled 512 KiB fence measured 2727ms of synchronous work
+      // against 248ms for the same body labelled. A per-fence size cap does
+      // not fix it — the cost is additive, so twenty small fences buy the
+      // stall back. Refusing auto-detection removes the path instead of
+      // pricing it, and costs little: unlabelled fences are mostly diagrams,
+      // console output, and config, where a guessed language mostly miscolours.
       const src = String(t.text == null ? '' : t.text);
       const hint = String(t.lang == null ? '' : t.lang).trim().split(/\s+/)[0];
-      const tree = hlTree(src, hint);
+      const known = typeof hljs !== 'undefined' && hint && hljs.getLanguage(hint);
+      const tree = known ? hlTree(src, hint) : null;
       const kids = tree ? hlNodes(tree) : null;
       return node('pre', Object.assign({attrs:{class:'md-block md-code'},
         kids:[kids && kids.length ? node('code', {kids}) : node('code', {text: src})]}, span));
