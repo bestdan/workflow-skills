@@ -1695,7 +1695,13 @@ smoke_test() {
   # Assert the output is actually parseable stream-json (a line beginning with
   # `{` and containing "type"), not just non-empty: a degraded claude could print
   # a plain-text error to stdout and false-pass the emptiness check above.
-  printf '%s\n' "$out" | grep -Eq '^\{.*"type"' \
+  # Read $out with a here-string, never `printf … | grep -Eq`. The pattern hits
+  # the first line, so grep exits at once; once $out outgrows the pipe buffer the
+  # printf dies of SIGPIPE and `set -o pipefail` turns a HEALTHY smoke test into
+  # 141 — a refusal to detach that blames the jail. Measured: this capture is
+  # ~30KB today and the piped form starts failing between 32KB and 64KB, so the
+  # margin is one growth spurt of the tool roster wide.
+  grep -Eq '^\{.*"type"' <<<"$out" \
     || die "auth smoke-test produced non-stream-json output THROUGH the wrapper — flag/jail suspect; not detaching"
   echo "spawn-orchestrator: smoke-test OK"
 }

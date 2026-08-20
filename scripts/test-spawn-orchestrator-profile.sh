@@ -877,6 +877,12 @@ fi
 smoke_src="$(sed -n '/^smoke_test()/,/^}/p' "$SCRIPT")"
 have "smoke-test: uses --verbose" '--verbose' "$smoke_src"
 have "smoke-test: uses --output-format stream-json" '--output-format stream-json' "$smoke_src"
+# The stream-json assertion must read $out with a here-string. Piped into a
+# `grep -q`, the early-exiting grep SIGPIPEs the writer once $out outgrows the
+# pipe buffer, and pipefail then fails a healthy smoke test as 141. Comments are
+# stripped first so the prose explaining that rule cannot trip the rule.
+smoke_code="$(grep -v '^[[:space:]]*#' <<<"$smoke_src")"
+lack "smoke-test: stream-json check does not pipe into grep" '| grep' "$smoke_code"
 
 # shellcheck source=scripts/lib/spawn-orchestrator-test-epilogue.sh
 . "$SO_LIB/spawn-orchestrator-test-epilogue.sh"
