@@ -52,7 +52,7 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 A missing file is not an error — it means the default `repo-pr` handler. **Overlay
 the local override on the committed config** — mappings merge recursively, local
-leaf values win (see `task-config.md` → "Local override") — and use this **merged**
+leaf values win (see `commands/task-config.md` → "Local override") — and use this **merged**
 view for every check below (the linear `api_key_ref` resolution check in particular
 depends on it). Hold the parsed `handler:` value (default `repo-pr`) for checks 1
 and 2.
