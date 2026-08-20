@@ -118,17 +118,18 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
 - **`--once`:** the server exits after a successful submit. The skill launches
   with it; the recorded PID is only cleanup for an abandoned round.
 - **`--out`:** written via temp file + `os.replace` — a poller checking
-  `[ -s "$OUT" ]` never sees a torn payload. The write happens **after** the
-  GitHub-posting loop, so OUT's appearance means posting finished, and the
-  payload carries `github_posted`/`github_failed`. Accepted residual: disk
-  exhaustion between the preflight and the write can still fail after posting
-  (the posting outcome is part of the payload, so it cannot be written first).
+  `[ -s "$OUT" ]` never sees a torn payload. It is now the **last** thing
+  `/submit` does, and nothing outward happens after it: the server no longer posts to
+  GitHub, so the old ordering constraint (post first, because OUT's appearance
+  is the caller's kill signal) and its accepted disk-exhaustion residual are
+  both gone.
 - **Payload:** `{meta, summary, approved, comments:[{file, side, line, code,
-  text}]}`, plus — in PR mode only — `github_posted` (list of comment URLs)
-  and `github_failed` (list of `{file, line, error}`). A
-  `kind: "dismiss-comments"` entry adds `endLine` (delete lines
-  `line`–`endLine` on `side`); `github: true` marks a comment the server also
-  posted to the PR. `code` is the anchor if line numbers shifted.
+  text}]}`. A `kind: "dismiss-comments"` entry adds `endLine` (delete lines
+  `line`–`endLine` on `side`); `kind: "block"` adds `endLine` too (a preview
+  comment about that whole span). `github: true` marks a comment the **user
+  wants on the PR** — the agent posts it; the server never does.
+  `code` is the anchor if line numbers shifted. `github_posted` /
+  `github_failed` no longer exist.
 - **Submission slot:** concurrent `/submit`s get 409; the slot releases before
   the response on a stay-alive server (CI caught the after-response release as
   a spurious sequential 409 — PR #374), and a completed `--once` submission
@@ -137,9 +138,19 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
 ## Threat model — loopback is not a trust boundary
 
 Binding `127.0.0.1` does not protect against the user's own browser: any web
-page can POST to localhost, and `/submit` writes the file the agent acts on —
-in PR mode it posts to GitHub through the user's authenticated `gh`. Hence:
-every route mounts under a path segment of four `secrets.choice()`-drawn words
+page can POST to localhost, and `/submit` writes the file the agent acts on.
+
+**What `/submit` can no longer do is post to GitHub.** It used to, through the
+user's authenticated `gh`, which made every capability of this handler reachable
+by any page the user had open — and a `gh` post is not undoable, unlike the file
+write. The **Comment on GitHub** button now only records `github: true`; the
+agent reads that and posts, where the write appears in the transcript and can be
+interrupted. `scripts/test-local-review.sh` asserts the absence rather than
+trusting it: a `gh` stand-in logs every invocation during a real PR-mode submit
+of a flagged comment, and the log must contain no write. Issue #381.
+
+The remaining defences, for the file write and for reads: every route mounts
+under a path segment of four `secrets.choice()`-drawn words
 from the 1024-word `WORDLIST` (bare 404 otherwise, slashless alias 301s),
 POSTs reject any foreign `Origin` — the allowlist is `127.0.0.1`, `localhost`,
 and the port-scoped vanity `http://review.localhost:<port>` only, so an

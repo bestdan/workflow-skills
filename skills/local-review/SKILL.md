@@ -133,8 +133,8 @@ between whichever modes a given file allows. The user:
   delete controls.
 - When the diff is a PR, the composer also shows a **Comment on GitHub**
   button. Comments made with it behave like any other comment but carry a
-  **→ GitHub** mark; on **Submit** they go to the agent _and_ are posted as
-  inline review comments on the PR (via `gh`). Nothing posts until submit. The
+  **→ GitHub** mark, which records the user's intent that it belong on the PR.
+  **The server does not post — you do**, after reading `OUT` (step 4). The
   button is absent for non-PR diffs.
 - Taps **⊘** on a comment line to mark the whole contiguous comment run for
   removal.
@@ -174,8 +174,22 @@ act on it by deleting lines `line`–`endLine` on `side`. A **block** entry
 carries `endLine` and `kind: "block"`: it came from Preview and is about the
 whole span `line`–`endLine`, not just the first line — a remark on a nine-line
 table means the table, so read the range before editing. A comment flagged for
-GitHub carries `github: true` (the server also posts it on the PR and returns
-`github_posted` / `github_failed` counts). Every other comment carries the
+GitHub carries `github: true` — the user's intent that it belong on the PR.
+**Post those yourself**, one inline review comment each, and report what landed
+and what failed:
+
+```bash
+gh api --method POST "/repos/<owner>/<repo>/pulls/<n>/comments" \
+  -f body="<text>" -f commit_id="<head-sha>" -f path="<file>" \
+  -F line=<line> -f side=RIGHT      # side=LEFT when the comment's side is "L"
+```
+
+Use the PR's head SHA (`gh pr view <n> --json headRefOid`). If a comment does
+not anchor — the line is not in the diff's right side — say so rather than
+retrying blindly, and fall back to a top-level PR comment. The server used to
+do this itself; it no longer holds any GitHub write capability, so a post is
+now visible in the transcript and you can be stopped mid-way. Every other
+comment carries the
 anchored `code` so you can stay on the right line if numbers shifted. Remind
 the user that comments live in the page until Submit — a refresh clears them.
 

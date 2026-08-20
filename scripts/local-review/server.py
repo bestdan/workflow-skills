@@ -240,25 +240,6 @@ def source_sig(diff_text):
     return hashlib.sha1(diff_text.encode("utf-8")).hexdigest()
 
 
-def post_pr_comment(g, c):
-    """Post one inline review comment on the PR. Returns (html_url, None) or (None, error)."""
-    side = "LEFT" if c.get("side") == "L" else "RIGHT"
-    args = ["gh", "api", "--method", "POST",
-            f"/repos/{g['owner']}/{g['repo']}/pulls/{g['pr']}/comments",
-            "-f", f"body={c.get('text', '')}",
-            "-f", f"commit_id={g['sha']}",
-            "-f", f"path={c.get('file', '')}",
-            "-F", f"line={int(c.get('line'))}",
-            "-f", f"side={side}"]
-    try:
-        out = subprocess.run(args, capture_output=True, text=True)
-        if out.returncode != 0:
-            return None, (out.stderr.strip() or "gh api failed")
-        return json.loads(out.stdout).get("html_url", ""), None
-    except Exception as e:
-        return None, str(e)
-
-
 def resolve_gh(pr, repo, diff_file, git_spec=None):
     """Owner/repo/pr/head-sha for posting inline comments, or None when there is no PR."""
     if diff_file or git_spec or not pr:
@@ -1187,7 +1168,7 @@ function openBlockComposer(el, desc, ctx){
       <textarea placeholder="Leave a comment on this block…"></textarea>
       <div class="cmt-actions">
         <button class="btn primary save">${existing ? 'Update comment' : 'Add comment'}</button>
-        ${HAS_PR ? `<button class="btn gh save-gh" title="Save for the agent and post on the PR">${GH_ICON} Comment on GitHub</button>` : ''}
+        ${HAS_PR ? `<button class="btn gh save-gh" title="Mark this for the PR — Claude posts it after you submit">${GH_ICON} Comment on GitHub</button>` : ''}
         <button class="btn cancel">Cancel</button>
       </div></div>`;
   insertAfterBlock(el, box);
@@ -1497,7 +1478,7 @@ function openComposer(file, cell, grid, codeEl){
       <textarea placeholder="Leave a comment on this line…"></textarea>
       <div class="cmt-actions">
         <button class="btn primary save">${existing ? 'Update comment' : 'Add comment'}</button>
-        ${HAS_PR ? `<button class="btn gh save-gh" title="Save for the agent and post on the PR">${GH_ICON} Comment on GitHub</button>` : ''}
+        ${HAS_PR ? `<button class="btn gh save-gh" title="Mark this for the PR — Claude posts it after you submit">${GH_ICON} Comment on GitHub</button>` : ''}
         <button class="btn cancel">Cancel</button>
       </div></div>`;
   // insert after the code cell's grid cell (append at end of grid keeps it after; better: place right after row)
@@ -1512,7 +1493,7 @@ function openComposer(file, cell, grid, codeEl){
   };
   cmt.querySelector('.cancel').onclick = () => cmt.remove();
   const ghBtn = cmt.querySelector('.save-gh');
-  if(ghBtn) ghBtn.onclick = () => {   // same as a normal comment, just flagged to also post on the PR at submit
+  if(ghBtn) ghBtn.onclick = () => {   // same as a normal comment, just flagged for the PR; the AGENT posts it
     const v = ta.value.trim(); if(!v) return;
     comments[a.key] = keepShape(existing, {file:a.path, line:a.line, side:a.side, code:a.code, text:v, github:true});
     cmt.remove(); refreshCounts(); rerenderSaved(grid, file, cell, codeEl);
@@ -1530,7 +1511,7 @@ function rerenderSaved(grid, file, cell, codeEl){
   const c = comments[a.key]; if(!c) return;
   const chip = document.createElement('div');
   chip.className='cmt-row cmt-saved' + (c.github ? ' gh' : ''); chip.dataset.k=a.key;
-  chip.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${a.side}${a.line}${c.github?` <span class="ghdest" title="Will be posted on the PR when you submit">${GH_ICON} GitHub</span>`:''}</div>
+  chip.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${a.side}${a.line}${c.github?` <span class="ghdest" title="Claude will post this on the PR after you submit">${GH_ICON} GitHub</span>`:''}</div>
     <div class="saved"><span class="txt">${esc(c.text)}</span>
       <button class="edit" title="Edit">✎</button>
       <button class="del" title="Delete">×</button></div>`;
@@ -1651,8 +1632,9 @@ async function doSubmit(approved){          // step 2: submit the round, optiona
     let msg = approved
       ? 'Approved — Claude will make sure the PR is up and marked ready.'
       : `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
-    if(info.github_posted) msg += ` · ${info.github_posted} posted to GitHub`;
-    if(info.github_failed) msg += ` · ${info.github_failed} GitHub post(s) failed`;
+    // "flagged", not "posted": the server no longer posts. Say what actually
+    // happened, so the reviewer doesn't leave believing a PR comment is live.
+    if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
     toast(msg);
     submitBtn.textContent = approved ? 'Approved ✓' : 'Submitted ✓'; submitBtn.disabled = true;
   }catch(e){
@@ -1900,31 +1882,18 @@ class Handler(BaseHTTPRequestHandler):
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
         try:
-            # Post the GitHub-flagged comments to the PR before writing out_path:
-            # the skill kills this process the moment out_path appears, so
-            # posting first keeps a slow multi-comment loop from being cut off
-            # mid-post.
-            gh_posted, gh_failed = [], []
-            if Handler.gh:
-                for c in payload.get("comments", []):
-                    if not c.get("github"):
-                        continue
-                    url, err = post_pr_comment(Handler.gh, c)
-                    if err:
-                        gh_failed.append({"file": c.get("file"), "line": c.get("line"), "error": err})
-                    else:
-                        gh_posted.append(url)
-                if gh_posted or gh_failed:
-                    print(f"GITHUB: posted {len(gh_posted)}, failed {len(gh_failed)}", flush=True)
-                    for u in gh_posted:
-                        print(f"  posted: {u}", flush=True)
-                    for f in gh_failed:
-                        print(f"  FAILED {f['file']}:{f['line']}: {f['error']}", flush=True)
+            # No gh write happens here, by design. The page can reach /submit,
+            # so anything this handler can do, a web page the user has open can
+            # cause. A `gh` post is not undoable; the file write is. The button
+            # now only records intent (github: true) and the AGENT posts, where
+            # the write is visible in the transcript and interruptible.
+            # See dev_docs/local-review.md, and issue #381.
+            flagged = [c for c in payload.get("comments", []) if c.get("github")]
+            if Handler.gh and flagged:
+                print(f"GITHUB: {len(flagged)} comment(s) flagged for the PR — "
+                      "the agent posts these, this server does not.", flush=True)
             print("============================\n", flush=True)
 
-            if Handler.gh:
-                payload["github_posted"] = gh_posted
-                payload["github_failed"] = gh_failed
             # Residual risk accepted: disk exhaustion between the preflight and
             # this write can still fail after posting. Closing it would need the
             # payload written before posting, but the posting outcome is part of
@@ -1958,7 +1927,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
-                                         "github_posted": len(gh_posted), "github_failed": len(gh_failed)}).encode())
+                                         "github_flagged": len(flagged)}).encode())
             self.wfile.flush()
         finally:
             if Handler.once and Handler.srv:
