@@ -21,7 +21,14 @@ currency, and never withhold the finding just because you can't verify it.
 For each finding, give:
 
 - `file:line`
-- the issue, stated concisely
+- the issue, stated concisely, as a
+  [conventional comment](https://conventionalcomments.org/):
+  `<label> [(decorations)]: <subject>`, where `<label>` is one of `issue`,
+  `suggestion`, `question`, `todo`, `thought`, `chore`, or `note`,
+  and `<decorations>` is `(blocking)`, `(non-blocking)`, or `(if-minor)`. The
+  label states how hard the finding is meant to land — do not soften a defect
+  or inflate a preference. (`nitpick` is a valid label but the skip rule above
+  still stands: don't report nitpicks at all.)
 - a suggested fix
 
 Output a plain list of findings, followed by the terminal verdict line below,

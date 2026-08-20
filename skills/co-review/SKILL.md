@@ -195,6 +195,50 @@ Why this is narrow:
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 
+## Comment style — conventional comments
+
+Every finding you show the user or post to GitHub starts with a
+[conventional comment](https://conventionalcomments.org/) label:
+
+```
+<label> [(decorations)]: <subject>
+```
+
+Labels: `praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`,
+`thought`, `chore`, `note`. Decorations: `(non-blocking)`, `(blocking)`,
+`(if-minor)`.
+
+The **label** says what the finding is; the **decoration** says what it costs
+the merge. Confidence decides neither — it only sets the default:
+
+- **Label** — a defect is `issue`, a clear improvement is `suggestion`, an
+  uncertainty is `question` or `thought`, housekeeping is `chore`.
+- **Decoration** — `(blocking)` only when the change should not merge as-is.
+  Otherwise `(non-blocking)`, or `(if-minor)` when the fix is worth doing only
+  if it turns out cheap.
+- **Confidence sets the default label, not the weight.** High findings are
+  usually `issue:`/`suggestion:`, medium usually `suggestion:`/`question:`, low
+  usually `thought:`/`note:`. But a high-confidence typo fix is still
+  non-blocking, and a medium-confidence data-loss bug is still blocking — the
+  reconciler's confidence is how sure it is, not how much the finding matters.
+
+Two rules that carry the weight here:
+
+- **The label is a claim about the finding, not decoration.** Don't label a
+  defect `nitpick` to soften it, and don't label a preference `issue` to force
+  it. A blocking decoration on someone else's PR says the change should not
+  merge as-is — mean it.
+- **`praise:` is a real label — use it.** A review that is only defects reads as
+  hostile, especially on someone else's PR. Praise is yours to give, not the
+  reviewer pipeline's: it has no `recommended_fix` and no confidence tier, so it
+  goes in the summary you present and in the `--post` review `body` — never
+  through the finding list.
+
+This applies to **all** dispositions: the lists at step 9, the `body` and
+inline `comments` of a `--post` review, and — most of all — a local read of
+someone else's PR that you present as an FYI rather than posting, where the
+label is the only signal of how hard each finding is meant to land.
+
 ## Steps
 
 1. **Parse invocation.** Note any `--local`, `--remote`, `--post`, `--non-interactive`, `--reviewer-set cheap-single`, `--allow-command <cmd>` (repeatable), and `--base <branch>` flags and whether a PR number was passed. `--local` and `--remote` are mutually exclusive — if both are present, stop and ask which was meant. `--post` requires a PR and is **mutually exclusive with `--local`** — if both are present, stop and ask which was meant. `--reviewer-set cheap-single` requires `--non-interactive`; any other reviewer-set value is a hard error. Under `--non-interactive` a conflicting-flag combination cannot be resolved by asking, so it is a **hard error** (stop with a logged reason), not a prompt — see **Non-interactive mode**.
@@ -261,7 +305,7 @@ Why this is narrow:
    - A finding that recommends pinning or SHA-pinning a GitHub Action to a version/tag is **never high confidence** unless the finding (or your own check — e.g. `gh api repos/<owner>/<repo>/releases/latest`) confirms that version is current — a reviewer endorsing a stale major version is exactly the failure mode this check exists to catch. Downgrade an unverified pin recommendation to medium and say why in the rationale.
    - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
-9. **Reconcile and present** to the user. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
+9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
 
    **Escalate architectural/design judgment calls to Fable before asking the user.** A medium-confidence item is frequently a technical question with a defensible "right" answer — signal handling, test design patterns, harness structure, and similar calls a reasonable engineer could resolve from the code and conventions alone — not a matter of what the user wants. For those, consult Fable (the Agent tool's `model: fable`) for a decisive recommendation **before** the item reaches the user, then turn the ask into a go/no-go on that recommendation rather than an open-ended "which do you want" question. Reserve a genuinely open question for items that are actual user-preference (priority, scope, whether the work is worth doing at all) — Fable has no standing to answer those on the user's behalf. Note in the summary which items were escalated and what Fable recommended. **A failed escalation is never fatal** — if Fable can't be reached or doesn't come back, note it and put the open question to the user as you would have without this rule, rather than stalling the review on it. This governs the **Default (your PR)** disposition below, where a medium item becomes a question you have to answer. It does not apply under `--non-interactive` (step 11 already skips every medium item there; there's no question to escalate), and it does not apply in `--post` mode, where medium findings aren't asked at all — they go onto the post-candidate list and you vet them at step 10.
    - **Default (your PR):**
@@ -304,8 +348,8 @@ The remaining steps depend on disposition.
 
 12. **Post one batched PR review.** Submit a single review via `gh api repos/{owner}/{repo}/pulls/<n>/reviews` (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
     - `event` = the chosen verdict.
-    - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns).
-    - `comments` = an array of `{path, line, body}`, one per anchored candidate. `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
+    - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns). Each such finding keeps its conventional-comment label.
+    - `comments` = an array of `{path, line, body}`, one per anchored candidate. Each `body` opens with the finding's conventional-comment label (see **Comment style**). `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
 
 13. **Report the result.** Print the review URL (`gh pr view <n> --json url` plus the review, or the API response's `html_url`). Don't commit or push anything — you changed no files.
 
