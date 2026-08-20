@@ -208,13 +208,19 @@ Labels: `praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`,
 `thought`, `chore`, `note`. Decorations: `(non-blocking)`, `(blocking)`,
 `(if-minor)`.
 
-Map the finding's confidence tier onto the label and decoration so the reader
-sees the weight without reading the rationale:
+The **label** says what the finding is; the **decoration** says what it costs
+the merge. Confidence decides neither — it only sets the default:
 
-- **high** → `issue (blocking):` — or `suggestion (blocking):` when the fix is a
-  clear improvement rather than a defect.
-- **medium** → `suggestion (non-blocking):` or `question:`.
-- **low** → `nitpick (non-blocking):`, `thought:`, or `note:`.
+- **Label** — a defect is `issue`, a clear improvement is `suggestion`, an
+  uncertainty is `question` or `thought`, housekeeping is `chore`.
+- **Decoration** — `(blocking)` only when the change should not merge as-is.
+  Otherwise `(non-blocking)`, or `(if-minor)` when the fix is worth doing only
+  if it turns out cheap.
+- **Confidence sets the default label, not the weight.** High findings are
+  usually `issue:`/`suggestion:`, medium usually `suggestion:`/`question:`, low
+  usually `thought:`/`note:`. But a high-confidence typo fix is still
+  non-blocking, and a medium-confidence data-loss bug is still blocking — the
+  reconciler's confidence is how sure it is, not how much the finding matters.
 
 Two rules that carry the weight here:
 
@@ -223,8 +229,10 @@ Two rules that carry the weight here:
   it. A blocking decoration on someone else's PR says the change should not
   merge as-is — mean it.
 - **`praise:` is a real label — use it.** A review that is only defects reads as
-  hostile, especially on someone else's PR. When the change does something well,
-  say so as its own comment.
+  hostile, especially on someone else's PR. Praise is yours to give, not the
+  reviewer pipeline's: it has no `recommended_fix` and no confidence tier, so it
+  goes in the summary you present and in the `--post` review `body` — never
+  through the finding list.
 
 This applies to **all** dispositions: the lists at step 9, the `body` and
 inline `comments` of a `--post` review, and — most of all — a local read of
@@ -293,7 +301,7 @@ label is the only signal of how hard each finding is meant to land.
    - A finding that recommends pinning or SHA-pinning a GitHub Action to a version/tag is **never high confidence** unless the finding (or your own check — e.g. `gh api repos/<owner>/<repo>/releases/latest`) confirms that version is current — a reviewer endorsing a stale major version is exactly the failure mode this check exists to catch. Downgrade an unverified pin recommendation to medium and say why in the rationale.
    - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
-9. **Reconcile and present** to the user. Label every finding per **Comment style** above. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
+9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
 
    **Escalate architectural/design judgment calls to Fable before asking the user.** A medium-confidence item is frequently a technical question with a defensible "right" answer — signal handling, test design patterns, harness structure, and similar calls a reasonable engineer could resolve from the code and conventions alone — not a matter of what the user wants. For those, consult Fable (the Agent tool's `model: fable`) for a decisive recommendation **before** the item reaches the user, then turn the ask into a go/no-go on that recommendation rather than an open-ended "which do you want" question. Reserve a genuinely open question for items that are actual user-preference (priority, scope, whether the work is worth doing at all) — Fable has no standing to answer those on the user's behalf. Note in the summary which items were escalated and what Fable recommended. **A failed escalation is never fatal** — if Fable can't be reached or doesn't come back, note it and put the open question to the user as you would have without this rule, rather than stalling the review on it. This governs the **Default (your PR)** disposition below, where a medium item becomes a question you have to answer. It does not apply under `--non-interactive` (step 11 already skips every medium item there; there's no question to escalate), and it does not apply in `--post` mode, where medium findings aren't asked at all — they go onto the post-candidate list and you vet them at step 10.
    - **Default (your PR):**

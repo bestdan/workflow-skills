@@ -24,7 +24,7 @@ For each finding, give:
 - the issue, stated concisely, as a
   [conventional comment](https://conventionalcomments.org/):
   `<label> [(decorations)]: <subject>`, where `<label>` is one of `issue`,
-  `suggestion`, `question`, `todo`, `thought`, `chore`, `note`, or `praise`,
+  `suggestion`, `question`, `todo`, `thought`, `chore`, or `note`,
   and `<decorations>` is `(blocking)`, `(non-blocking)`, or `(if-minor)`. The
   label states how hard the finding is meant to land — do not soften a defect
   or inflate a preference. (`nitpick` is a valid label but the skip rule above
