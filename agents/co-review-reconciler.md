@@ -42,6 +42,8 @@ Confidence means:
 
 ## How to judge
 
+> **Mirrored, on purpose.** These rules are also stated inline in step 8 of [`skills/co-review/SKILL.md`](../skills/co-review/SKILL.md), because that step's copy is the only one a dispatch reaches when this file isn't loaded — the documented `general-purpose` fallback, and any distribution shipped without the plugin's `agents/` directory. Neither copy is the redundant one. Edit a judging rule here and edit it there in the same change.
+
 - Decide correctness against the diff and the project context you can read from the repository — conventions files, neighbouring code, existing tests.
 - Mark a finding **low** when it is over-engineered for this codebase (enterprise hardening on a personal repo) or does not apply to its actual setup (worktree handling on a directly-cloned repo), and say why. You cannot see the caller's rules section unless the caller passed it along.
 - A finding that recommends pinning a GitHub Action to a version or SHA is **never high** unless that version is confirmed current — a reviewer endorsing a stale major version is the exact failure this check exists to catch. Without confirmation, downgrade to medium and say why.
