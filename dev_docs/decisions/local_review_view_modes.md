@@ -68,13 +68,27 @@ store rather than treating the DOM as the record.
   the layout, and "mid-row" depends on the column count.
 - Collapse and "Viewed" moved out of the DOM into `fileUi`, because a mode
   switch re-renders one file and would otherwise silently uncheck it.
-- `preview` brings a vendored `marked` and an HTML sanitizer. Loopback is not a
-  trust boundary here — see the threat model in `local-review.md` — so raw HTML
-  is off, hrefs are allowlisted, and no image is fetched off-host.
+- `preview` brings a vendored `marked`, and **no sanitizer** — this decision
+  was reversed during implementation. The plan had been to disable raw HTML in
+  `marked` and allowlist the output, but `marked` has no such option: it
+  deliberately does not sanitize, and its `Renderer.html()` returns raw HTML
+  verbatim. Preview therefore uses `marked`'s lexer only and builds DOM nodes
+  from the token stream, so no attacker-derived string ever reaches an HTML
+  parser and there is nothing to sanitize. Full reasoning, and the eight claims
+  the first design draft got wrong, are in
+  [`../designs/local-review-markdown-preview.md`](../designs/local-review-markdown-preview.md).
 
 ## Deferred
 
-Moving GitHub posting behind the agent. Today `post_pr_comment()` runs inside
-the `/submit` handler, so the browser page holds a GitHub write capability.
-The intended shape is an intent-only `github: true` flag that the agent acts
-on. Orthogonal to view modes, tracked separately.
+Moving GitHub posting behind the agent ([#381](https://github.com/bestdan/workflow-skills/issues/381)).
+`post_pr_comment()` runs inside the `/submit` handler, so the browser page
+holds a GitHub write capability. The intended shape is an intent-only
+`github: true` flag that the agent acts on. Orthogonal to view modes.
+
+Two further items surfaced by the preview security review, both pre-existing
+and neither introduced by view modes:
+[#385](https://github.com/bestdan/workflow-skills/issues/385) — the diff view's
+`hljs` + `innerHTML` path, which is why `preview` renders fenced code
+unhighlighted — and
+[#386](https://github.com/bestdan/workflow-skills/issues/386) — the token
+living in the URL, patched here by a `Referrer-Policy: no-referrer` header.
