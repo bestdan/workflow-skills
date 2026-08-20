@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.95.2] - 2026-08-20
+
+### Fixes
+
+- pin codex reviews to gpt-5.5 (#389) (43b8d99)
+
 ## [1.95.1] - 2026-08-20
 
 ### Fixes
