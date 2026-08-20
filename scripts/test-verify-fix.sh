@@ -10,6 +10,16 @@
 # touches the network or the real repo tree.
 #
 # Run directly: bash scripts/test-verify-fix.sh
+#
+# Match captured output with `grep -q PATTERN <<<"$out"`, never
+# `echo "$out" | grep -q PATTERN`. `grep -q` exits the moment it matches, so
+# on a large `$out` the `echo` is still writing and dies of SIGPIPE — and
+# under `pipefail` below the pipeline then reports 141 even though the
+# pattern matched, failing the assertion for a reason that has nothing to do
+# with the behavior under test. The case at "a real smoke-confinement failure
+# fails the run" hit this in CI: its `$out` carries a 200-line `ps -ef` dump,
+# which is big enough to lose the race. A here-string has no pipe and no
+# writer to kill.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -80,7 +90,7 @@ echo "== resolve_check_command precedence =="
 d="$(new_fixture resolve-floor)"
 stub_check "$d" 0
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: floor" 2>&1)"
-if echo "$out" | grep -q 'resolved gate command: scripts/check.sh'; then
+if grep -q 'resolved gate command: scripts/check.sh' <<<"$out"; then
   PASS "floor: scripts/check.sh chosen when no dli/just config present"
 else
   FAIL "floor: scripts/check.sh chosen when no dli/just config present" "$out"
@@ -97,7 +107,7 @@ exit 0
 EOF
 chmod +x "$d/bin/dli"
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: dli" 2>&1)"
-if echo "$out" | grep -q 'resolved gate command: dli check'; then
+if grep -q 'resolved gate command: dli check' <<<"$out"; then
   PASS "dli check outranks scripts/check.sh when dli.toml + dli on PATH"
 else
   FAIL "dli check outranks scripts/check.sh when dli.toml + dli on PATH" "$out"
@@ -108,7 +118,7 @@ if command -v just >/dev/null 2>&1; then
   stub_check "$d" 0
   printf 'check:\n\techo stub-just-marker-line\n' >"$d/justfile"
   out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: just" 2>&1)"
-  if echo "$out" | grep -q 'resolved gate command: just check'; then
+  if grep -q 'resolved gate command: just check' <<<"$out"; then
     PASS "just check outranks scripts/check.sh when justfile has a check recipe"
   else
     FAIL "just check outranks scripts/check.sh when justfile has a check recipe" "$out"
@@ -120,7 +130,7 @@ fi
 d="$(new_fixture resolve-none)"
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: none" 2>&1)"
 rc=$?
-if [ "$rc" -eq 2 ] && echo "$out" | grep -q 'no check command found'; then
+if [ "$rc" -eq 2 ] && grep -q 'no check command found' <<<"$out"; then
   PASS "no check command found -> exit 2 with a clear message"
 else
   FAIL "no check command found -> exit 2 with a clear message" "$out"
@@ -134,7 +144,7 @@ d="$(new_fixture cli-no-description)"
 stub_check "$d" 0
 out="$(run_verify_fix "$d" --runs 1 2>&1)"
 rc=$?
-if [ "$rc" -eq 2 ] && echo "$out" | grep -q 'usage:'; then
+if [ "$rc" -eq 2 ] && grep -q 'usage:' <<<"$out"; then
   PASS "missing <description> -> exit 2 with usage"
 else
   FAIL "missing <description> -> exit 2 with usage" "$out"
@@ -144,7 +154,7 @@ d="$(new_fixture cli-bad-runs)"
 stub_check "$d" 0
 out="$(run_verify_fix "$d" --runs 0 "desc" 2>&1)"
 rc=$?
-if [ "$rc" -eq 2 ] && echo "$out" | grep -q -- '--runs must be'; then
+if [ "$rc" -eq 2 ] && grep -q -- '--runs must be' <<<"$out"; then
   PASS "--runs 0 -> exit 2"
 else
   FAIL "--runs 0 -> exit 2" "$out"
@@ -154,7 +164,7 @@ d="$(new_fixture cli-nonnumeric-runs)"
 stub_check "$d" 0
 out="$(run_verify_fix "$d" --runs abc "desc" 2>&1)"
 rc=$?
-if [ "$rc" -eq 2 ] && echo "$out" | grep -q -- '--runs must be'; then
+if [ "$rc" -eq 2 ] && grep -q -- '--runs must be' <<<"$out"; then
   PASS "--runs abc -> exit 2"
 else
   FAIL "--runs abc -> exit 2" "$out"
@@ -168,7 +178,7 @@ d="$(new_fixture happy-path)"
 stub_check "$d" 0
 out="$(run_verify_fix "$d" --runs 2 --skip-confinement "case: happy path" 2>&1)"
 rc=$?
-if [ "$rc" -eq 0 ] && echo "$out" | grep -q '✅ verify-fix passed: case: happy path'; then
+if [ "$rc" -eq 0 ] && grep -q '✅ verify-fix passed: case: happy path' <<<"$out"; then
   PASS "all rounds pass -> exit 0 with a summary line"
 else
   FAIL "all rounds pass -> exit 0 with a summary line" "$out (rc=$rc)"
@@ -185,22 +195,22 @@ d="$(new_fixture failing-path)"
 stub_check "$d" 1
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: failing" 2>&1)"
 rc=$?
-if [ "$rc" -eq 1 ] && echo "$out" | grep -q 'FAILED'; then
+if [ "$rc" -eq 1 ] && grep -q 'FAILED' <<<"$out"; then
   PASS "a failing round -> exit 1"
 else
   FAIL "a failing round -> exit 1" "$out (rc=$rc)"
 fi
-if echo "$out" | grep -q 'diagnostics:' && echo "$out" | grep -q 'stub-check-marker-line'; then
+if grep -q 'diagnostics:' <<<"$out" && grep -q 'stub-check-marker-line' <<<"$out"; then
   PASS "failure dumps diagnostics including the captured output"
 else
   FAIL "failure dumps diagnostics including the captured output" "$out"
 fi
-if echo "$out" | grep -q 'process snapshot'; then
+if grep -q 'process snapshot' <<<"$out"; then
   PASS "failure diagnostics include a process snapshot"
 else
   FAIL "failure diagnostics include a process snapshot" "$out"
 fi
-if echo "$out" | grep -q '✅ verify-fix passed'; then
+if grep -q '✅ verify-fix passed' <<<"$out"; then
   FAIL "a failing round must not also print the success summary"
 else
   PASS "a failing round does not print the success summary"
@@ -237,7 +247,7 @@ EOF
 chmod +x "$d/scripts/smoke-confinement.sh"
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: confinement skipped by flag" 2>&1)"
 rc=$?
-if [ "$rc" -eq 0 ] && [ ! -f "$d/confinement-ran" ] && echo "$out" | grep -q 'skipped (--skip-confinement)'; then
+if [ "$rc" -eq 0 ] && [ ! -f "$d/confinement-ran" ] && grep -q 'skipped (--skip-confinement)' <<<"$out"; then
   PASS "--skip-confinement prevents smoke-confinement.sh from running"
 else
   FAIL "--skip-confinement prevents smoke-confinement.sh from running" "$out (rc=$rc)"
@@ -253,7 +263,7 @@ EOF
 chmod +x "$d/scripts/smoke-confinement.sh"
 out="$(run_verify_fix "$d" --runs 1 "case: confinement not macOS" 2>&1)"
 rc=$?
-if [ "$rc" -eq 0 ] && echo "$out" | grep -q 'smoke-confinement skipped (macOS/sandbox-exec only'; then
+if [ "$rc" -eq 0 ] && grep -q 'smoke-confinement skipped (macOS/sandbox-exec only' <<<"$out"; then
   PASS "smoke-confinement's own macOS-only guard is treated as a skip, not a failure"
 else
   FAIL "smoke-confinement's own macOS-only guard is treated as a skip, not a failure" "$out (rc=$rc)"
@@ -269,7 +279,7 @@ EOF
 chmod +x "$d/scripts/smoke-confinement.sh"
 out="$(run_verify_fix "$d" --runs 1 "case: confinement real failure" 2>&1)"
 rc=$?
-if [ "$rc" -eq 1 ] && echo "$out" | grep -q 'smoke-confinement FAILED' && echo "$out" | grep -q 'confinement wall did not hold'; then
+if [ "$rc" -eq 1 ] && grep -q 'smoke-confinement FAILED' <<<"$out" && grep -q 'confinement wall did not hold' <<<"$out"; then
   PASS "a real smoke-confinement failure fails the run and surfaces its output"
 else
   FAIL "a real smoke-confinement failure fails the run and surfaces its output" "$out (rc=$rc)"
@@ -300,7 +310,7 @@ EOF
 chmod +x "$d/bin/ps"
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: orphan flagged" 2>&1)"
 rc=$?
-if [ "$rc" -eq 0 ] && echo "$out" | grep -q 'possible orphan'; then
+if [ "$rc" -eq 0 ] && grep -q 'possible orphan' <<<"$out"; then
   PASS "a process newly reparented to init during a round is flagged"
 else
   FAIL "a process newly reparented to init during a round is flagged" "$out (rc=$rc)"
@@ -318,7 +328,7 @@ EOF
 chmod +x "$d/bin/ps"
 out="$(run_verify_fix "$d" --runs 1 --skip-confinement "case: no orphan" 2>&1)"
 rc=$?
-if [ "$rc" -eq 0 ] && ! echo "$out" | grep -q 'possible orphan'; then
+if [ "$rc" -eq 0 ] && ! grep -q 'possible orphan' <<<"$out"; then
   PASS "a stable process table does not trigger a false orphan warning"
 else
   FAIL "a stable process table does not trigger a false orphan warning" "$out (rc=$rc)"
