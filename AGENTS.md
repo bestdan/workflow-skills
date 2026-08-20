@@ -47,7 +47,9 @@ for what it loads.
 - A top-level file states the rule and links to the detail. It does not inline
   the detail.
 - A SKILL.md body carries the judgment; procedures, tables, and worked examples
-  go in `references/` and are loaded only when needed.
+  go in `references/` and are loaded only when needed. The loading mechanics —
+  and the rule they impose on where a fix lands — are in
+  [CONTRIBUTING.md](CONTRIBUTING.md#what-loads-at-runtime-vs-contributor-only).
 - One fact, one home. If something is already true in `commands/task-config.md`,
   `dev_docs/releasing.md`, or a skill's own reference file, **link to it** — a
   second copy rots silently and there is no invalidation.

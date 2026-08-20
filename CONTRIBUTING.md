@@ -93,6 +93,29 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 4. Run `just check` (must pass) and, if you can, `just eval` to confirm the new
    skill auto-triggers.
 
+## What loads at runtime vs. contributor-only
+
+Skill files split into two tiers with different audiences, and confusing them
+silently drops behavior:
+
+- **Runtime-loaded** — `SKILL.md` itself, in full, every time the skill
+  triggers (its frontmatter `description` loads even earlier, at session
+  start, as the trigger surface). No other file is read on invocation.
+- **Contributor-only / loaded on demand** — sibling `references/` files and
+  everything under `dev_docs/`. The agent opens a `references/` file only if
+  `SKILL.md`'s own text tells it to and it chooses to; `dev_docs/` is
+  essentially never pulled into a running skill's context at all.
+
+**Any operational or behavioral rule the agent must act on unconditionally
+belongs in `SKILL.md` itself, never only in a `references/` file.** A fix that
+spans both and only lands in the reference file is invisible to the agent at
+runtime — that gap has already shipped a silent bug once, past a first
+co-review pass, before a second pass caught it. The same split applies to
+`commands/<name>.md` (loaded when the command runs),
+`commands/handlers/<handler>.md` (loaded when a task command dispatches into
+it), and `agents/<name>.md` (loaded when the subagent spawns): their bodies are
+runtime prompts, not documentation.
+
 ## Adding a command
 
 Add `commands/<name>.md` with valid frontmatter, then update the component count
