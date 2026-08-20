@@ -604,11 +604,13 @@ USEOF
   cp "$SR_RUN/.auto-pilot/RUN.md" "$SRL/.auto-pilot/RUN.md" # no paused_until: gate OPEN
   SRL_CLAUDE="$SRL/bin/claude-slow"
   # The model call runs as long as the property needs, instead of a flat 3s:
-  # it waits for the reporter's SECOND digest, up to a 20s ceiling. A fixed 3s
-  # left no headroom — one reporter tick is a status-report plus a gh
-  # round-trip, so a loaded runner emitted the wake-start digest alone and
-  # failed this test on a PR that touched nothing but markdown (re-run passed,
-  # no code change). A wrapper with no in-wake reporter still fails: nothing
+  # it waits for the reporter's SECOND digest, up to a 20s ceiling (100 ×
+  # 0.2s). A fixed 3s left no headroom — a tick is a whole status-report
+  # render (a git elapsed lookup per task row, then the STATUS.md write; this
+  # fixture resolves no --gh and no --usage-bin, so the cost is git and file
+  # I/O), and a loaded runner emitted the wake-start digest alone and failed
+  # this test on a PR that touched nothing but markdown (re-run passed, no
+  # code change). A wrapper with no in-wake reporter still fails: nothing
   # further lands, the ceiling expires, and the count stays at 1.
   cat >"$SRL_CLAUDE" <<EOF
 #!/bin/sh
@@ -654,7 +656,8 @@ EOF
   if [ "$srl_digests" -ge 2 ]; then
     ok "status-report [in-wake]: reports kept firing DURING the model call ($srl_digests digests, wake-start alone would be 1)"
   else
-    bad "status-report [in-wake]: reports kept firing DURING the model call" "digests=$srl_digests (only the wake-start emission fired — the [A] cadence hole)"
+    bad "status-report [in-wake]: reports kept firing DURING the model call" \
+      "digests=$srl_digests after the 20s ceiling — no in-wake reporter (the [A] cadence hole), or 2 ticks took >20s here"
   fi
   # Poll to a deadline rather than sleeping a fixed second. The reap is a
   # process-GROUP TERM followed by a wait (`kill -TERM -"$rpt"; wait "$rpt"` in
