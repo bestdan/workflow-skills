@@ -712,6 +712,7 @@ except RuntimeError as e:
 # --- server-behavior cases: real subprocesses, one python3 process launches ---
 # them all. Each server is started with --diff-file (no `gh` needed) and no
 # --port, so the OS picks a free port and the server reports it.
+import http.cookiejar as _cookiejar
 import re as _re
 import selectors as _selectors
 import shutil as _shutil
@@ -817,6 +818,13 @@ def url_parts(url):
     return host, int(port_s), host_port, "/" + token_path
 
 
+def open_token_url(url, timeout=5):
+    # The tokenized URL now 302s to a cookie-scoped /, so opening it needs a
+    # cookie jar to follow the redirect the way a browser would.
+    opener = _urlrequest.build_opener(_urlrequest.HTTPCookieProcessor(_cookiejar.CookieJar()))
+    return opener.open(url, timeout=timeout)
+
+
 # -- launching without --port autoselects a free port and prints the URL ----
 proc1, patch1 = start_server([])
 proc2, patch2 = start_server([])
@@ -891,7 +899,7 @@ try:
     url = read_url(proc)
     check("server: --once run prints LOCAL_REVIEW_URL", bool(url), url)
     if url:
-        with _urlrequest.urlopen(url, timeout=5) as resp:
+        with open_token_url(url) as resp:
             body = resp.read().decode()
             check("server: GET / returns 200", resp.status == 200, resp.status)
             # The token is a path segment, so this header is what stops it
@@ -1088,10 +1096,61 @@ try:
         except _urlerror.HTTPError as e:
             check("server: GET /<wrong-token>/ returns 404", e.code == 404, e.code)
 
-        with _urlrequest.urlopen(url, timeout=5) as resp:
+        with open_token_url(url) as resp:
             body = resp.read().decode()
             check("server: GET tokenized URL returns 200", resp.status == 200, resp.status)
             check("server: GET tokenized URL body contains 'Submit review'", "Submit review" in body, "")
+
+        token = token_path.strip("/")
+        cookie_name = f"local_review_{port}"
+
+        class _NoRedirectCookie(_urlrequest.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        opener_nr = _urlrequest.build_opener(_NoRedirectCookie)
+        try:
+            opener_nr.open(url, timeout=5)
+            bad("server: GET /<token>/ (redirects not followed) returns 302", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            set_cookie = e.headers.get("Set-Cookie", "")
+            check("server: GET /<token>/ (redirects not followed) returns 302", e.code == 302, e.code)
+            check("server: GET /<token>/ redirect Location is exactly /",
+                  e.headers.get("Location", "") == "/", e.headers.get("Location"))
+            check("server: GET /<token>/ Set-Cookie carries the port-named cookie and the token",
+                  f"{cookie_name}={token}" in set_cookie, set_cookie)
+            check("server: GET /<token>/ Set-Cookie is HttpOnly", "HttpOnly" in set_cookie, set_cookie)
+            check("server: GET /<token>/ Set-Cookie is SameSite=Strict", "SameSite=Strict" in set_cookie, set_cookie)
+
+        req = _urlrequest.Request(f"{base}/", headers={"Cookie": f"{cookie_name}={token}"})
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
+            check("server: GET / with the session cookie returns 200", resp.status == 200, resp.status)
+            check("server: GET / with the session cookie body contains 'Submit review'",
+                  "Submit review" in body, "")
+
+        req = _urlrequest.Request(f"{base}/", headers={"Cookie": f"{cookie_name}=not-the-token"})
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: GET / with a wrong-value cookie returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET / with a wrong-value cookie returns 404", e.code == 404, e.code)
+
+        # Once the page lands on the bare /, every request it makes travels the
+        # cookie branch, not the token prefix — so the routes it actually calls
+        # have to be asserted there too, or that branch can regress on
+        # everything except the page root while this suite stays green.
+        req = _urlrequest.Request(f"{base}/state", headers={"Cookie": f"{cookie_name}={token}"})
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            state_body = json.loads(resp.read().decode())
+            check("server: GET /state with the session cookie returns 200", resp.status == 200, resp.status)
+            check("server: GET /state with the session cookie returns a sig", "sig" in state_body, state_body)
+
+        req = _urlrequest.Request(f"{base}/vendor/marked.umd.js",
+                                  headers={"Cookie": f"{cookie_name}={token}"})
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: GET /vendor/*.js with the session cookie returns 200", resp.status == 200, resp.status)
+            check("server: GET /vendor/*.js with the session cookie returns the asset",
+                  len(resp.read()) > 0, "")
 
         # slashless token alias must redirect, not serve a page whose relative
         # asset/fetch URLs resolve outside the token prefix
@@ -1173,6 +1232,20 @@ try:
             check("server: POST /submit with Origin evil.localhost returns 403", e.code == 403, e.code)
         check("server: evil.localhost-origin POST does not write OUT", not os.path.exists(sec_out), sec_out)
 
+        # The page submits from the bare /, so /submit has to authorize off the
+        # cookie too. Sits after the Origin cases above because it writes OUT,
+        # and those assert OUT is still absent.
+        req = _urlrequest.Request(
+            f"{base}/submit", data=b'{"meta":{},"summary":"cookiepath","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Cookie": f"{cookie_name}={token}"},
+            method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit with the session cookie returns 200", resp.status == 200, resp.status)
+        check("server: OUT written after a cookie-authorized submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "cookiepath", sec_out)
+        os.unlink(sec_out)
+
         # Vendor path traversal, sent as a raw request line so dot-segments
         # reach the server unnormalized (urllib normalizes them client-side
         # before the request ever goes out, so a urlopen() call can't exercise
@@ -1194,6 +1267,32 @@ try:
         s.close()
         status_line = resp_bytes.split(b"\r\n", 1)[0].decode(errors="replace")
         check("server: GET vendor path traversal (../..) returns 404", " 404 " in status_line, status_line)
+
+        # Port isolation: server1's cookie is named for server1's port, so it
+        # must not authorize a second review running on a different port.
+        proc_b, patch_b = start_server([])
+        try:
+            url_b = read_url(proc_b)
+            check("server: second server for port-isolation test starts", bool(url_b), url_b)
+            if url_b:
+                host_b, port_b, host_port_b, _ = url_parts(url_b)
+                req = _urlrequest.Request(
+                    f"http://{host_port_b}/", headers={"Cookie": f"{cookie_name}={token}"},
+                )
+                try:
+                    _urlrequest.urlopen(req, timeout=5)
+                    bad("server: server1's cookie does not authorize server2's /", "request unexpectedly succeeded")
+                except _urlerror.HTTPError as e:
+                    check("server: server1's cookie does not authorize server2's /", e.code == 404, e.code)
+        finally:
+            if proc_b.poll() is None:
+                proc_b.terminate()
+                try:
+                    proc_b.wait(timeout=5)
+                except _subprocess.TimeoutExpired:
+                    proc_b.kill()
+                    proc_b.wait(timeout=5)
+            os.unlink(patch_b)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1470,7 +1569,7 @@ try:
         url = read_url(proc)
         check("git uncommitted: server starts and prints LOCAL_REVIEW_URL", bool(url), url)
         if url:
-            with _urlrequest.urlopen(url, timeout=5) as resp:
+            with open_token_url(url) as resp:
                 body = resp.read().decode()
                 check("git uncommitted: page contains the modified file", "file.txt" in body, "")
             with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
@@ -1489,7 +1588,7 @@ try:
             with _urlrequest.urlopen(req, timeout=5) as resp:
                 refresh_body = json.loads(resp.read().decode())
                 check("git uncommitted: POST /refresh returns ok", refresh_body.get("ok") is True, refresh_body)
-            with _urlrequest.urlopen(url, timeout=5) as resp:
+            with open_token_url(url) as resp:
                 body2 = resp.read().decode()
                 check("git uncommitted: page after refresh shows the new edit", "CHANGED AGAIN" in body2, "")
             with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
@@ -1518,7 +1617,7 @@ try:
         url = read_url(proc)
         check("git branch mode: server starts and prints LOCAL_REVIEW_URL", bool(url), url)
         if url:
-            with _urlrequest.urlopen(url, timeout=5) as resp:
+            with open_token_url(url) as resp:
                 body = resp.read().decode()
                 check("git branch mode: page shows the committed diff vs main",
                       "feature branch" in body, "")
@@ -1590,7 +1689,7 @@ try:
     url = read_url(proc)
     check("title: --diff-file with --title starts", bool(url), url)
     if url:
-        with _urlrequest.urlopen(url, timeout=5) as resp:
+        with open_token_url(url) as resp:
             body = resp.read().decode()
             check("title: --diff-file page contains the custom --title label",
                   "Custom Label" in body, "")
@@ -1611,7 +1710,7 @@ try:
         url = read_url(proc)
         check("title: --git uncommitted with no --title starts", bool(url), url)
         if url:
-            with _urlrequest.urlopen(url, timeout=5) as resp:
+            with open_token_url(url) as resp:
                 body = resp.read().decode()
                 expected = f"uncommitted changes ({repo_name})"
                 check("title: --git uncommitted default title names the change and repo dir",

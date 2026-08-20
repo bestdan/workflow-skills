@@ -12,6 +12,7 @@ On Submit the page POSTs all comments to /submit; the server writes them to
 import argparse
 import errno
 import hashlib
+import http.cookies
 import json
 import os
 import re
@@ -1720,6 +1721,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _cookie_name(self):
+        # Cookies aren't port-scoped (RFC 6265): 127.0.0.1:8765 and :8766 share
+        # one jar for host 127.0.0.1. Naming the cookie after the port is how
+        # two concurrent reviews avoid clobbering each other's session.
+        return f"local_review_{Handler.port}"
+
     def _route_path(self):
         # Every route is mounted under /<token>/. A request whose first path
         # segment isn't the token gets a bare 404 from the caller — this just
@@ -1729,6 +1736,16 @@ class Handler(BaseHTTPRequestHandler):
         p = self.path
         if p.startswith(prefix + "/"):
             return p[len(prefix):]
+        # No token in the path: fall back to the session cookie set by the
+        # one-time redirect in do_GET, so the browser never has to carry the
+        # token again after the first hit.
+        cookie_header = self.headers.get("Cookie")
+        if cookie_header:
+            jar = http.cookies.SimpleCookie()
+            jar.load(cookie_header)
+            morsel = jar.get(self._cookie_name())
+            if morsel and morsel.value == Handler.token:
+                return p
         return None
 
     def _origin_ok(self):
@@ -1755,6 +1772,19 @@ class Handler(BaseHTTPRequestHandler):
             # token prefix and render a 200 that doesn't work.
             self.send_response(301)
             self.send_header("Location", "/" + Handler.token + "/")
+            self.end_headers()
+            return
+        if self.path == "/" + Handler.token + "/":
+            # Exchange the token for a session cookie and land on the bare
+            # path, so the browser's history/Referer never carry the token
+            # again. Must be 302, not 301: a browser caches a 301 forever,
+            # and a cached one would break a later review bound to this port.
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header(
+                "Set-Cookie",
+                f"{self._cookie_name()}={Handler.token}; HttpOnly; SameSite=Strict; Path=/",
+            )
             self.end_headers()
             return
         path = self._route_path()

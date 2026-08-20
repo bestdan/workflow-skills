@@ -97,7 +97,10 @@ The URL carries a random per-launch token, four hyphenated words (e.g.
 read and retype it; never rebuild it from the port alone, and don't record it
 anywhere persistent (a committed file, a ticket, a log that outlives the
 round). Showing it to the user so they can open it — including the
-no-browser fallback below — is fine: the token dies with the server.
+no-browser fallback below — is fine: the token dies with the server. The
+first request to it redirects to a token-free `/` and sets a session cookie,
+so don't be surprised to see the URL bar lose the token after the page loads
+— that's expected, not a broken link.
 
 The log's `Review UI:` line gives the human the same token under the vanity
 host `review.localhost` (e.g. `http://review.localhost:<port>/<token>/`).
