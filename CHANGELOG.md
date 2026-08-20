@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.95.3] - 2026-08-20
+
+### Fixes
+
+- stop a healthy smoke test from failing closed (#394) (e1d36d2)
+
 ## [1.95.2] - 2026-08-20
 
 ### Fixes
