@@ -175,7 +175,7 @@ enforcing layer**, and network egress is **not** covered by it:
   as a declaration of intent, not a control. Closing this needs a real
   host-allowlisting local proxy (or PF ruleset), which does not exist here.
 
-Four dimensions, only the first of which is enforced.
+Six dimensions below. Only §2 is unenforced: network egress is open.
 
 ### 1. Filesystem
 
