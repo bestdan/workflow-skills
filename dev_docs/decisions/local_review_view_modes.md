@@ -80,10 +80,11 @@ store rather than treating the DOM as the record.
 
 ## Deferred
 
-Moving GitHub posting behind the agent ([#381](https://github.com/bestdan/workflow-skills/issues/381)).
-`post_pr_comment()` runs inside the `/submit` handler, so the browser page
-holds a GitHub write capability. The intended shape is an intent-only
-`github: true` flag that the agent acts on. Orthogonal to view modes.
+~~Moving GitHub posting behind the agent
+([#381](https://github.com/bestdan/workflow-skills/issues/381)).~~ **Done.**
+`post_pr_comment()` is gone; `github: true` is intent only and the agent posts.
+The server holds no GitHub write capability, and the test suite asserts that
+absence against a `gh` stand-in rather than trusting it.
 
 Two further items surfaced by the preview security review, both pre-existing
 and neither introduced by view modes:

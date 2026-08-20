@@ -133,8 +133,8 @@ between whichever modes a given file allows. The user:
   delete controls.
 - When the diff is a PR, the composer also shows a **Comment on GitHub**
   button. Comments made with it behave like any other comment but carry a
-  **→ GitHub** mark; on **Submit** they go to the agent _and_ are posted as
-  inline review comments on the PR (via `gh`). Nothing posts until submit. The
+  **→ GitHub** mark, which records the user's intent that it belong on the PR.
+  **The server does not post — you do**, after the step-5 echo. The
   button is absent for non-PR diffs.
 - Taps **⊘** on a comment line to mark the whole contiguous comment run for
   removal.
@@ -174,8 +174,45 @@ act on it by deleting lines `line`–`endLine` on `side`. A **block** entry
 carries `endLine` and `kind: "block"`: it came from Preview and is about the
 whole span `line`–`endLine`, not just the first line — a remark on a nine-line
 table means the table, so read the range before editing. A comment flagged for
-GitHub carries `github: true` (the server also posts it on the PR and returns
-`github_posted` / `github_failed` counts). Every other comment carries the
+GitHub carries `github: true` — the user's intent that it belong on the PR.
+**Post those yourself — after the step-5 echo, not before it.** The echo is
+where a mis-transcribed comment becomes visible; posting first means it becomes
+visible only once it is already on the PR and needs deleting by hand. One
+inline review comment each, then report what landed and what failed.
+
+Single-line comment:
+
+```bash
+gh api --method POST "/repos/<owner>/<repo>/pulls/<n>/comments" \
+  -f body="<text>" -f commit_id="<meta.sha>" -f path="<file>" \
+  -F line=<line> -f side=RIGHT      # side=LEFT when the comment's side is "L"
+```
+
+A **block** entry (`kind: "block"`, `endLine` > `line`) is about its whole span,
+so post it as a multi-line comment or the range you were just told to respect is
+thrown away:
+
+```bash
+gh api --method POST "/repos/<owner>/<repo>/pulls/<n>/comments" \
+  -f body="<text>" -f commit_id="<meta.sha>" -f path="<file>" \
+  -F start_line=<line> -f start_side=RIGHT \
+  -F line=<endLine> -f side=RIGHT
+```
+
+Two things that will bite:
+
+- **Use `meta.sha`, not the current head.** It is the commit the reviewed diff
+  was rendered from, pinned when the server launched. Re-fetching
+  `headRefOid` at posting time anchors comments to whatever the PR has advanced
+  to in the meantime — a commit the reviewer never looked at. If `meta.sha` is
+  absent (a non-PR diff), there is nothing to post to.
+- **A comment that does not anchor is not a retry candidate.** GitHub rejects a
+  line — or a whole multi-line span — that is not in the diff's right side. Say
+  so and fall back to a top-level PR comment rather than retrying blindly.
+
+The server used to post these itself; it no longer holds any GitHub write
+capability, so the write is now visible in the transcript and you can be
+stopped part-way. Every other comment carries the
 anchored `code` so you can stay on the right line if numbers shifted. Remind
 the user that comments live in the page until Submit — a refresh clears them.
 

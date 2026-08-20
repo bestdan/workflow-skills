@@ -1308,6 +1308,83 @@ finally:
             proc.wait(timeout=5)
     _shutil.rmtree(fake_gh_dir_v, ignore_errors=True)
 
+# -- the server never issues a gh WRITE, even for a github-flagged comment ----
+# The page can reach /submit, so anything this handler can do a web page the
+# user has open can cause — and a `gh` post is not undoable. The button records
+# intent; the agent posts. This asserts the capability is gone rather than
+# merely unused: a gh stand-in logs every invocation, PR mode runs for real, a
+# comment flagged github:true is submitted, and the log must contain no write.
+gh_log_dir = _tempfile.mkdtemp(prefix="ghlog-")
+gh_log = os.path.join(gh_log_dir, "calls.log")
+with open(os.path.join(gh_log_dir, "gh"), "w") as f:
+    f.write(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >> "' + gh_log + '"\n'
+        'if [ "$1" = pr ] && [ "$2" = diff ]; then\n'
+        "  printf 'diff --git a/n.md b/n.md\\nnew file mode 100644\\n--- /dev/null\\n+++ b/n.md\\n@@ -0,0 +1,1 @@\\n+hi\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [ "$1" = pr ] && [ "$2" = view ]; then\n'
+        '  printf \'{"url":"https://github.com/o/r/pull/7","number":7,"headRefOid":"deadbeef","title":"T"}\'\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n")
+os.chmod(os.path.join(gh_log_dir, "gh"), 0o755)
+gh_log_env = dict(os.environ)
+gh_log_env["PATH"] = gh_log_dir + os.pathsep + os.environ.get("PATH", "")
+
+nw_fd, nw_out = _tempfile.mkstemp(suffix=".json")
+os.close(nw_fd)
+os.unlink(nw_out)
+nw_proc = _subprocess.Popen(
+    [sys.executable, server_path, "7", "--once", "--out", nw_out],
+    stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=gh_log_env,
+)
+try:
+    nw_url = read_url(nw_proc)
+    check("no-write: PR-mode server starts against the logging gh stub", bool(nw_url), nw_url)
+    if nw_url:
+        nw_payload = {"summary": "s", "approved": False, "comments": [
+            {"file": "n.md", "side": "R", "line": 1, "code": "hi",
+             "text": "post me", "github": True}]}
+        req = _urlrequest.Request(
+            f"{nw_url}submit", data=json.dumps(nw_payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            nw_body = json.loads(resp.read().decode())
+        check("no-write: /submit reports the comment as flagged, not posted",
+              nw_body.get("github_flagged") == 1
+              and "github_posted" not in nw_body
+              and "github_failed" not in nw_body, nw_body)
+        deadline = _time.time() + 5
+        while _time.time() < deadline and not (os.path.exists(nw_out) and os.path.getsize(nw_out)):
+            _time.sleep(0.05)
+        written = json.load(open(nw_out)) if os.path.exists(nw_out) else {}
+        check("no-write: the payload keeps github:true so the agent knows what to post",
+              written.get("comments", [{}])[0].get("github") is True, written)
+        check("no-write: the payload carries no github_posted/github_failed",
+              "github_posted" not in written and "github_failed" not in written, list(written))
+        calls = open(gh_log).read() if os.path.exists(gh_log) else ""
+        check("no-write: gh was invoked (read path is intact)", bool(calls.strip()), calls)
+        # Per LINE, not over the whole blob: `calls` is one invocation per line,
+        # so a substring test like `" api " in (" " + calls)` only ever gets the
+        # leading boundary right for the FIRST line — every later `api …` sits
+        # after a newline and never matches. That clause silently never fired.
+        gh_writes = [ln for ln in calls.splitlines()
+                     if "--method POST" in ln or "api" in ln.split()]
+        check("no-write: NO gh invocation was a write", gh_writes == [], gh_writes)
+finally:
+    if nw_proc.poll() is None:
+        nw_proc.terminate()
+        try:
+            nw_proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            nw_proc.kill()
+            nw_proc.wait(timeout=5)
+    _shutil.rmtree(gh_log_dir, ignore_errors=True)
+    if os.path.exists(nw_out):
+        os.unlink(nw_out)
+
 # -- --diff-file run still works with gh absent/failing: resolve_gh/get_meta -
 # short-circuit on diff_file before ever calling sh(), so this path must be
 # unaffected by gh being broken.
