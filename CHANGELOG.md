@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [1.95.0] - 2026-08-20
+
+### Features
+
+- render wholly-added markdown as a document (#388) (94dc196)
+
 ## [1.94.0] - 2026-08-19
 
 ### Features
