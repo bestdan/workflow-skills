@@ -15,7 +15,7 @@ Linear is accessed via the official MCP server connected from `https://mcp.linea
 
 ## Config block
 
-The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. Commands read the **merged view** — `.task-config.yml` overlaid with the optional gitignored `.task-config.local.yml` (mappings merge recursively — a local `linear.api_key_ref` overlays just that leaf and keeps the committed `team`/`projects`; see `task-config.md` → "Local override"). The config keys (top-level `wip_limit` plus the `linear:` block):
+The Linear handler is selected by `handler: linear` in `dev_docs/tasks/.task-config.yml`. Commands read the **merged view** — `.task-config.yml` overlaid with the optional gitignored `.task-config.local.yml` (mappings merge recursively — a local `linear.api_key_ref` overlays just that leaf and keeps the committed `team`/`projects`; see `commands/task-config.md` → "Local override"). The config keys (top-level `wip_limit` plus the `linear:` block):
 
 ```yaml
 handler: linear
@@ -79,7 +79,7 @@ linear:
 
 - `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
-- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, `api_key`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `task-config.md` → "Local override"). `api_key` (a raw key) and `api_key_resolver` (which names a program) are stricter still: both are honored **only** from `.task-config.local.yml` or the environment, and are refused outright in the committed config (see "Key resolution").
+- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, `api_key`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `commands/task-config.md` → "Local override"). `api_key` (a raw key) and `api_key_resolver` (which names a program) are stricter still: both are honored **only** from `.task-config.local.yml` or the environment, and are refused outright in the committed config (see "Key resolution").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `remote_batch` is optional and lives under `linear:`. It is the deterministic opt-out for `/do-tasks` batch remote dispatch — `false` degrades `--all` / `-n N` to a single foreground claim; absent or `true` dispatches one remote session per issue (each self-checks for the connector). Default `true`. See `commands/do-tasks.md` §3 "Tracker-batch subroutine".
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
@@ -168,7 +168,7 @@ _Pointer:_
 
 1. If `$LINEAR_API_KEY` or `$LINEAR_API_KEY_REF` is **already set** in the environment, bridge no pointer — an inherited value always wins (this is the headless `$OP_SERVICE_ACCOUNT_TOKEN` + `$LINEAR_API_KEY_REF` case, and the launching-terminal export).
 2. Otherwise, if `linear.api_key` is set in the **raw `.task-config.local.yml` leaf** — a plaintext key, a supported choice for operators who don't run a secret manager (`linear-config.md` → "Archive key") — bridge it into `$LINEAR_API_KEY` and skip the ref entirely; nothing needs resolving. Read it from the local file in isolation, **not** the merged view: a raw secret in the committed `.task-config.yml` is refused, reported in one line, and never used. Treat the value like any resolved key — never quote it in a log line, a report, or a summary. It does, unavoidably, ride in the bridged command itself (step 5) and therefore in the session transcript; that exposure is inherent to choosing plaintext over a pointer and is documented where the choice is offered (`dev_docs/auth_key_access.md` → "Plaintext keys").
-3. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
+3. Otherwise read `linear.api_key_ref` from the **merged config** — `dev_docs/tasks/.task-config.yml` overlaid with the gitignored `dev_docs/tasks/.task-config.local.yml` (see `commands/task-config.md` → "Local override"). The agent already parses that merged view, so read the leaf directly; no YAML-scraping one-liner.
 
 _Resolver:_
 
