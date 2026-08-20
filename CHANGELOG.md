@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.1.0] - 2026-08-20
+
+### Features
+
+- move the token out of the URL into an HttpOnly cookie (#397) (ea6eec7)
+
 ## [2.0.2] - 2026-08-20
 
 ### Fixes
