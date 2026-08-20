@@ -170,13 +170,25 @@ to the user is fine — it dies with the server.
 browser then rests on the bare `/`, so history and `Referer` no longer
 disclose the token; `_route_path()` accepts either the token path prefix
 or the matching cookie, so the token URL itself stays valid as a bearer
-credential (curl, urllib, and the machine `LOCAL_REVIEW_URL` contract are
-unaffected). The redirect must be 302, not 301 — a browser caches a 301
+credential. Every route under it — `GET /<token>/state`,
+`POST /<token>/submit`, `/<token>/vendor/*` — and the machine
+`LOCAL_REVIEW_URL` contract are unchanged. The page root is the one
+exception: a client that fetches `/<token>/` gets the 302, so it must follow
+redirects _and_ retain the cookie. `curl` without `-L` stops at the 302;
+`curl -L` or `urllib.request.urlopen()` without a cookie jar lands on a 404.
+That is what `open_token_url()` in `scripts/test-local-review.sh` exists for.
+The redirect must be 302, not 301 — a browser caches a 301
 forever, which would break a later review bound to the same port. The
 cookie name embeds the port because cookies are not port-scoped (RFC 6265):
 `127.0.0.1:8765` and `:8766` share one jar for host `127.0.0.1`, so naming
 the cookie after the port is what keeps two concurrent reviews from
-clobbering each other's session.
+clobbering each other's session. The name fixes the collision, not the
+exposure: the cookie is host-scoped, so the browser now sends the token to
+every other service it talks to on `127.0.0.1`, where before the token only
+ever appeared in requests to this server's own tokenized paths. Accepted —
+those services are the user's own, and the token dies with the server. There
+is no fix to reach for: cookies have no port scope, and a `__Host-` prefix
+would require `Secure`, hence HTTPS.
 
 ## Testing
 

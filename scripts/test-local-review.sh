@@ -1135,6 +1135,23 @@ try:
         except _urlerror.HTTPError as e:
             check("server: GET / with a wrong-value cookie returns 404", e.code == 404, e.code)
 
+        # Once the page lands on the bare /, every request it makes travels the
+        # cookie branch, not the token prefix — so the routes it actually calls
+        # have to be asserted there too, or that branch can regress on
+        # everything except the page root while this suite stays green.
+        req = _urlrequest.Request(f"{base}/state", headers={"Cookie": f"{cookie_name}={token}"})
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            state_body = json.loads(resp.read().decode())
+            check("server: GET /state with the session cookie returns 200", resp.status == 200, resp.status)
+            check("server: GET /state with the session cookie returns a sig", "sig" in state_body, state_body)
+
+        req = _urlrequest.Request(f"{base}/vendor/marked.umd.js",
+                                  headers={"Cookie": f"{cookie_name}={token}"})
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: GET /vendor/*.js with the session cookie returns 200", resp.status == 200, resp.status)
+            check("server: GET /vendor/*.js with the session cookie returns the asset",
+                  len(resp.read()) > 0, "")
+
         # slashless token alias must redirect, not serve a page whose relative
         # asset/fetch URLs resolve outside the token prefix
         class _NoRedirect(_urlrequest.HTTPRedirectHandler):
@@ -1214,6 +1231,20 @@ try:
         except _urlerror.HTTPError as e:
             check("server: POST /submit with Origin evil.localhost returns 403", e.code == 403, e.code)
         check("server: evil.localhost-origin POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
+        # The page submits from the bare /, so /submit has to authorize off the
+        # cookie too. Sits after the Origin cases above because it writes OUT,
+        # and those assert OUT is still absent.
+        req = _urlrequest.Request(
+            f"{base}/submit", data=b'{"meta":{},"summary":"cookiepath","approved":false,"comments":[]}',
+            headers={"Content-Type": "application/json", "Cookie": f"{cookie_name}={token}"},
+            method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit with the session cookie returns 200", resp.status == 200, resp.status)
+        check("server: OUT written after a cookie-authorized submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "cookiepath", sec_out)
+        os.unlink(sec_out)
 
         # Vendor path traversal, sent as a raw request line so dot-segments
         # reach the server unnormalized (urllib normalizes them client-side
