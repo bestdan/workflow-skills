@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.0.1] - 2026-08-20
+
+### Fixes
+
+- fail closed on an empty BASE before arming the rm -rf trap (#395) (51b23dc)
+
 ## [2.0.0] - 2026-08-20
 
 ### ⚠ Breaking Changes
