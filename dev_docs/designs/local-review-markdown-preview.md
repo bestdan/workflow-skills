@@ -138,8 +138,14 @@ The first draft claimed "mitigation is limited to pinning", which is false.
 (`GHSA-6v9c-7cg6-27q7`, high, CVSS 7.5, patched 18.0.2). Preview is the
 _default_ for added markdown, so a hostile file parses on load.
 
-- Refuse to lex above a byte cap and above a nesting depth cap; fall back to
-  `single` with a visible notice.
+- Refuse to lex above a byte cap — measured in **UTF-8 bytes**, since a
+  `String.length` check counts UTF-16 code units and would let a CJK document
+  through at roughly three times the stated size. Fall back to `single` with a
+  visible notice.
+- The **depth** cap bounds the token _walk_, not the lexer: it is applied while
+  describing tokens marked has already parsed. Say so plainly rather than
+  implying it bounds parsing. At the cutoff, remaining tokens render as inert
+  visible text — never dropped, per the visibility commitment below.
 - Blast radius is worse than the first draft's "a wedged tab, not a leaked
   token": draft comments live only in page memory, so a wedge destroys every
   unsent comment across every file.
@@ -235,7 +241,7 @@ function is the one whose bug is silent and destructive.
 
 ## Vendoring
 
-`marked.min.js` pinned to **one exact version**, at or above `18.0.2` — the
+`marked.umd.js` pinned to **one exact version**, at or above `18.0.2` — the
 first draft wrote `">= 18.0.2"` and called it an exact pin, which is a
 contradiction in a single sentence. Committed under
 `scripts/local-review/vendor/`, MIT appended to `vendor/LICENSE`, exact version

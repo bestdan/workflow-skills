@@ -387,6 +387,14 @@ def parse_diff(text):
             hunk["rows"].append({"l": left, "r": right})
         pend_del, pend_add = [], []
 
+    def close_hunk():
+        # A hunk that ends still owing lines against its own @@ header means the
+        # diff was cut short. Only the *preview* mode cares — it reconstructs a
+        # whole file from these rows, and rendering a truncated one as a complete
+        # document is the "confidently wrong" failure the design refuses.
+        if hunk is not None and cur is not None and (hunk_old_left > 0 or hunk_new_left > 0):
+            cur["truncated"] = True
+
     def hunk_exhausted():
         # A unified diff's hunk extent is exactly its @@ header counts, so
         # this is the only reliable way to tell "no more hunk body lines
@@ -397,6 +405,7 @@ def parse_diff(text):
 
     for raw in text.split("\n"):
         if raw.startswith("diff --git"):
+            close_hunk()
             flush_pairs() if hunk else None
             old, new = _parse_git_header(raw)
             cur = {
@@ -406,6 +415,7 @@ def parse_diff(text):
                 "status": "modified",
                 "generated": bool(GENERATED.search(new)) if new else False,
                 "binary": False,
+                "truncated": False,
                 "hunks": [],
                 "adds": 0,
                 "dels": 0,
@@ -422,6 +432,7 @@ def parse_diff(text):
             # hunk_exhausted() so a deleted line that itself starts with
             # "--- " mid-hunk falls through to ordinary hunk-body parsing
             # instead.
+            close_hunk()
             flush_pairs() if hunk else None
             pend_old_path = raw[4:]
             hunk = None
@@ -442,6 +453,7 @@ def parse_diff(text):
                 "status": status,
                 "generated": bool(GENERATED.search(name)) if name else False,
                 "binary": False,
+                "truncated": False,
                 "hunks": [],
                 "adds": 0,
                 "dels": 0,
@@ -475,6 +487,7 @@ def parse_diff(text):
             continue
         hm = HUNK.match(raw)
         if hm:
+            close_hunk()
             if hunk:
                 flush_pairs()
             old_ln = int(hm.group(1))
@@ -510,6 +523,7 @@ def parse_diff(text):
             new_ln += 1
             cur["adds"] += 1
             hunk_new_left -= 1
+    close_hunk()
     if hunk:
         flush_pairs()
     for f in files:
@@ -818,8 +832,16 @@ const MODE_LABEL = {split:'Split', single:'Single', preview:'Preview'};
 // closes, so the rendering would be confidently wrong. It also drops out
 // entirely when vendor/marked.umd.js is absent.
 function canPreview(file){
-  return file.status === 'added' && !file.binary && isMarkdown(file) && previewAvailable();
+  // file.truncated: a hunk that ended owing lines against its @@ header. The
+  // reconstruction would be a partial file rendered as a whole document, which
+  // is the one thing preview is required to refuse rather than guess at.
+  return file.status === 'added' && !file.binary && !file.truncated
+      && isMarkdown(file) && previewAvailable() && !previewDeclined[file.display];
 }
+// describe() can also decline at render time (over the byte cap, or a lexer
+// throw). Record that so the mode stops being offered instead of staying
+// selected on a file it cannot render.
+const previewDeclined = {};
 function legalModes(file){
   const m = file.single ? ['split','single'] : ['split'];
   if(canPreview(file)) m.push('preview');
@@ -911,7 +933,17 @@ const textNode = s => node('span', {text: String(s == null ? '' : s)});
 // Inline tokens. Only `a` ever carries an attribute, and only after safeHref.
 function describeInline(toks, depth){
   const out = [];
-  if(!Array.isArray(toks) || depth > PREVIEW_MAX_DEPTH) return out;
+  if(!Array.isArray(toks)) return out;
+  // At the depth cutoff, emit the remaining source as inert text rather than
+  // returning nothing. Dropping it would let 25-deep nesting hide text that
+  // still reaches the agent through the payload's `code` field, which is the
+  // one thing "What the reviewer must be able to see" forbids. The block side
+  // already did this; the inline side silently did not.
+  if(depth > PREVIEW_MAX_DEPTH){
+    out.push(node('span', {attrs:{class:'md-raw'},
+      text: toks.map(t => String(t.raw == null ? '' : t.raw)).join('')}));
+    return out;
+  }
   for(const t of toks){
     switch(t.type){
       case 'text': case 'escape':
@@ -926,19 +958,25 @@ function describeInline(toks, depth){
         const kids = describeInline(t.tokens, depth+1);
         // A rejected link is not silently dropped: the reviewer sees the text
         // and the URL it pointed at, as inert text.
-        if(!href){ out.push(node('span', {attrs:{class:'md-deadlink'}, kids:
-          kids.concat([textNode(' <' + String(t.href) + '>')])})); break; }
-        const a = node('a', {attrs: {href, class: 'md-link'}, kids});
-        out.push(a);
-        // A link title is text in the file that a normal rendering hides, and
-        // the agent still reads it. Show it.
+        if(!href){
+          out.push(node('span', {attrs:{class:'md-deadlink'}, kids:
+            kids.concat([textNode(' <' + String(t.href) + '>')])}));
+        }else{
+          out.push(node('a', {attrs: {href, class: 'md-link'}, kids}));
+        }
+        // The title emission used to sit after a `break` in the rejected
+        // branch, so the ONE case that hides a title was the hostile one —
+        // exactly where a payload author would put text meant for the agent
+        // and not the reviewer. It now runs on both paths.
         if(t.title) out.push(node('span', {attrs:{class:'md-title'}, text: ' "' + t.title + '"'}));
         break;
       }
       case 'image':
         // Never loaded. A remote image would turn a review into a beacon.
+        // Title included for the same reason links carry theirs.
         out.push(node('span', {attrs:{class:'md-img'},
-          text: '[image: ' + String(t.text || '') + ' <' + String(t.href || '') + '>]'}));
+          text: '[image: ' + String(t.text || '') + ' <' + String(t.href || '') + '>'
+                + (t.title ? ' "' + t.title + '"' : '') + ']'}));
         break;
       case 'html':
         out.push(node('span', {attrs:{class:'md-raw'}, text: String(t.raw == null ? '' : t.raw)}));
@@ -1002,8 +1040,12 @@ function describeBlock(t, ln, depth){
       // Rows carry no `raw` of their own (measured, not assumed), so row spans
       // are counted off the table token's own text.
       const kids = [];
-      const head = node('tr', {kids: (t.header||[]).map(c =>
-        node('th', {kids: describeInline(c.tokens, depth+1)}))});
+      // The header row is a target like any other. It was the one
+      // uncommentable element in a preview, which is backwards — the header
+      // names the columns and is what a reviewer most often wants to argue with.
+      const head = node('tr', Object.assign({attrs:{class:'md-block'},
+        kids: (t.header||[]).map(c => node('th', {kids: describeInline(c.tokens, depth+1)}))},
+        {line: ln.line, endLine: ln.line}));
       kids.push(node('thead', {kids:[head]}));
       let cursor = ln.line + 2;                     // header row + separator
       const body = [];
@@ -1017,7 +1059,14 @@ function describeBlock(t, ln, depth){
       return node('table', Object.assign({attrs:{class:'md-table'}, kids}, span));
     }
     default:
-      return node('div', Object.assign({attrs:{class:'md-block'},
+      // No md-block here. A list_item's inner `text` token lands in this case
+      // over the SAME span as the enclosing li, and blockAnchor keys on line
+      // alone — so marking both made two nested targets share one comment,
+      // with the chip dedupe silently eating whichever rendered first.
+      // Measured before the fix: `- one\n- two\npara\n` gave
+      // [li@1, div@1, li@2-3, div@2-3]. Containers stay the target; this is
+      // just their text.
+      return node('div', Object.assign({attrs:{class:'md-plain'},
         text: String(t.raw != null ? t.raw : '')}, span));
   }
 }
@@ -1038,7 +1087,13 @@ function describeBlocks(toks, ln, depth){
 // null when preview must decline.
 function describe(src){
   if(typeof marked === 'undefined' || !marked.lexer) return null;
-  if(src.length > PREVIEW_MAX_BYTES) return null;
+  // Encoded length, not src.length: the latter counts UTF-16 code units, so a
+  // CJK or emoji document sailed past a cap named _BYTES at roughly three
+  // times its stated size — and that oversized input is what reaches the lexer
+  // marked has a live OOM advisory against.
+  const bytes = (typeof TextEncoder !== 'undefined')
+    ? new TextEncoder().encode(src).length : src.length;
+  if(bytes > PREVIEW_MAX_BYTES) return null;
   // marked normalizes CRLF before tokenizing, so offsets must be computed
   // against normalized text or every anchor after line 1 drifts.
   const norm = src.replace(/\r\n/g, '\n');
@@ -1078,6 +1133,27 @@ function materialize(desc, ctx){
   return el;
 }
 
+// A composer or chip is a <div>, and inserting one after a <tr> makes it a
+// child of <tbody>. That is legal via the DOM API (no parser fixup) but CSS
+// wraps it in an anonymous single-cell row, so it renders crushed into the
+// first column. Wrap it in a real full-width row instead. Tables are half of
+// what preview exists to show, so this is the primary path, not an edge case.
+function insertAfterBlock(el, box){
+  if(el.tagName !== 'TR'){ el.insertAdjacentElement('afterend', box); return; }
+  const span = el.children.length || 1;
+  const tr = document.createElement('tr');
+  tr.className = 'md-cmt-row';
+  const td = document.createElement('td');
+  td.colSpan = span;
+  td.appendChild(box);
+  tr.appendChild(td);
+  el.insertAdjacentElement('afterend', tr);
+}
+
+// The wrapper row, not the box, is what must be removed on delete.
+const boxHost = box => (box.parentNode && box.parentNode.tagName === 'TD')
+  ? box.parentNode.parentNode : box;
+
 function blockAnchor(desc, ctx){
   return {key: `${ctx.file.new}|R${desc.line}`, path: ctx.file.new, side: 'R',
           line: desc.line, endLine: desc.endLine,
@@ -1114,21 +1190,30 @@ function openBlockComposer(el, desc, ctx){
         ${HAS_PR ? `<button class="btn gh save-gh" title="Save for the agent and post on the PR">${GH_ICON} Comment on GitHub</button>` : ''}
         <button class="btn cancel">Cancel</button>
       </div></div>`;
-  el.insertAdjacentElement('afterend', box);
+  insertAfterBlock(el, box);
   const ta = box.querySelector('textarea');
   if(existing) ta.value = existing.text;
   ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
   const commit = github => () => {
     const v = ta.value.trim(); if(!v) return;
-    comments[a.key] = {file: a.path, line: a.line, endLine: a.endLine, side: 'R',
-                       code: a.code, text: v, kind: 'block',
-                       github: github || !!(existing && existing.github)};
-    box.remove(); refreshCounts(); renderBlockChip(el, desc, ctx);
+    // Both modes key a comment as `path|R<line>`, so a line comment made in
+    // Split and a block comment made here are the SAME entry. Editing must
+    // therefore preserve what the comment already is: re-deriving kind and
+    // endLine from whichever mode you happen to be in silently changes what
+    // the agent is told the comment covers.
+    const kind = existing ? existing.kind : 'block';
+    const endLine = existing ? existing.endLine : a.endLine;
+    const c = {file: a.path, line: a.line, side: 'R', code: a.code, text: v,
+               github: github || !!(existing && existing.github)};
+    if(kind) c.kind = kind;
+    if(endLine != null) c.endLine = endLine;
+    comments[a.key] = c;
+    boxHost(box).remove(); refreshCounts(); renderBlockChip(el, desc, ctx);
   };
   box.querySelector('.save').onclick = commit(false);
   const gh = box.querySelector('.save-gh');
   if(gh) gh.onclick = commit(true);
-  box.querySelector('.cancel').onclick = () => box.remove();
+  box.querySelector('.cancel').onclick = () => boxHost(box).remove();
 }
 
 function renderBlockChip(el, desc, ctx){
@@ -1136,7 +1221,7 @@ function renderBlockChip(el, desc, ctx){
   const a = blockAnchor(desc, ctx);
   const root = ctx.root || document;
   const dup = root.querySelector(`.cmt-saved[data-k="${CSS.escape(a.key)}"]`);
-  if(dup) dup.remove();
+  if(dup) boxHost(dup).remove();
   const c = comments[a.key]; if(!c) return;
   const range = c.endLine > c.line ? `R${c.line}–R${c.endLine}` : `R${c.line}`;
   const chip = document.createElement('div');
@@ -1147,12 +1232,12 @@ function renderBlockChip(el, desc, ctx){
       <button class="edit" title="Edit">✎</button>
       <button class="del" title="Delete">×</button></div>`;
   chip.querySelector('.del').onclick = ev => {
-    ev.stopPropagation(); delete comments[a.key]; chip.remove(); refreshCounts();
+    ev.stopPropagation(); delete comments[a.key]; boxHost(chip).remove(); refreshCounts();
   };
-  const edit = ev => { ev.stopPropagation(); chip.remove(); openBlockComposer(el, desc, ctx); };
+  const edit = ev => { ev.stopPropagation(); boxHost(chip).remove(); openBlockComposer(el, desc, ctx); };
   chip.querySelector('.edit').onclick = edit;
   chip.querySelector('.saved .txt').onclick = edit;
-  el.insertAdjacentElement('afterend', chip);
+  insertAfterBlock(el, chip);
 }
 
 // The reconstructed source of a wholly-added file: every right-side row, in
@@ -1175,13 +1260,26 @@ function previewAvailable(){
   return typeof marked !== 'undefined' && !!marked.lexer;
 }
 
-function renderPreview(file, body){
+// Returns true when it handled the file by falling back.
+function fallbackToSingle(file, why){
+  previewDeclined[file.display] = true;
+  viewModes[file.display] = file.single ? 'single' : 'split';
+  saveViewModes();
+  toast('Preview unavailable: ' + why);
+  return true;
+}
+
+// Built before the file header is rendered, so a decline can change which
+// modes the control offers instead of leaving Preview selected on a file it
+// cannot render.
+function previewOf(file){
   const lines = sourceOf(file);
   const desc = describe(lines.join('\n'));
-  if(!desc){
-    body.innerHTML = '<div class="empty-note">Preview unavailable for this file — switch to Single to read it as source.</div>';
-    return;
-  }
+  return desc ? {desc, lines} : null;
+}
+
+function renderPreview(file, body, built){
+  const lines = built.lines, desc = built.desc;
   const wrap = document.createElement('div');
   wrap.className = 'md-wrap';
   wrap.innerHTML = '<div class="md-warn">Rendered from the diff. Content is untrusted — links open externally and images are not loaded.</div>';
@@ -1226,7 +1324,17 @@ function renderFile(file, fi){
   const stat = `<span class="stat"><span class="a">+${file.adds}</span> <span class="d">-${file.dels}</span></span>`;
   const gen = file.generated ? '<span class="badge">generated</span>' : '';
   const status = file.status!=='modified' ? `<span class="badge">${file.status}</span>` : '';
-  const modes = legalModes(file), mode = modeFor(file);
+  let modes = legalModes(file), mode = modeFor(file);
+  // Try the preview before drawing the header: if describe() declines, the
+  // mode is dropped and the control below must not still offer it.
+  let built = null;
+  if(mode === 'preview'){
+    built = previewOf(file);
+    if(!built){
+      fallbackToSingle(file, 'document too large or could not be parsed');
+      modes = legalModes(file); mode = modeFor(file);
+    }
+  }
   const modeCtl = modes.length>1 ? `<span class="modes">${modes.map(m =>
     `<button data-mode="${m}" aria-pressed="${m===mode}">${MODE_LABEL[m]}</button>`).join('')}</span>` : '';
   el.innerHTML = `<div class="file-head">
@@ -1240,7 +1348,7 @@ function renderFile(file, fi){
     </div><div class="file-body"></div>`;
   const body = el.querySelector('.file-body');
   if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
-  else if(mode === 'preview'){ renderPreview(file, body); }
+  else if(mode === 'preview'){ renderPreview(file, body, built); }
   else{
     const lang = langForFile(file);
     file.hunks.forEach(h => {
@@ -1368,6 +1476,16 @@ function showDismissChip(g, run, key){
   insertAfterRow(g, last.codeEl, chip);
 }
 
+// The Split/Single composer must not strip a block comment's shape either.
+// Editing a Preview comment from the source view would otherwise drop kind and
+// endLine, and the agent would then read "line 12" for a remark about a
+// nine-line table — the exact thing endLine exists to prevent.
+function keepShape(existing, c){
+  if(existing && existing.kind) c.kind = existing.kind;
+  if(existing && existing.endLine != null) c.endLine = existing.endLine;
+  return c;
+}
+
 function openComposer(file, cell, grid, codeEl){
   const a = anchorOf(file, cell);
   // find the DOM row index to insert after: insert a full-width comment row right after this code cell's row
@@ -1389,14 +1507,14 @@ function openComposer(file, cell, grid, codeEl){
   ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
   cmt.querySelector('.save').onclick = () => {
     const v = ta.value.trim(); if(!v) return;
-    comments[a.key] = {file:a.path, line:a.line, side:a.side, code:a.code, text:v, github: !!(existing && existing.github)};
+    comments[a.key] = keepShape(existing, {file:a.path, line:a.line, side:a.side, code:a.code, text:v, github:!!(existing && existing.github)});
     cmt.remove(); refreshCounts(); rerenderSaved(grid, file, cell, codeEl);
   };
   cmt.querySelector('.cancel').onclick = () => cmt.remove();
   const ghBtn = cmt.querySelector('.save-gh');
   if(ghBtn) ghBtn.onclick = () => {   // same as a normal comment, just flagged to also post on the PR at submit
     const v = ta.value.trim(); if(!v) return;
-    comments[a.key] = {file:a.path, line:a.line, side:a.side, code:a.code, text:v, github:true};
+    comments[a.key] = keepShape(existing, {file:a.path, line:a.line, side:a.side, code:a.code, text:v, github:true});
     cmt.remove(); refreshCounts(); rerenderSaved(grid, file, cell, codeEl);
   };
   cmt.querySelectorAll('.saved .del').forEach(b => b.onclick = () => {
