@@ -1047,9 +1047,14 @@ function describeBlock(t, ln, depth){
       // with the chip dedupe silently eating whichever rendered first.
       // Measured before the fix: `- one\n- two\npara\n` gave
       // [li@1, div@1, li@2-3, div@2-3]. Containers stay the target; this is
-      // just their text.
+      // just their text. That text is still MARKED-UP text: a tight list item
+      // carries its inline tokens here, so emitting `raw` printed `**Hook:**`
+      // literally in every tight list (a loose one goes through `paragraph`
+      // and always rendered). Inline tokens go through describeInline, the
+      // same allow-listed path every other inline site uses.
       return node('div', Object.assign({attrs:{class:'md-plain'},
-        text: String(t.raw != null ? t.raw : '')}, span));
+        kids: t.tokens ? describeInline(t.tokens, depth+1) : [],
+        text: t.tokens ? null : String(t.raw != null ? t.raw : '')}, span));
   }
 }
 
