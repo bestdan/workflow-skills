@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-16 skills, 21 commands, and 1 subagent, organized into seven workflows. Each
+16 skills, 21 commands, and 2 subagents, organized into seven workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -127,11 +127,14 @@ capability matrix.
 | [**tutor**](skills/tutor/SKILL.md)                                     | `/tutor [--pr <N> \| --diff [<ref>] \| <path>]`, or "quiz me on this" | Teach you the work until you can defend it: elicit first, close the gap, verify with a counterfactual quiz. An item is checked off only once you've demonstrated it. |
 | [**research-spike-tutorial**](skills/research-spike-tutorial/SKILL.md) | "walk me through how the research-spike obligation ledger works"      | A hands-on tutorial against a disposable tree under a temp dir — hit the "destination must already exist" wall for real, then watch the divergence.                  |
 
-### Bundled subagent
+### Bundled subagents
 
 - [**fact-reviewer**](agents/fact-reviewer.md) — read-only auditor used by
   `/review-facts`. Fresh context, `Read`/`Glob`/`Grep`/`Bash`/`WebFetch`.
   Reports findings; never edits the analysis.
+- [**co-review-reconciler**](agents/co-review-reconciler.md) — judges review
+  findings for `/co-review`. `Read`/`Glob`/`Grep`/`Bash`, no `Edit`/`Write`:
+  it returns a verdict, never the fix it just graded.
 
 ### Also included
 
