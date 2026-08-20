@@ -164,9 +164,23 @@ arbitrary `*.localhost` origin (e.g. `evil.localhost`) is still rejected — and
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.
 
+**The token leaves the URL after the first hit (#386).** A `GET /<token>/`
+302s to `/`, setting a `HttpOnly`, `SameSite=Strict` session cookie named
+`local_review_<port>=<token>` and stripping the token from `Location`. The
+browser then rests on the bare `/`, so history and `Referer` no longer
+disclose the token; `_route_path()` accepts either the token path prefix
+or the matching cookie, so the token URL itself stays valid as a bearer
+credential (curl, urllib, and the machine `LOCAL_REVIEW_URL` contract are
+unaffected). The redirect must be 302, not 301 — a browser caches a 301
+forever, which would break a later review bound to the same port. The
+cookie name embeds the port because cookies are not port-scoped (RFC 6265):
+`127.0.0.1:8765` and `:8766` share one jar for host `127.0.0.1`, so naming
+the cookie after the port is what keeps two concurrent reviews from
+clobbering each other's session.
+
 ## Testing
 
-`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~185
+`scripts/test-local-review.sh` (wired into `scripts/check.sh`) runs ~245
 checks from **one** python3 harness invocation (interpreter startup dominates
 suite time at this repo's scale) — the harness itself spawns real server
 subprocesses for the live cases: parse_diff fixtures, server
