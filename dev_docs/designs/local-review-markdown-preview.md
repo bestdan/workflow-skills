@@ -122,6 +122,11 @@ permanent carve-out at the one boundary under review.
 This asymmetry is deliberate, not incoherent: new code need not repeat an
 existing weakness. See _Security debt_ for the existing path.
 
+**Superseded by #385.** The `innerHTML` path is gone: highlighting now reads
+hljs's token tree and builds spans with `textContent`, so there is no weakness
+left to keep fences away from. Fences render highlighted through that shared
+path. See [`../local-review.md`](../local-review.md) for the current posture.
+
 ### Frontmatter
 
 Recognized only as a `---` line at offset 0 with a matching closing `---`; an

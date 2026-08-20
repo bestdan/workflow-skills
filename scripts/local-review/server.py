@@ -752,58 +752,11 @@ function saveViewModes(){
 }
 const HAS_PR = !!(META && META.github);   // only offer GitHub posting when the diff is a PR
 const GH_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" style="vertical-align:-2px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>';
-const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// There is deliberately no HTML-escaping helper here any more. Every string
+// that comes out of the diff, or out of the reviewer's own typing, now reaches
+// the page as textContent, so nothing needs escaping and no innerHTML template
+// interpolates untrusted content. Issue #385.
 const root = document.getElementById('root');
-
-// Syntax highlighting via highlight.js (vendored). Pick a language per file from
-// its extension; fall back to auto-detection when the extension is unknown.
-// Runtime contract: langForFile guards every mapping with hljs.getLanguage(),
-// so a value naming a language the bundle lacks falls back to highlightAuto —
-// wrong values degrade quality, never break rendering. getLanguage also
-// accepts registered aliases, so the grammar-name grep below is an audit aid
-// (the factory names), not the complete set of accepted names:
-//   grep -o 'grmr_[a-zA-Z0-9_]*' vendor/highlight.min.js | sort -u
-const LANG_MAP = {
-  dart:'dart', swift:'swift', kt:'kotlin', kts:'kotlin', java:'java',
-  js:'javascript', jsx:'javascript', mjs:'javascript', cjs:'javascript',
-  ts:'typescript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
-  c:'c', h:'c', cc:'cpp', cpp:'cpp', cxx:'cpp', hpp:'cpp', hh:'cpp', cs:'csharp',
-  m:'objectivec', mm:'objectivec', php:'php',
-  sh:'bash', bash:'bash', zsh:'bash', yml:'yaml', yaml:'yaml', json:'json',
-  xml:'xml', html:'xml', htm:'xml', vue:'xml', svg:'xml', plist:'xml',
-  css:'css', scss:'scss', less:'less', sql:'sql', md:'markdown', markdown:'markdown',
-  toml:'ini', ini:'ini', lua:'lua', r:'r', pl:'perl', pm:'perl',
-  make:'makefile', mk:'makefile',
-};
-function langForFile(file){
-  if(typeof hljs==='undefined') return null;
-  const base = (file.new || file.display || '').toLowerCase().split('/').pop();
-  const ext = base.includes('.') ? base.split('.').pop() : '';
-  // Filename special cases route through the same getLanguage guard as the
-  // extension map: the vendored bundle has makefile but no dockerfile grammar,
-  // and an unguarded name made hlLine catch the error and render plain text.
-  const l = (base==='makefile' || base==='dockerfile') ? base : LANG_MAP[ext];
-  return (l && hljs.getLanguage(l)) ? l : null;
-}
-// Highlight one source line and report whether the whole line is a comment.
-// Comment detection reuses the highlighter's own tokens, so it works for any
-// language hljs knows (// , # , -- , /* */ , <!-- -->, …) with no per-language rules.
-function hlLine(src, lang){
-  if(src==null || src==='') return {html:' ', isComment:false};
-  if(typeof hljs==='undefined') return {html:esc(src), isComment:false};
-  let res;
-  try{
-    res = lang ? hljs.highlight(src, {language:lang, ignoreIllegals:true})
-               : hljs.highlightAuto(src);
-  }catch(e){ return {html:esc(src), isComment:false}; }
-  const html = res.value;
-  if(html.indexOf('hljs-comment')===-1) return {html, isComment:false};
-  const tmp = document.createElement('div'); tmp.innerHTML = html;
-  const allNS = (tmp.textContent||'').replace(/\s+/g,'');
-  let cmt=''; tmp.querySelectorAll('.hljs-comment').forEach(s=>{cmt+=s.textContent;});
-  const isComment = allNS.length>0 && allNS===cmt.replace(/\s+/g,'');
-  return {html, isComment};
-}
 
 // View modes. `split` is the two-sided diff; `single` drops the dead side and
 // is offered only when one side carries all the content (parse_diff decides
@@ -845,6 +798,113 @@ function modeFor(file){
   return viewModes[file.display] || defaultMode(file);
 }
 
+// >>> PURE-PREVIEW-BEGIN — everything to the matching END marker touches no
+// DOM and no page state: syntax highlighting's token-tree half, and preview's
+// describe(). scripts/test-local-review.sh slices exactly this region out and
+// runs it under bare node against a security corpus. Keep it pure: one
+// `document.` reference in here silently disables that whole suite.
+
+// ---- syntax highlighting: token trees, never HTML -----------------------
+// highlight.js can emit an HTML string, and that string used to be assigned
+// to a diff cell's innerHTML — so the page's safety rested on a vendored
+// escaper being correct over content a fork PR can choose. The same call also
+// builds a TOKEN TREE, which is what we read instead: source text reaches the
+// page through textContent and never through an HTML parse.
+//
+// Pick a language per file from its extension; fall back to auto-detection
+// when the extension is unknown. Runtime contract: langForFile guards every
+// mapping with hljs.getLanguage(), so a value naming a language the bundle
+// lacks falls back to highlightAuto — wrong values degrade quality, never
+// break rendering. getLanguage also accepts registered aliases, so the
+// grammar-name grep below is an audit aid (the factory names), not the
+// complete set of accepted names:
+//   grep -o 'grmr_[a-zA-Z0-9_]*' vendor/highlight.min.js | sort -u
+const LANG_MAP = {
+  dart:'dart', swift:'swift', kt:'kotlin', kts:'kotlin', java:'java',
+  js:'javascript', jsx:'javascript', mjs:'javascript', cjs:'javascript',
+  ts:'typescript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
+  c:'c', h:'c', cc:'cpp', cpp:'cpp', cxx:'cpp', hpp:'cpp', hh:'cpp', cs:'csharp',
+  m:'objectivec', mm:'objectivec', php:'php',
+  sh:'bash', bash:'bash', zsh:'bash', yml:'yaml', yaml:'yaml', json:'json',
+  xml:'xml', html:'xml', htm:'xml', vue:'xml', svg:'xml', plist:'xml',
+  css:'css', scss:'scss', less:'less', sql:'sql', md:'markdown', markdown:'markdown',
+  toml:'ini', ini:'ini', lua:'lua', r:'r', pl:'perl', pm:'perl',
+  make:'makefile', mk:'makefile',
+};
+function langForFile(file){
+  if(typeof hljs==='undefined') return null;
+  const base = (file.new || file.display || '').toLowerCase().split('/').pop();
+  const ext = base.includes('.') ? base.split('.').pop() : '';
+  // Filename special cases route through the same getLanguage guard as the
+  // extension map: the vendored bundle has makefile but no dockerfile grammar,
+  // and an unguarded name made hlTree catch the error and render plain text.
+  const l = (base==='makefile' || base==='dockerfile') ? base : LANG_MAP[ext];
+  return (l && hljs.getLanguage(l)) ? l : null;
+}
+
+// The token tree for one source string, or null when there is nothing to
+// highlight it with. Every failure path returns null and the caller renders
+// plain text. `_emitter.rootNode` is hljs's own tree — the same one its
+// HTMLRenderer walks — so reading it costs no second parse.
+function hlTree(src, langHint){
+  if(typeof hljs==='undefined' || src==null || src==='') return null;
+  const lang = (langHint && hljs.getLanguage(langHint)) ? langHint : null;
+  let res;
+  try{
+    res = lang ? hljs.highlight(src, {language:lang, ignoreIllegals:true})
+               : hljs.highlightAuto(src);
+  }catch(e){ return null; }
+  return (res && res._emitter && res._emitter.rootNode) || null;
+}
+
+// Scope to CSS class, mirroring hljs's own HTMLRenderer so the stylesheet
+// above keeps matching: "language:css" -> "language-css", and a dotted scope
+// like "title.class" -> "hljs-title class_".
+const HLJS_PREFIX = 'hljs-';
+function scopeClass(scope){
+  const s = String(scope==null ? '' : scope);
+  if(s.indexOf('language:')===0) return 'language-' + s.slice('language:'.length);
+  if(s.indexOf('.')===-1) return HLJS_PREFIX + s;
+  const parts = s.split('.');
+  return [HLJS_PREFIX + parts.shift()]
+    .concat(parts.map((p, i) => p + '_'.repeat(i + 1))).join(' ');
+}
+
+// Token tree -> the same {tag, text, attrs, kids} descriptors preview uses, so
+// one materialize() serves both views. Only spans, only a class attribute, and
+// every leaf is text. A node with no scope contributes its children directly.
+function hlNodes(tree){
+  const out = [];
+  for(const child of (tree && tree.children) || []){
+    if(typeof child === 'string'){ out.push(textNode(child)); continue; }
+    const kids = hlNodes(child);
+    if(!child.scope){ for(const k of kids) out.push(k); continue; }
+    out.push(node('span', {attrs:{class: scopeClass(child.scope)}, kids}));
+  }
+  return out;
+}
+
+// Whether every non-whitespace character of a line lives inside a comment
+// token. Reusing the highlighter's own tokens means this works for any
+// language hljs knows (// , # , -- , /* */ , <!-- -->, …) with no
+// per-language rules.
+function hlIsComment(tree){
+  let all = '', cmt = '';
+  (function walk(n, inCmt){
+    for(const child of n.children || []){
+      if(typeof child === 'string'){
+        all += child;
+        if(inCmt) cmt += child;
+        continue;
+      }
+      walk(child, inCmt || String(child.scope||'').split('.')[0]==='comment');
+    }
+  })(tree || {}, false);
+  const strip = s => s.replace(/\s+/g, '');
+  const allNS = strip(all);
+  return allNS.length > 0 && allNS === strip(cmt);
+}
+
 // ---- preview: markdown as a document ------------------------------------
 // The security property is that no attacker-derived string ever reaches an
 // HTML parser. marked's LEXER is used; its parser and renderer, the half that
@@ -852,11 +912,6 @@ function modeFor(file){
 // is a pure function (no DOM), so the security-critical half is testable under
 // bare node; materialize() turns that tree into elements and has no logic.
 // Full rationale: dev_docs/designs/local-review-markdown-preview.md
-
-// >>> PURE-PREVIEW-BEGIN — everything to the matching END marker touches no
-// DOM and no page state. scripts/test-local-review.sh slices exactly this
-// region out and runs it under bare node against a security corpus. Keep it
-// pure: one `document.` reference in here silently disables that whole suite.
 const PREVIEW_MAX_BYTES = 512 * 1024;
 const PREVIEW_MAX_DEPTH = 24;
 
@@ -987,12 +1042,18 @@ function describeBlock(t, ln, depth){
         Object.assign({kids: describeInline_(t, depth+1), attrs:{class:'md-block'}}, span));
     case 'paragraph':
       return node('p', Object.assign({kids: describeInline_(t, depth+1), attrs:{class:'md-block'}}, span));
-    case 'code':
-      // textContent only, deliberately unhighlighted: highlighting means the
-      // hljs innerHTML path, and a carve-out at this boundary costs more than
-      // syntax colour. See issue #385.
+    case 'code': {
+      // Highlighted through the same token-tree path as the diff view, so the
+      // fence body is described as spans of text rather than parsed as HTML.
+      // The fence info string is a hint only: hlTree drops anything
+      // getLanguage does not know and auto-detects instead.
+      const src = String(t.text == null ? '' : t.text);
+      const hint = String(t.lang == null ? '' : t.lang).trim().split(/\s+/)[0];
+      const tree = hlTree(src, hint);
+      const kids = tree ? hlNodes(tree) : null;
       return node('pre', Object.assign({attrs:{class:'md-block md-code'},
-        kids:[node('code', {text: String(t.text == null ? '' : t.text)})]}, span));
+        kids:[kids && kids.length ? node('code', {kids}) : node('code', {text: src})]}, span));
+    }
     case 'blockquote':
       return node('blockquote', Object.assign({attrs:{class:'md-block'},
         kids: describeBlocks(t.tokens || [], ln, depth+1)}, span));
@@ -1158,13 +1219,21 @@ function attachBlockComment(el, desc, ctx){
   // do nothing. They are flushed once the tree is in the document.
 }
 
+// The only way a diff-derived string reaches an anchor label: a placeholder
+// span in the markup, filled with textContent afterwards. That keeps the
+// innerHTML templates below free of attacker-derived content, so their safety
+// is structural rather than a claim about esc(). Issue #385.
+const setAnchorPath = (host, p) => {
+  host.querySelector('.apath').textContent = String(p == null ? '' : p);
+};
+
 function openBlockComposer(el, desc, ctx){
   const a = blockAnchor(desc, ctx);
   const existing = comments[a.key];
   const range = a.endLine > a.line ? `R${a.line}–R${a.endLine}` : `R${a.line}`;
   const box = document.createElement('div');
   box.className = 'cmt-row md-cmt';
-  box.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${range}</div>
+  box.innerHTML = `<div class="cmt-anchor"><span class="apath"></span> : ${range}</div>
     <div class="cmt">
       <textarea placeholder="Leave a comment on this block…"></textarea>
       <div class="cmt-actions">
@@ -1172,6 +1241,7 @@ function openBlockComposer(el, desc, ctx){
         ${HAS_PR ? `<button class="btn gh save-gh" title="Mark this for the PR — Claude posts it after you submit">${GH_ICON} Comment on GitHub</button>` : ''}
         <button class="btn cancel">Cancel</button>
       </div></div>`;
+  setAnchorPath(box, a.path);
   insertAfterBlock(el, box);
   const ta = box.querySelector('textarea');
   if(existing) ta.value = existing.text;
@@ -1209,10 +1279,12 @@ function renderBlockChip(el, desc, ctx){
   const chip = document.createElement('div');
   chip.className = 'cmt-row cmt-saved md-cmt' + (c.github ? ' gh' : '');
   chip.dataset.k = a.key;
-  chip.innerHTML = `<div class="cmt-anchor">${esc(c.file)} : ${range}${c.github?` <span class="ghdest">${GH_ICON} GitHub</span>`:''}</div>
-    <div class="saved"><span class="txt">${esc(c.text)}</span>
+  chip.innerHTML = `<div class="cmt-anchor"><span class="apath"></span> : ${range}${c.github?` <span class="ghdest">${GH_ICON} GitHub</span>`:''}</div>
+    <div class="saved"><span class="txt"></span>
       <button class="edit" title="Edit">✎</button>
       <button class="del" title="Delete">×</button></div>`;
+  setAnchorPath(chip, c.file);
+  chip.querySelector('.saved .txt').textContent = c.text;
   chip.querySelector('.del').onclick = ev => {
     ev.stopPropagation(); delete comments[a.key]; boxHost(chip).remove(); refreshCounts();
   };
@@ -1321,13 +1393,14 @@ function renderFile(file, fi){
     `<button data-mode="${m}" aria-pressed="${m===mode}">${MODE_LABEL[m]}</button>`).join('')}</span>` : '';
   el.innerHTML = `<div class="file-head">
       <span class="chev">▾</span>
-      <span class="path">${esc(file.display)}</span>
+      <span class="path apath"></span>
       ${status}${gen}
       <span class="grow"></span>
       ${stat}
       ${modeCtl}
       <label><input type="checkbox" class="viewed"> Viewed</label>
     </div><div class="file-body"></div>`;
+  setAnchorPath(el, file.display);
   const body = el.querySelector('.file-body');
   if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
   else if(mode === 'preview'){ renderPreview(file, body, built); }
@@ -1336,7 +1409,11 @@ function renderFile(file, fi){
     file.hunks.forEach(h => {
       const hunkEl = document.createElement('div'); hunkEl.className='hunk';
       const hh = document.createElement('div'); hh.className='hunk-head';
-      hh.innerHTML = `<span class="hchev">▾</span><span>${esc(h.header)}${h.section? '  '+esc(h.section):''}</span>`;
+      // @@-header and section label both come out of the diff, so they go in
+      // as text, not as interpolations into an HTML string.
+      hh.innerHTML = '<span class="hchev">▾</span><span class="hlabel"></span>';
+      hh.querySelector('.hlabel').textContent =
+        h.header + (h.section ? '  ' + h.section : '');
       hh.addEventListener('click', () => hunkEl.classList.toggle('collapsed'));
       hunkEl.appendChild(hh);
       const g = document.createElement('div');
@@ -1393,17 +1470,31 @@ function addRow(g, file, row, lang, mode){
     }else{
       num.className='num'+(cls?' '+cls:''); num.textContent=cell.n!=null?cell.n:'';
       code.className='code'+(cls?' '+cls:'');
-      const {html, isComment} = hlLine(cell.s, lang);
-      const kill = (sideKey==='r' && isComment)
-        ? '<span class="cmt-kill" title="Remove this comment block">⊘</span>' : '';
-      code.innerHTML = `<span class="plus">+</span>${kill}${html||' '}`;
+      // Nothing derived from diff content is assigned as HTML: the token tree
+      // becomes span/text nodes through the same materialize() preview uses.
+      const tree = hlTree(cell.s, lang);
+      const isComment = tree ? hlIsComment(tree) : false;
+      const plus = document.createElement('span');
+      plus.className = 'plus'; plus.textContent = '+';
+      code.appendChild(plus);
+      let kill = null;
+      if(sideKey==='r' && isComment){
+        kill = document.createElement('span');
+        kill.className = 'cmt-kill';
+        kill.title = 'Remove this comment block';
+        kill.textContent = '⊘';
+        code.appendChild(kill);
+      }
+      const hl = tree ? hlNodes(tree) : [];
+      if(hl.length){ for(const d of hl) code.appendChild(materialize(d, null)); }
+      else { code.appendChild(document.createTextNode(cell.s ? cell.s : ' ')); }
       code.addEventListener('click', e => {
         if(e.target.closest('.cmt-kill')) return;
         const sel = window.getSelection();          // don't hijack a drag-to-select for copy/paste
         if(sel && !sel.isCollapsed && sel.toString().length) return;
         openComposer(file, cell, g, code);
       });
-      made[sideKey] = {cell, codeEl:code, isComment, kill: kill ? code.querySelector('.cmt-kill') : null};
+      made[sideKey] = {cell, codeEl:code, isComment, kill};
     }
     g.appendChild(num); g.appendChild(code);
   });
@@ -1447,9 +1538,11 @@ function showDismissChip(g, run, key){
   const range = c.endLine>c.line ? `R${c.line}–R${c.endLine}` : `R${c.line}`;
   const chip = document.createElement('div');
   chip.className='cmt-row cmt-saved dismiss'; chip.dataset.k=key;
-  chip.innerHTML = `<div class="cmt-anchor">${esc(c.file)} : ${range} · marked for removal</div>
-    <div class="saved"><span class="txt">${esc(c.text)}</span>
+  chip.innerHTML = `<div class="cmt-anchor"><span class="apath"></span> : ${range} · marked for removal</div>
+    <div class="saved"><span class="txt"></span>
       <button class="del" title="Undo removal">×</button></div>`;
+  setAnchorPath(chip, c.file);
+  chip.querySelector('.saved .txt').textContent = c.text;
   chip.querySelector('.del').onclick = () => {
     delete comments[key];
     run.forEach(rc => rc.codeEl.classList.remove('mark-remove'));
@@ -1474,7 +1567,7 @@ function openComposer(file, cell, grid, codeEl){
   const existing = comments[a.key];
   const cmt = document.createElement('div');
   cmt.className='cmt-row';
-  cmt.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${a.side}${a.line}</div>
+  cmt.innerHTML = `<div class="cmt-anchor"><span class="apath"></span> : ${a.side}${a.line}</div>
     <div class="cmt">
       <textarea placeholder="Leave a comment on this line…"></textarea>
       <div class="cmt-actions">
@@ -1482,6 +1575,7 @@ function openComposer(file, cell, grid, codeEl){
         ${HAS_PR ? `<button class="btn gh save-gh" title="Mark this for the PR — Claude posts it after you submit">${GH_ICON} Comment on GitHub</button>` : ''}
         <button class="btn cancel">Cancel</button>
       </div></div>`;
+  setAnchorPath(cmt, a.path);
   // insert after the code cell's grid cell (append at end of grid keeps it after; better: place right after row)
   insertAfterRow(grid, codeEl, cmt);
   const ta = cmt.querySelector('textarea');
@@ -1512,10 +1606,12 @@ function rerenderSaved(grid, file, cell, codeEl){
   const c = comments[a.key]; if(!c) return;
   const chip = document.createElement('div');
   chip.className='cmt-row cmt-saved' + (c.github ? ' gh' : ''); chip.dataset.k=a.key;
-  chip.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${a.side}${a.line}${c.github?` <span class="ghdest" title="Claude will post this on the PR after you submit">${GH_ICON} GitHub</span>`:''}</div>
-    <div class="saved"><span class="txt">${esc(c.text)}</span>
+  chip.innerHTML = `<div class="cmt-anchor"><span class="apath"></span> : ${a.side}${a.line}${c.github?` <span class="ghdest" title="Claude will post this on the PR after you submit">${GH_ICON} GitHub</span>`:''}</div>
+    <div class="saved"><span class="txt"></span>
       <button class="edit" title="Edit">✎</button>
       <button class="del" title="Delete">×</button></div>`;
+  setAnchorPath(chip, a.path);
+  chip.querySelector('.saved .txt').textContent = c.text;
   chip.querySelector('.del').onclick = () => { delete comments[a.key]; chip.remove(); refreshCounts(); };
   const editSaved = () => { chip.remove(); openComposer(file, cell, grid, codeEl); };
   chip.querySelector('.edit').onclick = editSaved;

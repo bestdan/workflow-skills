@@ -90,6 +90,7 @@ Two further items surfaced by the preview security review, both pre-existing
 and neither introduced by view modes:
 [#385](https://github.com/bestdan/workflow-skills/issues/385) — the diff view's
 `hljs` + `innerHTML` path, which is why `preview` renders fenced code
-unhighlighted — and
+unhighlighted (since fixed — highlighting reads hljs's token tree and fences
+render highlighted again) — and
 [#386](https://github.com/bestdan/workflow-skills/issues/386) — the token
 living in the URL, patched here by a `Referrer-Policy: no-referrer` header.

@@ -1764,6 +1764,34 @@ else:
     finally:
         os.unlink(_js_path)
 
+# --- no innerHTML assignment takes untrusted content ------------------------
+# The page's XSS argument used to be "we escape it". Now it is "we never put it
+# in an HTML string at all", which is checkable from the source: none of the
+# names that carry diff content or reviewer text may appear inside an
+# innerHTML assignment. Issue #385.
+_UNTRUSTED = ["a.path", "c.file", "file.display", "h.header", "h.section",
+              "c.text", "cell.s", "res.value", "_emitter"]
+_dirty = []
+for _chunk in server.PAGE.split("innerHTML")[1:]:
+    # Only real assignments. The prose above and in the page itself names
+    # innerHTML too, and a comment has no expression to bound — the scan would
+    # run on into unrelated code and flag it.
+    if not _re.match(r"\s*=[^=]", _chunk):
+        continue
+    # An assignment ends at the first statement terminator that closes the
+    # expression: a backtick, quote, or paren immediately before the `;`.
+    _end = min([i for i in (_chunk.find("`;"), _chunk.find("';"), _chunk.find('";'))
+                if i != -1] or [len(_chunk)])
+    _expr = _chunk[:_end]
+    _dirty += [f"{n}: {_expr.strip()[:70]}" for n in _UNTRUSTED if n in _expr]
+check("no innerHTML assignment interpolates diff content or reviewer text",
+      _dirty == [], _dirty)
+# The escaper is gone with the last of its callers. Its presence would mean an
+# interpolation somewhere still depends on it being correct.
+check("the page carries no HTML-escaping helper any more",
+      "const esc =" not in server.PAGE and "function esc(" not in server.PAGE,
+      "an esc() helper is back — something is interpolating again")
+
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's
 # token stream into a plain description tree, and materialize() adds no logic.
@@ -1772,11 +1800,14 @@ else:
 _PURE_BEGIN = "// >>> PURE-PREVIEW-BEGIN"
 _PURE_END = "// <<< PURE-PREVIEW-END"
 _marked_js = os.path.join(os.path.dirname(server_path), "vendor", "marked.umd.js")
+_hljs_js = os.path.join(os.path.dirname(server_path), "vendor", "highlight.min.js")
 
 if _node is None:
     skip("preview: describe() security corpus", "no node resolvable")
 elif not os.path.exists(_marked_js):
     skip("preview: describe() security corpus", "vendor/marked.umd.js not present")
+elif not os.path.exists(_hljs_js):
+    skip("preview: describe() security corpus", "vendor/highlight.min.js not present")
 elif _PURE_BEGIN not in server.PAGE or _PURE_END not in server.PAGE:
     bad("preview: the PURE-PREVIEW markers are present in PAGE",
         "markers missing — the describe() corpus cannot be sliced out")
@@ -1801,6 +1832,15 @@ const req = require(process.argv[2]);
 const marked = g.marked || req;
 if(!marked || typeof marked.lexer !== 'function'){
   console.error('marked did not load: no lexer'); process.exit(2);
+}
+// The hljs bundle is an IIFE assigning `var hljs`, so it neither exports nor
+// attaches to self. Run it and take its own binding, as a real global — the
+// sliced region reaches it by bare name and guards on `typeof hljs`, so a
+// silent miss would make every highlight assertion below vacuously pass.
+globalThis.hljs = new Function(
+  require('fs').readFileSync(process.argv[3], 'utf8') + '\n;return hljs;')();
+if(!globalThis.hljs || typeof globalThis.hljs.highlight !== 'function'){
+  console.error('hljs did not load: no highlight'); process.exit(2);
 }
 __PURE__
 const out = {};
@@ -1875,6 +1915,69 @@ walk(describe('- one\n- two\npara\n\n| a | b |\n| - | - |\n| 1 | 2 |\n'), n => {
 out.targetKeys = keyed;
 out.duplicateTargetKeys = keyed.filter((k, i) => keyed.indexOf(k) !== i);
 
+// --- structural highlighting (issue #385) ---------------------------------
+// A diff line is attacker-influenceable — a fork PR chooses it. Whatever hljs
+// tokenizes out of one, hlNodes must describe as spans carrying TEXT, and the
+// concatenated text must equal the source byte for byte. Round-tripping is the
+// property that proves no HTML parse happened: a parser would have eaten the
+// tags, decoded the entities, or both.
+const HOSTILE = [
+  '<img src=x onerror=alert(1)>',
+  '</script><script>alert(2)</script>',
+  'const s = "&lt;img onerror=1&gt;";  // &#60;b&#62;',
+  '<!-- <svg onload=alert(3)> -->',
+  "x = '</textarea><img onerror=alert(4)>'",
+  '<div class="hljs-comment">not really a comment</div>',
+];
+const hlTags = new Set(), hlAttrs = new Set(), hlClasses = new Set();
+out.hlNotRoundTripped = [];
+for(const line of HOSTILE){
+  for(const lang of ['javascript', 'xml', 'python', null]){
+    let text = '';
+    (function visit(ns){
+      for(const n of ns){
+        hlTags.add(n.tag);
+        Object.keys(n.attrs || {}).forEach(a => hlAttrs.add(a));
+        if(n.attrs && n.attrs.class) hlClasses.add(n.attrs.class);
+        if(n.text != null) text += n.text;
+        visit(n.kids || []);
+      }
+    })(hlNodes(hlTree(line, lang)));
+    if(text !== line) out.hlNotRoundTripped.push({lang, line, text});
+  }
+}
+out.hlTags = [...hlTags].sort();
+out.hlAttrs = [...hlAttrs].sort();
+// Every class must be one hljs owns: an "hljs-"/"language-" head, or a
+// trailing-underscore continuation from a dotted scope ("title.class").
+out.hlBadClasses = [...hlClasses].filter(c => !c.split(' ').every(p =>
+  p.indexOf('hljs-') === 0 || p.indexOf('language-') === 0 || /_+$/.test(p)));
+
+// Comment detection moved off innerHTML onto the same tree. It must still be
+// whole-line, language-agnostic, and unfooled by comment-looking content.
+out.hlComment = {
+  js:       hlIsComment(hlTree('  // <img onerror=1>', 'javascript')),
+  python:   hlIsComment(hlTree('# note', 'python')),
+  xml:      hlIsComment(hlTree('<!-- x -->', 'xml')),
+  trailing: hlIsComment(hlTree('const a = 1; // tail', 'javascript')),
+  blank:    hlIsComment(hlTree('', 'javascript')),
+  fake:     hlIsComment(hlTree('<div class="hljs-comment">x</div>', 'xml')),
+};
+
+// The preview fence renders highlighted again, through that same path: token
+// spans present, and the hostile body still intact as text.
+const fenceBody = '<img src=x onerror=alert(1)>';
+const fence = describe('```js\n' + fenceBody + '\n```\n');
+const fenceTags = new Set(); const fenceClasses = new Set(); let fenceText = '';
+walk(fence, n => {
+  fenceTags.add(n.tag);
+  if(n.attrs && n.attrs.class) fenceClasses.add(n.attrs.class);
+  if(n.text) fenceText += n.text;
+});
+out.fenceTags = [...fenceTags].sort();
+out.fenceTokenized = [...fenceClasses].some(c => c.indexOf('hljs-') === 0);
+out.fenceBodyIntact = fenceText.includes(fenceBody);
+
 console.log(JSON.stringify(out));
 """
     _src = _harness.replace("__PURE__", _pure)
@@ -1882,7 +1985,7 @@ console.log(JSON.stringify(out));
     try:
         with os.fdopen(_fd, "w", encoding="utf-8") as _f:
             _f.write(_src)
-        _r = _subprocess.run([_node, _hp, _marked_js],
+        _r = _subprocess.run([_node, _hp, _marked_js, _hljs_js],
                              capture_output=True, encoding="utf-8")
         if _r.returncode != 0:
             bad("preview: describe() corpus harness runs", (_r.stderr or "").strip()[:400])
@@ -1926,6 +2029,28 @@ console.log(JSON.stringify(out));
                   _o["duplicateTargetKeys"] == [], _o["duplicateTargetKeys"])
             check("preview: frontmatter offset is added back to later anchors",
                   _o["headingAfterFrontmatter"] == [5], _o["headingAfterFrontmatter"])
+            # --- structural highlighting (issue #385) ----------------------
+            check("highlight: a hostile diff line round-trips as text, never as markup",
+                  _o["hlNotRoundTripped"] == [], _o["hlNotRoundTripped"])
+            check("highlight: token descriptions are spans and nothing else",
+                  _o["hlTags"] == ["span"], _o["hlTags"])
+            check("highlight: token descriptions carry no attribute but class",
+                  _o["hlAttrs"] in ([], ["class"]), _o["hlAttrs"])
+            check("highlight: every emitted class is one highlight.js owns",
+                  _o["hlBadClasses"] == [], _o["hlBadClasses"])
+            check("highlight: whole-line comments are still detected per language",
+                  _o["hlComment"]["js"] and _o["hlComment"]["python"]
+                  and _o["hlComment"]["xml"], _o["hlComment"])
+            check("highlight: a trailing comment does not make the line a comment",
+                  _o["hlComment"]["trailing"] is False, _o["hlComment"])
+            check("highlight: an empty line is not a comment",
+                  _o["hlComment"]["blank"] is False, _o["hlComment"])
+            check("highlight: a line that merely says hljs-comment is not one",
+                  _o["hlComment"]["fake"] is False, _o["hlComment"])
+            check("highlight: preview renders a fence highlighted again",
+                  _o["fenceTokenized"] is True, _o["fenceTags"])
+            check("highlight: a hostile fence body survives intact as text",
+                  _o["fenceBodyIntact"] is True, _o["fenceTags"])
     finally:
         os.unlink(_hp)
 
