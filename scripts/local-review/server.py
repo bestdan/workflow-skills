@@ -609,6 +609,40 @@ main{max-width:1180px;margin:0 auto;padding:18px}
   padding:3px 12px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
 .grid{display:grid;grid-template-columns:46px minmax(0,1fr) 46px minmax(0,1fr);min-width:760px}
 .grid.single{grid-template-columns:46px minmax(0,1fr);min-width:380px}
+/* preview: rendered markdown. Visually bounded so attacker prose does not
+   inherit the page's own authority — see the design doc. */
+.md-wrap{padding:14px 18px 20px}
+.md-warn{font-size:11.5px;color:var(--dim);border:1px dashed var(--border);
+  border-radius:6px;padding:5px 9px;margin-bottom:14px}
+.md-doc{max-width:52em;line-height:1.6}
+.md-doc h1,.md-doc h2,.md-doc h3,.md-doc h4,.md-doc h5,.md-doc h6{
+  margin:1.1em 0 .45em;line-height:1.3}
+.md-doc h1{font-size:1.6em} .md-doc h2{font-size:1.35em} .md-doc h3{font-size:1.15em}
+.md-doc p,.md-doc ul,.md-doc ol,.md-doc blockquote{margin:.55em 0}
+.md-doc ul,.md-doc ol{padding-left:1.5em}
+.md-doc li{margin:.15em 0}
+.md-doc blockquote{border-left:3px solid var(--border);padding-left:.9em;color:var(--dim)}
+.md-doc code{font-family:var(--mono);font-size:.9em;background:var(--surface2);
+  padding:.1em .3em;border-radius:3px}
+.md-code{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  padding:9px 11px;overflow-x:auto}
+.md-code code{background:none;padding:0;white-space:pre}
+.md-table{border-collapse:collapse;margin:.7em 0;display:block;overflow-x:auto}
+.md-table th,.md-table td{border:1px solid var(--border);padding:4px 9px;text-align:left}
+.md-table th{background:var(--surface2)}
+.md-link{color:var(--accent)}
+.md-deadlink{color:var(--del-num);text-decoration:line-through}
+.md-title,.md-img,.md-def{color:var(--dim);font-family:var(--mono);font-size:.85em}
+.md-raw{display:block;font-family:var(--mono);font-size:.85em;color:var(--dim);
+  background:var(--surface2);border-left:3px solid var(--del-gut);
+  padding:3px 8px;white-space:pre-wrap;word-break:break-word}
+.md-fm{border:1px solid var(--border);border-radius:6px;background:var(--surface2);
+  padding:7px 10px;margin-bottom:1.2em;font-family:var(--mono);font-size:12px}
+.md-fm-row{display:flex;gap:10px;color:var(--dim)}
+.md-fm-k{min-width:8em;color:var(--text);opacity:.75}
+.md-target{cursor:pointer;border-radius:3px}
+.md-target:hover{background:var(--accent-bg);box-shadow:0 0 0 3px var(--accent-bg)}
+.md-cmt{margin:.5em 0;border-radius:6px}
 .num{font-family:var(--mono);font-size:12px;color:var(--dim);text-align:right;padding:1px 8px;
   user-select:none;border-right:1px solid var(--border);white-space:nowrap}
 .code{font-family:var(--mono);font-size:12.5px;padding:1px 10px;white-space:pre-wrap;word-break:break-word;
@@ -701,6 +735,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 </div>
 <script src="vendor/highlight.min.js"></script>
 <script src="vendor/dart.min.js"></script>
+<script src="vendor/marked.umd.js"></script>
 <script>
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
@@ -777,9 +812,23 @@ function hlLine(src, lang){
 // View modes. `split` is the two-sided diff; `single` drops the dead side and
 // is offered only when one side carries all the content (parse_diff decides
 // that, and reports it as file.single === 'r' | 'l' | null).
-const MODE_LABEL = {split:'Split', single:'Single'};
-function legalModes(file){ return file.single ? ['split','single'] : ['split']; }
-function defaultMode(file){ return file.single ? 'single' : 'split'; }
+const MODE_LABEL = {split:'Split', single:'Single', preview:'Preview'};
+// preview is offered only for a WHOLLY-ADDED markdown file: a modified file's
+// diff carries hunk fragments, and a fence opened outside the hunk never
+// closes, so the rendering would be confidently wrong. It also drops out
+// entirely when vendor/marked.umd.js is absent.
+function canPreview(file){
+  return file.status === 'added' && !file.binary && isMarkdown(file) && previewAvailable();
+}
+function legalModes(file){
+  const m = file.single ? ['split','single'] : ['split'];
+  if(canPreview(file)) m.push('preview');
+  return m;
+}
+function defaultMode(file){
+  if(canPreview(file)) return 'preview';
+  return file.single ? 'single' : 'split';
+}
 function modeFor(file){
   const pick = viewModes[file.display];
   // A file's status can move under /refresh — a new file gets committed, an
@@ -790,6 +839,362 @@ function modeFor(file){
     saveViewModes();
   }
   return viewModes[file.display] || defaultMode(file);
+}
+
+// ---- preview: markdown as a document ------------------------------------
+// The security property is that no attacker-derived string ever reaches an
+// HTML parser. marked's LEXER is used; its parser and renderer, the half that
+// emits HTML, are never called. describe() turns tokens into a plain tree and
+// is a pure function (no DOM), so the security-critical half is testable under
+// bare node; materialize() turns that tree into elements and has no logic.
+// Full rationale: dev_docs/designs/local-review-markdown-preview.md
+
+// >>> PURE-PREVIEW-BEGIN — everything to the matching END marker touches no
+// DOM and no page state. scripts/test-local-review.sh slices exactly this
+// region out and runs it under bare node against a security corpus. Keep it
+// pure: one `document.` reference in here silently disables that whole suite.
+const PREVIEW_MAX_BYTES = 512 * 1024;
+const PREVIEW_MAX_DEPTH = 24;
+
+// The only elements describe() may name. An element type is NEVER derived from
+// a token type — an unknown token becomes a span of text, never a tag.
+const SAFE_TAGS = ['div','span','p','h1','h2','h3','h4','h5','h6','ul','ol','li',
+  'table','thead','tbody','tr','th','td','pre','code','blockquote','em','strong',
+  'del','a','hr','br'];
+
+// Absolute, allow-listed scheme, and nothing else. A bare scheme test on an
+// unresolved string would pass a relative href, which resolves under /<token>/
+// — inside the authorized tree. Requiring the scheme in the raw text also
+// rejects protocol-relative "//host/path", which a canonical-origin check
+// alone would wave through.
+function safeHref(raw){
+  const s = String(raw == null ? '' : raw).trim();
+  if(!/^(https?|mailto):/i.test(s)) return null;
+  let u;
+  try{ u = new URL(s); }catch(e){ return null; }
+  return ['http:','https:','mailto:'].indexOf(u.protocol) === -1 ? null : u.href;
+}
+
+// Frontmatter is not YAML-parsed: split on the first colon, keep an ARRAY of
+// pairs (a plain object would take a __proto__ key straight into prototype
+// pollution), and render both halves as text. An unterminated opener is not
+// frontmatter at all.
+function splitFrontmatter(src){
+  const lines = src.split('\n');
+  if(lines[0] !== '---') return {pairs: null, body: src, offset: 0};
+  let close = -1;
+  for(let i = 1; i < lines.length; i++){ if(lines[i] === '---'){ close = i; break; } }
+  if(close === -1) return {pairs: null, body: src, offset: 0};
+  const pairs = [];
+  for(let i = 1; i < close; i++){
+    const c = lines[i].indexOf(':');
+    pairs.push(c === -1 ? [lines[i], ''] : [lines[i].slice(0, c), lines[i].slice(c + 1).trim()]);
+  }
+  return {pairs, body: lines.slice(close + 1).join('\n'), offset: close + 1};
+}
+
+// Where a token sits in the source, measured rather than assumed. A token's
+// raw carries N newlines and the NEXT token starts N lines later — a heading's
+// raw is "# One" (0 newlines) while the `space` token after it is "\n\n" (2),
+// so anything like `newlines || 1` over-counts every single block. The token
+// itself ends one line earlier when its raw closes with a newline.
+function spanOf(raw, line){
+  const s = String(raw == null ? '' : raw);
+  const nl = s.split('\n').length - 1;
+  const end = line + nl - (s.charAt(s.length - 1) === '\n' ? 1 : 0);
+  return {line, endLine: Math.max(line, end), advance: nl};
+}
+
+const node = (tag, opts) => Object.assign({tag, text: null, attrs: null, kids: []}, opts || {});
+const textNode = s => node('span', {text: String(s == null ? '' : s)});
+
+// Inline tokens. Only `a` ever carries an attribute, and only after safeHref.
+function describeInline(toks, depth){
+  const out = [];
+  if(!Array.isArray(toks) || depth > PREVIEW_MAX_DEPTH) return out;
+  for(const t of toks){
+    switch(t.type){
+      case 'text': case 'escape':
+        out.push(textNode(t.text)); break;
+      case 'strong': out.push(node('strong', {kids: describeInline(t.tokens, depth+1)})); break;
+      case 'em':     out.push(node('em',     {kids: describeInline(t.tokens, depth+1)})); break;
+      case 'del':    out.push(node('del',    {kids: describeInline(t.tokens, depth+1)})); break;
+      case 'codespan': out.push(node('code', {text: String(t.text == null ? '' : t.text)})); break;
+      case 'br':     out.push(node('br')); break;
+      case 'link': {
+        const href = safeHref(t.href);
+        const kids = describeInline(t.tokens, depth+1);
+        // A rejected link is not silently dropped: the reviewer sees the text
+        // and the URL it pointed at, as inert text.
+        if(!href){ out.push(node('span', {attrs:{class:'md-deadlink'}, kids:
+          kids.concat([textNode(' <' + String(t.href) + '>')])})); break; }
+        const a = node('a', {attrs: {href, class: 'md-link'}, kids});
+        out.push(a);
+        // A link title is text in the file that a normal rendering hides, and
+        // the agent still reads it. Show it.
+        if(t.title) out.push(node('span', {attrs:{class:'md-title'}, text: ' "' + t.title + '"'}));
+        break;
+      }
+      case 'image':
+        // Never loaded. A remote image would turn a review into a beacon.
+        out.push(node('span', {attrs:{class:'md-img'},
+          text: '[image: ' + String(t.text || '') + ' <' + String(t.href || '') + '>]'}));
+        break;
+      case 'html':
+        out.push(node('span', {attrs:{class:'md-raw'}, text: String(t.raw == null ? '' : t.raw)}));
+        break;
+      default:
+        out.push(textNode(t.raw != null ? t.raw : (t.text != null ? t.text : '')));
+    }
+  }
+  return out;
+}
+
+function describeInline_(t, depth){
+  return t.tokens ? describeInline(t.tokens, depth) : [textNode(t.text)];
+}
+
+// Block tokens -> {tag, text, attrs, kids, line, endLine}. `line`/`endLine` are
+// 1-based source lines and are what a comment anchors to.
+function describeBlock(t, ln, depth){
+  const span = {line: ln.line, endLine: ln.endLine};
+  if(depth > PREVIEW_MAX_DEPTH) return node('span', Object.assign({text: t.raw || ''}, span));
+  switch(t.type){
+    case 'space': return null;
+    case 'hr': return node('hr', span);
+    case 'heading':
+      return node('h' + Math.min(Math.max(t.depth|0, 1), 6),
+        Object.assign({kids: describeInline_(t, depth+1), attrs:{class:'md-block'}}, span));
+    case 'paragraph':
+      return node('p', Object.assign({kids: describeInline_(t, depth+1), attrs:{class:'md-block'}}, span));
+    case 'code':
+      // textContent only, deliberately unhighlighted: highlighting means the
+      // hljs innerHTML path, and a carve-out at this boundary costs more than
+      // syntax colour. See issue #385.
+      return node('pre', Object.assign({attrs:{class:'md-block md-code'},
+        kids:[node('code', {text: String(t.text == null ? '' : t.text)})]}, span));
+    case 'blockquote':
+      return node('blockquote', Object.assign({attrs:{class:'md-block'},
+        kids: describeBlocks(t.tokens || [], ln, depth+1)}, span));
+    case 'html':
+      // Visible as raw HTML, inert. The reviewer needs to know it is there.
+      return node('div', Object.assign({attrs:{class:'md-block md-raw'},
+        text: String(t.raw == null ? '' : t.raw)}, span));
+    case 'def':
+      // A reference definition renders nothing in normal markdown, but its URL
+      // and title are in the file and reach the agent.
+      return node('div', Object.assign({attrs:{class:'md-block md-def'},
+        text: '[' + String(t.tag||'') + ']: ' + String(t.href||'') +
+              (t.title ? ' "' + t.title + '"' : '')}, span));
+    case 'list': {
+      const kids = [];
+      let cursor = ln.line;
+      for(const item of (t.items || [])){
+        const isp = spanOf(item.raw, cursor);
+        cursor += isp.advance;
+        kids.push(node('li', Object.assign({attrs:{class:'md-block'},
+          kids: item.tokens ? describeBlocks(item.tokens, isp, depth+1)
+                            : describeInline_(item, depth+1)}, isp)));
+      }
+      return node(t.ordered ? 'ol' : 'ul', Object.assign({kids}, span));
+    }
+    case 'table': {
+      // Rows carry no `raw` of their own (measured, not assumed), so row spans
+      // are counted off the table token's own text.
+      const kids = [];
+      const head = node('tr', {kids: (t.header||[]).map(c =>
+        node('th', {kids: describeInline(c.tokens, depth+1)}))});
+      kids.push(node('thead', {kids:[head]}));
+      let cursor = ln.line + 2;                     // header row + separator
+      const body = [];
+      for(const row of (t.rows || [])){
+        const rsp = {line: cursor, endLine: cursor};
+        cursor += 1;
+        body.push(node('tr', Object.assign({attrs:{class:'md-block'},
+          kids: row.map(c => node('td', {kids: describeInline(c.tokens, depth+1)}))}, rsp)));
+      }
+      kids.push(node('tbody', {kids: body}));
+      return node('table', Object.assign({attrs:{class:'md-table'}, kids}, span));
+    }
+    default:
+      return node('div', Object.assign({attrs:{class:'md-block'},
+        text: String(t.raw != null ? t.raw : '')}, span));
+  }
+}
+
+function describeBlocks(toks, ln, depth){
+  const out = [];
+  let cursor = ln.line;
+  for(const t of toks){
+    const span = spanOf(t.raw, cursor);
+    cursor += span.advance;
+    const d = describeBlock(t, span, depth);
+    if(d) out.push(d);
+  }
+  return out;
+}
+
+// Entry point. `src` is the reconstructed file; returns a description tree or
+// null when preview must decline.
+function describe(src){
+  if(typeof marked === 'undefined' || !marked.lexer) return null;
+  if(src.length > PREVIEW_MAX_BYTES) return null;
+  // marked normalizes CRLF before tokenizing, so offsets must be computed
+  // against normalized text or every anchor after line 1 drifts.
+  const norm = src.replace(/\r\n/g, '\n');
+  const fm = splitFrontmatter(norm);
+  let toks;
+  try{ toks = marked.lexer(fm.body); }catch(e){ return null; }
+  const kids = describeBlocks(toks, {line: 1 + fm.offset, endLine: 1 + fm.offset}, 0);
+  if(fm.pairs){
+    const rows = fm.pairs.map((kv, i) => node('div', {attrs:{class:'md-fm-row'},
+      line: 2 + i, endLine: 2 + i,
+      kids:[node('span', {attrs:{class:'md-fm-k'}, text: kv[0]}),
+            node('span', {attrs:{class:'md-fm-v'}, text: kv[1]})]}));
+    kids.unshift(node('div', {attrs:{class:'md-fm'}, kids: rows}));
+  }
+  return node('div', {attrs:{class:'md-doc'}, kids});
+}
+
+// <<< PURE-PREVIEW-END
+
+// No logic here on purpose: everything security-relevant is decided in
+// describe() and is testable without a DOM.
+function materialize(desc, ctx){
+  const tag = SAFE_TAGS.indexOf(desc.tag) === -1 ? 'span' : desc.tag;
+  const el = document.createElement(tag);
+  const cls = desc.attrs && desc.attrs.class;
+  if(cls) el.className = cls;
+  if(desc.attrs && desc.attrs.href && tag === 'a'){
+    el.href = desc.attrs.href; el.rel = 'noopener noreferrer'; el.target = '_blank';
+  }
+  if(desc.text != null) el.textContent = desc.text;
+  for(const k of desc.kids) el.appendChild(materialize(k, ctx));
+  // Only leaf targets are commentable — describe() marks them md-block, so a
+  // whole table or list is never one target while its rows/items are.
+  if(ctx && desc.line != null && cls && cls.indexOf('md-block') !== -1){
+    attachBlockComment(el, desc, ctx);
+  }
+  return el;
+}
+
+function blockAnchor(desc, ctx){
+  return {key: `${ctx.file.new}|R${desc.line}`, path: ctx.file.new, side: 'R',
+          line: desc.line, endLine: desc.endLine,
+          code: ctx.lines[desc.line - 1] || ''};
+}
+
+function attachBlockComment(el, desc, ctx){
+  el.classList.add('md-target');
+  el.__mdDesc = desc;
+  el.addEventListener('click', e => {
+    if(e.target.closest('a')) return;                 // let a real link be a link
+    if(e.target.closest('.cmt, .cmt-saved')) return;  // don't re-open from the chip
+    const sel = window.getSelection();
+    if(sel && !sel.isCollapsed && sel.toString().length) return;
+    e.stopPropagation();                              // innermost target wins
+    openBlockComposer(el, desc, ctx);
+  });
+  // Chips are NOT rendered here: materialize() is still building the tree, so
+  // el has no parent yet and insertAdjacentElement('afterend') would silently
+  // do nothing. They are flushed once the tree is in the document.
+}
+
+function openBlockComposer(el, desc, ctx){
+  const a = blockAnchor(desc, ctx);
+  const existing = comments[a.key];
+  const range = a.endLine > a.line ? `R${a.line}–R${a.endLine}` : `R${a.line}`;
+  const box = document.createElement('div');
+  box.className = 'cmt-row md-cmt';
+  box.innerHTML = `<div class="cmt-anchor">${esc(a.path)} : ${range}</div>
+    <div class="cmt">
+      <textarea placeholder="Leave a comment on this block…"></textarea>
+      <div class="cmt-actions">
+        <button class="btn primary save">${existing ? 'Update comment' : 'Add comment'}</button>
+        ${HAS_PR ? `<button class="btn gh save-gh" title="Save for the agent and post on the PR">${GH_ICON} Comment on GitHub</button>` : ''}
+        <button class="btn cancel">Cancel</button>
+      </div></div>`;
+  el.insertAdjacentElement('afterend', box);
+  const ta = box.querySelector('textarea');
+  if(existing) ta.value = existing.text;
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  const commit = github => () => {
+    const v = ta.value.trim(); if(!v) return;
+    comments[a.key] = {file: a.path, line: a.line, endLine: a.endLine, side: 'R',
+                       code: a.code, text: v, kind: 'block',
+                       github: github || !!(existing && existing.github)};
+    box.remove(); refreshCounts(); renderBlockChip(el, desc, ctx);
+  };
+  box.querySelector('.save').onclick = commit(false);
+  const gh = box.querySelector('.save-gh');
+  if(gh) gh.onclick = commit(true);
+  box.querySelector('.cancel').onclick = () => box.remove();
+}
+
+function renderBlockChip(el, desc, ctx){
+  if(!el.parentNode) return;   // afterend is a no-op on a detached node
+  const a = blockAnchor(desc, ctx);
+  const root = ctx.root || document;
+  const dup = root.querySelector(`.cmt-saved[data-k="${CSS.escape(a.key)}"]`);
+  if(dup) dup.remove();
+  const c = comments[a.key]; if(!c) return;
+  const range = c.endLine > c.line ? `R${c.line}–R${c.endLine}` : `R${c.line}`;
+  const chip = document.createElement('div');
+  chip.className = 'cmt-row cmt-saved md-cmt' + (c.github ? ' gh' : '');
+  chip.dataset.k = a.key;
+  chip.innerHTML = `<div class="cmt-anchor">${esc(c.file)} : ${range}${c.github?` <span class="ghdest">${GH_ICON} GitHub</span>`:''}</div>
+    <div class="saved"><span class="txt">${esc(c.text)}</span>
+      <button class="edit" title="Edit">✎</button>
+      <button class="del" title="Delete">×</button></div>`;
+  chip.querySelector('.del').onclick = ev => {
+    ev.stopPropagation(); delete comments[a.key]; chip.remove(); refreshCounts();
+  };
+  const edit = ev => { ev.stopPropagation(); chip.remove(); openBlockComposer(el, desc, ctx); };
+  chip.querySelector('.edit').onclick = edit;
+  chip.querySelector('.saved .txt').onclick = edit;
+  el.insertAdjacentElement('afterend', chip);
+}
+
+// The reconstructed source of a wholly-added file: every right-side row, in
+// order. parse_diff drops the "\ No newline at end of file" marker, so a file
+// without a trailing newline round-trips with one added — immaterial to
+// rendering, and noted in the design doc.
+function sourceOf(file){
+  const out = [];
+  for(const h of file.hunks) for(const r of h.rows){
+    if(r.r && r.r.t !== 'empty') out.push(r.r.s);
+  }
+  return out;
+}
+
+function isMarkdown(file){
+  return /\.(md|markdown)$/i.test(String(file.display || ''));
+}
+
+function previewAvailable(){
+  return typeof marked !== 'undefined' && !!marked.lexer;
+}
+
+function renderPreview(file, body){
+  const lines = sourceOf(file);
+  const desc = describe(lines.join('\n'));
+  if(!desc){
+    body.innerHTML = '<div class="empty-note">Preview unavailable for this file — switch to Single to read it as source.</div>';
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'md-wrap';
+  wrap.innerHTML = '<div class="md-warn">Rendered from the diff. Content is untrusted — links open externally and images are not loaded.</div>';
+  const ctx = {file, lines, root: wrap};
+  wrap.appendChild(materialize(desc, ctx));
+  body.appendChild(wrap);
+  // Flush saved comments only now that the tree is attached. Comments outlive
+  // the DOM that created them, and a mode switch rebuilds this tree — if they
+  // are not restored here, the submit count claims comments the page cannot
+  // show, which is precisely what it did before this call existed.
+  wrap.querySelectorAll('.md-target').forEach(el => {
+    if(el.__mdDesc) renderBlockChip(el, el.__mdDesc, ctx);
+  });
 }
 
 function anchorOf(file, cell){
@@ -835,6 +1240,7 @@ function renderFile(file, fi){
     </div><div class="file-body"></div>`;
   const body = el.querySelector('.file-body');
   if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
+  else if(mode === 'preview'){ renderPreview(file, body); }
   else{
     const lang = langForFile(file);
     file.hunks.forEach(h => {
@@ -1197,6 +1603,14 @@ class Handler(BaseHTTPRequestHandler):
         Handler._last_sig = sig
         Handler._last_check = now
         return sig
+
+    def end_headers(self):
+        # The token is a path segment, so it rides in the Referer of anything
+        # the page navigates to — and preview renders links authored by whoever
+        # wrote the diff. Hooked here rather than at each send_header site
+        # because every response, including send_error's, funnels through this.
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
 
     def _send_json(self, code, obj):
         body = json.dumps(obj).encode()

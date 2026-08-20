@@ -67,6 +67,20 @@ file header. `parse_diff()` supplies the fact the heuristic reads:
 nothing, and `None` when both sides are live. Defaults: one-sided → `single`,
 everything else → `split` (wholly-added markdown → `preview`, once that lands).
 
+`preview` renders a wholly-added markdown file as a document. It uses
+`marked`'s **lexer** only and builds DOM nodes from the token stream, so no
+attacker-derived string ever reaches an HTML parser and no sanitizer exists to
+be bypassed — `marked` deliberately does not sanitize, which is why the
+originally-planned "disable raw HTML and allowlist the output" was not
+buildable. `describe()` is a pure token-tree → description-tree function with
+no DOM, which is what makes the security property testable under bare `node`;
+`materialize()` adds no logic. Comments anchor to leaf blocks — a list item, a
+table row — and carry `kind: "block"` with `endLine`. Fenced code is
+deliberately unhighlighted (see #385), the server sends
+`Referrer-Policy: no-referrer` because the token is in the URL (see #386), and
+the whole design including eight corrections to its first draft is in
+[`designs/local-review-markdown-preview.md`](designs/local-review-markdown-preview.md).
+
 `single` emits a genuine two-column grid rather than hiding two of four, so
 `insertAfterRow()` reads the column count from `grid.dataset.cols` instead of
 assuming 4. It is offered **only** when one side is empty; a mixed

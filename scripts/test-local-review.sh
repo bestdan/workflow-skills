@@ -614,11 +614,12 @@ check("build_page: the raw injected payload does not survive",
       "</script><script>alert(1)</script>" not in page_html, page_html)
 check("build_page: the diff's </script> is escaped to \\u003c/script>",
       "\\u003c/script>" in page_html, page_html)
-# PAGE has exactly three structural </script> closes: the two vendored
-# <script src=...></script> includes and the one inline block. A diff/meta
-# payload that could inject a fourth would mean the escaping regressed.
-check("build_page: exactly the 3 structural </script> closes remain, none injected from the diff",
-      page_html.count("</script>") == 3, page_html.count("</script>"))
+# PAGE has exactly four structural </script> closes: the three vendored
+# <script src=...></script> includes (highlight, dart, marked) and the one
+# inline block. A diff/meta payload that could inject a fifth would mean the
+# escaping regressed.
+check("build_page: exactly the 4 structural </script> closes remain, none injected from the diff",
+      page_html.count("</script>") == 4, page_html.count("</script>"))
 
 # --- build_page: meta['url'] is escaped before landing in the href ----------
 evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
@@ -1546,6 +1547,131 @@ else:
               (_r.stderr or _r.stdout).strip())
     finally:
         os.unlink(_js_path)
+
+# --- preview: describe() against a security corpus --------------------------
+# describe() is the whole XSS argument for preview mode: it turns marked's
+# token stream into a plain description tree, and materialize() adds no logic.
+# So asserting on describe()'s OUTPUT is asserting the security property, and
+# it needs no DOM — which matters because jsdom is unreachable here.
+_PURE_BEGIN = "// >>> PURE-PREVIEW-BEGIN"
+_PURE_END = "// <<< PURE-PREVIEW-END"
+_marked_js = os.path.join(os.path.dirname(server_path), "vendor", "marked.umd.js")
+
+if _node is None:
+    skip("preview: describe() security corpus", "no node resolvable")
+elif not os.path.exists(_marked_js):
+    skip("preview: describe() security corpus", "vendor/marked.umd.js not present")
+elif _PURE_BEGIN not in server.PAGE or _PURE_END not in server.PAGE:
+    bad("preview: the PURE-PREVIEW markers are present in PAGE",
+        "markers missing — the describe() corpus cannot be sliced out")
+else:
+    # Drop the rest of the marker's own line: the split eats its "//", which
+    # would otherwise leave the marker's trailing prose as bare code.
+    _pure = server.PAGE.split(_PURE_BEGIN, 1)[1].split("\n", 1)[1].split(_PURE_END, 1)[0]
+    # Strip // comments before looking: the region's own comment warns against
+    # `document.` references, and a naive substring test matches that warning.
+    _code_only = "\n".join(_re.sub(r"//.*$", "", ln) for ln in _pure.split("\n"))
+    check("preview: the sliced region touches no DOM",
+          "document." not in _code_only and "window." not in _code_only,
+          [ln.strip() for ln in _code_only.split("\n") if "document." in ln or "window." in ln])
+
+    _harness = r"""
+const g = {};
+Object.defineProperty(globalThis, 'self', {value: g, configurable: true});
+// The UMD takes its CommonJS branch here, so it exports rather than attaching
+// to self. Take whichever it used, and fail loudly if neither worked —
+// otherwise describe() returns null for everything and the corpus "passes".
+const req = require(process.argv[2]);
+const marked = g.marked || req;
+if(!marked || typeof marked.lexer !== 'function'){
+  console.error('marked did not load: no lexer'); process.exit(2);
+}
+__PURE__
+const out = {};
+const walk = (n, f) => { f(n); (n.kids || []).forEach(k => walk(k, f)); };
+
+// Every tag describe() emits, and every attribute name, over the whole corpus.
+const tags = new Set(), attrs = new Set(), texts = [];
+const CORPUS = {
+  rawhtml:  '<img src=x onerror=alert(1)>\n\n<script>alert(2)</script>\n',
+  jsHref:   '[a](javascript:alert(1)) [b](JaVaScRiPt:alert(2)) [c](  javascript:alert(3))\n',
+  dataHref: '[d](data:text/html;base64,PHNjcmlwdD4=)\n',
+  relHref:  '[e](../submit) [f](/x/y) [g](sneaky.html)\n',
+  protoRel: '[h](//evil.test/x)\n',
+  okHref:   '[i](https://ok.test/p?q=1) [j](mailto:a@b.test)\n',
+  image:    '![alt](https://evil.test/track.png)\n',
+  proto:    '---\n__proto__: polluted\nconstructor: x\n---\n\n# H\n',
+  table:    '| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n',
+  deep:     '> '.repeat(60) + 'deep\n',
+  unknown:  '$$math$$\n\n:::note\nx\n:::\n',
+  code:     '```js\nalert(1)\n```\n',
+};
+for(const [name, src] of Object.entries(CORPUS)){
+  const d = describe(src);
+  out[name] = d === null ? null : true;
+  if(d) walk(d, n => {
+    tags.add(n.tag);
+    Object.keys(n.attrs || {}).forEach(a => attrs.add(a));
+    if(n.attrs && n.attrs.href) texts.push('HREF:' + n.attrs.href);
+    if(n.text) texts.push(n.text);
+  });
+}
+out.tags = [...tags].sort();
+out.attrs = [...attrs].sort();
+out.tagsOutsideAllowlist = out.tags.filter(t => SAFE_TAGS.indexOf(t) === -1);
+out.hrefs = texts.filter(t => t.startsWith('HREF:')).map(t => t.slice(5)).sort();
+out.protoPolluted = ({}).polluted !== undefined || Object.prototype.polluted !== undefined;
+
+// Anchoring: CRLF must not drift, and table rows get their own line.
+const crlf = describe('# One\r\n\r\nTwo\r\n\r\nThree\r\n');
+out.crlfLines = (crlf.kids || []).map(k => k.line);
+const tbl = describe('intro\n\n| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n');
+const rows = [];
+walk(tbl, n => { if(n.tag === 'tr' && n.line != null) rows.push(n.line); });
+out.tableRowLines = rows;
+const fm = describe('---\nk: v\n---\n\n# After\n');
+const heads = [];
+walk(fm, n => { if(/^h[1-6]$/.test(n.tag)) heads.push(n.line); });
+out.headingAfterFrontmatter = heads;
+
+// Size cap.
+out.overCap = describe('x'.repeat(PREVIEW_MAX_BYTES + 1));
+
+console.log(JSON.stringify(out));
+"""
+    _src = _harness.replace("__PURE__", _pure)
+    _fd, _hp = _tempfile.mkstemp(suffix=".cjs")
+    try:
+        with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(_src)
+        _r = _subprocess.run([_node, _hp, _marked_js],
+                             capture_output=True, encoding="utf-8")
+        if _r.returncode != 0:
+            bad("preview: describe() corpus harness runs", (_r.stderr or "").strip()[:400])
+        else:
+            _o = json.loads(_r.stdout)
+            check("preview: no tag outside the allowlist, over the whole corpus",
+                  _o["tagsOutsideAllowlist"] == [], _o["tagsOutsideAllowlist"])
+            check("preview: no attribute beyond class/href",
+                  _o["attrs"] == ["class", "href"] or _o["attrs"] == ["class"] or _o["attrs"] == ["href"],
+                  _o["attrs"])
+            check("preview: javascript:, data:, relative and protocol-relative hrefs are all rejected",
+                  all(h.startswith("https://") or h.startswith("mailto:") for h in _o["hrefs"]),
+                  _o["hrefs"])
+            check("preview: the two legitimate hrefs do survive",
+                  len(_o["hrefs"]) == 2, _o["hrefs"])
+            check("preview: a __proto__ frontmatter key does not pollute Object.prototype",
+                  _o["protoPolluted"] is False, _o["protoPolluted"])
+            check("preview: a document over the byte cap is declined",
+                  _o["overCap"] is None, _o["overCap"])
+            check("preview: CRLF does not drift the line anchors",
+                  _o["crlfLines"] == [1, 3, 5], _o["crlfLines"])
+            check("preview: each table row anchors to its own line",
+                  _o["tableRowLines"] == [5, 6], _o["tableRowLines"])
+            check("preview: frontmatter offset is added back to later anchors",
+                  _o["headingAfterFrontmatter"] == [5], _o["headingAfterFrontmatter"])
+    finally:
+        os.unlink(_hp)
 
 print(f"# {pass_count} passed, {fail_count} failed, {skip_count} skipped")
 sys.exit(1 if fail_count else 0)

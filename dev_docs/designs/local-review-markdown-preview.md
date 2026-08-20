@@ -87,10 +87,15 @@ unresolved string is defeated by relative URLs, protocol-relative URLs,
 control characters, and entity forms — and a relative href resolves _under the
 token path_, so `[click](../submit)` navigates inside the authorized tree.
 
-- Resolve with the platform `URL` parser against the page base, then test the
-  canonical `.protocol` against exactly `http:`, `https:`, `mailto:`.
-- Reject relative and protocol-relative URLs outright — a markdown file in a
-  diff has no legitimate same-origin target here.
+- Require an allowed scheme in the raw text (`/^(https?|mailto):/i`, after
+  trimming) **before** parsing. Resolving against the page base first would
+  accept a relative href and quietly turn it into a same-origin URL; requiring
+  the scheme up front rejects relative and protocol-relative forms by
+  construction rather than by a follow-up origin comparison.
+- Then parse with the platform `URL` parser — no base — and test the canonical
+  `.protocol` against exactly `http:`, `https:`, `mailto:`. The parse is what
+  catches forms the regex would wave through.
+- A markdown file in a diff has no legitimate same-origin target here.
 - Rejected links render as plain text with the URL visible, never as an `a`.
 - Permitted links get `rel="noopener noreferrer"` and `target="_blank"`.
 - The server sends `Referrer-Policy: no-referrer` on every response. The token
@@ -199,6 +204,31 @@ relative URLs, remote image URLs, unknown token types, malformed tables,
 `__proto__` frontmatter keys, and deep nesting. The assertions are that no
 `tag` outside the allowlist appears, no attribute outside `{href, class}`
 appears, and no node bearing a remote resource is produced.
+
+### The DOM surface stays manually tested — decided, not overlooked
+
+`materialize()` and the comment-chip lifecycle have **no automated coverage and
+will not get any.** Testing them needs a DOM: `jsdom` is an npm dependency this
+environment cannot fetch and a large one to vendor, and a hand-rolled shim is
+its own liability — a fake DOM that disagrees with a real one produces
+confident green on behaviour that is broken.
+
+Know what that costs, because it is not hypothetical. Two DOM-timing defects
+reached a human reviewer during this work, and both were invisible to the
+suite:
+
+- `renderBlockChip` ran inside `materialize()`, before the element had a
+  parent. `insertAdjacentElement('afterend', …)` on a detached node does
+  nothing and reports nothing, so restored comments silently never rendered
+  while the submit count still counted them. Chips are now flushed after the
+  tree is attached.
+- The anchoring bugs the corpus _did_ catch — `newlines || 1` over-counting
+  every block, and table rows landing one line late — were caught precisely
+  because they live in `describe()`, on the pure side of the split.
+
+That is the split working as intended: the security property is machine-checked,
+the behaviour is not. Anyone extending preview should expect to smoke-test the
+DOM by hand and should not read a green suite as covering it.
 
 The block→line mapping gets its own tests, including a CRLF fixture. That
 function is the one whose bug is silent and destructive.
