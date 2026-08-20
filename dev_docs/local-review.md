@@ -55,8 +55,9 @@ history that anchored every hardening change to a small diff.
    containing `</script>` cannot execute in the page.
 4. **Serve** — `ThreadingHTTPServer` on `127.0.0.1`, state on `Handler` class
    attributes. Routes live under a per-launch token (below).
-5. **Hand off** — `/submit` posts GitHub-flagged comments first, then writes
-   `--out` atomically; the agent polls that file.
+5. **Hand off** — `/submit` writes `--out` atomically; the agent polls that
+   file and posts any GitHub-flagged comments itself. The server holds no
+   GitHub write capability (#381).
 
 ## View modes
 
@@ -65,7 +66,7 @@ Each file renders in one of three per-file modes — `split`, `single`,
 file header. `parse_diff()` supplies the fact the heuristic reads:
 `file["single"]` is `"r"` when the diff deletes nothing, `"l"` when it adds
 nothing, and `None` when both sides are live. Defaults: one-sided → `single`,
-everything else → `split` (wholly-added markdown → `preview`, once that lands).
+everything else → `split`; wholly-added markdown → `preview`.
 
 `preview` renders a wholly-added markdown file as a document. It uses
 `marked`'s **lexer** only and builds DOM nodes from the token stream, so no
@@ -123,6 +124,10 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
   GitHub, so the old ordering constraint (post first, because OUT's appearance
   is the caller's kill signal) and its accepted disk-exhaustion residual are
   both gone.
+- **`meta.sha`:** in PR mode, the head SHA `resolve_gh()` pinned at launch —
+  the commit this page's diff was rendered from. The agent posts against it;
+  re-resolving the head at posting time would anchor comments to whatever the
+  PR advanced to while the page was open.
 - **Payload:** `{meta, summary, approved, comments:[{file, side, line, code,
   text}]}`. A `kind: "dismiss-comments"` entry adds `endLine` (delete lines
   `line`–`endLine` on `side`); `kind: "block"` adds `endLine` too (a preview

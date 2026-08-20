@@ -1804,7 +1804,14 @@ class Handler(BaseHTTPRequestHandler):
                 meta = get_meta(Handler.pr, Handler.repo, Handler.diff_file, Handler.title,
                                  Handler.git_dir, Handler.git_spec)
                 Handler.gh = resolve_gh(Handler.pr, Handler.repo, Handler.diff_file, Handler.git_spec)
+                # The reviewed SHA, not the current head. resolve_gh() pins it
+                # once at launch, so it names the commit this page's diff was
+                # rendered from. The agent posts with it; re-fetching headRefOid
+                # at posting time would anchor comments to whatever the PR has
+                # advanced to, which the reviewer never saw.
                 meta["github"] = bool(Handler.gh)
+                if Handler.gh:
+                    meta["sha"] = Handler.gh["sha"]
                 files = parse_diff(diff)
                 Handler.page = build_page(files, meta)
                 Handler.diff_sig = source_sig(diff)
@@ -1850,18 +1857,18 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._submitted = False
 
     def _do_submit(self, payload):
-        # The temp file is created before posting, not just before the write: an
-        # unwritable/missing --out directory is then caught up front, instead of
-        # after comments were already posted (a 500 with nothing posted is safe
-        # to retry; a 500 after posting is not).
+        # The temp file is created up front so an unwritable or missing --out
+        # directory is caught before anything is printed: the human-readable
+        # block below reads as a completed submission, and the caller polls for
+        # OUT, so failing after printing would report a round that never landed.
+        # (This preflight also used to protect a GitHub-posting step; the server
+        # no longer posts — #381.)
         out_dir = os.path.dirname(os.path.abspath(self.out_path)) or "."
         try:
             if os.path.isdir(self.out_path):
                 raise OSError(f"{self.out_path} is a directory")
             fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
         except OSError as e:
-            # Fail before any comment posts: a retry after a partial post would
-            # duplicate the posted comments.
             self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
         # human-readable to stdout
@@ -1894,10 +1901,6 @@ class Handler(BaseHTTPRequestHandler):
                       "the agent posts these, this server does not.", flush=True)
             print("============================\n", flush=True)
 
-            # Residual risk accepted: disk exhaustion between the preflight and
-            # this write can still fail after posting. Closing it would need the
-            # payload written before posting, but the posting outcome is part of
-            # the payload and OUT's appearance is the caller's kill signal.
             with os.fdopen(fd, "w") as f:
                 json.dump(payload, f, indent=2)
             os.replace(tmp_path, self.out_path)
@@ -2034,7 +2037,11 @@ def main():
         msg = "; ".join(ln.strip() for ln in str(e).splitlines() if ln.strip())
         print(f"error: {msg}", file=sys.stderr)
         sys.exit(1)
+    # See the note at the /refresh site: this is the reviewed SHA, pinned at
+    # launch, and it is what the agent must post against.
     meta["github"] = bool(gh)
+    if gh:
+        meta["sha"] = gh["sha"]
     files = parse_diff(diff)
     Handler.page = build_page(files, meta)
     Handler.out_path = args.out

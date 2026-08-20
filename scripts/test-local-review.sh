@@ -1353,7 +1353,9 @@ try:
         with _urlrequest.urlopen(req, timeout=5) as resp:
             nw_body = json.loads(resp.read().decode())
         check("no-write: /submit reports the comment as flagged, not posted",
-              nw_body.get("github_flagged") == 1 and "github_posted" not in nw_body, nw_body)
+              nw_body.get("github_flagged") == 1
+              and "github_posted" not in nw_body
+              and "github_failed" not in nw_body, nw_body)
         deadline = _time.time() + 5
         while _time.time() < deadline and not (os.path.exists(nw_out) and os.path.getsize(nw_out)):
             _time.sleep(0.05)
@@ -1364,9 +1366,13 @@ try:
               "github_posted" not in written and "github_failed" not in written, list(written))
         calls = open(gh_log).read() if os.path.exists(gh_log) else ""
         check("no-write: gh was invoked (read path is intact)", bool(calls.strip()), calls)
-        check("no-write: NO gh invocation was a write",
-              "--method POST" not in calls and " api " not in (" " + calls),
-              calls)
+        # Per LINE, not over the whole blob: `calls` is one invocation per line,
+        # so a substring test like `" api " in (" " + calls)` only ever gets the
+        # leading boundary right for the FIRST line — every later `api …` sits
+        # after a newline and never matches. That clause silently never fired.
+        gh_writes = [ln for ln in calls.splitlines()
+                     if "--method POST" in ln or "api" in ln.split()]
+        check("no-write: NO gh invocation was a write", gh_writes == [], gh_writes)
 finally:
     if nw_proc.poll() is None:
         nw_proc.terminate()
