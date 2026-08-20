@@ -171,6 +171,27 @@ check("single: a pure append is right-only despite its context rows",
       f["single"] == "r", f["single"])
 check("single: a pure append is still status modified", f["status"] == "modified", f["status"])
 
+# --- file["truncated"]: a hunk that ends owing lines per its own @@ header ---
+# Only preview reads this, and it is the difference between rendering a partial
+# file as a whole document and declining to.
+diff_short = """diff --git a/new.md b/new.md
+new file mode 100644
+--- /dev/null
++++ b/new.md
+@@ -0,0 +1,5 @@
++one
++two
+"""
+check("truncated: a hunk short of its @@ count marks the file truncated",
+      parse_diff(diff_short)[0]["truncated"] is True,
+      parse_diff(diff_short)[0]["truncated"])
+check("truncated: a complete added file is not marked truncated",
+      parse_diff(diff_added)[0]["truncated"] is False,
+      parse_diff(diff_added)[0]["truncated"])
+check("truncated: a complete modification is not marked truncated",
+      parse_diff(diff_mod)[0]["truncated"] is False,
+      parse_diff(diff_mod)[0]["truncated"])
+
 diff_nochange = """diff --git a/a.py b/b.py
 similarity index 100%
 rename from a.py
@@ -873,6 +894,25 @@ try:
         with _urlrequest.urlopen(url, timeout=5) as resp:
             body = resp.read().decode()
             check("server: GET / returns 200", resp.status == 200, resp.status)
+            # The token is a path segment, so this header is what stops it
+            # riding the Referer of an outbound link — and preview renders
+            # links authored by whoever wrote the diff. Asserted on a page
+            # response, an asset response, and an error response below,
+            # because the guarantee claimed is "every response".
+            check("server: page response sets Referrer-Policy: no-referrer",
+                  resp.headers.get("Referrer-Policy") == "no-referrer",
+                  resp.headers.get("Referrer-Policy"))
+        with _urlrequest.urlopen(url + "vendor/marked.umd.js", timeout=5) as resp2:
+            check("server: asset response sets Referrer-Policy: no-referrer",
+                  resp2.headers.get("Referrer-Policy") == "no-referrer",
+                  resp2.headers.get("Referrer-Policy"))
+        try:
+            _urlrequest.urlopen(url + "no-such-route", timeout=5)
+            bad("server: a bogus route 404s", "it did not")
+        except _urlerror.HTTPError as e:
+            check("server: error response sets Referrer-Policy: no-referrer",
+                  e.headers.get("Referrer-Policy") == "no-referrer",
+                  e.headers.get("Referrer-Policy"))
             check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
         payload = {"meta": {}, "summary": "looks good", "approved": True, "comments": []}
         req = _urlrequest.Request(
@@ -1634,8 +1674,30 @@ const heads = [];
 walk(fm, n => { if(/^h[1-6]$/.test(n.tag)) heads.push(n.line); });
 out.headingAfterFrontmatter = heads;
 
-// Size cap.
+// Size cap, and that it is measured in UTF-8 BYTES: this string is well under
+// the cap by .length but over it once encoded.
 out.overCap = describe('x'.repeat(PREVIEW_MAX_BYTES + 1));
+out.overCapMultibyte = describe('中'.repeat(Math.floor(PREVIEW_MAX_BYTES / 2)));
+out.underCapMultibyte = describe('中'.repeat(1000)) === null;
+
+// Nothing in the file may be invisible in the rendering. A rejected link's
+// title used to be dropped on exactly the hostile branch.
+const seen = src => { const t = []; walk(describe(src), n => { if(n.text) t.push(n.text); }); return t.join('|'); };
+out.rejectedLinkTitle = seen('[x](javascript:alert(1) "HIDDEN_T")').includes('HIDDEN_T');
+out.okLinkTitle = seen('[x](https://ok.test "SHOWN_T")').includes('SHOWN_T');
+out.imageTitle = seen('![alt](https://e.test/i.png "IMG_T")').includes('IMG_T');
+out.refDefTitle = seen('[r]: https://r.test "REF_T"\n').includes('REF_T');
+// Deep nesting must degrade to visible raw text, not vanish.
+out.deepInlineText = seen('*'.repeat(40) + 'DEEP_TXT' + '*'.repeat(40)).includes('DEEP_TXT');
+
+// One anchor key per target: an li and its inner text fallback used to collide.
+const keyed = [];
+walk(describe('- one\n- two\npara\n\n| a | b |\n| - | - |\n| 1 | 2 |\n'), n => {
+  if(n.line != null && n.attrs && String(n.attrs.class || '').includes('md-block'))
+    keyed.push(n.line + ':' + n.endLine);
+});
+out.targetKeys = keyed;
+out.duplicateTargetKeys = keyed.filter((k, i) => keyed.indexOf(k) !== i);
 
 console.log(JSON.stringify(out));
 """
@@ -1666,8 +1728,26 @@ console.log(JSON.stringify(out));
                   _o["overCap"] is None, _o["overCap"])
             check("preview: CRLF does not drift the line anchors",
                   _o["crlfLines"] == [1, 3, 5], _o["crlfLines"])
-            check("preview: each table row anchors to its own line",
-                  _o["tableRowLines"] == [5, 6], _o["tableRowLines"])
+            # 3 is the header row, 5 and 6 the body rows. The header used to be
+            # the one uncommentable element in a rendered document.
+            check("preview: every table row incl. the header anchors to its own line",
+                  _o["tableRowLines"] == [3, 5, 6], _o["tableRowLines"])
+            check("preview: the byte cap rejects a multibyte document under the char count",
+                  _o["overCapMultibyte"] is None, "a UTF-16-length cap let it through")
+            check("preview: a multibyte document well under the cap is still rendered",
+                  _o["underCapMultibyte"] is False, _o["underCapMultibyte"])
+            check("preview: a REJECTED link's title stays visible",
+                  _o["rejectedLinkTitle"] is True, "hostile-branch title was dropped")
+            check("preview: an accepted link's title stays visible",
+                  _o["okLinkTitle"] is True, _o["okLinkTitle"])
+            check("preview: an image's title stays visible",
+                  _o["imageTitle"] is True, _o["imageTitle"])
+            check("preview: a reference definition's title stays visible",
+                  _o["refDefTitle"] is True, _o["refDefTitle"])
+            check("preview: inline content past the depth cap degrades to visible text",
+                  _o["deepInlineText"] is True, "deeply nested text vanished")
+            check("preview: no two comment targets share an anchor key",
+                  _o["duplicateTargetKeys"] == [], _o["duplicateTargetKeys"])
             check("preview: frontmatter offset is added back to later anchors",
                   _o["headingAfterFrontmatter"] == [5], _o["headingAfterFrontmatter"])
     finally:
