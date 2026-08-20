@@ -7,3 +7,27 @@ vendor/highlight.min.js and vendor/dart.min.js are Highlight.js v11.10.0
 (https://highlightjs.org/), (c) 2006-2024 Josh Goebel and other
 contributors, BSD-3-Clause licensed. The full license text, including its
 conditions and disclaimer, is retained in vendor/LICENSE.
+
+vendor/marked.umd.js is marked v18.0.10 (https://github.com/markedjs/marked),
+(c) 2018-2026 MarkedJS and (c) 2011-2018 Christopher Jeffrey, MIT licensed.
+Its full upstream LICENSE — the MIT grant plus John Gruber's original Markdown
+license, which marked ships alongside it — is retained in vendor/LICENSE.
+
+  version: 18.0.10
+  file:    lib/marked.umd.js from the npm package
+  size:    43897 bytes
+  sha256:  eaccee2fb9fb3b2c09e873a5504da82507850d9e677bd720122ac49e2a03982a
+
+Two deliberate choices worth knowing before replacing this file:
+
+It is the UMD build, not a minified one — marked publishes no minified browser
+bundle, and a readable vendored file is the right trade for a dependency that
+parses untrusted diff content inside a page holding the review token.
+
+The version floor is 18.0.2, where GHSA-6v9c-7cg6-27q7 (high, CVSS 7.5, an OOM
+via infinite recursion in the tokenizer, affecting >= 18.0.0 <= 18.0.1) is
+patched. Do not downgrade below it.
+
+The sha256 above was recorded when the file was vendored. It proves the file
+has not changed since; it does not independently establish that the fetched
+artifact was authentic.
