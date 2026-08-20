@@ -32,7 +32,7 @@
 #      This is the baseline: does the fix pass at all.
 #   2. N-run stability check — rounds 2..N of the same command (default
 #      N=3 total), to catch flakiness a single green run can't. Each round
-#      is separately timed and separately diagnosed on failure.
+#      is separately diagnosed on failure.
 #   3. Process/orphan watch — wraps EVERY round above (1 and 2), not a
 #      separate round of its own. See watch_processes() below: it snapshots
 #      which live processes are parented to init (pid 1) before and after
@@ -116,10 +116,10 @@ watch_processes() {
   local label="$1" logfile="$2"
   shift 2
   local before after new_orphans
-  before="$(ps -eo pid=,ppid= 2>/dev/null | awk '$2==1{print $1}' | sort -n)"
+  before="$(ps -eo pid=,ppid= 2>/dev/null | awk '$2==1{print $1}' | sort)"
   "$@" >"$logfile" 2>&1
   local rc=$?
-  after="$(ps -eo pid=,ppid= 2>/dev/null | awk '$2==1{print $1}' | sort -n)"
+  after="$(ps -eo pid=,ppid= 2>/dev/null | awk '$2==1{print $1}' | sort)"
   new_orphans="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") 2>/dev/null)"
   if [ -n "$new_orphans" ]; then
     echo "  ⚠ process watch: new process(es) reparented to init during $label — possible orphan(s):"
@@ -213,7 +213,7 @@ echo "verify-fix: stability rounds: $runs"
 
 run_round() {
   local label="$1" logfile
-  logfile="$(mktemp "${TMPDIR:-/tmp}/verify-fix.XXXXXX.log")" || {
+  logfile="$(mktemp "${TMPDIR:-/tmp}/verify-fix.XXXXXX")" || {
     echo "verify-fix: mktemp failed" >&2
     exit 2
   }
@@ -244,10 +244,10 @@ done
 # the process watch — it already wrapped every round above).
 if [ "$skip_confinement" -eq 1 ]; then
   echo "== smoke-confinement: skipped (--skip-confinement) =="
-elif [ ! -x "$ROOT/scripts/smoke-confinement.sh" ]; then
+elif [ ! -f "$ROOT/scripts/smoke-confinement.sh" ]; then
   echo "== smoke-confinement: skipped (scripts/smoke-confinement.sh not present) =="
 else
-  logfile="$(mktemp "${TMPDIR:-/tmp}/verify-fix.XXXXXX.log")" || {
+  logfile="$(mktemp "${TMPDIR:-/tmp}/verify-fix.XXXXXX")" || {
     echo "verify-fix: mktemp failed" >&2
     exit 2
   }

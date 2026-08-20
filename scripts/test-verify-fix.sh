@@ -23,8 +23,14 @@ SCRIPT_SRC="$ROOT/scripts/verify-fix.sh"
 BASE="$(mktemp -d 2>/dev/null \
   || mktemp -d "${TMPDIR:-/tmp}/test-verify-fix.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.test-verify-fix.XXXXXX")"
-trap 'rm -rf "$BASE"' EXIT
+# Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
+# exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.
+[ -n "$BASE" ] && [ -d "$BASE" ] || {
+  echo "test-verify-fix: could not create a temp dir" >&2
+  exit 2
+}
 BASE="$(cd "$BASE" && pwd -P)" || exit 2
+trap 'rm -rf "$BASE"' EXIT
 
 pass=0
 fail=0
