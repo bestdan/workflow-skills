@@ -596,13 +596,35 @@ USEOF
   # ZERO reports, on exactly the runs the report exists to monitor. The
   # generated wrapper must therefore run an in-wake background reporter while
   # claude runs, and reap it when claude exits. Driven through the REAL
-  # generated wrapper, gate OPEN, with a claude that takes 3s and a 1s
-  # interval: more than one report digest must land in the log.
+  # generated wrapper, gate OPEN, with a 1s interval and a claude that runs
+  # until the reporter has fired again: more than one report digest must land
+  # in the log.
   SRL="$SR/loop-wrapper"
   mkdir -p "$SRL/.auto-pilot" "$SRL/bin"
   cp "$SR_RUN/.auto-pilot/RUN.md" "$SRL/.auto-pilot/RUN.md" # no paused_until: gate OPEN
   SRL_CLAUDE="$SRL/bin/claude-slow"
-  printf '#!/bin/sh\n: >"%s/claude-called"\nsleep 3\nexit 0\n' "$SRL" >"$SRL_CLAUDE"
+  # The model call runs as long as the property needs, instead of a flat 3s:
+  # it waits for the reporter's SECOND digest, up to a 20s ceiling (100 ×
+  # 0.2s). A fixed 3s left no headroom — a tick is a whole status-report
+  # render (a git elapsed lookup per task row, then the STATUS.md write; this
+  # fixture resolves no --gh and no --usage-bin, so the cost is git and file
+  # I/O), and a loaded runner emitted the wake-start digest alone and failed
+  # this test on a PR that touched nothing but markdown (re-run passed, no
+  # code change). A wrapper with no in-wake reporter still fails: nothing
+  # further lands, the ceiling expires, and the count stays at 1.
+  cat >"$SRL_CLAUDE" <<EOF
+#!/bin/sh
+: >"$SRL/claude-called"
+i=0
+while [ "\$i" -lt 100 ]; do
+  n=\$(grep -c 'status-report: tasks=' "$SRL/o.log" 2>/dev/null | head -1 | tr -d ' ')
+  case "\$n" in '' | *[!0-9]*) n=0 ;; esac
+  [ "\$n" -ge 2 ] && break
+  sleep 0.2
+  i=\$((i + 1))
+done
+exit 0
+EOF
   chmod +x "$SRL_CLAUDE"
   printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SRL/bin/sandbox-exec"
   chmod +x "$SRL/bin/sandbox-exec"
@@ -627,14 +649,15 @@ USEOF
       "gate@$srl_gate_ln loop@$srl_loop_ln claude@$srl_claude_ln kill@$srl_kill_ln"
   fi
   "$SRL/launch.sh" >/dev/null 2>&1
-  [ -f "$SRL/claude-called" ] && ok "status-report [in-wake]: gate was OPEN — claude really ran (3s)" \
-    || bad "status-report [in-wake]: gate was OPEN — claude really ran (3s)"
+  [ -f "$SRL/claude-called" ] && ok "status-report [in-wake]: gate was OPEN — claude really ran" \
+    || bad "status-report [in-wake]: gate was OPEN — claude really ran"
   srl_digests="$(grep -c 'status-report: tasks=' "$SRL/o.log" 2>/dev/null | tr -d ' ')"
   case "$srl_digests" in '' | *[!0-9]*) srl_digests=0 ;; esac
   if [ "$srl_digests" -ge 2 ]; then
     ok "status-report [in-wake]: reports kept firing DURING the model call ($srl_digests digests, wake-start alone would be 1)"
   else
-    bad "status-report [in-wake]: reports kept firing DURING the model call" "digests=$srl_digests (only the wake-start emission fired — the [A] cadence hole)"
+    bad "status-report [in-wake]: reports kept firing DURING the model call" \
+      "digests=$srl_digests after the 20s ceiling — no in-wake reporter (the [A] cadence hole), or 2 ticks took >20s here"
   fi
   # Poll to a deadline rather than sleeping a fixed second. The reap is a
   # process-GROUP TERM followed by a wait (`kill -TERM -"$rpt"; wait "$rpt"` in
