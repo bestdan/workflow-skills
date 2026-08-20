@@ -23,14 +23,18 @@ SCRIPT="$ROOT/scripts/research-spike.py"
 BASE="$(mktemp -d 2>/dev/null \
   || mktemp -d "${TMPDIR:-/tmp}/research-spike-test.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.research-spike-test.XXXXXX")"
-trap 'rm -rf "$BASE"' EXIT
+# Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
+# exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.
+[ -n "$BASE" ] && [ -d "$BASE" ] || {
+  echo "test-research-spike: could not create a temp dir" >&2
+  exit 2
+}
 # Canonicalize to the physical path (mktemp -d can land under macOS's
 # /var -> /private/var symlink) and stop git's upward repo-discovery walk at
 # BASE, so a git op inside a fixture dir can never resolve to the caller's
-# repo when the mktemp fallback above lands BASE inside this checkout. If the
-# cd fails, exit rather than falling through with an empty BASE (which would
-# make every later "$BASE/x" resolve to a root-relative /x).
+# repo when the mktemp fallback above lands BASE inside this checkout.
 BASE="$(cd "$BASE" && pwd -P)" || exit 2
+trap 'rm -rf "$BASE"' EXIT
 export GIT_CEILING_DIRECTORIES="$BASE"
 
 # A developer's global/system git config leaks into these fixture repos too:
