@@ -244,7 +244,11 @@ Why this is narrow:
    - Test coverage gaps that matter
      Skip nitpicks, formatting, and pre-existing issues. Produce a list of findings with `file:line`, the issue, and your suggested fix.
 
-8. **Spawn the reconciler sub-agent** (`general-purpose`). Give it:
+8. **Spawn the reconciler sub-agent** (`co-review-reconciler`, bundled at [`agents/co-review-reconciler.md`](../../agents/co-review-reconciler.md)). It is dispatched **without `Edit`/`Write`/`NotebookEdit`** on purpose: the reconciler judges findings and must never author the fix it just graded. Steps 10–11 exist so the user sees the finding list before the tree changes, and under `--post` the tree is never touched at all — a writing reconciler breaks both. If that agent type is unavailable in the harness, fall back to `general-purpose` **and** state in the prompt that the reconciler is read-only and must not modify any file, run any writing command, or stage anything.
+
+   **Record the tree state before dispatching** — `git status --porcelain` — and compare after the sub-agent returns. Any difference is the reconciler having written to the tree: surface it to the user as an unexpected modification rather than silently inheriting it, and do not fold those edits into the auto-fix list.
+
+   Give it:
    - The full diff
    - All GitHub inline comments (with author + path + line) — none in `--local` mode
    - Every review's findings — your own and each local agent's — labelled neutrally as "Reviewer A", "Reviewer B", … alongside the GitHub authors, **not** tagged with which agent produced them. The reconciler should not know which list came from "you" or which came from codex.
@@ -310,6 +314,7 @@ The remaining steps depend on disposition.
 - Respect AGENTS.md / CLAUDE.md instructions already loaded.
 - Don't re-litigate decisions the user made earlier in the conversation.
 - If a bot or local-agent comment is wrong for this codebase (e.g., over-engineering for a personal repo, worktree-handling on a directly-cloned repo), the reconciler should mark it low — say so explicitly so the user sees why it was skipped.
+- **The reconciler never writes, in any disposition.** It is dispatched as `co-review-reconciler`, which has no `Edit`/`Write`/`NotebookEdit`, and its own prompt forbids writing commands. A reconciler that authors a fix has both jumped the user-approval step and graded its own homework. Compare `git status --porcelain` across the dispatch and report any drift (step 8).
 - Never auto-fix items the user has already declined in this session.
 - Architectural/design judgment calls (signal handling, test design patterns, harness structure, and similar calls with a defensible "right" answer) get escalated to Fable for a recommendation before they reach the user as a question; genuine user-preference calls (priority, scope, whether to do the work) go to the user directly. See step 9.
 - A local agent that fails to run is noted and skipped, never fatal.
