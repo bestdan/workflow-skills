@@ -183,6 +183,8 @@ Every task carries a **size** — a Fibonacci story-point estimate of its scope:
 
 This single scale governs the promotion confidence check (below), the `/do-tasks` tracker-path feasibility gate (which maps to a tracker's native estimate — Linear's `estimate` is the same Fibonacci scale), and the granularity rule in `plan-with-docs`. They point here rather than restating a threshold.
 
+**Subsystem count is a split signal independent of raw line/file count.** A task can stay under the size-5 ceiling by lines/files while still crossing several unrelated subsystems — e.g. a sync/build script, a test suite, formatter/tooling config, and domain logic/routine definitions, in any combination. Treat **3+ unrelated subsystems** as a split trigger on its own: default to splitting along subsystem boundaries unless each component is individually small (size ≤2 on its own). `skills/assess-task/SKILL.md`'s `scope` dimension and `skills/break-down-task/SKILL.md`'s **When to use** triggers both apply this signal — see those skills for how each surfaces it.
+
 ## Ranking
 
 When a command picks the "next" task or orders a list, it ranks tasks by, in order:
