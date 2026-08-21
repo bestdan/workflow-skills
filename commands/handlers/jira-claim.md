@@ -18,6 +18,7 @@ Read `dev_docs/tasks/.task-config.yml`. The jira claim flow reads:
 - `jira.project` — project key.
 - `jira.ready_status` — **required here.** The status the ready lane lives in (the jira analogue of Linear's `Todo`). `/do-tasks` pulls candidates from this status. If it is unset/empty, **stop** with: "jira `/do-tasks` needs `jira.ready_status` set in dev_docs/tasks/.task-config.yml (the status promoted issues land in). Set it, or run `/task-config jira`." Do not guess a status name.
 - `jira.base_branch` — optional; the branch `/do-tasks` branches from (default: the repo's default branch).
+- `jira.blocked_statuses` — optional; status names that mean "blocked" on this board. The pre-claim WIP gate excludes them from its in-flight count, so a parked issue doesn't consume a slot. Defined in `commands/handlers/jira-config.md` → "Blocked statuses".
 
 ## Modes: atomic vs. claim/execute split
 
@@ -66,7 +67,7 @@ claims nothing, skips it.
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr, linear,
    and gh-issue handlers use).
-2. Count current in-flight work = issues in the configured project whose status sits in
+2. Count current in-flight work = issues **assigned to this caller** whose status sits in
    the In Progress / In Review category. A single JQL count covers both: Jira's
    `indeterminate` category (display name `In Progress`) spans every In-Progress _and_
    In-Review-type status, so `statusCategory = "In Progress"` catches the lot (the
@@ -76,10 +77,26 @@ claims nothing, skips it.
    ```
    <atlassian-mcp>__searchJiraIssuesUsingJql
      cloudId: <jira.site>
-     jql: project = "<project>" AND statusCategory = "In Progress" ORDER BY updated ASC
+     jql: project = "<project>" AND assignee = currentUser() AND statusCategory = "In Progress" AND Flagged IS EMPTY [AND status NOT IN ("<blocked-status>", …)] ORDER BY updated ASC
      fields: ["status"]
      maxResults: 100
    ```
+
+   **`assignee = currentUser()` is required.** The gate bounds **this operator's**
+   concurrent work, not the project's. A shared team board carries other people's
+   in-progress issues by the dozen — an unscoped count on such a board exceeds any
+   plausible `wip_limit` permanently, so the gate never opens and `/do-tasks` can never
+   claim. Scoping to the caller is what makes the limit mean something a caller can act on.
+
+   **Parked work is not in flight.** `Flagged IS EMPTY` drops issues carrying Jira's
+   native Impediment flag; the `status NOT IN (…)` clause is added **only when**
+   `jira.blocked_statuses` is non-empty and drops the board's blocked-type statuses. Both
+   clauses are the same ones `jira-promote.md` step 3 applies, for the same reason — spell
+   them identically. A blocked status can sit in the `indeterminate` category, where it is
+   indistinguishable from real work to the category filter, and the same status name sits
+   in a different category on another board, so it cannot be hard-coded (see
+   `jira-config.md` → "Blocked statuses"). An issue parked at `On Hold/Blocked` consumes no
+   review capacity and must not consume a WIP slot.
 
    Count the returned issues — the length of `issues[]` (or `issues.nodes[]` on installs
    that nest it). The enhanced-search response carries **no** `total` field, so don't rely
