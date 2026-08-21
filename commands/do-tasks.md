@@ -375,7 +375,10 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    to decline, decline outright:
    `Global WIP limit <N> reached (<total> of your issues in flight across all projects) — no issue claimed`
    and stop. When it resolves to override, continue to step 4 — the ceiling is lifted for
-   this run only, and each project's own cap still applies below.
+   this run only, and each project's own cap still applies below. **That override is
+   _the_ override for this run** (`attendedness.md`, "once means once per run"): if step 4
+   later finds every candidate's project full, it is already granted — claim, do not ask
+   again.
 4. **Per-project gate (ranked path).** Otherwise the per-project cap is checked **per
    candidate** in the claim loop below: for the chosen candidate, if **its project's**
    slack is `≤ 0`, that project is full → **skip to the next ranked candidate** (which may
@@ -388,7 +391,9 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    ranked list is not an at-limit outcome, because another project may still have slack;
    the run only meets the limit once nothing is left to try. On override, claim the
    top-ranked candidate whose project was full. On decline, report that no issue was
-   claimed. **Ask at most once per run**, however many candidates were skipped.
+   claimed. The once-per-run bound is `attendedness.md`'s, not this step's — so an
+   override or a Stop already given in step 3 settles this too, and no second question is
+   asked however many candidates were skipped.
 5. **Direct-identifier / single mode** (`/do-tasks <identifier>`): gate against **that
    issue's own resolved scope** cap — a configured project, or the **shared Unassigned
    bucket** when the issue is outside the configured projects (`linear-claim.md` step 7).

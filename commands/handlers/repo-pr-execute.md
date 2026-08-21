@@ -233,7 +233,7 @@ For each selected task routed to **execute**, read its full content (frontmatter
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
-**Declare the remote session unattended.** State in the prompt that no human is present and it must never prompt. A dispatched worker otherwise sees an ordinary user-role prompt and concludes a human is watching (`commands/handlers/attendedness.md`) — the dispatching session's attendedness does **not** transfer to the sessions it dispatches. This handler's own gate is batch-only, so nothing here currently offers an override; the declaration keeps that true if the worker ever runs a gated path.
+**The template's unattended declaration is load-bearing — keep it in the quoted prompt.** A dispatched worker otherwise sees an ordinary user-role prompt and concludes a human is watching (`commands/handlers/attendedness.md`); the dispatching session's attendedness does **not** transfer to the sessions it dispatches. It lives _inside_ the template below rather than in this prose deliberately: the template is what gets copied, so a declaration sitting only out here is dropped by anyone who copies it. This handler's own gate is batch-only, so nothing currently offers an override to lose — the line keeps that true if a worker ever reaches a gated path.
 
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported.
 
@@ -246,6 +246,8 @@ for the orchestrator-side paths only (the pre-claim check and WIP count above,
 
 ```bash
 claude --remote "You are processing a task for the task plugin system.
+
+No human is present in this session — never prompt. If a WIP gate or any other check is met, decline and report it rather than asking.
 
 ## The task file
 

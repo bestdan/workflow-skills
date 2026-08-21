@@ -65,6 +65,14 @@ gating it is not a fix this file licenses.)
        handler's normal message. **Never retry the prompt** and never infer an
        answer from silence other than "stop".
 
+   **"Once" means once per run, across every cap in it — not once per cap.** A run can
+   meet more than one limit (a global ceiling and then a per-project cap; a project cap
+   and the bucket's), and asking again each time turns one decision into an
+   interrogation. So the **first** answer settles the run: an override already granted
+   stays granted for every later cap the same run meets, and a **Stop** already given is
+   not re-litigated. Handlers must not restate this bound locally — a step cannot enforce
+   a run-wide property on its own, and a local copy drifts.
+
 ## Hard negatives — a cheap pre-check, not the guarantee
 
 Skip straight to declining, without attempting the prompt, when any of these holds:
