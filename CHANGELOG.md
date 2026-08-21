@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.2.1] - 2026-08-21
+
+### Fixes
+
+- stop the rubric screening prose contradictions out of scope (#407) (48a7657)
+
 ## [2.2.0] - 2026-08-21
 
 ### Features
