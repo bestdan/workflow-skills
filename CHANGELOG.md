@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.1.3] - 2026-08-21
+
+### Fixes
+
+- render inline markup inside tight list items (#401) (9ec53ed)
+
 ## [2.1.2] - 2026-08-20
 
 ### Fixes
