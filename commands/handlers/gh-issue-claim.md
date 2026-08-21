@@ -63,13 +63,13 @@ claims nothing, skips it.
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr and
    linear handlers use).
-2. Count current in-flight work = open issues labeled `auto-claimed` (claimed, PR
-   not yet open) **or** `needs-review` (PR open, in review). An in-flight issue holds
-   exactly one of the two, so sum two counts:
+2. Count current in-flight work = open issues **assigned to this caller** labeled
+   `auto-claimed` (claimed, PR not yet open) **or** `needs-review` (PR open, in review).
+   An in-flight issue holds exactly one of the two, so sum two counts:
 
    ```bash
-   c1=$(gh issue list --state open --search "label:auto-claimed" --limit 100 --json number [--repo <repo>] --jq length)
-   c2=$(gh issue list --state open --search "label:needs-review" --limit 100 --json number [--repo <repo>] --jq length)
+   c1=$(gh issue list --state open --search "label:auto-claimed assignee:@me" --limit 100 --json number [--repo <repo>] --jq length)
+   c2=$(gh issue list --state open --search "label:needs-review assignee:@me" --limit 100 --json number [--repo <repo>] --jq length)
    count=$((c1 + c2))
    ```
 
@@ -77,6 +77,14 @@ claims nothing, skips it.
    "Move to review on PR open" swaps `auto-claimed → needs-review`, so a `needs-review`
    issue is an open PR still awaiting review — in-flight, not done. (This mirrors the
    linear gate, which counts both `In Progress` and `In Review`.)
+
+   `assignee:@me` scopes the count to **this operator's** work, matching the jira and
+   linear gates. "Claim the issue" self-assigns, so the filter is exact rather than a
+   heuristic. Be clear about what this changes: it is a **loosening**. Without it, two
+   operators running the loop against one repo shared a single budget; with it each holds
+   `wip_limit` of its own. That is deliberate — the labels alone already made the count
+   tool-scoped rather than a true bound on the repo's review queue, and a per-operator
+   budget is the only denominator a caller can act on.
 3. If that count is **≥ `wip_limit`**, decline: report
    `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
    not claim another issue.

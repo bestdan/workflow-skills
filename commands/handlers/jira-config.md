@@ -82,4 +82,9 @@ Both are **target status names** — set each to the name of the status you want
 
 ## Blocked statuses (`blocked_statuses`)
 
-`blocked_statuses` is an **optional** list of status **names** that mean "blocked" on your board (e.g. `["Blocked", "On Hold/Blocked"]`). `/promote-tasks` (the `jira-promote.md` flow) excludes them from its candidate query so a blocked issue isn't scored as fresh backlog and transitioned to `ready_status`. This is needed because a board can place a `Blocked`-type status in the **initial / To-Do** `statusCategory` — there it is indistinguishable from new work to the category filter, and the same status name can sit in a different category on another board, so it can't be hard-coded. Leave it empty or omit it if your board has no such status. (Issues flagged with Jira's native **Flagged**/Impediment field are excluded automatically, with no config — `blocked_statuses` is only for boards that encode blocked-ness as a _status_.)
+`blocked_statuses` is an **optional** list of status **names** that mean "blocked" on your board (e.g. `["Blocked", "On Hold/Blocked"]`). Two flows read it:
+
+- **`/promote-tasks`** (the `jira-promote.md` flow) excludes them from its candidate query so a blocked issue isn't scored as fresh backlog and transitioned to `ready_status`.
+- **`/do-tasks`** (the `jira-claim.md` pre-claim WIP gate) excludes them from its in-flight count so a parked issue doesn't consume a WIP slot.
+
+Both need it for the same reason: a board can place a `Blocked`-type status in **any** `statusCategory` — the **initial / To-Do** category, where it is indistinguishable from new work to the promoter's filter, or the **`indeterminate` / In Progress** category, where it is indistinguishable from real work to the gate's filter. The same status name sits in a different category on another board, so it can't be hard-coded. Leave it empty or omit it if your board has no such status. (Issues flagged with Jira's native **Flagged**/Impediment field are excluded automatically by both flows, with no config — `blocked_statuses` is only for boards that encode blocked-ness as a _status_.)

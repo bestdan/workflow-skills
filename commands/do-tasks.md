@@ -306,13 +306,24 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    **Unassigned bucket** or **Any** needs every configured project's count (the subtraction
    below sums them). For each such **configured** scope (real project `id`, or the single
    whole-team scope when 0 projects are configured), count Linear issues in any
-   `started`-type state (e.g. `In Progress`, `In Review`) via `<linear-mcp>__list_issues`
-   — resolve by state **type**, not display name — passing the resolved `teamId` and the
+   `started`-type state (e.g. `In Progress`, `In Review`) **assigned to the current
+   viewer** via `<linear-mcp>__list_issues` — resolve by state **type**, not display name
+   — passing the resolved `teamId`, the viewer's id as the `assigneeId` argument, and the
    scope's `id` as the `projectId` argument (omit when `id` is `null` — the whole-team
    scope). That scope's
    **slack = `wip_limit − in_flight`**. The started-type issue is the canonical in-flight
    unit — an open PR is already reflected by its issue sitting in a started state, so do
    **not** add open PRs separately (that double-counts).
+
+   **The `assigneeId` filter is required.** The gate bounds **this operator's** concurrent
+   work, not the team's. A shared Linear project carries other people's started issues, and
+   an unscoped count on such a project exceeds any plausible `wip_limit` permanently — the
+   gate never opens and no issue is ever claimed. "Claim the issue" self-assigns to the
+   viewer, so the filter is exact. Use the cached viewer id already resolved by
+   `linear-claim.md` "Find candidates" (or `meta.viewer.id` on the fast path); do not spend
+   a second call on it. This applies to **every** count in this step, the whole-team count
+   below included — mixing a viewer-scoped per-project count with an unscoped whole-team
+   count would make the Unassigned subtraction nonsense.
 
    **Whole-team count (once) → Unassigned and/or global total.** Run **one** whole-team
    `started` count (omit `projectId`) only when it is actually needed — i.e. when the
