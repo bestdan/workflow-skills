@@ -71,7 +71,7 @@ lets a present human override a single claim at the limit, which would be wrong 
 an orchestrator run is unattended by definition and is exactly the throughput the cap
 exists to bound. It is provably unreachable rather than merely unlikely: the
 orchestrator job exports `$AUTO_PILOT_UNTIL` (`scripts/spawn-orchestrator.sh`), which
-is the first hard negative on that file's pre-check list, so the override is skipped
+is a hard negative on that file's pre-check list, so the override is skipped
 before it can be offered. Do not add an escape hatch here.
 
 **`flag_for_human` diverges from `Bail` on purpose.** `linear-claim.md` **Bail**

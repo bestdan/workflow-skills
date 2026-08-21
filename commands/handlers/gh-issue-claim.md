@@ -92,9 +92,12 @@ claims nothing, skips it.
    `wip_limit` of its own. That is deliberate — the labels alone already made the count
    tool-scoped rather than a true bound on the repo's review queue, and a per-operator
    budget is the only denominator a caller can act on.
-3. If that count is **≥ `wip_limit`**, decline: report
+3. If that count is **≥ `wip_limit`**, apply the at-limit procedure in
+   `commands/handlers/attendedness.md`. **When it resolves to decline** — a batch, a hard
+   negative, or the user chose Stop — report
    `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
-   not claim another issue.
+   not claim another issue. When it resolves to override, proceed with the claim and say
+   so in the run report. This step owns the **message**; that file owns the **decision**.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
 outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve

@@ -40,8 +40,8 @@ proceed" — prose that goes unanswered does not block, so an unattended run rea
 and continues. The prompt is the detector, not a courtesy.
 
 Batches are excluded deliberately. `--all`, `-n N`, a `--claim-only` batch, and any
-remote dispatch stay bounded however they were invoked, because presence at dispatch
-says nothing about the pull requests that land later. The split is **batch vs single**,
+batch remote dispatch stay bounded however they were invoked, because presence at
+dispatch says nothing about the pull requests that land later. The split is **batch vs single**,
 never `--remote` vs `--local` — `repo-pr` dispatches single tasks remotely by default
 and those stay ungated.
 

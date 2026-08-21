@@ -34,16 +34,25 @@ detector. Do not "simplify" it into a printed question.
 
 ## The gate
 
-Every claiming run computes its in-flight count. The count is never skipped.
+Every run that reaches a WIP gate computes its in-flight count. The count is never
+skipped — attendedness changes what happens **at** the limit, never whether the count
+runs. (One path has no gate at all: repo-pr single mode deliberately never counts —
+that exemption is owned by `repo-pr-execute.md` §4, and restoring the invariant by
+gating it is not a fix this file licenses.)
 
 1. **Under the limit** → claim. No prompt, no note, no ceremony. This is the common
    case and it must stay silent.
 2. **At or over the limit, and the action is a batch** — `--all`, `-n N`, a
-   `--claim-only` batch, or any dispatch of remote sessions → **decline or bound the
+   `--claim-only` batch, or a batch dispatch of remote sessions → **decline or bound the
    batch exactly as that handler already specifies. Never prompt.** Reserving many
    cards, or dispatching N sessions, is a throughput decision either way: a human
    present at dispatch is not present for the N pull requests that land later. This
    is the one place attendedness is deliberately ignored.
+
+   **Transport never decides this — batch vs single does.** A _batch_ dispatch of
+   remote sessions is gated because it is a batch, not because it is remote. `repo-pr`
+   dispatches **single** tasks remotely by default and those are ungated
+   (`repo-pr-execute.md`), so reading "remote → gated" inverts the rule.
 3. **At or over the limit, single action** (a single execution, or a single
    `--claim-only`):
    - If any **hard negative** below holds, decline as the handler specifies. Do not
