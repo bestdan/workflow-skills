@@ -79,16 +79,16 @@ The delivery destination is a **handler** named in `dev_docs/tasks/.task-config.
 
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
-wip_limit: 3 # optional — bounds THIS operator's /do-tasks in-flight work (repo-pr batch dispatch + tracker pre-claim gates); default 3
+wip_limit: 3 # optional — bounds /do-tasks in-flight work (repo-pr batch dispatch: shared; tracker pre-claim gates: per-operator); default 3
 auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute size <= this, reserve bigger for a human; default 2
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `gh-issue-claim.md`, `jira-claim.md`, and `commands/do-tasks.md` (`linear`).
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
 
-**What counts as in-flight: this caller's own work, and only work that is actually moving.** Every tracker gate scopes its count to the claiming account (`assignee = currentUser()` in jira, `assignee:@me` in gh-issue, the viewer's `assigneeId` in linear) and drops parked issues (Jira's Impediment flag, and any status named in `jira.blocked_statuses`). A project-wide count is not a usable bound: on a shared team board other people's work alone exceeds any plausible limit, so the gate never opens and nothing is ever claimed. The trade is explicit — the limit budgets one operator, so N operators on one board hold N × `wip_limit` between them.
+**What counts as in-flight: this caller's own work, and only work that is actually moving.** Every tracker gate scopes its count to the claiming account (`assignee = currentUser()` in jira, `assignee:@me` in gh-issue, the viewer's id as `assignee` in linear) and drops parked issues (Jira's Impediment flag, and any status named in `jira.blocked_statuses`). A project-wide count is not a usable bound: on a shared team board other people's work alone exceeds any plausible limit, so the gate never opens and nothing is ever claimed. The trade is explicit — the limit budgets one operator, so N operators on one board hold N × `wip_limit` between them.
 
 `auto_execute_max_size` (default `2`, `repo-pr` only) size-gates **batch** auto-routing: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless); bigger ones are **reserved** (claimed but not executed, `--claim-only` semantics) for a human to resume with `/do-tasks <slug> --no-claim`. Single-task mode is never gated, and explicit `--claim-only` / `--no-claim` override it. See `commands/handlers/repo-pr-config.md`.
 

@@ -18,6 +18,7 @@ Read `dev_docs/tasks/.task-config.yml`. The jira claim flow reads:
 - `jira.project` — project key.
 - `jira.ready_status` — **required here.** The status the ready lane lives in (the jira analogue of Linear's `Todo`). `/do-tasks` pulls candidates from this status. If it is unset/empty, **stop** with: "jira `/do-tasks` needs `jira.ready_status` set in dev_docs/tasks/.task-config.yml (the status promoted issues land in). Set it, or run `/task-config jira`." Do not guess a status name.
 - `jira.base_branch` — optional; the branch `/do-tasks` branches from (default: the repo's default branch).
+- `jira.blocked_statuses` — optional; status names that mean "blocked" on this board. The pre-claim WIP gate excludes them from its in-flight count, so a parked issue doesn't consume a slot. Defined in `commands/handlers/jira-config.md` → "Blocked statuses".
 
 ## Modes: atomic vs. claim/execute split
 

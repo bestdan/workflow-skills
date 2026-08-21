@@ -308,31 +308,40 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    whole-team scope when 0 projects are configured), count Linear issues in any
    `started`-type state (e.g. `In Progress`, `In Review`) **assigned to the current
    viewer** via `<linear-mcp>__list_issues` — resolve by state **type**, not display name
-   — passing the resolved `teamId`, the viewer's id as the `assigneeId` argument, and the
+   — passing the resolved `teamId`, the viewer's id as the `assignee` argument, and the
    scope's `id` as the `projectId` argument (omit when `id` is `null` — the whole-team
    scope). That scope's
    **slack = `wip_limit − in_flight`**. The started-type issue is the canonical in-flight
    unit — an open PR is already reflected by its issue sitting in a started state, so do
    **not** add open PRs separately (that double-counts).
 
-   **The `assigneeId` filter is required.** The gate bounds **this operator's** concurrent
+   **The `assignee` filter is required.** The gate bounds **this operator's** concurrent
    work, not the team's. A shared Linear project carries other people's started issues, and
    an unscoped count on such a project exceeds any plausible `wip_limit` permanently — the
    gate never opens and no issue is ever claimed. "Claim the issue" self-assigns to the
-   viewer, so the filter is exact. Use the cached viewer id already resolved by
+   viewer, so the filter is exact. The argument is `assignee` — a **positive single-value
+   match**, which is exactly what this gate wants. (That is why the gate can push it
+   server-side where "Find candidates" cannot: its predicate is "unassigned **or** me",
+   which a single-value match can't express, so that gate stays client-side — see
+   `linear-claim.md` floor step 4. `assigneeId` is a field `list_issues` **returns**, not
+   an argument it accepts.) Use the cached viewer id already resolved by
    `linear-claim.md` "Find candidates" (or `meta.viewer.id` on the fast path); do not spend
-   a second call on it. This applies to **every** count in this step, the whole-team count
-   below included — mixing a viewer-scoped per-project count with an unscoped whole-team
+   a second call on it. This applies to **every** count in this step, the all-projects count
+   below included — mixing a viewer-scoped per-project count with an unscoped all-projects
    count would make the Unassigned subtraction nonsense.
 
-   **Whole-team count (once) → Unassigned and/or global total.** Run **one** whole-team
-   `started` count (omit `projectId`) only when it is actually needed — i.e. when the
+   **All-projects count (once) → Unassigned and/or global total.** This one omits
+   `projectId` — and **only** `projectId`. It is still viewer-scoped, so it is _this
+   caller's_ work across every project, never the team's; the name says "all projects"
+   rather than "whole team" for exactly that reason (a **whole-team scope**, elsewhere in
+   this file, is a _project_ scope — `id: null` — and is a different thing). Run **one**
+   such `started` count only when it is actually needed — i.e. when the
    **chosen scope is the Unassigned bucket or Any** (needs the subtraction below) **or**
    `linear.global_wip_limit` is set (needs the total). A **single real-project** pick
-   with no global ceiling needs neither, so **skip the whole-team count** — the Linear
+   with no global ceiling needs neither, so **skip the all-projects count** — the Linear
    MCP is token-expensive. These are two independent triggers:
    - **Unassigned subtraction** (only for an Unassigned/Any pick, where step 2 counted
-     **every** configured project): `unassigned_in_flight = max(0, whole_team_in_flight −
+     **every** configured project): `unassigned_in_flight = max(0, all_projects_in_flight −
      Σ(configured in_flight))` — clamped so a mid-count state transition can't drive it
      negative and hand back phantom slack. The bucket's **slack = `unassigned_wip_limit −
      unassigned_in_flight`** (a cap of `0` → slack ≤ 0, never claimed). The Unassigned
@@ -341,13 +350,13 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
      a single-project pick — the other projects weren't counted, so `Σ(configured)` is
      incomplete.)
    - **Global ceiling total** (whenever `global_wip_limit` is set, any config): the total
-     in-flight **is that same whole-team count**. Do **not** sum the per-scope counts for
+     in-flight **is that same all-projects count**. Do **not** sum the per-scope counts for
      the ceiling (that would double-count, and once the Unassigned bucket exists is simply
      wrong).
 3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight** (the
-   whole-team count from step 2) **≥ `global_wip_limit`**, **no** project can claim —
+   all-projects count from step 2) **≥ `global_wip_limit`**, **no** project can claim —
    decline outright:
-   `Global WIP limit <N> reached (<total> in flight across all projects) — no issue claimed`
+   `Global WIP limit <N> reached (<total> of your issues in flight across all projects) — no issue claimed`
    and stop.
 4. **Per-project gate (ranked path).** Otherwise the per-project cap is checked **per
    candidate** in the claim loop below: for the chosen candidate, if **its project's**
