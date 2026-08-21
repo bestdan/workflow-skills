@@ -170,6 +170,8 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 
 **WIP limit (batch only — `--all` / `-n N`).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — skip this paragraph there.
 
+> **The single-mode exemption is deliberate, and it is not the same rule.** `commands/handlers/attendedness.md` gates batches always and lets a present human override a single claim. repo-pr's single mode has simply never been gated: that **matches** the attended outcome and **diverges** from the unattended one — an unattended single claim at the limit declines under that rule, while repo-pr single mode claims, because it never counts. So this handler needs no attendedness check, but do not read the two as equivalent. The open consequence: a cron invoking bare `/do-tasks` repeatedly can dispatch past `wip_limit` here. That is pre-existing behavior, not something the attendedness work introduced, and closing it would change the default handler for every installed user — so it is a follow-up, not a silent fix. Note also it is the **batch/single** split that decides, never `--remote` vs `--local`: repo-pr dispatches single tasks remotely by default, and those stay ungated. Do not "fix" this by gating remote dispatch.
+
 1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
 2. Count current WIP = the number of **distinct in-flight tasks**, deduped by slug
    across three sources: open `task-claim` PRs (claimed, work underway), open
@@ -231,6 +233,8 @@ For each selected task routed to **execute**, read its full content (frontmatter
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
+**The template's unattended declaration is load-bearing — keep it in the quoted prompt.** A dispatched worker otherwise sees an ordinary user-role prompt and concludes a human is watching (`commands/handlers/attendedness.md`); the dispatching session's attendedness does **not** transfer to the sessions it dispatches. It lives _inside_ the template below rather than in this prose deliberately: the template is what gets copied, so a declaration sitting only out here is dropped by anyone who copies it. This handler's own gate is batch-only, so nothing currently offers an override to lose — the line keeps that true if a worker ever reaches a gated path.
+
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported.
 
 **This prompt block stays inline prose — do not wire it to `scripts/claim-scan.sh`.**
@@ -242,6 +246,8 @@ for the orchestrator-side paths only (the pre-claim check and WIP count above,
 
 ```bash
 claude --remote "You are processing a task for the task plugin system.
+
+No human is present in this session — never prompt. If a WIP gate or any other check is met, decline and report it rather than asking.
 
 ## The task file
 

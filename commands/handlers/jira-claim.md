@@ -64,6 +64,13 @@ Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
 claiming, on every claiming run — single mode included; only `--no-claim`, which
 claims nothing, skips it.
 
+> **When the count is at the limit, who decides.** The count below always runs. What
+> happens when it meets the limit depends on the action: a **batch** declines or is
+> bounded as specified here, always; a **single** claim in an attended session offers
+> the user a one-keystroke override first. See `commands/handlers/attendedness.md` —
+> that file owns the rule, including why the override is a prompt rather than a
+> printed question. Do not restate it here.
+
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr, linear,
    and gh-issue handlers use).
@@ -106,9 +113,12 @@ claims nothing, skips it.
    status; do **not** add open PRs separately, that double-counts. (This mirrors the
    linear gate, which counts both `In Progress` and `In Review`, and the gh-issue gate,
    which counts both `auto-claimed` and `needs-review`.)
-3. If that count is **≥ `wip_limit`**, decline: report
+3. If that count is **≥ `wip_limit`**, apply the at-limit procedure in
+   `commands/handlers/attendedness.md`. **When it resolves to decline** — a batch, a hard
+   negative, or the user chose Stop — report
    `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
-   not claim another issue.
+   not claim another issue. When it resolves to override, proceed with the claim and say
+   so in the run report. This step owns the **message**; that file owns the **decision**.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
 outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve

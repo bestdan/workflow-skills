@@ -66,6 +66,14 @@ section — none are no-ops.
 | `comment_progress` | `save_comment` (the same primitive `linear-claim.md` uses for the claim and PR-link comments)                                                                                |
 | `wip_limit`        | `do-tasks.md` **Pre-claim WIP gate** over `linear-common.md`'s config (`wip_limit`, per-project overrides, `global_wip_limit`, the Unassigned bucket)                        |
 
+**The WIP gate always binds an auto-pilot run.** `commands/handlers/attendedness.md`
+lets a present human override a single claim at the limit, which would be wrong here —
+an orchestrator run is unattended by definition and is exactly the throughput the cap
+exists to bound. It is provably unreachable rather than merely unlikely: the
+orchestrator job exports `$AUTO_PILOT_UNTIL` (`scripts/spawn-orchestrator.sh`), which
+is a hard negative on that file's pre-check list, so the override is skipped
+before it can be offered. Do not add an escape hatch here.
+
 **`flag_for_human` diverges from `Bail` on purpose.** `linear-claim.md` **Bail**
 reverts the issue to a `backlog` state and clears the assignee. A parked task
 must instead stay **visible and in flight**, so this verb reuses only Bail's

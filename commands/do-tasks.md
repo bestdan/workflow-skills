@@ -1,7 +1,7 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
-argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X]"
+argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X] [--non-interactive]"
 ---
 
 # Do Tasks
@@ -18,6 +18,13 @@ The per-handler mechanics live in handler reference files this command
 > **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/`
 > directory exists, run the **Legacy migration** prompt from
 > `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
+>
+> Under `--non-interactive`, do **not** prompt and do **not** migrate: proceed as if the
+> answer were **skip once**, and note the legacy directory in the report (point at
+> `/doctor --fix`). Note this prompt is **prose**, not `AskUserQuestion` — so an
+> unattended run does not stop at it, it _answers itself_ and starts moving files.
+> Skipping is therefore the fail-safe branch here, and blocking every run over a
+> directory rename would be the wrong one.
 
 ## Modes
 
@@ -29,6 +36,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 - `/do-tasks --project <name|id|unassigned|any>` — **tracker handler only**: pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
+- `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All five prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
 dispatch (each task gets its own cloud VM). Foreground pairing is inherently
@@ -60,7 +68,8 @@ in-progress) and then **executes** it (do the work, open a PR) in one step. Thes
 two flags expose the claim and execute halves as composable steps, so a claim now
 plus a `--no-claim` execute later (by a different actor, or after a resume) add up
 to one normal run. The flags are **mutually exclusive** — passing both is an
-error: stop and ask which one was meant.
+error: stop and ask which one was meant (under `--non-interactive`, a hard error with
+that message — never a question).
 
 - **default** (neither flag) — atomic claim + execute, unchanged.
 - **`--claim-only`** — run the claim step and **stop**: no execution, no review PR.
@@ -295,6 +304,13 @@ optional **global ceiling** across all of them. Resolve the caps and counts once
 check them per candidate. After the preflight resolves the team and workflow states and
 the claim scope is resolved (above), **before** judging feasibility or claiming:
 
+> **When a cap is met, who decides.** The counts below always run. What happens when
+> one is met depends on the action: a **batch** declines or is bounded as specified
+> here, always; a **single** claim in an attended session offers the user a
+> one-keystroke override first. This applies to the per-project caps **and** to
+> `global_wip_limit` — a deliberate absolute ceiling is still a cap a present human
+> may knowingly exceed. See `commands/handlers/attendedness.md`, which owns the rule.
+
 1. **Resolve caps.** Take the **chosen scope(s)** from "Resolve claim scope" above — one
    project, the Unassigned bucket, or (for **Any**/non-interactive) the full resolved
    list, each carrying its own `wip_limit` (per-project override else the top-level
@@ -354,10 +370,15 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
      the ceiling (that would double-count, and once the Unassigned bucket exists is simply
      wrong).
 3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight** (the
-   all-projects count from step 2) **≥ `global_wip_limit`**, **no** project can claim —
-   decline outright:
+   all-projects count from step 2) **≥ `global_wip_limit`**, **no** project can claim.
+   Apply the at-limit procedure in `commands/handlers/attendedness.md`; when it resolves
+   to decline, decline outright:
    `Global WIP limit <N> reached (<total> of your issues in flight across all projects) — no issue claimed`
-   and stop.
+   and stop. When it resolves to override, continue to step 4 — the ceiling is lifted for
+   this run only, and each project's own cap still applies below. **That override is
+   _the_ override for this run** (`attendedness.md`, "once means once per run"): if step 4
+   later finds every candidate's project full, it is already granted — claim, do not ask
+   again.
 4. **Per-project gate (ranked path).** Otherwise the per-project cap is checked **per
    candidate** in the claim loop below: for the chosen candidate, if **its project's**
    slack is `≤ 0`, that project is full → **skip to the next ranked candidate** (which may
@@ -365,16 +386,26 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    is `WIP limit <wip_limit> reached (<count> in flight) in project <name> — skipping to the next candidate`
    (render `<name>` as `the whole team` when the scope's `name` is `null`; the same
    convention applies to the direct-mode decline message in step 5).
-   If every remaining candidate's project is full, report that no issue was claimed.
+   If every remaining candidate's project is full, apply the at-limit procedure in
+   `commands/handlers/attendedness.md` **once, here** — not per candidate. Walking the
+   ranked list is not an at-limit outcome, because another project may still have slack;
+   the run only meets the limit once nothing is left to try. On override, claim the
+   top-ranked candidate whose project was full. On decline, report that no issue was
+   claimed. The once-per-run bound is `attendedness.md`'s, not this step's — so an
+   override or a Stop already given in step 3 settles this too, and no second question is
+   asked however many candidates were skipped.
 5. **Direct-identifier / single mode** (`/do-tasks <identifier>`): gate against **that
    issue's own resolved scope** cap — a configured project, or the **shared Unassigned
    bucket** when the issue is outside the configured projects (`linear-claim.md` step 7).
    The Unassigned bucket's in-flight is the subtraction from step 2 (already computed once
    the bucket exists); a configured project's is its per-project count. Also gate against
-   the global ceiling. If either is at its limit, **stop** — no fall-through — declining
-   with the global message (step 3) or, for the per-project cap,
+   the global ceiling. If either is at its limit, apply the at-limit procedure in
+   `commands/handlers/attendedness.md` — this is a **single** action, so an attended run
+   gets the override. On override, claim the named issue. On decline, **stop** — no
+   fall-through — with the global message (step 3) or, for the per-project cap,
    `WIP limit <wip_limit> reached (<count> in flight) in project <name> — no issue claimed`
    (render `<name>` as `Unassigned` for the bucket, `the whole team` for a `null` scope).
+   Both caps at their limit is still **one** question, not two.
 
 **`--all --claim-only` batch.** Reserve up to each scope's own slack independently:
 effective batch = `Σ max(0, slack_p)` across **all resolved scopes** (configured projects
@@ -533,7 +564,9 @@ capability is actually visible — inside the remote session** — via two concr
    scope's `slack = wip_limit − in_flight`; also track the remaining **global** slack.
    If every chosen scope has `slack ≤ 0` (or the global ceiling is already reached),
    dispatch nothing and report `WIP limit reached (<per-scope counts> in flight) —
-   nothing dispatched`.
+   nothing dispatched`. **This bound is unconditional — never offer the attended
+   override here**, however the batch was invoked: a batch is the one action
+   `attendedness.md` gates regardless of who is present.
 3. **Select dependency-ready candidates lazily, in ranked order, respecting each
    scope's slack.** Walk the ranked list and check dependency-readiness **on demand**,
    one candidate at a time: **dependency-ready** for a tracker means every native
@@ -564,8 +597,18 @@ capability is actually visible — inside the remote session** — via two concr
    `wip_limit`/`max_estimate`), mirroring the inline-prompt pattern in
    `repo-pr-execute.md` §4. **Never** inline secrets — `api_key`, `api_key_ref`,
    `api_key_resolver`, or any raw key stays in the remote host's own environment,
-   never in the prompt. Run the dispatch
-   commands in sequence so the user sees each session id.
+   never in the prompt.
+
+   **The prompt must declare the remote session unattended.** Inline
+   `--non-interactive` semantics explicitly: "No human is present in this session —
+   never prompt; if the WIP gate is met, decline and report it." Without that, the
+   worker sees an ordinary user-role prompt, matches no hard negative in
+   `attendedness.md`, concludes it is attended, and offers itself the override its
+   dispatcher was gated by — turning one bounded batch into N unbounded claims. This is
+   the sharpest failure mode in the whole design: **the dispatching session's
+   attendedness never transfers to the sessions it dispatches.**
+
+   Run the dispatch commands in sequence so the user sees each session id.
 5. **The atomic claim is the only race guard.** Parallel sessions are safe **without**
    any branch- or file-based lock because each session's first mutating step is the
    handler's read-then-write claim (Linear: the token-comment election in
