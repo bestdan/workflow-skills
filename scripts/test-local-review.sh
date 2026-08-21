@@ -1906,6 +1906,23 @@ out.refDefTitle = seen('[r]: https://r.test "REF_T"\n').includes('REF_T');
 // Deep nesting must degrade to visible raw text, not vanish.
 out.deepInlineText = seen('*'.repeat(40) + 'DEEP_TXT' + '*'.repeat(40)).includes('DEEP_TXT');
 
+// A TIGHT list item's inline markup: its child is a block `text` token, which
+// used to be emitted as raw source, so every bullet printed its own asterisks.
+const tagsOf = src => { const t = []; walk(describe(src), n => t.push(n.tag)); return t; };
+out.tightListStrong = tagsOf('- **Hook:** once\n- **Party:** 3-6\n').filter(g => g === 'strong').length;
+out.tightListRawStars = seen('- **Hook:** once\n- **Party:** 3-6\n').includes('**');
+// The loose form already worked; it must keep working.
+out.looseListStrong = tagsOf('- **Hook:** once\n\n- **Party:** 3-6\n').filter(g => g === 'strong').length;
+// ...and an UNKNOWN token stays inert even when it carries a `tokens` field.
+// No markdown source produces one, so the token is synthesized: this asserts
+// the design doc's own bullet — the fallback never derives an element from the
+// token type and never walks arbitrary token fields.
+const mystery = describeBlock({type: 'mystery', raw: 'MYSTERY_RAW',
+  tokens: [{type: 'strong', raw: '**x**', tokens: [{type: 'text', text: 'x'}]}]},
+  {line: 1, endLine: 1}, 0);
+const mysteryTags = []; walk(mystery, n => mysteryTags.push(n.tag));
+out.unknownTokenInert = mysteryTags.join(',') === 'div' && mystery.text === 'MYSTERY_RAW';
+
 // One anchor key per target: an li and its inner text fallback used to collide.
 const keyed = [];
 walk(describe('- one\n- two\npara\n\n| a | b |\n| - | - |\n| 1 | 2 |\n'), n => {
@@ -2063,6 +2080,13 @@ console.log(JSON.stringify(out));
                   _o["refDefTitle"] is True, _o["refDefTitle"])
             check("preview: inline content past the depth cap degrades to visible text",
                   _o["deepInlineText"] is True, "deeply nested text vanished")
+            check("preview: a tight list item renders its inline markup",
+                  _o["tightListStrong"] == 2 and _o["tightListRawStars"] is False,
+                  f'strong={_o["tightListStrong"]} rawStars={_o["tightListRawStars"]}')
+            check("preview: a loose list item still renders its inline markup",
+                  _o["looseListStrong"] == 2, _o["looseListStrong"])
+            check("preview: an unknown token stays inert raw text, fields unwalked",
+                  _o["unknownTokenInert"] is True, "the unknown-token fallback walked a token field")
             check("preview: no two comment targets share an anchor key",
                   _o["duplicateTargetKeys"] == [], _o["duplicateTargetKeys"])
             check("preview: frontmatter offset is added back to later anchors",
