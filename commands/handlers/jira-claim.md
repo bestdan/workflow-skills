@@ -64,6 +64,13 @@ Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
 claiming, on every claiming run — single mode included; only `--no-claim`, which
 claims nothing, skips it.
 
+> **When the count is at the limit, who decides.** The count below always runs. What
+> happens when it meets the limit depends on the action: a **batch** declines or is
+> bounded as specified here, always; a **single** claim in an attended session offers
+> the user a one-keystroke override first. See `commands/handlers/attendedness.md` —
+> that file owns the rule, including why the override is a prompt rather than a
+> printed question. Do not restate it here.
+
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr, linear,
    and gh-issue handlers use).

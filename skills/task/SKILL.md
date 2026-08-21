@@ -86,7 +86,9 @@ auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that runs on every claiming run, single ones included, and declines once in-flight work meets the limit (see the next paragraph for the one case that offers an override instead). How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
+
+**When the limit is met, a batch is bounded and a present human is asked.** The gate always runs, but what it does at the limit depends on the action. A **batch** — `--all`, `-n N`, a `--claim-only` batch, any remote dispatch — is bounded or declined unconditionally: presence at dispatch says nothing about the pull requests that land later. A **single** claim in an attended session gets a one-keystroke override, because the human the cap protects is right there and can see the queue. The gate is never simply skipped, so an unattended run that misjudges itself declines rather than flooding the queue. `commands/handlers/attendedness.md` owns the rule and the reasoning; `--non-interactive` declares a run unattended outright.
 
 **What counts as in-flight: this caller's own work, and only work that is actually moving.** Every tracker gate scopes its count to the claiming account (`assignee = currentUser()` in jira, `assignee:@me` in gh-issue, the viewer's id as `assignee` in linear) and drops parked issues (Jira's Impediment flag, and any status named in `jira.blocked_statuses`). A project-wide count is not a usable bound: on a shared team board other people's work alone exceeds any plausible limit, so the gate never opens and nothing is ever claimed. The trade is explicit — the limit budgets one operator, so N operators on one board hold N × `wip_limit` between them.
 
@@ -118,16 +120,17 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 
 Flag matrix:
 
-|                      | What it does                                                                  |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `/do-tasks`          | execute the single highest-ranked dependency-ready task                       |
-| `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`) |
-| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)    |
-| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)     |
-| `--remote` (default) | dispatch each task to its own cloud VM (file path)                            |
-| `--local`            | run in the current session; caps the batch at 1 (file path)                   |
-| `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable    |
-| `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only  |
+|                      | What it does                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `/do-tasks`          | execute the single highest-ranked dependency-ready task                                             |
+| `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`)                       |
+| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)                          |
+| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)                           |
+| `--remote` (default) | dispatch each task to its own cloud VM (file path)                                                  |
+| `--local`            | run in the current session; caps the batch at 1 (file path)                                         |
+| `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable                          |
+| `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only                        |
+| `--non-interactive`  | declare no human present: never prompt, and the WIP gate declines rather than offering its override |
 
 **Claim / execute split (`--claim-only`, `--no-claim`).** `/do-tasks` claims and executes atomically by default. These two **mutually exclusive** flags split that into composable steps: a `--claim-only` now plus a `--no-claim` later add up to one normal run. `--claim-only` runs only the claim half and stops (no file delete, no review PR). `--no-claim` skips claiming and executes a task the caller already claimed, guarding that it's already `in_progress` (`repo-pr`) or assigned in a `started` state (`linear`) — otherwise it stops, since executing an unclaimed task reopens the claim race. `--claim-only` is the one execute-family action safe to batch (bounded by the WIP gate); `--no-claim` is always single. Per-handler steps: `commands/do-tasks.md`.
 

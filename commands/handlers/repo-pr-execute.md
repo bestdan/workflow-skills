@@ -170,6 +170,8 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 
 **WIP limit (batch only — `--all` / `-n N`).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — skip this paragraph there.
 
+> **The single-mode exemption is the rule, not an oversight.** `commands/handlers/attendedness.md` gates batches always and lets a present human override a single claim; repo-pr's single mode has simply never been gated, which is the same outcome by a shorter route. So this handler needs no attendedness check — but note it is the **batch/single** split that decides, never `--remote` vs `--local`: repo-pr dispatches single tasks remotely by default, and those stay ungated. Do not "fix" this by gating remote dispatch.
+
 1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
 2. Count current WIP = the number of **distinct in-flight tasks**, deduped by slug
    across three sources: open `task-claim` PRs (claimed, work underway), open
@@ -230,6 +232,8 @@ Report the two groups distinctly in step 5: executed/dispatched vs.
 For each selected task routed to **execute**, read its full content (frontmatter + body), then dispatch a remote session.
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
+
+**Declare the remote session unattended.** State in the prompt that no human is present and it must never prompt. A dispatched worker otherwise sees an ordinary user-role prompt and concludes a human is watching (`commands/handlers/attendedness.md`) — the dispatching session's attendedness does **not** transfer to the sessions it dispatches. This handler's own gate is batch-only, so nothing here currently offers an override; the declaration keeps that true if the worker ever runs a gated path.
 
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported.
 

@@ -1,7 +1,7 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
 allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
-argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X]"
+argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X] [--non-interactive]"
 ---
 
 # Do Tasks
@@ -29,6 +29,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 - `/do-tasks --project <name|id|unassigned|any>` — **tracker handler only**: pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
+- `/do-tasks --non-interactive` — declare that no human is present: never prompt. The scope prompt resolves to **Any** and the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`). Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
 dispatch (each task gets its own cloud VM). Foreground pairing is inherently
@@ -295,6 +296,13 @@ optional **global ceiling** across all of them. Resolve the caps and counts once
 check them per candidate. After the preflight resolves the team and workflow states and
 the claim scope is resolved (above), **before** judging feasibility or claiming:
 
+> **When a cap is met, who decides.** The counts below always run. What happens when
+> one is met depends on the action: a **batch** declines or is bounded as specified
+> here, always; a **single** claim in an attended session offers the user a
+> one-keystroke override first. This applies to the per-project caps **and** to
+> `global_wip_limit` — a deliberate absolute ceiling is still a cap a present human
+> may knowingly exceed. See `commands/handlers/attendedness.md`, which owns the rule.
+
 1. **Resolve caps.** Take the **chosen scope(s)** from "Resolve claim scope" above — one
    project, the Unassigned bucket, or (for **Any**/non-interactive) the full resolved
    list, each carrying its own `wip_limit` (per-project override else the top-level
@@ -533,7 +541,9 @@ capability is actually visible — inside the remote session** — via two concr
    scope's `slack = wip_limit − in_flight`; also track the remaining **global** slack.
    If every chosen scope has `slack ≤ 0` (or the global ceiling is already reached),
    dispatch nothing and report `WIP limit reached (<per-scope counts> in flight) —
-   nothing dispatched`.
+   nothing dispatched`. **This bound is unconditional — never offer the attended
+   override here**, however the batch was invoked: a batch is the one action
+   `attendedness.md` gates regardless of who is present.
 3. **Select dependency-ready candidates lazily, in ranked order, respecting each
    scope's slack.** Walk the ranked list and check dependency-readiness **on demand**,
    one candidate at a time: **dependency-ready** for a tracker means every native
@@ -564,8 +574,18 @@ capability is actually visible — inside the remote session** — via two concr
    `wip_limit`/`max_estimate`), mirroring the inline-prompt pattern in
    `repo-pr-execute.md` §4. **Never** inline secrets — `api_key`, `api_key_ref`,
    `api_key_resolver`, or any raw key stays in the remote host's own environment,
-   never in the prompt. Run the dispatch
-   commands in sequence so the user sees each session id.
+   never in the prompt.
+
+   **The prompt must declare the remote session unattended.** Inline
+   `--non-interactive` semantics explicitly: "No human is present in this session —
+   never prompt; if the WIP gate is met, decline and report it." Without that, the
+   worker sees an ordinary user-role prompt, matches no hard negative in
+   `attendedness.md`, concludes it is attended, and offers itself the override its
+   dispatcher was gated by — turning one bounded batch into N unbounded claims. This is
+   the sharpest failure mode in the whole design: **the dispatching session's
+   attendedness never transfers to the sessions it dispatches.**
+
+   Run the dispatch commands in sequence so the user sees each session id.
 5. **The atomic claim is the only race guard.** Parallel sessions are safe **without**
    any branch- or file-based lock because each session's first mutating step is the
    handler's read-then-write claim (Linear: the token-comment election in
