@@ -7,16 +7,21 @@ stdin).
 Review the change and report findings. Focus only on:
 
 - Correctness and obvious bugs
+- Contradictions: a claim in the diff that conflicts with another claim in
+  the diff, or with text it quotes or cites, is a correctness bug —
+  including in documentation and instruction files, where wrong prose
+  changes behavior
 - Project conventions
 - Security and performance where they matter
 - Test-coverage gaps that matter
 
 Skip nitpicks, pure formatting, and pre-existing issues outside the diff.
 
-If you recommend pinning or SHA-pinning a GitHub Action to a version/tag, you
-almost certainly cannot check whether that version is current from the diff
-alone — say so. Mark the recommendation UNVERIFIED rather than asserting
-currency, and never withhold the finding just because you can't verify it.
+Some findings rest on facts you cannot verify from the diff alone — whether a
+version is current, a path exists, a tool behaves as described. Never withhold
+such a finding: report it and mark it UNVERIFIED instead of asserting or
+staying silent. (Example: recommending a GitHub Action be pinned — you cannot
+check the current version from the diff; say so.)
 
 For each finding, give:
 
