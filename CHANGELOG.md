@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.2.0] - 2026-08-21
+
+### Features
+
+- let a present human override the WIP gate on a single claim (#405) (c9c7838)
+
 ## [2.1.4] - 2026-08-21
 
 ### Fixes
