@@ -1040,21 +1040,35 @@ function describeBlock(t, ln, depth){
       kids.push(node('tbody', {kids: body}));
       return node('table', Object.assign({attrs:{class:'md-table'}, kids}, span));
     }
-    default:
-      // No md-block here. A list_item's inner `text` token lands in this case
-      // over the SAME span as the enclosing li, and blockAnchor keys on line
-      // alone — so marking both made two nested targets share one comment,
-      // with the chip dedupe silently eating whichever rendered first.
-      // Measured before the fix: `- one\n- two\npara\n` gave
-      // [li@1, div@1, li@2-3, div@2-3]. Containers stay the target; this is
-      // just their text. That text is still MARKED-UP text: a tight list item
-      // carries its inline tokens here, so emitting `raw` printed `**Hook:**`
-      // literally in every tight list (a loose one goes through `paragraph`
-      // and always rendered). Inline tokens go through describeInline, the
-      // same allow-listed path every other inline site uses.
+    case 'text':
+      // A list_item's inner `text` token, and the reason this case exists at
+      // all. It is MARKED-UP text: a tight list item carries its inline tokens
+      // here, so emitting `raw` printed `**Hook:**` literally in every tight
+      // list (a loose one goes through `paragraph` and always rendered).
+      //
+      // No md-block here. This token spans the SAME lines as the enclosing li,
+      // and blockAnchor keys on line alone — so marking both made two nested
+      // targets share one comment, with the chip dedupe silently eating
+      // whichever rendered first. Measured before that fix: `- one\n- two\n
+      // para\n` gave [li@1, div@1, li@2-3, div@2-3]. Containers stay the
+      // target; this is just their text.
+      //
+      // The length test is not redundant with the truthiness one: `tokens: []`
+      // is truthy, and would render neither kids nor text — the one outcome
+      // "nothing in the file may be invisible" forbids. No token in the
+      // vendored marked reaches here that way (60k fuzzed inputs, zero hits);
+      // the guard is for the next version bump, not for a live bug.
       return node('div', Object.assign({attrs:{class:'md-plain'},
-        kids: t.tokens ? describeInline(t.tokens, depth+1) : [],
-        text: t.tokens ? null : String(t.raw != null ? t.raw : '')}, span));
+        kids: (t.tokens && t.tokens.length) ? describeInline(t.tokens, depth+1) : [],
+        text: (t.tokens && t.tokens.length) ? null : String(t.raw != null ? t.raw : '')}, span));
+    default:
+      // An UNKNOWN token stays inert: its raw source as text, no element
+      // derived from the token type and no walk of its fields. That is one of
+      // the three bullets under "The invariant" in the design doc, and the
+      // security corpus asserts it directly — which is why the `text` token
+      // above is handled by name rather than by widening this branch.
+      return node('div', Object.assign({attrs:{class:'md-plain'},
+        text: String(t.raw != null ? t.raw : '')}, span));
   }
 }
 

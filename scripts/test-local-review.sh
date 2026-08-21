@@ -1873,6 +1873,15 @@ out.tightListStrong = tagsOf('- **Hook:** once\n- **Party:** 3-6\n').filter(g =>
 out.tightListRawStars = seen('- **Hook:** once\n- **Party:** 3-6\n').includes('**');
 // The loose form already worked; it must keep working.
 out.looseListStrong = tagsOf('- **Hook:** once\n\n- **Party:** 3-6\n').filter(g => g === 'strong').length;
+// ...and an UNKNOWN token stays inert even when it carries a `tokens` field.
+// No markdown source produces one, so the token is synthesized: this asserts
+// the design doc's own bullet — the fallback never derives an element from the
+// token type and never walks arbitrary token fields.
+const mystery = describeBlock({type: 'mystery', raw: 'MYSTERY_RAW',
+  tokens: [{type: 'strong', raw: '**x**', tokens: [{type: 'text', text: 'x'}]}]},
+  {line: 1, endLine: 1}, 0);
+const mysteryTags = []; walk(mystery, n => mysteryTags.push(n.tag));
+out.unknownTokenInert = mysteryTags.join(',') === 'div' && mystery.text === 'MYSTERY_RAW';
 
 // One anchor key per target: an li and its inner text fallback used to collide.
 const keyed = [];
@@ -1935,6 +1944,8 @@ console.log(JSON.stringify(out));
                   f'strong={_o["tightListStrong"]} rawStars={_o["tightListRawStars"]}')
             check("preview: a loose list item still renders its inline markup",
                   _o["looseListStrong"] == 2, _o["looseListStrong"])
+            check("preview: an unknown token stays inert raw text, fields unwalked",
+                  _o["unknownTokenInert"] is True, "the unknown-token fallback walked a token field")
             check("preview: no two comment targets share an anchor key",
                   _o["duplicateTargetKeys"] == [], _o["duplicateTargetKeys"])
             check("preview: frontmatter offset is added back to later anchors",
