@@ -12,6 +12,7 @@ It is the resolution of the `/promote-tasks` size gate, and the sibling of `plan
 ## When to use
 
 - A task estimates larger than size `5` (multi-layer rework, many unrelated files, several behaviors at once) — too big to capture as one card.
+- A task touches **3+ unrelated subsystems** (e.g. a sync/build script, a test suite, tooling/formatter config, and domain logic, in any combination) even while nominally at or under size `5` — subsystem count is a split trigger independent of raw line/file count (see **Task size** in `skills/task/SKILL.md`).
 - `/promote-tasks` scored a card LOW with `scope exceeds size 5 — split into sub-tasks`.
 - The user points at a specific task/card/ticket and says it's too big, won't fit one PR, or asks to split / slice / break down / chunk it.
 - Mid-`/do-tasks`, the executor realizes the claimed task is too large to finish in one PR and bails for breakdown.
