@@ -31,18 +31,22 @@ fresh `git worktree add` on its own — but a plain clone is faster to fix here.
 
 Those submodules also mean you can't tear a worktree down with a plain
 `git worktree remove <path>` once you're done with it — git refuses with
-`fatal: working trees containing submodules cannot be moved or removed`. Add
-`--force` (after confirming `git status --porcelain --ignored` is clean in
-that worktree — `--force` skips git's own uncommitted-changes check and
-deletes gitignored paths too, so check both, not just tracked changes):
+`fatal: working trees containing submodules cannot be moved or removed`.
+Before adding `--force` to get past that, confirm both the worktree itself
+_and_ its submodules are clean — `--force` skips git's own uncommitted-changes
+check, deletes gitignored paths right along with everything else, and a
+top-level status check doesn't look inside a submodule:
 
 ```sh
+git status --porcelain --ignored
+git submodule foreach 'git status --porcelain --ignored'
 git worktree remove --force "<path>"
 ```
 
-See [`dev_docs/worktree-cleanup.md`](dev_docs/worktree-cleanup.md) if that
-itself fails — a locked worktree needs different handling than any other
-failure does, and reaching for `rm -rf` is a last resort, not the default.
+See [`dev_docs/worktree-cleanup.md`](dev_docs/worktree-cleanup.md) if
+`remove --force` itself fails — a locked worktree needs different handling
+than any other failure does, and reaching for `rm -rf` is a last resort, not
+the default.
 
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.

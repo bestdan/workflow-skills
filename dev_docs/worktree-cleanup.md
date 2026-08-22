@@ -10,17 +10,25 @@ fatal: working trees containing submodules cannot be moved or removed
 
 ## The fix: `--force`
 
+Confirm both the worktree **and each of its populated submodules** are clean
+**first** — `--force` skips git's own uncommitted-changes check, and it
+deletes gitignored paths right along with everything else, so `--porcelain`
+alone isn't enough: this repo's own `.gitignore` covers real local state
+(`.claude/`, `dev_docs/co-review/`, `dev_docs/tasks/*`), and a top-level
+status check does not look inside a submodule at all — a submodule can carry
+its own ignored files that only its own `git status` will show:
+
+```sh
+git status --porcelain --ignored
+git submodule foreach 'git status --porcelain --ignored'
+```
+
+Only once both come back clean is `--force` actually safe:
+
 ```sh
 git worktree remove --force "<path>"
 ```
 
-Confirm `git status --porcelain --ignored` is clean in that worktree
-**first** — `--force` skips git's own uncommitted-changes check, and it
-deletes gitignored paths right along with everything else, so `--porcelain`
-alone isn't enough: this repo's own `.gitignore` covers real local state
-(`.claude/`, `dev_docs/co-review/`, `dev_docs/tasks/*`), and a submodule can
-carry its own ignored files too — check inside it as well before you
-force-remove. Only once both come back clean is `--force` actually safe.
 It stays a single git-managed command that keeps git's own worktree
 bookkeeping in sync as it goes (removal is still two internal steps —
 checkout, then metadata — so it isn't atomic; interruption can still leave
