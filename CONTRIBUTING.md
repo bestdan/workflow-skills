@@ -35,17 +35,25 @@ Those submodules also mean you can't tear a worktree down with a plain
 `--force`, which git needs anyway to remove a worktree containing submodules:
 
 ```sh
-git worktree remove --force <path>
+git worktree remove --force "<path>"
 ```
 
 Confirm `git status --porcelain` is clean in that worktree first — `--force`
 also skips git's own uncommitted-changes check, so it's the one thing making
 this safe rather than the atomic removal itself. `scripts/spawn-orchestrator.sh`
-already removes worker worktrees this way. Only if `--force` itself fails do
-you need the manual, non-atomic fallback:
+already removes worker worktrees this way.
+
+If `--force` itself fails, diagnose the error rather than reaching for
+`rm -rf` — a **locked** worktree (`git worktree lock`) refuses a single
+`--force` on purpose (`use 'remove -f -f' to override or unlock first`), and
+`rm -rf` would destroy a tree someone deliberately protected while leaving
+its locked administrative entry behind for `git worktree prune` to trip over.
+Pass `--force` twice, or `git worktree unlock` first, to remove it properly.
+Only once you've ruled out a lock (and any other diagnosable cause) is the
+manual, non-atomic fallback worth reaching for:
 
 ```sh
-rm -rf <path>
+rm -rf "<path>"
 git worktree prune
 ```
 
