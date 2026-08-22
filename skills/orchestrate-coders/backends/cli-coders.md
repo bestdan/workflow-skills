@@ -63,8 +63,11 @@ Per packet:
    changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
    commit — so the branch actually carries the work that SKILL.md step 6
    merges. Then hand the branch back to the orchestrator's integrate step.
-   After integration, remove the worktree with `git worktree remove <dir>`
-   (not a manual `rm`, which leaves stale `.git/worktrees` metadata).
+   After integration, remove the worktree with `git worktree remove --force
+   <dir>` (plain `remove` refuses if the packet's verify step populated any
+   submodules; `--force` is safe here since the packet's changes are already
+   committed to its branch by this point) — not a manual `rm`, which leaves
+   stale `.git/worktrees` metadata.
 
 ## Known invocations
 
