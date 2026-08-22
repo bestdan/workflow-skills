@@ -106,6 +106,41 @@ write_task() {
   } >"$path"
 }
 
+make_plugin_fixture() {
+  # make_plugin_fixture <dir> — the smallest plugin tree validate.py accepts
+  # without unrelated errors. Copies validate.py into <dir>/scripts so ROOT
+  # (Path(__file__).resolve().parent.parent) resolves to <dir> — this is how
+  # the plugin-root-path check (which always runs against ROOT, unlike the
+  # task-file checks above) gets exercised against a fixture instead of this
+  # plugin's own tree. Callers add a single command md file under
+  # <dir>/commands/ and must keep README.md's counts in sync with it.
+  local dir="$1"
+  mkdir -p "$dir/scripts" "$dir/skills" "$dir/agents" "$dir/dev_docs/tasks" \
+    "$dir/commands" "$dir/.claude-plugin"
+  cp "$SCRIPT" "$dir/scripts/validate.py"
+  if [ -f "$ROOT/scripts/validate.py.lock" ]; then
+    cp "$ROOT/scripts/validate.py.lock" "$dir/scripts/validate.py.lock"
+  fi
+  cat >"$dir/.claude-plugin/plugin.json" <<'JSON'
+{
+  "name": "fixture-plugin",
+  "version": "1.0.0",
+  "description": "fixture plugin for validate.py tests"
+}
+JSON
+  cat >"$dir/.claude-plugin/marketplace.json" <<'JSON'
+{
+  "description": "fixture marketplace",
+  "plugins": [
+    { "name": "fixture-plugin", "version": "1.0.0", "description": "fixture plugin for validate.py tests" }
+  ]
+}
+JSON
+  cat >"$dir/README.md" <<'MD'
+This fixture plugin has 0 skills, 1 command, and 0 subagents.
+MD
+}
+
 # --- Fixture (a): missing required field -------------------------------
 DIR_A="$BASE/missing-field"
 write_task "$DIR_A/missing-title.md" "priority: low
@@ -192,6 +227,64 @@ expires: 2099-01-01"
 out_d2="$(uv run "$SCRIPT" "$DIR_D_EMPTY_TITLE" 2>&1)"
 assert_contains "explicit dir: validates the passed dir's own card" "$out_d2" "needs-a-flag.md: missing required field 'title'"
 assert_not_contains "explicit dir: does NOT validate the plugin's own dev_docs/tasks" "$out_d2" "autopilot_hardening"
+
+# --- Fixture (e): ${CLAUDE_PLUGIN_ROOT}/<path> reference that resolves ------
+DIR_E="$BASE/plugin-root-pass"
+make_plugin_fixture "$DIR_E"
+echo "#!/bin/sh" >"$DIR_E/scripts/real-thing.sh"
+cat >"$DIR_E/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/real-thing.sh` to do the thing.
+MD
+
+out_e="$(uv run "$DIR_E/scripts/validate.py" 2>&1)"
+rc_e=$?
+assert_not_contains "resolving plugin-root reference is not flagged" "$out_e" "does not exist"
+if [ "$rc_e" -eq 0 ]; then
+  ok "resolving plugin-root reference: exits 0"
+else
+  bad "resolving plugin-root reference: should exit 0, got $rc_e"
+fi
+
+# --- Fixture (f): stale ${CLAUDE_PLUGIN_ROOT}/<path> reference is flagged ---
+# Also covers the three no-false-positive cases: a bare (unprefixed) script
+# path, a placeholder with <angle-bracket> segments, and a valid reference
+# immediately followed by a sentence-ending period.
+DIR_F="$BASE/plugin-root-fail"
+make_plugin_fixture "$DIR_F"
+echo "#!/bin/sh" >"$DIR_F/scripts/real-thing.sh"
+cat >"$DIR_F/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Missing script: `${CLAUDE_PLUGIN_ROOT}/scripts/does-not-exist.sh`.
+
+Bare reference (not flagged): scripts/something-absent.sh
+
+Placeholder (not flagged): `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh`
+
+End of sentence (not flagged): see ${CLAUDE_PLUGIN_ROOT}/scripts/real-thing.sh.
+MD
+
+out_f="$(uv run "$DIR_F/scripts/validate.py" 2>&1)"
+rc_f=$?
+assert_contains "stale plugin-root reference names the file and line" "$out_f" \
+  "cmd.md: line 5: \${CLAUDE_PLUGIN_ROOT}/scripts/does-not-exist.sh does not exist"
+if [ "$rc_f" -eq 1 ]; then
+  ok "stale plugin-root reference: exits 1"
+else
+  bad "stale plugin-root reference: should exit 1, got $rc_f"
+fi
+assert_not_contains "bare (unprefixed) script reference is not flagged" "$out_f" \
+  "something-absent.sh does not exist"
+assert_not_contains "placeholder <name>.sh reference is not flagged" "$out_f" \
+  "<name>.sh does not exist"
+assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
+  "real-thing.sh does not exist"
 
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)

@@ -39,6 +39,12 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 NAME_RE = re.compile(r"^[a-z0-9-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+# The trailing character class deliberately excludes "." so a reference at the
+# end of a sentence ("... see ${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py.")
+# doesn't capture the sentence period and report a false miss.
+PLUGIN_ROOT_REF_RE = re.compile(
+    r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]*[A-Za-z0-9_/-])"
+)
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
 BODY_WARN_LINES = 450
@@ -217,6 +223,27 @@ for a in agent_files:
     check_description(rel(a), data.get("description"))
     if not data.get("tools"):
         err(rel(a), "missing tools")
+
+# --- plugin-root script paths ---
+# Skills/commands are markdown instruction files an agent reads at runtime; a
+# stale ${CLAUDE_PLUGIN_ROOT}/<path> reference surfaces as "file not found" in
+# a user's session and is otherwise invisible to CI.
+plugin_root_ref_files = sorted(
+    [
+        *(ROOT / "skills").rglob("*.md"),
+        *(ROOT / "commands").rglob("*.md"),
+        *(ROOT / "agents").rglob("*.md"),
+    ]
+)
+for f in plugin_root_ref_files:
+    for n, line in enumerate(f.read_text().splitlines(), start=1):
+        for ref in PLUGIN_ROOT_REF_RE.finditer(line):
+            captured = ref.group(1)
+            if not (ROOT / captured).exists():
+                err(
+                    rel(f),
+                    f"line {n}: ${{CLAUDE_PLUGIN_ROOT}}/{captured} does not exist",
+                )
 
 # --- task files (task_dir/**/*.md, default ROOT/dev_docs/tasks) ---
 # The repo-native task store (see skills/task/SKILL.md). Lenient like the rest
