@@ -20,7 +20,7 @@ its own ignored files that only its own `git status` will show:
 
 ```sh
 git -C "<path>" status --porcelain --ignored
-git -C "<path>" submodule foreach 'git status --porcelain --ignored'
+git -C "<path>" submodule foreach -q 'git status --porcelain --ignored'
 ```
 
 Only once both come back clean is `--force` actually safe:

@@ -39,7 +39,7 @@ top-level status check doesn't look inside a submodule:
 
 ```sh
 git -C "<path>" status --porcelain --ignored
-git -C "<path>" submodule foreach 'git status --porcelain --ignored'
+git -C "<path>" submodule foreach -q 'git status --porcelain --ignored'
 ```
 
 Only once both come back empty:
