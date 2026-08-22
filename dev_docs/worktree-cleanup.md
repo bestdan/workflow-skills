@@ -19,8 +19,8 @@ status check does not look inside a submodule at all — a submodule can carry
 its own ignored files that only its own `git status` will show:
 
 ```sh
-git status --porcelain --ignored
-git submodule foreach 'git status --porcelain --ignored'
+git -C "<path>" status --porcelain --ignored
+git -C "<path>" submodule foreach 'git status --porcelain --ignored'
 ```
 
 Only once both come back clean is `--force` actually safe:

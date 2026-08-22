@@ -38,8 +38,8 @@ check, deletes gitignored paths right along with everything else, and a
 top-level status check doesn't look inside a submodule:
 
 ```sh
-git status --porcelain --ignored
-git submodule foreach 'git status --porcelain --ignored'
+git -C "<path>" status --porcelain --ignored
+git -C "<path>" submodule foreach 'git status --porcelain --ignored'
 git worktree remove --force "<path>"
 ```
 
