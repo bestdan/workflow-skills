@@ -29,6 +29,26 @@ git submodule update --init --recursive
 (`scripts/check.sh` calls `scripts/ensure-bats.sh` first and will recover a
 fresh `git worktree add` on its own — but a plain clone is faster to fix here.)
 
+Those submodules also mean you can't tear a worktree down with a plain
+`git worktree remove <path>` once you're done with it — git refuses with
+`fatal: working trees containing submodules cannot be moved or removed`. Add
+`--force`, which git needs anyway to remove a worktree containing submodules:
+
+```sh
+git worktree remove --force <path>
+```
+
+Confirm `git status --porcelain` is clean in that worktree first — `--force`
+also skips git's own uncommitted-changes check, so it's the one thing making
+this safe rather than the atomic removal itself. `scripts/spawn-orchestrator.sh`
+already removes worker worktrees this way. Only if `--force` itself fails do
+you need the manual, non-atomic fallback:
+
+```sh
+rm -rf <path>
+git worktree prune
+```
+
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 
