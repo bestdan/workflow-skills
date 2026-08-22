@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.3.0] - 2026-08-22
+
+### Features
+
+- fail on stale ${CLAUDE_PLUGIN_ROOT} path references (#410) (3de8461)
+
 ## [2.2.1] - 2026-08-21
 
 ### Fixes
