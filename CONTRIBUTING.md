@@ -32,8 +32,9 @@ fresh `git worktree add` on its own — but a plain clone is faster to fix here.
 Those submodules also mean you can't tear a worktree down with a plain
 `git worktree remove <path>` once you're done with it — git refuses with
 `fatal: working trees containing submodules cannot be moved or removed`. Add
-`--force` (after confirming `git status --porcelain` is clean in that
-worktree, since `--force` also skips git's own uncommitted-changes check):
+`--force` (after confirming `git status --porcelain --ignored` is clean in
+that worktree — `--force` skips git's own uncommitted-changes check and
+deletes gitignored paths too, so check both, not just tracked changes):
 
 ```sh
 git worktree remove --force "<path>"
