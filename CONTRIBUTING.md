@@ -40,8 +40,10 @@ git worktree remove --force "<path>"
 
 Confirm `git status --porcelain` is clean in that worktree first — `--force`
 also skips git's own uncommitted-changes check, so it's the one thing making
-this safe rather than the atomic removal itself. `scripts/spawn-orchestrator.sh`
-already removes worker worktrees this way.
+this safe. Unlike the manual fallback below, this stays a single git-managed
+command that keeps git's own worktree bookkeeping in sync as it goes, rather
+than leaving `git worktree prune` for you to remember to run separately.
+`scripts/spawn-orchestrator.sh` already removes worker worktrees this way.
 
 If `--force` itself fails, diagnose the error rather than reaching for
 `rm -rf` — a **locked** worktree (`git worktree lock`) refuses a single
@@ -50,7 +52,7 @@ If `--force` itself fails, diagnose the error rather than reaching for
 its locked administrative entry behind for `git worktree prune` to trip over.
 Pass `--force` twice, or `git worktree unlock` first, to remove it properly.
 Only once you've ruled out a lock (and any other diagnosable cause) is the
-manual, non-atomic fallback worth reaching for:
+manual fallback below worth reaching for:
 
 ```sh
 rm -rf "<path>"
