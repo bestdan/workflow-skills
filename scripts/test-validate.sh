@@ -251,8 +251,9 @@ fi
 
 # --- Fixture (f): stale ${CLAUDE_PLUGIN_ROOT}/<path> reference is flagged ---
 # Also covers the three no-false-positive cases: a bare (unprefixed) script
-# path, a placeholder with <angle-bracket> segments, and a valid reference
-# immediately followed by a sentence-ending period.
+# path, a placeholder with <angle-bracket> segments under a parent that does
+# not exist, and a valid reference immediately followed by a sentence-ending
+# period.
 DIR_F="$BASE/plugin-root-fail"
 make_plugin_fixture "$DIR_F"
 echo "#!/bin/sh" >"$DIR_F/scripts/real-thing.sh"
@@ -265,7 +266,7 @@ Missing script: `${CLAUDE_PLUGIN_ROOT}/scripts/does-not-exist.sh`.
 
 Bare reference (not flagged): scripts/something-absent.sh
 
-Placeholder (not flagged): `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh`
+Placeholder (not flagged): `${CLAUDE_PLUGIN_ROOT}/nonexistent/<name>.sh`
 
 End of sentence (not flagged): see ${CLAUDE_PLUGIN_ROOT}/scripts/real-thing.sh.
 MD
@@ -281,8 +282,12 @@ else
 fi
 assert_not_contains "bare (unprefixed) script reference is not flagged" "$out_f" \
   "something-absent.sh does not exist"
-assert_not_contains "placeholder <name>.sh reference is not flagged" "$out_f" \
-  "<name>.sh does not exist"
+# The placeholder sits under a parent that does NOT exist in the fixture, so a
+# regex that truncated the match at "<" would report `nonexistent/` here. An
+# assertion on the full "<name>.sh does not exist" string would pass whatever
+# the code did, since that string can never be emitted.
+assert_not_contains "placeholder under a missing parent is not flagged" "$out_f" \
+  "nonexistent"
 assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
   "real-thing.sh does not exist"
 

@@ -39,11 +39,14 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 NAME_RE = re.compile(r"^[a-z0-9-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
-# The trailing character class deliberately excludes "." so a reference at the
-# end of a sentence ("... see ${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py.")
-# doesn't capture the sentence period and report a false miss.
+# "<" and ">" are matched so a documentation placeholder
+# (${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<script>.py, linear-common.md)
+# is captured whole and skipped below. Excluding them instead ends the match at
+# the "<" and checks the parent directory, which passes silently when it exists
+# and otherwise reports a path nobody wrote. The trailing class still excludes
+# "." so a reference ending a sentence doesn't capture the period.
 PLUGIN_ROOT_REF_RE = re.compile(
-    r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]*[A-Za-z0-9_/-])"
+    r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
 )
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
@@ -239,6 +242,8 @@ for f in plugin_root_ref_files:
     for n, line in enumerate(f.read_text().splitlines(), start=1):
         for ref in PLUGIN_ROOT_REF_RE.finditer(line):
             captured = ref.group(1)
+            if "<" in captured:
+                continue  # a <placeholder>, not a literal path
             if not (ROOT / captured).exists():
                 err(
                     rel(f),
