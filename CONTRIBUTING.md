@@ -32,32 +32,16 @@ fresh `git worktree add` on its own — but a plain clone is faster to fix here.
 Those submodules also mean you can't tear a worktree down with a plain
 `git worktree remove <path>` once you're done with it — git refuses with
 `fatal: working trees containing submodules cannot be moved or removed`. Add
-`--force`, which git needs anyway to remove a worktree containing submodules:
+`--force` (after confirming `git status --porcelain` is clean in that
+worktree, since `--force` also skips git's own uncommitted-changes check):
 
 ```sh
 git worktree remove --force "<path>"
 ```
 
-Confirm `git status --porcelain` is clean in that worktree first — `--force`
-also skips git's own uncommitted-changes check, so it's the one thing making
-this safe. Unlike the manual fallback below, this stays a single git-managed
-command that keeps git's own worktree bookkeeping in sync as it goes, rather
-than leaving `git worktree prune` for you to remember to run separately.
-`scripts/spawn-orchestrator.sh` already removes worker worktrees this way.
-
-If `--force` itself fails, diagnose the error rather than reaching for
-`rm -rf` — a **locked** worktree (`git worktree lock`) refuses a single
-`--force` on purpose (`use 'remove -f -f' to override or unlock first`), and
-`rm -rf` would destroy a tree someone deliberately protected while leaving
-its locked administrative entry behind for `git worktree prune` to trip over.
-Pass `--force` twice, or `git worktree unlock` first, to remove it properly.
-Only once you've ruled out a lock (and any other diagnosable cause) is the
-manual fallback below worth reaching for:
-
-```sh
-rm -rf "<path>"
-git worktree prune
-```
+See [`dev_docs/worktree-cleanup.md`](dev_docs/worktree-cleanup.md) if that
+itself fails — a locked worktree needs different handling than any other
+failure does, and reaching for `rm -rf` is a last resort, not the default.
 
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
