@@ -2405,6 +2405,27 @@ def derive_counts(
     return tracks, total
 
 
+def derive_none_counts(tree: Tree, project: Project) -> dict[str, int]:
+    """Per-track tally of bare `none:` obligation blocks, plus a `total` key.
+
+    Kept separate from `derive_counts`/`Counts`: this is the escape hatch
+    itself, not a ledger field, and `Counts`/`render_counts` render the
+    stored, freshness-checked ledger blocks that stay untouched by this
+    count (see PRE-779) — folding it in there would make every existing
+    consumer tree stale until someone runs `write-ledger`.
+    """
+    tallies = {t.name: 0 for t in project.tracks}
+    for rec in tree.records:
+        if rec.kind != "obligation" or rec.project != project.name:
+            continue
+        if rec.track not in tallies:
+            continue
+        if is_none_block(rec):
+            tallies[rec.track] += 1
+    tallies["total"] = sum(tallies.values())
+    return tallies
+
+
 @dataclass(frozen=True)
 class DecisionStatus:
     """One decision's derived line: what to call it, and why."""
@@ -2589,7 +2610,9 @@ def render_counts_parenthetical(counts: Counts) -> str:
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def render_track_lines(tracks: list[tuple[str, Counts]], total: Counts) -> list[str]:
+def render_track_lines(
+    tracks: list[tuple[str, Counts]], total: Counts, none_counts: dict[str, int]
+) -> list[str]:
     """The question pair and the obligation pair, per track and then total.
 
     Totals never print without the per-track breakdown, including for a
@@ -2598,6 +2621,10 @@ def render_track_lines(tracks: list[tuple[str, Counts]], total: Counts) -> list[
     redundant is a report that drops it exactly when nobody is watching. A
     snapshot, deliberately — this script has no history, so it prints no trend,
     delta or arrow.
+
+    `none_counts` (from `derive_none_counts`) is looked up by name rather than
+    zipped positionally with `tracks` — the two are keyed by track name so a
+    project with zero tracks, or a `total` row, line up without special-casing.
     """
     rows = [*tracks, ("total", total)]
     label_width = max(len(name) + 1 for name, _ in rows)
@@ -2620,7 +2647,8 @@ def render_track_lines(tracks: list[tuple[str, Counts]], total: Counts) -> list[
             f"{counts.retired:>{widths['retired']}} retired    "
             f"O {counts.discharged:>{widths['discharged']}} discharged / "
             f"{counts.open_obligations:>{widths['open_obligations']}} open"
-            f"{render_counts_parenthetical(counts)}"
+            f"{render_counts_parenthetical(counts)} / "
+            f"{none_counts.get(name, 0)} declared none"
         )
     return lines
 
@@ -2721,7 +2749,8 @@ def print_project_status(tree: Tree, project: Project, resolved: Blockers) -> No
     if not tracks:
         print("  no tracks yet")
         return
-    for line in render_track_lines(tracks, total):
+    none_counts = derive_none_counts(tree, project)
+    for line in render_track_lines(tracks, total, none_counts):
         print(line)
     warning = scarcity_warning(total)
     if warning is not None:

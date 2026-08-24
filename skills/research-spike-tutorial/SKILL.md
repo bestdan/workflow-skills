@@ -368,8 +368,8 @@ onboarding — decisions: 0 decided, 1 ready, 0 blocked
 
   sso-rollout  READY awaiting decision
 
-  auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)
-  total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)
+  auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none
+  total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none
 ```
 
 Stop. Don't explain it — point at the two numbers and ask the learner what
