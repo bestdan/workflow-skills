@@ -20,8 +20,17 @@ like `est:7` fails loudly instead of silently entering the repo's namespace.
 Never add `--add-label` / `--remove-label` to a state-transition path.
 
 Note: the local `sandbox-network-guard` hook blocks non-GET `gh api`, so this
-needs an allowlist entry to run unsandboxed locally. GitHub Actions and cloud
-routines have no such hook.
+needs an allowlist entry to run unsandboxed locally.
+
+This script is the LOCAL path. A cloud routine has no `gh` and no credentialed
+raw HTTP, so it must go through the GitHub MCP connector's `issue_write` instead.
+The same two-part rule applies there, measured 2026-08-24 against the live API:
+`issue_write` with `labels` REPLACES the whole set (3 labels in, updated to 1,
+read back as exactly 1), and it AUTO-CREATES a name the repo does not have
+(`zz-mcp-undefined-20260824` was created, color ededed, and had to be deleted by
+hand). So validate-then-replace is not a quirk of the `gh api` path — it is the
+rule on both channels, and the routine path needs the same vocabulary check
+before it writes.
 
 Usage:
   python3 gh-label-write.py --repo owner/name --issue 142 \
