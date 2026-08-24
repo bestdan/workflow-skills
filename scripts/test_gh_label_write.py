@@ -27,14 +27,29 @@ VALID = "status:3_started,auto:eligible,prio:1,est:3"
 
 
 class Recorder:
-    """Records every `gh` invocation; an empty log means no network was touched."""
+    """Records every `gh` invocation; an empty log means no network was touched.
 
-    def __init__(self):
+    `existing` is what the issue already carries, so tests can prove the helper
+    carries forward labels outside the four managed namespaces instead of
+    deleting them with the full-set write.
+    """
+
+    def __init__(self, existing=()):
         self.calls = []
+        self.existing = list(existing)
 
     def run_gh(self, args, stdin=None):
         self.calls.append((args, stdin))
+        if args[:2] == ["issue", "view"]:
+            return 0, json.dumps({"labels": [{"name": n} for n in self.existing]}), ""
         return 0, "{}", ""
+
+    def writes(self):
+        """Only the mutating calls — reads are not what atomicity is about."""
+        return [(a, s) for a, s in self.calls if "--method" in a]
+
+    def written_labels(self):
+        return json.loads(self.writes()[0][1])["labels"]
 
 
 class WriteTests(unittest.TestCase):
@@ -102,9 +117,10 @@ class WriteTests(unittest.TestCase):
         code, _, _ = self._write(VALID)
 
         self.assertEqual(code, 0)
-        self.assertEqual(len(self.recorder.calls), 1, "must be exactly one request")
+        # The read is a second request, but atomicity is about the WRITE.
+        self.assertEqual(len(self.recorder.writes()), 1, "must be exactly one write")
 
-        args, stdin = self.recorder.calls[0]
+        args, stdin = self.recorder.writes()[0]
         self.assertEqual(
             args[:4], ["api", "--method", "PATCH", "repos/owner/name/issues/142"]
         )
@@ -112,6 +128,34 @@ class WriteTests(unittest.TestCase):
             json.loads(stdin)["labels"],
             ["status:3_started", "auto:eligible", "prio:1", "est:3"],
         )
+
+    def test_labels_outside_the_managed_namespaces_are_carried_forward(self):
+        """The full-set write must not delete what this helper does not own.
+
+        `follow-up` is the handler's own marker — gh-issue.md applies it and
+        /archive-tasks refuses to sweep without it — and it can never live in
+        labels.yml, so omitting it from the write would silently destroy it.
+        """
+        self.recorder.existing = ["follow-up", "status:2_ready", "bug"]
+        code, out, _ = self._write(VALID)
+
+        self.assertEqual(code, 0)
+        written = self.recorder.written_labels()
+        # Unmanaged labels survive...
+        self.assertIn("follow-up", written)
+        self.assertIn("bug", written)
+        # ...while the stale managed rung is replaced, not duplicated.
+        self.assertNotIn("status:2_ready", written)
+        self.assertIn("status:3_started", written)
+        self.assertIn("Carried forward", out)
+
+    def test_the_read_happens_after_validation_not_before(self):
+        """A bad set must cost zero requests — including the read."""
+        self.recorder.existing = ["follow-up"]
+        code, _, _ = self._write("status:3_started,auto:eligible,est:7")
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.recorder.calls, [])
 
     def test_no_incremental_label_flag_is_ever_used(self):
         self._write(VALID)
@@ -122,22 +166,37 @@ class WriteTests(unittest.TestCase):
         # source scan would fire on its own documentation. The argv assertion
         # above is the real guard: it fails if a flag ever reaches `gh`.
 
-    def test_done_write_requires_the_status_rung_to_be_absent(self):
-        code, _, _ = self._write("auto:eligible,prio:1,est:3", extra=["--done"])
+    def test_done_write_requires_both_rungs_to_be_absent(self):
+        """A closed issue keeps prio/est but carries no status and no auto rung."""
+        code, _, _ = self._write("prio:1,est:3", extra=["--done"])
         self.assertEqual(code, 0)
-        self.assertEqual(len(self.recorder.calls), 1)
+        self.assertEqual(len(self.recorder.writes()), 1)
+
+        # Clear first: otherwise the accepted write above is still in the log and
+        # the no-network-on-refusal assertion below would pass vacuously.
+        self.recorder.calls.clear()
 
         code, _, err = self._write(VALID, extra=["--done"])
         self.assertEqual(code, 2)
-        self.assertIn("--done means no status rung", err)
+        self.assertEqual(self.recorder.calls, [])
+        self.assertIn("--done means no `status:` rung", err)
 
-    def test_report_only_run_sends_nothing(self):
+        self.recorder.calls.clear()
+        code, _, err = self._write("auto:eligible,prio:1", extra=["--done"])
+        self.assertEqual(code, 2)
+        self.assertEqual(self.recorder.calls, [])
+        self.assertIn("--done means no `auto:` rung", err)
+
+    def test_report_only_run_mutates_nothing(self):
+        """It reads, so the preview is accurate — but it never writes."""
+        self.recorder.existing = ["follow-up"]
         code, out, _ = self._main(
             ["--repo", "owner/name", "--issue", "142", "--labels", VALID]
         )
         self.assertEqual(code, 0)
-        self.assertEqual(self.recorder.calls, [])
+        self.assertEqual(self.recorder.writes(), [])
         self.assertIn("Would write", out)
+        self.assertIn("follow-up", out)
 
 
 if __name__ == "__main__":

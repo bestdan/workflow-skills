@@ -13,14 +13,19 @@
 #   python3 commands/handlers/assets/gh-label-sync.py --repo owner/name --apply
 #
 # Format is a deliberately small subset of YAML — one `<group>: [<value>, ...]`
-# line per group, plus a `colors:` mapping — so the sync script can parse it with
-# the standard library and no dependency. See gh-label-sync.py's load_vocabulary().
+# line per group, plus a `colors:` mapping — so the handler assets can parse it with
+# the standard library and no dependency. See _labels.py's load_vocabulary().
 #
 # Invariants (enforced by the write helper and the reconciler, not by this file):
 #   - an open issue carries exactly one `status:` and exactly one `auto:` label
 #   - an issue carries at most one `prio:` and at most one `est:` label
-#   - "done" is implicit: a closed issue has no status rung, and keeps its
-#     `prio:`/`est:` labels
+#   - "done" is implicit: a closed issue has neither a `status:` nor an `auto:`
+#     rung, and keeps its `prio:`/`est:` labels. `prio:`/`est:` are facts about
+#     the work and stay useful afterwards; `auto:` is a live instruction to a
+#     scheduler, so leaving one on a closed issue is a hazard, not information
+#   - the write helper owns ONLY these four namespaces. It replaces an issue's
+#     whole label set, so it carries forward every other label it finds —
+#     `follow-up` and anything a human added
 #   - dependencies and sub-issues use GitHub's native endpoints, never labels
 
 status: [0_untriaged, 1_needs_refinement, 2_ready, 3_started, 4_needs_review]

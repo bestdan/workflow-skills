@@ -32,16 +32,23 @@ hand). So validate-then-replace is not a quirk of the `gh api` path — it is th
 rule on both channels, and the routine path needs the same vocabulary check
 before it writes.
 
+Because the write replaces the issue's ENTIRE label set, anything not echoed back
+is deleted — so this reads the issue's current labels first and carries forward
+every label outside the four vocabulary namespaces. That is what keeps the
+handler's own markers alive: gh-issue.md puts `follow-up` on task issues and
+/archive-tasks refuses to sweep without it, and it can never live in labels.yml.
+The read makes it two requests, but the WRITE is still one, which is where
+atomicity is needed.
+
 Usage:
   python3 gh-label-write.py --repo owner/name --issue 142 \
       --labels status:3_started,auto:eligible,prio:1,est:3 --apply
 
-  # completion: a closed issue carries no status rung, and keeps prio/est
+  # completion: a closed issue carries neither rung, and keeps prio/est
   python3 gh-label-write.py --repo owner/name --issue 142 \
-      --labels auto:eligible,prio:1,est:3 --done --apply
+      --labels prio:1,est:3 --done --apply
 
-Without --apply it validates and prints the PATCH it would send, touching
-nothing.
+Without --apply it validates and prints the set it would write, touching nothing.
 """
 
 import argparse
@@ -94,11 +101,14 @@ def validate(labels, vocabulary, done=False):
 
     for group in EXACTLY_ONE:
         found = counts.get(group, 0)
-        # A closed issue carries no status rung — "done" is the absence of one.
-        if group == "status" and done:
+        # A closed issue carries neither rung. `status:` is absent because "done"
+        # IS that absence; `auto:` because it answers "may automation pick this
+        # up?" — a live scheduling instruction, not a fact about the work. A
+        # lingering `auto:eligible` on a closed issue is a hazard, not data.
+        if done:
             if found:
                 raise InvalidLabelSet(
-                    f"--done means no status rung, but {found} `status:` label(s) given"
+                    f"--done means no `{group}:` rung, but {found} was given"
                 )
             continue
         if found != 1:
@@ -116,6 +126,28 @@ def run_gh(args, stdin=None):
     """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def current_labels(repo, issue):
+    """Read the issue's labels. Read-only; mutates nothing."""
+    code, out, err = run_gh(
+        ["issue", "view", str(issue), "--repo", repo, "--json", "labels"]
+    )
+    if code != 0:
+        raise SystemExit(f"reading {repo}#{issue} failed: {err.strip() or out.strip()}")
+    payload = json.loads(out or '{"labels": []}')
+    return [entry["name"] for entry in payload.get("labels", [])]
+
+
+def preserve_unmanaged(current, managed_groups):
+    """The labels this helper does not own, and must therefore carry forward.
+
+    The write replaces the issue's entire label set, so anything not echoed back
+    is deleted. Only the four vocabulary namespaces belong to this helper: the
+    handler's own marker (`follow-up`, which /archive-tasks refuses to sweep
+    without) and anything a human added live outside them and must survive.
+    """
+    return [label for label in current if group_of(label) not in managed_groups]
 
 
 def patch_labels(repo, issue, labels):
@@ -153,11 +185,16 @@ def main(argv=None):
     vocabulary = expected_labels(groups, colors)
     requested = [label.strip() for label in args.labels.split(",") if label.strip()]
 
+    # Validate FIRST, before any network call: an unknown name must never reach
+    # the API, because a raw REST write creates it rather than rejecting it.
     try:
-        labels = validate(requested, vocabulary, done=args.done)
+        managed = validate(requested, vocabulary, done=args.done)
     except InvalidLabelSet as exc:
         print(f"refusing to write {args.repo}#{args.issue}: {exc}", file=sys.stderr)
         return 2
+
+    preserved = preserve_unmanaged(current_labels(args.repo, args.issue), set(groups))
+    labels = managed + [label for label in preserved if label not in managed]
 
     if args.apply:
         patch_labels(args.repo, args.issue, labels)
@@ -166,6 +203,8 @@ def main(argv=None):
         "repo": args.repo,
         "issue": args.issue,
         "labels": labels,
+        "managed": managed,
+        "preserved": preserved,
         "applied": args.apply,
     }
     if args.as_json:
@@ -173,6 +212,8 @@ def main(argv=None):
     else:
         verb = "Wrote" if args.apply else "Would write"
         print(f"{verb} {args.repo}#{args.issue}: {', '.join(labels)}")
+        if preserved:
+            print(f"Carried forward (not managed here): {', '.join(preserved)}")
     return 0
 
 

@@ -14,7 +14,7 @@ Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue cre
    - `labels` — list, e.g. `[follow-up]`. Plain text prompt (comma-separated); skip if blank.
    - `assignees` — list of GitHub usernames. Plain text prompt (comma-separated); skip if blank.
 
-3. **Provision the repo's label vocabulary.** The handler stores status, priority and estimate as labels, and GitHub label namespaces are **per-repo** — an unprovisioned repo breaks `/add-task` outright (`gh` rejects an undefined label), and `gh issue transfer` silently drops labels the target repo lacks, which for this schema means losing an issue's entire state. Run the sync against the `repo` resolved in step 2:
+3. **Provision the repo's label vocabulary.** The handler will store status, priority and estimate as labels, and GitHub label namespaces are **per-repo**. This is a prerequisite for the schema-aware writes, not for today's `/add-task` — that path creates each configured label itself (`gh-issue.md` step 3) and applies no schema label yet. Once a write does carry one, an unprovisioned repo fails it outright, because `gh` rejects an undefined label. Provisioning also protects a move: `gh issue transfer` silently drops labels the target repo lacks, which for this schema means losing an issue's entire state. Run the sync against the `repo` resolved in step 2:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-label-sync.py" \

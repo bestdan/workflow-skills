@@ -86,7 +86,7 @@ acquire, and the other advances deterministically instead of building a duplicat
 Every later `git push` on this branch is an ordinary fast-forward update of a ref this
 session owns — the lock is the **creation**, and it is already decided by then.
 
-## Cloud routines: the lock works, but it cannot be released
+## Cloud routines: use the comment election, not the ref lock
 
 **Measured 2026-08-24.** An earlier version of this file was wrong about routines
 twice, so the reasoning is spelled out rather than asserted.
@@ -112,33 +112,43 @@ same call again
 ```
 
 Create-only, and the duplicate is rejected — the same election semantics as
-`POST /git/refs`. **So a routine can hold this lock.** Use `create_branch` there and
-the `gh api` form locally; read `Reference already exists` exactly as the 422 above.
+`POST /git/refs`. So the primitive **works** there. But do not use it yet:
 
-One difference to respect: `create_branch` takes `from_branch`, **not a sha**, so it
-resolves the source tip at call time and cannot pin an exact base. That does not weaken
-the election — the lock is the _name_ — but the branch may not sit at the sha the
-session read earlier if the base moved in between.
+> **Routines default to the comment-token election below, not to `create_branch`.**
+> The primitive is available and measured; what is missing is the other half of the
+> lifecycle.
 
-### The release problem — this is the real limitation
+One further difference, if the default ever flips: `create_branch` takes
+`from_branch`, **not a sha**, so it resolves the source tip at call time and cannot pin
+an exact base. That does not weaken the election — the lock is the _name_ — but the
+branch may not sit at the sha the session read earlier if the base moved in between.
 
-A routine **cannot release the lock it just acquired.** Both paths are closed:
+### Why it is not the default: a routine cannot release
+
+A routine **cannot release the lock it would acquire.** Both paths are closed:
 
 - The connector's 58 tools contain **no delete-branch and no delete-ref tool**
   (enumerated in full, not sampled).
 - `git push --delete` from a routine fails with a **403 RPC error**, even though
   `git push` creating a ref succeeds.
 
-So the bail path at the end of this file is **unavailable unattended**. A routine that
-acquires and then bails leaves a permanent lock ref, and every later session reads that
-ref as a live claim and skips the issue forever. Treat this as a real hazard, not a
-tidiness issue:
+So the bail path at the end of this file is **unavailable unattended**, and the failure
+is not symmetric with the fallback's:
 
-- A routine should acquire only when it intends to run to completion.
-- A lock ref left by a routine must be cleared from a **local** session
-  (`git push origin --delete task/<KEY>`), and a stale-lock sweep is the backstop.
-- The connector also exposes **no delete-comment tool**, so the fallback election below
-  cannot retract from a routine either.
+|                  | left behind     | cost                                                                                                     |
+| ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |
+| comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans |
+
+A routine cannot retract its comment either (no delete-comment tool), but a leftover
+comment costs hygiene where a leftover ref costs the issue. "Acquire only when you
+intend to run to completion" is **not** a mitigation: a crash or a timeout is precisely
+the case where intent does not apply, and there is no stale-ref sweep in this repo —
+`scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr` claim PRs, not refs.
+
+**Flipping the default is a one-paragraph change once a stale-ref sweep exists.** Until
+then a routine that somehow does hold a ref must be cleared from a **local** session
+(`git push origin --delete task/<KEY>`).
 
 ## Fallback: comment-token election (environments that cannot acquire)
 
@@ -235,10 +245,10 @@ the fallback path there is no ref to delete — **retract** this session's token
 instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
 on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.
 
-> **A routine cannot run this step.** Measured 2026-08-24: `git push --delete` returns
-> a **403 RPC error** there, and the GitHub MCP connector exposes no delete-branch or
-> delete-ref tool. A routine _can_ acquire (see "Cloud routines" above), so unlike the
-> fallback path it really does owe a release it cannot perform. A bailing routine must
-> report the ref it is stranding, and the ref has to be deleted from a local session —
-> both `gh api --method DELETE .../git/refs/heads/<ref>` and
-> `git push origin --delete <ref>` work there.
+> **A routine cannot run this step** — which is exactly why routines do not take the
+> ref lock in the first place (see "Cloud routines" above). Measured 2026-08-24:
+> `git push --delete` returns a **403 RPC error** there, and the GitHub MCP connector
+> exposes no delete-branch or delete-ref tool. A ref that does end up stranded has to
+> be deleted from a local session, where both
+> `gh api --method DELETE .../git/refs/heads/<ref>` and `git push origin --delete <ref>`
+> work.
