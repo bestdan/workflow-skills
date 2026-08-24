@@ -3041,6 +3041,69 @@ assert_exit "a question's 'blocks: none:' field sentinel still exits 0" "$exit_s
 assert_contains "the field-position 'none:' sentinel is not counted as a bare obligation block" \
   "$out_s18" "O 1 discharged / 0 open (1 stub) / 0 declared none"
 
+# A track literally named `total` is valid — `require_name` only enforces
+# kebab-case — and must not collide with the synthetic aggregate row of the
+# same name: its own tally and the report-wide total are different numbers.
+DIR_S19="$BASE/status-declared-none-track-named-total"
+mkdir -p "$DIR_S19/dev_docs/research/alpha/tracks/account" \
+  "$DIR_S19/dev_docs/research/alpha/tracks/total"
+write_file "$DIR_S19/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: account-provisioning
+state: pending
+```'
+write_file "$DIR_S19/dev_docs/research/alpha/tracks/account/questions.md" \
+  '# account
+
+### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed — the isolated domain requires no new tooling
+```'
+write_file "$DIR_S19/dev_docs/research/alpha/tracks/total/questions.md" \
+  '# total
+
+### Q1. Does the rollout need a feature flag?
+
+```question
+id: rollout-flag
+status: answered
+answer: yes, gated behind a flag
+blocks: account-provisioning
+```
+
+```obligation
+none: the flag ships with the release, no separate tooling
+```
+
+### Q2. Does the rollout need a comms plan?
+
+```question
+id: rollout-comms
+status: answered
+answer: yes, a heads-up to existing users
+blocks: account-provisioning
+```
+
+```obligation
+none: the notice is copy, not tooling
+```'
+out_s19="$(python3 "$SCRIPT" --root "$DIR_S19" status alpha 2>&1)"
+exit_s19=$?
+assert_exit "a track literally named 'total' still exits 0" "$exit_s19" 0
+assert_contains "the 'total' track's own tally is its own two, not the aggregate" "$out_s19" \
+  "O 0 discharged / 0 open / 2 declared none"
+assert_contains "the report-wide aggregate sums every track, 'total' included" "$out_s19" \
+  "O 0 discharged / 0 open / 3 declared none"
+
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do
