@@ -86,31 +86,61 @@ acquire, and the other advances deterministically instead of building a duplicat
 Every later `git push` on this branch is an ordinary fast-forward update of a ref this
 session owns — the lock is the **creation**, and it is already decided by then.
 
-## Fallback: comment-token election (environments that cannot write the GitHub API)
+## Cloud routines: the lock works, but it cannot be released
 
-**Cloud routines cannot acquire this lock. Measured 2026-08-24** in a Claude Code
-cloud routine (environment `env_017t5zvhK6AhSx23Hn8xP5mN`, repo
-`bestdan/workflow-skills`):
+**Measured 2026-08-24.** An earlier version of this file was wrong about routines
+twice, so the reasoning is spelled out rather than asserted.
 
-- **`gh` is not installed** — not on `PATH`, and not found by
-  `find / -maxdepth 4 -name gh -type f`. `git`, `curl`, `python3` and `jq` are.
-- **The GitHub API is readable but not writable.** An unauthenticated-looking
-  `curl` to `api.github.com` is transparently authenticated by the environment's
-  proxy and reads back `login: bestdan`, but `POST` and `DELETE` on
-  `/repos/<repo>/git/refs` both return **403 `Write access to this GitHub API path
-  is not permitted through this proxy.`**
-- **`git push` creating a new ref succeeds**; `git push --delete` of that same ref
-  fails with a 403 RPC error.
+A routine has two channels to GitHub and they behave differently:
 
-So the acquire call cannot run there at all — not because the session is pinned to
-a `claude/<session>` branch (the earlier stated reason, which was never measured),
-but because the proxy refuses GitHub API writes. `git push` is not a substitute:
-per the warning above it is not a CAS, so two racers pushing the identical sha both
-exit 0.
+- **Raw HTTP is not a credentialed path.** `gh` is not installed (absent from `PATH`
+  and from `find / -maxdepth 4 -name gh -type f`), and `curl` to `api.github.com`
+  carries no token. `POST`/`DELETE` on `/git/refs` return **403 `Write access to this
+  GitHub API path is not permitted through this proxy.`** Read behaviour on this path
+  was **inconsistent between runs**, so do not rely on it for reads either. **The
+  `gh api` acquire form above is therefore local-only.**
+- **The GitHub MCP connector is authenticated and is the routine's real channel.**
 
-This was measured in **one** environment. Re-check before assuming it holds in
-another, and re-check if `gh` is ever added to the routine image — the acquire path
-would then be worth re-testing.
+**`mcp__github__create_branch` is a valid acquire primitive.** Verified against the
+live API from inside a routine:
+
+```
+create_branch(owner, repo, branch="zz/probe-b-20260824")
+  → {"ref":"refs/heads/zz/probe-b-20260824","object":{"sha":"4b6379aa…"}}
+same call again
+  → failed to create branch: Reference already exists
+```
+
+Create-only, and the duplicate is rejected — the same election semantics as
+`POST /git/refs`. **So a routine can hold this lock.** Use `create_branch` there and
+the `gh api` form locally; read `Reference already exists` exactly as the 422 above.
+
+One difference to respect: `create_branch` takes `from_branch`, **not a sha**, so it
+resolves the source tip at call time and cannot pin an exact base. That does not weaken
+the election — the lock is the _name_ — but the branch may not sit at the sha the
+session read earlier if the base moved in between.
+
+### The release problem — this is the real limitation
+
+A routine **cannot release the lock it just acquired.** Both paths are closed:
+
+- The connector's 58 tools contain **no delete-branch and no delete-ref tool**
+  (enumerated in full, not sampled).
+- `git push --delete` from a routine fails with a **403 RPC error**, even though
+  `git push` creating a ref succeeds.
+
+So the bail path at the end of this file is **unavailable unattended**. A routine that
+acquires and then bails leaves a permanent lock ref, and every later session reads that
+ref as a live claim and skips the issue forever. Treat this as a real hazard, not a
+tidiness issue:
+
+- A routine should acquire only when it intends to run to completion.
+- A lock ref left by a routine must be cleared from a **local** session
+  (`git push origin --delete task/<KEY>`), and a stale-lock sweep is the backstop.
+- The connector also exposes **no delete-comment tool**, so the fallback election below
+  cannot retract from a routine either.
+
+## Fallback: comment-token election (environments that cannot acquire)
 
 When the acquire call fails for an environment or permission reason
 (never on a 422 — that is a decided race), degrade to the election below and
@@ -171,8 +201,11 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    and no work started. On gh-issue, delete it outright:
    `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
 
-   > **In a cloud routine this retraction also fails** — `gh` is absent and the proxy
-   > refuses GitHub API writes (measured 2026-08-24, see the section heading above).
+   > **In a cloud routine this retraction is impossible.** `gh` is absent and raw HTTP
+   > carries no credential, so the `gh api --method DELETE` form cannot run. The
+   > authenticated GitHub MCP connector can _add_ a comment (`add_issue_comment`) but
+   > exposes **no delete-comment tool** — confirmed by enumerating all 58 tools on
+   > 2026-08-24.
    > A routine that loses the election therefore leaves its token comment behind.
    > Since a loser's id is always higher than the winner's it still cannot win its own
    > race, so this costs hygiene rather than correctness — but the _next_ session's
@@ -202,10 +235,10 @@ the fallback path there is no ref to delete — **retract** this session's token
 instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
 on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.
 
-> **`git push --delete` does not work in a cloud routine.** Measured 2026-08-24: the
-> same routine that could _create_ a ref by push got a **403 RPC error** deleting it.
-> A routine never holds this lock in the first place (it cannot acquire — see the
-> fallback section), so no release is owed; the relevance is that a ref left behind by
-> a routine cannot be cleaned up from inside one. Delete it from a local session,
-> where both `gh api --method DELETE .../git/refs/heads/<ref>` and
-> `git push origin --delete <ref>` work.
+> **A routine cannot run this step.** Measured 2026-08-24: `git push --delete` returns
+> a **403 RPC error** there, and the GitHub MCP connector exposes no delete-branch or
+> delete-ref tool. A routine _can_ acquire (see "Cloud routines" above), so unlike the
+> fallback path it really does owe a release it cannot perform. A bailing routine must
+> report the ref it is stranding, and the ref has to be deleted from a local session —
+> both `gh api --method DELETE .../git/refs/heads/<ref>` and
+> `git push origin --delete <ref>` work there.
