@@ -86,11 +86,33 @@ acquire, and the other advances deterministically instead of building a duplicat
 Every later `git push` on this branch is an ordinary fast-forward update of a ref this
 session owns — the lock is the **creation**, and it is already decided by then.
 
-## Fallback: comment-token election (branch-pinned environments)
+## Fallback: comment-token election (environments that cannot write the GitHub API)
 
-Claude Code on the web runs pinned to a fixed `claude/<session>` branch and cannot
-create `task/<KEY>` — this is exactly why the `repo-pr` handler locks on a PR rather
-than a branch. When the acquire call fails for an environment or permission reason
+**Cloud routines cannot acquire this lock. Measured 2026-08-24** in a Claude Code
+cloud routine (environment `env_017t5zvhK6AhSx23Hn8xP5mN`, repo
+`bestdan/workflow-skills`):
+
+- **`gh` is not installed** — not on `PATH`, and not found by
+  `find / -maxdepth 4 -name gh -type f`. `git`, `curl`, `python3` and `jq` are.
+- **The GitHub API is readable but not writable.** An unauthenticated-looking
+  `curl` to `api.github.com` is transparently authenticated by the environment's
+  proxy and reads back `login: bestdan`, but `POST` and `DELETE` on
+  `/repos/<repo>/git/refs` both return **403 `Write access to this GitHub API path
+  is not permitted through this proxy.`**
+- **`git push` creating a new ref succeeds**; `git push --delete` of that same ref
+  fails with a 403 RPC error.
+
+So the acquire call cannot run there at all — not because the session is pinned to
+a `claude/<session>` branch (the earlier stated reason, which was never measured),
+but because the proxy refuses GitHub API writes. `git push` is not a substitute:
+per the warning above it is not a CAS, so two racers pushing the identical sha both
+exit 0.
+
+This was measured in **one** environment. Re-check before assuming it holds in
+another, and re-check if `gh` is ever added to the routine image — the acquire path
+would then be worth re-testing.
+
+When the acquire call fails for an environment or permission reason
 (never on a 422 — that is a decided race), degrade to the election below and
 **say so explicitly** in the report: `claim lock degraded to comment election: <the
 API error>`. A silent degrade would claim atomicity the run does not have.
@@ -149,6 +171,14 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    and no work started. On gh-issue, delete it outright:
    `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
 
+   > **In a cloud routine this retraction also fails** — `gh` is absent and the proxy
+   > refuses GitHub API writes (measured 2026-08-24, see the section heading above).
+   > A routine that loses the election therefore leaves its token comment behind.
+   > Since a loser's id is always higher than the winner's it still cannot win its own
+   > race, so this costs hygiene rather than correctness — but the _next_ session's
+   > `T_unclaimed` may fall before that orphan, so treat a leftover token from a
+   > routine as expected rather than as evidence of a live claim.
+
    Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
    than the winner's, so it can never win its own race. What it protects is the _next_
    session, whose `T_unclaimed` may fall before a leftover token — the tokenless
@@ -171,3 +201,11 @@ never sits unclaimed while a stale lock ref still blocks the next session's acqu
 the fallback path there is no ref to delete — **retract** this session's token comment
 instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
 on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.
+
+> **`git push --delete` does not work in a cloud routine.** Measured 2026-08-24: the
+> same routine that could _create_ a ref by push got a **403 RPC error** deleting it.
+> A routine never holds this lock in the first place (it cannot acquire — see the
+> fallback section), so no release is owed; the relevance is that a ref left behind by
+> a routine cannot be cleaned up from inside one. Delete it from a local session,
+> where both `gh api --method DELETE .../git/refs/heads/<ref>` and
+> `git push origin --delete <ref>` work.
