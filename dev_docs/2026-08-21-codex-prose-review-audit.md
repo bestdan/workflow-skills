@@ -136,7 +136,14 @@ Both runs reporting it were right, and no other reviewer had caught it:
 pre-check list", while `attendedness.md` lists `--non-interactive` first and
 `$AUTO_PILOT_UNTIL` second. Verified against the tree at `58950eee5`.
 
-**This is still unfixed on `main`** — the audit only documented it.
+**It was already fixed when this audit ran.** `70c3f07`, #405's own second commit,
+changed "is the first hard negative" to "is a hard negative" — the same fix codex
+proposed — so the contradiction was real in the reviewed diff and resolved before
+that PR merged. An earlier revision of this file claimed it was still live on
+`main`; that was verified at `58950eee5` and asserted about `main` without
+re-checking. The catch stands: it was genuinely present in the diff codex
+reviewed, and no other reviewer reported it there. That an independent pass
+reached the same conclusion corroborates it rather than diminishing it.
 
 ### agy regression check
 
