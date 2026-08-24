@@ -14,7 +14,16 @@ Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue cre
    - `labels` — list, e.g. `[follow-up]`. Plain text prompt (comma-separated); skip if blank.
    - `assignees` — list of GitHub usernames. Plain text prompt (comma-separated); skip if blank.
 
-3. **Return the config block** to `/task-config`:
+3. **Provision the repo's label vocabulary.** The handler stores status, priority and estimate as labels, and GitHub label namespaces are **per-repo** — an unprovisioned repo breaks `/add-task` outright (`gh` rejects an undefined label), and `gh issue transfer` silently drops labels the target repo lacks, which for this schema means losing an issue's entire state. Run the sync against the `repo` resolved in step 2:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-label-sync.py" \
+     --repo <gh-issue.repo> --apply
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-label-sync.py`. The vocabulary lives in the sibling `labels.yml` and is the single source for these names — never hardcode a label name. The script is idempotent, so re-running `/task-config` creates nothing. It **reports** labels it does not recognise and never deletes them; a repo may carry unrelated labels of its own. Drop `--apply` to see what it would create without touching the repo.
+
+4. **Return the config block** to `/task-config`:
 
    ```yaml
    handler: gh-issue

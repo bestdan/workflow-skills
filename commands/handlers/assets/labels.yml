@@ -1,0 +1,35 @@
+# Label vocabulary for the gh-issue handler's state model.
+#
+# GitHub Issues has only open/closed and no native status, priority or estimate
+# field, so labels carry that state. Label namespaces are per-repo, which makes
+# provisioning load-bearing rather than hygiene: `gh` rejects an undefined label
+# outright, and `gh issue transfer` silently drops labels the target repo lacks
+# — which for this schema means losing an issue's entire state.
+#
+# This file is the single source of the vocabulary. Do not hardcode label names
+# anywhere else in the handler; read them from here.
+#
+# Provision a repo with:
+#   python3 commands/handlers/assets/gh-label-sync.py --repo owner/name --apply
+#
+# Format is a deliberately small subset of YAML — one `<group>: [<value>, ...]`
+# line per group, plus a `colors:` mapping — so the sync script can parse it with
+# the standard library and no dependency. See gh-label-sync.py's load_vocabulary().
+#
+# Invariants (enforced by the write helper and the reconciler, not by this file):
+#   - an open issue carries exactly one `status:` and exactly one `auto:` label
+#   - an issue carries at most one `prio:` and at most one `est:` label
+#   - "done" is implicit: a closed issue has no status rung, and keeps its
+#     `prio:`/`est:` labels
+#   - dependencies and sub-issues use GitHub's native endpoints, never labels
+
+status: [0_untriaged, 1_needs_refinement, 2_ready, 3_started, 4_needs_review]
+auto: [eligible, human-review-needed]
+prio: [0, 1, 2, 3]
+est: [1, 2, 3, 5, 8, 13]
+
+colors:
+  status: 1d76db
+  auto: 0e8a16
+  prio: d93f0b
+  est: 5319e2
