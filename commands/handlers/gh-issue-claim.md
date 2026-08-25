@@ -54,15 +54,18 @@ normal run — passing both is an error: stop and ask which was meant.
   "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
 
-**`--all` / `-n N` (without `--claim-only`)** is **not** run from this file directly —
-`commands/do-tasks.md` §3 "Tracker-batch subroutine" ranks and selects dependency-ready
-candidates itself (reusing "Find candidates" and "Dependency-ready selection" below),
-then dispatches one remote session **per selected issue**, each running this file's
-**default** atomic claim-and-execute flow (pre-claim WIP gate → find candidates →
-dependency-ready → pre-flight → judge → claim → branch + execute → PR → move to
-review) against that one issue number. Nothing in this file changes between single and
-batch mode — a batch session is just this file's default flow, run unattended, pinned
-to one already-selected issue.
+**`--all` / `-n N` with `--remote` (the default, without `--claim-only`)** is **not**
+run from this file directly — `commands/do-tasks.md` §3 "Tracker-batch subroutine"
+ranks and selects dependency-ready candidates itself (reusing "Find candidates" and
+"Dependency-ready selection" below), then dispatches one remote session **per
+selected issue**, each running this file's **default** atomic claim-and-execute flow
+(pre-claim WIP gate → find candidates → dependency-ready → pre-flight → judge →
+claim → branch + execute → PR → move to review) against that one issue number.
+Nothing in this file changes between single and batch mode — a batch session is just
+this file's default flow, run unattended, pinned to one already-selected issue.
+**`--all` / `-n N --local` never dispatches remotely** — it caps the batch at 1 and
+runs the single highest-ranked dependency-ready issue through this file's default
+flow **in the current session** instead (`commands/do-tasks.md` §4).
 
 ## Pre-claim WIP gate
 
@@ -138,22 +141,42 @@ footer rather than a label or a separate lookup keeps one representation across 
 whole gh-issue handler family instead of a claim-only special case.
 
 1. **Parse.** In the candidate's `body` (already fetched by "Find candidates" — no
-   extra call), find a line matching `Blocked by: #<n>[, #<n>…]` under the `---`
-   footer. No match (or no footer) → the candidate has no recorded blockers; it is
-   dependency-ready. A `blocked` label with **no** matching footer line still excludes
-   the issue via the query filter above — the footer is what this step reads, the
-   label is what "Find candidates" already gates on.
-2. **Resolve each referenced number.** For every `#<n>` on the line, `gh issue view <n>
-   --json state --repo <repo>` (only for candidates that actually carry the footer —
-   this is a per-candidate lazy read, not a bulk one, matching `linear-claim.md`'s
-   lazy `get_issue` for blockers). `state: "CLOSED"` satisfies that blocker; a
-   deleted/inaccessible issue number also satisfies it (nothing left to block on,
-   mirroring the Linear rule for a since-deleted blocker). `state: "OPEN"` does not.
-3. **Verdict.** Dependency-ready only when **every** referenced number resolves
-   closed-or-gone. If any blocker is still open: in ranked mode, record `waiting on
-   #<n>` and advance to the next candidate; on a direct `/do-tasks <#n>` pick, **stop**
-   and report the unresolved blocker rather than claiming an issue whose dependencies
-   aren't met — the same split `linear-claim.md`'s pre-flight uses.
+   extra call), find a `Blocked by:` line under the `---` footer and split it into
+   references matching `push-plan.md` §5.3's accepted shape,
+   `/^(\S*#)?\d+$/` — a bare `#<n>`/`<n>` (this repo) **or** `owner/repo#<n>`
+   (cross-repo; **preserve the `owner/repo` qualifier**, do not strip it down to the
+   number). No `Blocked by:` line (or no footer) → the candidate has no recorded
+   blockers; it is dependency-ready. A `blocked` label with **no** matching footer
+   line still excludes the issue via the query filter above — the footer is what
+   this step reads, the label is what "Find candidates" already gates on.
+2. **Resolve each referenced issue.** For every reference on the line, one lazy
+   `gh issue view <n> --json state,stateReason --repo <ref-repo>` (only for
+   candidates that actually carry the footer — matching `linear-claim.md`'s lazy
+   `get_issue` for blockers). `<ref-repo>` is the reference's own `owner/repo` when
+   it carried one, **else** the candidate's own repo (`gh-issue.repo` if set, else
+   the current repo) — never collapse a cross-repo reference onto the configured
+   repo. Classify the result:
+   - **Satisfied** — `state: "CLOSED"` **and** `stateReason` is `COMPLETED` (or
+     absent/null). Matches `gh-issue-reoptimize.md`'s rule that a `COMPLETED` close
+     is a satisfied dependency.
+   - **Not satisfied** — `state: "OPEN"`, **or** `state: "CLOSED"` with
+     `stateReason: "NOT_PLANNED"` (a wontfix/duplicate close blocks forever — same
+     `gh-issue-reoptimize.md` rule, and the same shape as a Linear `canceled`
+     blocker never satisfying a dependency).
+   - **Satisfied (gone)** — the lookup fails with a **not-found** error (the issue
+     number doesn't exist in `<ref-repo>` — nothing left to block on).
+   - **Fail closed (not satisfied)** — the lookup fails any **other** way (auth,
+     network, rate limit, permission on a private cross-repo reference). An error
+     is not proof the issue was deleted; treat it as an unresolved blocker rather
+     than silently letting it satisfy the dependency, and surface the lookup
+     failure alongside the `waiting on` note below so it doesn't read as a normal
+     open blocker.
+3. **Verdict.** Dependency-ready only when **every** referenced issue resolves
+   satisfied. If any blocker is not satisfied: in ranked mode, record `waiting on
+   <ref>` (or `waiting on <ref> (lookup failed: <reason>)` for the fail-closed
+   case) and advance to the next candidate; on a direct `/do-tasks <#n>` pick,
+   **stop** and report the unresolved blocker rather than claiming an issue whose
+   dependencies aren't met — the same split `linear-claim.md`'s pre-flight uses.
 
 ## Pre-flight: is work already in flight?
 

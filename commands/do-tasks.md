@@ -165,8 +165,9 @@ Overlay the local override on the committed config — mappings merge recursivel
   `commands/handlers/linear-claim.md` (with `commands/handlers/linear-common.md`
   for config/preflight/kanban mapping) for the full claim flow.
 - `handler: gh-issue` → **gh-issue path** (section 4 below). Follow
-  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow
-  (foreground single, current session).
+  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow —
+  foreground single by default, or batch remote dispatch for `--all`/`-n N`
+  (see section 4).
 - `handler: jira` → **jira path** (section 5 below). Follow
   `commands/handlers/jira-claim.md` for the full claim/execute flow
   (foreground single, current session).
@@ -678,9 +679,11 @@ substituting:
    bound is unconditional — a batch never offers the attended override (`attendedness.md`).
 3. **Select dependency-ready candidates lazily, in ranked order** — walk the ranked
    list and apply `gh-issue-claim.md` "Dependency-ready selection" (the
-   `Blocked by: #<n>` footer, each referenced number resolved via a lazy
-   `gh issue view <n> --json state`) one candidate at a time; keep ready issues,
-   record the rest as `waiting on #<n>`. Stop once you have `N` issues (for `-n N`),
+   `Blocked by: #<n>[, owner/repo#<n>…]` footer, each reference resolved via a lazy
+   `gh issue view --json state,stateReason` against its own repo, `NOT_PLANNED`
+   closes and lookup errors both treated as **not** satisfied — see that section for
+   the full classification) one candidate at a time; keep ready issues, record the
+   rest as `waiting on #<n>`. Stop once you have `N` issues (for `-n N`),
    the WIP slack is exhausted, or the list is exhausted. Record any candidate left
    unexamined as `held (WIP limit reached)` or `held (-n N ceiling)`.
 4. **Dispatch one remote session per selected issue** — each issue's own cloud VM
