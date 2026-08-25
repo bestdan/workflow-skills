@@ -1744,7 +1744,7 @@ submitBtn.onclick = () => {                 // step 1: open the finish-review wi
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
   document.getElementById('finishSub').textContent =
-    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an optional overall comment, then submit.`;
+    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 };
 finishSummary.addEventListener('input', updateFinishBtn);
