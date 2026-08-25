@@ -1245,6 +1245,12 @@ try:
               len(before.get("threads", [])) == 2
               and all(t.get("resolved") is False and t.get("replies") == [] for t in before["threads"]),
               before)
+        # Minted threads carry the diff_sig of the round that created them
+        # (design doc, "Comment identity") -- no behavioral use yet, but the
+        # field must ride the payload for the re-placement work to read later.
+        check("server: minted threads carry a non-empty diff_sig matching /state's sig",
+              all(t.get("diff_sig") and t.get("diff_sig") == state0.get("sig") for t in before["threads"]),
+              (before, state0))
 
         # a. reply round-trip
         status, r1 = post_json("reply", {"thread_id": "t1", "author": "agent", "text": "Fixed in place."})
@@ -2191,6 +2197,75 @@ try:
 finally:
     _shutil.rmtree(git_dir1, ignore_errors=True)
 
+# -- --git uncommitted, threads mode: threads survive a live /refresh -------
+# (dev_docs/designs/2026-08-24-local-review-threaded-replies.md, "State
+# ownership": threads live in server memory and must survive /refresh, which
+# always ends in the page reloading -- only unsubmitted drafts are lost.)
+# This is the server-side half of re-placement: the thread and its reply must
+# still be there after the diff moves under it. The page-side re-anchoring is
+# covered by the placeThreads() node corpus below.
+git_dir1b, git_env1b, git1b = make_git_fixture()
+try:
+    file_path1b = os.path.join(git_dir1b, "file.txt")
+    with open(file_path1b, "w") as f:
+        f.write("line one\nline two CHANGED\nline three\n")
+    ep_fd1b, ep_out1b = _tempfile.mkstemp(suffix=".json")
+    os.close(ep_fd1b)
+    os.unlink(ep_out1b)
+    proc = _subprocess.Popen(
+        [sys.executable, server_path, "--git", "uncommitted", "--out", ep_out1b],
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        cwd=git_dir1b, env=git_env1b,
+    )
+    try:
+        url = read_url(proc)
+        check("git uncommitted threads mode: server starts", bool(url), url)
+        if url:
+            def post_json1b(route, obj):
+                req = _urlrequest.Request(
+                    f"{url}{route}", data=json.dumps(obj).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                with _urlrequest.urlopen(req, timeout=5) as resp:
+                    return resp.status, json.loads(resp.read().decode())
+
+            def get_json1b(route):
+                with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                    return resp.status, json.loads(resp.read().decode())
+
+            status, info = post_json1b("submit", {"meta": {}, "summary": "", "comments": [
+                {"file": "file.txt", "side": "R", "line": 2, "code": "line two CHANGED", "text": "why this change?"},
+            ]})
+            check("git uncommitted threads mode: submit returns 200", status == 200, status)
+            tid = (info.get("ids") or [None])[0]
+            check("git uncommitted threads mode: submit mints a thread id", bool(tid), info)
+
+            status, r1 = post_json1b("reply", {"thread_id": tid, "author": "agent", "text": "Because of the fixture."})
+            check("git uncommitted threads mode: reply returns 200", status == 200, status)
+
+            # Edit the tracked file again -- `--git uncommitted` re-runs the
+            # diff on every check, so the row this thread anchored to moves.
+            with open(file_path1b, "w") as f:
+                f.write("line one\nline two CHANGED AGAIN\nline three\n")
+            req = _urlrequest.Request(f"{url}refresh", data=b"", method="POST")
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                refresh_body = json.loads(resp.read().decode())
+                check("git uncommitted threads mode: POST /refresh returns ok",
+                      refresh_body.get("ok") is True, refresh_body)
+
+            status, after = get_json1b("threads")
+            check("git uncommitted threads mode: GET /threads still 200 after refresh", status == 200, status)
+            t = next((t for t in after.get("threads", []) if t.get("id") == tid), None)
+            check("git uncommitted threads mode: the thread survives /refresh", t is not None, after)
+            if t:
+                check("git uncommitted threads mode: the thread's reply survives /refresh",
+                      len(t.get("replies", [])) == 1 and t["replies"][0].get("text") == "Because of the fixture.",
+                      t)
+    finally:
+        stop_proc(proc)
+finally:
+    _shutil.rmtree(git_dir1b, ignore_errors=True)
+
 # -- --git <ref> (branch mode): shows the committed diff of the branch vs ----
 # the given ref (here main).
 git_dir2, git_env2, git2 = make_git_fixture()
@@ -2889,7 +2964,7 @@ finally:
 # return;`); it must now index it by file for the strip instead of discarding
 # it.
 check("server.PAGE's fetchThreads() indexes resolved threads for the strip, not just drops them",
-      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,400}?resolvedByFile\s*=\s*byFile",
+      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,1400}?resolvedByFile\s*=\s*byFile",
                  server.PAGE) is not None,
       "fetchThreads() no longer keeps resolved threads for the strip")
 # The strip's index is side-aware on purpose: path alone double-lists in a
@@ -2903,7 +2978,7 @@ check("server.PAGE defines a resolved-strip renderer",
       "function renderResolvedStrip(" in server.PAGE,
       "renderResolvedStrip() is missing")
 check("server.PAGE invokes the resolved-strip renderer from the file-card build path",
-      _re.search(r"if\(THREADS_MODE\)\s*renderResolvedStrip\(el,\s*file\);", server.PAGE) is not None,
+      _re.search(r"if\(THREADS_MODE\)\{[\s\S]{0,120}?renderResolvedStrip\(el,\s*file\);", server.PAGE) is not None,
       "renderResolvedStrip(...) is not called from renderFile()")
 check("server.PAGE's Reopen control posts resolved: false",
       _re.search(r"reopenBtn\.onclick[\s\S]{0,400}?resolved:\s*false", server.PAGE) is not None,
@@ -2950,6 +3025,115 @@ if os.path.exists(_threads_md_path):
 else:
     skip("references/threads.md documents no agent-side /resolve",
          "file does not exist yet -- a later task adds it")
+
+# -- Task 5: anchor re-placement across /refresh -----------------------------
+# placeThreads() lives in the PURE-PREVIEW region so it can be driven under
+# bare node with no DOM, the same slicing as the describe() corpus above --
+# but it needs neither marked nor hljs, so it runs whenever node is
+# resolvable at all, independent of the vendor-file skips those cases carry.
+if _node is None:
+    skip("placeThreads: anchor re-placement corpus", "no node resolvable")
+elif _PURE_BEGIN not in server.PAGE or _PURE_END not in server.PAGE:
+    bad("placeThreads: the PURE-PREVIEW markers are present in PAGE",
+        "markers missing -- the placeThreads() corpus cannot be sliced out")
+else:
+    _pure2 = server.PAGE.split(_PURE_BEGIN, 1)[1].split("\n", 1)[1].split(_PURE_END, 1)[0]
+    _pt_harness = """
+%s
+// A tiny fixture "files" array shaped like parse_diff()'s output: one hunk,
+// rows carrying {l, r} cells ({t, n, s}); an "empty" cell is flush_pairs()
+// padding and names no real row, same as the real parser emits.
+function mkFile(oldPath, newPath, rows){
+  return {old: oldPath, new: newPath, display: newPath || oldPath,
+          hunks: [{header: '@@', section: '', rows}]};
+}
+const out = {};
+
+// Rule 1: the anchor's own row still says the same thing -- exact.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'del', n:5, s:'old line'}, r: {t:'add', n:5, s:'new line'}},
+  ])];
+  const threads = [{id:'t1', file:'a.py', side:'R', line:5, code:'new line'}];
+  out.exact = placeThreads(files, threads);
+}
+
+// Rule 2: the anchored row is gone, but its exact text appears exactly once
+// elsewhere in the file -- moved, re-anchored at the NEW row.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'ctx', n:1, s:'unrelated'}, r: {t:'ctx', n:1, s:'unrelated'}},
+    {l: {t:'empty'}, r: {t:'add', n:9, s:'moved line'}},
+  ])];
+  const threads = [{id:'t2', file:'a.py', side:'R', line:5, code:'moved line'}];
+  out.moved = placeThreads(files, threads);
+}
+
+// Rule 3a: the anchor is gone and its text is nowhere in the file -- outdated,
+// at the ORIGINAL anchor.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'ctx', n:1, s:'unrelated'}, r: {t:'ctx', n:1, s:'unrelated'}},
+  ])];
+  const threads = [{id:'t3', file:'a.py', side:'R', line:5, code:'gone forever'}];
+  out.outdatedGone = placeThreads(files, threads);
+}
+
+// Rule 3b, the ambiguous case: the SAME code text sits on two rows. Never
+// guess which one the user meant -- outdated, not moved.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'empty'}, r: {t:'add', n:7, s:'return None'}},
+    {l: {t:'empty'}, r: {t:'add', n:20, s:'return None'}},
+  ])];
+  const threads = [{id:'t4', file:'a.py', side:'R', line:5, code:'return None'}];
+  out.outdatedAmbiguous = placeThreads(files, threads);
+}
+
+console.log(JSON.stringify(out));
+""" % _pure2
+    _pt_fd, _pt_hp = _tempfile.mkstemp(suffix=".cjs")
+    try:
+        with os.fdopen(_pt_fd, "w", encoding="utf-8") as _f:
+            _f.write(_pt_harness)
+        _pt_r = _subprocess.run([_node, _pt_hp], capture_output=True, encoding="utf-8")
+        if _pt_r.returncode != 0:
+            bad("placeThreads: corpus harness runs", (_pt_r.stderr or "").strip()[:400])
+        else:
+            _pt = json.loads(_pt_r.stdout)
+            check("placeThreads: rule 1 -- an unmoved row places 'exact' at its own anchor",
+                  _pt["exact"] == [{"thread": {"id": "t1", "file": "a.py", "side": "R", "line": 5,
+                                                "code": "new line"},
+                                     "placement": "exact", "file": "a.py", "side": "R", "line": 5}],
+                  _pt["exact"])
+            check("placeThreads: rule 2 -- a uniquely-relocated row places 'moved' at its NEW line",
+                  _pt["moved"][0]["placement"] == "moved" and _pt["moved"][0]["line"] == 9
+                  and _pt["moved"][0]["side"] == "R", _pt["moved"])
+            check("placeThreads: rule 3 -- gone with no match anywhere is 'outdated' at the original anchor",
+                  _pt["outdatedGone"][0]["placement"] == "outdated"
+                  and _pt["outdatedGone"][0]["line"] == 5 and _pt["outdatedGone"][0]["side"] == "R",
+                  _pt["outdatedGone"])
+            check("placeThreads: rule 3 -- two rows sharing the same code is 'outdated', never a guess",
+                  _pt["outdatedAmbiguous"][0]["placement"] == "outdated"
+                  and _pt["outdatedAmbiguous"][0]["line"] == 5, _pt["outdatedAmbiguous"])
+    finally:
+        os.unlink(_pt_hp)
+
+# fetchThreads() must run placeThreads() over the current DIFF on every fetch
+# (page load AND every post-refresh reload, since /refresh ends in
+# location.reload()) rather than indexing threads by their raw stored anchor.
+check("server.PAGE's fetchThreads() routes unresolved threads through placeThreads()",
+      "placeThreads(DIFF, unresolved)" in server.PAGE,
+      "fetchThreads() does not call placeThreads(DIFF, unresolved)")
+check("server.PAGE defines an Outdated-strip renderer",
+      "function renderOutdatedStrip(" in server.PAGE,
+      "renderOutdatedStrip() is missing")
+check("server.PAGE invokes the outdated-strip renderer from the file-card build path",
+      _re.search(r"if\(THREADS_MODE\)\{\s*renderOutdatedStrip\(el,\s*file\);", server.PAGE) is not None,
+      "renderOutdatedStrip(...) is not called from renderFile()")
+check("server.PAGE's thread chip badges a 'moved' thread",
+      "thread._moved" in server.PAGE and "moved-badge" in server.PAGE,
+      "buildThreadChip() has no moved-marker branch")
 
 print(f"# {pass_count} passed, {fail_count} failed, {skip_count} skipped")
 sys.exit(1 if fail_count else 0)

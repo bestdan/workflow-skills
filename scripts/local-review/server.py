@@ -687,6 +687,11 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .resolved-strip{background:var(--surface2);border-bottom:1px solid var(--border);padding:2px 12px}
 .resolved-strip .cmt-row{border-left:none;border-right:none}
 .resolved-strip .cmt-row:first-child{border-top:none}
+.outdated-strip{background:var(--surface2);border-bottom:1px solid var(--border);padding:2px 12px}
+.outdated-strip .cmt-row{border-left:none;border-right:none}
+.outdated-strip .cmt-row:first-child{border-top:none}
+.outdated-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:6px 0 2px}
+.moved-badge{color:var(--dim);font-size:11px}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
   border-radius:20px;padding:0 7px;margin-left:6px;font-size:10.5px;vertical-align:1px}
 .cmt-saved.gh .saved{border-left-color:#6e7681}
@@ -766,6 +771,10 @@ let threadsByKey = {};
 // fileResolvedThreads()) -> array of that file's resolved threads, for the
 // per-file resolved-strip toggle.
 let resolvedByFile = {};
+// file path (same side-dependent key as resolvedByFile) -> array of that
+// file's unresolved threads whose anchor failed placeThreads() rules 1 and 2
+// -- rendered in the file's Outdated strip instead of at a diff row.
+let outdatedByFile = {};
 // path -> view mode the user picked. Survives /refresh (unlike comments, which
 // refresh discards): a view preference cannot go stale the way an anchor can.
 // Refresh ends in location.reload(), so this has to outlive the page, not just
@@ -940,6 +949,59 @@ function hlIsComment(tree){
   const strip = s => s.replace(/\s+/g, '');
   const allNS = strip(all);
   return allNS.length > 0 && allNS === strip(cmt);
+}
+
+// ---- thread re-placement: anchor a snapshot back onto a moved diff --------
+// A thread's anchor ({file, side, line, code}) is a snapshot taken at comment
+// time. `--git uncommitted` re-runs the diff on every check and `/refresh`
+// ends in a reload, so the row a thread named can move or vanish under it.
+// placeThreads() answers, for every thread, where it renders now -- per the
+// design doc's "Comment identity", in order: the same row wins (exact); else
+// a uniquely-identical row elsewhere in the file wins (moved) -- two or more
+// candidates is NOT a signal, and falls through rather than guessing; else
+// the thread is never dropped, it goes to that file's Outdated strip
+// (outdated). `files` is parse_diff's output (mirrored in the harness
+// fixture); `threads` is the flat array GET /threads returns.
+
+// Every non-empty cell of one file, both sides, as a candidate row. "empty"
+// cells are flush_pairs() padding for an unequal del/add run in a hunk and
+// name no real row, so they are never candidates.
+function threadRowsOf(file){
+  const out = [];
+  for(const h of file.hunks || []){
+    for(const row of h.rows || []){
+      if(row.l && row.l.t !== 'empty') out.push({side:'L', line:row.l.n, code:row.l.s, file:file.old});
+      if(row.r && row.r.t !== 'empty') out.push({side:'R', line:row.r.n, code:row.r.s, file:file.new});
+    }
+  }
+  return out;
+}
+// A thread's `file` is the side-dependent path it was anchored on (old for L,
+// new for R -- see anchorOf()), so match it against either side of a parsed
+// file, same as fileResolvedThreads() does for the resolved strip. Usually
+// one file matches; a rename can in principle match on either field, so every
+// match's rows are pooled rather than picking one arbitrarily.
+function filesNamed(files, path){
+  return (files || []).filter(f => f.old === path || f.new === path);
+}
+function placeThreads(files, threads){
+  return (threads || []).map(thread => {
+    const rows = [];
+    filesNamed(files, thread.file).forEach(f => rows.push(...threadRowsOf(f)));
+    // Rule 1: the row this thread was anchored to still says the same thing.
+    const exact = rows.find(r => r.side === thread.side && r.line === thread.line && r.code === thread.code);
+    if(exact) return {thread, placement:'exact', file: exact.file, side: thread.side, line: thread.line};
+    // Rule 2: exactly one row anywhere in the file (either side) carries the
+    // same text. Two or more matches is not a signal -- never guess which one
+    // the user meant; that falls through to rule 3 instead.
+    const matches = rows.filter(r => r.code === thread.code);
+    if(matches.length === 1){
+      return {thread, placement:'moved', file: matches[0].file, side: matches[0].side, line: matches[0].line};
+    }
+    // Rule 3: gone, and not uniquely findable. Never dropped -- the file's
+    // Outdated strip shows the original anchor.
+    return {thread, placement:'outdated', file: thread.file, side: thread.side, line: thread.line};
+  });
 }
 
 // ---- preview: markdown as a document ------------------------------------
@@ -1540,6 +1602,12 @@ function buildThreadChip(thread, opts){
     ? `${thread.side}${thread.line}–${thread.side}${thread.endLine}`
     : `${thread.side}${thread.line}`;
   anchor.appendChild(document.createTextNode(' : ' + range));
+  if(thread._moved){
+    const moved = document.createElement('span');
+    moved.className = 'moved-badge';
+    moved.textContent = ' · moved';
+    anchor.appendChild(moved);
+  }
   chip.appendChild(anchor);
   const saved = document.createElement('div');
   saved.className = 'saved';
@@ -1635,6 +1703,8 @@ async function fetchThreads(){
     threadsRev = j.threads_rev;
     const byKey = {};
     const byFile = {};
+    const outdated = {};
+    const unresolved = [];
     (j.threads || []).forEach(t => {
       if(t.resolved){
         // Kept, not dropped: the per-file resolved-strip needs these to
@@ -1644,13 +1714,32 @@ async function fetchThreads(){
         // a thread's file is its side-dependent path -- see anchorOf().
         const fk = `${t.file}|${t.side}`;
         (byFile[fk] = byFile[fk] || []).push(t);
+      }else{
+        unresolved.push(t);
+      }
+    });
+    // Run every unresolved thread's anchor back through the current diff.
+    // The diff moves under `--git uncommitted` and on every `/refresh`
+    // reload, so this runs on every fetch -- covering both page load and
+    // post-refresh with the one call.
+    placeThreads(DIFF, unresolved).forEach(p => {
+      if(p.placement === 'outdated'){
+        (outdated[p.file] = outdated[p.file] || []).push(p.thread);
         return;
       }
-      const key = `${t.file}|${t.side}${t.line}`;
-      (byKey[key] = byKey[key] || []).push(t);
+      // A "moved" thread renders at its NEW row: a shallow copy carrying the
+      // relocated side/line plus a marker buildThreadChip badges "· moved".
+      // The stored thread object (and its id/replies) is untouched -- this
+      // copy exists only for this render pass.
+      const rendered = p.placement === 'moved'
+        ? Object.assign({}, p.thread, {side: p.side, line: p.line, _moved: true})
+        : p.thread;
+      const key = `${p.file}|${p.side}${p.line}`;
+      (byKey[key] = byKey[key] || []).push(rendered);
     });
     threadsByKey = byKey;
     resolvedByFile = byFile;
+    outdatedByFile = outdated;
     updateRoundNote(j.round);
   }catch(e){ /* transient; the poll will retry */ }
 }
@@ -1667,6 +1756,29 @@ function fileResolvedThreads(file){
   if(file.new) out = out.concat(resolvedByFile[`${file.new}|R`] || []);
   return out;
 }
+// Same old/new union as fileResolvedThreads, for outdatedByFile.
+function fileOutdatedThreads(file){
+  const keys = new Set([file.old, file.new].filter(Boolean));
+  let out = [];
+  keys.forEach(k => { out = out.concat(outdatedByFile[k] || []); });
+  return out;
+}
+// Per-file Outdated strip: threads whose anchor failed placeThreads() rules 1
+// and 2. Unlike the resolved strip, there is no toggle -- an outdated thread
+// is unresolved and must stay visible until the user acts on it, per the
+// design doc's "never dropped". Each chip shows the ORIGINAL anchor (the
+// thread's own file/side/line, untouched by placement) and keeps its normal
+// Reply/Resolve controls -- these are live unresolved threads, just ones
+// whose row is gone.
+function renderOutdatedStrip(el, file){
+  const outdated = fileOutdatedThreads(file);
+  const stripEl = el.querySelector('.outdated-strip');
+  if(!outdated.length){ stripEl.hidden = true; stripEl.innerHTML = ''; return; }
+  stripEl.innerHTML = '<div class="outdated-label">Outdated</div>';
+  outdated.forEach(t => stripEl.appendChild(buildThreadChip(t)));
+  stripEl.hidden = false;
+}
+
 // Per-file resolved-thread strip. Independent of Split/Single/Preview: called
 // once per renderFile() below, so a mode switch never drops it, unlike
 // renderThreadRow/renderThreadBlockRow which are wired into each mode's own
@@ -1728,9 +1840,9 @@ function renderFile(file, fi){
       ${modeCtl}
       ${THREADS_MODE ? '<button class="btn resolved-toggle" hidden></button>' : ''}
       <label><input type="checkbox" class="viewed"> Viewed</label>
-    </div>${THREADS_MODE ? '<div class="resolved-strip" hidden></div>' : ''}<div class="file-body"></div>`;
+    </div>${THREADS_MODE ? '<div class="outdated-strip" hidden></div><div class="resolved-strip" hidden></div>' : ''}<div class="file-body"></div>`;
   setAnchorPath(el, file.display);
-  if(THREADS_MODE) renderResolvedStrip(el, file);
+  if(THREADS_MODE){ renderOutdatedStrip(el, file); renderResolvedStrip(el, file); }
   const body = el.querySelector('.file-body');
   if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
   else if(mode === 'preview'){ renderPreview(file, body, built); }
@@ -2596,6 +2708,7 @@ class Handler(BaseHTTPRequestHandler):
                         "text": c.get("text"),
                         "resolved": False,
                         "replies": [],
+                        "diff_sig": Handler.diff_sig,
                     })
                 with Handler._threads_lock:
                     threads_snapshot = list(Handler.threads) + new_entries
