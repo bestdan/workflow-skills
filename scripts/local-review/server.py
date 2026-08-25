@@ -1804,6 +1804,7 @@ class Handler(BaseHTTPRequestHandler):
     gh = None  # {owner, repo, pr, sha} when the diff is an associated PR, else None
     srv = None  # the running server, set by main() so a handler can shut it down
     once = False  # shut the server down after a successful /submit
+    mode = "human-only"  # derived from --out/--once: threads | one-shot | human-only
     title = None  # --title override for the header (diff-file mode)
     # Serializes submissions across handler threads: the browser's double-click
     # guard doesn't bind other local callers, and concurrent /submit posts
@@ -2160,7 +2161,7 @@ def main():
     ap.add_argument("--diff-file")
     ap.add_argument("--git", help="live diff spec: uncommitted | <ref> | <A>...<B>")
     ap.add_argument("--port", type=int, default=None)
-    ap.add_argument("--out", default="pr_comments.json")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--title", help="human title for the header (else the --diff-file path is shown)")
     ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
     args = ap.parse_args()
@@ -2193,7 +2194,18 @@ def main():
         meta["sha"] = gh["sha"]
     files = parse_diff(diff)
     Handler.page = build_page(files, meta)
-    Handler.out_path = args.out
+    # Mode is derived, not flagged: an explicit --out is the one fact that
+    # means an agent is watching the file, so no --once with an explicit
+    # --out is the only shape that stays alive as "threads" mode.
+    if args.out is None:
+        Handler.mode = "human-only"
+        Handler.out_path = "pr_comments.json"
+    elif args.once:
+        Handler.mode = "one-shot"
+        Handler.out_path = args.out
+    else:
+        Handler.mode = "threads"
+        Handler.out_path = args.out
     Handler.vendor_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
     Handler.pr = args.pr
     Handler.repo = args.repo
@@ -2214,7 +2226,7 @@ def main():
         print(f"port 8765 busy; using {port}", file=sys.stderr)
     machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
     vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
-    print(f"Review UI: {vanity_url}   ({len(files)} files)  out={args.out}", flush=True)
+    print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
     print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 

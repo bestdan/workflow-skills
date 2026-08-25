@@ -736,13 +736,13 @@ index 1111111..2222222 100644
 """
 
 
-def start_server(extra_args, env=None):
+def start_server(extra_args, env=None, cwd=None):
     patch_fd, patch_path = _tempfile.mkstemp(suffix=".patch")
     with os.fdopen(patch_fd, "w") as f:
         f.write(PATCH)
     proc = _subprocess.Popen(
         [sys.executable, server_path, "--diff-file", patch_path] + extra_args,
-        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=env,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True, env=env, cwd=cwd,
     )
     return proc, patch_path
 
@@ -891,6 +891,7 @@ finally:
         hold_sock.close()
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
+# (--out with --once: one-shot mode)
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")
 os.close(out_fd)
 os.unlink(out_path)  # server must create it; --once poller checks for existence
@@ -969,6 +970,7 @@ finally:
         os.unlink(out_path)
 
 # -- unwritable --out directory: /submit 500s before any side effect --------
+# (--out with no --once: threads mode, stays alive)
 bad_out_root = _tempfile.mkdtemp(prefix="lr-gone-")
 bad_out = os.path.join(bad_out_root, "missing", "out.json")
 proc, patch_path = start_server(["--out", bad_out])
@@ -1040,7 +1042,7 @@ finally:
 slot_fd, slot_out = _tempfile.mkstemp(suffix=".json")
 os.close(slot_fd)
 os.unlink(slot_out)
-proc, patch_path = start_server(["--out", slot_out])  # stay-alive: no --once
+proc, patch_path = start_server(["--out", slot_out])  # stay-alive: threads mode (--out, no --once)
 try:
     url = read_url(proc)
     check("server: slot run starts", bool(url), url)
@@ -1068,6 +1070,7 @@ try:
         check("server: at least one concurrent submit wins", 200 in results, results)
         check("server: OUT is whole JSON after the race",
               os.path.exists(slot_out) and json.load(open(slot_out)).get("summary") == "race", slot_out)
+        check("server: threads mode stays alive after a submit", proc.poll() is None, proc.poll())
         # sequential second round on a stay-alive server must still be allowed
         req = _urlrequest.Request(
             f"{url}submit", data=b'{"meta":{},"summary":"round 2","comments":[]}',
@@ -1091,7 +1094,7 @@ finally:
 sec_fd, sec_out = _tempfile.mkstemp(suffix=".json")
 os.close(sec_fd)
 os.unlink(sec_out)
-proc, patch_path = start_server(["--out", sec_out])  # stay-alive: several requests in sequence
+proc, patch_path = start_server(["--out", sec_out])  # stay-alive: threads mode (--out, no --once); several requests in sequence
 try:
     url = read_url(proc)
     check("server: security-test run starts", bool(url), url)
@@ -1321,6 +1324,7 @@ finally:
         os.unlink(sec_out)
 
 # -- --out pointing at an existing DIRECTORY: preflight must 500, not post ---
+# (--out with no --once: threads mode, stays alive)
 dir_out = _tempfile.mkdtemp(prefix="lr-isdir-")
 proc, patch_path = start_server(["--out", dir_out])
 try:
@@ -1349,6 +1353,80 @@ finally:
             proc.wait(timeout=5)
     os.unlink(patch_path)
     _shutil.rmtree(dir_out, ignore_errors=True)
+
+# -- mode derivation: no --out, no --once => human-only, stays alive --------
+# writes the default pr_comments.json (relative to the server's cwd) on
+# submit, exactly like today's hand-run flow.
+human_only_dir = _tempfile.mkdtemp(prefix="lr-humanonly-")
+human_only_out = os.path.join(human_only_dir, "pr_comments.json")
+proc, patch_path = start_server([], cwd=human_only_dir)
+try:
+    url = read_url(proc)
+    check("server: human-only run starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"human-only","comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: human-only POST /submit returns 200", resp.status == 200, resp.status)
+        check("server: human-only submit writes pr_comments.json in the server's cwd",
+              os.path.exists(human_only_out), human_only_out)
+        if os.path.exists(human_only_out):
+            with open(human_only_out) as f:
+                written = json.load(f)
+            check("server: human-only pr_comments.json carries the submitted summary",
+                  written.get("summary") == "human-only", written)
+        check("server: human-only mode stays alive after a submit", proc.poll() is None, proc.poll())
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(human_only_dir, ignore_errors=True)
+
+# -- mode derivation: --once with no --out => still exits, still writes ------
+# pr_comments.json (the default out path, relative to the server's cwd).
+once_no_out_dir = _tempfile.mkdtemp(prefix="lr-oncenoout-")
+once_no_out = os.path.join(once_no_out_dir, "pr_comments.json")
+proc, patch_path = start_server(["--once"], cwd=once_no_out_dir)
+try:
+    url = read_url(proc)
+    check("server: --once-no-out run starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"once-no-out","comments":[]}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: --once-no-out POST /submit returns 200", resp.status == 200, resp.status)
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: --once with no --out still exits after a successful /submit", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: --once with no --out still exits after a successful /submit",
+                "did not exit within 5s")
+        check("server: --once with no --out still writes pr_comments.json",
+              os.path.exists(once_no_out), once_no_out)
+        if os.path.exists(once_no_out):
+            with open(once_no_out) as f:
+                written = json.load(f)
+            check("server: --once-no-out pr_comments.json carries the submitted summary",
+                  written.get("summary") == "once-no-out", written)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(once_no_out_dir, ignore_errors=True)
 
 # -- PR-mode startup with gh unavailable: the RuntimeError from sh() must ----
 # propagate to main()'s handler (a one-line stderr error, exit 1) instead of
