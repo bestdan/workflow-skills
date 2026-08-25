@@ -946,8 +946,9 @@ try:
             check("server: one-shot $OUT carries no round, threads, or finished key",
                   "round" not in written and "threads" not in written and "finished" not in written,
                   written)
-            check("server: one-shot $OUT comments carry no minted id",
-                  all("id" not in c for c in written.get("comments", [])), written)
+            check("server: one-shot $OUT keeps the submitted comment, unminted",
+                  len(written.get("comments", [])) == 1
+                  and all("id" not in c for c in written["comments"]), written)
         _fd = proc.stdout.fileno()
         os.set_blocking(_fd, False)
         _stdout_tail = ""
@@ -1156,6 +1157,21 @@ try:
               len(written2.get("threads", [])) == 3, written2)
         check("server: threads-mode round 2 --out finished is false", written2.get("finished") is False, written2)
         check("server: threads-mode server stays alive after round 2", proc.poll() is None, proc.poll())
+
+        # a non-boolean finished must 400, not shut the server down:
+        # bool("false") is True, and a Finish keeps the submit slot forever.
+        bad_fin = {"meta": {}, "summary": "", "comments": [], "finished": "false"}
+        req = _urlrequest.Request(
+            f"{url}submit", data=json.dumps(bad_fin).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: a non-boolean finished returns 400", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: a non-boolean finished returns 400", e.code == 400, e.code)
+        check("server: a rejected non-boolean finished leaves the server alive",
+              proc.poll() is None, proc.poll())
 
         # round 3: Finish -> finished true, server shuts down
         payload3 = {"meta": {}, "summary": "", "comments": [], "finished": True}

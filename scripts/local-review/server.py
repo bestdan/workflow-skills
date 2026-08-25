@@ -2022,6 +2022,15 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._submitted = False
 
     def _do_submit(self, payload):
+        # finished must be a JSON boolean, validated before anything happens:
+        # bool() would turn "false" into a Finish that shuts the server down
+        # mid-review and keeps the submit slot. Same rule /resolve applies to
+        # its resolved bit.
+        finished = payload.get("finished", False)
+        if Handler.mode == "threads" and not isinstance(finished, bool):
+            self._send_json(400, {"ok": False, "error": "finished must be a boolean"})
+            return
+        finished = bool(finished) if Handler.mode == "threads" else False
         # The temp file is created up front so an unwritable or missing --out
         # directory is caught before anything is printed: the human-readable
         # block below reads as a completed submission, and the caller polls for
@@ -2047,7 +2056,6 @@ class Handler(BaseHTTPRequestHandler):
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
-        finished = False
         round_no = None
         try:
             # No gh write happens here, by design. The page can reach /submit,
@@ -2065,33 +2073,37 @@ class Handler(BaseHTTPRequestHandler):
             # Build the persisted object explicitly rather than dumping the
             # request verbatim — that also closes off a hand-crafted POST
             # smuggling an extra key (e.g. the removed "approved") into --out.
+            new_entries = []
             if Handler.mode == "threads":
-                finished = bool(payload.get("finished"))
-                # Mint ids and grow the store under its own lock: a comment is
-                # a draft with no identity until it lands here, where the
-                # server becomes the authority for keys into its own store.
+                # Mint ids into locals and commit to the store only after the
+                # write is durable: a failed dump/replace releases the slot,
+                # the browser retries, and a store mutated up front would
+                # re-mint — skipped ids, a round gap, and ghost threads riding
+                # every later full-state payload. The server is still the
+                # minting authority; the commit just waits for os.replace.
                 with Handler._threads_lock:
-                    Handler.round += 1
-                    round_no = Handler.round
-                    for c in payload.get("comments", []):
-                        Handler._thread_counter += 1
-                        tid = f"t{Handler._thread_counter}"
-                        c["id"] = tid
-                        Handler.threads.append({
-                            "id": tid,
-                            "round": round_no,
-                            "file": c.get("file"),
-                            "side": c.get("side"),
-                            "line": c.get("line"),
-                            "code": c.get("code"),
-                            "endLine": c.get("endLine"),
-                            "kind": c.get("kind"),
-                            "github": bool(c.get("github")),
-                            "text": c.get("text"),
-                            "resolved": False,
-                            "replies": [],
-                        })
-                    threads_snapshot = list(Handler.threads)
+                    round_no = Handler.round + 1
+                    counter = Handler._thread_counter
+                for c in payload.get("comments", []):
+                    counter += 1
+                    tid = f"t{counter}"
+                    c["id"] = tid
+                    new_entries.append({
+                        "id": tid,
+                        "round": round_no,
+                        "file": c.get("file"),
+                        "side": c.get("side"),
+                        "line": c.get("line"),
+                        "code": c.get("code"),
+                        "endLine": c.get("endLine"),
+                        "kind": c.get("kind"),
+                        "github": bool(c.get("github")),
+                        "text": c.get("text"),
+                        "resolved": False,
+                        "replies": [],
+                    })
+                with Handler._threads_lock:
+                    threads_snapshot = list(Handler.threads) + new_entries
                 persisted = {
                     "meta": payload.get("meta"),
                     "round": round_no,
@@ -2111,6 +2123,11 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump(persisted, f, indent=2)
             os.replace(tmp_path, self.out_path)
             self._durable = True
+            if Handler.mode == "threads":
+                with Handler._threads_lock:
+                    Handler.round = round_no
+                    Handler._thread_counter = counter
+                    Handler.threads.extend(new_entries)
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,
