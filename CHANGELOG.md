@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.5.0] - 2026-08-25
+
+### Features
+
+- derive the server mode from --out (#418) (5356db4)
+
 ## [2.4.0] - 2026-08-25
 
 ### Features
