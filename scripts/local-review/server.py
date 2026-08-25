@@ -2018,6 +2018,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(str(e).encode())
                 return
+            # json.loads accepts any JSON value; a non-object would reach
+            # payload.get() and die as an unhandled AttributeError.
+            if not isinstance(payload, dict):
+                self._send_json(400, {"ok": False, "error": "payload must be a JSON object"})
+                return
             if path == "/reply":
                 self._do_reply(payload)
             else:

@@ -1315,6 +1315,15 @@ try:
         t1s = next(t for t in still["threads"] if t["id"] == "t1")
         check("server: a rejected non-boolean resolve leaves the bit unchanged", t1s.get("resolved") is False, t1s)
 
+        # a JSON value that parses but is not an object must 400, not crash:
+        # payload.get() on a list/string raises AttributeError otherwise.
+        for label, bad_payload in (("a JSON array", []), ("a JSON string", "just a string")):
+            try:
+                post_json("reply", bad_payload)
+                bad(f"server: POST /reply with {label} payload returns 400", "request unexpectedly succeeded")
+            except _urlerror.HTTPError as e:
+                check(f"server: POST /reply with {label} payload returns 400", e.code == 400, e.code)
+
         # f. threads_rev keeps climbing across a second submit
         status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
         check("server: threads-endpoints second submit returns 200", status == 200, status)
@@ -1389,6 +1398,15 @@ try:
             bad("server: GET /threads in one-shot mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: GET /threads in one-shot mode returns 404", e.code == 404, e.code)
+        req = _urlrequest.Request(
+            f"{url}resolve", data=b'{"thread_id":"t1","resolved":true}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /resolve in one-shot mode returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /resolve in one-shot mode returns 404", e.code == 404, e.code)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1416,6 +1434,15 @@ try:
             bad("server: POST /reply in human-only mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /reply in human-only mode returns 404", e.code == 404, e.code)
+        req = _urlrequest.Request(
+            f"{url}resolve", data=b'{"thread_id":"t1","resolved":true}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /resolve in human-only mode returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /resolve in human-only mode returns 404", e.code == 404, e.code)
 finally:
     if proc.poll() is None:
         proc.terminate()
