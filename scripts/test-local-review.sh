@@ -922,7 +922,7 @@ try:
                   e.headers.get("Referrer-Policy") == "no-referrer",
                   e.headers.get("Referrer-Policy"))
             check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
-        payload = {"meta": {}, "summary": "looks good", "approved": True, "comments": []}
+        payload = {"meta": {}, "summary": "looks good", "comments": []}
         req = _urlrequest.Request(
             f"{url}submit", data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
@@ -938,9 +938,24 @@ try:
         if os.path.exists(out_path):
             with open(out_path) as f:
                 written = json.load(f)
-            check("server: $OUT parses as JSON with the submitted fields",
-                  written.get("summary") == "looks good" and written.get("approved") is True,
+            check("server: $OUT parses as JSON with the submitted fields and no approved key",
+                  written.get("summary") == "looks good" and "approved" not in written,
                   written)
+        _fd = proc.stdout.fileno()
+        os.set_blocking(_fd, False)
+        _stdout_tail = ""
+        while True:
+            try:
+                _chunk = os.read(_fd, 4096)
+            except (BlockingIOError, OSError):
+                break
+            if not _chunk:
+                break
+            _stdout_tail += _chunk.decode(errors="replace")
+        check("server: stdout prints REVIEW SUBMITTED after a submit",
+              "REVIEW SUBMITTED" in _stdout_tail, _stdout_tail)
+        check("server: stdout carries no APPROVED: line after a submit",
+              "APPROVED:" not in _stdout_tail, _stdout_tail)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -962,7 +977,7 @@ try:
     check("server: unwritable-out run still starts", bool(url), url)
     if url:
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"","comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
@@ -995,7 +1010,7 @@ try:
     check("server: disconnect run starts", bool(url), url)
     if url:
         host, port, host_port, token_path = url_parts(url)
-        body = b'{"meta":{},"summary":"gone","approved":true,"comments":[]}'
+        body = b'{"meta":{},"summary":"gone","comments":[]}'
         raw = (b"POST " + (token_path + "submit").encode() + b" HTTP/1.1\r\nHost: " + host_port.encode()
                + b"\r\nContent-Type: application/json\r\nContent-Length: "
                + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
@@ -1032,7 +1047,7 @@ try:
     if url:
         def submit_once(results, idx):
             req = _urlrequest.Request(
-                f"{url}submit", data=b'{"meta":{},"summary":"race","approved":false,"comments":[]}',
+                f"{url}submit", data=b'{"meta":{},"summary":"race","comments":[]}',
                 headers={"Content-Type": "application/json"}, method="POST",
             )
             try:
@@ -1055,7 +1070,7 @@ try:
               os.path.exists(slot_out) and json.load(open(slot_out)).get("summary") == "race", slot_out)
         # sequential second round on a stay-alive server must still be allowed
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"round 2","approved":true,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"round 2","comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -1167,7 +1182,7 @@ try:
                   (e.code, e.headers.get("Location")))
 
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"sfs","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"sfs","comments":[]}',
             headers={"Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"}, method="POST",
         )
         try:
@@ -1178,7 +1193,7 @@ try:
         check("server: Sec-Fetch-Site cross-site POST does not write OUT", not os.path.exists(sec_out), sec_out)
 
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"evil","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"evil","comments":[]}',
             headers={"Content-Type": "application/json", "Origin": "https://evil.example"}, method="POST",
         )
         try:
@@ -1189,7 +1204,7 @@ try:
         check("server: cross-origin POST does not write OUT", not os.path.exists(sec_out), sec_out)
 
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"noorigin","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"noorigin","comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -1200,7 +1215,7 @@ try:
 
         same_origin = f"http://127.0.0.1:{port}"
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"sameorigin","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"sameorigin","comments":[]}',
             headers={"Content-Type": "application/json", "Origin": same_origin}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -1211,7 +1226,7 @@ try:
 
         vanity_origin = f"http://review.localhost:{port}"
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"vanity","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"vanity","comments":[]}',
             headers={"Content-Type": "application/json", "Origin": vanity_origin}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
@@ -1222,7 +1237,7 @@ try:
 
         evil_vanity_origin = f"http://evil.localhost:{port}"
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"evilvanity","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"evilvanity","comments":[]}',
             headers={"Content-Type": "application/json", "Origin": evil_vanity_origin}, method="POST",
         )
         try:
@@ -1236,7 +1251,7 @@ try:
         # cookie too. Sits after the Origin cases above because it writes OUT,
         # and those assert OUT is still absent.
         req = _urlrequest.Request(
-            f"{base}/submit", data=b'{"meta":{},"summary":"cookiepath","approved":false,"comments":[]}',
+            f"{base}/submit", data=b'{"meta":{},"summary":"cookiepath","comments":[]}',
             headers={"Content-Type": "application/json", "Cookie": f"{cookie_name}={token}"},
             method="POST",
         )
@@ -1313,7 +1328,7 @@ try:
     check("server: dir-out run still starts", bool(url), url)
     if url:
         req = _urlrequest.Request(
-            f"{url}submit", data=b'{"meta":{},"summary":"","approved":false,"comments":[]}',
+            f"{url}submit", data=b'{"meta":{},"summary":"","comments":[]}',
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
@@ -1443,7 +1458,7 @@ try:
     nw_url = read_url(nw_proc)
     check("no-write: PR-mode server starts against the logging gh stub", bool(nw_url), nw_url)
     if nw_url:
-        nw_payload = {"summary": "s", "approved": False, "comments": [
+        nw_payload = {"summary": "s", "comments": [
             {"file": "n.md", "side": "R", "line": 1, "code": "hi",
              "text": "post me", "github": True}]}
         req = _urlrequest.Request(
@@ -1472,6 +1487,23 @@ try:
         gh_writes = [ln for ln in calls.splitlines()
                      if "--method POST" in ln or "api" in ln.split()]
         check("no-write: NO gh invocation was a write", gh_writes == [], gh_writes)
+        _nw_fd = nw_proc.stdout.fileno()
+        os.set_blocking(_nw_fd, False)
+        _nw_stdout = ""
+        _nw_deadline = _time.time() + 2
+        while _time.time() < _nw_deadline:
+            try:
+                _chunk = os.read(_nw_fd, 4096)
+            except BlockingIOError:
+                _time.sleep(0.05)
+                continue
+            if not _chunk:
+                break
+            _nw_stdout += _chunk.decode(errors="replace")
+        check("no-write: stdout prints REVIEW SUBMITTED after a submit",
+              "REVIEW SUBMITTED" in _nw_stdout, _nw_stdout)
+        check("no-write: stdout carries no APPROVED: line after a submit",
+              "APPROVED:" not in _nw_stdout, _nw_stdout)
 finally:
     if nw_proc.poll() is None:
         nw_proc.terminate()
@@ -1791,6 +1823,12 @@ check("no innerHTML assignment interpolates diff content or reviewer text",
 check("the page carries no HTML-escaping helper any more",
       "const esc =" not in server.PAGE and "function esc(" not in server.PAGE,
       "an esc() helper is back — something is interpolating again")
+# --- no verdict: the finish dialog has one button, not an approve verdict ---
+with open(server_path) as _f:
+    _server_src = _f.read()
+_verdict_hits = [s for s in ("finishApprove", ">Approve<", "Approved ✓") if s in _server_src]
+check("server.py carries no Approve button or verdict string",
+      _verdict_hits == [], _verdict_hits)
 
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's

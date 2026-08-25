@@ -1,14 +1,14 @@
 ---
 name: local-review
-description: Open a local GitHub-style split-diff UI so the USER reads a code change in their browser and leaves inline line comments plus an approve/request-changes verdict, which is written to a JSON file for the agent to act on. Local-only review of agent work before anything reaches GitHub. Point it at a PR, a branch or worktree diff, staged/unstaged changes, a commit range, or a patch file. Use when the user wants to eyeball a diff themselves and comment on it — "show me the diff", "let me look over these changes", "let me comment on specific lines". Not for agent-run review of a PR (that is co-review).
+description: Open a local GitHub-style split-diff UI so the USER reads a code change in their browser and leaves inline line comments, which are written to a JSON file for the agent to act on. Local-only review of agent work before anything reaches GitHub. Point it at a PR, a branch or worktree diff, staged/unstaged changes, a commit range, or a patch file. Use when the user wants to eyeball a diff themselves and comment on it — "show me the diff", "let me look over these changes", "let me comment on specific lines". Not for agent-run review of a PR (that is co-review).
 ---
 
 # local-review
 
 local-review is a human-in-the-loop diff review surface: a local, stdlib-only
 web server renders a GitHub-style split diff, the user leaves inline line
-comments and an overall verdict in their browser, and on submit the round is
-written to a JSON file the agent reads and acts on. Nothing touches GitHub
+comments in their browser, and on submit the round is written to a JSON file
+the agent reads and acts on. Nothing touches GitHub
 unless the diff is a PR and the user explicitly flags a comment for it.
 
 Tool: `${CLAUDE_PLUGIN_ROOT}/scripts/local-review/server.py` (Python stdlib
@@ -142,8 +142,7 @@ between whichever modes a given file allows. The user:
 - Taps **⊘** on a comment line to mark the whole contiguous comment run for
   removal.
 - Clicks **Submit review** → a finish window with an optional overall comment
-  and two buttons: **Submit review** (feedback to act on) or **Approve** (the
-  change is good).
+  and one button: **Submit review**.
 - If the diff **source** changes while the page is open — the PR on GitHub,
   the patch file, or (in `--git` mode) the pinned repo — a **↻ Refresh**
   button appears in the header. `--git uncommitted` re-runs `git diff HEAD`
@@ -168,7 +167,7 @@ for i in $(seq 1 2400); do [ -s "$OUT" ] && { cat "$OUT"; exit 0; }; sleep 3; do
 Payload:
 
 ```
-{ "meta": {...}, "summary": "<optional overall comment>", "approved": <bool>,
+{ "meta": {...}, "summary": "<optional overall comment>",
   "comments": [ {file, side, line, code, text}, ... ] }
 ```
 
@@ -232,7 +231,7 @@ per comment. No preamble, no restating the code, no per-comment rationale, no
 closing summary.
 
 ```
-Round <n> · <approved ✓ | changes requested> · <count> comment(s)
+Round <n> · <count> comment(s)
 summary: <summary>                      ← omit this line entirely when summary is empty
 1. <file>:<side><line> — <text>
 2. <file>:<side><line>–<endLine> [dismiss block] — <text>
