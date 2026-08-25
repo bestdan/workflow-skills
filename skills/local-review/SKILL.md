@@ -174,7 +174,12 @@ until Finish. `OUT` is written on every submit, then removed by the reader —
 the loop below is bounded per round, not an unbounded wait:
 
 ```bash
-BASE="${url#LOCAL_REVIEW_URL=}"; BASE="${BASE%/}"
+# Re-derive the reply base from the log: shell state does not survive
+# between tool calls, so never lean on step 2's variables here. This is the
+# machine URL (127.0.0.1), not the vanity one — agent calls use the machine
+# form.
+BASE="$(grep -m1 LOCAL_REVIEW_URL= <scratch>/lr_server.log)"
+BASE="${BASE#LOCAL_REVIEW_URL=}"; BASE="${BASE%/}"
 round=0
 while :; do
   for i in $(seq 1 2400); do [ -s "$OUT" ] && break; sleep 3; done
