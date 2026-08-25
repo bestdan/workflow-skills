@@ -58,11 +58,15 @@ through the `/state` poll it already runs.
 There is no mode flag. The server derives the mode from two arguments it
 already takes:
 
-| Launch shape          | Mode       | Behavior                                                                                       |
-| --------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `--out`, no `--once`  | threads    | Stays alive across rounds. Thread endpoints and thread UI on. Two buttons: `Submit`, `Finish`. |
-| `--out` with `--once` | one-shot   | One round, write `--out`, exit. Today's skill launch, byte-compatible payload.                 |
-| no `--out`            | human-only | Today's hand-run behavior exactly. No thread endpoints, no Reply controls.                     |
+| Launch shape             | Mode       | Behavior                                                                                       |
+| ------------------------ | ---------- | ---------------------------------------------------------------------------------------------- |
+| `--out`, no `--once`     | threads    | Stays alive across rounds. Thread endpoints and thread UI on. Two buttons: `Submit`, `Finish`. |
+| `--out` with `--once`    | one-shot   | One round, write `--out`, exit. Today's skill launch, post-stage-0 payload shape.              |
+| no `--out`, no `--once`  | human-only | Today's hand-run behavior exactly. No thread endpoints, no Reply controls.                     |
+| no `--out` with `--once` | human-only | One round, write `pr_comments.json`, exit. Today's behavior for that launch.                   |
+
+`--once` always means "exit after one successful submit", in every mode. Only
+an explicit `--out` with no `--once` keeps the server alive.
 
 The derivation works because `--out` already encodes the one fact that
 matters: an agent is watching the file. The skill's step 2 always passes
@@ -305,10 +309,11 @@ plus the minted `id`. `threads` is the complete state, so overwriting the
 previous round's file loses nothing: every earlier comment, reply, and
 resolution rides along in full. That property is what makes a single `--out`
 path safe across rounds; the agent removes the file after reading and
-resumes polling. In one-shot mode (`--once`) the payload is byte-compatible
-with today, minus the `approved` key stage 0 removes: no `round`, no `id`,
-no `threads`. Human-only mode writes the same one-shot shape to the default
-`pr_comments.json`.
+resumes polling. In one-shot mode (`--once`) the payload matches the
+post-stage-0 one-shot shape — today's payload minus the `approved` key stage 0
+removes. It carries none of the keys this design adds: no `round`, no `id`, no
+`threads`, and no `finished`. Human-only mode writes the same one-shot shape to
+the default `pr_comments.json`.
 
 ### Thread lifecycle
 
@@ -361,10 +366,12 @@ while :; do
   for i in $(seq 1 2400); do [ -s "$OUT" ] && break; sleep 3; done
   [ -s "$OUT" ] || break            # 2h idle: stop watching, ask the user
   payload=$(cat "$OUT"); rm -f "$OUT"
-  # echo the round (step 5), act on it, then per thread answered:
+  # echo the round (step 5).
+  # finished==true → break HERE, before any reply: the server has already
+  #   exited, so there is no reply channel left and every curl would fail.
+  # else act on the round, then per thread answered:
   # curl -sf -X POST "$BASE/reply" -H 'Content-Type: application/json' \
   #   -d '{"thread_id":"t3","author":"agent","text":"..."}'
-  # finished==true → break: the server is shutting down, review is over.
 done
 ```
 
@@ -511,7 +518,8 @@ Each item is one PR. `just check` gates each.
    they now start threads-mode servers, and their payload assertions gain
    the `round`/`id`/`threads` keys. Touches
    `scripts/local-review/server.py`, `scripts/test-local-review.sh`. Tests:
-   one-shot payload byte-compat under `--once`; human-only submit still
+   one-shot payload matches the post-stage-0 shape under `--once`; human-only
+   submit still
    writes `pr_comments.json` with the one-shot shape; threaded round trip
    (submit → ids in OUT → reply → `/threads` shows it → `threads_rev`
    bumped); resolve round trip; 404 on `/reply` in `--once` mode, in
