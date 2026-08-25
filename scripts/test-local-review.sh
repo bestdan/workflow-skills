@@ -2403,6 +2403,45 @@ _verdict_hits = [s for s in ("finishApprove", ">Approve<", "Approved ✓") if s 
 check("server.py carries no Approve button or verdict string",
       _verdict_hits == [], _verdict_hits)
 
+# --- finish dialog: one button (Submit review) normally, a second (Finish) --
+# --- static markup gated on THREADS_MODE at runtime, in threads mode -------
+check("finish dialog markup carries a hidden Finish button beside finishSubmit",
+      '<button class="btn primary" id="finishFinish" hidden>Finish</button>' in server.PAGE,
+      "finishFinish button markup missing or not hidden by default")
+check("THREADS_MODE reveals the Finish button and relabels Submit",
+      _re.search(
+          r"if\(THREADS_MODE\)\{\s*"
+          r"finishSubmit\.textContent = 'Submit';\s*"
+          r"finishFinish\.hidden = false;\s*\}",
+          server.PAGE) is not None,
+      "no THREADS_MODE-gated reveal of finishFinish / relabel of finishSubmit")
+# --- doSubmit: finished flag only travels from the Finish path, only in ----
+# --- threads mode; Submit always posts finished:false there ----------------
+check("doSubmit posts payload.finished only in threads mode",
+      "if(THREADS_MODE) payload.finished = !!finished;" in server.PAGE,
+      "finished flag not gated on THREADS_MODE in doSubmit's payload")
+check("finishSubmit posts finished:false, finishFinish posts finished:true",
+      "finishSubmit.onclick = () => doSubmit(false);" in server.PAGE
+      and "finishFinish.onclick = () => doSubmit(true);" in server.PAGE,
+      "Submit/Finish button handlers do not wire the finished flag as expected")
+# --- re-arm: a Submit round resets the header button via refreshCounts(), --
+# --- not the permanent 'Submitted ✓' freeze; Finish ends the session -------
+check("a threads-mode Submit round re-arms via refreshCounts(), not a freeze",
+      _re.search(r"if\(finished\)\{\s*endReview\(\);\s*\}else\{[^}]*refreshCounts\(\);",
+                  server.PAGE, _re.S) is not None,
+      "doSubmit's non-finished threads branch does not call refreshCounts()")
+check("doSubmit only freezes 'Submitted ✓' outside threads mode",
+      _re.search(r"\}else\{\s*submitBtn\.textContent = 'Submitted ✓'; submitBtn\.disabled = true;\s*\}",
+                  server.PAGE) is not None,
+      "the 'Submitted ✓' freeze is not confined to the non-threads branch")
+# --- Finish end-state: stop polling and tell the user the page is dead -----
+check("endReview() clears the poll timer and shows a persistent finished banner",
+      "clearInterval(pollTimer);" in server.PAGE and "finishedBg.classList.add('show');" in server.PAGE,
+      "endReview() does not stop polling and/or show the finished overlay")
+check("checkSync() bails out once the review is finished",
+      "if(reviewFinished) return;" in server.PAGE,
+      "checkSync() keeps polling a server that has exited")
+
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's
 # token stream into a plain description tree, and materialize() adds no logic.

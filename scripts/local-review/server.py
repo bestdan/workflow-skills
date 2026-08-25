@@ -697,6 +697,8 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .toast.show{opacity:1}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
 .modal-bg.show{display:flex}
+.finished-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:70;padding:20px}
+.finished-bg.show{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;padding:18px;box-shadow:0 14px 44px rgba(0,0,0,.32)}
 .modal h2{margin:0 0 4px;font-size:16px}
 .modal .sub{color:var(--dim);font-size:13px;margin-bottom:12px}
@@ -739,7 +741,14 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <div class="actions">
       <button class="btn" id="finishCancel">Cancel</button>
       <button class="btn primary" id="finishSubmit">Submit review</button>
+      <button class="btn primary" id="finishFinish" hidden>Finish</button>
     </div>
+  </div>
+</div>
+<div class="finished-bg" id="finishedBg">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-label="Review finished">
+    <h2>Review finished</h2>
+    <div class="sub">The server has exited. This page is no longer live.</div>
   </div>
 </div>
 <script src="vendor/highlight.min.js"></script>
@@ -1989,7 +1998,9 @@ const refreshBtn = document.getElementById('refresh');
 const REFRESH_LABEL = '↻ Refresh';
 let refreshArmed = false, refreshArmTimer = null;
 function disarmRefresh(){ refreshArmed = false; clearTimeout(refreshArmTimer); refreshBtn.textContent = REFRESH_LABEL; }
+let reviewFinished = false;    // Finish round exited the server: stop polling it
 async function checkSync(){
+  if(reviewFinished) return;
   try{
     const r = await fetch('state', {cache:'no-store'});
     if(!r.ok) return;
@@ -2037,7 +2048,7 @@ refreshBtn.onclick = () => {
   clearTimeout(refreshArmTimer); refreshArmed = false;
   doRefresh();
 };
-setInterval(checkSync, 6000);
+const pollTimer = setInterval(checkSync, 6000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) checkSync(); });
 window.addEventListener('focus', checkSync);
 checkSync();
@@ -2045,6 +2056,12 @@ const submitBtn = document.getElementById('submit');
 const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
+const finishFinish = document.getElementById('finishFinish');
+const finishedBg = document.getElementById('finishedBg');
+if(THREADS_MODE){
+  finishSubmit.textContent = 'Submit';
+  finishFinish.hidden = false;
+}
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
   finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
@@ -2052,16 +2069,26 @@ function updateFinishBtn(){                 // Submit needs feedback
 submitBtn.onclick = () => {                 // step 1: open the finish-review window
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
-  document.getElementById('finishSub').textContent =
-    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
+  document.getElementById('finishSub').textContent = THREADS_MODE
+    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude or finish the review.`
+    : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 };
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
-async function doSubmit(){                  // step 2: submit the round
+function endReview(){                       // Finish round succeeded: server has exited
+  reviewFinished = true;
+  clearInterval(pollTimer);
+  finishBg.classList.remove('show');
+  submitBtn.disabled = true;
+  finishedBg.classList.add('show');
+}
+async function doSubmit(finished){          // step 2: submit the round
   const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
+  if(THREADS_MODE) payload.finished = !!finished;
   finishSubmit.disabled = true;
+  finishFinish.disabled = true;
   try{
     const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
@@ -2072,24 +2099,34 @@ async function doSubmit(){                  // step 2: submit the round
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
     toast(msg);
-    submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
     if(THREADS_MODE){
       // These comments are now server threads (the response minted an id for
       // each). Drop the matching local drafts so the coming /threads refetch
       // doesn't render the same comment twice — once as a draft chip, once as
-      // a thread chip. Re-arming Submit for a next round is a later PR.
+      // a thread chip.
       for(const c of payload.comments){
         delete comments[`${c.file}|${c.side}${c.line}`];
       }
-      await fetchThreads();
-      render();
+      if(finished){
+        endReview();
+      }else{
+        await fetchThreads();
+        render();
+        refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
+        finishSubmit.disabled = false;
+        finishFinish.disabled = false;
+      }
+    }else{
+      submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
     }
   }catch(e){
     toast('Submit failed: '+e.message);
     finishSubmit.disabled = false;
+    finishFinish.disabled = false;
   }
 }
-finishSubmit.onclick = () => doSubmit();
+finishSubmit.onclick = () => doSubmit(false);
+finishFinish.onclick = () => doSubmit(true);
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 4000);
