@@ -970,8 +970,19 @@ function threadRowsOf(file){
   const out = [];
   for(const h of file.hunks || []){
     for(const row of h.rows || []){
-      if(row.l && row.l.t !== 'empty') out.push({side:'L', line:row.l.n, code:row.l.s, file:file.old});
-      if(row.r && row.r.t !== 'empty') out.push({side:'R', line:row.r.n, code:row.r.s, file:file.new});
+      const l = row.l && row.l.t !== 'empty' ? {side:'L', line:row.l.n, code:row.l.s, file:file.old} : null;
+      const r = row.r && row.r.t !== 'empty' ? {side:'R', line:row.r.n, code:row.r.s, file:file.new} : null;
+      // A context row is ONE physical line rendered as two cells with the
+      // same text. Counting both would make rule 2's uniqueness test see a
+      // double for every unchanged line -- the lines most likely to move
+      // intact -- so a paired identical-text row collapses to one candidate
+      // carrying both sides; the placement picks the thread's own side.
+      if(l && r && l.code === r.code){
+        out.push({side:'R', line:r.line, code:r.code, file:r.file, alt:l});
+      }else{
+        if(l) out.push(l);
+        if(r) out.push(r);
+      }
     }
   }
   return out;
@@ -996,7 +1007,11 @@ function placeThreads(files, threads){
     // the user meant; that falls through to rule 3 instead.
     const matches = rows.filter(r => r.code === thread.code);
     if(matches.length === 1){
-      return {thread, placement:'moved', file: matches[0].file, side: matches[0].side, line: matches[0].line};
+      // A collapsed context pair re-anchors on the thread's own side when it
+      // has one, so an L-anchored thread does not silently switch sides.
+      let m = matches[0];
+      if(m.alt && thread.side === m.alt.side) m = m.alt;
+      return {thread, placement:'moved', file: m.file, side: m.side, line: m.line};
     }
     // Rule 3: gone, and not uniquely findable. Never dropped -- the file's
     // Outdated strip shows the original anchor.
@@ -1731,8 +1746,10 @@ async function fetchThreads(){
       // relocated side/line plus a marker buildThreadChip badges "· moved".
       // The stored thread object (and its id/replies) is untouched -- this
       // copy exists only for this render pass.
+      // endLine is cleared: rule 2 re-anchors only the single anchor line,
+      // so the copy has no basis for claiming a span at the new location.
       const rendered = p.placement === 'moved'
-        ? Object.assign({}, p.thread, {side: p.side, line: p.line, _moved: true})
+        ? Object.assign({}, p.thread, {side: p.side, line: p.line, endLine: null, _moved: true})
         : p.thread;
       const key = `${p.file}|${p.side}${p.line}`;
       (byKey[key] = byKey[key] || []).push(rendered);

@@ -3090,6 +3090,20 @@ const out = {};
   out.outdatedAmbiguous = placeThreads(files, threads);
 }
 
+// Rule 2, context pair: an unchanged line renders as ONE physical row with
+// identical text in both cells. That pair must count as one candidate, or a
+// uniquely moved context line -- the commonest kind -- could never be rule 2.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'ctx', n:3, s:'stable ctx'}, r: {t:'ctx', n:9, s:'stable ctx'}},
+  ])];
+  const threads = [
+    {id:'t5', file:'a.py', side:'R', line:5, code:'stable ctx'},
+    {id:'t6', file:'a.py', side:'L', line:5, code:'stable ctx'},
+  ];
+  out.movedCtx = placeThreads(files, threads);
+}
+
 console.log(JSON.stringify(out));
 """ % _pure2
     _pt_fd, _pt_hp = _tempfile.mkstemp(suffix=".cjs")
@@ -3116,6 +3130,11 @@ console.log(JSON.stringify(out));
             check("placeThreads: rule 3 -- two rows sharing the same code is 'outdated', never a guess",
                   _pt["outdatedAmbiguous"][0]["placement"] == "outdated"
                   and _pt["outdatedAmbiguous"][0]["line"] == 5, _pt["outdatedAmbiguous"])
+            check("placeThreads: rule 2 -- a moved context pair is ONE candidate, re-anchored on the thread's own side",
+                  _pt["movedCtx"][0]["placement"] == "moved" and _pt["movedCtx"][0]["side"] == "R"
+                  and _pt["movedCtx"][0]["line"] == 9
+                  and _pt["movedCtx"][1]["placement"] == "moved" and _pt["movedCtx"][1]["side"] == "L"
+                  and _pt["movedCtx"][1]["line"] == 3, _pt["movedCtx"])
     finally:
         os.unlink(_pt_hp)
 
