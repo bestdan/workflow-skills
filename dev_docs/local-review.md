@@ -137,8 +137,8 @@ Only an explicit `--out` with no `--once` keeps the server alive.
   bad `--git` spec, and a non-repo cwd are all normalized to a one-line
   `error:` (via `sh()`'s `RuntimeError`); other failures (an unreadable
   `--diff-file`, an occupied explicit `--port`) surface as a traceback.
-- **`--once`:** the server exits after a successful submit. It selects
-  one-shot mode (see Modes above); the skill no longer launches with it by
+- **`--once`:** the server exits after a successful submit. When passed with
+  `--out`, it selects one-shot mode (see Modes above); the skill no longer launches with it by
   default — an explicit `--out` with no `--once` is what the skill passes,
   selecting threads mode instead. `--once` remains available as an explicit
   one-round opt-out, keeping the pre-stage-1 payload shape. The recorded PID
