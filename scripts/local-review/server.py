@@ -2361,12 +2361,17 @@ class Handler(BaseHTTPRequestHandler):
         # os.replace), not a return value: a BrokenPipeError while writing the
         # response must not release the slot of a completed --once submission.
         # A durable stay-alive submission released its own slot before the
-        # response (see _do_submit); this finally only covers failure paths.
+        # response (see _do_submit), and a rejected submission released via
+        # _reject_submit for the same pre-flush reason; this finally only
+        # covers the unexpected-exception path. It must NOT fire after either
+        # early release: a new request may have claimed the slot in between,
+        # and releasing here would free that request's claim.
         self._durable = False
+        self._slot_released = False
         try:
             self._do_submit(payload)
         finally:
-            if not self._durable:
+            if not (self._durable or self._slot_released):
                 with Handler._submit_lock:
                     Handler._submitted = False
 
@@ -2419,6 +2424,17 @@ class Handler(BaseHTTPRequestHandler):
             rev = Handler.threads_rev
         self._send_json(200, {"ok": True, "threads_rev": rev})
 
+    def _reject_submit(self, code, obj):
+        # Release the submit slot BEFORE the rejection flushes, mirroring the
+        # durable stay-alive release below: do_POST's finally runs after the
+        # flush, so a sequential caller that has already seen this rejection
+        # would otherwise race the release into a spurious 409 (seen in CI on
+        # the finished-"false" -> Finish sequence).
+        with Handler._submit_lock:
+            Handler._submitted = False
+        self._slot_released = True
+        self._send_json(code, obj)
+
     def _do_submit(self, payload):
         # finished must be a JSON boolean, validated before anything happens:
         # bool() would turn "false" into a Finish that shuts the server down
@@ -2426,7 +2442,7 @@ class Handler(BaseHTTPRequestHandler):
         # its resolved bit.
         finished = payload.get("finished", False)
         if Handler.mode == "threads" and not isinstance(finished, bool):
-            self._send_json(400, {"ok": False, "error": "finished must be a boolean"})
+            self._reject_submit(400, {"ok": False, "error": "finished must be a boolean"})
             return
         finished = bool(finished) if Handler.mode == "threads" else False
         # The temp file is created up front so an unwritable or missing --out
@@ -2441,7 +2457,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise OSError(f"{self.out_path} is a directory")
             fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
         except OSError as e:
-            self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
+            self._reject_submit(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
         # human-readable to stdout
         print("\n===== REVIEW SUBMITTED =====", flush=True)
