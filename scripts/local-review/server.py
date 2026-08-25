@@ -1811,6 +1811,15 @@ class Handler(BaseHTTPRequestHandler):
     # would duplicate GitHub comments and race the OUT write.
     _submit_lock = threading.Lock()
     _submitted = False
+    # Thread store, threads mode only. Server memory, not disk: the store dies
+    # with the server on purpose (see "State ownership" in the threaded-replies
+    # design) — the transcript plus the round payloads the agent already read
+    # are the durable record. Guarded by its own lock; _submit_lock keeps its
+    # existing job of serializing /submit itself.
+    threads: "list[dict]" = []  # list of thread dicts, insertion order = creation order
+    _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...
+    round = 0  # threads-mode round number, incremented on each successful submit
+    _threads_lock = threading.Lock()
 
     def log_message(self, *a):
         pass
@@ -2013,6 +2022,15 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._submitted = False
 
     def _do_submit(self, payload):
+        # finished must be a JSON boolean, validated before anything happens:
+        # bool() would turn "false" into a Finish that shuts the server down
+        # mid-review and keeps the submit slot. Same rule /resolve applies to
+        # its resolved bit.
+        finished = payload.get("finished", False)
+        if Handler.mode == "threads" and not isinstance(finished, bool):
+            self._send_json(400, {"ok": False, "error": "finished must be a boolean"})
+            return
+        finished = bool(finished) if Handler.mode == "threads" else False
         # The temp file is created up front so an unwritable or missing --out
         # directory is caught before anything is printed: the human-readable
         # block below reads as a completed submission, and the caller polls for
@@ -2038,6 +2056,7 @@ class Handler(BaseHTTPRequestHandler):
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
 
+        round_no = None
         try:
             # No gh write happens here, by design. The page can reach /submit,
             # so anything this handler can do, a web page the user has open can
@@ -2051,16 +2070,73 @@ class Handler(BaseHTTPRequestHandler):
                       "the agent posts these, this server does not.", flush=True)
             print("============================\n", flush=True)
 
+            # Build the persisted object explicitly rather than dumping the
+            # request verbatim — that also closes off a hand-crafted POST
+            # smuggling an extra key (e.g. the removed "approved") into --out.
+            new_entries = []
+            if Handler.mode == "threads":
+                # Mint ids into locals and commit to the store only after the
+                # write is durable: a failed dump/replace releases the slot,
+                # the browser retries, and a store mutated up front would
+                # re-mint — skipped ids, a round gap, and ghost threads riding
+                # every later full-state payload. The server is still the
+                # minting authority; the commit just waits for os.replace.
+                with Handler._threads_lock:
+                    round_no = Handler.round + 1
+                    counter = Handler._thread_counter
+                for c in payload.get("comments", []):
+                    counter += 1
+                    tid = f"t{counter}"
+                    c["id"] = tid
+                    new_entries.append({
+                        "id": tid,
+                        "round": round_no,
+                        "file": c.get("file"),
+                        "side": c.get("side"),
+                        "line": c.get("line"),
+                        "code": c.get("code"),
+                        "endLine": c.get("endLine"),
+                        "kind": c.get("kind"),
+                        "github": bool(c.get("github")),
+                        "text": c.get("text"),
+                        "resolved": False,
+                        "replies": [],
+                    })
+                with Handler._threads_lock:
+                    threads_snapshot = list(Handler.threads) + new_entries
+                persisted = {
+                    "meta": payload.get("meta"),
+                    "round": round_no,
+                    "summary": payload.get("summary"),
+                    "finished": finished,
+                    "comments": payload.get("comments", []),
+                    "threads": threads_snapshot,
+                }
+            else:
+                persisted = {
+                    "meta": payload.get("meta"),
+                    "summary": payload.get("summary"),
+                    "comments": payload.get("comments", []),
+                }
+
             with os.fdopen(fd, "w") as f:
-                json.dump(payload, f, indent=2)
+                json.dump(persisted, f, indent=2)
             os.replace(tmp_path, self.out_path)
             self._durable = True
+            if Handler.mode == "threads":
+                with Handler._threads_lock:
+                    Handler.round = round_no
+                    Handler._thread_counter = counter
+                    Handler.threads.extend(new_entries)
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,
-            # and CI hit exactly that window as a spurious 409). A --once
-            # server keeps the slot; do_POST's finally handles failure paths.
-            if not Handler.once:
+            # and CI hit exactly that window as a spurious 409). A server that
+            # is about to shut down keeps the slot instead — --once always,
+            # and a threads-mode Finish round the same way, since do_POST's
+            # finally only covers failure paths.
+            will_shutdown = Handler.once or (Handler.mode == "threads" and finished)
+            if not will_shutdown:
                 with Handler._submit_lock:
                     Handler._submitted = False
         except BaseException:
@@ -2071,19 +2147,23 @@ class Handler(BaseHTTPRequestHandler):
             os.unlink(tmp_path)
             raise
 
-        # The --once shutdown is scheduled in a finally AFTER the response
-        # write attempt: in the try so the flushed 200 can't race interpreter
-        # exit (daemon handler threads die with serve_forever), in the finally
-        # so a client disconnect mid-response still shuts the server down.
+        # The shutdown is scheduled in a finally AFTER the response write
+        # attempt: in the try so the flushed 200 can't race interpreter exit
+        # (daemon handler threads die with serve_forever), in the finally so a
+        # client disconnect mid-response still shuts the server down.
         try:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"ok": True, "count": len(payload.get("comments", [])),
-                                         "github_flagged": len(flagged)}).encode())
+            resp = {"ok": True, "count": len(payload.get("comments", [])),
+                     "github_flagged": len(flagged)}
+            if Handler.mode == "threads":
+                resp["ids"] = [c["id"] for c in payload.get("comments", [])]
+                resp["round"] = round_no
+            self.wfile.write(json.dumps(resp).encode())
             self.wfile.flush()
         finally:
-            if Handler.once and Handler.srv:
+            if will_shutdown and Handler.srv:
                 threading.Thread(target=Handler.srv.shutdown, daemon=True).start()
 
 
