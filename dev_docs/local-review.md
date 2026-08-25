@@ -102,6 +102,22 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
 
 ## The agent contract
 
+### Modes
+
+There is no mode flag; the server derives the mode from two arguments it
+already takes. `--out`'s argparse default moved from `pr_comments.json` to
+`None`, so "given" means "given explicitly":
+
+| Launch shape             | Mode       | Behavior                                                                         |
+| ------------------------ | ---------- | -------------------------------------------------------------------------------- |
+| `--out`, no `--once`     | threads    | stays alive across rounds; thread endpoints and thread UI on                     |
+| `--out` with `--once`    | one-shot   | one round, write `--out`, exit — today's skill launch, pre-stage-1 payload shape |
+| no `--out`, no `--once`  | human-only | hand-run behavior; no thread endpoints, no Reply/Resolve controls                |
+| no `--out` with `--once` | human-only | one round, write `pr_comments.json`, exit                                        |
+
+`--once` always means "exit after one successful submit," in every mode.
+Only an explicit `--out` with no `--once` keeps the server alive.
+
 - **Startup:** the server prints `LOCAL_REVIEW_URL=http://127.0.0.1:<port>/<token>/`
   on its own line — the machine contract, unchanged. Port defaults to the
   stable `8765`; if that's busy, `bind_server()` falls back to autoselect
@@ -121,8 +137,12 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
   bad `--git` spec, and a non-repo cwd are all normalized to a one-line
   `error:` (via `sh()`'s `RuntimeError`); other failures (an unreadable
   `--diff-file`, an occupied explicit `--port`) surface as a traceback.
-- **`--once`:** the server exits after a successful submit. The skill launches
-  with it; the recorded PID is only cleanup for an abandoned round.
+- **`--once`:** the server exits after a successful submit. It selects
+  one-shot mode (see Modes above); the skill no longer launches with it by
+  default — an explicit `--out` with no `--once` is what the skill passes,
+  selecting threads mode instead. `--once` remains available as an explicit
+  one-round opt-out, keeping the pre-stage-1 payload shape. The recorded PID
+  is cleanup only for an abandoned session (one the user never finishes).
 - **`--out`:** written via temp file + `os.replace` — a poller checking
   `[ -s "$OUT" ]` never sees a torn payload. It is now the **last** thing
   `/submit` does, and nothing outward happens after it: the server no longer posts to
@@ -139,11 +159,40 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
   comment about that whole span). `github: true` marks a comment the **user
   wants on the PR** — the agent posts it; the server never does.
   `code` is the anchor if line numbers shifted. `github_posted` /
-  `github_failed` no longer exist.
+  `github_failed` no longer exist. This is the one-shot and human-only
+  shape; threads mode adds `round`, per-comment `id`, the full-state
+  `threads` array, and `finished` — see Round protocol below.
 - **Submission slot:** concurrent `/submit`s get 409; the slot releases before
   the response on a stay-alive server (CI caught the after-response release as
   a spurious sequential 409 — PR #374), and a completed `--once` submission
   keeps it.
+
+### Round protocol (threads mode)
+
+Each submit is a **round**, numbered from 1 by the server. The server mints
+each new comment's id (`t1`, `t2`, … a per-launch counter) at submit time,
+not the browser — before submit a comment is a browser-only draft with no
+identity, and after submit the server owns the thread store, so it is the
+natural authority for the keys into it. `--out`'s `comments` array keeps its
+one-shot meaning (the entries new in this round) plus the minted `id`;
+`threads` carries the complete state, resolved threads included, so the
+previous round's file can be overwritten with nothing lost. `finished: true`
+marks the round the server writes just before Finish shuts it down; no
+reply channel exists once that round is read, since the server has already
+exited.
+
+New endpoints, active only in threads mode (`--out` without `--once`; they
+404 under one-shot and human-only): `GET /threads` (full thread state, for
+render and reload), `POST /reply` (agent and browser append a reply to a
+thread; `author` is `"agent"` or `"user"`, a label rather than an
+authenticated identity, since both callers share one bearer token), and
+`/resolve` (browser only — sets or clears a thread's `resolved` bit;
+resolve is the user's click, and the agent never calls it). `GET /state`
+gains a `threads_rev` integer that increments on every store mutation; the
+page diffs it against the value it last rendered and fetches `/threads`
+only on change. Full detail — schemas, anchor re-placement across
+`/refresh`, resolved-thread semantics — is in
+`skills/local-review/references/threads.md`.
 
 ## Threat model — loopback is not a trust boundary
 
