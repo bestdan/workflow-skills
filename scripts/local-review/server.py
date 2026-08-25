@@ -1819,6 +1819,7 @@ class Handler(BaseHTTPRequestHandler):
     threads: "list[dict]" = []  # list of thread dicts, insertion order = creation order
     _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...
     round = 0  # threads-mode round number, incremented on each successful submit
+    threads_rev = 0  # bumped on every store mutation: submit, reply, resolve
     _threads_lock = threading.Lock()
 
     def log_message(self, *a):
@@ -1935,7 +1936,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/state":
             sig = self.current_sig()
-            self._send_json(200, {"stale": sig != Handler.diff_sig, "sig": sig})
+            resp = {"stale": sig != Handler.diff_sig, "sig": sig}
+            if Handler.mode == "threads":
+                with Handler._threads_lock:
+                    resp["threads_rev"] = Handler.threads_rev
+            self._send_json(200, resp)
+            return
+        if path == "/threads":
+            if Handler.mode != "threads":
+                self.send_response(404)
+                self.end_headers()
+                return
+            with Handler._threads_lock:
+                self._send_json(200, {
+                    "threads_rev": Handler.threads_rev,
+                    "round": Handler.round,
+                    "threads": list(Handler.threads),
+                })
             return
         if path.startswith("/vendor/"):
             name = path[len("/vendor/"):].split("?", 1)[0]
@@ -1987,6 +2004,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, {"ok": True, "files": len(files)})
             return
+        if path in ("/reply", "/resolve"):
+            if Handler.mode != "threads":
+                self.send_response(404)
+                self.end_headers()
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            data = self.rfile.read(length)
+            try:
+                payload = json.loads(data)
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(str(e).encode())
+                return
+            if path == "/reply":
+                self._do_reply(payload)
+            else:
+                self._do_resolve(payload)
+            return
         if path != "/submit":
             self.send_response(404)
             self.end_headers()
@@ -2020,6 +2056,50 @@ class Handler(BaseHTTPRequestHandler):
             if not self._durable:
                 with Handler._submit_lock:
                     Handler._submitted = False
+
+    def _find_thread(self, thread_id):
+        # Caller holds Handler._threads_lock.
+        for t in Handler.threads:
+            if t["id"] == thread_id:
+                return t
+        return None
+
+    def _do_reply(self, payload):
+        thread_id = payload.get("thread_id")
+        author = payload.get("author")
+        text = payload.get("text")
+        if author not in ("agent", "user"):
+            self._send_json(400, {"ok": False, "error": "author must be 'agent' or 'user'"})
+            return
+        if not isinstance(text, str) or not text.strip():
+            self._send_json(400, {"ok": False, "error": "text must be non-empty"})
+            return
+        with Handler._threads_lock:
+            thread = self._find_thread(thread_id)
+            if thread is None:
+                self._send_json(404, {"ok": False, "error": f"unknown thread_id: {thread_id}"})
+                return
+            thread["replies"].append({
+                "author": author,
+                "ts": int(time.time()),
+                "text": text,
+            })
+            Handler.threads_rev += 1
+            rev = Handler.threads_rev
+        self._send_json(200, {"ok": True, "threads_rev": rev})
+
+    def _do_resolve(self, payload):
+        thread_id = payload.get("thread_id")
+        resolved = payload.get("resolved")
+        with Handler._threads_lock:
+            thread = self._find_thread(thread_id)
+            if thread is None:
+                self._send_json(404, {"ok": False, "error": f"unknown thread_id: {thread_id}"})
+                return
+            thread["resolved"] = bool(resolved)
+            Handler.threads_rev += 1
+            rev = Handler.threads_rev
+        self._send_json(200, {"ok": True, "threads_rev": rev})
 
     def _do_submit(self, payload):
         # finished must be a JSON boolean, validated before anything happens:
@@ -2128,6 +2208,7 @@ class Handler(BaseHTTPRequestHandler):
                     Handler.round = round_no
                     Handler._thread_counter = counter
                     Handler.threads.extend(new_entries)
+                    Handler.threads_rev += 1
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,

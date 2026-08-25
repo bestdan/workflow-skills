@@ -1202,6 +1202,216 @@ finally:
     if os.path.exists(th_out):
         os.unlink(th_out)
 
+# -- threads mode: GET /threads, POST /reply, POST /resolve, threads_rev -----
+ep_fd, ep_out = _tempfile.mkstemp(suffix=".json")
+os.close(ep_fd)
+os.unlink(ep_out)
+proc, patch_path = start_server(["--out", ep_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: threads-endpoints run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        payload = {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+            {"file": "a.py", "side": "R", "line": 2, "code": "y", "text": "second"},
+        ]}
+        status, info = post_json("submit", payload)
+        check("server: threads-endpoints submit returns 200", status == 200, status)
+        check("server: threads-endpoints submit mints ids t1, t2", info.get("ids") == ["t1", "t2"], info)
+
+        status, state0 = get_json("state")
+        check("server: GET /state in threads mode carries threads_rev", "threads_rev" in state0, state0)
+        rev0 = state0.get("threads_rev")
+        check("server: threads_rev after one submit is 1", rev0 == 1, state0)
+
+        status, before = get_json("threads")
+        check("server: GET /threads returns 200", status == 200, status)
+        check("server: GET /threads carries threads_rev, round, threads",
+              set(["threads_rev", "round", "threads"]) <= set(before.keys()), before)
+        check("server: GET /threads round matches the one submitted round", before.get("round") == 1, before)
+        check("server: GET /threads has 2 threads, both unresolved with no replies",
+              len(before.get("threads", [])) == 2
+              and all(t.get("resolved") is False and t.get("replies") == [] for t in before["threads"]),
+              before)
+
+        # a. reply round-trip
+        status, r1 = post_json("reply", {"thread_id": "t1", "author": "agent", "text": "Fixed in place."})
+        check("server: POST /reply returns 200", status == 200, status)
+        check("server: POST /reply response carries ok and threads_rev", r1.get("ok") is True, r1)
+        check("server: POST /reply bumps threads_rev", r1.get("threads_rev") == rev0 + 1, (rev0, r1))
+
+        status, after = get_json("threads")
+        t1 = next(t for t in after["threads"] if t["id"] == "t1")
+        check("server: GET /threads shows the new reply", len(t1["replies"]) == 1, t1)
+        reply = t1["replies"][0]
+        check("server: reply carries author 'agent'", reply.get("author") == "agent", reply)
+        check("server: reply carries the text", reply.get("text") == "Fixed in place.", reply)
+        check("server: reply carries an integer ts", isinstance(reply.get("ts"), int), reply)
+        check("server: GET /threads threads_rev matches /reply's response",
+              after.get("threads_rev") == r1["threads_rev"], (after, r1))
+
+        # b. resolve round-trip
+        status, res1 = post_json("resolve", {"thread_id": "t1", "resolved": True})
+        check("server: POST /resolve (true) returns 200", status == 200, status)
+        check("server: POST /resolve (true) bumps threads_rev",
+              res1.get("threads_rev") == r1["threads_rev"] + 1, (r1, res1))
+        _, after_resolve = get_json("threads")
+        t1r = next(t for t in after_resolve["threads"] if t["id"] == "t1")
+        check("server: GET /threads shows resolved true", t1r.get("resolved") is True, t1r)
+
+        status, res2 = post_json("resolve", {"thread_id": "t1", "resolved": False})
+        check("server: POST /resolve (false) returns 200", status == 200, status)
+        check("server: POST /resolve (false) bumps threads_rev again",
+              res2.get("threads_rev") == res1["threads_rev"] + 1, (res1, res2))
+        _, after_reopen = get_json("threads")
+        t1o = next(t for t in after_reopen["threads"] if t["id"] == "t1")
+        check("server: GET /threads shows resolved false after reopen", t1o.get("resolved") is False, t1o)
+
+        # e. unknown thread_id -> 404; empty text -> 400
+        try:
+            post_json("reply", {"thread_id": "t999", "author": "agent", "text": "nope"})
+            bad("server: POST /reply with an unknown thread_id returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply with an unknown thread_id returns 404", e.code == 404, e.code)
+
+        try:
+            post_json("resolve", {"thread_id": "t999", "resolved": True})
+            bad("server: POST /resolve with an unknown thread_id returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /resolve with an unknown thread_id returns 404", e.code == 404, e.code)
+
+        try:
+            post_json("reply", {"thread_id": "t1", "author": "agent", "text": "   "})
+            bad("server: POST /reply with empty text returns 400", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply with empty text returns 400", e.code == 400, e.code)
+
+        try:
+            post_json("reply", {"thread_id": "t1", "author": "bystander", "text": "hi"})
+            bad("server: POST /reply with an invalid author returns 400", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply with an invalid author returns 400", e.code == 400, e.code)
+
+        # f. threads_rev keeps climbing across a second submit
+        status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: threads-endpoints second submit returns 200", status == 200, status)
+        _, state1 = get_json("state")
+        check("server: threads_rev increments again on a second submit",
+              state1.get("threads_rev") == res2["threads_rev"] + 1, (res2, state1))
+
+        # c. /reply 404s without a valid token or cookie
+        host, port, host_port, token_path = url_parts(url)
+        base = f"http://{host_port}"
+        try:
+            _urlrequest.urlopen(f"{base}/reply", timeout=5)
+            bad("server: POST /reply with no token and no cookie returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply with no token and no cookie returns 404", e.code == 404, e.code)
+        req = _urlrequest.Request(
+            f"{base}/not-the-token/reply", data=b'{"thread_id":"t1","author":"agent","text":"x"}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /<wrong-token>/reply returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /<wrong-token>/reply returns 404", e.code == 404, e.code)
+
+        # d. /reply rejects a cross-origin Origin, matching /submit's gate
+        req = _urlrequest.Request(
+            f"{url}reply", data=b'{"thread_id":"t1","author":"agent","text":"x"}',
+            headers={"Content-Type": "application/json", "Origin": "https://evil.example"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /reply with a cross-origin Origin returns 403", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply with a cross-origin Origin returns 403", e.code == 403, e.code)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(ep_out):
+        os.unlink(ep_out)
+
+# -- thread endpoints exist only in threads mode; 404 elsewhere --------------
+once_ep_fd, once_ep_out = _tempfile.mkstemp(suffix=".json")
+os.close(once_ep_fd)
+os.unlink(once_ep_out)
+proc, patch_path = start_server(["--once", "--out", once_ep_out])
+try:
+    url = read_url(proc)
+    check("server: one-shot run for endpoint-gating starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}reply", data=b'{"thread_id":"t1","author":"agent","text":"x"}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /reply in one-shot mode returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply in one-shot mode returns 404", e.code == 404, e.code)
+        try:
+            _urlrequest.urlopen(f"{url}threads", timeout=5)
+            bad("server: GET /threads in one-shot mode returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: GET /threads in one-shot mode returns 404", e.code == 404, e.code)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(once_ep_out):
+        os.unlink(once_ep_out)
+
+human_ep_dir = _tempfile.mkdtemp(prefix="lr-humanonly-ep-")
+proc, patch_path = start_server([], cwd=human_ep_dir)
+try:
+    url = read_url(proc)
+    check("server: human-only run for endpoint-gating starts", bool(url), url)
+    if url:
+        req = _urlrequest.Request(
+            f"{url}reply", data=b'{"thread_id":"t1","author":"agent","text":"x"}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /reply in human-only mode returns 404", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /reply in human-only mode returns 404", e.code == 404, e.code)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    _shutil.rmtree(human_ep_dir, ignore_errors=True)
+
 # -- security: path token gates every route; Origin/Sec-Fetch-Site gate POSTs
 sec_fd, sec_out = _tempfile.mkstemp(suffix=".json")
 os.close(sec_fd)
