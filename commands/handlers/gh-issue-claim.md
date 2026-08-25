@@ -1,6 +1,6 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow: **find candidates** (read-only), **dependency-ready selection** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP. In **single** mode (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`) this flow runs in the **current session**; in **batch** mode (`/do-tasks --all` / `-n N`, without `--claim-only`) it runs unchanged, once per selected issue, inside a dispatched **remote** session — see `commands/do-tasks.md` §3 "Tracker-batch subroutine", which gh-issue batch reuses with this file's find/dependency/claim phases as the per-handler substitution.
 
 **Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -53,6 +53,16 @@ normal run — passing both is an error: stop and ask which was meant.
   default branch). Then run "Branch + execute" (skipping branch creation), "PR", and
   "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
+
+**`--all` / `-n N` (without `--claim-only`)** is **not** run from this file directly —
+`commands/do-tasks.md` §3 "Tracker-batch subroutine" ranks and selects dependency-ready
+candidates itself (reusing "Find candidates" and "Dependency-ready selection" below),
+then dispatches one remote session **per selected issue**, each running this file's
+**default** atomic claim-and-execute flow (pre-claim WIP gate → find candidates →
+dependency-ready → pre-flight → judge → claim → branch + execute → PR → move to
+review) against that one issue number. Nothing in this file changes between single and
+batch mode — a batch session is just this file's default flow, run unattended, pinned
+to one already-selected issue.
 
 ## Pre-claim WIP gate
 
@@ -113,8 +123,37 @@ gh issue list --state open --search "label:auto-eligible no:assignee -label:auto
 - As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through — these receive no claim action.
 - **Rank** by a `priority:<urgent|high|medium|low>` label if present (urgent → high → medium → low, none last), then by issue age (oldest `createdAt` first — let aging issues bubble up).
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
+- The query's `--json` already includes `body`, which "Dependency-ready selection" below reads — no extra fetch to rank.
 
-Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
+Take the ranked candidates **one at a time**: for each candidate in ranked order, check **Dependency-ready selection**, then run **Pre-flight: is work already in flight?** and, if that passes, **Judge feasibility** — on a blocked dependency, a pre-flight trip, or a feasibility reject, advance to the next candidate and start it at the same gate. If no candidate remains, report that and stop.
+
+## Dependency-ready selection (blockers)
+
+GitHub Issues has no native blocking relationship this handler can query, so
+dependency readiness is read off the same **`Blocked by: #<n>[, #<n>…]`** body-footer
+line `gh-issue.md` step 2 writes when a task's `is_blocked_by` is supplied as issue
+references (the case `/push-plan` always produces — see `push-plan.md` and
+`gh-issue-reoptimize.md`, which read and repair the identical footer). Adopting the
+footer rather than a label or a separate lookup keeps one representation across the
+whole gh-issue handler family instead of a claim-only special case.
+
+1. **Parse.** In the candidate's `body` (already fetched by "Find candidates" — no
+   extra call), find a line matching `Blocked by: #<n>[, #<n>…]` under the `---`
+   footer. No match (or no footer) → the candidate has no recorded blockers; it is
+   dependency-ready. A `blocked` label with **no** matching footer line still excludes
+   the issue via the query filter above — the footer is what this step reads, the
+   label is what "Find candidates" already gates on.
+2. **Resolve each referenced number.** For every `#<n>` on the line, `gh issue view <n>
+   --json state --repo <repo>` (only for candidates that actually carry the footer —
+   this is a per-candidate lazy read, not a bulk one, matching `linear-claim.md`'s
+   lazy `get_issue` for blockers). `state: "CLOSED"` satisfies that blocker; a
+   deleted/inaccessible issue number also satisfies it (nothing left to block on,
+   mirroring the Linear rule for a since-deleted blocker). `state: "OPEN"` does not.
+3. **Verdict.** Dependency-ready only when **every** referenced number resolves
+   closed-or-gone. If any blocker is still open: in ranked mode, record `waiting on
+   #<n>` and advance to the next candidate; on a direct `/do-tasks <#n>` pick, **stop**
+   and report the unresolved blocker rather than claiming an issue whose dependencies
+   aren't met — the same split `linear-claim.md`'s pre-flight uses.
 
 ## Pre-flight: is work already in flight?
 
