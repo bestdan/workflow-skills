@@ -671,6 +671,13 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .saved .del,.saved .edit{color:var(--dim);cursor:pointer;border:none;background:none;font-size:16px;line-height:1}
 .saved .edit{font-size:13px}
 .saved .del:hover,.saved .edit:hover{color:var(--text)}
+/* threads (server-side comment threads + replies) — display only, no
+   Reply/Resolve controls in this slice */
+.cmt-thread{border-left:3px solid var(--accent)}
+.reply-row{margin:8px 0 0 14px;padding-top:7px;border-top:1px dashed var(--border)}
+.reply-row .reply-author{font-weight:650;font-size:11.5px;color:var(--accent)}
+.reply-row .reply-ts{color:var(--dim);font-size:11px;margin-left:6px}
+.reply-row .reply-text{white-space:pre-wrap;margin-top:3px}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
   border-radius:20px;padding:0 7px;margin-left:6px;font-size:10.5px;vertical-align:1px}
 .cmt-saved.gh .saved{border-left-color:#6e7681}
@@ -706,6 +713,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
   <span class="title" id="title">__TITLE_HTML__</span>
   <div class="controls">
     <button class="btn refresh" id="refresh" hidden>↻ Refresh</button>
+    <span class="count" id="roundNote" hidden></span>
     <span class="count" id="fcount"></span>
     <button class="btn" id="expandAll">Expand all</button>
     <button class="btn" id="collapseAll">Collapse all</button>
@@ -733,6 +741,18 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
 const comments = {}; // anchor -> {file,line,side,code,text}
+// Threads mode: server-owned comment threads and their replies. This slice is
+// display only — no Reply/Resolve controls yet (next PR). The server already
+// knows its mode when it builds the page, so it rides in META rather than a
+// separate flag; a page built by an older server has no META.mode and falls
+// back to human-only, matching that server's actual behavior.
+const MODE = (META && META.mode) || 'human-only';
+const THREADS_MODE = MODE === 'threads';
+let threadsRev = -1;   // last threads_rev this page has fetched and rendered
+// anchor key (same "`${file}|${side}${line}`" shape as a draft comment's key)
+// -> array of that anchor's unresolved threads. Resolved threads are dropped
+// here entirely; the resolved-strip UI is a later PR.
+let threadsByKey = {};
 // path -> view mode the user picked. Survives /refresh (unlike comments, which
 // refresh discards): a view preference cannot go stale the way an anchor can.
 // Refresh ends in location.reload(), so this has to outlive the page, not just
@@ -1378,7 +1398,10 @@ function renderPreview(file, body, built){
   // are not restored here, the submit count claims comments the page cannot
   // show, which is precisely what it did before this call existed.
   wrap.querySelectorAll('.md-target').forEach(el => {
-    if(el.__mdDesc) renderBlockChip(el, el.__mdDesc, ctx);
+    if(el.__mdDesc){
+      renderBlockChip(el, el.__mdDesc, ctx);
+      if(THREADS_MODE) renderThreadBlockRow(el, el.__mdDesc, ctx);
+    }
   });
 }
 
@@ -1394,6 +1417,116 @@ const fileUi = {};
 function uiFor(file){
   if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false};
   return fileUi[file.display];
+}
+
+// ---- threads: read-only rendering of server-side comment threads ---------
+// A thread renders like a saved-comment chip (same .cmt-anchor/.saved shape)
+// but carries no ✎/× controls: those act on the local `comments` drafts, and
+// a thread is server state the page cannot mutate in this slice. Every
+// server-derived string (anchor path, thread text, reply author/text) lands
+// via textContent, never innerHTML — the page's "no attacker-derived string
+// reaches an HTML parser" invariant extends unchanged to thread and reply
+// content, per the design doc's security posture.
+function buildReplyRow(reply){
+  const row = document.createElement('div');
+  row.className = 'reply-row';
+  const author = document.createElement('span');
+  author.className = 'reply-author';
+  author.textContent = reply.author === 'agent' ? 'Claude' : 'You';
+  row.appendChild(author);
+  const ts = document.createElement('span');
+  ts.className = 'reply-ts';
+  ts.textContent = reply.ts ? new Date(reply.ts * 1000).toLocaleTimeString() : '';
+  row.appendChild(ts);
+  const txt = document.createElement('div');
+  txt.className = 'reply-text';
+  txt.textContent = reply.text || '';
+  row.appendChild(txt);
+  return row;
+}
+function buildThreadChip(thread){
+  const chip = document.createElement('div');
+  chip.className = 'cmt-row cmt-thread';
+  chip.dataset.tid = thread.id;
+  const anchor = document.createElement('div');
+  anchor.className = 'cmt-anchor';
+  const pathSpan = document.createElement('span');
+  pathSpan.className = 'apath';
+  pathSpan.textContent = thread.file || '';
+  anchor.appendChild(pathSpan);
+  const range = (thread.endLine != null && thread.endLine > thread.line)
+    ? `${thread.side}${thread.line}–${thread.side}${thread.endLine}`
+    : `${thread.side}${thread.line}`;
+  anchor.appendChild(document.createTextNode(' : ' + range));
+  chip.appendChild(anchor);
+  const saved = document.createElement('div');
+  saved.className = 'saved';
+  const txt = document.createElement('span');
+  txt.className = 'txt';
+  txt.textContent = thread.text || '';
+  saved.appendChild(txt);
+  chip.appendChild(saved);
+  (thread.replies || []).forEach(r => chip.appendChild(buildReplyRow(r)));
+  return chip;
+}
+// Diff (split/single) path: same insertAfterRow() a draft's chip uses.
+function renderThreadRow(grid, file, cell, codeEl){
+  const a = anchorOf(file, cell);
+  grid.querySelectorAll(`.cmt-thread[data-akey="${CSS.escape(a.key)}"]`).forEach(n => n.remove());
+  const list = threadsByKey[a.key];
+  if(!list || !list.length) return;
+  list.forEach(t => {
+    const chip = buildThreadChip(t);
+    chip.dataset.akey = a.key;
+    insertAfterRow(grid, codeEl, chip);
+  });
+}
+// Preview (block) path: same insertAfterBlock() a draft's chip uses. A chip
+// dropped into a table row is wrapped in its own <tr><td>, so removal must
+// go through boxHost() or a stale empty row is left behind — same reason
+// renderBlockChip does it for draft chips.
+function renderThreadBlockRow(el, desc, ctx){
+  if(!el.parentNode) return;   // afterend is a no-op on a detached node
+  const a = blockAnchor(desc, ctx);
+  const root2 = ctx.root || document;
+  root2.querySelectorAll(`.cmt-thread[data-akey="${CSS.escape(a.key)}"]`).forEach(n => boxHost(n).remove());
+  const list = threadsByKey[a.key];
+  if(!list || !list.length) return;
+  // Reversed: each afterend insert against the fixed `el` lands ABOVE the
+  // previous chip, so forward iteration would render newest-first. The row
+  // path needs no such flip — insertAfterRow walks past existing .cmt-row
+  // siblings, appending in iteration order.
+  list.slice().reverse().forEach(t => {
+    const chip = buildThreadChip(t);
+    chip.dataset.akey = a.key;
+    insertAfterBlock(el, chip);
+  });
+}
+function updateRoundNote(round){
+  const el = document.getElementById('roundNote');
+  if(!el) return;
+  if(round && round >= 1){ el.hidden = false; el.textContent = `Round ${round}`; }
+  else{ el.hidden = true; el.textContent = ''; }
+}
+// GET /threads: full thread state, for the startup render and every later
+// refetch triggered by a threads_rev bump on /state. Fetched only in threads
+// mode — the endpoint 404s in one-shot and human-only mode.
+async function fetchThreads(){
+  if(!THREADS_MODE) return;
+  try{
+    const r = await fetch('threads', {cache:'no-store'});
+    if(!r.ok) return;
+    const j = await r.json();
+    threadsRev = j.threads_rev;
+    const byKey = {};
+    (j.threads || []).forEach(t => {
+      if(t.resolved) return;   // hidden entirely in this slice — see design doc
+      const key = `${t.file}|${t.side}${t.line}`;
+      (byKey[key] = byKey[key] || []).push(t);
+    });
+    threadsByKey = byKey;
+    updateRoundNote(j.round);
+  }catch(e){ /* transient; the poll will retry */ }
 }
 
 function render(){
@@ -1462,6 +1595,7 @@ function renderFile(file, fi){
       made.forEach(m => {
         const c = comments[anchorOf(file, m.cell).key];
         if(c && c.kind !== 'dismiss-comments') rerenderSaved(g, file, m.cell, m.codeEl);
+        if(THREADS_MODE) renderThreadRow(g, file, m.cell, m.codeEl);
       });
       hunkEl.appendChild(g);
       body.appendChild(hunkEl);
@@ -1701,6 +1835,16 @@ async function checkSync(){
     const s = await r.json();
     refreshBtn.hidden = !s.stale;
     if(refreshBtn.hidden) disarmRefresh();
+    if(THREADS_MODE && typeof s.threads_rev === 'number' && s.threads_rev !== threadsRev){
+      // Never re-render over an open composer: unsaved text lives only in the
+      // textarea, and render() starts from root.innerHTML=''. Skip the fetch
+      // too — fetchThreads() advances threadsRev, so fetch-without-render
+      // would leave the DOM stale with nothing left to retrigger. The next
+      // 6s tick retries once the composer closes.
+      if(document.querySelector('.cmt textarea')) return;
+      await fetchThreads();
+      render();
+    }
   }catch(e){ /* transient; try again next tick */ }
 }
 async function doRefresh(){
@@ -1764,6 +1908,17 @@ async function doSubmit(){                  // step 2: submit the round
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
     toast(msg);
     submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
+    if(THREADS_MODE){
+      // These comments are now server threads (the response minted an id for
+      // each). Drop the matching local drafts so the coming /threads refetch
+      // doesn't render the same comment twice — once as a draft chip, once as
+      // a thread chip. Re-arming Submit for a next round is a later PR.
+      for(const c of payload.comments){
+        delete comments[`${c.file}|${c.side}${c.line}`];
+      }
+      await fetchThreads();
+      render();
+    }
   }catch(e){
     toast('Submit failed: '+e.message);
     finishSubmit.disabled = false;
@@ -1783,6 +1938,7 @@ function fitTitle(){
 window.addEventListener('resize', fitTitle);
 render();
 fitTitle();
+if(THREADS_MODE) fetchThreads().then(render);
 </script></body></html>"""
 
 
@@ -1994,6 +2150,7 @@ class Handler(BaseHTTPRequestHandler):
                 meta["github"] = bool(Handler.gh)
                 if Handler.gh:
                     meta["sha"] = Handler.gh["sha"]
+                meta["mode"] = Handler.mode
                 files = parse_diff(diff)
                 Handler.page = build_page(files, meta)
                 Handler.diff_sig = source_sig(diff)
@@ -2363,11 +2520,11 @@ def main():
     meta["github"] = bool(gh)
     if gh:
         meta["sha"] = gh["sha"]
-    files = parse_diff(diff)
-    Handler.page = build_page(files, meta)
     # Mode is derived, not flagged: an explicit --out is the one fact that
     # means an agent is watching the file, so no --once with an explicit
-    # --out is the only shape that stays alive as "threads" mode.
+    # --out is the only shape that stays alive as "threads" mode. Computed
+    # before build_page so the page's META carries it for the JS (the page
+    # detects threads mode via META.mode rather than a separate flag).
     if args.out is None:
         Handler.mode = "human-only"
         Handler.out_path = "pr_comments.json"
@@ -2377,6 +2534,9 @@ def main():
     else:
         Handler.mode = "threads"
         Handler.out_path = args.out
+    meta["mode"] = Handler.mode
+    files = parse_diff(diff)
+    Handler.page = build_page(files, meta)
     Handler.vendor_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
     Handler.pr = args.pr
     Handler.repo = args.repo
