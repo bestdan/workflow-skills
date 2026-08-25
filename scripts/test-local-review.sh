@@ -1304,6 +1304,17 @@ try:
         except _urlerror.HTTPError as e:
             check("server: POST /reply with an invalid author returns 400", e.code == 400, e.code)
 
+        # resolved must be a JSON boolean: bool("false") is True, so coercion
+        # would silently resolve a thread on a mistyped value.
+        try:
+            post_json("resolve", {"thread_id": "t1", "resolved": "false"})
+            bad("server: POST /resolve with a non-boolean resolved returns 400", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /resolve with a non-boolean resolved returns 400", e.code == 400, e.code)
+        _, still = get_json("threads")
+        t1s = next(t for t in still["threads"] if t["id"] == "t1")
+        check("server: a rejected non-boolean resolve leaves the bit unchanged", t1s.get("resolved") is False, t1s)
+
         # f. threads_rev keeps climbing across a second submit
         status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
         check("server: threads-endpoints second submit returns 200", status == 200, status)
@@ -1314,8 +1325,12 @@ try:
         # c. /reply 404s without a valid token or cookie
         host, port, host_port, token_path = url_parts(url)
         base = f"http://{host_port}"
+        req = _urlrequest.Request(
+            f"{base}/reply", data=b'{"thread_id":"t1","author":"agent","text":"x"}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
         try:
-            _urlrequest.urlopen(f"{base}/reply", timeout=5)
+            _urlrequest.urlopen(req, timeout=5)
             bad("server: POST /reply with no token and no cookie returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /reply with no token and no cookie returns 404", e.code == 404, e.code)

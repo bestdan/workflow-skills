@@ -2091,12 +2091,17 @@ class Handler(BaseHTTPRequestHandler):
     def _do_resolve(self, payload):
         thread_id = payload.get("thread_id")
         resolved = payload.get("resolved")
+        # A JSON boolean only: bool() would turn "false", 1, or {} into a
+        # silent wrong-state write, and an omitted key into an unresolve.
+        if not isinstance(resolved, bool):
+            self._send_json(400, {"ok": False, "error": "resolved must be a boolean"})
+            return
         with Handler._threads_lock:
             thread = self._find_thread(thread_id)
             if thread is None:
                 self._send_json(404, {"ok": False, "error": f"unknown thread_id: {thread_id}"})
                 return
-            thread["resolved"] = bool(resolved)
+            thread["resolved"] = resolved
             Handler.threads_rev += 1
             rev = Handler.threads_rev
         self._send_json(200, {"ok": True, "threads_rev": rev})
