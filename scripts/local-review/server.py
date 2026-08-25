@@ -1474,7 +1474,12 @@ async function postThreadAction(route, body){
 // disabled state reads as done in the meantime.
 async function afterThreadMutation(){
   if(document.querySelector('.cmt textarea')) return;
-  await fetchThreads(); render();
+  await fetchThreads();
+  // Re-check after the await: a composer opened during the fetch would be
+  // wiped by render(). fetchThreads() already advanced threadsRev, so reset
+  // it to force the next poll tick to refetch and re-render.
+  if(document.querySelector('.cmt textarea')){ threadsRev = -1; return; }
+  render();
 }
 // Reply composer: mirrors openComposer's `.cmt` textarea+actions shape so the
 // checkSync guard (`document.querySelector('.cmt textarea')`) covers it too.
@@ -1985,6 +1990,10 @@ async function checkSync(){
       // 6s tick retries once the composer closes.
       if(document.querySelector('.cmt textarea')) return;
       await fetchThreads();
+      // Re-check after the await: the check above ran before the fetch, and
+      // a composer opened during it would be wiped by render(). Reset
+      // threadsRev so the next tick refetches once the composer closes.
+      if(document.querySelector('.cmt textarea')){ threadsRev = -1; return; }
       render();
     }
   }catch(e){ /* transient; try again next tick */ }
