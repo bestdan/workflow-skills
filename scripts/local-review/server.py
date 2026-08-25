@@ -1466,7 +1466,16 @@ async function postThreadAction(route, body){
 }
 // Both Resolve and Reopen end the same way: refetch server state and
 // re-render, so the chip moves grid <-> resolved-strip on the next paint.
-async function afterThreadMutation(){ await fetchThreads(); render(); }
+// Same guard as checkSync, same reason: render() starts from
+// root.innerHTML='' and unsaved draft text lives only in its textarea, so a
+// mutation clicked while a composer is open elsewhere must not re-render
+// over it. Skipping the fetch too leaves threadsRev behind, so the next
+// poll tick re-renders once the composer closes; the clicked button's
+// disabled state reads as done in the meantime.
+async function afterThreadMutation(){
+  if(document.querySelector('.cmt textarea')) return;
+  await fetchThreads(); render();
+}
 // Reply composer: mirrors openComposer's `.cmt` textarea+actions shape so the
 // checkSync guard (`document.querySelector('.cmt textarea')`) covers it too.
 function openThreadReply(chip, thread){
@@ -1487,6 +1496,7 @@ function openThreadReply(chip, thread){
     saveBtn.disabled = true;
     try{
       await postThreadAction('reply', {thread_id: thread.id, author: 'user', text: v});
+      cmt.remove();   // this composer is saved; left in place it would trip the guard
       await afterThreadMutation();
     }catch(e){
       toast('Reply failed: '+e.message);
