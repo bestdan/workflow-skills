@@ -65,8 +65,10 @@ already takes:
 | no `--out`, no `--once`  | human-only | Today's hand-run behavior exactly. No thread endpoints, no Reply controls.                     |
 | no `--out` with `--once` | human-only | One round, write `pr_comments.json`, exit. Today's behavior for that launch.                   |
 
-`--once` always means "exit after one successful submit", in every mode. Only
-an explicit `--out` with no `--once` keeps the server alive.
+`--once` always means "exit after one successful submit", in every mode; any
+launch without it stays alive across submits — human-only included, which is
+today's hand-run behavior. What an explicit `--out` with no `--once` uniquely
+selects is the thread machinery, not liveness.
 
 The derivation works because `--out` already encodes the one fact that
 matters: an agent is watching the file. The skill's step 2 always passes
@@ -102,7 +104,8 @@ Two meanings shift, and both are named here rather than hidden:
   200 (now by design, not by slot release), the `Submit review` header
   button text the security case greps for stays, and the `--out` preflight
   path is mode-independent. What changes is the payload those cases
-  observe — it gains `round`, `id`, and `threads` keys — so their labels
+  observe — it gains top-level `round`, `finished`, and `threads` keys, and
+  each `comments` entry gains a minted `id` — so their labels
   and any payload-shape assertions move with stage 1. A future test that
   wants today's payload shape must pass `--once`; a stay-alive one-shot
   mode no longer exists.
@@ -151,6 +154,11 @@ re-places each thread by this rule, in order:
 3. Else, render the thread in an **Outdated** strip at the top of that
    file's card, showing the original anchor. The thread is never dropped:
    a comment the user wrote must stay visible until the user resolves it.
+   The card is located by the thread's old **or** new path, so a rename
+   still finds it. One accepted limitation: a file that leaves the diff
+   entirely has no card to carry the strip, so its threads are invisible
+   until the file returns — they stay in the store and every round payload.
+   A page-level fallback strip is deferred until real use hits this.
 
 Re-placement is a pure function (`placeThreads(files, threads)` → placement
 list) that lives inside the page's `PURE-PREVIEW` region, so
@@ -262,6 +270,7 @@ stamps `ts` (epoch seconds) on each reply. Response: `{"ok": true,
       "side": "R",
       "line": 41,
       "code": "    return cached",
+      "diff_sig": "…",
       "endLine": null,
       "kind": null,
       "github": false,
@@ -306,9 +315,13 @@ stamps `ts` (epoch seconds) on each reply. Response: `{"ok": true,
 
 `comments` keeps today's shape and meaning — the entries new in this round —
 plus the minted `id`. `threads` is the complete state, so overwriting the
-previous round's file loses nothing: every earlier comment, reply, and
-resolution rides along in full. That property is what makes a single `--out`
-path safe across rounds; the agent removes the file after reading and
+previous round's file preserves every earlier comment, reply, and resolution
+in full. One field is exempt and the exemption is accepted: a round's
+`summary` lives only in that round's payload, so two Submits inside the
+agent's poll window lose the first round's summary text. Carrying summaries
+in the thread store would close it; deferred until real use shows the window
+matters. That full-state property is what makes a single `--out` path safe
+across rounds; the agent claims the file by rename before reading and
 resumes polling. In one-shot mode (`--once`) the payload matches the
 post-stage-0 one-shot shape — today's payload minus the `approved` key stage 0
 removes. It carries none of the keys this design adds: no `round`, no `id`, no
@@ -365,13 +378,18 @@ round=0
 while :; do
   for i in $(seq 1 2400); do [ -s "$OUT" ] && break; sleep 3; done
   [ -s "$OUT" ] || break            # 2h idle: stop watching, ask the user
-  payload=$(cat "$OUT"); rm -f "$OUT"
-  # echo the round (step 5).
-  # finished==true → break HERE, before any reply: the server has already
-  #   exited, so there is no reply channel left and every curl would fail.
-  # else act on the round, then per thread answered:
-  # curl -sf -X POST "$BASE/reply" -H 'Content-Type: application/json' \
-  #   -d '{"thread_id":"t3","author":"agent","text":"..."}'
+  # Claim by rename before reading: rename(2) is atomic, so a round the
+  # server replaces after the mv lands at $OUT for the next iteration —
+  # cat-then-rm would delete that newer round unread.
+  mv "$OUT" "$OUT.claimed"
+  payload=$(cat "$OUT.claimed"); rm -f "$OUT.claimed"
+  # echo the round (step 5), then ACT on it — a Finish round can carry
+  # comments and a summary, and they are addressed like any other round's.
+  # then, per thread answered:
+  #   finished==true → skip the replies and break: the server has already
+  #     exited, so there is no reply channel left and every curl would fail.
+  #   else: curl -sf -X POST "$BASE/reply" -H 'Content-Type: application/json' \
+  #     -d '{"thread_id":"t3","author":"agent","text":"..."}'
 done
 ```
 
@@ -516,7 +534,7 @@ Each item is one PR. `just check` gates each.
    Full-state `threads` in `--out`. Re-label and extend the four
    `--out`-without-`--once` harness cases named under Mode derivation:
    they now start threads-mode servers, and their payload assertions gain
-   the `round`/`id`/`threads` keys. Touches
+   the `round`/`finished`/`threads` keys and per-comment `id`. Touches
    `scripts/local-review/server.py`, `scripts/test-local-review.sh`. Tests:
    one-shot payload matches the post-stage-0 shape under `--once`; human-only
    submit still
