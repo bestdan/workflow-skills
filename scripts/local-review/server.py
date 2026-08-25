@@ -2113,8 +2113,13 @@ async function doSubmit(finished){          // step 2: submit the round
         await fetchThreads();
         render();
         refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
+        // The summary was sent with this round; left in place it would ride
+        // into the next round's payload verbatim and keep the dialog's
+        // Submit enabled with nothing new to say.
+        finishSummary.value = '';
         finishSubmit.disabled = false;
         finishFinish.disabled = false;
+        updateFinishBtn();
       }
     }else{
       submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
