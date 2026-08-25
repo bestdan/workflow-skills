@@ -1832,6 +1832,12 @@ async function checkSync(){
     refreshBtn.hidden = !s.stale;
     if(refreshBtn.hidden) disarmRefresh();
     if(THREADS_MODE && typeof s.threads_rev === 'number' && s.threads_rev !== threadsRev){
+      // Never re-render over an open composer: unsaved text lives only in the
+      // textarea, and render() starts from root.innerHTML=''. Skip the fetch
+      // too — fetchThreads() advances threadsRev, so fetch-without-render
+      // would leave the DOM stale with nothing left to retrigger. The next
+      // 6s tick retries once the composer closes.
+      if(document.querySelector('.cmt textarea')) return;
       await fetchThreads();
       render();
     }
