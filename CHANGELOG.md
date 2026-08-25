@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.6.0] - 2026-08-25
+
+### Features
+
+- thread store, minted ids, and the round payload (#419) (8bd7e7f)
+
 ## [2.5.0] - 2026-08-25
 
 ### Features
