@@ -573,8 +573,6 @@ header .controls{flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:1
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:#fff;border-color:transparent;font-weight:600}
 .btn.primary:disabled{opacity:.5;cursor:not-allowed}
-.btn.approve{background:var(--add-num);color:#fff;border-color:transparent;font-weight:600}
-.btn.approve:hover{filter:brightness(1.05)}
 .btn.refresh{background:var(--accent);color:#fff;border-color:transparent;font-weight:600;
   animation:pulse 2s ease-in-out infinite}
 .btn.refresh:hover{filter:brightness(1.05)}
@@ -725,7 +723,6 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <div class="actions">
       <button class="btn" id="finishCancel">Cancel</button>
       <button class="btn primary" id="finishSubmit">Submit review</button>
-      <button class="btn approve" id="finishApprove">Approve</button>
     </div>
   </div>
 </div>
@@ -1739,8 +1736,7 @@ const submitBtn = document.getElementById('submit');
 const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
-const finishApprove = document.getElementById('finishApprove');
-function updateFinishBtn(){                 // Submit needs feedback; Approve is always allowed
+function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
   finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
 }
@@ -1748,35 +1744,32 @@ submitBtn.onclick = () => {                 // step 1: open the finish-review wi
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
   document.getElementById('finishSub').textContent =
-    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an optional overall comment, then submit or approve.`;
+    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 };
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
-async function doSubmit(approved){          // step 2: submit the round, optionally approving
-  const payload = {meta:META, summary:finishSummary.value.trim(), approved, comments:Object.values(comments)};
-  finishSubmit.disabled = true; finishApprove.disabled = true;
+async function doSubmit(){                  // step 2: submit the round
+  const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
+  finishSubmit.disabled = true;
   try{
     const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
     const info = await res.json().catch(()=>({}));
     finishBg.classList.remove('show');
-    let msg = approved
-      ? 'Approved — Claude will make sure the PR is up and marked ready.'
-      : `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
+    let msg = `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
     // "flagged", not "posted": the server no longer posts. Say what actually
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
     toast(msg);
-    submitBtn.textContent = approved ? 'Approved ✓' : 'Submitted ✓'; submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
   }catch(e){
     toast('Submit failed: '+e.message);
-    finishSubmit.disabled = false; finishApprove.disabled = false;
+    finishSubmit.disabled = false;
   }
 }
-finishSubmit.onclick = () => doSubmit(false);
-finishApprove.onclick = () => doSubmit(true);
+finishSubmit.onclick = () => doSubmit();
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 4000);
@@ -2034,13 +2027,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
         # human-readable to stdout
-        header = "REVIEW APPROVED" if payload.get("approved") else "REVIEW SUBMITTED"
-        print(f"\n===== {header} =====", flush=True)
-        if payload.get("approved"):
-            if Handler.gh:
-                print("APPROVED: ensure the PR is pushed to GitHub and marked ready for review.", flush=True)
-            else:
-                print("APPROVED: local review — no PR to update.", flush=True)
+        print("\n===== REVIEW SUBMITTED =====", flush=True)
         if payload.get("summary"):
             print(f"SUMMARY: {payload['summary']}", flush=True)
         for c in payload.get("comments", []):

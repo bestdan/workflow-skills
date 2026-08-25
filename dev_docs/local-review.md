@@ -2,7 +2,7 @@
 
 The `local-review` skill is the plugin's human-in-the-loop review surface: a
 local, stdlib-only web server renders a GitHub-style split diff, the user
-leaves inline line comments and a verdict in their browser, and the submitted
+leaves inline line comments in their browser, and the submitted
 round lands in a JSON file the agent acts on. `/co-review` is agents reading a
 diff; `local-review` is the human reading it. This doc is the durable record of
 the port (PRs #369–#376, 2026-08-18); the plan scaffolding that produced it has
@@ -133,7 +133,7 @@ The reasoning, and the two constraints that look arbitrary from outside, are in
   the commit this page's diff was rendered from. The agent posts against it;
   re-resolving the head at posting time would anchor comments to whatever the
   PR advanced to while the page was open.
-- **Payload:** `{meta, summary, approved, comments:[{file, side, line, code,
+- **Payload:** `{meta, summary, comments:[{file, side, line, code,
   text}]}`. A `kind: "dismiss-comments"` entry adds `endLine` (delete lines
   `line`–`endLine` on `side`); `kind: "block"` adds `endLine` too (a preview
   comment about that whole span). `github: true` marks a comment the **user
