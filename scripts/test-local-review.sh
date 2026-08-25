@@ -1375,6 +1375,113 @@ finally:
     if os.path.exists(ep_out):
         os.unlink(ep_out)
 
+# -- a. threads UI render input: what fetchThreads()/render() consume --------
+# Stage 2 (this PR) makes the page fetch GET /threads at startup and render
+# every thread + its replies read-only. This drives the endpoints in the same
+# order the browser does -- submit a round with two comments on different
+# lines, reply to one -- then asserts GET /threads' shape is exactly what the
+# page's buildThreadChip()/buildReplyRow() consume: an anchor of
+# {file, side, line} (plus endLine/kind for a block comment) per thread, and
+# each reply carrying author/ts/text.
+ui_fd, ui_out = _tempfile.mkstemp(suffix=".json")
+os.close(ui_fd)
+os.unlink(ui_out)
+proc, patch_path = start_server(["--out", ui_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: threads-render-input run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        # Two comments on different lines -- one plain (a Split/Single line
+        # comment's shape) and one carrying endLine/kind (a Preview block
+        # comment's shape -- see openBlockComposer's `c` object in server.PAGE)
+        # -- so this round's render input covers both chip paths' anchors.
+        payload = {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+            {"file": "a.py", "side": "R", "line": 5, "code": "y", "endLine": 7,
+             "kind": "block", "text": "second, a block comment"},
+        ]}
+        status, info = post_json("submit", payload)
+        check("server: threads-render-input submit returns 200", status == 200, status)
+        t1_id, t2_id = (info.get("ids") or [None, None])[:2]
+
+        status, _r1 = post_json("reply", {"thread_id": t1_id, "author": "agent", "text": "Looked into it."})
+        check("server: threads-render-input reply returns 200", status == 200, status)
+
+        status, doc = get_json("threads")
+        check("server: threads-render-input GET /threads returns 200", status == 200, status)
+        threads = {t["id"]: t for t in doc.get("threads", [])}
+        check("server: threads-render-input has both threads",
+              set(threads.keys()) == {t1_id, t2_id}, threads)
+        t1, t2 = threads.get(t1_id, {}), threads.get(t2_id, {})
+        # Exactly the fields buildThreadChip() reads to place and label a chip.
+        check("server: threads-render-input thread 1 anchor matches what was submitted",
+              (t1.get("file"), t1.get("side"), t1.get("line")) == ("a.py", "R", 1), t1)
+        check("server: threads-render-input thread 2 anchor (block shape) matches",
+              (t2.get("file"), t2.get("side"), t2.get("line"), t2.get("endLine"), t2.get("kind"))
+              == ("a.py", "R", 5, 7, "block"), t2)
+        check("server: threads-render-input thread text matches", t1.get("text") == "first", t1)
+        check("server: threads-render-input thread 2 carries no replies", t2.get("replies") == [], t2)
+        check("server: threads-render-input thread 1 carries exactly one reply",
+              len(t1.get("replies", [])) == 1, t1)
+        reply = (t1.get("replies") or [{}])[0]
+        check("server: threads-render-input reply carries author/ts/text -- exactly what "
+              "buildReplyRow() reads", {"author", "ts", "text"} <= set(reply.keys()), reply)
+        check("server: threads-render-input reply author/text match",
+              (reply.get("author"), reply.get("text")) == ("agent", "Looked into it."), reply)
+        check("server: threads-render-input reply ts is an int epoch, what "
+              "new Date(ts*1000) needs", isinstance(reply.get("ts"), int), reply)
+        check("server: threads-render-input both threads start unresolved (so the page renders them)",
+              t1.get("resolved") is False and t2.get("resolved") is False, (t1, t2))
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(ui_out):
+        os.unlink(ui_out)
+
+# -- b. thread rendering wiring: both chip paths call the same renderer ------
+# The Preview (block-comment) chip path and the Split/Single (line-comment)
+# chip path insert at two different DOM points (insertAfterBlock vs
+# insertAfterRow). A DOM-driven assertion of the actual rendered chip isn't
+# possible here -- jsdom is unreachable, the same reason the PURE-PREVIEW
+# region exists and is tested under bare node instead of a browser. So this
+# is a source-scan, in the same spirit as the innerHTML scan below: it
+# confirms renderThreadRow() is invoked from the exact forEach that renders a
+# saved LINE comment's chip, and renderThreadBlockRow() from the exact forEach
+# that renders a saved BLOCK (Preview) comment's chip. Paired with the
+# render-input assertions above -- which already prove a block-shaped anchor
+# (endLine + kind, exactly what a Preview comment submits) round-trips through
+# GET /threads unchanged -- this establishes both halves: the data a
+# Preview-created thread carries is correct, and the page's Preview code path
+# actually renders it.
+check("server.PAGE wires thread rendering into the Split/Single chip path",
+      _re.search(r"rerenderSaved\(g,\s*file,\s*m\.cell,\s*m\.codeEl\);\s*\n\s*"
+                 r"if\(THREADS_MODE\)\s*renderThreadRow\(g,\s*file,\s*m\.cell,\s*m\.codeEl\);",
+                 server.PAGE) is not None,
+      "renderThreadRow(...) is not called beside rerenderSaved(...) in the made.forEach loop")
+check("server.PAGE wires thread rendering into the Preview/block chip path",
+      _re.search(r"renderBlockChip\(el,\s*el\.__mdDesc,\s*ctx\);\s*\n\s*"
+                 r"if\(THREADS_MODE\)\s*renderThreadBlockRow\(el,\s*el\.__mdDesc,\s*ctx\);",
+                 server.PAGE) is not None,
+      "renderThreadBlockRow(...) is not called beside renderBlockChip(...) in the md-target loop")
+
 # -- thread endpoints exist only in threads mode; 404 elsewhere --------------
 once_ep_fd, once_ep_out = _tempfile.mkstemp(suffix=".json")
 os.close(once_ep_fd)
@@ -2247,7 +2354,11 @@ else:
 # names that carry diff content or reviewer text may appear inside an
 # innerHTML assignment. Issue #385.
 _UNTRUSTED = ["a.path", "c.file", "file.display", "h.header", "h.section",
-              "c.text", "cell.s", "res.value", "_emitter"]
+              "c.text", "cell.s", "res.value", "_emitter",
+              # Threads (server-owned comment threads + replies): the same
+              # invariant extends unchanged, per the design doc's security
+              # posture -- a reply is never rendered through an HTML parser.
+              "thread.file", "thread.text", "reply.author", "reply.text", "reply.ts"]
 _dirty = []
 for _chunk in server.PAGE.split("innerHTML")[1:]:
     # Only real assignments. The prose above and in the page itself names
@@ -2263,6 +2374,16 @@ for _chunk in server.PAGE.split("innerHTML")[1:]:
     _dirty += [f"{n}: {_expr.strip()[:70]}" for n in _UNTRUSTED if n in _expr]
 check("no innerHTML assignment interpolates diff content or reviewer text",
       _dirty == [], _dirty)
+# --- companion to the scan above: the thread/reply renderer itself must use
+# textContent, not just "never innerHTML". This is the positive half -- the
+# scan above proves the negative (no untrusted string in an innerHTML
+# assignment); this proves the renderer actually assigns thread/reply text
+# and author through the DOM property that never parses its input as markup.
+_TC_REQUIRED = ["author.textContent = reply.author", "txt.textContent = reply.text",
+                "pathSpan.textContent = thread.file", "txt.textContent = thread.text"]
+_tc_missing = [s for s in _TC_REQUIRED if s not in server.PAGE]
+check("buildThreadChip()/buildReplyRow() assign thread/reply strings via textContent",
+      _tc_missing == [], _tc_missing)
 # The escaper is gone with the last of its callers. Its presence would mean an
 # interpolation somewhere still depends on it being correct.
 check("the page carries no HTML-escaping helper any more",
