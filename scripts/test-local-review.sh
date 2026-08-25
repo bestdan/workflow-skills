@@ -923,7 +923,8 @@ try:
                   e.headers.get("Referrer-Policy") == "no-referrer",
                   e.headers.get("Referrer-Policy"))
             check("server: GET / body contains 'Submit review'", "Submit review" in body, "")
-        payload = {"meta": {}, "summary": "looks good", "comments": []}
+        payload = {"meta": {}, "summary": "looks good",
+                   "comments": [{"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "one"}]}
         req = _urlrequest.Request(
             f"{url}submit", data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
@@ -942,6 +943,11 @@ try:
             check("server: $OUT parses as JSON with the submitted fields and no approved key",
                   written.get("summary") == "looks good" and "approved" not in written,
                   written)
+            check("server: one-shot $OUT carries no round, threads, or finished key",
+                  "round" not in written and "threads" not in written and "finished" not in written,
+                  written)
+            check("server: one-shot $OUT comments carry no minted id",
+                  all("id" not in c for c in written.get("comments", [])), written)
         _fd = proc.stdout.fileno()
         os.set_blocking(_fd, False)
         _stdout_tail = ""
@@ -1089,6 +1095,96 @@ finally:
     os.unlink(patch_path)
     if os.path.exists(slot_out):
         os.unlink(slot_out)
+
+# -- threads mode: id minting, round numbering, lossless threads, Finish -----
+th_fd, th_out = _tempfile.mkstemp(suffix=".json")
+os.close(th_fd)
+os.unlink(th_out)
+proc, patch_path = start_server(["--out", th_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: threads-mode run starts", bool(url), url)
+    if url:
+        # round 1: two comments -> ids t1, t2
+        payload1 = {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+            {"file": "a.py", "side": "R", "line": 2, "code": "y", "text": "second"},
+        ]}
+        req = _urlrequest.Request(
+            f"{url}submit", data=json.dumps(payload1).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: threads-mode round 1 returns 200", resp.status == 200, resp.status)
+            info1 = json.loads(resp.read().decode())
+        check("server: threads-mode round 1 response mints ids t1, t2",
+              info1.get("ids") == ["t1", "t2"], info1)
+        check("server: threads-mode round 1 response carries round 1",
+              info1.get("round") == 1, info1)
+        check("server: threads-mode server stays alive after round 1", proc.poll() is None, proc.poll())
+        with open(th_out) as f:
+            written1 = json.load(f)
+        check("server: threads-mode round 1 --out carries round 1", written1.get("round") == 1, written1)
+        check("server: threads-mode round 1 --out finished is false", written1.get("finished") is False, written1)
+        check("server: threads-mode round 1 --out threads has 2 entries",
+              len(written1.get("threads", [])) == 2, written1)
+        check("server: threads-mode round 1 threads start unresolved with no replies",
+              all(t.get("resolved") is False and t.get("replies") == [] for t in written1.get("threads", [])),
+              written1)
+        check("server: threads-mode round 1 comments carry the minted ids",
+              [c.get("id") for c in written1.get("comments", [])] == ["t1", "t2"], written1)
+
+        # round 2: one more comment -> id t3; threads array grows losslessly
+        payload2 = {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 3, "code": "z", "text": "third"},
+        ]}
+        req = _urlrequest.Request(
+            f"{url}submit", data=json.dumps(payload2).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: threads-mode round 2 returns 200", resp.status == 200, resp.status)
+            info2 = json.loads(resp.read().decode())
+        check("server: threads-mode round 2 response mints id t3", info2.get("ids") == ["t3"], info2)
+        check("server: threads-mode round 2 response carries round 2", info2.get("round") == 2, info2)
+        with open(th_out) as f:
+            written2 = json.load(f)
+        check("server: threads-mode round 2 --out carries round 2", written2.get("round") == 2, written2)
+        check("server: threads-mode round 2 --out comments has only the new-in-round entry",
+              len(written2.get("comments", [])) == 1, written2)
+        check("server: threads-mode round 2 --out threads carries all 3 (lossless overwrite)",
+              len(written2.get("threads", [])) == 3, written2)
+        check("server: threads-mode round 2 --out finished is false", written2.get("finished") is False, written2)
+        check("server: threads-mode server stays alive after round 2", proc.poll() is None, proc.poll())
+
+        # round 3: Finish -> finished true, server shuts down
+        payload3 = {"meta": {}, "summary": "", "comments": [], "finished": True}
+        req = _urlrequest.Request(
+            f"{url}submit", data=json.dumps(payload3).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: threads-mode Finish round returns 200", resp.status == 200, resp.status)
+        try:
+            rc = proc.wait(timeout=5)
+            check("server: threads-mode Finish shuts the server down", rc == 0, rc)
+        except _subprocess.TimeoutExpired:
+            bad("server: threads-mode Finish shuts the server down", "did not exit within 5s")
+        with open(th_out) as f:
+            written3 = json.load(f)
+        check("server: threads-mode Finish --out sets finished true", written3.get("finished") is True, written3)
+        check("server: threads-mode Finish --out carries round 3", written3.get("round") == 3, written3)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(th_out):
+        os.unlink(th_out)
 
 # -- security: path token gates every route; Origin/Sec-Fetch-Site gate POSTs
 sec_fd, sec_out = _tempfile.mkstemp(suffix=".json")
@@ -1377,6 +1473,9 @@ try:
                 written = json.load(f)
             check("server: human-only pr_comments.json carries the submitted summary",
                   written.get("summary") == "human-only", written)
+            check("server: human-only pr_comments.json carries no round, threads, or finished key",
+                  "round" not in written and "threads" not in written and "finished" not in written,
+                  written)
         check("server: human-only mode stays alive after a submit", proc.poll() is None, proc.poll())
 finally:
     if proc.poll() is None:
