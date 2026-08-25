@@ -1000,8 +1000,12 @@ function placeThreads(files, threads){
     const rows = [];
     filesNamed(files, thread.file).forEach(f => rows.push(...threadRowsOf(f)));
     // Rule 1: the row this thread was anchored to still says the same thing.
-    const exact = rows.find(r => r.side === thread.side && r.line === thread.line && r.code === thread.code);
-    if(exact) return {thread, placement:'exact', file: exact.file, side: thread.side, line: thread.line};
+    // A collapsed context pair carries its L cell in .alt, so an L-anchored
+    // thread's unmoved row is still an exact hit, not a spurious "moved".
+    const hits = r => (r.side === thread.side && r.line === thread.line && r.code === thread.code)
+      || (r.alt && r.alt.side === thread.side && r.alt.line === thread.line && r.alt.code === thread.code);
+    const exact = rows.find(hits);
+    if(exact) return {thread, placement:'exact', file: thread.file, side: thread.side, line: thread.line};
     // Rule 2: exactly one row anywhere in the file (either side) carries the
     // same text. Two or more matches is not a signal -- never guess which one
     // the user meant; that falls through to rule 3 instead.
@@ -1749,7 +1753,7 @@ async function fetchThreads(){
       // endLine is cleared: rule 2 re-anchors only the single anchor line,
       // so the copy has no basis for claiming a span at the new location.
       const rendered = p.placement === 'moved'
-        ? Object.assign({}, p.thread, {side: p.side, line: p.line, endLine: null, _moved: true})
+        ? Object.assign({}, p.thread, {file: p.file, side: p.side, line: p.line, endLine: null, _moved: true})
         : p.thread;
       const key = `${p.file}|${p.side}${p.line}`;
       (byKey[key] = byKey[key] || []).push(rendered);

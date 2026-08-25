@@ -3104,6 +3104,16 @@ const out = {};
   out.movedCtx = placeThreads(files, threads);
 }
 
+// Rule 1, context pair: an UNMOVED L-anchored context thread is exact, not
+// "moved" -- the collapsed pair's alt cell must count for rule 1 too.
+{
+  const files = [mkFile('a.py', 'a.py', [
+    {l: {t:'ctx', n:3, s:'stable ctx'}, r: {t:'ctx', n:9, s:'stable ctx'}},
+  ])];
+  const threads = [{id:'t7', file:'a.py', side:'L', line:3, code:'stable ctx'}];
+  out.exactCtxL = placeThreads(files, threads);
+}
+
 console.log(JSON.stringify(out));
 """ % _pure2
     _pt_fd, _pt_hp = _tempfile.mkstemp(suffix=".cjs")
@@ -3135,6 +3145,9 @@ console.log(JSON.stringify(out));
                   and _pt["movedCtx"][0]["line"] == 9
                   and _pt["movedCtx"][1]["placement"] == "moved" and _pt["movedCtx"][1]["side"] == "L"
                   and _pt["movedCtx"][1]["line"] == 3, _pt["movedCtx"])
+            check("placeThreads: rule 1 -- an unmoved L-side context thread is 'exact', not 'moved'",
+                  _pt["exactCtxL"][0]["placement"] == "exact" and _pt["exactCtxL"][0]["side"] == "L"
+                  and _pt["exactCtxL"][0]["line"] == 3, _pt["exactCtxL"])
     finally:
         os.unlink(_pt_hp)
 
