@@ -1492,7 +1492,11 @@ function renderThreadBlockRow(el, desc, ctx){
   root2.querySelectorAll(`.cmt-thread[data-akey="${CSS.escape(a.key)}"]`).forEach(n => boxHost(n).remove());
   const list = threadsByKey[a.key];
   if(!list || !list.length) return;
-  list.forEach(t => {
+  // Reversed: each afterend insert against the fixed `el` lands ABOVE the
+  // previous chip, so forward iteration would render newest-first. The row
+  // path needs no such flip — insertAfterRow walks past existing .cmt-row
+  // siblings, appending in iteration order.
+  list.slice().reverse().forEach(t => {
     const chip = buildThreadChip(t);
     chip.dataset.akey = a.key;
     insertAfterBlock(el, chip);

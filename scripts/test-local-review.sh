@@ -1481,6 +1481,13 @@ check("server.PAGE wires thread rendering into the Preview/block chip path",
                  r"if\(THREADS_MODE\)\s*renderThreadBlockRow\(el,\s*el\.__mdDesc,\s*ctx\);",
                  server.PAGE) is not None,
       "renderThreadBlockRow(...) is not called beside renderBlockChip(...) in the md-target loop")
+# The block path must iterate REVERSED: insertAfterBlock inserts afterend of
+# the same fixed element, so forward iteration renders threads newest-first.
+# (The row path is exempt -- insertAfterRow walks past existing .cmt-row
+# siblings, so it appends in iteration order.)
+check("server.PAGE's block chip path inserts multiple same-anchor threads in creation order",
+      "list.slice().reverse().forEach" in server.PAGE,
+      "renderThreadBlockRow must iterate reversed to counter afterend insertion against a fixed el")
 
 # -- thread endpoints exist only in threads mode; 404 elsewhere --------------
 once_ep_fd, once_ep_out = _tempfile.mkstemp(suffix=".json")
