@@ -743,7 +743,6 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <div class="actions">
       <button class="btn" id="finishCancel">Cancel</button>
       <button class="btn primary" id="finishSubmit">Submit review</button>
-      <button class="btn primary" id="finishFinish" hidden>Finish</button>
     </div>
   </div>
 </div>
@@ -2059,7 +2058,6 @@ const submitBtn = document.getElementById('submit');
 const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
-const finishFinish = document.getElementById('finishFinish');
 const finishHdr = document.getElementById('finishHdr');
 const finishedBg = document.getElementById('finishedBg');
 if(THREADS_MODE){
@@ -2070,25 +2068,20 @@ function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
   finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
 }
-// One dialog, one action at a time: the header Submit opens it showing only
-// Submit, the header Finish showing only Finish. Finish shuts the server
-// down, so it never fires from a single header click — the dialog is its
-// confirm step — and it stays enabled with zero comments, which is exactly
-// the round that ends a review.
-function openFinishDialog(finishing){
+// The dialog serves Submit only. Finish fires directly from the header —
+// no modal: the finish round still carries any pending draft comments (they
+// ride out and the agent acts on them), it just skips the summary box. An
+// accidental Finish costs a relaunch on a loopback single-user tool.
+function openFinishDialog(){
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
-  finishSubmit.hidden = !!finishing;
-  finishFinish.hidden = !finishing;
-  document.getElementById('finishSub').textContent = finishing
-    ? `Finish the review and shut the server down. ${n?`${n} pending comment${n!==1?'s':''} and any`:'Any'} overall comment ride out with this final round.`
-    : THREADS_MODE
-      ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
-      : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
+  document.getElementById('finishSub').textContent = THREADS_MODE
+    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
+    : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 }
-submitBtn.onclick = () => openFinishDialog(false);
-finishHdr.onclick = () => openFinishDialog(true);
+submitBtn.onclick = () => openFinishDialog();
+finishHdr.onclick = () => doSubmit(true);
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
@@ -2109,7 +2102,7 @@ async function doSubmit(finished){          // step 2: submit the round
   const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
   if(THREADS_MODE) payload.finished = !!finished;
   finishSubmit.disabled = true;
-  finishFinish.disabled = true;
+  finishHdr.disabled = true;
   try{
     const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
@@ -2139,7 +2132,7 @@ async function doSubmit(finished){          // step 2: submit the round
         // Submit enabled with nothing new to say.
         finishSummary.value = '';
         finishSubmit.disabled = false;
-        finishFinish.disabled = false;
+        finishHdr.disabled = false;
         updateFinishBtn();
       }
     }else{
@@ -2148,11 +2141,10 @@ async function doSubmit(finished){          // step 2: submit the round
   }catch(e){
     toast('Submit failed: '+e.message);
     finishSubmit.disabled = false;
-    finishFinish.disabled = false;
+    finishHdr.disabled = false;
   }
 }
 finishSubmit.onclick = () => doSubmit(false);
-finishFinish.onclick = () => doSubmit(true);
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 4000);

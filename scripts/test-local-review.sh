@@ -2403,11 +2403,11 @@ _verdict_hits = [s for s in ("finishApprove", ">Approve<", "Approved ✓") if s 
 check("server.py carries no Approve button or verdict string",
       _verdict_hits == [], _verdict_hits)
 
-# --- finish dialog: one button (Submit review) normally, a second (Finish) --
-# --- static markup gated on THREADS_MODE at runtime, in threads mode -------
-check("finish dialog markup carries a hidden Finish button beside finishSubmit",
-      '<button class="btn primary" id="finishFinish" hidden>Finish</button>' in server.PAGE,
-      "finishFinish button markup missing or not hidden by default")
+# --- finish dialog serves Submit only; Finish lives in the header and fires -
+# --- doSubmit(true) directly (no modal -- see the header-Finish scans below) -
+check("the finish dialog carries no Finish button",
+      "finishFinish" not in server.PAGE,
+      "a finishFinish reference survives -- the modal Finish was removed on purpose")
 check("THREADS_MODE relabels Submit and reveals the header Finish",
       _re.search(
           r"if\(THREADS_MODE\)\{\s*"
@@ -2415,22 +2415,15 @@ check("THREADS_MODE relabels Submit and reveals the header Finish",
           r"finishHdr\.hidden = false;\s*\}",
           server.PAGE) is not None,
       "no THREADS_MODE-gated relabel of finishSubmit / reveal of finishHdr")
-# The dialog shows exactly one action per opening: Submit's opening hides
-# Finish and vice versa -- the modal Finish exists only as the header
-# Finish's confirm step, never beside Submit.
-check("openFinishDialog() shows exactly one of Submit/Finish per opening",
-      "finishSubmit.hidden = !!finishing;" in server.PAGE
-      and "finishFinish.hidden = !finishing;" in server.PAGE,
-      "the finish dialog does not toggle Submit/Finish visibility per mode")
 # --- doSubmit: finished flag only travels from the Finish path, only in ----
 # --- threads mode; Submit always posts finished:false there ----------------
 check("doSubmit posts payload.finished only in threads mode",
       "if(THREADS_MODE) payload.finished = !!finished;" in server.PAGE,
       "finished flag not gated on THREADS_MODE in doSubmit's payload")
-check("finishSubmit posts finished:false, finishFinish posts finished:true",
+check("finishSubmit posts finished:false, the header Finish posts finished:true",
       "finishSubmit.onclick = () => doSubmit(false);" in server.PAGE
-      and "finishFinish.onclick = () => doSubmit(true);" in server.PAGE,
-      "Submit/Finish button handlers do not wire the finished flag as expected")
+      and "finishHdr.onclick = () => doSubmit(true);" in server.PAGE,
+      "Submit/Finish handlers do not wire the finished flag as expected")
 # --- re-arm: a Submit round resets the header button via refreshCounts(), --
 # --- not the permanent 'Submitted ✓' freeze; Finish ends the session -------
 check("a threads-mode Submit round re-arms via refreshCounts(), not a freeze",
@@ -2448,18 +2441,16 @@ check("endReview() clears the poll timer and shows a persistent finished banner"
 check("checkSync() bails out once the review is finished",
       "if(reviewFinished) return;" in server.PAGE,
       "checkSync() keeps polling a server that has exited")
-# --- header Finish: reachable without opening the Submit dialog first, but --
-# --- still routed through the dialog (Finish kills the server; the dialog ---
-# --- is the confirm step) ---------------------------------------------------
+# --- header Finish: fires doSubmit(true) directly -- no confirm modal, by ---
+# --- explicit user decision (2026-08-26): an accidental Finish costs a ------
+# --- relaunch on a loopback single-user tool, and pending drafts still ride -
+# --- out with the final round -----------------------------------------------
 check("header carries a hidden Finish button",
       '<button class="btn" id="finishHdr" hidden>Finish</button>' in server.PAGE,
       "finishHdr button markup missing or not hidden by default")
 check("THREADS_MODE reveals the header Finish button",
       "finishHdr.hidden = false;" in server.PAGE,
       "finishHdr is never revealed in threads mode")
-check("the header Finish opens the finish dialog rather than posting directly",
-      "finishHdr.onclick = () => openFinishDialog(true);" in server.PAGE,
-      "finishHdr does not route through the confirm dialog")
 check("endReview() disables the header Finish button",
       "finishHdr.disabled = true;" in server.PAGE,
       "a finished review leaves the header Finish clickable")
