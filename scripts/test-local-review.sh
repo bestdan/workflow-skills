@@ -2463,6 +2463,11 @@ check("the header Finish opens the finish dialog rather than posting directly",
 check("endReview() disables the header Finish button",
       "finishHdr.disabled = true;" in server.PAGE,
       "a finished review leaves the header Finish clickable")
+# Best-effort tab close AFTER the overlay: a browser that refuses the close
+# (non-script-closable tab) must already be showing the finished banner.
+check("endReview() attempts window.close() after showing the finished overlay",
+      _re.search(r"finishedBg\.classList\.add\('show'\);[\s\S]{0,400}?window\.close\(\);", server.PAGE) is not None,
+      "no overlay-then-window.close() sequence in endReview()")
 
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's

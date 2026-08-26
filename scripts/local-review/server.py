@@ -2099,6 +2099,11 @@ function endReview(){                       // Finish round succeeded: server ha
   submitBtn.disabled = true;
   finishHdr.disabled = true;
   finishedBg.classList.add('show');
+  // Best-effort tab close: only a script-closable tab obeys (opened by
+  // script, or a single-entry history — the token 302s add none, so a fresh
+  // review tab often qualifies). When the browser refuses, the overlay
+  // above is already showing, so the refusal costs nothing.
+  window.close();
 }
 async function doSubmit(finished){          // step 2: submit the round
   const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
