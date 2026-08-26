@@ -35,14 +35,16 @@ Those submodules also mean you can't tear a worktree down with a plain
 Before adding `--force` to get past that, confirm both the worktree itself
 _and_ its submodules are clean — `--force` skips git's own uncommitted-changes
 check, deletes gitignored paths right along with everything else, and a
-top-level status check doesn't look inside a submodule:
+top-level status check doesn't look inside a submodule. A stash is invisible to
+`git status`, so it needs its own check:
 
 ```sh
 git -C "<path>" status --porcelain --ignored
 git -C "<path>" submodule foreach -q 'git status --porcelain --ignored'
+git -C "<path>" submodule foreach -q --recursive 'git stash list'
 ```
 
-Only once both come back empty:
+Only once all three come back empty:
 
 ```sh
 git worktree remove --force "<path>"

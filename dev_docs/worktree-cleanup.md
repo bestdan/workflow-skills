@@ -16,14 +16,21 @@ deletes gitignored paths right along with everything else, so `--porcelain`
 alone isn't enough: this repo's own `.gitignore` covers real local state
 (`.claude/`, `dev_docs/co-review/`, `dev_docs/tasks/*`), and a top-level
 status check does not look inside a submodule at all — a submodule can carry
-its own ignored files that only its own `git status` will show:
+its own ignored files that only its own `git status` will show.
+
+A stash needs its own check, because `git status` never reports one and the
+loss is unrecoverable. A linked worktree keeps its submodule gitdirs under
+`.git/worktrees/<name>/modules/`, not the shared `.git/modules/`, so forcing
+destroys that submodule's objects and refs with no shared copy to recover
+from:
 
 ```sh
 git -C "<path>" status --porcelain --ignored
 git -C "<path>" submodule foreach -q 'git status --porcelain --ignored'
+git -C "<path>" submodule foreach -q --recursive 'git stash list'
 ```
 
-Only once both come back clean is `--force` actually safe:
+Only once all three come back clean is `--force` actually safe:
 
 ```sh
 git worktree remove --force "<path>"
