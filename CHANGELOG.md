@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.9.0] - 2026-08-26
+
+### Features
+
+- Reply, Resolve, and Reopen controls (#422) (430155b)
+
 ## [2.8.0] - 2026-08-25
 
 ### Features
