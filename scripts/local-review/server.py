@@ -528,7 +528,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <style>
 :root{
   --bg:#f4f6f8; --surface:#ffffff; --surface2:#eef1f4; --border:#d7dde3;
-  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13);
+  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13); --agent:#6f42c1;
   --add-bg:rgba(46,160,67,.12); --add-gut:rgba(46,160,67,.22); --add-num:#1a7f37;
   --del-bg:rgba(207,34,46,.10); --del-gut:rgba(207,34,46,.18); --del-num:#b3202b;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -536,18 +536,18 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#0c1320; --surface:#0f1826; --surface2:#0b111b; --border:#1e2a3a;
-  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14);
+  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14); --agent:#a371f7;
   --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.28); --add-num:#3fb950;
   --del-bg:rgba(248,81,73,.15); --del-gut:rgba(248,81,73,.26); --del-num:#f85149;
 }}
 :root[data-theme=dark]{
   --bg:#0c1320; --surface:#0f1826; --surface2:#0b111b; --border:#1e2a3a;
-  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14);
+  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14); --agent:#a371f7;
   --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.28); --add-num:#3fb950;
   --del-bg:rgba(248,81,73,.15); --del-gut:rgba(248,81,73,.26); --del-num:#f85149;}
 :root[data-theme=light]{
   --bg:#f4f6f8; --surface:#ffffff; --surface2:#eef1f4; --border:#d7dde3;
-  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13);
+  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13); --agent:#6f42c1;
   --add-bg:rgba(46,160,67,.12); --add-gut:rgba(46,160,67,.22); --add-num:#1a7f37;
   --del-bg:rgba(207,34,46,.10); --del-gut:rgba(207,34,46,.18); --del-num:#b3202b;}
 /* dart token colors */
@@ -676,6 +676,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .cmt-thread{border-left:3px solid var(--accent)}
 .reply-row{margin:8px 0 0 14px;padding-top:7px;border-top:1px dashed var(--border)}
 .reply-row .reply-author{font-weight:650;font-size:11.5px;color:var(--accent)}
+.reply-row .reply-author.agent{color:var(--agent)}
 .reply-row .reply-ts{color:var(--dim);font-size:11px;margin-left:6px}
 .reply-row .reply-text{white-space:pre-wrap;margin-top:3px}
 .thread-actions{display:flex;gap:8px;margin-top:8px}
@@ -727,6 +728,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <button class="btn" id="collapseAll">Collapse all</button>
     <button class="btn" id="theme">◐</button>
     <button class="btn primary" id="submit" disabled>Submit review (0)</button>
+    <button class="btn" id="finishHdr" hidden>Finish</button>
   </div>
 </header>
 <main id="root"></main>
@@ -1444,7 +1446,8 @@ function buildReplyRow(reply){
   const row = document.createElement('div');
   row.className = 'reply-row';
   const author = document.createElement('span');
-  author.className = 'reply-author';
+  // The agent's handle gets its own color so the two voices scan apart.
+  author.className = 'reply-author' + (reply.author === 'agent' ? ' agent' : '');
   author.textContent = reply.author === 'agent' ? 'Claude' : 'You';
   row.appendChild(author);
   const ts = document.createElement('span');
@@ -1989,7 +1992,9 @@ const refreshBtn = document.getElementById('refresh');
 const REFRESH_LABEL = '↻ Refresh';
 let refreshArmed = false, refreshArmTimer = null;
 function disarmRefresh(){ refreshArmed = false; clearTimeout(refreshArmTimer); refreshBtn.textContent = REFRESH_LABEL; }
+let reviewFinished = false;    // Finish round exited the server: stop polling it
 async function checkSync(){
+  if(reviewFinished) return;
   try{
     const r = await fetch('state', {cache:'no-store'});
     if(!r.ok) return;
@@ -2037,7 +2042,7 @@ refreshBtn.onclick = () => {
   clearTimeout(refreshArmTimer); refreshArmed = false;
   doRefresh();
 };
-setInterval(checkSync, 6000);
+const pollTimer = setInterval(checkSync, 6000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) checkSync(); });
 window.addEventListener('focus', checkSync);
 checkSync();
@@ -2045,23 +2050,58 @@ const submitBtn = document.getElementById('submit');
 const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
+const finishHdr = document.getElementById('finishHdr');
+if(THREADS_MODE){
+  finishSubmit.textContent = 'Submit';
+  finishHdr.hidden = false;
+}
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
   finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
 }
-submitBtn.onclick = () => {                 // step 1: open the finish-review window
+// The dialog serves Submit only. Finish fires directly from the header —
+// no modal: the finish round still carries any pending draft comments (they
+// ride out and the agent acts on them), it just skips the summary box. An
+// accidental Finish costs a relaunch on a loopback single-user tool.
+function openFinishDialog(){
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
-  document.getElementById('finishSub').textContent =
-    `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
+  document.getElementById('finishSub').textContent = THREADS_MODE
+    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
+    : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
-};
+}
+submitBtn.onclick = () => openFinishDialog();
+finishHdr.onclick = () => doSubmit(true);
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
-async function doSubmit(){                  // step 2: submit the round
-  const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
+function endReview(){                       // Finish round succeeded: server has exited
+  reviewFinished = true;
+  clearInterval(pollTimer);
+  finishBg.classList.remove('show');
+  submitBtn.disabled = true;
+  finishHdr.disabled = true;
+  // Finish means the page goes away — no overlay, no dialog. window.close()
+  // works only on a script-closable tab (opened by script, or single-entry
+  // history); when the browser refuses, the timeout still runs and the page
+  // replaces itself with about:blank, which reads as closed either way. The
+  // delay gives an allowed close time to land first.
+  window.close();
+  setTimeout(() => location.replace('about:blank'), 150);
+}
+async function doSubmit(finished){          // step 2: submit the round
+  // Finish sends no summary: the box isn't visible from the header path, so
+  // text typed into the Submit dialog and then canceled must never ride out
+  // invisibly with the final round.
+  const payload = {meta:META, summary: finished ? '' : finishSummary.value.trim(), comments:Object.values(comments)};
+  if(THREADS_MODE) payload.finished = !!finished;
+  // All three entry points go dark during the POST: leaving submitBtn live
+  // would let openFinishDialog() -> updateFinishBtn() recompute
+  // finishSubmit.disabled from counts alone and re-arm a double submit.
   finishSubmit.disabled = true;
+  finishHdr.disabled = true;
+  submitBtn.disabled = true;
   try{
     const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
@@ -2072,24 +2112,51 @@ async function doSubmit(){                  // step 2: submit the round
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
     toast(msg);
-    submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
     if(THREADS_MODE){
       // These comments are now server threads (the response minted an id for
       // each). Drop the matching local drafts so the coming /threads refetch
       // doesn't render the same comment twice — once as a draft chip, once as
-      // a thread chip. Re-arming Submit for a next round is a later PR.
+      // a thread chip.
       for(const c of payload.comments){
-        delete comments[`${c.file}|${c.side}${c.line}`];
+        // Identity compare: a draft re-saved while the POST was in flight is
+        // a NEW object (keepShape and the composer handlers build literals),
+        // and only the OLD object was submitted -- leave the new draft alone.
+        const k = `${c.file}|${c.side}${c.line}`;
+        if(comments[k] === c) delete comments[k];
       }
-      await fetchThreads();
-      render();
+      if(finished){
+        endReview();
+      }else{
+        // Same composer guard as checkSync/afterThreadMutation: a composer
+        // can sit beneath the dialog with unsaved text, and render() starts
+        // from root.innerHTML=''. Skip the fetch+render and reset threadsRev
+        // so the next poll tick re-renders once the composer closes.
+        if(document.querySelector('.cmt textarea')){
+          threadsRev = -1;
+        }else{
+          await fetchThreads();
+          render();
+        }
+        refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
+        // The summary was sent with this round; left in place it would ride
+        // into the next round's payload verbatim and keep the dialog's
+        // Submit enabled with nothing new to say.
+        finishSummary.value = '';
+        finishSubmit.disabled = false;
+        finishHdr.disabled = false;
+        updateFinishBtn();
+      }
+    }else{
+      submitBtn.textContent = 'Submitted ✓'; submitBtn.disabled = true;
     }
   }catch(e){
     toast('Submit failed: '+e.message);
     finishSubmit.disabled = false;
+    finishHdr.disabled = false;
+    submitBtn.disabled = false;
   }
 }
-finishSubmit.onclick = () => doSubmit();
+finishSubmit.onclick = () => doSubmit(false);
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 4000);

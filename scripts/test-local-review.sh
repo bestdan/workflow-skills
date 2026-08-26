@@ -2403,6 +2403,79 @@ _verdict_hits = [s for s in ("finishApprove", ">Approve<", "Approved ✓") if s 
 check("server.py carries no Approve button or verdict string",
       _verdict_hits == [], _verdict_hits)
 
+# --- finish dialog serves Submit only; Finish lives in the header and fires -
+# --- doSubmit(true) directly (no modal -- see the header-Finish scans below) -
+check("the finish dialog carries no Finish button",
+      "finishFinish" not in server.PAGE,
+      "a finishFinish reference survives -- the modal Finish was removed on purpose")
+check("THREADS_MODE relabels Submit and reveals the header Finish",
+      _re.search(
+          r"if\(THREADS_MODE\)\{\s*"
+          r"finishSubmit\.textContent = 'Submit';\s*"
+          r"finishHdr\.hidden = false;\s*\}",
+          server.PAGE) is not None,
+      "no THREADS_MODE-gated relabel of finishSubmit / reveal of finishHdr")
+# --- doSubmit: finished flag only travels from the Finish path, only in ----
+# --- threads mode; Submit always posts finished:false there ----------------
+check("doSubmit posts payload.finished only in threads mode",
+      "if(THREADS_MODE) payload.finished = !!finished;" in server.PAGE,
+      "finished flag not gated on THREADS_MODE in doSubmit's payload")
+check("finishSubmit posts finished:false, the header Finish posts finished:true",
+      "finishSubmit.onclick = () => doSubmit(false);" in server.PAGE
+      and "finishHdr.onclick = () => doSubmit(true);" in server.PAGE,
+      "Submit/Finish handlers do not wire the finished flag as expected")
+# --- re-arm: a Submit round resets the header button via refreshCounts(), --
+# --- not the permanent 'Submitted ✓' freeze; Finish ends the session -------
+check("a threads-mode Submit round re-arms via refreshCounts(), not a freeze",
+      _re.search(r"if\(finished\)\{\s*endReview\(\);\s*\}else\{[\s\S]{0,700}?refreshCounts\(\);",
+                  server.PAGE) is not None,
+      "doSubmit's non-finished threads branch does not call refreshCounts()")
+# Round-2 co-review invariants (Copilot + reconciler, 2026-08-26):
+check("the post-submit render is composer-guarded like checkSync/afterThreadMutation",
+      _re.search(r"\}else\{\s*\n[\s\S]{0,500}?if\(document\.querySelector\('\.cmt textarea'\)\)\{\s*\n\s*threadsRev = -1;",
+                 server.PAGE) is not None,
+      "doSubmit's non-finished branch renders over an open composer")
+check("a submitted draft is deleted only if still the submitted object",
+      "if(comments[k] === c) delete comments[k];" in server.PAGE,
+      "the post-submit draft delete is unconditional -- a mid-flight re-save would be lost")
+check("Finish sends no summary; Submit sends the trimmed box",
+      "summary: finished ? '' : finishSummary.value.trim()" in server.PAGE,
+      "a canceled dialog's summary could ride out invisibly with Finish")
+check("all three entry points are disabled during the submit POST",
+      _re.search(r"finishSubmit\.disabled = true;\s*\n\s*finishHdr\.disabled = true;\s*\n\s*submitBtn\.disabled = true;",
+                 server.PAGE) is not None,
+      "submitBtn stays live during the POST -- reopening the dialog can re-arm a double submit")
+check("doSubmit only freezes 'Submitted ✓' outside threads mode",
+      _re.search(r"\}else\{\s*submitBtn\.textContent = 'Submitted ✓'; submitBtn\.disabled = true;\s*\}",
+                  server.PAGE) is not None,
+      "the 'Submitted ✓' freeze is not confined to the non-threads branch")
+# --- Finish end-state: stop polling; the page removes itself (no overlay) --
+check("endReview() clears the poll timer and carries no finished overlay",
+      "clearInterval(pollTimer);" in server.PAGE and "finishedBg" not in server.PAGE,
+      "endReview() keeps polling and/or a finished-overlay reference survives")
+check("checkSync() bails out once the review is finished",
+      "if(reviewFinished) return;" in server.PAGE,
+      "checkSync() keeps polling a server that has exited")
+# --- header Finish: fires doSubmit(true) directly -- no confirm modal, by ---
+# --- explicit user decision (2026-08-26): an accidental Finish costs a ------
+# --- relaunch on a loopback single-user tool, and pending drafts still ride -
+# --- out with the final round -----------------------------------------------
+check("header carries a hidden Finish button",
+      '<button class="btn" id="finishHdr" hidden>Finish</button>' in server.PAGE,
+      "finishHdr button markup missing or not hidden by default")
+check("THREADS_MODE reveals the header Finish button",
+      "finishHdr.hidden = false;" in server.PAGE,
+      "finishHdr is never revealed in threads mode")
+check("endReview() disables the header Finish button",
+      "finishHdr.disabled = true;" in server.PAGE,
+      "a finished review leaves the header Finish clickable")
+# Finish means the page goes away: try the real close, and when the browser
+# refuses (non-script-closable tab) the delayed about:blank replacement makes
+# the page read as closed anyway. User decision 2026-08-26: no pop-up.
+check("endReview() closes the tab with an about:blank fallback",
+      _re.search(r"window\.close\(\);\s*\n\s*setTimeout\(\(\) => location\.replace\('about:blank'\)", server.PAGE) is not None,
+      "no window.close() + about:blank fallback sequence in endReview()")
+
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's
 # token stream into a plain description tree, and materialize() adds no logic.
