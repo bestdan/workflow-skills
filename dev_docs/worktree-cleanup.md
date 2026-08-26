@@ -18,15 +18,21 @@ alone isn't enough: this repo's own `.gitignore` covers real local state
 status check does not look inside a submodule at all — a submodule can carry
 its own ignored files that only its own `git status` will show.
 
-A stash needs its own check, because `git status` never reports one and the
-loss is unrecoverable. A linked worktree keeps its submodule gitdirs under
-`.git/worktrees/<name>/modules/`, not the shared `.git/modules/`, so forcing
-destroys that submodule's objects and refs with no shared copy to recover
-from:
+A **submodule** stash needs its own check, because `git status` never reports
+one and the loss is unrecoverable. A linked worktree keeps its submodule
+gitdirs under `.git/worktrees/<name>/modules/`, not the shared `.git/modules/`,
+so forcing destroys that submodule's objects and refs with no shared copy to
+recover from.
+
+The worktree's **own** stash is deliberately not checked here: a stash made in
+a linked worktree lands in the shared `refs/stash` in the common dir, so it
+survives the removal and stays recoverable from the main checkout. Only the
+submodule case loses data — that asymmetry is the reason these two checks
+differ:
 
 ```sh
 git -C "<path>" status --porcelain --ignored
-git -C "<path>" submodule foreach -q 'git status --porcelain --ignored'
+git -C "<path>" submodule foreach -q --recursive 'git status --porcelain --ignored'
 git -C "<path>" submodule foreach -q --recursive 'git stash list'
 ```
 
@@ -35,6 +41,10 @@ Only once all three come back clean is `--force` actually safe:
 ```sh
 git worktree remove --force "<path>"
 ```
+
+Run that from the main checkout, not from inside `<path>`. Git does not refuse
+to delete the directory you are standing in — it removes the tree and reports
+success, and every later command in that shell then fails in `getcwd`.
 
 It stays a single git-managed command that keeps git's own worktree
 bookkeeping in sync as it goes (removal is still two internal steps —
