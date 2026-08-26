@@ -185,9 +185,10 @@ while :; do
   for i in $(seq 1 2400); do [ -s "$OUT" ] && break; sleep 3; done
   [ -s "$OUT" ] || break            # 2h idle: stop watching, ask the user
   payload=$(cat "$OUT"); rm -f "$OUT"
-  # echo the round (step 5), then act on it.
+  printf '%s\n' "$payload"   # echo the round (step 5), then act on it
   # finished==true -> break HERE, before any reply: the server has already
   #   exited, so there is no reply channel left and every curl would fail.
+  case $payload in *'"finished": true'*) break ;; esac
   # else, per thread answered:
   # curl -sf -X POST "$BASE/reply" -H 'Content-Type: application/json' \
   #   -d '{"thread_id":"t3","author":"agent","text":"..."}'

@@ -38,7 +38,8 @@ no SSE, no long-poll; one integer rides the poll that already exists.
 
 ## Payload schemas
 
-Reply request body, and the shape the server stores under the thread:
+Reply request body (the stored shape differs: the server drops `thread_id`
+and stamps `ts` — see the `GET /threads` example below):
 
 ```json
 {
