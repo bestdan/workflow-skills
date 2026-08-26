@@ -698,8 +698,6 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .toast.show{opacity:1}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
 .modal-bg.show{display:flex}
-.finished-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:70;padding:20px}
-.finished-bg.show{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;padding:18px;box-shadow:0 14px 44px rgba(0,0,0,.32)}
 .modal h2{margin:0 0 4px;font-size:16px}
 .modal .sub{color:var(--dim);font-size:13px;margin-bottom:12px}
@@ -744,12 +742,6 @@ main{max-width:1180px;margin:0 auto;padding:18px}
       <button class="btn" id="finishCancel">Cancel</button>
       <button class="btn primary" id="finishSubmit">Submit review</button>
     </div>
-  </div>
-</div>
-<div class="finished-bg" id="finishedBg">
-  <div class="modal" role="alertdialog" aria-modal="true" aria-label="Review finished">
-    <h2>Review finished</h2>
-    <div class="sub">The server has exited. This page is no longer live.</div>
   </div>
 </div>
 <script src="vendor/highlight.min.js"></script>
@@ -2059,7 +2051,6 @@ const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
 const finishHdr = document.getElementById('finishHdr');
-const finishedBg = document.getElementById('finishedBg');
 if(THREADS_MODE){
   finishSubmit.textContent = 'Submit';
   finishHdr.hidden = false;
@@ -2091,12 +2082,13 @@ function endReview(){                       // Finish round succeeded: server ha
   finishBg.classList.remove('show');
   submitBtn.disabled = true;
   finishHdr.disabled = true;
-  finishedBg.classList.add('show');
-  // Best-effort tab close: only a script-closable tab obeys (opened by
-  // script, or a single-entry history — the token 302s add none, so a fresh
-  // review tab often qualifies). When the browser refuses, the overlay
-  // above is already showing, so the refusal costs nothing.
+  // Finish means the page goes away — no overlay, no dialog. window.close()
+  // works only on a script-closable tab (opened by script, or single-entry
+  // history); when the browser refuses, the timeout still runs and the page
+  // replaces itself with about:blank, which reads as closed either way. The
+  // delay gives an allowed close time to land first.
   window.close();
+  setTimeout(() => location.replace('about:blank'), 150);
 }
 async function doSubmit(finished){          // step 2: submit the round
   const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};

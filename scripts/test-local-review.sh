@@ -2434,10 +2434,10 @@ check("doSubmit only freezes 'Submitted ✓' outside threads mode",
       _re.search(r"\}else\{\s*submitBtn\.textContent = 'Submitted ✓'; submitBtn\.disabled = true;\s*\}",
                   server.PAGE) is not None,
       "the 'Submitted ✓' freeze is not confined to the non-threads branch")
-# --- Finish end-state: stop polling and tell the user the page is dead -----
-check("endReview() clears the poll timer and shows a persistent finished banner",
-      "clearInterval(pollTimer);" in server.PAGE and "finishedBg.classList.add('show');" in server.PAGE,
-      "endReview() does not stop polling and/or show the finished overlay")
+# --- Finish end-state: stop polling; the page removes itself (no overlay) --
+check("endReview() clears the poll timer and carries no finished overlay",
+      "clearInterval(pollTimer);" in server.PAGE and "finishedBg" not in server.PAGE,
+      "endReview() keeps polling and/or a finished-overlay reference survives")
 check("checkSync() bails out once the review is finished",
       "if(reviewFinished) return;" in server.PAGE,
       "checkSync() keeps polling a server that has exited")
@@ -2454,11 +2454,12 @@ check("THREADS_MODE reveals the header Finish button",
 check("endReview() disables the header Finish button",
       "finishHdr.disabled = true;" in server.PAGE,
       "a finished review leaves the header Finish clickable")
-# Best-effort tab close AFTER the overlay: a browser that refuses the close
-# (non-script-closable tab) must already be showing the finished banner.
-check("endReview() attempts window.close() after showing the finished overlay",
-      _re.search(r"finishedBg\.classList\.add\('show'\);[\s\S]{0,400}?window\.close\(\);", server.PAGE) is not None,
-      "no overlay-then-window.close() sequence in endReview()")
+# Finish means the page goes away: try the real close, and when the browser
+# refuses (non-script-closable tab) the delayed about:blank replacement makes
+# the page read as closed anyway. User decision 2026-08-26: no pop-up.
+check("endReview() closes the tab with an about:blank fallback",
+      _re.search(r"window\.close\(\);\s*\n\s*setTimeout\(\(\) => location\.replace\('about:blank'\)", server.PAGE) is not None,
+      "no window.close() + about:blank fallback sequence in endReview()")
 
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's
