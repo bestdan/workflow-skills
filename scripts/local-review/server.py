@@ -2258,6 +2258,7 @@ async function doSubmit(finished){          // step 2: submit the round
     // "flagged", not "posted": the server no longer posts. Say what actually
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
+    if(THREADS_MODE && info.replies) msg += ` · ${info.replies} ${info.replies===1?'reply':'replies'} since last round`;
     toast(msg);
     if(THREADS_MODE){
       // These comments are now server threads (the response minted an id for
@@ -2355,6 +2356,7 @@ class Handler(BaseHTTPRequestHandler):
     _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...
     round = 0  # threads-mode round number, incremented on each successful submit
     threads_rev = 0  # bumped on every store mutation: submit, reply, resolve
+    replies_since_round = 0  # replies posted since the last submit, reset on submit
     _threads_lock = threading.Lock()
 
     def log_message(self, *a):
@@ -2632,6 +2634,7 @@ class Handler(BaseHTTPRequestHandler):
             })
             Handler.threads_rev += 1
             rev = Handler.threads_rev
+            Handler.replies_since_round += 1
         self._send_json(200, {"ok": True, "threads_rev": rev})
 
     def _do_resolve(self, payload):
@@ -2687,6 +2690,10 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             self._reject_submit(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
+        replies_count = 0
+        if Handler.mode == "threads":
+            with Handler._threads_lock:
+                replies_count = Handler.replies_since_round
         # human-readable to stdout
         print("\n===== REVIEW SUBMITTED =====", flush=True)
         if payload.get("summary"):
@@ -2697,6 +2704,8 @@ class Handler(BaseHTTPRequestHandler):
             tag = " [dismiss-comments]" if c.get("kind") == "dismiss-comments" else ""
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
+        if Handler.mode == "threads" and replies_count > 0:
+            print(f"REPLIES SINCE LAST ROUND: {replies_count}", flush=True)
 
         round_no = None
         try:
@@ -2772,6 +2781,7 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._thread_counter = counter
                     Handler.threads.extend(new_entries)
                     Handler.threads_rev += 1
+                    Handler.replies_since_round = 0
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,
@@ -2804,6 +2814,7 @@ class Handler(BaseHTTPRequestHandler):
             if Handler.mode == "threads":
                 resp["ids"] = [c["id"] for c in payload.get("comments", [])]
                 resp["round"] = round_no
+                resp["replies"] = replies_count
             self.wfile.write(json.dumps(resp).encode())
             self.wfile.flush()
         finally:

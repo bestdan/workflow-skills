@@ -931,6 +931,9 @@ try:
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
             check("server: POST /submit returns 200", resp.status == 200, resp.status)
+            once_info = json.loads(resp.read().decode())
+        check("server: one-shot /submit response carries no replies key",
+              "replies" not in once_info, once_info)
         try:
             rc = proc.wait(timeout=5)
             check("server: --once exits after a successful /submit", rc == 0, rc)
@@ -1381,6 +1384,54 @@ finally:
     if os.path.exists(ep_out):
         os.unlink(ep_out)
 
+# -- threads mode: submit response counts replies since the last round -------
+rc_fd, rc_out = _tempfile.mkstemp(suffix=".json")
+os.close(rc_fd)
+os.unlink(rc_out)
+proc, patch_path = start_server(["--out", rc_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: reply-count run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        status, info1 = post_json("submit", {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+        ]})
+        check("server: reply-count first submit of a launch carries replies 0",
+              status == 200 and info1.get("replies") == 0, info1)
+
+        tid = info1.get("ids", [None])[0]
+        status, _ = post_json("reply", {"thread_id": tid, "author": "user", "text": "one"})
+        check("server: reply-count first POST /reply returns 200", status == 200, status)
+        status, _ = post_json("reply", {"thread_id": tid, "author": "user", "text": "two"})
+        check("server: reply-count second POST /reply returns 200", status == 200, status)
+
+        status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: reply-count second submit carries replies 2 (both replies since round 1)",
+              status == 200 and info2.get("replies") == 2, info2)
+
+        status, info3 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: reply-count third submit carries replies 0 (counter reset by round 2)",
+              status == 200 and info3.get("replies") == 0, info3)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(rc_out):
+        os.unlink(rc_out)
+
 # -- a. threads UI render input: what fetchThreads()/render() consume --------
 # Stage 2 (this PR) makes the page fetch GET /threads at startup and render
 # every thread + its replies read-only. This drives the endpoints in the same
@@ -1487,6 +1538,10 @@ check("server.PAGE wires thread rendering into the Preview/block chip path",
                  r"if\(THREADS_MODE\)\s*renderThreadBlockRow\(el,\s*el\.__mdDesc,\s*ctx\);",
                  server.PAGE) is not None,
       "renderThreadBlockRow(...) is not called beside renderBlockChip(...) in the md-target loop")
+check("server.PAGE wires the reply-count toast into doSubmit",
+      _re.search(r"THREADS_MODE && info\.replies\)\s*msg \+= `[^`]*since last round`;",
+                 server.PAGE) is not None,
+      "the 'since last round' toast fragment is not guarded by THREADS_MODE in doSubmit")
 # The block path must iterate REVERSED: insertAfterBlock inserts afterend of
 # the same fixed element, so forward iteration renders threads newest-first.
 # (The row path is exempt -- insertAfterRow walks past existing .cmt-row
