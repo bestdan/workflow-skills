@@ -2091,10 +2091,17 @@ function endReview(){                       // Finish round succeeded: server ha
   setTimeout(() => location.replace('about:blank'), 150);
 }
 async function doSubmit(finished){          // step 2: submit the round
-  const payload = {meta:META, summary:finishSummary.value.trim(), comments:Object.values(comments)};
+  // Finish sends no summary: the box isn't visible from the header path, so
+  // text typed into the Submit dialog and then canceled must never ride out
+  // invisibly with the final round.
+  const payload = {meta:META, summary: finished ? '' : finishSummary.value.trim(), comments:Object.values(comments)};
   if(THREADS_MODE) payload.finished = !!finished;
+  // All three entry points go dark during the POST: leaving submitBtn live
+  // would let openFinishDialog() -> updateFinishBtn() recompute
+  // finishSubmit.disabled from counts alone and re-arm a double submit.
   finishSubmit.disabled = true;
   finishHdr.disabled = true;
+  submitBtn.disabled = true;
   try{
     const res = await fetch('submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!res.ok) throw new Error(await res.text());
@@ -2111,13 +2118,25 @@ async function doSubmit(finished){          // step 2: submit the round
       // doesn't render the same comment twice — once as a draft chip, once as
       // a thread chip.
       for(const c of payload.comments){
-        delete comments[`${c.file}|${c.side}${c.line}`];
+        // Identity compare: a draft re-saved while the POST was in flight is
+        // a NEW object (keepShape and the composer handlers build literals),
+        // and only the OLD object was submitted -- leave the new draft alone.
+        const k = `${c.file}|${c.side}${c.line}`;
+        if(comments[k] === c) delete comments[k];
       }
       if(finished){
         endReview();
       }else{
-        await fetchThreads();
-        render();
+        // Same composer guard as checkSync/afterThreadMutation: a composer
+        // can sit beneath the dialog with unsaved text, and render() starts
+        // from root.innerHTML=''. Skip the fetch+render and reset threadsRev
+        // so the next poll tick re-renders once the composer closes.
+        if(document.querySelector('.cmt textarea')){
+          threadsRev = -1;
+        }else{
+          await fetchThreads();
+          render();
+        }
         refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
         // The summary was sent with this round; left in place it would ride
         // into the next round's payload verbatim and keep the dialog's
@@ -2134,6 +2153,7 @@ async function doSubmit(finished){          // step 2: submit the round
     toast('Submit failed: '+e.message);
     finishSubmit.disabled = false;
     finishHdr.disabled = false;
+    submitBtn.disabled = false;
   }
 }
 finishSubmit.onclick = () => doSubmit(false);

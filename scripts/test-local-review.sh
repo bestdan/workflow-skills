@@ -2427,9 +2427,24 @@ check("finishSubmit posts finished:false, the header Finish posts finished:true"
 # --- re-arm: a Submit round resets the header button via refreshCounts(), --
 # --- not the permanent 'Submitted ✓' freeze; Finish ends the session -------
 check("a threads-mode Submit round re-arms via refreshCounts(), not a freeze",
-      _re.search(r"if\(finished\)\{\s*endReview\(\);\s*\}else\{[^}]*refreshCounts\(\);",
-                  server.PAGE, _re.S) is not None,
+      _re.search(r"if\(finished\)\{\s*endReview\(\);\s*\}else\{[\s\S]{0,700}?refreshCounts\(\);",
+                  server.PAGE) is not None,
       "doSubmit's non-finished threads branch does not call refreshCounts()")
+# Round-2 co-review invariants (Copilot + reconciler, 2026-08-26):
+check("the post-submit render is composer-guarded like checkSync/afterThreadMutation",
+      _re.search(r"\}else\{\s*\n[\s\S]{0,500}?if\(document\.querySelector\('\.cmt textarea'\)\)\{\s*\n\s*threadsRev = -1;",
+                 server.PAGE) is not None,
+      "doSubmit's non-finished branch renders over an open composer")
+check("a submitted draft is deleted only if still the submitted object",
+      "if(comments[k] === c) delete comments[k];" in server.PAGE,
+      "the post-submit draft delete is unconditional -- a mid-flight re-save would be lost")
+check("Finish sends no summary; Submit sends the trimmed box",
+      "summary: finished ? '' : finishSummary.value.trim()" in server.PAGE,
+      "a canceled dialog's summary could ride out invisibly with Finish")
+check("all three entry points are disabled during the submit POST",
+      _re.search(r"finishSubmit\.disabled = true;\s*\n\s*finishHdr\.disabled = true;\s*\n\s*submitBtn\.disabled = true;",
+                 server.PAGE) is not None,
+      "submitBtn stays live during the POST -- reopening the dialog can re-arm a double submit")
 check("doSubmit only freezes 'Submitted ✓' outside threads mode",
       _re.search(r"\}else\{\s*submitBtn\.textContent = 'Submitted ✓'; submitBtn\.disabled = true;\s*\}",
                   server.PAGE) is not None,
