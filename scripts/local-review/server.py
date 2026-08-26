@@ -2781,7 +2781,11 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._thread_counter = counter
                     Handler.threads.extend(new_entries)
                     Handler.threads_rev += 1
-                    Handler.replies_since_round = 0
+                    # Subtract, not reset: a /reply landing between the count
+                    # read above and this commit must carry into the next
+                    # round, not vanish. Never negative — only _do_reply
+                    # increments, and the submit slot serializes submits.
+                    Handler.replies_since_round -= replies_count
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,
