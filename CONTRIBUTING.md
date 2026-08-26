@@ -29,32 +29,6 @@ git submodule update --init --recursive
 (`scripts/check.sh` calls `scripts/ensure-bats.sh` first and will recover a
 fresh `git worktree add` on its own — but a plain clone is faster to fix here.)
 
-Those submodules also mean you can't tear a worktree down with a plain
-`git worktree remove <path>` once you're done with it — git refuses with
-`fatal: working trees containing submodules cannot be moved or removed`.
-Before adding `--force` to get past that, confirm both the worktree itself
-_and_ its submodules are clean — `--force` skips git's own uncommitted-changes
-check, deletes gitignored paths right along with everything else, and a
-top-level status check doesn't look inside a submodule. A _submodule_ stash is
-invisible to `git status` and dies with the worktree, so it needs its own check:
-
-```sh
-git -C "<path>" status --porcelain --ignored
-git -C "<path>" submodule foreach -q --recursive 'git status --porcelain --ignored'
-git -C "<path>" submodule foreach -q --recursive 'git stash list'
-```
-
-Only once all three come back empty:
-
-```sh
-git worktree remove --force "<path>"
-```
-
-See [`dev_docs/worktree-cleanup.md`](dev_docs/worktree-cleanup.md) if
-`remove --force` itself fails — a locked worktree needs different handling
-than any other failure does, and reaching for `rm -rf` is a last resort, not
-the default.
-
 Everything CI runs is also runnable locally through one entrypoint, so you never
 discover a failure only after pushing.
 
