@@ -3170,6 +3170,15 @@ check("server.PAGE keys outdated threads by path AND side",
       and "outdatedByFile[`${file.old}|L`]" in server.PAGE
       and "outdatedByFile[`${file.new}|R`]" in server.PAGE,
       "the Outdated-strip index or lookup is not side-aware")
+# Collapsed by default behind an always-visible count toggle, like the
+# resolved strip: expanded chips push the diff down without being actionable
+# in place, and "never dropped" is carried by the count.
+check("server.PAGE's Outdated strip collapses behind a count toggle",
+      "outdatedOpen: false" in server.PAGE
+      and "`${outdated.length} outdated`" in server.PAGE
+      and _re.search(r"function renderOutdatedStrip\([\s\S]{0,900}?stripEl\.hidden = !ui\.outdatedOpen;",
+                     server.PAGE) is not None,
+      "the Outdated strip is not collapsed behind a count toggle")
 check("server.PAGE's thread chip badges a 'moved' thread",
       "thread._moved" in server.PAGE and "moved-badge" in server.PAGE,
       "buildThreadChip() has no moved-marker branch")

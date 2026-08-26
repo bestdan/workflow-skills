@@ -681,9 +681,9 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .reply-row .reply-text{white-space:pre-wrap;margin-top:3px}
 .thread-actions{display:flex;gap:8px;margin-top:8px}
 .thread-actions .btn{font-size:12px;padding:5px 10px}
-.resolved-toggle{background:none;border:1px solid var(--border);color:var(--dim);
+.resolved-toggle,.outdated-toggle{background:none;border:1px solid var(--border);color:var(--dim);
   border-radius:20px;padding:2px 9px;font-size:11px;cursor:pointer}
-.resolved-toggle:hover{color:var(--text);border-color:var(--accent)}
+.resolved-toggle:hover,.outdated-toggle:hover{color:var(--text);border-color:var(--accent)}
 .resolved-strip{background:var(--surface2);border-bottom:1px solid var(--border);padding:2px 12px}
 .resolved-strip .cmt-row{border-left:none;border-right:none}
 .resolved-strip .cmt-row:first-child{border-top:none}
@@ -1509,7 +1509,7 @@ function anchorOf(file, cell){
 // re-renders that file without silently unchecking it.
 const fileUi = {};
 function uiFor(file){
-  if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false, resolvedOpen: false};
+  if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false, resolvedOpen: false, outdatedOpen: false};
   return fileUi[file.display];
 }
 
@@ -1788,19 +1788,30 @@ function fileOutdatedThreads(file){
   return out;
 }
 // Per-file Outdated strip: threads whose anchor failed placeThreads() rules 1
-// and 2. Unlike the resolved strip, there is no toggle -- an outdated thread
-// is unresolved and must stay visible until the user acts on it, per the
-// design doc's "never dropped". Each chip shows the ORIGINAL anchor (the
-// thread's own file/side/line, untouched by placement) and keeps its normal
-// Reply/Resolve controls -- these are live unresolved threads, just ones
-// whose row is gone.
+// and 2. Collapsed behind a count toggle like the resolved strip -- expanded
+// chips push the diff down without being actionable in place. "Never dropped"
+// (design doc) is carried by the always-visible "N outdated" count, not by
+// forced expansion. Each chip shows the ORIGINAL anchor (the thread's own
+// file/side/line, untouched by placement) and keeps its normal Reply/Resolve
+// controls -- these are live unresolved threads, just ones whose row is gone.
 function renderOutdatedStrip(el, file){
   const outdated = fileOutdatedThreads(file);
+  const toggleBtn = el.querySelector('.outdated-toggle');
   const stripEl = el.querySelector('.outdated-strip');
-  if(!outdated.length){ stripEl.hidden = true; stripEl.innerHTML = ''; return; }
+  if(!outdated.length){ toggleBtn.hidden = true; stripEl.hidden = true; stripEl.innerHTML = ''; return; }
+  const ui = uiFor(file);
+  toggleBtn.hidden = false;
+  toggleBtn.textContent = `${outdated.length} outdated`;
+  toggleBtn.setAttribute('aria-pressed', String(!!ui.outdatedOpen));
   stripEl.innerHTML = '<div class="outdated-label">Outdated</div>';
   outdated.forEach(t => stripEl.appendChild(buildThreadChip(t)));
-  stripEl.hidden = false;
+  stripEl.hidden = !ui.outdatedOpen;
+  toggleBtn.onclick = e => {
+    e.stopPropagation();   // the file-head click toggles collapse
+    ui.outdatedOpen = !ui.outdatedOpen;
+    stripEl.hidden = !ui.outdatedOpen;
+    toggleBtn.setAttribute('aria-pressed', String(ui.outdatedOpen));
+  };
 }
 
 // Per-file resolved-thread strip. Independent of Split/Single/Preview: called
@@ -1862,7 +1873,7 @@ function renderFile(file, fi){
       <span class="grow"></span>
       ${stat}
       ${modeCtl}
-      ${THREADS_MODE ? '<button class="btn resolved-toggle" hidden></button>' : ''}
+      ${THREADS_MODE ? '<button class="btn outdated-toggle" hidden></button><button class="btn resolved-toggle" hidden></button>' : ''}
       <label><input type="checkbox" class="viewed"> Viewed</label>
     </div>${THREADS_MODE ? '<div class="outdated-strip" hidden></div><div class="resolved-strip" hidden></div>' : ''}<div class="file-body"></div>`;
   setAnchorPath(el, file.display);
