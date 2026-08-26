@@ -671,13 +671,21 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .saved .del,.saved .edit{color:var(--dim);cursor:pointer;border:none;background:none;font-size:16px;line-height:1}
 .saved .edit{font-size:13px}
 .saved .del:hover,.saved .edit:hover{color:var(--text)}
-/* threads (server-side comment threads + replies) — display only, no
-   Reply/Resolve controls in this slice */
+/* threads (server-side comment threads + replies): Reply/Resolve on an open
+   thread, Reopen on a resolved one in the per-file strip */
 .cmt-thread{border-left:3px solid var(--accent)}
 .reply-row{margin:8px 0 0 14px;padding-top:7px;border-top:1px dashed var(--border)}
 .reply-row .reply-author{font-weight:650;font-size:11.5px;color:var(--accent)}
 .reply-row .reply-ts{color:var(--dim);font-size:11px;margin-left:6px}
 .reply-row .reply-text{white-space:pre-wrap;margin-top:3px}
+.thread-actions{display:flex;gap:8px;margin-top:8px}
+.thread-actions .btn{font-size:12px;padding:5px 10px}
+.resolved-toggle{background:none;border:1px solid var(--border);color:var(--dim);
+  border-radius:20px;padding:2px 9px;font-size:11px;cursor:pointer}
+.resolved-toggle:hover{color:var(--text);border-color:var(--accent)}
+.resolved-strip{background:var(--surface2);border-bottom:1px solid var(--border);padding:2px 12px}
+.resolved-strip .cmt-row{border-left:none;border-right:none}
+.resolved-strip .cmt-row:first-child{border-top:none}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
   border-radius:20px;padding:0 7px;margin-left:6px;font-size:10.5px;vertical-align:1px}
 .cmt-saved.gh .saved{border-left-color:#6e7681}
@@ -741,18 +749,21 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
 const comments = {}; // anchor -> {file,line,side,code,text}
-// Threads mode: server-owned comment threads and their replies. This slice is
-// display only — no Reply/Resolve controls yet (next PR). The server already
-// knows its mode when it builds the page, so it rides in META rather than a
-// separate flag; a page built by an older server has no META.mode and falls
-// back to human-only, matching that server's actual behavior.
+// Threads mode: server-owned comment threads and their replies, with Reply,
+// Resolve and Reopen controls that post back to the server. The server
+// already knows its mode when it builds the page, so it rides in META rather
+// than a separate flag; a page built by an older server has no META.mode and
+// falls back to human-only, matching that server's actual behavior.
 const MODE = (META && META.mode) || 'human-only';
 const THREADS_MODE = MODE === 'threads';
 let threadsRev = -1;   // last threads_rev this page has fetched and rendered
 // anchor key (same "`${file}|${side}${line}`" shape as a draft comment's key)
-// -> array of that anchor's unresolved threads. Resolved threads are dropped
-// here entirely; the resolved-strip UI is a later PR.
+// -> array of that anchor's unresolved threads.
 let threadsByKey = {};
+// file path (a thread's side-dependent old/new path, not file.display -- see
+// fileResolvedThreads()) -> array of that file's resolved threads, for the
+// per-file resolved-strip toggle.
+let resolvedByFile = {};
 // path -> view mode the user picked. Survives /refresh (unlike comments, which
 // refresh discards): a view preference cannot go stale the way an anchor can.
 // Refresh ends in location.reload(), so this has to outlive the page, not just
@@ -1415,18 +1426,20 @@ function anchorOf(file, cell){
 // re-renders that file without silently unchecking it.
 const fileUi = {};
 function uiFor(file){
-  if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false};
+  if(!fileUi[file.display]) fileUi[file.display] = {collapsed: !!file.generated, viewed: false, resolvedOpen: false};
   return fileUi[file.display];
 }
 
-// ---- threads: read-only rendering of server-side comment threads ---------
+// ---- threads: rendering + Reply/Resolve/Reopen for server-side threads ----
 // A thread renders like a saved-comment chip (same .cmt-anchor/.saved shape)
-// but carries no ✎/× controls: those act on the local `comments` drafts, and
-// a thread is server state the page cannot mutate in this slice. Every
-// server-derived string (anchor path, thread text, reply author/text) lands
-// via textContent, never innerHTML — the page's "no attacker-derived string
-// reaches an HTML parser" invariant extends unchanged to thread and reply
-// content, per the design doc's security posture.
+// plus its replies and, unlike a draft comment's ✎/× (which act on the local
+// `comments` drafts), a Reply/Resolve pair that posts to the server -- or, in
+// the resolved strip, a single Reopen. Every server-derived string (anchor
+// path, thread text, reply author/text) lands via textContent, never
+// innerHTML — the page's "no attacker-derived string reaches an HTML parser"
+// invariant extends unchanged to thread and reply content, per the design
+// doc's security posture. Resolving is the user's click only: nothing here
+// posts /resolve on the agent's behalf.
 function buildReplyRow(reply){
   const row = document.createElement('div');
   row.className = 'reply-row';
@@ -1444,7 +1457,73 @@ function buildReplyRow(reply){
   row.appendChild(txt);
   return row;
 }
-function buildThreadChip(thread){
+// POST helper shared by Reply/Resolve/Reopen: same fetch shape as doSubmit's,
+// against a route relative to this page's own token path.
+async function postThreadAction(route, body){
+  const res = await fetch(route, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(!res.ok){
+    // Error routes send {"ok": false, "error": "..."} -- surface the message,
+    // not the raw JSON, in the failure toast. Fall back to the raw text for
+    // anything that isn't that shape.
+    const raw = await res.text();
+    let msg = raw;
+    try{ msg = JSON.parse(raw).error || raw; }catch(e){ /* not JSON */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+// Both Resolve and Reopen end the same way: refetch server state and
+// re-render, so the chip moves grid <-> resolved-strip on the next paint.
+// Same guard as checkSync, same reason: render() starts from
+// root.innerHTML='' and unsaved draft text lives only in its textarea, so a
+// mutation clicked while a composer is open elsewhere must not re-render
+// over it. Skipping the fetch too leaves threadsRev behind, so the next
+// poll tick re-renders once the composer closes; the clicked button's
+// disabled state reads as done in the meantime.
+async function afterThreadMutation(){
+  if(document.querySelector('.cmt textarea')) return;
+  await fetchThreads();
+  // Re-check after the await: a composer opened during the fetch would be
+  // wiped by render(). fetchThreads() already advanced threadsRev, so reset
+  // it to force the next poll tick to refetch and re-render.
+  if(document.querySelector('.cmt textarea')){ threadsRev = -1; return; }
+  render();
+}
+// Reply composer: mirrors openComposer's `.cmt` textarea+actions shape so the
+// checkSync guard (`document.querySelector('.cmt textarea')`) covers it too.
+function openThreadReply(chip, thread){
+  if(chip.querySelector('.cmt')) return;   // already open
+  const cmt = document.createElement('div');
+  cmt.className = 'cmt';
+  cmt.innerHTML = `<textarea placeholder="Reply…"></textarea>
+    <div class="cmt-actions">
+      <button class="btn primary save">Reply</button>
+      <button class="btn cancel">Cancel</button>
+    </div>`;
+  chip.appendChild(cmt);
+  const ta = cmt.querySelector('textarea');
+  ta.focus();
+  const saveBtn = cmt.querySelector('.save');
+  saveBtn.onclick = async () => {
+    const v = ta.value.trim(); if(!v) return;
+    saveBtn.disabled = true;
+    try{
+      await postThreadAction('reply', {thread_id: thread.id, author: 'user', text: v});
+      cmt.remove();   // this composer is saved; left in place it would trip the guard
+      await afterThreadMutation();
+    }catch(e){
+      toast('Reply failed: '+e.message);
+      saveBtn.disabled = false;
+    }
+  };
+  cmt.querySelector('.cancel').onclick = () => cmt.remove();
+}
+// `opts.reopen` renders the resolved-strip shape (Reopen only); otherwise the
+// open-thread shape (Reply + Resolve). The Resolve click is the only path
+// that ever posts `resolved: true` — that button exists solely in the page,
+// per the design doc: resolving is the user's decision, not the agent's.
+function buildThreadChip(thread, opts){
+  opts = opts || {};
   const chip = document.createElement('div');
   chip.className = 'cmt-row cmt-thread';
   chip.dataset.tid = thread.id;
@@ -1467,6 +1546,39 @@ function buildThreadChip(thread){
   saved.appendChild(txt);
   chip.appendChild(saved);
   (thread.replies || []).forEach(r => chip.appendChild(buildReplyRow(r)));
+  const actions = document.createElement('div');
+  actions.className = 'thread-actions';
+  if(opts.reopen){
+    const reopenBtn = document.createElement('button');
+    reopenBtn.className = 'btn reopen';
+    reopenBtn.textContent = 'Reopen';
+    reopenBtn.onclick = async () => {
+      reopenBtn.disabled = true;
+      try{
+        await postThreadAction('resolve', {thread_id: thread.id, resolved: false});
+        await afterThreadMutation();
+      }catch(e){ toast('Reopen failed: '+e.message); reopenBtn.disabled = false; }
+    };
+    actions.appendChild(reopenBtn);
+  }else{
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'btn reply';
+    replyBtn.textContent = 'Reply';
+    replyBtn.onclick = () => openThreadReply(chip, thread);
+    actions.appendChild(replyBtn);
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'btn resolve';
+    resolveBtn.textContent = 'Resolve';
+    resolveBtn.onclick = async () => {
+      resolveBtn.disabled = true;
+      try{
+        await postThreadAction('resolve', {thread_id: thread.id, resolved: true});
+        await afterThreadMutation();
+      }catch(e){ toast('Resolve failed: '+e.message); resolveBtn.disabled = false; }
+    };
+    actions.appendChild(resolveBtn);
+  }
+  chip.appendChild(actions);
   return chip;
 }
 // Diff (split/single) path: same insertAfterRow() a draft's chip uses.
@@ -1519,14 +1631,61 @@ async function fetchThreads(){
     const j = await r.json();
     threadsRev = j.threads_rev;
     const byKey = {};
+    const byFile = {};
     (j.threads || []).forEach(t => {
-      if(t.resolved) return;   // hidden entirely in this slice — see design doc
+      if(t.resolved){
+        // Kept, not dropped: the per-file resolved-strip needs these to
+        // render on demand and count them for the "N resolved" toggle.
+        // Keyed by path AND side: path alone double-lists in a rename chain
+        // (A->B, B->C makes B one card's new path and another's old), since
+        // a thread's file is its side-dependent path -- see anchorOf().
+        const fk = `${t.file}|${t.side}`;
+        (byFile[fk] = byFile[fk] || []).push(t);
+        return;
+      }
       const key = `${t.file}|${t.side}${t.line}`;
       (byKey[key] = byKey[key] || []).push(t);
     });
     threadsByKey = byKey;
+    resolvedByFile = byFile;
     updateRoundNote(j.round);
   }catch(e){ /* transient; the poll will retry */ }
+}
+
+// A thread's `file` is the side-dependent path it was submitted on (old for
+// L, new for R -- see anchorOf()), so a renamed file's resolved threads can
+// be split across both. Join side-aware: L-side threads belong to file.old
+// and R-side to file.new, so a path shared across cards in a rename chain
+// never pulls another card's threads. The keys differ by side even when
+// old === new, so no dedupe is needed.
+function fileResolvedThreads(file){
+  let out = [];
+  if(file.old) out = out.concat(resolvedByFile[`${file.old}|L`] || []);
+  if(file.new) out = out.concat(resolvedByFile[`${file.new}|R`] || []);
+  return out;
+}
+// Per-file resolved-thread strip. Independent of Split/Single/Preview: called
+// once per renderFile() below, so a mode switch never drops it, unlike
+// renderThreadRow/renderThreadBlockRow which are wired into each mode's own
+// per-line chip path.
+function renderResolvedStrip(el, file){
+  const resolved = fileResolvedThreads(file);
+  const toggleBtn = el.querySelector('.resolved-toggle');
+  const stripEl = el.querySelector('.resolved-strip');
+  if(!resolved.length){ toggleBtn.hidden = true; stripEl.hidden = true; stripEl.innerHTML = ''; return; }
+  const ui = uiFor(file);
+  toggleBtn.hidden = false;
+  toggleBtn.textContent = `${resolved.length} resolved`;
+  toggleBtn.setAttribute('aria-pressed', String(!!ui.resolvedOpen));
+  stripEl.innerHTML = '';
+  resolved.forEach(t => stripEl.appendChild(buildThreadChip(t, {reopen: true})));
+  stripEl.hidden = !ui.resolvedOpen;
+  toggleBtn.onclick = e => {
+    e.stopPropagation();   // the file-head click toggles collapse
+    ui.resolvedOpen = !ui.resolvedOpen;
+    stripEl.hidden = !ui.resolvedOpen;
+    toggleBtn.setAttribute('aria-pressed', String(ui.resolvedOpen));
+  };
 }
 
 function render(){
@@ -1564,9 +1723,11 @@ function renderFile(file, fi){
       <span class="grow"></span>
       ${stat}
       ${modeCtl}
+      ${THREADS_MODE ? '<button class="btn resolved-toggle" hidden></button>' : ''}
       <label><input type="checkbox" class="viewed"> Viewed</label>
-    </div><div class="file-body"></div>`;
+    </div>${THREADS_MODE ? '<div class="resolved-strip" hidden></div>' : ''}<div class="file-body"></div>`;
   setAnchorPath(el, file.display);
+  if(THREADS_MODE) renderResolvedStrip(el, file);
   const body = el.querySelector('.file-body');
   if(file.binary){ body.innerHTML='<div class="empty-note">Binary file not shown.</div>'; }
   else if(mode === 'preview'){ renderPreview(file, body, built); }
@@ -1843,6 +2004,10 @@ async function checkSync(){
       // 6s tick retries once the composer closes.
       if(document.querySelector('.cmt textarea')) return;
       await fetchThreads();
+      // Re-check after the await: the check above ran before the fetch, and
+      // a composer opened during it would be wiped by render(). Reset
+      // threadsRev so the next tick refetches once the composer closes.
+      if(document.querySelector('.cmt textarea')){ threadsRev = -1; return; }
       render();
     }
   }catch(e){ /* transient; try again next tick */ }
@@ -2210,12 +2375,17 @@ class Handler(BaseHTTPRequestHandler):
         # os.replace), not a return value: a BrokenPipeError while writing the
         # response must not release the slot of a completed --once submission.
         # A durable stay-alive submission released its own slot before the
-        # response (see _do_submit); this finally only covers failure paths.
+        # response (see _do_submit), and a rejected submission released via
+        # _reject_submit for the same pre-flush reason; this finally only
+        # covers the unexpected-exception path. It must NOT fire after either
+        # early release: a new request may have claimed the slot in between,
+        # and releasing here would free that request's claim.
         self._durable = False
+        self._slot_released = False
         try:
             self._do_submit(payload)
         finally:
-            if not self._durable:
+            if not (self._durable or self._slot_released):
                 with Handler._submit_lock:
                     Handler._submitted = False
 
@@ -2268,6 +2438,17 @@ class Handler(BaseHTTPRequestHandler):
             rev = Handler.threads_rev
         self._send_json(200, {"ok": True, "threads_rev": rev})
 
+    def _reject_submit(self, code, obj):
+        # Release the submit slot BEFORE the rejection flushes, mirroring the
+        # durable stay-alive release below: do_POST's finally runs after the
+        # flush, so a sequential caller that has already seen this rejection
+        # would otherwise race the release into a spurious 409 (seen in CI on
+        # the finished-"false" -> Finish sequence).
+        with Handler._submit_lock:
+            Handler._submitted = False
+        self._slot_released = True
+        self._send_json(code, obj)
+
     def _do_submit(self, payload):
         # finished must be a JSON boolean, validated before anything happens:
         # bool() would turn "false" into a Finish that shuts the server down
@@ -2275,7 +2456,7 @@ class Handler(BaseHTTPRequestHandler):
         # its resolved bit.
         finished = payload.get("finished", False)
         if Handler.mode == "threads" and not isinstance(finished, bool):
-            self._send_json(400, {"ok": False, "error": "finished must be a boolean"})
+            self._reject_submit(400, {"ok": False, "error": "finished must be a boolean"})
             return
         finished = bool(finished) if Handler.mode == "threads" else False
         # The temp file is created up front so an unwritable or missing --out
@@ -2290,7 +2471,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise OSError(f"{self.out_path} is a directory")
             fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".out-", suffix=".tmp")
         except OSError as e:
-            self._send_json(500, {"ok": False, "error": f"cannot write --out: {e}"})
+            self._reject_submit(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
         # human-readable to stdout
         print("\n===== REVIEW SUBMITTED =====", flush=True)

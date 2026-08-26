@@ -2743,6 +2743,141 @@ console.log(JSON.stringify(out));
     finally:
         os.unlink(_hp)
 
+# -- Task 4: Reply, Resolve and Reopen page controls -------------------------
+# a. POST /reply through the page's own call shape: openThreadReply()'s save
+# handler posts author: "user" (the agent's shape, author: "agent", is
+# already covered by the threads-endpoints round-trip test above).
+ctl_fd, ctl_out = _tempfile.mkstemp(suffix=".json")
+os.close(ctl_fd)
+os.unlink(ctl_out)
+proc, patch_path = start_server(["--out", ctl_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: controls run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        payload = {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+        ]}
+        status, info = post_json("submit", payload)
+        tid = (info.get("ids") or [None])[0]
+        check("server: controls submit mints a thread id", bool(tid), info)
+
+        status, _r = post_json("reply", {"thread_id": tid, "author": "user", "text": "looks good"})
+        check("server: a user reply (the page's Reply control shape) returns 200", status == 200, status)
+        _, doc = get_json("threads")
+        t = next(t for t in doc["threads"] if t["id"] == tid)
+        check("server: the user reply lands on the right thread with author 'user'",
+              len(t["replies"]) == 1 and t["replies"][0].get("author") == "user"
+              and t["replies"][0].get("text") == "looks good", t)
+
+        # b. resolving sets the bit the resolved-strip renders from. A DOM
+        # assertion (chip leaves the grid, appears in the strip) can't run
+        # under node -- see the source scans below for the render wiring.
+        status, _res = post_json("resolve", {"thread_id": tid, "resolved": True})
+        check("server: resolve (the page's Resolve control shape) returns 200", status == 200, status)
+        _, doc2 = get_json("threads")
+        t2 = next(t for t in doc2["threads"] if t["id"] == tid)
+        check("server: GET /threads shows resolved true -- the resolved-strip's render input",
+              t2.get("resolved") is True, t2)
+
+        # c. reopening clears the bit and the thread is live again
+        status, _res2 = post_json("resolve", {"thread_id": tid, "resolved": False})
+        check("server: reopen (resolved: false, the page's Reopen control shape) returns 200",
+              status == 200, status)
+        _, doc3 = get_json("threads")
+        t3 = next(t for t in doc3["threads"] if t["id"] == tid)
+        check("server: GET /threads shows resolved false after reopen", t3.get("resolved") is False, t3)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(ctl_out):
+        os.unlink(ctl_out)
+
+# -- b/c. resolved-strip + Reopen wiring (source scans, DOM unreachable) -----
+# fetchThreads() used to drop a resolved thread entirely (`if(t.resolved)
+# return;`); it must now index it by file for the strip instead of discarding
+# it.
+check("server.PAGE's fetchThreads() indexes resolved threads for the strip, not just drops them",
+      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,400}?resolvedByFile\s*=\s*byFile",
+                 server.PAGE) is not None,
+      "fetchThreads() no longer keeps resolved threads for the strip")
+# The strip's index is side-aware on purpose: path alone double-lists in a
+# rename chain (A->B, B->C shares B across two cards).
+check("server.PAGE keys resolved threads by path AND side",
+      "const fk = `${t.file}|${t.side}`;" in server.PAGE
+      and "resolvedByFile[`${file.old}|L`]" in server.PAGE
+      and "resolvedByFile[`${file.new}|R`]" in server.PAGE,
+      "the resolved-strip index or lookup is not side-aware")
+check("server.PAGE defines a resolved-strip renderer",
+      "function renderResolvedStrip(" in server.PAGE,
+      "renderResolvedStrip() is missing")
+check("server.PAGE invokes the resolved-strip renderer from the file-card build path",
+      _re.search(r"if\(THREADS_MODE\)\s*renderResolvedStrip\(el,\s*file\);", server.PAGE) is not None,
+      "renderResolvedStrip(...) is not called from renderFile()")
+check("server.PAGE's Reopen control posts resolved: false",
+      _re.search(r"reopenBtn\.onclick[\s\S]{0,400}?resolved:\s*false", server.PAGE) is not None,
+      "the Reopen control does not post {resolved: false}")
+check("server.PAGE's Resolve control posts resolved: true",
+      _re.search(r"resolveBtn\.onclick[\s\S]{0,400}?resolved:\s*true", server.PAGE) is not None,
+      "the Resolve control does not post {resolved: true}")
+# The endpoint round-trip above posts its own known-correct request, so it
+# cannot catch openThreadReply() drifting to the wrong route/author -- pin the
+# browser handler itself, like the Resolve/Reopen scans.
+check("server.PAGE's Reply control posts route 'reply' with author 'user'",
+      _re.search(r"openThreadReply[\s\S]{0,800}?postThreadAction\('reply',\s*\{thread_id:\s*thread\.id,\s*author:\s*'user'",
+                 server.PAGE) is not None,
+      "openThreadReply() does not post {thread_id, author: 'user'} to 'reply'")
+
+# -- d. documentation: resolve is the user's click, never the agent's -------
+# Timing subtlety: references/threads.md is a later task and doesn't exist
+# yet, and SKILL.md doesn't document the thread protocol yet either. So this
+# scan is written to pass now (no /resolve call exists anywhere to find) and
+# still bite once the docs land: any agent-facing `curl ... /resolve` line is
+# a hard failure, and once references/threads.md exists it must also state
+# that resolve is the user's click.
+_skill_path = os.path.normpath(os.path.join(
+    os.path.dirname(server_path), "..", "..", "skills", "local-review", "SKILL.md"))
+with open(_skill_path) as _f:
+    _skill_src = _f.read()
+_skill_agent_resolve = [ln.strip() for ln in _skill_src.splitlines()
+                        if "/resolve" in ln and ("curl" in ln.lower() or "post " in ln.lower())]
+check("SKILL.md gives the agent no /resolve call -- resolve is the user's click only",
+      _skill_agent_resolve == [], _skill_agent_resolve)
+
+_threads_md_path = os.path.normpath(os.path.join(
+    os.path.dirname(_skill_path), "references", "threads.md"))
+if os.path.exists(_threads_md_path):
+    with open(_threads_md_path) as _f:
+        _threads_src = _f.read()
+    _threads_agent_resolve = [ln.strip() for ln in _threads_src.splitlines()
+                              if "/resolve" in ln and ("curl" in ln.lower() or "post " in ln.lower())]
+    check("references/threads.md gives the agent no /resolve call -- resolve is the user's click only",
+          _threads_agent_resolve == [], _threads_agent_resolve)
+    check("references/threads.md states resolve is the user's click",
+          _re.search(r"resolv\w*\s+is\s+the\s+user'?s\s+click", _threads_src, _re.I) is not None,
+          "no 'resolve is the user's click' statement found")
+else:
+    skip("references/threads.md documents no agent-side /resolve",
+         "file does not exist yet -- a later task adds it")
+
 print(f"# {pass_count} passed, {fail_count} failed, {skip_count} skipped")
 sys.exit(1 if fail_count else 0)
 PYEOF
