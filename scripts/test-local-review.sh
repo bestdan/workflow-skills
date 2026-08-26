@@ -2408,14 +2408,20 @@ check("server.py carries no Approve button or verdict string",
 check("finish dialog markup carries a hidden Finish button beside finishSubmit",
       '<button class="btn primary" id="finishFinish" hidden>Finish</button>' in server.PAGE,
       "finishFinish button markup missing or not hidden by default")
-check("THREADS_MODE reveals the Finish button and relabels Submit",
+check("THREADS_MODE relabels Submit and reveals the header Finish",
       _re.search(
           r"if\(THREADS_MODE\)\{\s*"
           r"finishSubmit\.textContent = 'Submit';\s*"
-          r"finishFinish\.hidden = false;\s*"
           r"finishHdr\.hidden = false;\s*\}",
           server.PAGE) is not None,
-      "no THREADS_MODE-gated reveal of finishFinish / relabel of finishSubmit")
+      "no THREADS_MODE-gated relabel of finishSubmit / reveal of finishHdr")
+# The dialog shows exactly one action per opening: Submit's opening hides
+# Finish and vice versa -- the modal Finish exists only as the header
+# Finish's confirm step, never beside Submit.
+check("openFinishDialog() shows exactly one of Submit/Finish per opening",
+      "finishSubmit.hidden = !!finishing;" in server.PAGE
+      and "finishFinish.hidden = !finishing;" in server.PAGE,
+      "the finish dialog does not toggle Submit/Finish visibility per mode")
 # --- doSubmit: finished flag only travels from the Finish path, only in ----
 # --- threads mode; Submit always posts finished:false there ----------------
 check("doSubmit posts payload.finished only in threads mode",
@@ -2452,7 +2458,7 @@ check("THREADS_MODE reveals the header Finish button",
       "finishHdr.hidden = false;" in server.PAGE,
       "finishHdr is never revealed in threads mode")
 check("the header Finish opens the finish dialog rather than posting directly",
-      "finishHdr.onclick = () => submitBtn.onclick();" in server.PAGE,
+      "finishHdr.onclick = () => openFinishDialog(true);" in server.PAGE,
       "finishHdr does not route through the confirm dialog")
 check("endReview() disables the header Finish button",
       "finishHdr.disabled = true;" in server.PAGE,

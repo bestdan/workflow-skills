@@ -528,7 +528,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <style>
 :root{
   --bg:#f4f6f8; --surface:#ffffff; --surface2:#eef1f4; --border:#d7dde3;
-  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13);
+  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13); --agent:#6f42c1;
   --add-bg:rgba(46,160,67,.12); --add-gut:rgba(46,160,67,.22); --add-num:#1a7f37;
   --del-bg:rgba(207,34,46,.10); --del-gut:rgba(207,34,46,.18); --del-num:#b3202b;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -536,18 +536,18 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#0c1320; --surface:#0f1826; --surface2:#0b111b; --border:#1e2a3a;
-  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14);
+  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14); --agent:#a371f7;
   --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.28); --add-num:#3fb950;
   --del-bg:rgba(248,81,73,.15); --del-gut:rgba(248,81,73,.26); --del-num:#f85149;
 }}
 :root[data-theme=dark]{
   --bg:#0c1320; --surface:#0f1826; --surface2:#0b111b; --border:#1e2a3a;
-  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14);
+  --text:#d6deea; --dim:#8493a5; --accent:#e8a317; --accent-bg:rgba(232,163,23,.14); --agent:#a371f7;
   --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.28); --add-num:#3fb950;
   --del-bg:rgba(248,81,73,.15); --del-gut:rgba(248,81,73,.26); --del-num:#f85149;}
 :root[data-theme=light]{
   --bg:#f4f6f8; --surface:#ffffff; --surface2:#eef1f4; --border:#d7dde3;
-  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13);
+  --text:#1b222c; --dim:#63707e; --accent:#b26a00; --accent-bg:rgba(232,163,23,.13); --agent:#6f42c1;
   --add-bg:rgba(46,160,67,.12); --add-gut:rgba(46,160,67,.22); --add-num:#1a7f37;
   --del-bg:rgba(207,34,46,.10); --del-gut:rgba(207,34,46,.18); --del-num:#b3202b;}
 /* dart token colors */
@@ -676,6 +676,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .cmt-thread{border-left:3px solid var(--accent)}
 .reply-row{margin:8px 0 0 14px;padding-top:7px;border-top:1px dashed var(--border)}
 .reply-row .reply-author{font-weight:650;font-size:11.5px;color:var(--accent)}
+.reply-row .reply-author.agent{color:var(--agent)}
 .reply-row .reply-ts{color:var(--dim);font-size:11px;margin-left:6px}
 .reply-row .reply-text{white-space:pre-wrap;margin-top:3px}
 .thread-actions{display:flex;gap:8px;margin-top:8px}
@@ -1454,7 +1455,8 @@ function buildReplyRow(reply){
   const row = document.createElement('div');
   row.className = 'reply-row';
   const author = document.createElement('span');
-  author.className = 'reply-author';
+  // The agent's handle gets its own color so the two voices scan apart.
+  author.className = 'reply-author' + (reply.author === 'agent' ? ' agent' : '');
   author.textContent = reply.author === 'agent' ? 'Claude' : 'You';
   row.appendChild(author);
   const ts = document.createElement('span');
@@ -2062,26 +2064,31 @@ const finishHdr = document.getElementById('finishHdr');
 const finishedBg = document.getElementById('finishedBg');
 if(THREADS_MODE){
   finishSubmit.textContent = 'Submit';
-  finishFinish.hidden = false;
   finishHdr.hidden = false;
 }
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
   finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
 }
-submitBtn.onclick = () => {                 // step 1: open the finish-review window
+// One dialog, one action at a time: the header Submit opens it showing only
+// Submit, the header Finish showing only Finish. Finish shuts the server
+// down, so it never fires from a single header click — the dialog is its
+// confirm step — and it stays enabled with zero comments, which is exactly
+// the round that ends a review.
+function openFinishDialog(finishing){
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
-  document.getElementById('finishSub').textContent = THREADS_MODE
-    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude or finish the review.`
-    : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
+  finishSubmit.hidden = !!finishing;
+  finishFinish.hidden = !finishing;
+  document.getElementById('finishSub').textContent = finishing
+    ? `Finish the review and shut the server down. ${n?`${n} pending comment${n!==1?'s':''} and any`:'Any'} overall comment ride out with this final round.`
+    : THREADS_MODE
+      ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
+      : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
-};
-// Header Finish: same dialog, same confirm step — Finish shuts the server
-// down, so it never fires from a single header click. The header Submit can
-// be disabled (0 comments) while Finish must stay reachable, hence its own
-// button rather than relying on the Submit path.
-finishHdr.onclick = () => submitBtn.onclick();
+}
+submitBtn.onclick = () => openFinishDialog(false);
+finishHdr.onclick = () => openFinishDialog(true);
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
