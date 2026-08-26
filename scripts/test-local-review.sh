@@ -2964,7 +2964,7 @@ finally:
 # return;`); it must now index it by file for the strip instead of discarding
 # it.
 check("server.PAGE's fetchThreads() indexes resolved threads for the strip, not just drops them",
-      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,1400}?resolvedByFile\s*=\s*byFile",
+      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,1800}?resolvedByFile\s*=\s*byFile",
                  server.PAGE) is not None,
       "fetchThreads() no longer keeps resolved threads for the strip")
 # The strip's index is side-aware on purpose: path alone double-lists in a
@@ -3163,6 +3163,13 @@ check("server.PAGE defines an Outdated-strip renderer",
 check("server.PAGE invokes the outdated-strip renderer from the file-card build path",
       _re.search(r"if\(THREADS_MODE\)\{\s*renderOutdatedStrip\(el,\s*file\);", server.PAGE) is not None,
       "renderOutdatedStrip(...) is not called from renderFile()")
+# Side-aware like resolvedByFile, and for the same reason: path alone
+# double-lists an outdated thread across two cards of a rename chain.
+check("server.PAGE keys outdated threads by path AND side",
+      "const ok = `${p.file}|${p.side}`;" in server.PAGE
+      and "outdatedByFile[`${file.old}|L`]" in server.PAGE
+      and "outdatedByFile[`${file.new}|R`]" in server.PAGE,
+      "the Outdated-strip index or lookup is not side-aware")
 check("server.PAGE's thread chip badges a 'moved' thread",
       "thread._moved" in server.PAGE and "moved-badge" in server.PAGE,
       "buildThreadChip() has no moved-marker branch")

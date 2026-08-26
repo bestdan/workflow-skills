@@ -1743,7 +1743,10 @@ async function fetchThreads(){
     // post-refresh with the one call.
     placeThreads(DIFF, unresolved).forEach(p => {
       if(p.placement === 'outdated'){
-        (outdated[p.file] = outdated[p.file] || []).push(p.thread);
+        // Side-aware key, like resolvedByFile: path alone double-lists in a
+        // rename chain (an outdated placement keeps the thread's own side).
+        const ok = `${p.file}|${p.side}`;
+        (outdated[ok] = outdated[ok] || []).push(p.thread);
         return;
       }
       // A "moved" thread renders at its NEW row: a shallow copy carrying the
@@ -1777,11 +1780,11 @@ function fileResolvedThreads(file){
   if(file.new) out = out.concat(resolvedByFile[`${file.new}|R`] || []);
   return out;
 }
-// Same old/new union as fileResolvedThreads, for outdatedByFile.
+// Same side-aware old/new union as fileResolvedThreads, for outdatedByFile.
 function fileOutdatedThreads(file){
-  const keys = new Set([file.old, file.new].filter(Boolean));
   let out = [];
-  keys.forEach(k => { out = out.concat(outdatedByFile[k] || []); });
+  if(file.old) out = out.concat(outdatedByFile[`${file.old}|L`] || []);
+  if(file.new) out = out.concat(outdatedByFile[`${file.new}|R`] || []);
   return out;
 }
 // Per-file Outdated strip: threads whose anchor failed placeThreads() rules 1
