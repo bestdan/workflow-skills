@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.10.0] - 2026-08-26
+
+### Features
+
+- re-place threads across a refresh (#424) (4ca6f71)
+- Submit and Finish session controls (#423) (40a89ef)
+
 ## [2.9.0] - 2026-08-26
 
 ### Features
