@@ -2816,9 +2816,16 @@ finally:
 # return;`); it must now index it by file for the strip instead of discarding
 # it.
 check("server.PAGE's fetchThreads() indexes resolved threads for the strip, not just drops them",
-      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,200}?byFile\[t\.file\][\s\S]{0,400}?resolvedByFile\s*=\s*byFile",
+      _re.search(r"if\(t\.resolved\)\{[\s\S]{0,600}?byFile\[fk\][\s\S]{0,400}?resolvedByFile\s*=\s*byFile",
                  server.PAGE) is not None,
       "fetchThreads() no longer keeps resolved threads for the strip")
+# The strip's index is side-aware on purpose: path alone double-lists in a
+# rename chain (A->B, B->C shares B across two cards).
+check("server.PAGE keys resolved threads by path AND side",
+      "const fk = `${t.file}|${t.side}`;" in server.PAGE
+      and "resolvedByFile[`${file.old}|L`]" in server.PAGE
+      and "resolvedByFile[`${file.new}|R`]" in server.PAGE,
+      "the resolved-strip index or lookup is not side-aware")
 check("server.PAGE defines a resolved-strip renderer",
       "function renderResolvedStrip(" in server.PAGE,
       "renderResolvedStrip() is missing")
@@ -2831,6 +2838,13 @@ check("server.PAGE's Reopen control posts resolved: false",
 check("server.PAGE's Resolve control posts resolved: true",
       _re.search(r"resolveBtn\.onclick[\s\S]{0,400}?resolved:\s*true", server.PAGE) is not None,
       "the Resolve control does not post {resolved: true}")
+# The endpoint round-trip above posts its own known-correct request, so it
+# cannot catch openThreadReply() drifting to the wrong route/author -- pin the
+# browser handler itself, like the Resolve/Reopen scans.
+check("server.PAGE's Reply control posts route 'reply' with author 'user'",
+      _re.search(r"openThreadReply[\s\S]{0,800}?postThreadAction\('reply',\s*\{thread_id:\s*thread\.id,\s*author:\s*'user'",
+                 server.PAGE) is not None,
+      "openThreadReply() does not post {thread_id, author: 'user'} to 'reply'")
 
 # -- d. documentation: resolve is the user's click, never the agent's -------
 # Timing subtlety: references/threads.md is a later task and doesn't exist

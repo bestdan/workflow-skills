@@ -1461,7 +1461,15 @@ function buildReplyRow(reply){
 // against a route relative to this page's own token path.
 async function postThreadAction(route, body){
   const res = await fetch(route, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if(!res.ok) throw new Error(await res.text());
+  if(!res.ok){
+    // Error routes send {"ok": false, "error": "..."} -- surface the message,
+    // not the raw JSON, in the failure toast. Fall back to the raw text for
+    // anything that isn't that shape.
+    const raw = await res.text();
+    let msg = raw;
+    try{ msg = JSON.parse(raw).error || raw; }catch(e){ /* not JSON */ }
+    throw new Error(msg);
+  }
   return res.json();
 }
 // Both Resolve and Reopen end the same way: refetch server state and
@@ -1628,7 +1636,11 @@ async function fetchThreads(){
       if(t.resolved){
         // Kept, not dropped: the per-file resolved-strip needs these to
         // render on demand and count them for the "N resolved" toggle.
-        (byFile[t.file] = byFile[t.file] || []).push(t);
+        // Keyed by path AND side: path alone double-lists in a rename chain
+        // (A->B, B->C makes B one card's new path and another's old), since
+        // a thread's file is its side-dependent path -- see anchorOf().
+        const fk = `${t.file}|${t.side}`;
+        (byFile[fk] = byFile[fk] || []).push(t);
         return;
       }
       const key = `${t.file}|${t.side}${t.line}`;
@@ -1642,12 +1654,14 @@ async function fetchThreads(){
 
 // A thread's `file` is the side-dependent path it was submitted on (old for
 // L, new for R -- see anchorOf()), so a renamed file's resolved threads can
-// be split across both. Union the two lookups, deduped by Set for the common
-// case where old === new.
+// be split across both. Join side-aware: L-side threads belong to file.old
+// and R-side to file.new, so a path shared across cards in a rename chain
+// never pulls another card's threads. The keys differ by side even when
+// old === new, so no dedupe is needed.
 function fileResolvedThreads(file){
-  const keys = new Set([file.old, file.new].filter(Boolean));
   let out = [];
-  keys.forEach(k => { out = out.concat(resolvedByFile[k] || []); });
+  if(file.old) out = out.concat(resolvedByFile[`${file.old}|L`] || []);
+  if(file.new) out = out.concat(resolvedByFile[`${file.new}|R`] || []);
   return out;
 }
 // Per-file resolved-thread strip. Independent of Split/Single/Preview: called
