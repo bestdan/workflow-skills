@@ -729,6 +729,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <button class="btn" id="collapseAll">Collapse all</button>
     <button class="btn" id="theme">◐</button>
     <button class="btn primary" id="submit" disabled>Submit review (0)</button>
+    <button class="btn" id="finishHdr" hidden>Finish</button>
   </div>
 </header>
 <main id="root"></main>
@@ -2057,10 +2058,12 @@ const finishBg = document.getElementById('finishBg');
 const finishSummary = document.getElementById('finishSummary');
 const finishSubmit = document.getElementById('finishSubmit');
 const finishFinish = document.getElementById('finishFinish');
+const finishHdr = document.getElementById('finishHdr');
 const finishedBg = document.getElementById('finishedBg');
 if(THREADS_MODE){
   finishSubmit.textContent = 'Submit';
   finishFinish.hidden = false;
+  finishHdr.hidden = false;
 }
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
@@ -2074,6 +2077,11 @@ submitBtn.onclick = () => {                 // step 1: open the finish-review wi
     : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 };
+// Header Finish: same dialog, same confirm step — Finish shuts the server
+// down, so it never fires from a single header click. The header Submit can
+// be disabled (0 comments) while Finish must stay reachable, hence its own
+// button rather than relying on the Submit path.
+finishHdr.onclick = () => submitBtn.onclick();
 finishSummary.addEventListener('input', updateFinishBtn);
 document.getElementById('finishCancel').onclick = () => finishBg.classList.remove('show');
 finishBg.addEventListener('click', e => { if(e.target===finishBg) finishBg.classList.remove('show'); });
@@ -2082,6 +2090,7 @@ function endReview(){                       // Finish round succeeded: server ha
   clearInterval(pollTimer);
   finishBg.classList.remove('show');
   submitBtn.disabled = true;
+  finishHdr.disabled = true;
   finishedBg.classList.add('show');
 }
 async function doSubmit(finished){          // step 2: submit the round

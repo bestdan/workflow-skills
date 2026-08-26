@@ -2412,7 +2412,8 @@ check("THREADS_MODE reveals the Finish button and relabels Submit",
       _re.search(
           r"if\(THREADS_MODE\)\{\s*"
           r"finishSubmit\.textContent = 'Submit';\s*"
-          r"finishFinish\.hidden = false;\s*\}",
+          r"finishFinish\.hidden = false;\s*"
+          r"finishHdr\.hidden = false;\s*\}",
           server.PAGE) is not None,
       "no THREADS_MODE-gated reveal of finishFinish / relabel of finishSubmit")
 # --- doSubmit: finished flag only travels from the Finish path, only in ----
@@ -2441,6 +2442,21 @@ check("endReview() clears the poll timer and shows a persistent finished banner"
 check("checkSync() bails out once the review is finished",
       "if(reviewFinished) return;" in server.PAGE,
       "checkSync() keeps polling a server that has exited")
+# --- header Finish: reachable without opening the Submit dialog first, but --
+# --- still routed through the dialog (Finish kills the server; the dialog ---
+# --- is the confirm step) ---------------------------------------------------
+check("header carries a hidden Finish button",
+      '<button class="btn" id="finishHdr" hidden>Finish</button>' in server.PAGE,
+      "finishHdr button markup missing or not hidden by default")
+check("THREADS_MODE reveals the header Finish button",
+      "finishHdr.hidden = false;" in server.PAGE,
+      "finishHdr is never revealed in threads mode")
+check("the header Finish opens the finish dialog rather than posting directly",
+      "finishHdr.onclick = () => submitBtn.onclick();" in server.PAGE,
+      "finishHdr does not route through the confirm dialog")
+check("endReview() disables the header Finish button",
+      "finishHdr.disabled = true;" in server.PAGE,
+      "a finished review leaves the header Finish clickable")
 
 # --- preview: describe() against a security corpus --------------------------
 # describe() is the whole XSS argument for preview mode: it turns marked's
