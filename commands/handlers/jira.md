@@ -67,29 +67,23 @@ jira:
    - `parent`: the chosen `<EPIC-KEY>` (omit entirely if the user picked "No epic")
    - `additional_fields`: the `jira.additional_fields` mapping with `{ "labels": <jira.labels list> }` merged in (omit the whole argument when neither key is configured; omit `labels` alone when only `additional_fields` is set, and vice versa). A `labels` entry inside `additional_fields` loses to the dedicated `jira.labels` key — do not send both spellings.
 
-     `additional_fields` is a **verbatim passthrough** to `createJiraIssue`, so it is how a board's non-standard fields get set: the Advanced Roadmaps **Team** field, `components`, `fixVersions`, or any custom field. Jira exposes most of these as site-specific custom-field ids, so the plugin does not model them individually — write the ids your site uses. Resolve an id with `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`, the configured project and issue type); the response names every field the create screen accepts. Example — a Team field on `customfield_10001`:
+     `additional_fields` is a **verbatim passthrough**, so whatever the config holds is what `createJiraIssue` receives — this step neither resolves nor validates a field id. How a site's ids are found and written is setup-time work, defined in `commands/handlers/jira-config.md` → "Team and other custom fields". If `createJiraIssue` rejects a field ("field cannot be set" / "not on the appropriate screen"), the id is wrong or absent from the project's create screen. **Stop** and report the rejected id — do not retry the create without it, because that lands a work item missing the field the user configured.
 
-     ```yaml
-     jira:
-       additional_fields:
-         customfield_10001: "Insights and Planning"
-     ```
-
-     If `createJiraIssue` rejects a field ("field cannot be set" / "not on the appropriate screen"), the id is wrong or absent from the project's create screen. **Stop** and report the rejected id — do not retry the create without it, because that lands a work item missing the field the user configured.
-
-5. **Set the initial status.** Jira creates every issue in the project's initial status, which on many boards means a refinement lane. When the captured task is already complete, move it out of that lane rather than leaving it for `/promote-tasks`.
+5. **Transition to ready status.** Jira creates every issue in the project's initial status, which on many boards means a refinement lane. When the captured task is already complete, move it out of that lane rather than leaving it for `/promote-tasks`.
 
    **Skip this step entirely** — leave the issue where `createJiraIssue` put it — when any of these holds:
    - `jira.ready_status` is unset or empty (nothing to transition to; the promoter owns the issue).
    - The drafted task carries an `is_blocked_by` entry. Blocked work is not ready, and this handler cannot tell whether the blocker is resolved — `/promote-tasks` holds blocked cards for the same reason.
-   - The drafted task fails the capture gate: `title`, `body`, and `priority` present; `size` present and one of `1`/`2`/`3`/`5`; the body's **Acceptance Criteria** section non-empty. This is the deterministic half of the confidence check in `skills/task/SKILL.md`, read against the drafted task instead of a task file. `/add-task` step 5 has the user confirm every one of these fields, so the normal path passes.
+   - The drafted task fails the capture gate: `title`, `body`, and `priority` present; `size` present and one of `1`/`2`/`3`/`5`; the body's **Acceptance Criteria** section carries at least one bullet; and the body has no **Open Questions** / **TBD** section with content in it. This is the deterministic half of the confidence check in `skills/task/SKILL.md` — read it against the drafted task instead of a task file, and keep the two lists identical, or a task this step promotes is one `/promote-tasks` would have scored LOW. `/add-task` step 5 has the user confirm every one of these fields, so the normal path passes; a plan task pushed by `/push-plan` is the case most likely to still carry open questions.
 
    Otherwise transition the issue to `ready_status`:
 
    1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`) and find the transition whose target status `to.name` matches `jira.ready_status` (case-insensitive).
    2. Call `<atlassian-mcp>__transitionJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`, `transition: { id: <transition id> }`).
 
-   If no available transition leads to `ready_status`, **do not stop and do not guess a different status** — the issue is already created, and a capture flow must not fail after its artifact exists. Leave the issue in its initial status and surface this in the `/add-task` step 8 report: "`<key>` created but left in `<current status>` — no transition to `<ready_status>` is available from it." A transition that errors is reported the same way.
+   Either call can fail, and neither failure is fatal: the issue is already created, and a capture flow must not fail after its artifact exists. **Do not stop and do not guess a different status** — leave the issue where it is and surface the reason in the `/add-task` step 8 report. Report the two causes apart, because they send the user to different places:
+   - No available transition leads to `ready_status` — the board's workflow has no path there from the initial status. "`<key>` created but left in `<current status>` — no transition to `<ready_status>` is available from it."
+   - `transitionJiraIssue` errored — a permission, validator, or required-field failure on a transition that does exist. "`<key>` created but left in `<current status>` — the transition to `<ready_status>` failed: `<error>`."
 
 6. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.) When step 5 transitioned the issue, name the status it landed in; when step 5 was skipped or failed, say so per the rules above.
 

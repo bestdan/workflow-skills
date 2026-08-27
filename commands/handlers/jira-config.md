@@ -81,7 +81,7 @@ Jira has no "create in status X" — `createJiraIssue` always drops the issue in
 
 So when `ready_status` is set, `commands/handlers/jira.md` **step 5** transitions the new issue to it — but only when the captured task is genuinely ready: no `is_blocked_by` entry, and the deterministic half of the confidence check passes (title, body, priority, a valid `size`, a non-empty Acceptance Criteria section). Anything else is left in the initial status for `/promote-tasks` to score, and so is every issue when `ready_status` is unset. A create that lands but cannot transition is reported, never rolled back.
 
-`/push-plan`'s jira path inherits this, so a pushed plan's unblocked tasks land ready and its blocked ones do not.
+`/push-plan`'s jira path inherits this, so a pushed plan's complete, unblocked tasks land ready and the rest do not.
 
 **Watch the initial status.** The rule that `ready_status` and `refinement_status` must each differ from the project's initial status bites hardest on a board whose initial status is literally named `Needs Refinement`: setting `refinement_status` to that same name empties the promote candidate query (it filters out every issue already in the configured statuses), so `/promote-tasks` finds nothing to score. Leave `refinement_status` unset on such a board — a LOW-confidence issue is already sitting where it belongs — and set only `ready_status`.
 
