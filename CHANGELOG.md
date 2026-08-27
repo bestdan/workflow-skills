@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.11.0] - 2026-08-27
+
+### Features
+
+- count replies in the submit confirmation (#431) (813d9f7)
+
 ## [2.10.0] - 2026-08-26
 
 ### Features
