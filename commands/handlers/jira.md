@@ -14,12 +14,13 @@ jira:
   issue_type: Task # default Task
   default_epic: PLAT-100 # optional; skips the epic prompt (explicit key, not a name)
   labels: [] # optional — passed via additional_fields.labels
+  additional_fields: {} # optional — extra createJiraIssue fields, merged under labels (Team, components, custom fields)
   blocked_statuses: [] # optional — status names that mean "blocked"; excluded from /promote-tasks candidates
-  ready_status: Selected for Development # optional — used by /promote-tasks; target status for HIGH-confidence promotions (must differ from the initial/new status). Prompted when unset.
+  ready_status: Selected for Development # optional — target status for a complete, unblocked issue. Used by /add-task (step 5) and /promote-tasks.
   refinement_status: Needs Refinement # optional — used by /promote-tasks; target status for LOW-confidence (underspecified) issues. Prompted when unset.
 ```
 
-The `ready_status` / `refinement_status` keys are consumed only by the promote flow (`jira-promote.md`); `/add-task` ignores them.
+`ready_status` is read by **both** the create flow (step 5 below, which transitions a complete, unblocked new issue out of the project's initial status) and the promote flow (`jira-promote.md`). `refinement_status` is read only by the promote flow. Both keys are optional; when `ready_status` is unset, step 5 is skipped and a new issue stays in the project's initial status for `/promote-tasks` to score.
 
 `site` is passed directly as `cloudId` to the MCP tools (they accept either a UUID or a site URL/hostname).
 
@@ -64,9 +65,33 @@ The `ready_status` / `refinement_status` keys are consumed only by the promote f
    - `description`: the composed description from step 3
    - `contentFormat`: `"markdown"`
    - `parent`: the chosen `<EPIC-KEY>` (omit entirely if the user picked "No epic")
-   - `additional_fields`: `{ "labels": <jira.labels list> }` (omit if no labels configured)
+   - `additional_fields`: the `jira.additional_fields` mapping with `{ "labels": <jira.labels list> }` merged in (omit the whole argument when neither key is configured; omit `labels` alone when only `additional_fields` is set, and vice versa). A `labels` entry inside `additional_fields` loses to the dedicated `jira.labels` key — do not send both spellings.
 
-5. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.)
+     `additional_fields` is a **verbatim passthrough** to `createJiraIssue`, so it is how a board's non-standard fields get set: the Advanced Roadmaps **Team** field, `components`, `fixVersions`, or any custom field. Jira exposes most of these as site-specific custom-field ids, so the plugin does not model them individually — write the ids your site uses. Resolve an id with `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`, the configured project and issue type); the response names every field the create screen accepts. Example — a Team field on `customfield_10001`:
+
+     ```yaml
+     jira:
+       additional_fields:
+         customfield_10001: "Insights and Planning"
+     ```
+
+     If `createJiraIssue` rejects a field ("field cannot be set" / "not on the appropriate screen"), the id is wrong or absent from the project's create screen. **Stop** and report the rejected id — do not retry the create without it, because that lands a work item missing the field the user configured.
+
+5. **Set the initial status.** Jira creates every issue in the project's initial status, which on many boards means a refinement lane. When the captured task is already complete, move it out of that lane rather than leaving it for `/promote-tasks`.
+
+   **Skip this step entirely** — leave the issue where `createJiraIssue` put it — when any of these holds:
+   - `jira.ready_status` is unset or empty (nothing to transition to; the promoter owns the issue).
+   - The drafted task carries an `is_blocked_by` entry. Blocked work is not ready, and this handler cannot tell whether the blocker is resolved — `/promote-tasks` holds blocked cards for the same reason.
+   - The drafted task fails the capture gate: `title`, `body`, and `priority` present; `size` present and one of `1`/`2`/`3`/`5`; the body's **Acceptance Criteria** section non-empty. This is the deterministic half of the confidence check in `skills/task/SKILL.md`, read against the drafted task instead of a task file. `/add-task` step 5 has the user confirm every one of these fields, so the normal path passes.
+
+   Otherwise transition the issue to `ready_status`:
+
+   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`) and find the transition whose target status `to.name` matches `jira.ready_status` (case-insensitive).
+   2. Call `<atlassian-mcp>__transitionJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`, `transition: { id: <transition id> }`).
+
+   If no available transition leads to `ready_status`, **do not stop and do not guess a different status** — the issue is already created, and a capture flow must not fail after its artifact exists. Leave the issue in its initial status and surface this in the `/add-task` step 8 report: "`<key>` created but left in `<current status>` — no transition to `<ready_status>` is available from it." A transition that errors is reported the same way.
+
+6. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.) When step 5 transitioned the issue, name the status it landed in; when step 5 was skipped or failed, say so per the rules above.
 
 This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
@@ -74,7 +99,7 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one `searchJiraIssuesUsingJql` query, no edits, no claims. Renders the configured project's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `jira` now supports capture (`/add-task`), promote (`jira-promote.md`), single `/do-tasks` execute (`jira-claim.md`), and explicit completion (`/complete-task` → `jira-complete.md`, the fallback for when Jira's GitHub integration or smart commits didn't fire) — promote and claim move issues by **status transition** (To Do → `ready_status`/`refinement_status` → In Progress → In Review), not by status labels. So an actively-driven board populates the `in_progress`/`needs_review` sections via `statusCategory`. The status-**label** mapping below is still honored when those labels happen to be present (e.g. set by hand or a board automation); a board only ever touched by `/add-task` renders mostly `new`/`done`, the same fallback the gh-issue `## List` path has.
+> **Coverage note.** `jira` now supports capture (`/add-task`), promote (`jira-promote.md`), single `/do-tasks` execute (`jira-claim.md`), and explicit completion (`/complete-task` → `jira-complete.md`, the fallback for when Jira's GitHub integration or smart commits didn't fire) — create, promote, and claim move issues by **status transition** (To Do → `ready_status`/`refinement_status` → In Progress → In Review), not by status labels. So an actively-driven board populates the `in_progress`/`needs_review` sections via `statusCategory`. The status-**label** mapping below is still honored when those labels happen to be present (e.g. set by hand or a board automation); a board only ever touched by `/add-task` renders mostly `new`/`ready`/`done`, the same fallback the gh-issue `## List` path has.
 
 1. **Preflight.** Reuse the create flow's step 1 preflight: call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP…" / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
 

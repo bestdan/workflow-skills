@@ -44,7 +44,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 
    If the user picks "None — prompt me per-task", omit `default_epic` from the written config. Otherwise write the validated key as-is.
 
-6. **Optional `labels`** — ask the user as plain text (comma-separated list); skip if blank. Do not use `AskUserQuestion` here.
+6. **Optional `labels`** — ask the user as plain text (comma-separated list); skip if blank. Do not use `AskUserQuestion` here. Do not prompt for `additional_fields` — it needs site-specific custom-field ids the user is unlikely to have to hand; point them at the "Team and other custom fields" section below instead.
 
 7. **Return the config block** to `/task-config`:
 
@@ -56,6 +56,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      issue_type: Task
      default_epic: PLAT-100
      labels: []
+     # additional_fields: {}      # optional — extra createJiraIssue fields (Team, components, custom fields)
      blocked_statuses: []
      ready_status: Selected for Development
      refinement_status: Needs Refinement
@@ -69,16 +70,40 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
 
 `/promote-tasks` (the `jira-promote.md` flow) transitions scored issues to configured statuses, so it needs two extra keys:
 
-- **`ready_status`** — the target status a HIGH-confidence issue is transitioned to (the jira analogue of Linear's `Todo`/`auto-eligible`).
+- **`ready_status`** — the target status a HIGH-confidence issue is transitioned to (the jira analogue of Linear's `Todo`/`auto-eligible`). **`/add-task` reads this key too** — see "Landing status at capture" below.
 - **`refinement_status`** — the target status a LOW-confidence (underspecified) issue is transitioned to (the jira analogue of `needs_refinement`/`human-approval-requested`).
 
-Both are **target status names** — set each to the name of the status you want the issue moved to in your project. The promote flow resolves each name to the matching workflow transition id per issue at apply time (`transitionJiraIssue` takes a transition id, not a status name), so the name just has to match a status an available transition leads to. Each **must differ from the project's initial/new status** (the status new issues enter): the candidate query excludes issues already in `ready_status`/`refinement_status`, so pointing either at the initial status would filter out every new issue and promote nothing. Both keys are **optional**. When a key is unset, `/promote-tasks` (the `jira-promote.md` flow) resolves the project's reachable statuses dynamically from a candidate's available transitions and prompts you to pick via `AskUserQuestion`, then offers to persist the choice back here so the prompt does not recur — no status id or name is ever hard-coded. They are likewise unused in `/add-task`-only setups — they only matter for promote.
+Both are **target status names** — set each to the name of the status you want the issue moved to in your project. The promote flow resolves each name to the matching workflow transition id per issue at apply time (`transitionJiraIssue` takes a transition id, not a status name), so the name just has to match a status an available transition leads to. Each **must differ from the project's initial/new status** (the status new issues enter): the candidate query excludes issues already in `ready_status`/`refinement_status`, so pointing either at the initial status would filter out every new issue and promote nothing. Both keys are **optional**. When a key is unset, `/promote-tasks` (the `jira-promote.md` flow) resolves the project's reachable statuses dynamically from a candidate's available transitions and prompts you to pick via `AskUserQuestion`, then offers to persist the choice back here so the prompt does not recur — no status id or name is ever hard-coded. `refinement_status` is unused in an `/add-task`-only setup; `ready_status` is not — the create flow reads it as well.
+
+## Landing status at capture
+
+Jira has no "create in status X" — `createJiraIssue` always drops the issue in the project's **initial** status, whatever the board calls it. On a board whose initial status is a refinement lane (`Needs Refinement`, `Triage`, `Inbox`), that means a fully-specified task captured by `/add-task` lands as if nobody had written it yet, and stays there until someone runs `/promote-tasks`.
+
+So when `ready_status` is set, `commands/handlers/jira.md` **step 5** transitions the new issue to it — but only when the captured task is genuinely ready: no `is_blocked_by` entry, and the deterministic half of the confidence check passes (title, body, priority, a valid `size`, a non-empty Acceptance Criteria section). Anything else is left in the initial status for `/promote-tasks` to score, and so is every issue when `ready_status` is unset. A create that lands but cannot transition is reported, never rolled back.
+
+`/push-plan`'s jira path inherits this, so a pushed plan's unblocked tasks land ready and its blocked ones do not.
+
+**Watch the initial status.** The rule that `ready_status` and `refinement_status` must each differ from the project's initial status bites hardest on a board whose initial status is literally named `Needs Refinement`: setting `refinement_status` to that same name empties the promote candidate query (it filters out every issue already in the configured statuses), so `/promote-tasks` finds nothing to score. Leave `refinement_status` unset on such a board — a LOW-confidence issue is already sitting where it belongs — and set only `ready_status`.
 
 ## Archive status (`archive_status`)
 
 `archive_status` is an **optional** status **name** used only by `/archive-tasks`. **Native Jira issue archival is a Jira Premium feature** and is not reachable through the Atlassian MCP, so this handler instead transitions terminal (`statusCategory = Done`) issues older than the threshold to a status you've modeled as "archived" — typically an extra status in the `Done` category that your board's default filter hides. Set it to that status's name (e.g. `Archived`). The archive flow resolves the name to a per-issue transition id the same way the promote keys do (`transitionJiraIssue` takes a transition id, not a name).
 
 **When `archive_status` is unset, `/archive-tasks` is a no-op** for jira — it reports that there's nothing to do rather than guessing. The shared top-level **`archive_after`** (days) is the default age threshold when `/archive-tasks` is run without `--older-than`. See `commands/handlers/jira-archive.md`.
+
+## Team and other custom fields (`additional_fields`)
+
+`additional_fields` is an **optional** mapping passed verbatim to `createJiraIssue` (merged with `labels`), for board fields this plugin does not model: the Advanced Roadmaps **Team** field, `components`, `fixVersions`, or any custom field. There is no dedicated `team:` key because Jira exposes Team as a **site-specific custom-field id** (`customfield_NNNNN`) that differs between sites, so a named key would hard-code one org's schema.
+
+Resolve the id for a field with `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <site>`, the chosen project and issue type) — the response names every field the create screen accepts — then write it as a plain mapping:
+
+```yaml
+jira:
+  additional_fields:
+    customfield_10001: "Insights and Planning" # Team
+```
+
+Values are passed through untouched, so each one has to match the shape that field expects (a plain string, an `{ "id": … }` object, an array). If `createJiraIssue` rejects a field, the create flow stops and reports the id rather than silently creating the issue without it.
 
 ## Blocked statuses (`blocked_statuses`)
 

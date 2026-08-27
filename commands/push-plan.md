@@ -487,14 +487,20 @@ Walk the tasks in topological order. For each:
    the map from the seed step.
 2. **Skip if held.** With `--ready-only`, skip non-`ready` tasks.
 3. **Build the drafted task** — the normalized contract from `commands/add-task.md`
-   step 5. The blocker translation is **deferred to §5b.5** (links are a second
-   pass), so nothing about `is_blocked_by` is passed at create time.
-4. **Create the issue** by following `jira.md` steps 3–5 (compose description,
-   `createJiraIssue`, return the url) with `issueTypeName: <jira.issue_type>`
-   (default `Task`) and **`parent: <epic key from §5b.2>`**. Because the container
-   is already resolved here, **skip `jira.md` step 2's epic-selection prompt** —
-   pass the epic key directly as `parent`. Apply `jira.labels` via
-   `additional_fields` exactly as the create flow does.
+   step 5. The blocker **translation** is deferred to §5b.5 (links are a second
+   pass), so no blocker key is passed at create time. The task's own
+   `is_blocked_by` value still travels on the drafted task, because `jira.md`
+   step 5 reads it to decide whether the new issue may land in `ready_status` —
+   that decision only needs to know a blocker exists, not which key it became.
+4. **Create the issue** by following `jira.md` steps 3–6 (compose description,
+   `createJiraIssue`, set the initial status, return the url) with
+   `issueTypeName: <jira.issue_type>` (default `Task`) and
+   **`parent: <epic key from §5b.2>`**. Because the container is already resolved
+   here, **skip `jira.md` step 2's epic-selection prompt** — pass the epic key
+   directly as `parent`. Apply `jira.labels` and `jira.additional_fields` via
+   `additional_fields` exactly as the create flow does. Step 5 runs per issue as
+   the walk creates it, so an unblocked plan task lands in `ready_status` while a
+   blocked one waits in the initial status for its links (§5b.5) and a human.
 5. **Record the key back** into the task file's frontmatter: `tracker_id: <key>`
    (e.g. `PLAT-142`) and optional `tracker_url`, and add `<slug> → <key>` to the
    map so later dependents resolve.
