@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.12.0] - 2026-08-27
+
+### Features
+
+- land complete tasks in ready_status at capture (#433) (b520c78)
+
 ## [2.11.0] - 2026-08-27
 
 ### Features
