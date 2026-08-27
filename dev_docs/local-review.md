@@ -190,8 +190,12 @@ authenticated identity, since both callers share one bearer token), and
 resolve is the user's click, and the agent never calls it). `GET /state`
 gains a `threads_rev` integer that increments on every store mutation; the
 page diffs it against the value it last rendered and fetches `/threads`
-only on change. Full detail — schemas, anchor re-placement across
-`/refresh`, resolved-thread semantics — is in
+only on change. A submit's response and stdout block also carry the count
+of replies posted since the previous round, so a reply-only round does not
+read as "Submitted 0 comment(s)"; `GET /state` also carries that count live,
+so the page's Submit dialog can show it before the round is sent. Full
+detail — schemas, anchor
+re-placement across `/refresh`, resolved-thread semantics — is in
 `skills/local-review/references/threads.md`.
 
 ## Threat model — loopback is not a trust boundary

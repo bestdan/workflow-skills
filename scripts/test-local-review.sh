@@ -931,6 +931,9 @@ try:
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
             check("server: POST /submit returns 200", resp.status == 200, resp.status)
+            once_info = json.loads(resp.read().decode())
+        check("server: one-shot /submit response carries no replies key",
+              "replies" not in once_info, once_info)
         try:
             rc = proc.wait(timeout=5)
             check("server: --once exits after a successful /submit", rc == 0, rc)
@@ -1381,6 +1384,80 @@ finally:
     if os.path.exists(ep_out):
         os.unlink(ep_out)
 
+# -- threads mode: submit response counts replies since the last round -------
+rc_fd, rc_out = _tempfile.mkstemp(suffix=".json")
+os.close(rc_fd)
+os.unlink(rc_out)
+proc, patch_path = start_server(["--out", rc_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: reply-count run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        status, info1 = post_json("submit", {"meta": {}, "summary": "", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+        ]})
+        check("server: reply-count first submit of a launch carries replies 0",
+              status == 200 and info1.get("replies") == 0, info1)
+
+        tid = info1.get("ids", [None])[0]
+        status, _ = post_json("reply", {"thread_id": tid, "author": "user", "text": "one"})
+        check("server: reply-count first POST /reply returns 200", status == 200, status)
+        status, _ = post_json("reply", {"thread_id": tid, "author": "user", "text": "two"})
+        check("server: reply-count second POST /reply returns 200", status == 200, status)
+
+        status, state_after_replies = get_json("state")
+        check("server: reply-count GET /state carries replies_since_round 2 after two replies",
+              status == 200 and state_after_replies.get("replies_since_round") == 2, state_after_replies)
+
+        status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: reply-count second submit carries replies 2 (both replies since round 1)",
+              status == 200 and info2.get("replies") == 2, info2)
+
+        status, info3 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: reply-count third submit carries replies 0 (counter reset by round 2)",
+              status == 200 and info3.get("replies") == 0, info3)
+
+        status, state_after_submit = get_json("state")
+        check("server: reply-count GET /state carries replies_since_round 0 after submit resets it",
+              status == 200 and state_after_submit.get("replies_since_round") == 0, state_after_submit)
+
+        _fd = proc.stdout.fileno()
+        os.set_blocking(_fd, False)
+        _stdout_tail = ""
+        while True:
+            try:
+                _chunk = os.read(_fd, 4096)
+            except (BlockingIOError, OSError):
+                break
+            if not _chunk:
+                break
+            _stdout_tail += _chunk.decode(errors="replace")
+        check("server: stdout prints REPLIES SINCE LAST ROUND for the reply-carrying round",
+              "REPLIES SINCE LAST ROUND: 2" in _stdout_tail, _stdout_tail)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(rc_out):
+        os.unlink(rc_out)
+
 # -- a. threads UI render input: what fetchThreads()/render() consume --------
 # Stage 2 (this PR) makes the page fetch GET /threads at startup and render
 # every thread + its replies read-only. This drives the endpoints in the same
@@ -1487,6 +1564,21 @@ check("server.PAGE wires thread rendering into the Preview/block chip path",
                  r"if\(THREADS_MODE\)\s*renderThreadBlockRow\(el,\s*el\.__mdDesc,\s*ctx\);",
                  server.PAGE) is not None,
       "renderThreadBlockRow(...) is not called beside renderBlockChip(...) in the md-target loop")
+check("server.PAGE wires the reply-count toast into doSubmit",
+      _re.search(r"THREADS_MODE && info\.replies && payload\.comments\.length\)\s*msg \+= `[^`]*since last round`;",
+                 server.PAGE) is not None,
+      "the 'since last round' toast suffix is not guarded by THREADS_MODE in doSubmit")
+check("server.PAGE's doSubmit leads a reply-only toast with the replies",
+      _re.search(r"THREADS_MODE && !payload\.comments\.length && info\.replies\)\s*"
+                 r"\? `Submitted \$\{info\.replies\} [^`]*since last round — switch back to Claude\.`",
+                 server.PAGE) is not None,
+      "a reply-only round's toast does not lead with the reply count")
+check("server.PAGE's openFinishDialog includes the since-last-round fragment",
+      "since last round" in _re.search(r"function openFinishDialog\(\)\{.*?\n\}", server.PAGE, _re.S).group(0),
+      "openFinishDialog's finishSub text does not mention replies since last round")
+check("server.PAGE's updateFinishBtn consults repliesSinceRound",
+      "repliesSinceRound" in _re.search(r"function updateFinishBtn\(\)\{.*?\n\}", server.PAGE, _re.S).group(0),
+      "updateFinishBtn does not reference repliesSinceRound")
 # The block path must iterate REVERSED: insertAfterBlock inserts afterend of
 # the same fixed element, so forward iteration renders threads newest-first.
 # (The row path is exempt -- insertAfterRow walks past existing .cmt-row
@@ -1527,6 +1619,10 @@ try:
             bad("server: POST /resolve in one-shot mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /resolve in one-shot mode returns 404", e.code == 404, e.code)
+        with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+            state = json.loads(resp.read().decode())
+        check("server: GET /state in one-shot mode carries no replies_since_round key",
+              "replies_since_round" not in state, state)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1563,6 +1659,10 @@ try:
             bad("server: POST /resolve in human-only mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /resolve in human-only mode returns 404", e.code == 404, e.code)
+        with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+            state = json.loads(resp.read().decode())
+        check("server: GET /state in human-only mode carries no replies_since_round key",
+              "replies_since_round" not in state, state)
 finally:
     if proc.poll() is None:
         proc.terminate()

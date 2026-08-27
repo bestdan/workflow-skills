@@ -764,6 +764,7 @@ const comments = {}; // anchor -> {file,line,side,code,text}
 const MODE = (META && META.mode) || 'human-only';
 const THREADS_MODE = MODE === 'threads';
 let threadsRev = -1;   // last threads_rev this page has fetched and rendered
+let repliesSinceRound = 0;   // replies posted since the last submit, from the server
 // anchor key (same "`${file}|${side}${line}`" shape as a draft comment's key)
 // -> array of that anchor's unresolved threads.
 let threadsByKey = {};
@@ -2148,6 +2149,9 @@ async function checkSync(){
     const s = await r.json();
     refreshBtn.hidden = !s.stale;
     if(refreshBtn.hidden) disarmRefresh();
+    if(THREADS_MODE && typeof s.replies_since_round === 'number'){
+      repliesSinceRound = s.replies_since_round;
+    }
     if(THREADS_MODE && typeof s.threads_rev === 'number' && s.threads_rev !== threadsRev){
       // Never re-render over an open composer: unsaved text lives only in the
       // textarea, and render() starts from root.innerHTML=''. Skip the fetch
@@ -2204,7 +2208,7 @@ if(THREADS_MODE){
 }
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
-  finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
+  finishSubmit.disabled = (n===0 && !finishSummary.value.trim() && !(THREADS_MODE && repliesSinceRound > 0));
 }
 // The dialog serves Submit only. Finish fires directly from the header —
 // no modal: the finish round still carries any pending draft comments (they
@@ -2214,7 +2218,7 @@ function openFinishDialog(){
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
   document.getElementById('finishSub').textContent = THREADS_MODE
-    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
+    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}${repliesSinceRound>0?`, ${repliesSinceRound} repl${repliesSinceRound===1?'y':'ies'} since last round`:''}. Add an ${(n||repliesSinceRound>0)?'optional ':''}overall comment, then send this round to Claude.`
     : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 }
@@ -2254,10 +2258,15 @@ async function doSubmit(finished){          // step 2: submit the round
     if(!res.ok) throw new Error(await res.text());
     const info = await res.json().catch(()=>({}));
     finishBg.classList.remove('show');
-    let msg = `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
+    // A reply-only round leads with its replies — "Submitted 0 comment(s)"
+    // reads as lost work when the replies were the round.
+    let msg = (THREADS_MODE && !payload.comments.length && info.replies)
+      ? `Submitted ${info.replies} ${info.replies===1?'reply':'replies'} since last round — switch back to Claude.`
+      : `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
     // "flagged", not "posted": the server no longer posts. Say what actually
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
+    if(THREADS_MODE && info.replies && payload.comments.length) msg += ` · ${info.replies} ${info.replies===1?'reply':'replies'} since last round`;
     toast(msg);
     if(THREADS_MODE){
       // These comments are now server threads (the response minted an id for
@@ -2285,6 +2294,11 @@ async function doSubmit(finished){          // step 2: submit the round
           render();
         }
         refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
+        // This round's replies went out with it; without this the dialog
+        // shows the old count until the next /state poll. Subtract, not
+        // reset, mirroring the server — the poll reconciles any drift.
+        repliesSinceRound -= (info.replies || 0);
+        if(repliesSinceRound < 0) repliesSinceRound = 0;
         // The summary was sent with this round; left in place it would ride
         // into the next round's payload verbatim and keep the dialog's
         // Submit enabled with nothing new to say.
@@ -2355,6 +2369,7 @@ class Handler(BaseHTTPRequestHandler):
     _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...
     round = 0  # threads-mode round number, incremented on each successful submit
     threads_rev = 0  # bumped on every store mutation: submit, reply, resolve
+    replies_since_round = 0  # replies posted since the last submit, reset on submit
     _threads_lock = threading.Lock()
 
     def log_message(self, *a):
@@ -2475,6 +2490,7 @@ class Handler(BaseHTTPRequestHandler):
             if Handler.mode == "threads":
                 with Handler._threads_lock:
                     resp["threads_rev"] = Handler.threads_rev
+                    resp["replies_since_round"] = Handler.replies_since_round
             self._send_json(200, resp)
             return
         if path == "/threads":
@@ -2632,6 +2648,7 @@ class Handler(BaseHTTPRequestHandler):
             })
             Handler.threads_rev += 1
             rev = Handler.threads_rev
+            Handler.replies_since_round += 1
         self._send_json(200, {"ok": True, "threads_rev": rev})
 
     def _do_resolve(self, payload):
@@ -2687,6 +2704,10 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             self._reject_submit(500, {"ok": False, "error": f"cannot write --out: {e}"})
             return
+        replies_count = 0
+        if Handler.mode == "threads":
+            with Handler._threads_lock:
+                replies_count = Handler.replies_since_round
         # human-readable to stdout
         print("\n===== REVIEW SUBMITTED =====", flush=True)
         if payload.get("summary"):
@@ -2697,6 +2718,8 @@ class Handler(BaseHTTPRequestHandler):
             tag = " [dismiss-comments]" if c.get("kind") == "dismiss-comments" else ""
             tag += " [→github]" if c.get("github") else ""
             print(f"{c['file']}:{c['side']}{c['line']}{rng}{tag}  {c['text']}", flush=True)
+        if Handler.mode == "threads" and replies_count > 0:
+            print(f"REPLIES SINCE LAST ROUND: {replies_count}", flush=True)
 
         round_no = None
         try:
@@ -2772,6 +2795,11 @@ class Handler(BaseHTTPRequestHandler):
                     Handler._thread_counter = counter
                     Handler.threads.extend(new_entries)
                     Handler.threads_rev += 1
+                    # Subtract, not reset: a /reply landing between the count
+                    # read above and this commit must carry into the next
+                    # round, not vanish. Never negative — only _do_reply
+                    # increments, and the submit slot serializes submits.
+                    Handler.replies_since_round -= replies_count
             # Release the slot HERE for a stay-alive server, before the
             # response goes out: a sequential caller that has seen the 200 must
             # never race the release (do_POST's finally runs after the flush,
@@ -2804,6 +2832,7 @@ class Handler(BaseHTTPRequestHandler):
             if Handler.mode == "threads":
                 resp["ids"] = [c["id"] for c in payload.get("comments", [])]
                 resp["round"] = round_no
+                resp["replies"] = replies_count
             self.wfile.write(json.dumps(resp).encode())
             self.wfile.flush()
         finally:
