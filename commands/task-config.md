@@ -107,6 +107,8 @@ jira:
   issue_type: Task
   default_epic: PLAT-100
   labels: []
+  # additional_fields: {}    # optional — extra createJiraIssue fields (Team, components, custom fields)
+  # ready_status: Selected for Development # optional — where a complete, unblocked issue lands at capture
   # archive_status: Archived # optional — terminal-category status /archive-tasks transitions to
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
@@ -160,7 +162,7 @@ Tell the user:
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
-  - `jira`: "`jira` supports: /add-task, /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
+  - `jira`: "`jira` supports: /add-task (lands a complete, unblocked task in `ready_status` when that key is set — otherwise it stays in the project's initial status), /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
   - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). You can still manage issues in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
