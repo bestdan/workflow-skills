@@ -2258,11 +2258,15 @@ async function doSubmit(finished){          // step 2: submit the round
     if(!res.ok) throw new Error(await res.text());
     const info = await res.json().catch(()=>({}));
     finishBg.classList.remove('show');
-    let msg = `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
+    // A reply-only round leads with its replies — "Submitted 0 comment(s)"
+    // reads as lost work when the replies were the round.
+    let msg = (THREADS_MODE && !payload.comments.length && info.replies)
+      ? `Submitted ${info.replies} ${info.replies===1?'reply':'replies'} since last round — switch back to Claude.`
+      : `Submitted ${payload.comments.length} comment(s) — switch back to Claude.`;
     // "flagged", not "posted": the server no longer posts. Say what actually
     // happened, so the reviewer doesn't leave believing a PR comment is live.
     if(info.github_flagged) msg += ` · ${info.github_flagged} flagged for the PR — Claude will post`;
-    if(THREADS_MODE && info.replies) msg += ` · ${info.replies} ${info.replies===1?'reply':'replies'} since last round`;
+    if(THREADS_MODE && info.replies && payload.comments.length) msg += ` · ${info.replies} ${info.replies===1?'reply':'replies'} since last round`;
     toast(msg);
     if(THREADS_MODE){
       // These comments are now server threads (the response minted an id for
@@ -2290,6 +2294,11 @@ async function doSubmit(finished){          // step 2: submit the round
           render();
         }
         refreshCounts();                    // re-arms "Submit review (0)" — drafts are cleared
+        // This round's replies went out with it; without this the dialog
+        // shows the old count until the next /state poll. Subtract, not
+        // reset, mirroring the server — the poll reconciles any drift.
+        repliesSinceRound -= (info.replies || 0);
+        if(repliesSinceRound < 0) repliesSinceRound = 0;
         // The summary was sent with this round; left in place it would ride
         // into the next round's payload verbatim and keep the dialog's
         // Submit enabled with nothing new to say.

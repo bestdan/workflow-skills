@@ -1432,6 +1432,20 @@ try:
         status, state_after_submit = get_json("state")
         check("server: reply-count GET /state carries replies_since_round 0 after submit resets it",
               status == 200 and state_after_submit.get("replies_since_round") == 0, state_after_submit)
+
+        _fd = proc.stdout.fileno()
+        os.set_blocking(_fd, False)
+        _stdout_tail = ""
+        while True:
+            try:
+                _chunk = os.read(_fd, 4096)
+            except (BlockingIOError, OSError):
+                break
+            if not _chunk:
+                break
+            _stdout_tail += _chunk.decode(errors="replace")
+        check("server: stdout prints REPLIES SINCE LAST ROUND for the reply-carrying round",
+              "REPLIES SINCE LAST ROUND: 2" in _stdout_tail, _stdout_tail)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1551,9 +1565,14 @@ check("server.PAGE wires thread rendering into the Preview/block chip path",
                  server.PAGE) is not None,
       "renderThreadBlockRow(...) is not called beside renderBlockChip(...) in the md-target loop")
 check("server.PAGE wires the reply-count toast into doSubmit",
-      _re.search(r"THREADS_MODE && info\.replies\)\s*msg \+= `[^`]*since last round`;",
+      _re.search(r"THREADS_MODE && info\.replies && payload\.comments\.length\)\s*msg \+= `[^`]*since last round`;",
                  server.PAGE) is not None,
-      "the 'since last round' toast fragment is not guarded by THREADS_MODE in doSubmit")
+      "the 'since last round' toast suffix is not guarded by THREADS_MODE in doSubmit")
+check("server.PAGE's doSubmit leads a reply-only toast with the replies",
+      _re.search(r"THREADS_MODE && !payload\.comments\.length && info\.replies\)\s*"
+                 r"\? `Submitted \$\{info\.replies\} [^`]*since last round — switch back to Claude\.`",
+                 server.PAGE) is not None,
+      "a reply-only round's toast does not lead with the reply count")
 check("server.PAGE's openFinishDialog includes the since-last-round fragment",
       "since last round" in _re.search(r"function openFinishDialog\(\)\{.*?\n\}", server.PAGE, _re.S).group(0),
       "openFinishDialog's finishSub text does not mention replies since last round")
