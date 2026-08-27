@@ -107,7 +107,9 @@ jira:
 
 **Resolving an id is only half the job — the value shape is the other half, and getting it wrong looks exactly like getting the id wrong.** Values are passed through untouched, so each has to match what its field expects, and the shapes differ by `schema.type`:
 
-- A **`team`** field (Advanced Roadmaps / Atlassian Teams, `schema.custom` ending `:atlassian-team`) takes the team's **id**, not its name. Passing the display name is rejected with `Cannot assign a non-existing team.` — a message that reads like the team is missing when the real problem is that a name was sent where an id belongs. Verified against a live board.
+- A **`team`** field (Advanced Roadmaps / Atlassian Teams, `schema.custom` ending `:atlassian-team`) takes the team's **id as a bare string** — not its name, and not an `{ "id": … }` wrapper. Passing the display name is rejected with `Cannot assign a non-existing team.`, a message that reads like the team is missing when the real problem is that a name was sent where an id belongs. Both halves verified against a live board.
+
+  **Its read shape is not its write shape.** `getJiraIssue` returns a team as an object (`id`, `name`, `avatarUrl`, …), so copying a value out of an existing issue carries a wrapper the create side does not accept. Take the `id` out of that object and write the id alone. This asymmetry is the likeliest way to arrive at a shape error while holding a perfectly correct id.
 - **`components`** and **`fixVersions`** are arrays of `{ "name": … }` objects.
 - Most other custom fields take a plain string, a number, or an `{ "id": … }` object.
 
