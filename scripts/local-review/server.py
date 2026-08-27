@@ -764,6 +764,7 @@ const comments = {}; // anchor -> {file,line,side,code,text}
 const MODE = (META && META.mode) || 'human-only';
 const THREADS_MODE = MODE === 'threads';
 let threadsRev = -1;   // last threads_rev this page has fetched and rendered
+let repliesSinceRound = 0;   // replies posted since the last submit, from the server
 // anchor key (same "`${file}|${side}${line}`" shape as a draft comment's key)
 // -> array of that anchor's unresolved threads.
 let threadsByKey = {};
@@ -2148,6 +2149,9 @@ async function checkSync(){
     const s = await r.json();
     refreshBtn.hidden = !s.stale;
     if(refreshBtn.hidden) disarmRefresh();
+    if(THREADS_MODE && typeof s.replies_since_round === 'number'){
+      repliesSinceRound = s.replies_since_round;
+    }
     if(THREADS_MODE && typeof s.threads_rev === 'number' && s.threads_rev !== threadsRev){
       // Never re-render over an open composer: unsaved text lives only in the
       // textarea, and render() starts from root.innerHTML=''. Skip the fetch
@@ -2204,7 +2208,7 @@ if(THREADS_MODE){
 }
 function updateFinishBtn(){                 // Submit needs feedback
   const n = Object.keys(comments).length;
-  finishSubmit.disabled = (n===0 && !finishSummary.value.trim());
+  finishSubmit.disabled = (n===0 && !finishSummary.value.trim() && !(THREADS_MODE && repliesSinceRound > 0));
 }
 // The dialog serves Submit only. Finish fires directly from the header —
 // no modal: the finish round still carries any pending draft comments (they
@@ -2214,7 +2218,7 @@ function openFinishDialog(){
   const n = Object.keys(comments).length;
   const g = Object.values(comments).filter(c=>c.github).length;
   document.getElementById('finishSub').textContent = THREADS_MODE
-    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then send this round to Claude.`
+    ? `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}${repliesSinceRound>0?`, ${repliesSinceRound} repl${repliesSinceRound===1?'y':'ies'} since last round`:''}. Add an ${(n||repliesSinceRound>0)?'optional ':''}overall comment, then send this round to Claude.`
     : `${n} line comment${n!==1?'s':''} on this review${g?`, ${g} will be posted to GitHub`:''}. Add an ${n?'optional ':''}overall comment, then submit.`;
   finishBg.classList.add('show'); finishSummary.focus(); updateFinishBtn();
 }
@@ -2477,6 +2481,7 @@ class Handler(BaseHTTPRequestHandler):
             if Handler.mode == "threads":
                 with Handler._threads_lock:
                     resp["threads_rev"] = Handler.threads_rev
+                    resp["replies_since_round"] = Handler.replies_since_round
             self._send_json(200, resp)
             return
         if path == "/threads":

@@ -1401,6 +1401,10 @@ try:
             with _urlrequest.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read().decode())
 
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
         status, info1 = post_json("submit", {"meta": {}, "summary": "", "comments": [
             {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
         ]})
@@ -1413,6 +1417,10 @@ try:
         status, _ = post_json("reply", {"thread_id": tid, "author": "user", "text": "two"})
         check("server: reply-count second POST /reply returns 200", status == 200, status)
 
+        status, state_after_replies = get_json("state")
+        check("server: reply-count GET /state carries replies_since_round 2 after two replies",
+              status == 200 and state_after_replies.get("replies_since_round") == 2, state_after_replies)
+
         status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
         check("server: reply-count second submit carries replies 2 (both replies since round 1)",
               status == 200 and info2.get("replies") == 2, info2)
@@ -1420,6 +1428,10 @@ try:
         status, info3 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
         check("server: reply-count third submit carries replies 0 (counter reset by round 2)",
               status == 200 and info3.get("replies") == 0, info3)
+
+        status, state_after_submit = get_json("state")
+        check("server: reply-count GET /state carries replies_since_round 0 after submit resets it",
+              status == 200 and state_after_submit.get("replies_since_round") == 0, state_after_submit)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1542,6 +1554,12 @@ check("server.PAGE wires the reply-count toast into doSubmit",
       _re.search(r"THREADS_MODE && info\.replies\)\s*msg \+= `[^`]*since last round`;",
                  server.PAGE) is not None,
       "the 'since last round' toast fragment is not guarded by THREADS_MODE in doSubmit")
+check("server.PAGE's openFinishDialog includes the since-last-round fragment",
+      "since last round" in _re.search(r"function openFinishDialog\(\)\{.*?\n\}", server.PAGE, _re.S).group(0),
+      "openFinishDialog's finishSub text does not mention replies since last round")
+check("server.PAGE's updateFinishBtn consults repliesSinceRound",
+      "repliesSinceRound" in _re.search(r"function updateFinishBtn\(\)\{.*?\n\}", server.PAGE, _re.S).group(0),
+      "updateFinishBtn does not reference repliesSinceRound")
 # The block path must iterate REVERSED: insertAfterBlock inserts afterend of
 # the same fixed element, so forward iteration renders threads newest-first.
 # (The row path is exempt -- insertAfterRow walks past existing .cmt-row
@@ -1582,6 +1600,10 @@ try:
             bad("server: POST /resolve in one-shot mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /resolve in one-shot mode returns 404", e.code == 404, e.code)
+        with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+            state = json.loads(resp.read().decode())
+        check("server: GET /state in one-shot mode carries no replies_since_round key",
+              "replies_since_round" not in state, state)
 finally:
     if proc.poll() is None:
         proc.terminate()
@@ -1618,6 +1640,10 @@ try:
             bad("server: POST /resolve in human-only mode returns 404", "request unexpectedly succeeded")
         except _urlerror.HTTPError as e:
             check("server: POST /resolve in human-only mode returns 404", e.code == 404, e.code)
+        with _urlrequest.urlopen(f"{url}state", timeout=5) as resp:
+            state = json.loads(resp.read().decode())
+        check("server: GET /state in human-only mode carries no replies_since_round key",
+              "replies_since_round" not in state, state)
 finally:
     if proc.poll() is None:
         proc.terminate()

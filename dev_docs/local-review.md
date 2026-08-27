@@ -192,7 +192,9 @@ gains a `threads_rev` integer that increments on every store mutation; the
 page diffs it against the value it last rendered and fetches `/threads`
 only on change. A submit's response and stdout block also carry the count
 of replies posted since the previous round, so a reply-only round does not
-read as "Submitted 0 comment(s)". Full detail — schemas, anchor
+read as "Submitted 0 comment(s)"; `GET /state` also carries that count live,
+so the page's Submit dialog can show it before the round is sent. Full
+detail — schemas, anchor
 re-placement across `/refresh`, resolved-thread semantics — is in
 `skills/local-review/references/threads.md`.
 
