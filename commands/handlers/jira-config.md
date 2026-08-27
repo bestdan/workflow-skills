@@ -95,15 +95,23 @@ So when `ready_status` is set, `commands/handlers/jira.md` **step 5** transition
 
 `additional_fields` is an **optional** mapping passed verbatim to `createJiraIssue` (merged with `labels`), for board fields this plugin does not model: the Advanced Roadmaps **Team** field, `components`, `fixVersions`, or any custom field. There is no dedicated `team:` key because Jira exposes Team as a **site-specific custom-field id** (`customfield_NNNNN`) that differs between sites, so a named key would hard-code one org's schema.
 
-Resolve the id for a field with `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <site>`, the chosen project and issue type) — the response names every field the create screen accepts — then write it as a plain mapping:
+Resolve the id for a field with `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <site>`, the chosen project and issue type) — the response names every field the create screen accepts, and gives each one's `schema.type`, which is what decides the value shape below. Then write the ids as a plain mapping:
 
 ```yaml
 jira:
   additional_fields:
-    customfield_10001: "Insights and Planning" # Team
+    customfield_10001: "<team-id>" # Team — the id, never the display name
+    components: [{ name: "Billing" }]
+    fixVersions: [{ name: "2026.09" }]
 ```
 
-Values are passed through untouched, so each one has to match the shape that field expects (a plain string, an `{ "id": … }` object, an array). If `createJiraIssue` rejects a field, the create flow stops and reports the id rather than silently creating the issue without it.
+**Resolving an id is only half the job — the value shape is the other half, and getting it wrong looks exactly like getting the id wrong.** Values are passed through untouched, so each has to match what its field expects, and the shapes differ by `schema.type`:
+
+- A **`team`** field (Advanced Roadmaps / Atlassian Teams, `schema.custom` ending `:atlassian-team`) takes the team's **id**, not its name. Passing the display name is rejected with `Cannot assign a non-existing team.` — a message that reads like the team is missing when the real problem is that a name was sent where an id belongs. Verified against a live board.
+- **`components`** and **`fixVersions`** are arrays of `{ "name": … }` objects.
+- Most other custom fields take a plain string, a number, or an `{ "id": … }` object.
+
+When a value is rejected, read the error's own `expectedShape` and `currentValue` — Jira returns both, and together they say whether the id or the shape is wrong. If `createJiraIssue` rejects a field, the create flow stops and reports it rather than silently creating the issue without it.
 
 ## Blocked statuses (`blocked_statuses`)
 
