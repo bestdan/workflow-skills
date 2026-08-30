@@ -115,10 +115,21 @@ directly in the worktree cwd; the older cloud-session model below is a
 fallback). Canonical invocation, cwd `<dir>`:
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --permission-mode accept-edits --model swe-1.6
+[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --permission-mode accept-edits --respect-workspace-trust false --model swe-1.6
 ```
 
 Use `--prompt-file`, **not** piped stdin — `devin -p` with piped stdin panics.
+Pass `--respect-workspace-trust false` or the packet dies before the model:
+devin refuses an untrusted workspace, `-p` cannot show its trust prompt, and
+`<dir>` is a fresh worktree, which is exactly what a trusted-path prefix does
+not cover unless its parent happens to be trusted. Verified — without the flag
+the dispatch returns `Refusing to run in an untrusted workspace: <dir>`.
+Unlike the co-review reviewer, this coder **must** run with `<dir>` as cwd, so
+the neutral-cwd guard used there does not apply: the packet's own repo config
+(`.windsurf/rules/*.md`, `.devin/skills/<name>/SKILL.md`) reaches a coder that
+holds `accept-edits`. That is your own worktree of your own repo, so the
+exposure is the code you already chose to work on — but do not extend this
+invocation to a repo you would not run unreviewed.
 Under `accept-edits`, devin makes edits but **cannot run the verify command**
 (permission restrictions), so **devin packets always return unverified** — the
 orchestrator's check run (SKILL.md step 5) is the verification, not optional.
