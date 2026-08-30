@@ -44,7 +44,7 @@ Call `<linear-mcp>__list_issues` with:
 - `includeArchived`: `false`
 - Limit: 50. If more exist, note the truncation in the report; do not paginate.
 
-Set aside (do **not** score) any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Keep these in a separate `skipped` list so step 8 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `save_issue` call. Report and exit if no un-scored candidates remain.
+Set aside (do **not** score) any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Keep these in a separate `skipped` list so step 9 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `save_issue` call. Report and exit if no un-scored candidates remain.
 
 Also set aside (do **not** score) any candidate that is a **parent rollup** — a backlog issue that has been decomposed by `/break-down-task` into child issues. Promoting a parent rollup would move an empty shell to `Todo` where `/do-tasks` would try to claim it. This is the tracker-path analogue of the file path's `type: epic` skip (see `commands/promote-tasks.md` step 1).
 
@@ -59,7 +59,7 @@ Also set aside (do **not** score) any candidate that is **blocked** — a backlo
 - `priority` is `none` (`0`) → set to `medium` (Linear priority `3`). A flat static default is correct here: priority only orders work, it never gates anything. Never auto-set `urgent` (`1`).
 - `estimate` is unset or not one of `1` / `2` / `3` / `5` → **estimate it** from the issue `description` (Fibonacci `1`/`2`/`3`/`5` — `estimate` is the same scale as the file path's `size`, see `linear-common.md`). This is deliberately not a static default: `estimate` feeds the same size-driven routing `size` does on the file path, so a blind constant could misroute; producing the number is the same judgment the scope-fit check below already requires, backfill just records it. If the honest estimate would exceed `5`, do not write a bogus `5` — leave `estimate` unset and let the scope-fit check below score LOW with reason `scope exceeds estimate 5 — split into sub-issues`.
 
-Backfilled values are written in step 7's `save_issue` call alongside the state/label transition (not a separate write), with a one-line issue comment noting which field(s) the promoter auto-set so a human can cheaply correct a bad guess. `dry-run` reports the intended backfills without writing them. An auto-estimated `estimate` is fully trusted downstream exactly like a human-set one — see the file path's equivalent note in `skills/task/SKILL.md`'s Confidence check section.
+Backfilled values are written in step 8's `save_issue` call alongside the state/label transition (not a separate write), with a one-line issue comment noting which field(s) the promoter auto-set so a human can cheaply correct a bad guess. `dry-run` reports the intended backfills without writing them. An auto-estimated `estimate` is fully trusted downstream exactly like a human-set one — see the file path's equivalent note in `skills/task/SKILL.md`'s Confidence check section.
 
 Then, for each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter, **using the backfilled `priority`/`estimate` values** from above:
 
@@ -76,20 +76,33 @@ Then, for each candidate, run the **confidence check** from `skills/task/SKILL.m
 
 As on the file path, this scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands tagged `human-approval-requested` for a human to confirm, never silently lost.
 
-### 7. Apply
+### 7. Precheck workspace active-issue quota
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below) and exit **without** calling `save_issue`.
+Linear's free plan caps the **workspace-wide** count of **active** issues (states of type `unstarted` + `started` — Backlog, Done, and Canceled are explicitly excluded) at 250, and a HIGH transition in step 8 (`backlog` → `unstarted`) is exactly what grows that count: promoting a batch of backlog cards is functionally "creating" that many new active issues from the quota's point of view, and running into the cap **mid-batch** is the failure this step exists to prevent. Skip this step entirely if **no** candidate scored HIGH in step 6 — a LOW-scored candidate never leaves Backlog, so it can't affect the count.
 
-Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`, including any backfilled `priority`/`estimate` from step 6 regardless of HIGH/LOW (a LOW-scored issue still gets its backfilled fields saved, so the human has less to fix):
+1. **Resolve the quota.** Read `linear.active_issue_quota` (default `250` — the free-plan ceiling; set to `0` to disable this check entirely, e.g. on a paid plan with no cap). If `0`, skip the rest of this step.
+2. **Count current active issues, workspace-wide.** The cap is per-workspace, not per-team, so omit `team`/`teamId` from both calls below (a configured project scope doesn't narrow this either — a promotion in one project still spends from the same shared quota). Call `<linear-mcp>__list_issues` twice — `state: "unstarted"` and `state: "started"`, `includeArchived: false`, `limit: 250` — and sum the two result counts as `active_count`. If either call returns `hasNextPage: true`, the workspace already holds `>= linear.active_issue_quota` active issues on that state alone; treat `active_count` as at-or-over the quota without paginating further.
+3. **Compare against this run's batch.** Let `promoting` = the number of HIGH-scored candidates from step 6, in the same order they were scored. `remaining = active_issue_quota - active_count`.
+   - `remaining >= promoting` → plenty of room — proceed to Apply normally, no change to any candidate's outcome.
+   - `0 < remaining < promoting` → **partial**: only the first `remaining` HIGH candidates actually promote in step 8; the rest stay HIGH-scored but move to a `held (quota)` outcome — Apply must not touch their `state` or add `auto-eligible`, though their step 6 backfills (if any) still get saved (see step 8).
+   - `remaining <= 0` → **none**: every HIGH candidate this run becomes `held (quota)` — Apply skips the `state`/`auto-eligible` transition for all of them.
+4. **Carry `active_count`/`active_issue_quota` and the held identifiers** into step 8 (Apply) and step 9 (Report) — this is a read done once here, not re-queried per candidate.
 
-- **HIGH:** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering); `priority`/`estimate` = the backfilled value(s) from step 6, if any.
+### 8. Apply
+
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below) and exit **without** calling `save_issue`. Include the quota precheck's projected outcome in the dry-run output too — the point of checking it upfront is to surface the constraint before a real run ever hits it mid-batch.
+
+Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`, including any backfilled `priority`/`estimate` from step 6 regardless of HIGH/LOW/held (a LOW-scored or quota-held issue still gets its backfilled fields saved, so the human has less to fix):
+
+- **HIGH (promoted):** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering); `priority`/`estimate` = the backfilled value(s) from step 6, if any.
+- **HIGH, held by step 7's quota precheck:** **do not** change `state` or `labels` (leave the issue in Backlog, un-tagged) — this is the one case that skips the `auto-eligible` label a HIGH score would otherwise get, precisely because the issue isn't actually moving to `unstarted`; `priority`/`estimate` = the backfilled value(s) from step 6, if any. Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` and `body` = `/promote-tasks: held — active-issue quota <active_count>/<active_issue_quota> reached. Run /archive-tasks to free capacity, then re-run /promote-tasks to pick this up.` (append the backfill note in the same comment when one applies, same shape as the LOW comment below).
 - **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`; `priority`/`estimate` = the backfilled value(s) from step 6, if any. Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` (the `save_comment` field is named `issueId`, not `id` — same as `linear-claim.md`) and `body` = a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment; if any field was backfilled, note it in the same comment (e.g. `promoter auto-set priority to Medium, estimate to 2`).
 
 If a candidate had no other failed check but **did** get a backfill, still call `save_comment` to note what was auto-set (there is no failed-check reason in that case, just the backfill note) — mirrors the file path's provenance comment being appended even when the card is otherwise HIGH.
 
 Never move an issue to a `completed`- or `canceled`-type state, and never touch a non-`backlog` issue.
 
-### 8. Report
+### 9. Report
 
 Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
 
@@ -102,6 +115,8 @@ Promoted 4 of 7 candidates:
     - PRE-18  Remove stale alias  (backfilled: priority, estimate)
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
+  held (quota) (1):
+    - PRE-22  Add retry to sync job  (active-issue quota 249/250 — run /archive-tasks to free capacity)
   skipped (3):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
@@ -111,7 +126,7 @@ backfilled (2):
   - PRE-18  (priority, estimate)
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 5 if it applied.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. **`held (quota)`** is a separate section from `skipped`: these scored HIGH and would otherwise have promoted, but step 7's quota precheck held them back — every one names the `active_count`/`active_issue_quota` reading and points at `/archive-tasks`, so the note in step 7 is not silently lost between the check and the report. Omit the section entirely when nothing was held. Append the truncation note from step 5 if it applied.
 
 **Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". Make the remediation **scope-aware**, and note that the whole-team backlog has **no per-run override** — it is scored only when **no** projects are configured (step 4 cases 1–2), a config-level state, not a flag. For example:
 
