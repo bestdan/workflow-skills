@@ -7,8 +7,10 @@ an open issue is exactly "one `status:` rung and one `auto:` rung". Writing them
 separately would leave a window in which the issue contradicts itself, so the
 single PATCH carries both.
 
-This is the ONLY supported way for the gh-issue handler to change an issue's
-status, routing, priority or estimate. Two measured facts force its shape, and
+Once the gh-issue handler migrates onto it, this will be the only supported way
+to change an issue's status, routing, priority or estimate. Nothing calls it yet
+— the handler transitions still use `gh issue edit`, and they move together in a
+later change rather than half-now. Two measured facts force its shape, and
 neither half is sufficient alone:
 
 - `gh issue edit --add-label X --remove-label Y` is **not atomic** — it produced
@@ -96,6 +98,17 @@ def group_of(label):
     return label.split(":", 1)[0]
 
 
+def in_managed_namespace(label, managed_groups):
+    """True only for a label that actually sits inside one of the namespaces.
+
+    The colon is load-bearing. A repo may carry a plain label named `status` or
+    `est` that has nothing to do with this schema, and `group_of()` reports the
+    whole bare name as its own group — so deciding on the split result alone
+    would classify that label as ours and delete it with the full-set write.
+    """
+    return any(label.startswith(f"{group}:") for group in managed_groups)
+
+
 def validate(labels, vocabulary, done=False):
     """Raise InvalidLabelSet unless `labels` is a legal complete set.
 
@@ -171,7 +184,9 @@ def preserve_unmanaged(current, managed_groups):
     handler's own marker (`follow-up`, which /archive-tasks refuses to sweep
     without) and anything a human added live outside them and must survive.
     """
-    return [label for label in current if group_of(label) not in managed_groups]
+    return [
+        label for label in current if not in_managed_namespace(label, managed_groups)
+    ]
 
 
 def dropped_unrecognized(current, managed_groups, vocabulary):
@@ -188,7 +203,7 @@ def dropped_unrecognized(current, managed_groups, vocabulary):
     return [
         label
         for label in current
-        if group_of(label) in managed_groups and label not in vocabulary
+        if in_managed_namespace(label, managed_groups) and label not in vocabulary
     ]
 
 
@@ -210,18 +225,24 @@ def patch_issue(repo, issue, labels, state=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True, help="owner/name")
-    parser.add_argument("--issue", required=True, help="issue number")
+    parser.add_argument("--issue", required=True, type=int, help="issue number")
     parser.add_argument(
         "--labels",
         required=True,
-        help="the COMPLETE desired set, comma-separated — it replaces what is there",
+        help=(
+            "the complete MANAGED set, comma-separated — labels outside "
+            "status:/auto:/prio:/est: are carried forward, not deleted"
+        ),
     )
-    parser.add_argument(
+    # Opposite transitions. Accepting both would silently drop one of them, so
+    # argparse rejects the pair before any work happens.
+    state = parser.add_mutually_exclusive_group()
+    state.add_argument(
         "--done",
         action="store_true",
         help="completion write: closes the issue and asserts no `status:`/`auto:` rung",
     )
-    parser.add_argument(
+    state.add_argument(
         "--reopen",
         action="store_true",
         help="reopen a closed issue and give it these rungs",

@@ -247,6 +247,25 @@ class WriteTests(unittest.TestCase):
         _, out, _ = self._write(VALID)
         self.assertNotIn("Dropped", out)
 
+    def test_a_bare_label_named_after_a_group_is_not_ours_to_delete(self):
+        """The colon is what makes a label ours.
+
+        A repo may carry a plain `status` or `est` label with nothing to do with
+        this schema. Deciding on the split result alone would report the whole
+        bare name as its own group, classify it as managed, and delete it.
+        """
+        self.recorder.existing = ["status", "est", "prio:urgent", "bug"]
+        code, out, _ = self._write(VALID)
+
+        self.assertEqual(code, 0)
+        written = self.recorder.written_labels()
+        self.assertIn("status", written)
+        self.assertIn("est", written)
+        self.assertIn("bug", written)
+        # ...while a real out-of-vocabulary label inside a namespace still goes.
+        self.assertNotIn("prio:urgent", written)
+        self.assertIn("prio:urgent", out)
+
     def test_report_only_run_mutates_nothing(self):
         """It reads, so the preview is accurate — but it never writes."""
         self.recorder.existing = ["follow-up"]

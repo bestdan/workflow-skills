@@ -88,67 +88,47 @@ session owns — the lock is the **creation**, and it is already decided by then
 
 ## Cloud routines: use the comment election, not the ref lock
 
-**Measured 2026-08-24.** An earlier version of this file was wrong about routines
-twice, so the reasoning is spelled out rather than asserted.
+A routine has two channels to GitHub and only one of them is credentialed:
 
-A routine has two channels to GitHub and they behave differently:
-
-- **Raw HTTP is not a credentialed path.** `gh` is not installed (absent from `PATH`
-  and from `find / -maxdepth 4 -name gh -type f`), and `curl` to `api.github.com`
-  carries no token. `POST`/`DELETE` on `/git/refs` return **403 `Write access to this
-  GitHub API path is not permitted through this proxy.`** Read behaviour on this path
-  was **inconsistent between runs**, so do not rely on it for reads either. **The
+- **Raw HTTP carries no token.** `gh` is not installed, and `curl` to `api.github.com`
+  gets **403** on writes; reads on `/git/refs` were inconsistent between runs. **The
   `gh api` acquire form above is therefore local-only.**
-- **The GitHub MCP connector is authenticated and is the routine's real channel.**
+- **The GitHub MCP connector is the routine's real channel**, and
+  `mcp__github__create_branch` is a working acquire primitive there — create-only, and a
+  duplicate is rejected with `Reference already exists`, the same election semantics as
+  `POST /git/refs`.
 
-**`mcp__github__create_branch` is a valid acquire primitive.** Verified against the
-live API from inside a routine:
-
-```
-create_branch(owner, repo, branch="zz/probe-b-20260824")
-  → {"ref":"refs/heads/zz/probe-b-20260824","object":{"sha":"4b6379aa…"}}
-same call again
-  → failed to create branch: Reference already exists
-```
-
-Create-only, and the duplicate is rejected — the same election semantics as
-`POST /git/refs`. So the primitive **works** there. But do not use it yet:
-
-> **Routines default to the comment-token election below, not to `create_branch`.**
-> The primitive is available and measured; what is missing is the other half of the
-> lifecycle.
-
-One further difference, if the default ever flips: `create_branch` takes
-`from_branch`, **not a sha**, so it resolves the source tip at call time and cannot pin
-an exact base. That does not weaken the election — the lock is the _name_ — but the
-branch may not sit at the sha the session read earlier if the base moved in between.
+> **Routines still default to the comment-token election below.** The acquire primitive
+> works; the other half of the lifecycle does not.
 
 ### Why it is not the default: a routine cannot release
 
-A routine **cannot release the lock it would acquire.** Both paths are closed:
-
-- The connector's 58 tools contain **no delete-branch and no delete-ref tool**
-  (enumerated in full, not sampled).
-- `git push --delete` from a routine fails with a **403 RPC error**, even though
-  `git push` creating a ref succeeds.
-
-So the bail path at the end of this file is **unavailable unattended**, and the failure
-is not symmetric with the fallback's:
+A routine **cannot release the lock it would acquire** — the connector exposes no
+delete-branch and no delete-ref tool, and `git push --delete` returns 403. So the bail
+path at the end of this file is **unavailable unattended**, and the two failures are not
+symmetric:
 
 |                  | left behind     | cost                                                                                                     |
 | ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
 | `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |
 | comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans |
 
-A routine cannot retract its comment either (no delete-comment tool), but a leftover
-comment costs hygiene where a leftover ref costs the issue. "Acquire only when you
-intend to run to completion" is **not** a mitigation: a crash or a timeout is precisely
-the case where intent does not apply, and there is no stale-ref sweep in this repo —
-`scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr` claim PRs, not refs.
+"Acquire only when you intend to run to completion" is **not** a mitigation: a crash or a
+timeout is precisely the case where intent does not apply, and there is **no stale-ref
+sweep in this repo** — `scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr`
+claim PRs, not refs. Flipping the default is a one-paragraph change once a sweep exists;
+until then a routine that somehow does hold a ref must be cleared from a **local**
+session (`git push origin --delete task/<KEY>`).
 
-**Flipping the default is a one-paragraph change once a stale-ref sweep exists.** Until
-then a routine that somehow does hold a ref must be cleared from a **local** session
-(`git push origin --delete task/<KEY>`).
+One caveat if the default ever flips: `create_branch` takes `from_branch`, **not a sha**,
+so it cannot pin an exact base. That does not weaken the election — the lock is the
+_name_ — but the branch may not sit at the sha the session read earlier.
+
+> **Measured 2026-08-24 against the live API.** Probe transcripts, the verbatim 403
+> texts and the full 58-tool connector inventory are in
+> [`dev_docs/decisions/2026-08-24-routine-claim-channel.md`](../../dev_docs/decisions/2026-08-24-routine-claim-channel.md).
+> **Do not re-derive routine behaviour from documentation** — this file was wrong twice
+> that way.
 
 ## Fallback: comment-token election (environments that cannot acquire)
 
@@ -211,16 +191,11 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    and no work started. On gh-issue, delete it outright:
    `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
 
-   > **In a cloud routine this retraction is impossible.** `gh` is absent and raw HTTP
-   > carries no credential, so the `gh api --method DELETE` form cannot run. The
-   > authenticated GitHub MCP connector can _add_ a comment (`add_issue_comment`) but
-   > exposes **no delete-comment tool** — confirmed by enumerating all 58 tools on
-   > 2026-08-24.
-   > A routine that loses the election therefore leaves its token comment behind.
-   > Since a loser's id is always higher than the winner's it still cannot win its own
-   > race, so this costs hygiene rather than correctness — but the _next_ session's
-   > `T_unclaimed` may fall before that orphan, so treat a leftover token from a
-   > routine as expected rather than as evidence of a live claim.
+   > **In a cloud routine this retraction is impossible** — the connector exposes no
+   > delete-comment tool, and the `gh api` form cannot run there (see "Cloud routines"
+   > above). A losing routine leaves its token behind, which costs hygiene rather than
+   > correctness: a loser's id is always higher than the winner's, so it can never win
+   > its own race. Treat a leftover routine token as expected, not as a live claim.
 
    Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
    than the winner's, so it can never win its own race. What it protects is the _next_
@@ -246,9 +221,6 @@ instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; de
 on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.
 
 > **A routine cannot run this step** — which is exactly why routines do not take the
-> ref lock in the first place (see "Cloud routines" above). Measured 2026-08-24:
-> `git push --delete` returns a **403 RPC error** there, and the GitHub MCP connector
-> exposes no delete-branch or delete-ref tool. A ref that does end up stranded has to
-> be deleted from a local session, where both
-> `gh api --method DELETE .../git/refs/heads/<ref>` and `git push origin --delete <ref>`
-> work.
+> ref lock in the first place (see "Cloud routines" above). A stranded ref has to be
+> deleted from a local session, where both `git push origin --delete <ref>` and the
+> equivalent `DELETE .../git/refs/heads/<ref>` API call work.
