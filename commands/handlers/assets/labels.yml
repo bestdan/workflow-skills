@@ -2,9 +2,11 @@
 #
 # GitHub Issues has only open/closed and no native status, priority or estimate
 # field, so labels carry that state. Label namespaces are per-repo, which makes
-# provisioning load-bearing rather than hygiene: `gh` rejects an undefined label
-# outright, and `gh issue transfer` silently drops labels the target repo lacks
-# — which for this schema means losing an issue's entire state.
+# provisioning load-bearing rather than hygiene. Mind which channel: the `gh issue
+# edit` CLI rejects an undefined label outright, while the raw REST PATCH the write
+# helper uses silently CREATES it — which is why gh-issue-state.py validates against
+# this file before any network call. And `gh issue transfer` silently drops labels the
+# target repo lacks, which for this schema means losing an issue's entire state.
 #
 # This file is the single source of the vocabulary. Do not hardcode label names
 # anywhere else in the handler; read them from here.

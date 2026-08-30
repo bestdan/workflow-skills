@@ -9,9 +9,16 @@ the evidence behind it.
 ## Why this exists
 
 `claim-lock.md` was wrong about routines **twice**, and both times the same way: the
-claim was taken from documentation rather than from a measurement. The first version
-asserted that a routine had a pre-installed `gh`. The second asserted that the proxy
-refused GitHub API writes outright. Neither survived contact with a probe.
+claim was taken from documentation rather than from a measurement.
+
+- The first version asserted that a cloud session "runs pinned to a fixed
+  `claude/<session>` branch and cannot create `task/<KEY>`" — so the ref lock was
+  described as unavailable to routines outright. Removed in `08a6642`.
+- The second asserted that the proxy refused GitHub API writes outright. That is true
+  of the raw HTTP path and false of the MCP connector, which is the credentialed one —
+  so the conclusion drawn from it was wrong.
+
+Neither survived contact with a probe.
 
 So the operative instruction, which belongs with the rule and not only here, is: **do
 not re-derive routine behaviour from documentation.** Probe it.
@@ -73,7 +80,9 @@ That asymmetry is the whole decision, and it is stated inline in `claim-lock.md`
 
 ## What else the connector cannot do
 
-Recorded here because each one shaped a task in the GitHub-Issues migration:
+Measured in the same 2026-08-24 probe session, and recorded here because each one
+shaped a task in the GitHub-Issues migration. Unlike the facts above, these were not
+carried over from `claim-lock.md` — nothing else in the repo corroborates them:
 
 - **No dependency-edge tool** — `blocked_by` / `blocking` are unreachable unattended.
 - **No milestone create** (a milestone can be _set_, not created).

@@ -91,8 +91,9 @@ session owns — the lock is the **creation**, and it is already decided by then
 A routine has two channels to GitHub and only one of them is credentialed:
 
 - **Raw HTTP carries no token.** `gh` is not installed, and `curl` to `api.github.com`
-  gets **403** on writes; reads on `/git/refs` were inconsistent between runs. **The
-  `gh api` acquire form above is therefore local-only.**
+  gets **403** on writes; reads on `/git/refs` were inconsistent between runs, so do
+  not rely on that path for reads either. **The `gh api` acquire form above is
+  therefore local-only.**
 - **The GitHub MCP connector is the routine's real channel**, and
   `mcp__github__create_branch` is a working acquire primitive there — create-only, and a
   duplicate is rejected with `Reference already exists`, the same election semantics as

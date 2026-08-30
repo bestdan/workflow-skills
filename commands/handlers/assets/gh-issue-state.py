@@ -70,7 +70,8 @@ Usage:
   python3 gh-issue-state.py --repo owner/name --issue 142 \
       --labels prio:1,est:3 --done --apply
 
-Without --apply it validates and prints what it would write, touching nothing.
+Without --apply it validates, reads the issue, and prints what it would write. That
+path is read-only — it mutates nothing — but it is not offline: the read always runs.
 """
 
 import argparse
