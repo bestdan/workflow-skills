@@ -86,11 +86,54 @@ acquire, and the other advances deterministically instead of building a duplicat
 Every later `git push` on this branch is an ordinary fast-forward update of a ref this
 session owns — the lock is the **creation**, and it is already decided by then.
 
-## Fallback: comment-token election (branch-pinned environments)
+## Cloud routines: use the comment election, not the ref lock
 
-Claude Code on the web runs pinned to a fixed `claude/<session>` branch and cannot
-create `task/<KEY>` — this is exactly why the `repo-pr` handler locks on a PR rather
-than a branch. When the acquire call fails for an environment or permission reason
+A routine has two channels to GitHub and only one of them is credentialed:
+
+- **Raw HTTP carries no token.** `gh` is not installed, and `curl` to `api.github.com`
+  gets **403** on writes; reads on `/git/refs` were inconsistent between runs, so do
+  not rely on that path for reads either. **The `gh api` acquire form above is
+  therefore local-only.**
+- **The GitHub MCP connector is the routine's real channel**, and
+  `mcp__github__create_branch` is a working acquire primitive there — create-only, and a
+  duplicate is rejected with `Reference already exists`, the same election semantics as
+  `POST /git/refs`.
+
+> **Routines still default to the comment-token election below.** The acquire primitive
+> works; the other half of the lifecycle does not.
+
+### Why it is not the default: a routine cannot release
+
+A routine **cannot release the lock it would acquire** — the connector exposes no
+delete-branch and no delete-ref tool, and `git push --delete` returns 403. So the bail
+path at the end of this file is **unavailable unattended**, and the two failures are not
+symmetric:
+
+|                  | left behind     | cost                                                                                                     |
+| ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |
+| comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans |
+
+"Acquire only when you intend to run to completion" is **not** a mitigation: a crash or a
+timeout is precisely the case where intent does not apply, and there is **no stale-ref
+sweep in this repo** — `scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr`
+claim PRs, not refs. Flipping the default is a one-paragraph change once a sweep exists;
+until then a routine that somehow does hold a ref must be cleared from a **local**
+session (`git push origin --delete task/<KEY>`).
+
+One caveat if the default ever flips: `create_branch` takes `from_branch`, **not a sha**,
+so it cannot pin an exact base. That does not weaken the election — the lock is the
+_name_ — but the branch may not sit at the sha the session read earlier.
+
+> **Measured 2026-08-24 against the live API.** Probe transcripts, the verbatim 403
+> texts and the full 58-tool connector inventory are in
+> [`dev_docs/decisions/2026-08-24-routine-claim-channel.md`](../../dev_docs/decisions/2026-08-24-routine-claim-channel.md).
+> **Do not re-derive routine behaviour from documentation** — this file was wrong twice
+> that way.
+
+## Fallback: comment-token election (environments that cannot acquire)
+
+When the acquire call fails for an environment or permission reason
 (never on a 422 — that is a decided race), degrade to the election below and
 **say so explicitly** in the report: `claim lock degraded to comment election: <the
 API error>`. A silent degrade would claim atomicity the run does not have.
@@ -149,6 +192,12 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    and no work started. On gh-issue, delete it outright:
    `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
 
+   > **In a cloud routine this retraction is impossible** — the connector exposes no
+   > delete-comment tool, and the `gh api` form cannot run there (see "Cloud routines"
+   > above). A losing routine leaves its token behind, which costs hygiene rather than
+   > correctness: a loser's id is always higher than the winner's, so it can never win
+   > its own race. Treat a leftover routine token as expected, not as a live claim.
+
    Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
    than the winner's, so it can never win its own race. What it protects is the _next_
    session, whose `T_unclaimed` may fall before a leftover token — the tokenless
@@ -171,3 +220,8 @@ never sits unclaimed while a stale lock ref still blocks the next session's acqu
 the fallback path there is no ref to delete — **retract** this session's token comment
 instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
 on gh-issue). Never delete a `task/<KEY>` ref this session did not acquire.
+
+> **A routine cannot run this step** — which is exactly why routines do not take the
+> ref lock in the first place (see "Cloud routines" above). A stranded ref has to be
+> deleted from a local session, where both `git push origin --delete <ref>` and the
+> equivalent `DELETE .../git/refs/heads/<ref>` API call work.
