@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.13.0] - 2026-08-30
+
+### Features
+
+- label state model primitives for the Linear migration (#415) (d7aa23a)
+
 ## [2.12.0] - 2026-08-27
 
 ### Features
