@@ -78,7 +78,7 @@ def sync(repo, labels_file, apply):
     return {
         "repo": repo,
         "expected": len(expected),
-        "created" if apply else "would_create": missing,
+        "missing": missing,
         "unknown": unknown,
         "applied": apply,
     }
@@ -86,7 +86,7 @@ def sync(repo, labels_file, apply):
 
 def report(result):
     verb = "Created" if result["applied"] else "Would create"
-    pending = result.get("created", result.get("would_create", []))
+    pending = result["missing"]
     print(f"{result['repo']}: {result['expected']} labels in the vocabulary")
     if pending:
         print(f"{verb} {len(pending)}: {', '.join(pending)}")

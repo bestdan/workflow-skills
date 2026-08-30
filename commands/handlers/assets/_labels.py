@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Shared reader for the gh-issue handler's label vocabulary (labels.yml).
 
-Imported by gh-label-sync.py (which provisions a repo) and gh-label-write.py
-(which writes an issue's label set). Both need the same vocabulary and the same
+Imported by gh-label-sync.py (which provisions a repo) and gh-issue-state.py
+(which writes an issue's label set and open/closed state). Both need the same vocabulary and the same
 invariants, and labels.yml is the single source for them — so the parser lives
 here rather than being restated in each caller.
 
@@ -16,7 +16,8 @@ from pathlib import Path
 DEFAULT_LABELS_FILE = Path(__file__).resolve().parent / "labels.yml"
 
 # Groups an open issue must carry exactly one of, and groups it may carry at most
-# one of. A closed ("done") issue carries no status rung — see labels.yml.
+# one of. A closed ("done") issue carries neither a `status:` nor an `auto:`
+# rung — see labels.yml.
 EXACTLY_ONE = ("status", "auto")
 AT_MOST_ONE = ("prio", "est")
 
@@ -68,10 +69,28 @@ def load_vocabulary(path=DEFAULT_LABELS_FILE):
             raise VocabularyError(
                 f"{path}:{lineno}: expected an inline list for `{key}`"
             )
-        groups[key] = [v.strip() for v in value[1:-1].split(",") if v.strip()]
+        values = [v.strip() for v in value[1:-1].split(",") if v.strip()]
+        if not values:
+            raise VocabularyError(f"{path}:{lineno}: group `{key}` has no values")
+        groups[key] = values
 
     if not groups:
         raise VocabularyError(f"{path}: no label groups found")
+    # The group NAMES are load-bearing, not just their values: EXACTLY_ONE and
+    # AT_MOST_ONE hardcode them, so a typo here (`stauts:`) would provision a
+    # dead namespace and then make every write impossible, because validate()
+    # would still demand a `status:` label the vocabulary no longer has. One
+    # fact, one home — so the two sources have to be checked against each other.
+    wanted = set(EXACTLY_ONE + AT_MOST_ONE)
+    if set(groups) != wanted:
+        unexpected = sorted(set(groups) - wanted)
+        absent = sorted(wanted - set(groups))
+        detail = []
+        if unexpected:
+            detail.append(f"unexpected group(s): {', '.join(unexpected)}")
+        if absent:
+            detail.append(f"missing group(s): {', '.join(absent)}")
+        raise VocabularyError(f"{path}: {'; '.join(detail)}")
     missing_colors = sorted(set(groups) - set(colors))
     if missing_colors:
         raise VocabularyError(

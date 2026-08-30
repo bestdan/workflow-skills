@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Write an issue's complete label set atomically: validate, then full-set PATCH.
+"""Write an issue's complete state atomically: validate, then one full-set PATCH.
+
+"State" here means the label set AND open/closed together, because under this
+schema they are two encodings of one fact: a closed issue is exactly "no rungs",
+an open issue is exactly "one `status:` rung and one `auto:` rung". Writing them
+separately would leave a window in which the issue contradicts itself, so the
+single PATCH carries both.
 
 This is the ONLY supported way for the gh-issue handler to change an issue's
 status, routing, priority or estimate. Two measured facts force its shape, and
@@ -40,15 +46,29 @@ handler's own markers alive: gh-issue.md puts `follow-up` on task issues and
 The read makes it two requests, but the WRITE is still one, which is where
 atomicity is needed.
 
+Open/closed travels in the same PATCH rather than being left to the caller. That
+removes an ordering question instead of legislating one: whichever order a caller
+picked for "close the issue" and "write its labels", one of the two would land
+while the issue was in the other state, so rejecting a mismatch would forbid a
+legal sequence arbitrarily. The rules:
+
+- `--done` closes the issue and asserts neither rung is present
+- an ordinary write against an OPEN issue omits `state` entirely, so the default
+  path never touches it
+- an ordinary write against a CLOSED issue is refused, because putting live rungs
+  on a closed issue IS a reopen; `--reopen` says so out loud and performs it
+
+Callers must not pair --done with a separate `gh issue close` — this does it.
+
 Usage:
-  python3 gh-label-write.py --repo owner/name --issue 142 \
+  python3 gh-issue-state.py --repo owner/name --issue 142 \
       --labels status:3_started,auto:eligible,prio:1,est:3 --apply
 
-  # completion: a closed issue carries neither rung, and keeps prio/est
-  python3 gh-label-write.py --repo owner/name --issue 142 \
+  # completion: closes the issue, which carries neither rung and keeps prio/est
+  python3 gh-issue-state.py --repo owner/name --issue 142 \
       --labels prio:1,est:3 --done --apply
 
-Without --apply it validates and prints the set it would write, touching nothing.
+Without --apply it validates and prints what it would write, touching nothing.
 """
 
 import argparse
@@ -128,15 +148,19 @@ def run_gh(args, stdin=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def current_labels(repo, issue):
-    """Read the issue's labels. Read-only; mutates nothing."""
+def current_issue(repo, issue):
+    """Read the issue's labels and open/closed state. Read-only; mutates nothing.
+
+    State rides along on the same GET, so knowing it costs no extra request.
+    """
     code, out, err = run_gh(
-        ["issue", "view", str(issue), "--repo", repo, "--json", "labels"]
+        ["issue", "view", str(issue), "--repo", repo, "--json", "labels,state"]
     )
     if code != 0:
         raise SystemExit(f"reading {repo}#{issue} failed: {err.strip() or out.strip()}")
-    payload = json.loads(out or '{"labels": []}')
-    return [entry["name"] for entry in payload.get("labels", [])]
+    payload = json.loads(out or '{"labels": [], "state": "OPEN"}')
+    labels = [entry["name"] for entry in payload.get("labels", [])]
+    return labels, (payload.get("state") or "OPEN").lower()
 
 
 def preserve_unmanaged(current, managed_groups):
@@ -150,9 +174,30 @@ def preserve_unmanaged(current, managed_groups):
     return [label for label in current if group_of(label) not in managed_groups]
 
 
-def patch_labels(repo, issue, labels):
+def dropped_unrecognized(current, managed_groups, vocabulary):
+    """Managed-namespace labels the vocabulary does not define.
+
+    The full-set write deletes these, and correctly so — this helper owns those
+    four namespaces, and an `prio:urgent` a human invented is exactly the garbage
+    validate-then-replace exists to purge. But the deletion is invisible unless it
+    is reported, so a caller would see a label vanish with no trace of why.
+
+    A rung being REPLACED (status:2_ready -> status:3_started) is not in here:
+    that is the ordinary transition, not a loss.
+    """
+    return [
+        label
+        for label in current
+        if group_of(label) in managed_groups and label not in vocabulary
+    ]
+
+
+def patch_issue(repo, issue, labels, state=None):
     """One PATCH carrying the complete set. Never --add-label/--remove-label."""
-    body = json.dumps({"labels": labels})
+    payload = {"labels": labels}
+    if state:
+        payload["state"] = state
+    body = json.dumps(payload)
     code, out, err = run_gh(
         ["api", "--method", "PATCH", f"repos/{repo}/issues/{issue}", "--input", "-"],
         stdin=body,
@@ -174,7 +219,12 @@ def main(argv=None):
     parser.add_argument(
         "--done",
         action="store_true",
-        help="completion write: assert no `status:` label (a closed issue has no rung)",
+        help="completion write: closes the issue and asserts no `status:`/`auto:` rung",
+    )
+    parser.add_argument(
+        "--reopen",
+        action="store_true",
+        help="reopen a closed issue and give it these rungs",
     )
     parser.add_argument("--apply", action="store_true", help="send the PATCH")
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
@@ -193,11 +243,32 @@ def main(argv=None):
         print(f"refusing to write {args.repo}#{args.issue}: {exc}", file=sys.stderr)
         return 2
 
-    preserved = preserve_unmanaged(current_labels(args.repo, args.issue), set(groups))
+    current, state = current_issue(args.repo, args.issue)
+    preserved = preserve_unmanaged(current, set(groups))
+    dropped = dropped_unrecognized(current, set(groups), vocabulary)
     labels = managed + [label for label in preserved if label not in managed]
 
+    # The label set and open/closed are two encodings of one fact, so the write
+    # settles both. Only the two transitions touch `state`; an ordinary write to
+    # an already-open issue omits it, so the common path cannot move it by
+    # accident.
+    if args.done:
+        target_state = "closed"
+    elif state == "closed":
+        if not args.reopen:
+            print(
+                f"refusing to write {args.repo}#{args.issue}: issue is closed; "
+                "pass --done for a rung-free write, or --reopen to reopen it "
+                "with these rungs",
+                file=sys.stderr,
+            )
+            return 2
+        target_state = "open"
+    else:
+        target_state = None
+
     if args.apply:
-        patch_labels(args.repo, args.issue, labels)
+        patch_issue(args.repo, args.issue, labels, target_state)
 
     result = {
         "repo": args.repo,
@@ -205,6 +276,8 @@ def main(argv=None):
         "labels": labels,
         "managed": managed,
         "preserved": preserved,
+        "dropped": dropped,
+        "state": target_state or state,
         "applied": args.apply,
     }
     if args.as_json:
@@ -214,6 +287,10 @@ def main(argv=None):
         print(f"{verb} {args.repo}#{args.issue}: {', '.join(labels)}")
         if preserved:
             print(f"Carried forward (not managed here): {', '.join(preserved)}")
+        if dropped:
+            print(f"Dropped (not in labels.yml): {', '.join(dropped)}")
+        if target_state:
+            print(f"State: {target_state}")
     return 0
 
 

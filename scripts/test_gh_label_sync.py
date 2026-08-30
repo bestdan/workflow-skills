@@ -134,17 +134,53 @@ class SyncTests(unittest.TestCase):
                 color, source, f"color {color} is hardcoded in {ASSET.name}"
             )
 
-    def test_malformed_vocabulary_raises_rather_than_dropping_a_group(self):
+    def _bad_vocabulary(self, text):
+        """Write `text` as a labels.yml and return the path."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        bad = Path(tmp.name) / "labels.yml"
-        bad.write_text("status: 0_untriaged\n")
+        path = Path(tmp.name) / "labels.yml"
+        path.write_text(text)
+        return path
+
+    def test_malformed_vocabulary_raises_rather_than_dropping_a_group(self):
+        # A scalar where an inline list belongs.
+        bad = self._bad_vocabulary("status: 0_untriaged\n")
         with self.assertRaises(gh_label_sync.VocabularyError):
             gh_label_sync.load_vocabulary(bad)
 
-        bad.write_text("status: [a, b]\n")
-        with self.assertRaises(gh_label_sync.VocabularyError):
+        # Every group present, but one has no color.
+        bad = self._bad_vocabulary(
+            "status: [a]\nauto: [b]\nprio: [c]\nest: [d]\n"
+            "colors:\n  status: 1d76db\n  auto: 0e8a16\n  prio: d93f0b\n"
+        )
+        with self.assertRaises(gh_label_sync.VocabularyError) as ctx:
             gh_label_sync.load_vocabulary(bad)
+        self.assertIn("est", str(ctx.exception))
+
+    def test_a_group_with_no_values_is_rejected(self):
+        """An empty `status: []` would provision nothing while the writer still
+        demands exactly one `status:` label — a state model with a hole in it."""
+        bad = self._bad_vocabulary(
+            "status: []\nauto: [b]\nprio: [c]\nest: [d]\n"
+            "colors:\n  status: 1d76db\n  auto: 0e8a16\n  prio: d93f0b\n  est: 5319e2\n"
+        )
+        with self.assertRaises(gh_label_sync.VocabularyError) as ctx:
+            gh_label_sync.load_vocabulary(bad)
+        self.assertIn("no values", str(ctx.exception))
+
+    def test_a_misspelled_group_name_is_rejected(self):
+        """labels.yml and the writer's EXACTLY_ONE/AT_MOST_ONE are two sources for
+        one fact. Unchecked, `stauts:` provisions a dead namespace and then makes
+        every write impossible, because validate() still demands `status:`."""
+        bad = self._bad_vocabulary(
+            "stauts: [a]\nauto: [b]\nprio: [c]\nest: [d]\n"
+            "colors:\n  stauts: 1d76db\n  auto: 0e8a16\n  prio: d93f0b\n  est: 5319e2\n"
+        )
+        with self.assertRaises(gh_label_sync.VocabularyError) as ctx:
+            gh_label_sync.load_vocabulary(bad)
+        message = str(ctx.exception)
+        self.assertIn("stauts", message)
+        self.assertIn("status", message)
 
 
 if __name__ == "__main__":
