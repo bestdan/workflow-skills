@@ -2,7 +2,8 @@
 
 Invoked from `/complete-task <identifier>` when `handler: gh-issue` is
 configured. This is a single **mechanical** phase: given one already-identified
-issue, close it. It does **no PR discovery and no merge verification** — GitHub
+issue, write its completed state — the close and the rung-free label set in one
+PATCH. It does **no PR discovery and no merge verification** — GitHub
 already closes the issue natively on merge via `Closes #<n>` in the PR body;
 this handler exists only for the case that auto-close didn't fire (no `Closes`
 line, or the issue was closed out-of-band and needs to be re-driven). If you
@@ -10,11 +11,11 @@ find yourself adding logic here to search for merged PRs or open PRs by
 branch, stop — that is not this file's job, and gh-issue has no
 `/sweep-for-complete` equivalent that would need it.
 
-**Shared reference:** the status-label vocabulary (`auto-claimed`,
-`human-approval-requested`, `blocked`) is defined in the `## List` section of
-`commands/handlers/gh-issue.md`; `commands/handlers/linear-complete.md` is the
-structural template this file mirrors over the `gh` CLI instead of the Linear
-MCP.
+**Shared reference:** the label vocabulary and its invariants live in
+`commands/handlers/assets/labels.yml`; the sections they drive are the `## List`
+table in `commands/handlers/gh-issue.md`.
+`commands/handlers/linear-complete.md` is the structural template this file
+mirrors over the `gh` CLI instead of the Linear MCP.
 
 **Repo.** If `gh-issue.repo` is set in the **merged** config — the committed
 `dev_docs/tasks/.task-config.yml` overlaid with the optional
@@ -23,9 +24,9 @@ already resolved by `/complete-task`'s "Resolve the handler" step — pass it as
 `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the
 current repo, matching the create/list/claim/promote flows.
 
-> **Hard rule: this file only closes the one issue it was given.** It never
-> searches for other issues, never touches labels or assignees, and never
-> re-opens anything. Completion here means exactly one `gh issue close` call
+> **Hard rule: this file only completes the one issue it was given.** It never
+> searches for other issues, never touches an assignee, and never re-opens
+> anything. Completion here means exactly one `gh-issue-state.py --done` call
 > (or none, on dry-run / idempotent no-op).
 
 ## Caller contract
@@ -57,8 +58,11 @@ This phase takes, in addition to the identifier:
    token turns the rest of the shell line into a comment. Then call:
 
    ```bash
-   gh issue view "<n>" --json number,title,state,stateReason [--repo <repo>]
+   gh issue view "<n>" --json number,title,state,stateReason,labels [--repo <repo>]
    ```
+
+   `labels` rides along on the same read because step 5 needs the issue's
+   current `prio:`/`est:` labels to carry them through the write — see there.
 
    If `gh` reports the issue does not exist, stop and report "no issue found
    for `<identifier>`". On any **other** non-zero exit — permission, wrong
@@ -84,7 +88,7 @@ This phase takes, in addition to the identifier:
      write**:
 
      ```
-     #<n>: open → closed (completed)
+     #<n>: open → closed, rungs removed (keeping prio:1, est:3)
      ```
 
    - **Otherwise, interactive + `assume_verified: false`** (the default manual
@@ -96,30 +100,67 @@ This phase takes, in addition to the identifier:
      above) — kept for parity with `linear-complete.md` so a future gh-issue
      sweep can reuse this phase without a prompt per issue.
 
-5. **Apply.** One `gh issue close` call, honoring the no-comment signal from
-   the caller contract:
+5. **Apply.** One call — the schema writer with `--done`:
 
    ```bash
-   gh issue close "<n>" --reason completed [--comment "<comment_body>"] [--repo <repo>]
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
+     --repo "<repo>" --issue "<n>" --labels "<prio:…>,<est:…>" --done --apply
    ```
 
-   - `comment_body` omitted → pass `--comment "Completed via /complete-task"`.
-   - `comment_body` set to a non-empty string → pass `--comment "<comment_body>"`.
-   - `comment_body` set to the explicit no-comment signal (`""`) → omit
-     `--comment` entirely; `gh issue close` still closes the issue with no
-     comment posted.
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+   `**/handlers/assets/gh-issue-state.py`. The helper's `--repo` is required,
+   so when `gh-issue.repo` is unset resolve the current repo with
+   `gh repo view --json nameWithOwner --jq .nameWithOwner` rather than omitting
+   the flag.
 
-   When `comment_body` is multi-line or may contain quotes, backticks, or
-   `$(...)`, write it to a temp file first and interpolate from there rather
-   than inlining it into the command — same reason as `gh-issue.md` step 2.
-   (`gh issue close` has no `--comment-file`, so the temp file feeds
-   `--comment`; it does not replace the flag.)
+   **`--labels` is the complete managed set the closed issue should end with**,
+   assembled from the labels step 2 read: keep its `prio:` and `est:` labels
+   verbatim, and pass **no** `status:` or `auto:` rung. That is the shape
+   `--done` asserts — "done" _is_ the absence of a `status:` rung, and `auto:`
+   is a live instruction to a scheduler, so leaving one on a closed issue is a
+   hazard rather than information, while `prio:`/`est:` are facts about the work
+   and stay useful afterwards (`commands/handlers/assets/labels.yml`). The
+   validator rejects a rung under `--done` before any network call, so a set
+   copied from the promote flow fails loudly instead of closing an issue that
+   still advertises itself to automation. An issue carrying neither `prio:` nor
+   `est:` passes `--labels ""`. Every label outside the four managed namespaces
+   — `follow-up`, `blocked`, anything a human added — is carried forward by the
+   helper and must not be listed.
 
-   `--reason completed` is what makes this a genuine completion rather than a
-   plain close — it is the mechanical analogue of `linear-complete.md` setting
-   the `completed`-type state rather than `canceled`.
+   **There is no separate `gh issue close` on this path.** The close rides in
+   the same PATCH as the labels, so no window exists in which the issue is
+   closed while still carrying rungs, or rung-free while still open. Adding a
+   `gh issue close` would reopen that window and double-write the state.
 
-6. **Report.** Identifier, old state → new state (`open → closed (completed)`),
+   **Post the completion comment separately, and only after the write
+   succeeds**, honoring the no-comment signal from the caller contract:
+
+   ```bash
+   gh issue comment "<n>" --body-file "<path>" [--repo <repo>]
+   ```
+
+   - `comment_body` omitted → post `Completed via /complete-task`.
+   - `comment_body` set to a non-empty string → post it.
+   - `comment_body` set to the explicit no-comment signal (`""`) → post
+     nothing; skip the call entirely.
+
+   Write the body to a temp file and pass `--body-file` rather than inlining it
+   into `--body` — the same shell-quoting reason as `gh-issue.md` step 2, and
+   here `gh issue comment` does take a `--body-file`. The comment follows the
+   write because it reports a completion that has already happened; posting it
+   first would leave a note claiming a transition that a failed write never
+   made.
+
+   > **`state_reason` is not part of this schema.** The old `gh issue close
+   > --reason completed` set it explicitly; the writer's PATCH carries `state`
+   > and `labels` only, so `state_reason` is left to whatever GitHub records
+   > for a close it was not given one for. Step 3 still **reads** `stateReason`
+   > to tell an already-completed issue from one closed as not-planned or
+   > duplicate, and that read is unaffected — but do not describe this step as
+   > setting it.
+
+6. **Report.** Identifier, old state → new state (`open → closed`), the
+   `prio:`/`est:` labels carried through,
    and whether a comment was posted (and its body, if short). On dry-run or
    idempotent no-write, report that instead — never claim a transition that
    didn't happen.

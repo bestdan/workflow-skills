@@ -135,6 +135,7 @@ run scripts/test-local-review.sh
 run scripts/test-claim-scan.sh
 run scripts/test-gh-label-sync.sh
 run scripts/test-gh-issue-state.sh
+run scripts/test-gh-issue-ready.sh
 run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
 run scripts/test-secret-resolve.sh

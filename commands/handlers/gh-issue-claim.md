@@ -106,12 +106,24 @@ nothing and report the WIP-limit decline).
 ## Find candidates
 
 ```bash
-gh issue list --state open --search "label:auto-eligible no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
+gh issue list --state open --search "no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
 ```
 
-- `label:auto-eligible` selects promoted, ready issues; `no:assignee` skips anything already claimed; `-label:auto-claimed -label:human-approval-requested -label:blocked` excludes already-claimed, unrefined, or blocked issues. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.
+- `no:assignee` skips anything already claimed; `-label:auto-claimed -label:human-approval-requested -label:blocked` excludes already-claimed, unrefined, or blocked issues. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.
+- **Select the ready ones client-side, accepting either spelling.** Keep an issue whose returned `labels` contain **`status:2_ready`** (the current vocabulary — see `commands/handlers/assets/labels.yml`) **or** the legacy **`auto-eligible`**. Drop everything else.
+
+  > **Why this is a filter and not a `--search` term.** GitHub's issue search has no
+  > label OR, so one query cannot ask for either spelling. And it has to ask for both:
+  > `/promote-tasks` now writes `status:2_ready`, while this file still writes
+  > `auto-claimed` on claim — the two halves of the handler migrate in separate
+  > changes, and in between, a repo holds issues in both spellings. Filtering on the
+  > `labels` this query already returns costs nothing extra and keeps `/do-tasks`
+  > working across the gap. **Delete the `auto-eligible` arm once the claim lifecycle
+  > moves to the `status:` vocabulary** — it is a migration bridge, not a supported
+  > dialect.
+
 - As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through — these receive no claim action.
-- **Rank** by a `priority:<urgent|high|medium|low>` label if present (urgent → high → medium → low, none last), then by issue age (oldest `createdAt` first — let aging issues bubble up).
+- **Rank** by priority, accepting either spelling for the same reason as the ready filter above: `prio:0` → `prio:1` → `prio:2` → `prio:3` (the current vocabulary), or the legacy `priority:urgent` → `high` → `medium` → `low`. An issue carrying neither sorts last. Then by issue age (oldest `createdAt` first — let aging issues bubble up). **Drop the `priority:` arm when the `auto-eligible` one goes.** Without both, a newly promoted issue carries `prio:1` and reads as unprioritised, so `/do-tasks` would pick work in the wrong order rather than visibly failing.
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
 Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
