@@ -133,8 +133,8 @@ that message — never a question).
     (`git fetch origin && git switch "<branch>"`); create it
     (`git switch -c "<branch>" origin/<base>`) only when the claim ran on the degraded
     comment-election path, which creates no ref. **Resolve `<branch>` with
-    `gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"]`, never by
-    spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
+    `python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"]`,
+    never by spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
     repo and wrong in the next. Then do the work, open the PR, and "Move to review on PR
     open" (per `gh-issue-claim.md`) — without re-claiming.
   - `jira`: check out the handler's deterministic claim branch `task/<KEY>`
