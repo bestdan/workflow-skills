@@ -12,10 +12,20 @@ State this plainly in every report (mirrors how `push-plan.md` §5.3 notes the
 and label fixes (Dimension 3's inversions, Dimension 4's suspected duplicates)
 apply through ordinary `gh issue edit`, same as any other gh-issue mutation.
 
+> **This file has not migrated, and the names below are pre-migration.** Every
+> other gh-issue verb now reads and writes the namespaced vocabulary in
+> `commands/handlers/assets/labels.yml` — `status:0_untriaged`…`status:4_needs_review`,
+> `auto:eligible` / `auto:human-review-needed`, `prio:0`–`prio:3`, `est:<n>` — through
+> `commands/handlers/assets/gh-issue-state.py`. Reoptimize still speaks the old names,
+> so on a migrated board its `statusType` derivation below matches nothing and every
+> issue reads as `new`. Migrating it is its own change. Until then, do not follow the
+> shared reference below to `gh-issue.md` or `gh-issue-promote.md` expecting to find
+> these names — they define the namespaced ones now.
+
 **Shared reference:** the label vocabulary (`auto-eligible`, `auto-claimed`,
 `human-approval-requested`, `priority:<urgent|high|medium|low>`,
-`size:<n>`) is defined in `gh-issue.md` §List and `gh-issue-promote.md`; reuse
-it rather than inventing new labels. The confidence-check style judgment used
+`size:<n>`) was defined in `gh-issue.md` §List and `gh-issue-promote.md` before
+those files migrated; reuse it rather than inventing new labels. The confidence-check style judgment used
 below mirrors `linear-reoptimize.md`'s Analysis dimensions — read that file for
 the fuller rationale on each check; this file only documents what differs for
 gh-issue.

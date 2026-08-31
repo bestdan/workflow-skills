@@ -7,11 +7,10 @@ an open issue is exactly "one `status:` rung and one `auto:` rung". Writing them
 separately would leave a window in which the issue contradicts itself, so the
 single PATCH carries both.
 
-Once the gh-issue handler migrates onto it, this will be the only supported way
-to change an issue's status, routing, priority or estimate. Nothing calls it yet
-— the handler transitions still use `gh issue edit`, and they move together in a
-later change rather than half-now. Two measured facts force its shape, and
-neither half is sufficient alone:
+This is the only supported way to change an issue's status, routing, priority or
+estimate. `gh-issue-claim.md` calls it on all three of its transitions — claim,
+move-to-review, and bail — and the promote and complete flows call it too. Two
+measured facts force its shape, and neither half is sufficient alone:
 
 - `gh issue edit --add-label X --remove-label Y` is **not atomic** — it produced
   8 HTTP request lines. A crash between them strands an issue carrying two

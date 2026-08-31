@@ -81,9 +81,7 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only — one `gh issue list` query, no edits, no claims. Renders the repo's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which scores an issue to `status:2_ready` + `auto:eligible` or `status:1_needs_refinement` + `auto:human-review-needed`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `task/<n>` ref-creation lock plus the `@me` + started board marker — and swaps to the needs-review rung on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is not yet supported.
->
-> **Mid-migration.** `gh-issue-claim.md` still writes the pre-namespace labels (`auto-claimed`, `needs-review`) and moves onto the writer in a later change. Until it does, a repo holds both spellings at once, so the section rules below match either.
+> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which scores an issue to `status:2_ready` + `auto:eligible` or `status:1_needs_refinement` + `auto:human-review-needed`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `<branch_prefix>task-<n>` ref-creation lock plus the `@me` + `status:3_started` board marker — and swaps to the needs-review rung on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is not yet supported.
 
 **The vocabulary lives in `commands/handlers/assets/labels.yml`** — four namespaces (`status:`, `auto:`, `prio:`, `est:`) and the invariants that govern them. Read the names from there; never hardcode one. Two of those invariants decide how this section reads a board: an **open** issue carries exactly one `status:` and exactly one `auto:` rung, and a **closed** issue carries neither while keeping its `prio:`/`est:`. `status:` and `auto:` answer different questions — where the work is, versus whether automation may take it — so listing reads `status:` for the section and ignores `auto:` entirely.
 
@@ -106,15 +104,15 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
 3. **Group into kanban sections.** Classify each issue by `state` plus its `status:` rung. The sections mirror the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
-   | Section            | Match rule                                                                                                                                                     |
-   | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `new`              | `open`, has `status:0_untriaged` — **or** no `status:` label and none of the legacy markers below (a pre-migration issue)                                      |
-   | `needs_refinement` | `open`, has `status:1_needs_refinement` (or legacy `human-approval-requested`)                                                                                 |
-   | `ready`            | `open`, has `status:2_ready` (or legacy `auto-eligible`) and no open dependency (see **Blocked** below)                                                        |
-   | `in_progress`      | `open`, has `status:3_started` (or legacy `auto-claimed` / `in-progress`)                                                                                      |
-   | `blocked`          | `open`, has the `blocked` label — **or** has `status:2_ready` with an open `blocked_by` dependency (see **Blocked** below)                                     |
-   | `needs_review`     | `open`, has `status:4_needs_review` (or legacy `needs-review`) — best-effort: `gh issue list` does not return linked PRs, so call no extra tool to detect them |
-   | `done`             | `closed` — select the 10 most recent by `createdAt`, then sort per step 4                                                                                      |
+   | Section            | Match rule                                                                                                                                |
+   | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+   | `new`              | `open`, has `status:0_untriaged` — **or** no `status:` label at all (an issue filed outside the loop, or before the repo was provisioned) |
+   | `needs_refinement` | `open`, has `status:1_needs_refinement`                                                                                                   |
+   | `ready`            | `open`, has `status:2_ready` and no open dependency (see **Blocked** below)                                                               |
+   | `in_progress`      | `open`, has `status:3_started`                                                                                                            |
+   | `blocked`          | `open`, has the `blocked` label — **or** has `status:2_ready` with an open `blocked_by` dependency (see **Blocked** below)                |
+   | `needs_review`     | `open`, has `status:4_needs_review` — best-effort: `gh issue list` does not return linked PRs, so call no extra tool to detect them       |
+   | `done`             | `closed` — select the 10 most recent by `createdAt`, then sort per step 4                                                                 |
 
    If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
 
@@ -141,14 +139,14 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                                                                                                             |
-   | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Priority    | the `prio:<0-3>` label if present, rendered `[p<n>]`; else the legacy `priority:urgent\|high\|medium\|low`, mapped urgent→p0, high→p1, medium→p2, low→p3; otherwise `[—]`, sorted last in the tier |
-   | Identifier  | `#<number>`                                                                                                                                                                                        |
-   | Title       | issue `title`                                                                                                                                                                                      |
-   | Estimate    | the `est:<n>` label if present, rendered `(est <n>)` after the title; omit the parenthetical when the issue carries none                                                                           |
-   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                                                                    |
-   | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—`                                       |
+   | Field       | Source                                                                                                                                                       |
+   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Priority    | the `prio:<0-3>` label if present, rendered `[p<n>]`; otherwise `[—]`, sorted last in the tier                                                               |
+   | Identifier  | `#<number>`                                                                                                                                                  |
+   | Title       | issue `title`                                                                                                                                                |
+   | Estimate    | the `est:<n>` label if present, rendered `(est <n>)` after the title; omit the parenthetical when the issue carries none                                     |
+   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                              |
+   | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—` |
 
    Sort within each section by priority (`prio:0` first through `prio:3`, none last), then `createdAt` (oldest first).
 
