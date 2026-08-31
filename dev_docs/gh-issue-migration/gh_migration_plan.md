@@ -103,7 +103,7 @@ join, and `gh` covers it only partially.
 5. ~~[phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md)~~ — State model across add / list / promote / do. **Done** — PR #439, merged `a4815d7`.
    Added `gh-issue-ready.py` for dependency-readiness. The **migration bridges** it left
    were removed by task 4.
-6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. **NEXT.**
+6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. Next after task 15.
 7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants.
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
    **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
@@ -129,10 +129,16 @@ join, and `gh` covers it only partially.
 
 **Phase 3 — handler (added 2026-08-31, from the post-task-4 PR audit)**
 
-14. [phase_3_handler/gh_migration_task_14.md](phase_3_handler/gh_migration_task_14.md) — **Defect from task 4.** `/do-tasks --no-claim`
-    still checks out `task/<n>`, a branch the claim no longer creates. Size 1. Do it next.
+14. ~~[phase_3_handler/gh_migration_task_14.md](phase_3_handler/gh_migration_task_14.md)~~ — **Defect from task 4.** `/do-tasks --no-claim`
+    checked out `task/<n>`, a branch the claim no longer creates. **Done** — PR #443.
+    The sweep the task file asked for found a **second** stale reference, in section 4's
+    summary of what the handler holds; co-review found a third problem in the fix itself
+    (the resolver was spelled with no interpreter and no path, so following it literally
+    gets `command not found`). Both are the same lesson: a partial sweep reads as a
+    complete one, and an unrunnable command sends a reader back to the literal the
+    instruction exists to forbid.
 15. [phase_3_handler/gh_migration_task_15.md](phase_3_handler/gh_migration_task_15.md) — **Create native dependency edges on the write
-    side.** Tasks 4 and 5 both taught the loop to _read_ GitHub's native `blocked_by`
+    side. NEXT.** Tasks 4 and 5 both taught the loop to _read_ GitHub's native `blocked_by`
     graph. Nothing _writes_ one — `/push-plan` still emits a prose footer — so both
     checks pass everything and dependency-blocking is inert. This is the task that makes
     them do something. It also retires the "GitHub Issues have no native dependency edge"

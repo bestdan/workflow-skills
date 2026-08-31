@@ -14,7 +14,7 @@ committed under `dev_docs/gh-issue-migration/`, per the `.gitignore` comment blo
 advice: "Prefer graduating durable wisdom to a top-level `dev_docs/<name>.md` (never
 ignored) over keeping it here."
 
-## State: phase 1–2 and tasks 4 and 5 are done
+## State: phase 1–2 and tasks 4, 5 and 14 are done
 
 **PR #415 merged as `d7aa23a`.** It shipped:
 
@@ -52,15 +52,13 @@ dependency-readiness. **Task 4** — PR #442 — moved `/do-tasks`'s claim lifec
 `gh-issue-claim.py` for the parts two racing sessions must perform identically, taught
 claim to consult native `blocked_by`, and removed task 5's bridges.
 
-**Tasks 14 and 15 are next, then 6.** The 2026-08-31 audit of the open PRs turned up two
-things that outrank the next planned task:
+**Task 15 is next, then 6.** Task 14 — the `--no-claim` branch-name defect task 4 shipped
+— is **done** (PR #443).
 
-- **Task 14** — a defect task 4 shipped. `/do-tasks --no-claim` still checks out
-  `task/<n>`, a branch the claim no longer creates. Size 1.
-- **Task 15** — dependency-blocking is **inert**. Tasks 4 and 5 both taught the loop to
-  read GitHub's native `blocked_by` graph; nothing writes one, so both checks pass
-  everything. Fixing the write side is what makes two already-shipped read paths do
-  anything.
+**Task 15** is the one that matters: dependency-blocking is **inert**. Tasks 4 and 5 both
+taught the loop to read GitHub's native `blocked_by` graph; nothing writes one, so both
+checks pass everything. Fixing the write side is what makes two already-shipped read paths
+do anything.
 
 The same audit produced the epic's **In-flight PRs against files this plan owns**
 section. Read it before touching `gh-issue-claim.md` or `gh-issue-promote.md` — three

@@ -2,7 +2,7 @@
 title: Fix the --no-claim resume branch name task 4 missed
 priority: high
 size: 1
-status: new
+status: done
 created: 2026-08-31
 source_branch: bestdan/gh-issue-migration
 parent: gh_migration
@@ -61,3 +61,21 @@ old label vocabulary — this defect exists because a partial sweep read as a co
 
 - Read the `--no-claim` section end to end and confirm the gh-issue and jira bullets each
   name their own handler's branch
+
+## Outcome — PR #443
+
+The sweep found **two** stale references, not one: the `--no-claim` resume bullet named in
+this file, and section 4's summary of what `gh-issue-claim.md` holds, which also still
+called move-to-review a "label swap" rather than a rung move.
+
+The fix is the resolver, not the string. The bullet now calls
+`python3 commands/handlers/assets/gh-issue-claim.py branch-name` instead of spelling a
+literal, because `gh-issue.branch_prefix` is per-repo and any hardcoded name is right in
+one repo and wrong in the next — the class of mistake that caused the defect.
+
+Co-review then caught the fix's own version of the same failure: the resolver was first
+written as a bare `gh-issue-claim.py …`, with no interpreter and no path. The script is not
+on `PATH`, so an agent following the line would get `command not found` and fall straight
+back to spelling the branch by hand — the exact behaviour the instruction forbids.
+
+jira's `task/<KEY>` references are untouched, as scoped.
