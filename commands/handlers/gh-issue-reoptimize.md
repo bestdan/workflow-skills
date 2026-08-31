@@ -3,14 +3,21 @@
 Invoked from `/reoptimize-tasks` when `handler: gh-issue` is configured. Audits
 an existing GitHub Issues backlog's dependency graph and ordering, then applies
 the approved fixes. **This path is a downgrade from the Linear handler
-(`linear-reoptimize.md`) by construction: GitHub Issues have no native
-dependency edge** (no `blockedBy`/`blocks`/`relatedTo`/`duplicateOf`), so
-Dimensions 1–2 can only ever produce a **report** plus a suggested
-`Blocked by: #<n>` / `Related: #<n>` body footer line — never a real link.
-State this plainly in every report (mirrors how `push-plan.md` §5.3 notes the
-`plan:<name>` label fallback as a weaker grouping than a milestone). Priority
-and label fixes (Dimension 3's inversions, Dimension 4's suspected duplicates)
-apply through ordinary `gh issue edit`, same as any other gh-issue mutation.
+(`linear-reoptimize.md`) — but the limit is this handler, not the platform.**
+GitHub Issues has a real `blocked_by` dependency edge: `/push-plan` writes one
+per plan dependency (`push-plan.md` §5.5, via
+`commands/handlers/assets/gh-issue-deps.py`) and both `/list-tasks` and
+`/do-tasks` read it. This flow has simply not been taught to write one yet, so
+Dimensions 1–2 still produce a **report** plus a suggested
+`Blocked by: #<n>` / `Related: #<n>` body footer line rather than a real edge.
+Say that plainly in every report — a footer here is a **proposal**, not an
+echo of an edge that exists. (`Related:` and `duplicateOf` have no native
+counterpart at all; only the blocking direction does.) Priority and label fixes
+(Dimension 3's inversions, Dimension 4's suspected duplicates) apply through
+ordinary `gh issue edit`, same as any other gh-issue mutation.
+
+> **Teaching this flow to write edges is task 8's scope**, not a gap to close
+> inline: it also owns migrating existing `Blocked by:` footers into edges.
 
 > **This file has not migrated, and the names below are pre-migration.** Every
 > other gh-issue verb now reads and writes the namespaced vocabulary in
@@ -92,10 +99,12 @@ gh-issue.
      see `gh-issue.md` §List's mapping table for the open-side labels this
      reuses).
 
-   **Edges exist only as parsed prose** — there is no native edge to
-   reconcile against, unlike Linear where a `blockedBy` may already exist and
-   merely be missing or wrong. Every edge below is therefore a **proposed
-   addition**, never a "convert existing relation" fix.
+   **This flow reads edges only as parsed prose.** A native `blocked_by` edge
+   may well exist — `/push-plan` writes one per plan dependency — but nothing
+   here queries it yet (task 8), so every edge below is a **proposed addition**
+   rather than a "convert existing relation" fix. The practical consequence: a
+   dependency already carrying a real edge but no footer line reads here as
+   missing, so check the issue's dependency panel before acting on one.
 
 ## Analysis
 
@@ -194,11 +203,11 @@ wrong one whenever `gh-issue.repo` is configured.
 - Apply only what the user approved in `/reoptimize-tasks` §5; echo each
   applied mutation back in the final summary (issue number + what changed),
   and list anything skipped (unapproved, terminal, or cyclic) with the reason.
-- **State the report/native-link downgrade explicitly** in the final summary
-  — e.g. "Dimensions 1–2 add suggested `Blocked by:`/`Related:` footer lines
-  only; GitHub Issues have no native dependency edge to create" — so the user
-  never mistakes a footer line for a real link the way a Linear `blockedBy`
-  is.
+- **State the report-only limit explicitly** in the final summary — e.g.
+  "Dimensions 1–2 add suggested `Blocked by:`/`Related:` footer lines only;
+  this flow does not yet create the native `blocked_by` edge that `/push-plan`
+  writes and `/do-tasks` reads" — so the user never mistakes a footer line for
+  a real link the way a Linear `blockedBy` is.
 
 ## Optional deepening — cross-check the source plan
 
