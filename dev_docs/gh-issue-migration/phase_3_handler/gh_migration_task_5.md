@@ -2,11 +2,10 @@
 title: Carry the label state model through add, list, promote and do
 priority: high
 size: 5
-status: new
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
-is_blocked_by: gh_migration_task_4
 related_files:
   - commands/handlers/gh-issue.md
   - commands/handlers/gh-issue-promote.md
@@ -15,6 +14,8 @@ tags: [handler, state-model]
 ---
 
 ← [gh_migration_plan.md](../gh_migration_plan.md)
+
+**Done — PR #439, merged `a4815d7`.**
 
 # Carry the label state model through add, list, promote and do
 

@@ -2,7 +2,7 @@
 title: Define the label vocabulary and an idempotent per-repo sync script
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
@@ -13,6 +13,8 @@ tags: [labels, handler, prerequisite]
 ---
 
 ← [gh_migration_plan.md](../gh_migration_plan.md)
+
+**Done — PR #415, merged `d7aa23a`.**
 
 # Define the label vocabulary and an idempotent per-repo sync script
 

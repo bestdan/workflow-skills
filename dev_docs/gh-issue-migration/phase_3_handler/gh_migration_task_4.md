@@ -16,6 +16,13 @@ tags: [handler, claiming, concurrency]
 
 ← [gh_migration_plan.md](../gh_migration_plan.md)
 
+> **This task also removes the migration bridges task 5 left.** They are listed
+> by file in the epic's task 4 entry. Both label vocabularies are live until this
+> lands, so removing a bridge early breaks `/do-tasks` rather than tidying it.
+> Task 5's frontmatter used to name this task as its blocker; that was a cycle,
+> not a direction — promote and claim have to agree on a vocabulary, and task 5
+> shipped first behind those bridges.
+
 # Build the claim lifecycle to linear-level depth
 
 ## Context

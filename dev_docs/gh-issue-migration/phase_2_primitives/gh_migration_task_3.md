@@ -2,7 +2,7 @@
 title: "Atomic label write helper: validate, then full-set PATCH"
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
@@ -14,6 +14,8 @@ tags: [labels, handler, atomicity]
 ---
 
 ← [gh_migration_plan.md](../gh_migration_plan.md)
+
+**Done — PR #415, merged `d7aa23a`.**
 
 # Atomic label write helper: validate, then full-set PATCH
 
