@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# test-coreview-rule-drift.sh — fixture-based tests for
+# scripts/coreview-rule-drift.py.
+#
+# Builds fake plugin roots and settings files under a temp dir (mktemp -d) so
+# nothing reads the developer's real ~/.claude/settings.json, and asserts on the
+# JSON the script emits. Covers the classifications that are easy to get wrong:
+#   - rules that match their templates exactly report NOTHING
+#   - a reordered flag is DEAD (the match is byte-for-byte outside placeholders)
+#   - a typo'd path is SUSPECT, not a pass — a placeholder wildcard alone
+#     cannot tell a typo from a legitimate substitution
+#   - a path that merely does not exist YET (one level) is NOT suspect, because
+#     the dispatch's own `mkdir -p` / `cat >` creates it
+#   - a reviewer with no rule at all is "not configured", not drift
+#   - a general-purpose `Bash(cd ...)` is never attributed to a reviewer
+#   - a missing plugin root exits 2, distinct from the exit 1 that means drift
+#
+# Run directly: bash scripts/test-coreview-rule-drift.sh
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$ROOT/scripts/coreview-rule-drift.py"
+
+command -v jq >/dev/null 2>&1 || {
+  echo "test-coreview-rule-drift: jq is required but not found in PATH" >&2
+  exit 2
+}
+
+# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
+# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# repo-local.
+BASE="$(mktemp -d 2>/dev/null \
+  || mktemp -d "${TMPDIR:-/tmp}/coreview-drift-test.XXXXXX" 2>/dev/null \
+  || mktemp -d "$ROOT/.coreview-drift-test.XXXXXX")"
+# Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
+# exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.
+[ -n "$BASE" ] && [ -d "$BASE" ] || {
+  echo "test-coreview-rule-drift: could not create a temp dir" >&2
+  exit 2
+}
+BASE="$(cd "$BASE" && pwd -P)" || exit 2
+trap 'rm -rf "$BASE"' EXIT
+
+fails=0
+pass() { echo "  ok   $1"; }
+fail() {
+  echo "  FAIL $1"
+  fails=$((fails + 1))
+}
+
+# A directory that really exists, so a substituted path built under it is
+# plausible. The plausibility rule allows one missing trailing level.
+REAL_DIR="$BASE/inputs"
+mkdir -p "$REAL_DIR"
+
+# --- fixture builders ------------------------------------------------------
+
+# make_plugin <dir> — a plugin root shipping one agy-shaped reviewer with two
+# rules (a path-bearing command and a bare probe) plus a devin-shaped one whose
+# first segment is a generic `mkdir`.
+make_plugin() {
+  local dir="$1"
+  mkdir -p "$dir/skills/co-review/reviewers"
+  cat >"$dir/skills/co-review/reviewers/agy.md" <<'EOF'
+# agy
+
+Prose that quotes "Bash(agy never-a-rule)" outside a fence must be ignored.
+
+```json
+"Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" -p \"read <INPUT>\" --model \"M1\")",
+"Bash(agy models)"
+```
+EOF
+  cat >"$dir/skills/co-review/reviewers/devin.md" <<'EOF'
+# devin
+
+```json
+"Bash(mkdir -p \"<NEUTRAL>\")",
+"Bash(devin -p --prompt-file \"<INPUT>\" --permission-mode auto)"
+```
+EOF
+}
+
+# make_settings <file> <rule>... — a settings.json carrying the given allow rules.
+make_settings() {
+  local file="$1"
+  shift
+  local json
+  json="$(printf '%s\n' "$@" | jq -R . | jq -s '{permissions: {allow: .}}')"
+  printf '%s\n' "$json" >"$file"
+}
+
+# run_drift <settings> — emit the script's JSON; record its exit code in $RC.
+run_drift() {
+  OUT="$("$SCRIPT" --plugin-root "$PLUGIN" --settings "$1" --json 2>&1)"
+  RC=$?
+}
+
+# count <reviewer> <field> — how many entries that reviewer has in that field.
+count() {
+  printf '%s' "$OUT" | jq --arg r "$1" --arg f "$2" \
+    '[.reviewers[] | select(.reviewer == $r)][0][$f] | length'
+}
+
+PLUGIN="$BASE/plugin"
+make_plugin "$PLUGIN"
+
+echo "test-coreview-rule-drift:"
+
+# --- 1. exact rules report nothing ----------------------------------------
+
+make_settings "$BASE/clean.json" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR\" -p \"read $REAL_DIR/in.agy\" --model \"M1\")" \
+  "Bash(agy models)" \
+  "Bash(mkdir -p \"$REAL_DIR/neutral\")" \
+  "Bash(devin -p --prompt-file \"$REAL_DIR/in.devin\" --permission-mode auto)"
+run_drift "$BASE/clean.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .drift)" = "false" ]; then
+  pass "matching rules report no drift (exit 0)"
+else
+  fail "matching rules reported drift (rc=$RC): $OUT"
+fi
+
+# --- 2. a reordered flag is dead ------------------------------------------
+
+make_settings "$BASE/reordered.json" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR\" --model \"M1\" -p \"read $REAL_DIR/in.agy\")" \
+  "Bash(agy models)"
+run_drift "$BASE/reordered.json"
+if [ "$RC" -eq 1 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
+  pass "a reordered flag is dead, and its template is missing"
+else
+  fail "reordered flag misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing))"
+fi
+
+# --- 3. a typo'd path is suspect, not a pass -------------------------------
+
+make_settings "$BASE/typo.json" \
+  "Bash(agy --sandbox --add-dir \"$BASE/nope/deeper/inputs\" -p \"read $BASE/nope/deeper/inputs/in.agy\" --model \"M1\")" \
+  "Bash(agy models)"
+run_drift "$BASE/typo.json"
+if [ "$RC" -eq 1 ] && [ "$(count agy suspect)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
+  pass "a typo'd path is suspect and leaves its template uncovered"
+else
+  fail "typo'd path misclassified (rc=$RC, suspect=$(count agy suspect), missing=$(count agy missing))"
+fi
+
+# --- 4. one not-yet-created level is fine ----------------------------------
+# `mkdir -p` and `cat >` each create the final component, so a single missing
+# trailing level must NOT be flagged — otherwise a correct rule reads as broken
+# on any machine that has not run a review yet.
+
+make_settings "$BASE/notyet.json" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR/fresh\" -p \"read $REAL_DIR/in.agy\" --model \"M1\")" \
+  "Bash(agy models)"
+run_drift "$BASE/notyet.json"
+if [ "$(count agy suspect)" = "0" ] && [ "$(count agy missing)" = "0" ]; then
+  pass "a single not-yet-created level is not suspect"
+else
+  fail "not-yet-created path wrongly flagged (suspect=$(count agy suspect), missing=$(count agy missing))"
+fi
+
+# --- 5. no rules at all is "not configured", not drift ---------------------
+
+make_settings "$BASE/none.json" "Bash(git diff:*)"
+run_drift "$BASE/none.json"
+if [ "$RC" -eq 0 ] \
+  && [ "$(printf '%s' "$OUT" | jq -r '[.reviewers[] | select(.configured)] | length')" = "0" ]; then
+  pass "a reviewer with no rules is not configured, and not drift"
+else
+  fail "unconfigured reviewers reported as drift (rc=$RC): $OUT"
+fi
+
+# --- 6. a general-purpose cd/mkdir rule is never called dead ---------------
+# `Bash(cd "$(git rev-parse --show-toplevel)")` is ordinary shell config. It
+# must neither satisfy devin's `<NEUTRAL>` template (the placeholder stands for
+# an absolute path, not a command substitution) nor be reported as devin's dead
+# rule.
+
+make_settings "$BASE/generic.json" \
+  "Bash(cd \"\$(git rev-parse --show-toplevel)\")" \
+  "Bash(mkdir -p /some/other/place)" \
+  "Bash(devin -p --prompt-file \"$REAL_DIR/in.devin\" --permission-mode auto)"
+run_drift "$BASE/generic.json"
+if [ "$(count devin dead)" = "0" ] && [ "$(count devin missing)" = "1" ]; then
+  pass "a generic cd/mkdir rule is neither coverage nor a dead reviewer rule"
+else
+  fail "generic rule misattributed (dead=$(count devin dead), missing=$(count devin missing))"
+fi
+
+# --- 7. prose outside a fence is not a template ---------------------------
+# agy.md quotes a bogus rule in prose. Reading it as a template would invent a
+# rule the reviewer never ships, and report it missing forever.
+
+run_drift "$BASE/clean.json"
+if [ "$(printf '%s' "$OUT" | jq -r '[.reviewers[] | select(.reviewer == "agy")][0].templates')" = "2" ]; then
+  pass "a rule quoted in prose outside a fence is not a template"
+else
+  fail "prose rule counted as a template: $OUT"
+fi
+
+# --- 8. a bad plugin root exits 2, not 1 ----------------------------------
+# Exit 1 means drift and exit 2 means the check could not run. Collapsing the
+# two would let a mis-resolved plugin root read as a clean bill of health's
+# opposite — or worse, as drift nobody can act on.
+
+"$SCRIPT" --plugin-root "$BASE/not-a-plugin" --settings "$BASE/clean.json" --json >/dev/null 2>&1
+if [ "$?" -eq 2 ]; then
+  pass "a bad plugin root exits 2, distinct from drift's exit 1"
+else
+  fail "bad plugin root did not exit 2"
+fi
+
+echo
+if [ "$fails" -eq 0 ]; then
+  echo "test-coreview-rule-drift: all checks passed"
+  exit 0
+fi
+echo "test-coreview-rule-drift: $fails check(s) failed"
+exit 1

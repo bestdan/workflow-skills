@@ -88,6 +88,26 @@ All four are **advisory-only** and must pass through the reconciler; a missing, 
 >
 > **Don't blind-discard the probe's stderr; disambiguate `127`.** A `127` (or any non-zero) with _no_ captured stderr is almost always the **wrapper/tool missing**, not the reviewer unauthenticated — a `>/dev/null 2>&1` swallows the telltale `command not found: timeout`. Before skipping a reviewer, confirm the failure came from the reviewer binary itself (it prints `Please sign in …` / `not authenticated`), not from a missing wrapper. Only skip on a genuine auth failure.
 
+**Pre-flight allow-rule check.** An auth probe answers "can this reviewer log
+in?", not "will its dispatch be approved?" — and the second failure is the
+quieter one: an unapproved command is **denied** under `--non-interactive`, not
+queued, so the reviewer vanishes from the run summary with nothing logged.
+Alongside the auth probes, run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" --json
+```
+
+It is read-only and costs milliseconds. Exit `1` means at least one configured
+reviewer has a dead, suspect, or missing rule; **do not skip that reviewer on
+this signal** — the check is a heuristic over settings files it may not have all
+of, so let the dispatch decide. Instead, carry the finding into the run summary
+beside that reviewer, so a reviewer that then produces nothing is explained
+rather than silently absent. Exit `2` means the check itself could not run
+(usually an unresolvable `${CLAUDE_PLUGIN_ROOT}`); note it and carry on — this is
+advisory, never fatal. `/doctor`'s Check 7 runs the same script and owns the full
+classification and repair guidance; see `commands/doctor.md`.
+
 The probe is a fast gate that runs **before** dispatch, not alongside it: in step 5, run the probes first (they're ~1s each — batch them in parallel if you like), wait for them to finish, then dispatch only the reviewers that passed. A probe failure is a **skip**, reported in the run summary alongside any missing reviewers. (These live rc-gates deliberately duplicate the `select-coder` skill's [`scripts/probe-coders.sh`](../../scripts/probe-coders.sh) probes rather than read its up-to-30-days-stale availability cache — a stale `agy: logged_in: true` would reintroduce the 30s hang. Each reviewer file notes this so the two stay in sync.)
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one input file** (`<INPUT>`), which is then handed to the reviewer one of three ways: piped on **stdin** with a short fixed-pointer argument (`codex`, `copilot`), named **by path inside the pointer** (`agy` — it does **not** read stdin, so its pointer tells it which file to read; see [`reviewers/agy.md`](reviewers/agy.md)), or handed over with **`--prompt-file "<INPUT>"`** (`devin`). Because nothing variable ends up in the command string — only the fixed `<INPUT>` path and the pointer — the command is invariant and can be approved once with an exact-match rule (see Permissions).

@@ -89,7 +89,7 @@ capability matrix.
 | [**`/reconcile-tasks`**](commands/reconcile-tasks.md)         | `/reconcile-tasks [--apply] [--all] [--project <id\|name>]`               | Fix issues sitting in the wrong state, against a fixed rule table. **linear-only (v1)**.                                         |
 | [**`/find-false-closures`**](commands/find-false-closures.md) | `/find-false-closures [--apply] [--project <uuid>] [--repo <owner/name>]` | Detect completed issues no merged PR owns (the bare-id over-close bug) and restore them. **linear-only**.                        |
 | [**`/sweep-for-archive`**](commands/sweep-for-archive.md)     | `/sweep-for-archive [--since 24h] [--apply] [...]`                        | Close-out sweep: verify the window's closures, complete what merged, archive exactly what was proved delivered. **linear-only**. |
-| [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the task-loop setup — config, prerequisites, legacy dirs, schema drift — as `PASS`/`WARN`/`FAIL`.                       |
+| [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the setup — config, prerequisites, legacy dirs, schema drift, co-review allow-rules — as `PASS`/`WARN`/`FAIL`.          |
 | [**break-down-task**](skills/break-down-task/SKILL.md)        | a task is too big for one PR, or "split / slice / break down this task"   | Find the natural shear points in an over-sized task and replace it with PR-sized components chained by `is_blocked_by`.          |
 
 `/sweep-for-complete`, `/reconcile-tasks`, `/find-false-closures`, and
