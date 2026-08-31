@@ -128,12 +128,15 @@ that message — never a question).
     already published, so stop and report it rather than re-executing. Otherwise
     check out Linear's verbatim `branchName`, do the work, open the PR, and "Move to
     review on PR open" — without re-claiming.
-  - `gh-issue`: check out the handler's deterministic claim branch `task/<n>`
-    (`git fetch origin && git switch task/<n>`), which the claim pushed as its lock;
-    create it (`git switch -c task/<n> origin/<base>`) only when the claim ran on the
-    degraded comment-election path, which pushes no ref. Then do the
-    work, open the PR, and "Move to review on PR open" (per `gh-issue-claim.md`) —
-    without re-claiming.
+  - `gh-issue`: check out the handler's deterministic claim branch
+    `<branch_prefix>task-<n>`, which the claim created as its lock
+    (`git fetch origin && git switch "<branch>"`); create it
+    (`git switch -c "<branch>" origin/<base>`) only when the claim ran on the degraded
+    comment-election path, which creates no ref. **Resolve `<branch>` with
+    `gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"]`, never by
+    spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
+    repo and wrong in the next. Then do the work, open the PR, and "Move to review on PR
+    open" (per `gh-issue-claim.md`) — without re-claiming.
   - `jira`: check out the handler's deterministic claim branch `task/<KEY>`
     (`git fetch origin && git switch task/<KEY>`), which the claim pushed as its lock;
     create it (`git switch -c task/<KEY> origin/<base>`) only when the claim ran on the
@@ -632,9 +635,10 @@ capability is actually visible — inside the remote session** — via two concr
 
 Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
 the find-candidates query, the in-flight pre-flight, the feasibility judgment, the
-atomic `task/<n>` claim lock (defined in `commands/handlers/claim-lock.md`), the work
-branch, `gh pr create` with
-`Closes #<n>`, the move-to-review label swap, bail mechanics, and the report format.
+atomic `<branch_prefix>task-<n>` claim lock (defined in
+`commands/handlers/claim-lock.md`), the work branch, `gh pr create` with
+`Closes #<n>`, the move to the `status:4_needs_review` rung, bail mechanics, and the
+report format.
 `/do-tasks` runs these phases in the **current session** over the `gh` CLI. If the
 relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
