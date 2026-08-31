@@ -278,10 +278,14 @@ def report(findings, plugin_root, settings_read):
         print(
             "A dead rule fails silently: under `/co-review --non-interactive` the\n"
             "dispatch is denied, not queued, so the reviewer just stops appearing in\n"
-            "the run summary. Fix by editing `permissions.allow` in your settings —\n"
-            "copy each MISSING template verbatim and substitute its placeholders with\n"
-            "the same literal absolute paths your invocation uses, then delete the DEAD\n"
-            "rule it replaces. Nothing here writes settings for you."
+            "the run summary. To repair: copy each MISSING template verbatim,\n"
+            "substitute its placeholders with the same literal absolute paths your\n"
+            "invocation uses, and delete the DEAD rule it replaces.\n"
+            "\n"
+            "Make that edit wherever the settings file above is MANAGED, which is not\n"
+            "always the file itself — a generated or dotfiles-synced settings.json\n"
+            "loses an in-place edit at the next sync, and the drift comes back with no\n"
+            "sign of why. Nothing here writes settings for you."
         )
     else:
         print("No drift.")

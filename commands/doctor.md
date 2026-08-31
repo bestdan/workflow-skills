@@ -360,14 +360,24 @@ check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
 unresolvable plugin root.
 
-**Always `WARN`, never `FAIL`, and never touched by `--fix`.** Two independent
-reasons, both decisive. The repair needs literal absolute paths only the operator
-knows — `<NEUTRAL>` in particular is deliberately never documented as a fixed
-value (see `skills/co-review/reviewers/devin.md`) — so there is no mechanical
-edit to apply. And the settings file is write-denied under the sandbox on the
-machines this runs on, so a `--fix` that tried would fail exactly where it was
-needed. Every `FAIL` in this command must be repairable under `--fix`; this one
-isn't, so it is a `WARN`. Print the corrected rules and let the human paste them.
+**Always `WARN`, never `FAIL`, and never touched by `--fix`.** Three independent
+reasons, each sufficient:
+
+1. The repair needs literal absolute paths only the operator knows — `<NEUTRAL>`
+   in particular is deliberately never documented as a fixed value (see
+   `skills/co-review/reviewers/devin.md`) — so there is no mechanical edit to
+   apply.
+2. **A settings file is frequently generated or dotfiles-synced, not
+   hand-edited.** Writing to it in place would be undone at the next sync, and
+   the drift would return with nothing to show why — a silent failure of the
+   same kind this check exists to catch. The check reads the live file, because
+   that is what the permission matcher reads; the repair belongs upstream of it,
+   and only the operator knows where that is.
+3. The settings file is write-denied under the sandbox on the machines this runs
+   on, so a `--fix` would fail exactly where it was needed.
+
+Every `FAIL` in this command must be repairable under `--fix`; this one isn't, so
+it is a `WARN`. Print the corrected rules and let the human place them.
 
 ### 3. Report (and fix under `--fix`)
 
