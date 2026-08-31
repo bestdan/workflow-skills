@@ -126,8 +126,10 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
      ```bash
      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
-       --repo "<repo>" --json
+       --repo "<repo>" --json [--label "<label>" --label "<label2>"]
      ```
+
+     Pass one `--label` per entry in `gh-issue.labels`, the same filters step 2 used. Without them the helper draws its own 50-issue window over the **whole** repo, so an in-scope issue can fall outside it and get no verdict at all — and a missing verdict is indistinguishable from a ready one, which the intersection below cannot detect.
 
      If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. **Intersect its output with the issue numbers step 2 returned**, then move each of those it reports as blocked into the `blocked` section, annotated with the open blockers it names. The helper queries the whole repo, while step 2 may be narrowed by `gh-issue.labels` (which defaults to `[follow-up]`), so applying its verdicts unfiltered would put a card on the board that this board never listed.
 

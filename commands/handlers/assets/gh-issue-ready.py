@@ -21,6 +21,7 @@ equivalent is an open question, not this file's job.
 Usage:
   python3 gh-issue-ready.py --repo owner/name
   python3 gh-issue-ready.py --repo owner/name --limit 100 --json
+  python3 gh-issue-ready.py --repo owner/name --label follow-up   # match a board's scope
 """
 
 import argparse
@@ -59,23 +60,29 @@ def ready_label(groups):
     return f"status:{READY_STATUS_VALUE}"
 
 
-def list_ready_issues(repo, label, limit):
-    code, out, err = run_gh(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--state",
-            "open",
-            "--label",
-            label,
-            "--json",
-            "number,title,labels",
-            "--limit",
-            str(limit),
-        ]
-    )
+def list_ready_issues(repo, label, limit, scope_labels=()):
+    """Open issues carrying the ready label, narrowed to `scope_labels`.
+
+    The scope matters for more than cost. `--limit` is applied by the API, so a
+    window drawn over the whole repo can exclude an in-scope issue entirely —
+    and a missing verdict is indistinguishable from a ready one, so the caller
+    cannot detect the omission. Repeated `--label` flags AND together, matching
+    how the board query narrows itself.
+    """
+    args = [
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--label",
+        label,
+    ]
+    for scope in scope_labels:
+        args += ["--label", scope]
+    args += ["--json", "number,title,labels", "--limit", str(limit)]
+    code, out, err = run_gh(args)
     if code != 0:
         raise SystemExit(
             f"gh issue list failed for {repo}: {err.strip() or out.strip()}"
@@ -84,23 +91,38 @@ def list_ready_issues(repo, label, limit):
 
 
 def open_blockers(repo, issue):
-    """Numbers of this issue's `blocked_by` dependencies still open."""
+    """Numbers of this issue's `blocked_by` dependencies still open.
+
+    `--paginate --slurp`, not a bare call: this is a REST list endpoint, so a
+    plain read returns only the first 30 blockers and an open one past that page
+    would make a blocked issue read as ready — a silent wrong answer, which is
+    the one thing this script must not produce. `--slurp` is what makes it
+    parseable: bare `--paginate` emits one JSON array per page, concatenated,
+    which is not valid JSON; `--slurp` wraps the pages in a single array, so the
+    result is a list of pages to flatten.
+    """
     code, out, err = run_gh(
-        ["api", f"repos/{repo}/issues/{issue}/dependencies/blocked_by"]
+        [
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repo}/issues/{issue}/dependencies/blocked_by",
+        ]
     )
     if code != 0:
         raise SystemExit(
             f"gh api blocked_by failed for {repo}#{issue}: {err.strip() or out.strip()}"
         )
-    blockers = json.loads(out or "[]")
+    pages = json.loads(out or "[]")
+    blockers = [b for page in pages for b in page]
     return [b["number"] for b in blockers if b.get("state") == "open"]
 
 
-def compute(repo, labels_file, limit):
+def compute(repo, labels_file, limit, scope_labels=()):
     groups, _colors = load_vocabulary(labels_file)
     label = ready_label(groups)
 
-    candidates = list_ready_issues(repo, label, limit)
+    candidates = list_ready_issues(repo, label, limit, scope_labels)
     ready = []
     blocked = []
     for issue in candidates:
@@ -140,11 +162,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True, help="owner/name")
     parser.add_argument("--limit", type=int, default=50, help="max issues to check")
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        dest="scope_labels",
+        metavar="LABEL",
+        help="narrow to issues also carrying this label; repeatable (AND)",
+    )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
-    result = compute(args.repo, args.labels_file, args.limit)
+    result = compute(args.repo, args.labels_file, args.limit, args.scope_labels)
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:

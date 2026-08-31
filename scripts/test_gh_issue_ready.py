@@ -29,12 +29,15 @@ class FakeRepo:
     """A repo's ready-labeled issues and their dependency graphs.
 
     `issues` maps issue number -> title. `blocked_by` maps issue number -> list
-    of (number, state) tuples describing its blockers.
+    of (number, state) tuples describing its blockers. `page_size` splits each
+    blocker list into pages, so a test can put an open blocker beyond page one —
+    the shape `gh api --paginate --slurp` returns.
     """
 
-    def __init__(self, issues, blocked_by=None):
+    def __init__(self, issues, blocked_by=None, page_size=100):
         self.issues = dict(issues)
         self.blocked_by = dict(blocked_by or {})
+        self.page_size = page_size
         self.calls = []
 
     def run_gh(self, args):
@@ -46,11 +49,15 @@ class FakeRepo:
             ]
             return 0, json.dumps(payload), ""
         if args[0] == "api":
-            path = args[1]
+            path = next(a for a in args if "/issues/" in a)
             issue = int(path.split("/issues/")[1].split("/")[0])
             blockers = self.blocked_by.get(issue, [])
-            payload = [{"number": n, "state": s} for n, s in blockers]
-            return 0, json.dumps(payload), ""
+            entries = [{"number": n, "state": s} for n, s in blockers]
+            pages = [
+                entries[i : i + self.page_size]
+                for i in range(0, max(len(entries), 1), self.page_size)
+            ]
+            return 0, json.dumps(pages), ""
         raise AssertionError(f"unexpected gh call: {args}")
 
     def mutating_calls(self):
@@ -161,6 +168,49 @@ class MainTests(unittest.TestCase):
         result = json.loads(out.getvalue())
         self.assertEqual([i["number"] for i in result["ready"]], [1])
         self.assertEqual(result["blocked"][0]["open_blockers"], [99])
+
+
+class ScopeAndPagingTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def test_an_open_blocker_past_the_first_page_is_still_seen(self):
+        """A single-page read would call this issue ready. It is not.
+
+        The endpoint is a REST list, so without --paginate only the first page
+        comes back and an open blocker after it vanishes — a silent wrong
+        "ready", which is the one answer this script must never give.
+        """
+        blockers = [(900 + i, "closed") for i in range(3)] + [(999, "open")]
+        repo = FakeRepo({7: "seven"}, {7: blockers}, page_size=2)
+        gh_issue_ready.run_gh = repo.run_gh
+
+        result = gh_issue_ready.compute("o/n", LABELS_FILE, 50)
+
+        self.assertEqual(result["ready"], [])
+        self.assertEqual(result["blocked"][0]["open_blockers"], [999])
+        # And the call really did ask for every page.
+        api_call = next(c for c in repo.calls if c[0] == "api")
+        self.assertIn("--paginate", api_call)
+        self.assertIn("--slurp", api_call)
+
+    def test_scope_labels_narrow_the_candidate_query(self):
+        """The helper's window must be drawn over the caller's scope.
+
+        Its --limit is applied by the API, so a repo-wide window can omit an
+        in-scope issue entirely — and a missing verdict is indistinguishable
+        from a ready one, so the caller cannot detect the omission.
+        """
+        repo = FakeRepo({1: "one"})
+        gh_issue_ready.run_gh = repo.run_gh
+
+        gh_issue_ready.compute("o/n", LABELS_FILE, 50, ["follow-up", "task-loop"])
+
+        listing = next(c for c in repo.calls if c[:2] == ["issue", "list"])
+        self.assertEqual(listing.count("--label"), 3)  # ready label + two scopes
+        self.assertIn("follow-up", listing)
+        self.assertIn("task-loop", listing)
 
 
 if __name__ == "__main__":
