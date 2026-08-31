@@ -43,7 +43,15 @@ from pathlib import Path
 # operator's real value is unknowable here — `<NEUTRAL>` is deliberately never
 # documented as a fixed path — so each is matched as a wildcard, bounded by
 # PLACEHOLDER_VALUE below.
-PLACEHOLDER_RE = re.compile(r"<INPUT-DIR>|<INPUT>|<NEUTRAL>")
+PLACEHOLDER_RE = re.compile(r"(<INPUT-DIR>|<INPUT>|<NEUTRAL>)")
+
+# Placeholders whose path is exempt from the off-machine check, because nothing
+# about them can be wrong. `<NEUTRAL>` is created by the dispatch's own
+# `mkdir -p`, which makes every missing parent, so any depth may legitimately be
+# absent before a first run. And its only requirement is to be a dedicated empty
+# directory — a mistyped `<NEUTRAL>` still yields one, so there is no failure to
+# detect. Checking it would report a valid config as broken and catch nothing.
+EXEMPT_PLACEHOLDERS = {"<NEUTRAL>"}
 
 # What a placeholder may stand for. Every reviewer file requires a "literal
 # fixed absolute path" here, so anything not starting with `/` is not a
@@ -106,12 +114,20 @@ def template_to_regex(template):
     merely wildcarded so the substituted paths can be checked separately; the
     pattern alone cannot tell a legitimate path from a typo'd one, because both
     are equally well-formed absolute paths to it.
+
+    Returns `(regex, names)`, where `names[i]` is the placeholder that produced
+    capture group `i + 1`. The caller needs it because the placeholders are not
+    interchangeable: what counts as an implausible path differs by which one it
+    substitutes (see `offmachine_paths`).
     """
-    parts = PLACEHOLDER_RE.split(template)
-    return re.compile(PLACEHOLDER_VALUE.join(re.escape(p) for p in parts) + r"\Z")
+    # PLACEHOLDER_RE captures, so split interleaves: [lit, ph, lit, ph, …, lit].
+    pieces = PLACEHOLDER_RE.split(template)
+    literals, names = pieces[0::2], pieces[1::2]
+    pattern = PLACEHOLDER_VALUE.join(re.escape(p) for p in literals)
+    return re.compile(pattern + r"\Z"), names
 
 
-def offmachine_paths(rule, rx):
+def offmachine_paths(rule, rx, names):
     """Substituted absolute paths in `rule` that do not resolve on THIS machine.
 
     A placeholder path may legitimately not exist yet: `<INPUT>` is created by
@@ -119,6 +135,10 @@ def offmachine_paths(rule, rx):
     the parent to be there already. So one missing trailing level is normal and
     two or more is not — a path that far from anything on disk cannot be written
     or read here, so the rule it sits in can never fire on this machine.
+
+    That reasoning is specific to the `cat >` placeholders, so it is applied
+    only to them; `EXEMPT_PLACEHOLDERS` names the ones it would misjudge and why.
+    A single global threshold reported a valid deep `<NEUTRAL>` as unusable.
 
     **This says nothing about whether the rule is wrong.** A settings file
     shared across machines — a dotfiles repo synced to hosts whose usernames
@@ -128,16 +148,11 @@ def offmachine_paths(rule, rx):
     template with no live rule, `missing` says so on its own, which is the
     signal that actually matters and is true on exactly the hosts where it is.
 
-    The threshold is deliberately not tuned to `<NEUTRAL>`, whose `mkdir -p`
-    would happily create any depth. Allowing arbitrary depth for it would give
-    up the check on the one reviewer whose path is least standardised, which is
-    a worse trade than asking an operator to `mkdir` a neutral directory that a
-    first review would have created anyway.
     """
     m = rx.fullmatch(rule)
     bad = []
-    for value in m.groups():
-        if not value.startswith("/"):
+    for name, value in zip(names, m.groups()):
+        if name in EXEMPT_PLACEHOLDERS or not value.startswith("/"):
             continue
         p = Path(value)
         missing = 0
@@ -202,7 +217,7 @@ def analyze(reviewers_dir, allow_rules):
 
         matched_rules, missing, offmachine = set(), [], []
         for template in templates:
-            rx = template_to_regex(template)
+            rx, ph_names = template_to_regex(template)
             live = []
             # Coverage is asked of every allow rule, not just the owned ones:
             # devin's `mkdir -p` / `cd` segments are satisfied by whatever rule
@@ -211,7 +226,7 @@ def analyze(reviewers_dir, allow_rules):
             for rule in allow_rules:
                 if not rx.fullmatch(rule):
                     continue
-                bad = offmachine_paths(rule, rx)
+                bad = offmachine_paths(rule, rx, ph_names)
                 if bad:
                     # Shape-correct but pointed somewhere this machine has no
                     # path to, so it cannot fire here. Not coverage — otherwise

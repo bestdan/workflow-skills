@@ -346,7 +346,9 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
   dropped one, a stale pinned model). It will never fire again.
 - **OFF-MACHINE** — a rule matching a template's _shape_ but substituting a path
   this machine has no route to (missing two or more trailing levels; one is fine,
-  the dispatch's own `cat >` creates it). It cannot fire here, so it is not
+  the dispatch's own `cat >` creates it). `<NEUTRAL>` is exempt from this
+  entirely — its dispatch runs `mkdir -p`, which creates every missing parent, and
+  any dedicated empty directory serves, so no depth there is wrong. It cannot fire here, so it is not
   coverage — but it is **reported and never counted as drift**. A settings file
   shared across hosts with different usernames must carry every host's rules, so
   each host sees the others' as unresolvable: correct, not broken, and "fixing"

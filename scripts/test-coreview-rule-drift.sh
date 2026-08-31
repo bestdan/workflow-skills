@@ -189,6 +189,37 @@ else
   fail "not-yet-created path wrongly flagged (offmachine=$(count agy offmachine), missing=$(count agy missing))"
 fi
 
+# --- 4b. a deep, not-yet-created <NEUTRAL> is exempt -----------------------
+# devin's dispatch creates <NEUTRAL> with `mkdir -p`, which makes EVERY missing
+# parent, so any depth may legitimately be absent before a first run. And its
+# only requirement is to be a dedicated empty directory, so even a mistyped one
+# works — there is nothing to detect. A single global depth threshold reported
+# this valid config as unusable, which made devin's template MISSING and warned.
+
+make_settings "$BASE/deepneutral.json" \
+  "Bash(mkdir -p \"$BASE/fresh/co-review/devin/cwd\")" \
+  "Bash(devin -p --prompt-file \"$REAL_DIR/in.devin\" --permission-mode auto)"
+run_drift "$BASE/deepneutral.json"
+if [ "$RC" -eq 0 ] && [ "$(count devin offmachine)" = "0" ] && [ "$(count devin missing)" = "0" ]; then
+  pass "a deep not-yet-created <NEUTRAL> is exempt, not off-machine"
+else
+  fail "deep <NEUTRAL> wrongly flagged (rc=$RC, offmachine=$(count devin offmachine), missing=$(count devin missing))"
+fi
+
+# --- 4c. <INPUT> is NOT exempt --------------------------------------------
+# The exemption is per-placeholder, not a blanket relaxation: <INPUT> is opened
+# with `cat >`, which cannot create directories, so a deep one is still unusable.
+
+make_settings "$BASE/deepinput.json" \
+  "Bash(mkdir -p \"$REAL_DIR/neutral\")" \
+  "Bash(devin -p --prompt-file \"$BASE/nope/deeper/in.devin\" --permission-mode auto)"
+run_drift "$BASE/deepinput.json"
+if [ "$(count devin offmachine)" = "1" ] && [ "$(count devin missing)" = "1" ]; then
+  pass "a deep <INPUT> is still off-machine (the exemption is per-placeholder)"
+else
+  fail "deep <INPUT> not flagged (offmachine=$(count devin offmachine), missing=$(count devin missing))"
+fi
+
 # --- 5. no rules at all is "not configured", not drift ---------------------
 
 make_settings "$BASE/none.json" "Bash(git diff:*)"
