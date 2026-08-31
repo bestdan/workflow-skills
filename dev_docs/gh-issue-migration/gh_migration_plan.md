@@ -127,6 +127,18 @@ join, and `gh` covers it only partially.
     self-healing comment election. Note `scripts/claim-scan.sh` and `/doctor` cover
     `repo-pr` claim PRs, not refs — this is new work, not a config change.
 
+**Phase 3 — handler (added 2026-08-31, from the post-task-4 PR audit)**
+
+14. [phase_3_handler/gh_migration_task_14.md](phase_3_handler/gh_migration_task_14.md) — **Defect from task 4.** `/do-tasks --no-claim`
+    still checks out `task/<n>`, a branch the claim no longer creates. Size 1. Do it next.
+15. [phase_3_handler/gh_migration_task_15.md](phase_3_handler/gh_migration_task_15.md) — **Create native dependency edges on the write
+    side.** Tasks 4 and 5 both taught the loop to _read_ GitHub's native `blocked_by`
+    graph. Nothing _writes_ one — `/push-plan` still emits a prose footer — so both
+    checks pass everything and dependency-blocking is inert. This is the task that makes
+    them do something. It also retires the "GitHub Issues have no native dependency edge"
+    claim still asserted in `gh-issue-reoptimize.md`, `task-config.md:33` and
+    `push-plan.md:282`, which task 8's own context already falsifies.
+
 **Phase 4 — migrate (added 2026-08-30)**
 
 13. **Teach auto-pilot the `gh-issue` handler.** `/auto-pilot` today supports **linear
@@ -150,6 +162,61 @@ join, and `gh` covers it only partially.
 **Phase 5 — cleanup**
 
 11. [phase_5_cleanup/gh_migration_task_11.md](phase_5_cleanup/gh_migration_task_11.md) — Graduate durable decisions to `dev_docs/`, delete the plan folder.
+
+## In-flight PRs against files this plan owns
+
+Three open PRs modify handler files this migration has since rewritten. They are tracked
+in Linear, not here — **this section records only what the migration requires of each**,
+which is the migration's own knowledge and lives nowhere else. Audited 2026-08-31 against
+`main` at `3883d49`.
+
+The shared hazard: **all three apply almost cleanly and are almost all wrong.** Each was
+written against the pre-migration vocabulary, so `git` reports success while the prose
+now instructs an agent to query labels nothing writes.
+
+| PR                                                                                                 | Verdict                        | What must change before merge                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#426](https://github.com/bestdan/workflow-skills/pull/426) — gh-issue batch `/do-tasks --all`     | rebase-then-**revise heavily** | Four things, below. Three of its four files apply clean, which is the trap.                                                                                                                                                                                                                                                           |
+| [#432](https://github.com/bestdan/workflow-skills/pull/432) — paginate promote's candidate query   | rebase-then-revise             | Three of five hunks anchor on the deleted legacy-label query. The intent (`--limit 50` → `500`, pagination prose) is orthogonal to the vocabulary change — re-anchor it onto the current query and backstop paragraph. Its GraphQL rewrite applies as-is.                                                                             |
+| [#411](https://github.com/bestdan/workflow-skills/pull/411) — warn against parallel tracker writes | rebase-then-revise             | Its anchor line is gone (task 5 restructured promote's step 5), and its warning names `gh issue edit` — the call this migration **banned** on that path. Reword to name the `gh-issue-state.py` PATCH. The concern itself is real and complementary: the script bounds one issue's transition, #411 bounds parallelism across issues. |
+
+**#432 and #411 touch disjoint sections of `gh-issue-promote.md`**, so they can land in
+either order once each is separately reconciled.
+
+### #426 in detail — it would ship a silently dead feature
+
+Merged after a mechanical rebase, gh-issue batch would report "no candidate" forever and
+look healthy doing it:
+
+- Its candidate query asks for `auto-eligible` / `-label:auto-claimed`. Nothing writes
+  those now, so it matches **zero issues** — reported as no candidate, with no error.
+- It re-derives the WIP count in prose from the same two dead labels instead of calling
+  `gh-issue-claim.py wip`, so the bound the whole batch mechanism exists to enforce reads
+  zero.
+- It spells `task/<n>` throughout, so a batch session would create a ref that misses the
+  real lock.
+- It adds a **"Dependency-ready selection"** section that parses the `Blocked by: #<n>`
+  body footer, on the stated premise that "GitHub Issues has no native blocking
+  relationship this handler can query." That premise is false (task 8's context, and the
+  live endpoint `gh-issue-ready.py` uses). **Delete that section rather than reconciling
+  it** — task 4 already drops dependency-blocked candidates via
+  `gh-issue-ready.py --issue N`, scoped exactly the way #426 wants.
+- Its capability-matrix flip to `yes` is directionally right but must land **last**:
+  until the four above are fixed it advertises a feature that no-ops.
+
+Worth naming: #426 reached for the body footer because the repo told it to. It is the
+same stale claim task 15 exists to retire, arrived at independently — which is the
+argument for fixing the claim at its source rather than per-PR.
+
+### Not interacting
+
+[#436](https://github.com/bestdan/workflow-skills/pull/436) (Linear active-issue quota
+precheck) touches `linear-common.md` and `linear-promote.md` only. Its `auto-eligible`
+mentions are **Linear's** vocabulary, which this migration deliberately leaves alone —
+`finplan` stays on Linear as the control. No action. One observation for the pilot
+evaluation (task 10): it is building a workaround for the 250-issue cap that is one of
+the three reasons this migration was chosen, which is evidence about Linear's cost, not
+about #436.
 
 ## Open questions
 

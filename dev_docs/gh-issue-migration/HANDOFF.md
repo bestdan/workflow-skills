@@ -52,7 +52,20 @@ dependency-readiness. **Task 4** — PR #442 — moved `/do-tasks`'s claim lifec
 `gh-issue-claim.py` for the parts two racing sessions must perform identically, taught
 claim to consult native `blocked_by`, and removed task 5's bridges.
 
-**Task 6 is next.**
+**Tasks 14 and 15 are next, then 6.** The 2026-08-31 audit of the open PRs turned up two
+things that outrank the next planned task:
+
+- **Task 14** — a defect task 4 shipped. `/do-tasks --no-claim` still checks out
+  `task/<n>`, a branch the claim no longer creates. Size 1.
+- **Task 15** — dependency-blocking is **inert**. Tasks 4 and 5 both taught the loop to
+  read GitHub's native `blocked_by` graph; nothing writes one, so both checks pass
+  everything. Fixing the write side is what makes two already-shipped read paths do
+  anything.
+
+The same audit produced the epic's **In-flight PRs against files this plan owns**
+section. Read it before touching `gh-issue-claim.md` or `gh-issue-promote.md` — three
+open PRs edit those files against the old vocabulary, and they all apply almost cleanly,
+which is exactly what makes them dangerous.
 
 One consequence still open: `gh-issue-state.py` shells out to `gh api`. A cloud routine
 has no `gh`, so the loop still owes an MCP branch that reuses `labels.yml` for the same
@@ -84,6 +97,11 @@ This file was wrong twice by asserting routine behaviour from documentation. Pro
   than degrading. Switching `.task-config.yml` to `gh-issue` takes this repo out of
   unattended operation until that is fixed.
 - **`gh-issue-reoptimize.md` has not migrated** — see above. Owned by task 8.
+- **Nothing creates a native dependency edge**, so `/list-tasks`'s and `/do-tasks`'s
+  dependency checks are correct and inert. Owned by task 15, which also retires the
+  "GitHub Issues have no native dependency edge" claim still asserted in three files —
+  a claim that was true when written, is false now, and has already misled one open PR
+  (#426) into building a body-footer parser.
 - **Tasks 12 and 13 have no task file** — they exist only as entries in the epic. Every
   other task has one under a `phase_*/` directory.
 
