@@ -109,8 +109,8 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
    | Section            | Match rule                                                                                                                                                     |
    | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | `new`              | `open`, has `status:0_untriaged` — **or** no `status:` label and none of the legacy markers below (a pre-migration issue)                                      |
-   | `needs_refinement` | `open`, has `status:1_needs_refinement`                                                                                                                        |
-   | `ready`            | `open`, has `status:2_ready` and no open dependency (see **Blocked** below)                                                                                    |
+   | `needs_refinement` | `open`, has `status:1_needs_refinement` (or legacy `human-approval-requested`)                                                                                 |
+   | `ready`            | `open`, has `status:2_ready` (or legacy `auto-eligible`) and no open dependency (see **Blocked** below)                                                        |
    | `in_progress`      | `open`, has `status:3_started` (or legacy `auto-claimed` / `in-progress`)                                                                                      |
    | `blocked`          | `open`, has the `blocked` label — **or** has `status:2_ready` with an open `blocked_by` dependency (see **Blocked** below)                                     |
    | `needs_review`     | `open`, has `status:4_needs_review` (or legacy `needs-review`) — best-effort: `gh issue list` does not return linked PRs, so call no extra tool to detect them |
@@ -129,7 +129,7 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
        --repo "<repo>" --json
      ```
 
-     If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. Move each issue it reports as blocked into the `blocked` section, annotated with the open blockers it names.
+     If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. **Intersect its output with the issue numbers step 2 returned**, then move each of those it reports as blocked into the `blocked` section, annotated with the open blockers it names. The helper queries the whole repo, while step 2 may be narrowed by `gh-issue.labels` (which defaults to `[follow-up]`), so applying its verdicts unfiltered would put a card on the board that this board never listed.
 
 4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
@@ -139,14 +139,14 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                                                                       |
-   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-   | Priority    | the `prio:<0-3>` label if present, rendered `[p<n>]`; otherwise render `[—]` and sort it last in the tier                                                    |
-   | Identifier  | `#<number>`                                                                                                                                                  |
-   | Title       | issue `title`                                                                                                                                                |
-   | Estimate    | the `est:<n>` label if present, rendered `(est <n>)` after the title; omit the parenthetical when the issue carries none                                     |
-   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                              |
-   | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—` |
+   | Field       | Source                                                                                                                                                                                             |
+   | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Priority    | the `prio:<0-3>` label if present, rendered `[p<n>]`; else the legacy `priority:urgent\|high\|medium\|low`, mapped urgent→p0, high→p1, medium→p2, low→p3; otherwise `[—]`, sorted last in the tier |
+   | Identifier  | `#<number>`                                                                                                                                                                                        |
+   | Title       | issue `title`                                                                                                                                                                                      |
+   | Estimate    | the `est:<n>` label if present, rendered `(est <n>)` after the title; omit the parenthetical when the issue carries none                                                                           |
+   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                                                                    |
+   | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—`                                       |
 
    Sort within each section by priority (`prio:0` first through `prio:3`, none last), then `createdAt` (oldest first).
 

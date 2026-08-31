@@ -106,24 +106,22 @@ nothing and report the WIP-limit decline).
 ## Find candidates
 
 ```bash
-gh issue list --state open --search "no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked" --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
+gh issue list --state open --search 'label:"status:2_ready","auto-eligible" no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked' --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
 ```
 
+- `label:"status:2_ready","auto-eligible"` selects ready issues in **either** spelling — a comma-separated list is an OR in GitHub's issue search, verified against the live API (`label:"a","b"` returns the union in both term orders, including when one term matches nothing). `/promote-tasks` now writes `status:2_ready` while this file still writes `auto-claimed`, so during the migration a repo holds both; asking for only one spelling finds half the board. **Delete the `auto-eligible` arm once the claim lifecycle moves to the `status:` vocabulary** — it is a migration bridge, not a supported dialect. Quote each value: `status:2_ready` contains a colon, which is also the search syntax's own separator.
 - `no:assignee` skips anything already claimed; `-label:auto-claimed -label:human-approval-requested -label:blocked` excludes already-claimed, unrefined, or blocked issues. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.
-- **Select the ready ones client-side, accepting either spelling.** Keep an issue whose returned `labels` contain **`status:2_ready`** (the current vocabulary — see `commands/handlers/assets/labels.yml`) **or** the legacy **`auto-eligible`**. Drop everything else.
 
-  > **Why this is a filter and not a `--search` term.** GitHub's issue search has no
-  > label OR, so one query cannot ask for either spelling. And it has to ask for both:
-  > `/promote-tasks` now writes `status:2_ready`, while this file still writes
-  > `auto-claimed` on claim — the two halves of the handler migrate in separate
-  > changes, and in between, a repo holds issues in both spellings. Filtering on the
-  > `labels` this query already returns costs nothing extra and keeps `/do-tasks`
-  > working across the gap. **Delete the `auto-eligible` arm once the claim lifecycle
-  > moves to the `status:` vocabulary** — it is a migration bridge, not a supported
-  > dialect.
+  > **The ready term has to stay on the server.** Dropping it and filtering the
+  > returned `labels` client-side looks equivalent and is not: `--limit 50` is applied
+  > by the API **before** any local filter runs, so on a repo with more than 50 other
+  > unassigned open issues the window can contain no ready issue at all and
+  > `/do-tasks` reports "no candidate" — silently, and worst for exactly the oldest
+  > issues the ranking below most wants, since the search returns newest first.
 
-- As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through — these receive no claim action.
+- As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through, and keep only issues whose returned `labels` carry one of the two ready spellings — these receive no claim action.
 - **Rank** by priority, accepting either spelling for the same reason as the ready filter above: `prio:0` → `prio:1` → `prio:2` → `prio:3` (the current vocabulary), or the legacy `priority:urgent` → `high` → `medium` → `low`. An issue carrying neither sorts last. Then by issue age (oldest `createdAt` first — let aging issues bubble up). **Drop the `priority:` arm when the `auto-eligible` one goes.** Without both, a newly promoted issue carries `prio:1` and reads as unprioritised, so `/do-tasks` would pick work in the wrong order rather than visibly failing.
+- **This path does not yet honour native dependencies.** `-label:blocked` above catches the manual override, but nothing here reads `dependencies/blocked_by`, so `/list-tasks` can show an issue as dependency-blocked while `/do-tasks` claims it. Pre-existing — claim never consulted the graph — and surfaced only now that listing does. It belongs with the claim lifecycle migration, which is where a candidate-scoped `gh-issue-ready.py` pass fits.
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
 Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
