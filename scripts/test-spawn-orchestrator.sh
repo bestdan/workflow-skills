@@ -5467,10 +5467,17 @@ USEOF
   # property under test — observed flapping pass/fail across runs with no code
   # change. The claim is "eventually reaped", so bound the wait instead: still
   # matching after 10s is a real leaked reaper, which is what this should catch.
-  # Note the match is argv-based, and every fork of the report-tick process
-  # inherits that argv — so this also covers _run_bounded's job and watchdog and
-  # anything its TERM handler does. The 10s is a budget for that teardown as
-  # well as for the reap; spend against it knowingly.
+  # NOTE: this match is argv-based, and argv is only INHERITED across a fork —
+  # it is REPLACED by exec. A plain fork (like the command-substitution and
+  # job-control subshells report-tick spawns on its way to _run_bounded's job
+  # and watchdog) still carries this argv, so this pgrep does happen to reach
+  # them today. But anything downstream that execs (a `sleep`, a real `gh`)
+  # stops matching the instant it execs, even while it is still alive and
+  # still a descendant. This assertion is therefore NOT what actually covers
+  # _run_bounded's job/watchdog/TERM-handler teardown — the PGID-based direct
+  # test in the "reaper teardown" section below is what covers that
+  # descendant set, by identity rather than by argv. The 10s here is a budget
+  # for the reap of report-tick itself; spend against it knowingly.
   srl_reaped=0
   srl_tries=0
   while [ "$srl_tries" -lt 50 ]; do
@@ -5495,6 +5502,273 @@ USEOF
     'report-tick' "$(cat "$SRL/launch-off.sh" 2>/dev/null)"
 else
   echo "skip - status-report suite (no git available)"
+fi
+
+# --- reaper teardown: _run_bounded's TERM/INT/HUP trap (#264) -----------------
+#
+# Background: _run_bounded opens a NESTED `set -m` window, so the bounded job
+# and its watchdog land in process groups of their OWN, outside the caller's
+# group. An outer reaper (`kill -TERM -"$rpt"`, the exact shape the generated
+# wrapper uses on report-tick) hits the parent shell but NOT those children
+# unless the parent installs its own trap and forwards the signal — without
+# it the parent shell dies blocked in `wait`, cleanup never runs, both
+# children re-parent to init, and the watchdog lingers its full ~62s firing
+# `gh` at a run that has already ended. That was fixed by the TERM/INT/HUP
+# trap at the top of _run_bounded, which itself has ZERO test coverage: two
+# wrong versions of it passed the whole suite green while still leaking, and
+# the only thing that ever caught the leak was an ad-hoc `ps` watch run
+# alongside the suite. This is the deterministic replacement for that watch.
+#
+# Design constraints, each load-bearing:
+#   - The watchdog stays at its PRODUCTION default (60s, no SPAWN_REPORT_TIMEOUT
+#     override). Shrinking it would make this test VACUOUS: an orphaned
+#     watchdog still runs, so with e.g. a 2s timeout it would TERM-then-KILL
+#     the job on its own at ~4s regardless of whether the trap works, and any
+#     assertion deadline above that would see a clean process table and pass
+#     even when the teardown is completely broken. We instead assert teardown
+#     within a SHORT 10s deadline against a 60s watchdog — the 60≫10 gap is
+#     exactly what makes a leak observable instead of masked.
+#   - Processes are identified by PROCESS GROUP, never by PPID (re-parenting
+#     to init on a leak is the bug itself, so PPID cannot be the signal) and
+#     never by argv (inherited across `fork`, but REPLACED by `exec` — an
+#     exec'd `sleep`/`gh` can survive while no longer matching any argv
+#     pattern; see the corrected comment above the status-report [in-wake]
+#     reap for the bug this file used to have).
+#   - Every wait below is a bounded poll on an observable event, never a bare
+#     `sleep` — that is what made the OLD reaper coverage read as flaky.
+RTD="$BASE/reaper-teardown"
+mkdir -p "$RTD"
+
+# One shared RUN.md fixture: a single task in phase `handed-off` with a PR
+# number set. That is enough to make `status_report` place a REAL, BLOCKING
+# call through `--gh` (the pr-view loop at the top of the PR/reconciliation
+# section) without needing a git repo at all — `status` and
+# `_restack_read_run_md` only ever read this file as text. `handed-off` (not
+# `pr-open`/`implementing`) is deliberate: it is NOT in the `in-flight`
+# bucket, so the elapsed/tip-tracking loops above the gh calls skip it
+# cleanly instead of trying (and harmlessly failing) git lookups against a
+# non-repo dir.
+mkdir -p "$RTD/.auto-pilot"
+{
+  printf -- '---\n'
+  printf 'base_branch: main\n'
+  printf -- '---\n\n'
+  printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+  printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+  printf '| task_pr | handed-off | branch_pr | main | - | #201 | |\n'
+} >"$RTD/.auto-pilot/RUN.md"
+
+# A usage-bin stub that returns instantly (not the thing under test — just
+# has to exist so status_report's optional usage section does not skip).
+RTD_USAGE="$RTD/usage.sh"
+printf '#!/bin/sh\nprintf "{}\\n"\n' >"$RTD_USAGE"
+chmod +x "$RTD_USAGE"
+
+# Snapshot -> BFS the transitive PPID closure from a root pid, returning every
+# DISTINCT pgid found (one per line). This is the identity this whole section
+# is built on: never PPID (flips to 1 on the leak), never argv (lost on exec).
+_rtd_pgids_from() {
+  local root="$1" snap
+  snap="$(ps -Ao pid,ppid,pgid,stat,etime,command 2>/dev/null | tail -n +2)"
+  local -a queue=("$root") seen=() pgids=()
+  while [ "${#queue[@]}" -gt 0 ]; do
+    local cur="${queue[0]}"
+    queue=("${queue[@]:1}")
+    case " ${seen[*]-} " in *" $cur "*) continue ;; esac
+    seen+=("$cur")
+    local line
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      local pid ppid pgid
+      # shellcheck disable=SC2086 # deliberate word-split: pid/ppid/pgid are
+      # the first three whitespace-separated fields; trailing words (stat,
+      # etime, the command line) are discarded here and re-read via awk when
+      # a failure needs to dump full rows.
+      set -- $line
+      pid="$1"
+      ppid="$2"
+      pgid="$3"
+      if [ "$pid" = "$cur" ]; then
+        case " ${pgids[*]-} " in *" $pgid "*) ;; *) pgids+=("$pgid") ;; esac
+      fi
+      if [ "$ppid" = "$cur" ]; then
+        queue+=("$pid")
+      fi
+    done <<EOF
+$snap
+EOF
+  done
+  printf '%s\n' "${pgids[@]}"
+}
+
+# Dump every surviving row whose pgid (column 3, exact match) is in the
+# recorded set — for a FAIL message, never for the pass path.
+_rtd_dump_rows() {
+  local pgid_list="$1" snap row pg
+  snap="$(ps -Ao pid,ppid,pgid,stat,etime,command 2>/dev/null | tail -n +2)"
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    pg="$(printf '%s\n' "$row" | awk '{print $3}')"
+    case " $pgid_list " in *" $pg "*) printf '%s\n' "$row" ;; esac
+  done <<EOF
+$snap
+EOF
+}
+
+# Group-kill every recorded pgid, best-effort. Called unconditionally at the
+# end of each iteration (pass or fail) so a red run does not leave the very
+# orphan it just detected running on the machine, and does not bleed into a
+# later iteration or the end-of-suite sweep (Part 2, below).
+_rtd_kill_pgids() {
+  local pg
+  for pg in $1; do
+    kill -KILL -"$pg" 2>/dev/null
+  done
+}
+
+for rtd_kind in compliant stubborn; do
+  RTDK="$RTD/$rtd_kind"
+  mkdir -p "$RTDK/bin"
+
+  # Two `--gh` stubs, differing only in TERM disposition:
+  #   - compliant: default disposition, so a TERM handed to its process group
+  #     ends it outright — proves the trap's first `kill -TERM` alone is
+  #     enough and that the escalation to KILL does not fire unnecessarily
+  #     (over-killing a job that already exited cleanly would be its own bug).
+  #   - stubborn: `trap '' TERM` — the shape with ZERO coverage before this
+  #     file. Proves the escalation to KILL in _run_bounded's trap actually
+  #     happens and actually reaches this process (which a TERM alone cannot
+  #     touch by construction).
+  # Both write their readiness file as the FIRST action after the trap is
+  # settled (installed for stubborn, left at its default for compliant) —
+  # never before — so "ready" means "a TERM sent from this point on exercises
+  # the exact disposition under test", not merely "the script started".
+  RTDK_READY="$RTDK/ready"
+  case "$rtd_kind" in
+    compliant)
+      printf '#!/bin/sh\n: >"%s"\nsleep 300\n' "$RTDK_READY" >"$RTDK/bin/gh-stub"
+      ;;
+    stubborn)
+      printf '#!/bin/sh\ntrap "" TERM\n: >"%s"\nsleep 300\n' "$RTDK_READY" >"$RTDK/bin/gh-stub"
+      ;;
+  esac
+  chmod +x "$RTDK/bin/gh-stub"
+
+  # Launch report-tick in ITS OWN process group, the same way the generated
+  # wrapper launches the in-wake reporter — so `kill -TERM -"$rpt"` below is
+  # the real production shape, not a stand-in for it.
+  set -m
+  "$SCRIPT" report-tick --dir "$RTD" --label "com.autopilot.reaper.$rtd_kind" \
+    --gh "$RTDK/bin/gh-stub" --usage-bin "$RTD_USAGE" >>"$RTDK/o.log" 2>&1 &
+  rpt=$!
+  set +m
+
+  # --- readiness handshake: bounded poll, never a sleep ----------------------
+  rtd_ready=0
+  rtd_tries=0
+  while [ "$rtd_tries" -lt 150 ]; do
+    [ -f "$RTDK_READY" ] && {
+      rtd_ready=1
+      break
+    }
+    sleep 0.1
+    rtd_tries=$((rtd_tries + 1))
+  done
+  if [ "$rtd_ready" != 1 ]; then
+    bad "reaper teardown [$rtd_kind]: fixture never reached blocked state" \
+      "gh stub's readiness file never appeared within 15s"
+    kill -TERM -"$rpt" 2>/dev/null
+    wait "$rpt" 2>/dev/null
+    continue
+  fi
+
+  # --- topology handshake: poll until the full 3-group shape is up -----------
+  # (the reporter's own group, the bounded job's group, the watchdog's group).
+  # Recording BEFORE signalling — and not signalling until this is observed —
+  # is what closes the snapshot-before-watchdog race without a sleep.
+  rtd_pgids=""
+  rtd_tries=0
+  while [ "$rtd_tries" -lt 150 ]; do
+    rtd_pgids="$(_rtd_pgids_from "$rpt" | sort -u)"
+    rtd_count="$(printf '%s\n' "$rtd_pgids" | grep -c .)"
+    [ "$rtd_count" -ge 3 ] && break
+    sleep 0.1
+    rtd_tries=$((rtd_tries + 1))
+  done
+  rtd_pgid_list="$(printf '%s' "$rtd_pgids" | tr '\n' ' ')"
+  if [ "$rtd_count" -lt 3 ]; then
+    bad "reaper teardown [$rtd_kind]: topology never reached the expected 3 process groups" \
+      "saw $rtd_count distinct pgid(s): $rtd_pgid_list"
+    kill -TERM -"$rpt" 2>/dev/null
+    wait "$rpt" 2>/dev/null
+    _rtd_kill_pgids "$rtd_pgid_list"
+    continue
+  fi
+
+  # --- signal, the production shape, then reap the direct child --------------
+  kill -TERM -"$rpt" 2>/dev/null
+  wait "$rpt" 2>/dev/null
+
+  # --- assert EVENTUAL absence, never an instant and never exact timing ------
+  # Deadline is 10s against a 60s watchdog default (constraint above): still
+  # matching at 10s is a real leak, not a slow-but-honest teardown.
+  rtd_gone=0
+  rtd_tries=0
+  while [ "$rtd_tries" -lt 50 ]; do
+    rtd_survivors="$(_rtd_dump_rows "$rtd_pgid_list")"
+    if [ -z "$rtd_survivors" ]; then
+      rtd_gone=1
+      break
+    fi
+    sleep 0.2
+    rtd_tries=$((rtd_tries + 1))
+  done
+  if [ "$rtd_gone" = 1 ]; then
+    ok "reaper teardown [$rtd_kind]: job group + watchdog group both gone within 10s of TERM"
+  else
+    bad "reaper teardown [$rtd_kind]: a process from a recorded pgid survived past the 10s deadline" \
+      "pgids=[$rtd_pgid_list] rows: $(_rtd_dump_rows "$rtd_pgid_list" | tr '\n' ';')"
+  fi
+
+  # Self-cleaning: never leave this iteration's groups behind, pass or fail.
+  _rtd_kill_pgids "$rtd_pgid_list"
+done
+
+# --- Part 2: end-of-suite fixture-process sweep -----------------------------
+# Assert that no process-table row's command contains this suite's own $BASE
+# (fixed-string match, never a regex over an unescaped path). Phrased as "no
+# fixture-owned processes remain" — NOT "no PPID-1 processes" — because by
+# this point in the suite every launcher has already returned; ANY surviving
+# fixture process at end-of-suite is a leak regardless of what re-parented it.
+#
+# What this catches, and what it does NOT: this sweep catches the PERSISTENT
+# class — a regression that orphans the reporter loop itself so it is still
+# alive when the suite finishes. It would NOT have caught the bug that
+# motivated this work: that watchdog lived ~57s inside a ~6-minute suite, so
+# an end-of-suite sweep would have missed it entirely unless it happened to
+# land in the final minute. The direct, PGID-based test above (the reaper
+# teardown section) is what covers that bounded-TRANSIENT class — do not
+# delete it as "redundant" with this sweep; the two catch different failure
+# shapes and neither subsumes the other.
+# Snapshot FIRST, filter SECOND, as two separate steps rather than one
+# pipeline: `ps | grep -F -- "$BASE"` puts $BASE into the grep process's OWN
+# argv, and that grep is itself alive (and captured by `ps`, since it runs
+# concurrently with the pipeline's `ps` stage) at the moment the snapshot is
+# taken — a self-match false positive on every run. Capturing the snapshot to
+# a variable first, then filtering the captured TEXT, means the filtering
+# process's argv is never itself part of what got snapshotted.
+rtd_sweep_snap="$(ps -Ao pid,ppid,pgid,stat,etime,command 2>/dev/null | tail -n +2)"
+rtd_sweep_rows="$(printf '%s\n' "$rtd_sweep_snap" | grep -F -- "$BASE" || true)"
+if [ -z "$rtd_sweep_rows" ]; then
+  ok "end-of-suite sweep: no fixture-owned processes remain"
+else
+  bad "end-of-suite sweep: fixture-owned process(es) survived to end-of-suite" \
+    "$(printf '%s' "$rtd_sweep_rows" | tr '\n' ';')"
+  # Scoped kill by pgid (column 3 of each offending row), not a blanket
+  # pkill -f "$BASE" — a red run here must not poison a LATER run's process
+  # table by leaving something for a coarser match to trip over either.
+  rtd_sweep_pgids="$(printf '%s\n' "$rtd_sweep_rows" | awk '{print $3}' | sort -u | tr '\n' ' ')"
+  _rtd_kill_pgids "$rtd_sweep_pgids"
 fi
 
 guard_hits="$(grep -c '^osascript: ' "$NOTIFY_GUARD_LOG" 2>/dev/null | tr -d ' ')"
