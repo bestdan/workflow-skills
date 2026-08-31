@@ -270,10 +270,17 @@ def has_drift(findings):
     return any(f["configured"] and (f["missing"] or f["dead"]) for f in findings)
 
 
-def report(findings, plugin_root, settings_read):
+def report(findings, plugin_root, settings_read, settings_searched):
     print(f"co-review allow-rule drift — templates from {plugin_root}")
     for p in settings_read:
         print(f"  settings: {p}")
+    if not settings_read:
+        # Say where it looked. Silence here reads as "settings were consulted
+        # and were empty", which is a different diagnosis from "there are none".
+        print(
+            "  settings: none found — looked in "
+            + ", ".join(str(p) for p in settings_searched)
+        )
     print()
 
     for f in findings:
@@ -350,12 +357,12 @@ def main():
             Path(".claude") / "settings.local.json",
         ]
 
+    # No settings file at all is not a failure to run: it is a machine with zero
+    # allow-rules, which every reviewer already reports as "not configured".
+    # Exiting 2 here would render as "the check could not run" when the check
+    # ran fine and has a more useful answer. A file that EXISTS but is
+    # unreadable or invalid stays fatal — load_allow_rules handles that.
     allow_rules, settings_read = load_allow_rules(settings_paths)
-    if not settings_read:
-        die(
-            "none of the settings files exist: "
-            + ", ".join(str(p) for p in settings_paths)
-        )
 
     findings = analyze(reviewers, allow_rules)
     if args.as_json:
@@ -371,7 +378,7 @@ def main():
             )
         )
     else:
-        report(findings, args.plugin_root, settings_read)
+        report(findings, args.plugin_root, settings_read, settings_paths)
 
     sys.exit(1 if has_drift(findings) else 0)
 

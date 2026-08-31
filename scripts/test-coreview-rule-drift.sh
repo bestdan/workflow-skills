@@ -231,6 +231,20 @@ else
   fail "unconfigured reviewers reported as drift (rc=$RC): $OUT"
 fi
 
+# --- 5b. a machine with NO settings file reports, it does not fail ---------
+# A fresh install has zero allow-rules, which is "not configured" — the answer
+# the report already gives well. Exiting 2 would render in /doctor as "the check
+# could not run", when it ran fine. Exit 2 stays for a file that exists but is
+# unreadable or invalid, which test 8 covers for the plugin-root case.
+
+run_drift "$BASE/does-not-exist.json"
+if [ "$RC" -eq 0 ] \
+  && [ "$(printf '%s' "$OUT" | jq -r '[.reviewers[] | select(.configured)] | length')" = "0" ]; then
+  pass "no settings file at all reports not-configured (exit 0), not a failure"
+else
+  fail "absent settings file did not report cleanly (rc=$RC): $OUT"
+fi
+
 # --- 6. a general-purpose cd/mkdir rule is never called dead ---------------
 # `Bash(cd "$(git rev-parse --show-toplevel)")` is ordinary shell config. It
 # must neither satisfy devin's `<NEUTRAL>` template (the placeholder stands for
