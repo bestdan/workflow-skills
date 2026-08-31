@@ -165,7 +165,9 @@ Renders a kanban view grouped by `status` column with priority, dependency block
 
 ### Diagnostics (`/doctor`)
 
-`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), and hygiene (expired tasks, orphan branches) — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth) as reported warnings.
+`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), hygiene (expired tasks, orphan branches), and co-review allow-rule drift — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth, allow-rule drift) as reported warnings.
+
+The allow-rule check is the one that isn't about the task loop; it is there because its failure is silent by construction, so nothing else would ever surface it. See `commands/doctor.md` → Check 7.
 
 It **complements, not replaces, migrate-on-contact** (below): that implicit preflight keeps stale setups working without anyone invoking `/doctor`, while `/doctor` surfaces the same drift — and more — in one place on demand. Both reference the single migration procedure in this file.
 

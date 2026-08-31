@@ -139,6 +139,7 @@ run scripts/test-gh-issue-ready.sh
 run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
 run scripts/test-secret-resolve.sh
+run scripts/test-coreview-rule-drift.sh
 run scripts/test-verify-fix.sh
 # Scheduled LAST because the replay loop is strictly index-ordered: this is the
 # longest check, and anything after it would have its output held back behind

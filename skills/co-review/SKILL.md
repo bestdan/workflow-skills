@@ -88,6 +88,26 @@ All four are **advisory-only** and must pass through the reconciler; a missing, 
 >
 > **Don't blind-discard the probe's stderr; disambiguate `127`.** A `127` (or any non-zero) with _no_ captured stderr is almost always the **wrapper/tool missing**, not the reviewer unauthenticated — a `>/dev/null 2>&1` swallows the telltale `command not found: timeout`. Before skipping a reviewer, confirm the failure came from the reviewer binary itself (it prints `Please sign in …` / `not authenticated`), not from a missing wrapper. Only skip on a genuine auth failure.
 
+**Pre-flight allow-rule check.** An auth probe answers "can this reviewer log
+in?", not "will its dispatch be approved?" — and the second failure is the
+quieter one: an unapproved command is **denied** under `--non-interactive`, not
+queued, so the reviewer vanishes from the run summary with nothing logged.
+Alongside the auth probes, run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" --json
+```
+
+It is read-only and costs milliseconds. Exit `1` means at least one configured
+reviewer has a dead or missing rule; **do not skip that reviewer on
+this signal** — the check is a heuristic over settings files it may not have all
+of, so let the dispatch decide. Instead, carry the finding into the run summary
+beside that reviewer, so a reviewer that then produces nothing is explained
+rather than silently absent. Exit `2` means the check itself could not run
+(usually an unresolvable `${CLAUDE_PLUGIN_ROOT}`); note it and carry on — this is
+advisory, never fatal. `/doctor`'s Check 7 runs the same script and owns the full
+classification and repair guidance; see `commands/doctor.md`.
+
 The probe is a fast gate that runs **before** dispatch, not alongside it: in step 5, run the probes first (they're ~1s each — batch them in parallel if you like), wait for them to finish, then dispatch only the reviewers that passed. A probe failure is a **skip**, reported in the run summary alongside any missing reviewers. (These live rc-gates deliberately duplicate the `select-coder` skill's [`scripts/probe-coders.sh`](../../scripts/probe-coders.sh) probes rather than read its up-to-30-days-stale availability cache — a stale `agy: logged_in: true` would reintroduce the 30s hang. Each reviewer file notes this so the two stay in sync.)
 
 **Built-in invocations.** Everything that varies per PR — the rubric, any reviewer-specific requests, and the diff — is assembled into **one input file** (`<INPUT>`), which is then handed to the reviewer one of three ways: piped on **stdin** with a short fixed-pointer argument (`codex`, `copilot`), named **by path inside the pointer** (`agy` — it does **not** read stdin, so its pointer tells it which file to read; see [`reviewers/agy.md`](reviewers/agy.md)), or handed over with **`--prompt-file "<INPUT>"`** (`devin`). Because nothing variable ends up in the command string — only the fixed `<INPUT>` path and the pointer — the command is invariant and can be approved once with an exact-match rule (see Permissions).
@@ -170,7 +190,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 The reviewer command is **invariant**: everything that varies per PR (the diff and any reviewer-specific requests) travels in the `<INPUT>` file — reached on stdin with a fixed pointer argument (`codex`, `copilot`), named by its fixed path inside the `-p` pointer (`agy`), or via `--prompt-file "<INPUT>"` from a fixed neutral cwd (`devin` — that cwd is load-bearing, not incidental; see [`reviewers/devin.md`](reviewers/devin.md)) — so the command string never changes. Approve each reviewer **once** with an **exact-match** rule — no broad wildcard. Two layers of rules:
 
-**Shared rules** (input assembly + staleness pre-flight) — add once, they cover every reviewer:
+**Shared rules** (input assembly, staleness pre-flight, allow-rule pre-flight) — add once, they cover every reviewer:
 
 ```json
 {
@@ -179,11 +199,14 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
       "Bash(cat:*)",
       "Bash(gh pr diff:*)",
       "Bash(git diff:*)",
-      "Bash(git ls-remote:*)"
+      "Bash(git ls-remote:*)",
+      "Bash(python3 <PLUGIN-CACHE>/workflow-skills/workflow-skills/:*)"
     ]
   }
 }
 ```
+
+Replace `<PLUGIN-CACHE>` with your own plugin cache root (`~/.claude/plugins/cache`, spelled as a literal absolute path). **This one is a prefix rule, not an exact match, and that is deliberate** — the installed plugin's path carries its version (`…/workflow-skills/2.13.2/scripts/…`), so an exact rule would die at the next release. A rule that breaks on every update is precisely the drift the allow-rule pre-flight exists to catch, and it would be catching itself. Stopping the prefix above the version segment survives updates; what it widens to is python3 scripts shipped by this plugin, which you already trust by having installed it.
 
 **Per-reviewer rules** — each reviewer's own exact-match rule(s) (the review command, plus the pre-flight probe for `agy`/`devin`, and for `devin` the two segments that prepare and enter its neutral cwd) live in its file under [`reviewers/`](reviewers/). Add only the ones for the reviewers you use; copy them verbatim. Merge everything into the `permissions.allow` array in `~/.claude/settings.json` (user-wide) or the repo's `.claude/settings.json` — don't overwrite an existing settings file.
 
@@ -192,6 +215,7 @@ Why this is narrow:
 - The per-reviewer rules are **exact** — each authorizes only its one read-only review command with that exact prompt/flags, pinning the read-only posture into the approved string (see each reviewer file for the details: `codex --sandbox read-only`; `agy --sandbox --model …`; `devin --permission-mode auto` with a literal `--prompt-file "<INPUT>"` path and a fixed neutral cwd; `copilot --no-ask-user` with **no** `--allow-all-tools`/`--yolo`). None grant arbitrary runs of the agent. Edit the pointer, path, or flags and Claude Code re-prompts, so the approval can't silently come to mean something else. The pointer/flags must match **byte-for-byte** between the reviewer file's invocation and its rule — if you edit one, edit the other.
 - The `agy`/`devin` probe rules (`Bash(agy models)`, `Bash(devin auth status)`) are read-only status queries with no varying arguments — exact-match, safe to approve once. `copilot` has no probe rule (no `auth status` command; failures are caught from output).
 - `Bash(git ls-remote:*)` covers the staleness pre-flight — it only reads remote ref tips and mutates nothing (no fetch).
+- The `python3 <PLUGIN-CACHE>/…` prefix covers the allow-rule pre-flight. That checker only reads the plugin's own reviewer files and your settings, and never writes (see `scripts/coreview-rule-drift.py`). Without this rule the pre-flight is denied under `--non-interactive` — silently, since a denied command is not queued — so the check meant to explain a missing reviewer goes missing itself.
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
 

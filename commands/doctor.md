@@ -1,15 +1,22 @@
 ---
-description: Diagnose and optionally fix the task-loop setup — config validity, handler prerequisites, legacy dirs, schema drift, and hygiene
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, and co-review allow-rule drift
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
 
 # Doctor
 
-One explicit "diagnose and fix my task-loop setup" entry point. It runs a set of
-checks against `dev_docs/tasks/` and the configured handler, prints a
-`PASS` / `WARN` / `FAIL` line per check with a remediation hint, and changes
-**nothing** unless invoked with `--fix`.
+One explicit "diagnose and fix my setup" entry point. It runs a set of checks
+against `dev_docs/tasks/` and the configured handler — plus one over co-review's
+allow-rules, Check 7 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+remediation hint, and changes **nothing** unless invoked with `--fix`.
+
+Most of what it checks is the task loop. Check 7 is not, and that is deliberate:
+it covers a failure that is **silent by construction**, so the only way anyone
+learns of it is by asking, and this is the one place people already come to ask.
+A check nobody runs does not fix a problem nobody notices. Read that as the bar
+for widening the scope again, not as an invitation — a diagnosable failure that
+announces itself does not belong here.
 
 `/doctor` does **not** replace the migrate-on-contact preflight that the other
 commands run — that implicit auto-heal stays, so a stale setup keeps working
@@ -309,6 +316,74 @@ auto-archive, store an API key). Report against the resolved handler:
 handler-specific prerequisite (Linear key / Jira status) is satisfied or
 not-applicable.
 
+**Check 7 — co-review allow-rules.** Whether the exact-match Bash rules that
+approve each co-review reviewer still match the command the **installed** plugin
+dispatches. This is the one check here that is not about the task loop, and it
+earns its place on the failure mode rather than the subject: a rule that stops
+matching fails **silently** in the mode that matters — under `/co-review
+--non-interactive` an unapproved command is denied rather than queued, so the
+reviewer just stops appearing in the run summary and nothing errors. There is no
+moment at which a human is told, so it has to be asked for. With `autoUpdate`
+enabled on the marketplace the shipped strings move without anyone present, which
+makes it a standing hazard rather than an occasional one.
+
+Run the deterministic checker (read-only; it never writes settings):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py"
+```
+
+`${CLAUDE_PLUGIN_ROOT}` is load-bearing, not incidental: it resolves to the
+**installed** plugin, which is what actually dispatches. A working checkout can be
+several releases ahead of it, so a check run against the checkout answers a
+question nobody asked. Pass `--plugin-root` only to test the script itself.
+
+It compares each reviewer's shipped rule templates against `permissions.allow`
+in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
+`settings.local.json`, and classifies every rule:
+
+- **DEAD** — an existing rule matching no shipped template (a reordered flag, a
+  dropped one, a stale pinned model). It will never fire again.
+- **OFF-MACHINE** — a rule matching a template's _shape_ but substituting a path
+  this machine has no route to (missing two or more trailing levels; one is fine,
+  the dispatch's own `cat >` creates it). `<NEUTRAL>` is exempt from this
+  entirely — its dispatch runs `mkdir -p`, which creates every missing parent, and
+  any dedicated empty directory serves, so no depth there is wrong. It cannot fire here, so it is not
+  coverage — but it is **reported and never counted as drift**. A settings file
+  shared across hosts with different usernames must carry every host's rules, so
+  each host sees the others' as unresolvable: correct, not broken, and "fixing"
+  one here breaks it there. Where such a rule leaves a template with no live
+  rule, MISSING says so on its own — on exactly the hosts where that is true.
+- **MISSING** — a shipped template no rule covers, printed verbatim so it can be
+  copied into settings.
+- **not configured** — a reviewer with no rules at all. Reported, but **not**
+  drift: an operator who doesn't use a reviewer shouldn't be nagged about it.
+
+Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead or missing rule)
+→ `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
+check could not run. It prints the reason on **stderr**, so capture that
+(`2>&1`) and quote it rather than reporting a bare failure — it is usually an
+unresolvable plugin root.
+
+**Always `WARN`, never `FAIL`, and never touched by `--fix`.** Three independent
+reasons, each sufficient:
+
+1. The repair needs literal absolute paths only the operator knows — `<NEUTRAL>`
+   in particular is deliberately never documented as a fixed value (see
+   `skills/co-review/reviewers/devin.md`) — so there is no mechanical edit to
+   apply.
+2. **A settings file is frequently generated or dotfiles-synced, not
+   hand-edited.** Writing to it in place would be undone at the next sync, and
+   the drift would return with nothing to show why — a silent failure of the
+   same kind this check exists to catch. The check reads the live file, because
+   that is what the permission matcher reads; the repair belongs upstream of it,
+   and only the operator knows where that is.
+3. The settings file is write-denied under the sandbox on the machines this runs
+   on, so a `--fix` would fail exactly where it was needed.
+
+Every `FAIL` in this command must be repairable under `--fix`; this one isn't, so
+it is a `WARN`. Print the corrected rules and let the human place them.
+
 ### 3. Report (and fix under `--fix`)
 
 **Report-only (default).** Print the status block and stop — no writes:
@@ -322,8 +397,9 @@ not-applicable.
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
+  WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
 
-2 fail, 2 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 3 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block
@@ -342,8 +418,8 @@ with each fixed check marked `FIXED`:
   `$(git rev-parse --git-dir)/info/exclude` (skip for `repo-pr`, or if the config is
   tracked, per the check above).
 
-Leave every `WARN` (unknown handler, failing auth/MCP, orphan branches) untouched
-and still reported — those need a human. Do **not** stage or commit; the next git
+Leave every `WARN` (unknown handler, failing auth/MCP, orphan branches,
+co-review allow-rules) untouched and still reported — those need a human. Do **not** stage or commit; the next git
 operation picks up the changes (mirrors `/promote-tasks` step 3).
 
 > If the check set later grows past the size budget, split **Hygiene** into a
