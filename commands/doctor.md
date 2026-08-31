@@ -356,8 +356,9 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
 
 Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead, suspect, or
 missing rule) → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
-check could not run (name the reason it printed — usually an unresolvable plugin
-root).
+check could not run. It prints the reason on **stderr**, so capture that
+(`2>&1`) and quote it rather than reporting a bare failure — it is usually an
+unresolvable plugin root.
 
 **Always `WARN`, never `FAIL`, and never touched by `--fix`.** Two independent
 reasons, both decisive. The repair needs literal absolute paths only the operator

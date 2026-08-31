@@ -66,6 +66,12 @@ make_plugin() {
 
 Prose that quotes "Bash(agy never-a-rule)" outside a fence must be ignored.
 
+A bash fence holds the invocation, not a rule:
+
+```bash
+"Bash(agy also-never-a-rule)"
+```
+
 ```json
 "Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" -p \"read <INPUT>\" --model \"M1\")",
 "Bash(agy models)"
@@ -188,15 +194,16 @@ else
   fail "generic rule misattributed (dead=$(count devin dead), missing=$(count devin missing))"
 fi
 
-# --- 7. prose outside a fence is not a template ---------------------------
-# agy.md quotes a bogus rule in prose. Reading it as a template would invent a
-# rule the reviewer never ships, and report it missing forever.
+# --- 7. only a json fence holds templates ---------------------------------
+# agy.md quotes a bogus rule twice: once in prose, once inside a `bash` fence.
+# Reading either as a template would invent a rule the reviewer never ships and
+# report it missing forever. Only the two inside the `json` fence count.
 
 run_drift "$BASE/clean.json"
 if [ "$(printf '%s' "$OUT" | jq -r '[.reviewers[] | select(.reviewer == "agy")][0].templates')" = "2" ]; then
-  pass "a rule quoted in prose outside a fence is not a template"
+  pass "only a json fence holds templates (prose and bash fences ignored)"
 else
-  fail "prose rule counted as a template: $OUT"
+  fail "a non-json rule was counted as a template: $OUT"
 fi
 
 # --- 8. a bad plugin root exits 2, not 1 ----------------------------------

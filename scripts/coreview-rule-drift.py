@@ -62,7 +62,10 @@ GENERIC_BINARIES = {"cat", "cd", "gh", "git", "mkdir"}
 # Bash() rule, optionally followed by the array comma.
 RULE_LINE_RE = re.compile(r'^\s*("Bash\(.*\)")\s*,?\s*$')
 
-FENCE_RE = re.compile(r"^\s*```")
+# Opening fence, capturing its language. Only a `json` fence holds rules; a bash
+# fence in the same file holds the invocation, whose lines must never be read as
+# shipped templates.
+FENCE_RE = re.compile(r"^\s*```(\w*)")
 
 
 def die(msg):
@@ -73,17 +76,20 @@ def die(msg):
 def parse_templates(reviewer_file):
     """Extract the Bash() rule templates from a reviewer file's ```json fences.
 
-    Only lines inside a fence count. Prose elsewhere in these files quotes rule
-    fragments to explain them, and treating those as templates would invent
-    rules the reviewer never ships.
+    Only lines inside a `json` fence count, on both axes. Prose in these files
+    quotes rule fragments to explain them, and a sibling `bash` fence carries the
+    invocation itself — reading either as a template would invent rules the
+    reviewer never ships and report them missing forever.
     """
     templates = []
-    in_fence = False
+    fence_lang = None
     for line in reviewer_file.read_text(encoding="utf-8").splitlines():
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
+        m = FENCE_RE.match(line)
+        if m:
+            # An opening fence records its language; the next fence closes it.
+            fence_lang = None if fence_lang is not None else m.group(1)
             continue
-        if not in_fence:
+        if fence_lang != "json":
             continue
         m = RULE_LINE_RE.match(line)
         if m:
@@ -109,11 +115,18 @@ def implausible_paths(rule, rx):
     """Substituted absolute paths in `rule` that were almost certainly typo'd.
 
     A placeholder path may legitimately not exist yet: `<INPUT>` is created by
-    the dispatch's own `cat >`, and `<NEUTRAL>` by its `mkdir -p`. But those
-    create at most the final component — so a path missing TWO or more trailing
-    levels was never right on this machine. That is what catches a username
-    typo (`/Users/danegan/.claude/co-review-input`, three levels below the
-    deepest thing that exists) while leaving a not-yet-created directory alone.
+    the dispatch's own `cat >`, which makes only the final component and needs
+    the parent to be there already. So one missing trailing level is normal and
+    two or more is not — a path that far from anything on disk was never right
+    here. That is what catches a username typo
+    (`/Users/danegan/.claude/co-review-input`, three levels below the deepest
+    thing that exists) while leaving a not-yet-written input file alone.
+
+    The threshold is deliberately not tuned to `<NEUTRAL>`, whose `mkdir -p`
+    would happily create any depth. Allowing arbitrary depth for it would give
+    up the typo check on the one reviewer whose path is least standardised,
+    which is a worse trade than asking an operator to `mkdir` a neutral
+    directory that a first review would have created anyway.
     """
     m = rx.fullmatch(rule)
     bad = []
