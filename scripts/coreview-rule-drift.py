@@ -111,22 +111,28 @@ def template_to_regex(template):
     return re.compile(PLACEHOLDER_VALUE.join(re.escape(p) for p in parts) + r"\Z")
 
 
-def implausible_paths(rule, rx):
-    """Substituted absolute paths in `rule` that were almost certainly typo'd.
+def offmachine_paths(rule, rx):
+    """Substituted absolute paths in `rule` that do not resolve on THIS machine.
 
     A placeholder path may legitimately not exist yet: `<INPUT>` is created by
     the dispatch's own `cat >`, which makes only the final component and needs
     the parent to be there already. So one missing trailing level is normal and
-    two or more is not — a path that far from anything on disk was never right
-    here. That is what catches a username typo
-    (`/Users/danegan/.claude/co-review-input`, three levels below the deepest
-    thing that exists) while leaving a not-yet-written input file alone.
+    two or more is not — a path that far from anything on disk cannot be written
+    or read here, so the rule it sits in can never fire on this machine.
+
+    **This says nothing about whether the rule is wrong.** A settings file
+    shared across machines — a dotfiles repo synced to hosts whose usernames
+    differ, say — must carry each machine's rules, so every host sees the other
+    hosts' rules as unresolvable and that is correct, not drift. An off-machine
+    rule is therefore reported and never counted as drift; if it leaves a
+    template with no live rule, `missing` says so on its own, which is the
+    signal that actually matters and is true on exactly the hosts where it is.
 
     The threshold is deliberately not tuned to `<NEUTRAL>`, whose `mkdir -p`
     would happily create any depth. Allowing arbitrary depth for it would give
-    up the typo check on the one reviewer whose path is least standardised,
-    which is a worse trade than asking an operator to `mkdir` a neutral
-    directory that a first review would have created anyway.
+    up the check on the one reviewer whose path is least standardised, which is
+    a worse trade than asking an operator to `mkdir` a neutral directory that a
+    first review would have created anyway.
     """
     m = rx.fullmatch(rule)
     bad = []
@@ -194,7 +200,7 @@ def analyze(reviewers_dir, allow_rules):
         }
         owned = [r for r in allow_rules if command_word(r) in binaries]
 
-        matched_rules, missing, suspect = set(), [], []
+        matched_rules, missing, offmachine = set(), [], []
         for template in templates:
             rx = template_to_regex(template)
             live = []
@@ -205,12 +211,13 @@ def analyze(reviewers_dir, allow_rules):
             for rule in allow_rules:
                 if not rx.fullmatch(rule):
                     continue
-                bad = implausible_paths(rule, rx)
+                bad = offmachine_paths(rule, rx)
                 if bad:
-                    # Shape-correct but pointed at a path that does not exist:
-                    # it will never fire. Counted as drift, not as coverage —
-                    # otherwise a typo'd rule masks the missing real one.
-                    suspect.append({"rule": rule, "paths": bad})
+                    # Shape-correct but pointed somewhere this machine has no
+                    # path to, so it cannot fire here. Not coverage — otherwise
+                    # another host's rule would mask that this host has none —
+                    # but not drift either; see offmachine_paths.
+                    offmachine.append({"rule": rule, "paths": bad})
                     matched_rules.add(rule)
                 else:
                     live.append(rule)
@@ -227,7 +234,7 @@ def analyze(reviewers_dir, allow_rules):
                 "matched": len(templates) - len(missing),
                 "missing": missing,
                 "dead": dead,
-                "suspect": suspect,
+                "offmachine": offmachine,
                 # No rule at all is "not set up", not "broke" — an operator who
                 # does not use a reviewer should not be nagged about it.
                 "configured": bool(owned),
@@ -237,11 +244,15 @@ def analyze(reviewers_dir, allow_rules):
 
 
 def has_drift(findings):
-    """Drift is a CONFIGURED reviewer with a missing, dead, or suspect rule."""
-    return any(
-        f["configured"] and (f["missing"] or f["dead"] or f["suspect"])
-        for f in findings
-    )
+    """Drift is a CONFIGURED reviewer with a missing or dead rule.
+
+    Off-machine rules are deliberately excluded: on a settings file shared
+    across hosts they are the other hosts' correct rules, so counting them
+    would report drift on every machine forever. A template they fail to cover
+    is already reported as `missing`, which fires on exactly the hosts where it
+    is true.
+    """
+    return any(f["configured"] and (f["missing"] or f["dead"]) for f in findings)
 
 
 def report(findings, plugin_root, settings_read):
@@ -258,21 +269,29 @@ def report(findings, plugin_root, settings_read):
                 f"this reviewer cannot run"
             )
             continue
-        if not f["missing"] and not f["dead"] and not f["suspect"]:
+        if not f["missing"] and not f["dead"] and not f["offmachine"]:
             print(f"{name}: ok ({f['matched']}/{f['templates']} rules match)")
             continue
 
         print(f"{name}: {f['matched']}/{f['templates']} shipped rules covered")
         for rule in f["dead"]:
-            print(f"  DEAD    {rule}")
-        for s in f["suspect"]:
-            print(f"  SUSPECT {s['rule']}")
+            print(f"  DEAD       {rule}")
+        for s in f["offmachine"]:
+            print(f"  OFF-MACHINE {s['rule']}")
             for value, deepest in s["paths"]:
-                print(f"          path does not exist: {value}")
-                print(f"          deepest existing ancestor: {deepest}")
+                print(f"              no such path here: {value}")
+                print(f"              deepest that exists: {deepest}")
         for template in f["missing"]:
-            print(f"  MISSING {template}")
+            print(f"  MISSING    {template}")
         print()
+
+    if any(f["offmachine"] for f in findings):
+        print(
+            "OFF-MACHINE rules are reported, never counted as drift. On a settings\n"
+            "file shared across hosts they are another host's correct rules, and\n"
+            "'fixing' one here breaks it there. Leave them alone unless you know the\n"
+            "path is simply wrong everywhere.\n"
+        )
 
     if has_drift(findings):
         print(

@@ -7,10 +7,13 @@
 # JSON the script emits. Covers the classifications that are easy to get wrong:
 #   - rules that match their templates exactly report NOTHING
 #   - a reordered flag is DEAD (the match is byte-for-byte outside placeholders)
-#   - a typo'd path is SUSPECT, not a pass — a placeholder wildcard alone
-#     cannot tell a typo from a legitimate substitution
-#   - a path that merely does not exist YET (one level) is NOT suspect, because
-#     the dispatch's own `mkdir -p` / `cat >` creates it
+#   - a path that does not resolve here is OFF-MACHINE, not coverage — a
+#     placeholder wildcard alone cannot tell it from a live substitution
+#   - but an off-machine rule is NOT drift: a settings file shared across hosts
+#     with different usernames carries every host's rules, so each host sees the
+#     others' as unresolvable, and that is correct
+#   - a path that merely does not exist YET (one level) is not off-machine,
+#     because the dispatch's own `cat >` creates it
 #   - a reviewer with no rule at all is "not configured", not drift
 #   - a general-purpose `Bash(cd ...)` is never attributed to a reviewer
 #   - a missing plugin root exits 2, distinct from the exit 1 that means drift
@@ -139,16 +142,36 @@ else
   fail "reordered flag misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing))"
 fi
 
-# --- 3. a typo'd path is suspect, not a pass -------------------------------
+# --- 3. an off-machine path is not coverage -------------------------------
+# A rule whose paths don't resolve here cannot fire here, so it must not count
+# as covering its template — otherwise another host's rule masks the fact that
+# THIS host has no working rule.
 
-make_settings "$BASE/typo.json" \
+make_settings "$BASE/offmachine.json" \
   "Bash(agy --sandbox --add-dir \"$BASE/nope/deeper/inputs\" -p \"read $BASE/nope/deeper/inputs/in.agy\" --model \"M1\")" \
   "Bash(agy models)"
-run_drift "$BASE/typo.json"
-if [ "$RC" -eq 1 ] && [ "$(count agy suspect)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
-  pass "a typo'd path is suspect and leaves its template uncovered"
+run_drift "$BASE/offmachine.json"
+if [ "$RC" -eq 1 ] && [ "$(count agy offmachine)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
+  pass "an off-machine rule is not coverage; its template is still missing"
 else
-  fail "typo'd path misclassified (rc=$RC, suspect=$(count agy suspect), missing=$(count agy missing))"
+  fail "off-machine rule misclassified (rc=$RC, offmachine=$(count agy offmachine), missing=$(count agy missing))"
+fi
+
+# --- 3b. an off-machine rule is NOT drift on its own -----------------------
+# The load-bearing case: a settings file shared across hosts with different
+# usernames must carry BOTH hosts' rules. Every host then sees the other host's
+# rules as unresolvable — correct, not drift. Counting them would cry wolf on
+# every machine forever, and "fixing" one here breaks it there.
+
+make_settings "$BASE/twohosts.json" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR\" -p \"read $REAL_DIR/in.agy\" --model \"M1\")" \
+  "Bash(agy --sandbox --add-dir \"$BASE/other-host/inputs\" -p \"read $BASE/other-host/inputs/in.agy\" --model \"M1\")" \
+  "Bash(agy models)"
+run_drift "$BASE/twohosts.json"
+if [ "$RC" -eq 0 ] && [ "$(count agy offmachine)" = "1" ] && [ "$(count agy missing)" = "0" ]; then
+  pass "the other host's rule is reported but is not drift (exit 0)"
+else
+  fail "two-host config reported drift (rc=$RC, offmachine=$(count agy offmachine), missing=$(count agy missing))"
 fi
 
 # --- 4. one not-yet-created level is fine ----------------------------------
@@ -160,10 +183,10 @@ make_settings "$BASE/notyet.json" \
   "Bash(agy --sandbox --add-dir \"$REAL_DIR/fresh\" -p \"read $REAL_DIR/in.agy\" --model \"M1\")" \
   "Bash(agy models)"
 run_drift "$BASE/notyet.json"
-if [ "$(count agy suspect)" = "0" ] && [ "$(count agy missing)" = "0" ]; then
-  pass "a single not-yet-created level is not suspect"
+if [ "$(count agy offmachine)" = "0" ] && [ "$(count agy missing)" = "0" ]; then
+  pass "a single not-yet-created level is not off-machine"
 else
-  fail "not-yet-created path wrongly flagged (suspect=$(count agy suspect), missing=$(count agy missing))"
+  fail "not-yet-created path wrongly flagged (offmachine=$(count agy offmachine), missing=$(count agy missing))"
 fi
 
 # --- 5. no rules at all is "not configured", not drift ---------------------

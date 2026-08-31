@@ -344,18 +344,21 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
 
 - **DEAD** — an existing rule matching no shipped template (a reordered flag, a
   dropped one, a stale pinned model). It will never fire again.
-- **SUSPECT** — a rule matching a template's _shape_ but substituting a path that
-  does not exist, and is missing two or more trailing levels. One missing level is
-  fine — the dispatch's own `mkdir -p` / `cat >` creates it — so this is what
-  catches a typo'd path, which a placeholder wildcard alone cannot distinguish
-  from a legitimate substitution.
+- **OFF-MACHINE** — a rule matching a template's _shape_ but substituting a path
+  this machine has no route to (missing two or more trailing levels; one is fine,
+  the dispatch's own `cat >` creates it). It cannot fire here, so it is not
+  coverage — but it is **reported and never counted as drift**. A settings file
+  shared across hosts with different usernames must carry every host's rules, so
+  each host sees the others' as unresolvable: correct, not broken, and "fixing"
+  one here breaks it there. Where such a rule leaves a template with no live
+  rule, MISSING says so on its own — on exactly the hosts where that is true.
 - **MISSING** — a shipped template no rule covers, printed verbatim so it can be
   copied into settings.
 - **not configured** — a reviewer with no rules at all. Reported, but **not**
   drift: an operator who doesn't use a reviewer shouldn't be nagged about it.
 
-Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead, suspect, or
-missing rule) → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
+Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead or missing rule)
+→ `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
 check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
 unresolvable plugin root.
@@ -392,7 +395,7 @@ it is a `WARN`. Print the corrected rules and let the human place them.
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
-  WARN  co-review allow-rules — agy: 1 dead, 2 suspect; devin: 2 dead, 3 missing
+  WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
 
 2 fail, 3 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
