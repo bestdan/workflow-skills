@@ -14,7 +14,7 @@ committed under `dev_docs/gh-issue-migration/`, per the `.gitignore` comment blo
 advice: "Prefer graduating durable wisdom to a top-level `dev_docs/<name>.md` (never
 ignored) over keeping it here."
 
-## State: phases 1–2 are done
+## State: phase 1–2 and tasks 4 and 5 are done
 
 **PR #415 merged as `d7aa23a`.** It shipped:
 
@@ -29,35 +29,34 @@ ignored) over keeping it here."
 
 ## The one thing that will trip you up
 
-**Two label vocabularies are live at once, deliberately.** Task 5 migrated add / list /
-promote / complete to the new one; task 4 has not yet migrated **claim**, which still
-writes `auto-claimed` and `needs-review`. Bridges in three files accept both spellings so
-the loop keeps working across the gap — do not remove one without doing task 4.
+**One verb is still on the old vocabulary: `reoptimize`.** Tasks 4 and 5 moved add /
+list / promote / complete / claim onto the namespaced names in `labels.yml`, and task 4
+deleted the bridges that let both spellings coexist. `gh-issue-reoptimize.md` was not in
+either scope and still reads `auto-eligible` / `auto-claimed` / `priority:*`, so **on a
+migrated board it classifies every issue as `new`**. It carries a scope note saying so;
+migrating it belongs with task 8, which is the other reoptimize work.
 
-The two vocabularies:
+The rename, for reference:
 
-| Handler applies today        | The provisioned vocabulary |
+| Pre-migration                | The provisioned vocabulary |
 | ---------------------------- | -------------------------- |
 | `auto-eligible`              | `auto:eligible`            |
 | `human-approval-requested`   | `auto:human-review-needed` |
+| `auto-claimed`               | `status:3_started`         |
 | `needs-review`               | `status:4_needs_review`    |
 | `priority:urgent\|high\|...` | `prio:0`–`prio:3`          |
 
-**Task 5 did that move** — PR #439, merged `a4815d7`. `/add-task`, `/list-tasks`,
-`/promote-tasks` and `/complete-task` now read and write the new vocabulary through
-`gh-issue-state.py`, and `gh-issue-ready.py` answers dependency-readiness.
+**Task 5** — PR #439, merged `a4815d7` — moved `/add-task`, `/list-tasks`,
+`/promote-tasks` and `/complete-task`, and added `gh-issue-ready.py` for
+dependency-readiness. **Task 4** — PR #442 — moved `/do-tasks`'s claim lifecycle, added
+`gh-issue-claim.py` for the parts two racing sessions must perform identically, taught
+claim to consult native `blocked_by`, and removed task 5's bridges.
 
-**Task 4 is next**, and it carries a second job: deleting the migration bridges task 5
-left behind. See the task 4 entry in the epic for the exact list — while claim writes
-the old markers and promote writes the new ones, both spellings are live in a repo, so
-a bridge removed early breaks the loop rather than tidying it.
+**Task 6 is next.**
 
-Two consequences:
-
-- Filing the remaining tasks as GitHub issues **today** would file them under the old
-  scheme, which task 5 then has to migrate — including the issue tracking task 5 itself.
-- `gh-issue-state.py` shells out to `gh api`. A cloud routine has no `gh`, so task 5 owes
-  an MCP branch that reuses `labels.yml` for the same validate-then-replace rule.
+One consequence still open: `gh-issue-state.py` shells out to `gh api`. A cloud routine
+has no `gh`, so the loop still owes an MCP branch that reuses `labels.yml` for the same
+validate-then-replace rule.
 
 ## Do not re-derive these — they were measured, not read
 
@@ -84,11 +83,18 @@ This file was wrong twice by asserting routine behaviour from documentation. Pro
 - **`/auto-pilot` does not support `gh-issue`** (task 13, new). It stops outright rather
   than degrading. Switching `.task-config.yml` to `gh-issue` takes this repo out of
   unattended operation until that is fixed.
+- **`gh-issue-reoptimize.md` has not migrated** — see above. Owned by task 8.
 - **Tasks 12 and 13 have no task file** — they exist only as entries in the epic. Every
   other task has one under a `phase_*/` directory.
 
 ## This repo is still on Linear
 
 `dev_docs/tasks/.task-config.yml` says `handler: linear`, with four Linear projects.
-Nothing has switched yet, and nothing should until task 5 lands and task 13 is at least
-scoped.
+Nothing has switched yet, and nothing should until task 13 is at least scoped —
+switching today would end unattended operation rather than degrade it.
+
+A consequence worth naming: **task 4's acceptance criteria are not all met yet.** Its
+code-enforced ones are (hermetic tests for the race, the branch parser and the WIP cap),
+but its user-run one — two `/do-tasks` sessions against the same ready issue, confirming
+exactly one proceeds — needs a repo actually on the `gh-issue` handler. Run it when one
+is.

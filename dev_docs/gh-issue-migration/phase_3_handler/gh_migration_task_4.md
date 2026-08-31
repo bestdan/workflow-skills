@@ -2,7 +2,7 @@
 title: Build the claim lifecycle to linear-level depth
 priority: high
 size: 5
-status: new
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
@@ -65,3 +65,26 @@ Bring `gh-issue-claim.md` up to `linear-claim.md`'s depth:
 **User-run**
 
 - Run two `/do-tasks` sessions against the same ready issue; confirm exactly one proceeds and the other reports a lost claim
+
+## Outcome — PR #442
+
+**Shipped.** Claim writes `status:` rungs through `gh-issue-state.py`; the bridges are
+gone; claim consults native `blocked_by` through a candidate-scoped `--issue N` mode on
+`gh-issue-ready.py`. The deterministic parts moved into
+`commands/handlers/assets/gh-issue-claim.py`, whose exit codes are the contract the
+handler branches on — `0` won, `3` lost the race, `4` neither won nor lost.
+
+**One deviation from this file.** The branch is `<branch_prefix>task-<n>`, from a new
+optional `gh-issue.branch_prefix` config key, not the literal `bestdan/task-<n>` written
+above. The three constraints this file names all still hold; what it missed is that
+`bestdan/` is one owner's house rule and the handler ships to everyone. The key is empty
+by default (`task-142`), and a config value is still deterministic across racers because
+both read one repo's config. The parser ignores the prefix either way.
+
+**The user-run criterion is not met.** It needs a repo actually on the `gh-issue`
+handler; this one is still on `linear`, and should stay there until task 13. The
+code-enforced three are met, each verified to fail with its fix reverted.
+
+**Not in scope, discovered here.** `gh-issue-reoptimize.md` still speaks the
+pre-migration vocabulary and now points at files that no longer define it. It got a scope
+note; migrating it belongs with task 8.

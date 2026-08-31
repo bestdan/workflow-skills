@@ -80,25 +80,37 @@ join, and `gh` covers it only partially.
 
 **Phase 3 — handler**
 
-4. [phase_3_handler/gh_migration_task_4.md](phase_3_handler/gh_migration_task_4.md) — Claim lifecycle at `linear`-level depth. **NEXT.**
-   It also owns deleting the bridges task 5 left, all marked in-file. Removing them
-   is not optional tidying: while claim writes the old markers and promote writes the
-   new ones, both spellings are live, and dropping a bridge early breaks the loop.
-   - `gh-issue-claim.md` — the either-spelling ready term in the candidate query, and
-     the legacy `priority:` arm in the ranking.
-   - `gh-issue-promote.md` — the `-label:auto-eligible -label:human-approval-requested`
-     exclusions in the query and the matching backstop clause.
-   - `gh-issue.md` — the legacy `auto-eligible` / `human-approval-requested` arms in the
-     `## List` section table, and the legacy `priority:` fallback in the card line.
-   - Task 5 also left claim **not** consulting native `blocked_by`, so `/list-tasks` can
-     show an issue dependency-blocked while `/do-tasks` claims it. A candidate-scoped
-     `gh-issue-ready.py` pass belongs here.
+4. ~~[phase_3_handler/gh_migration_task_4.md](phase_3_handler/gh_migration_task_4.md)~~ — Claim lifecycle at `linear`-level depth. **Done** — PR #442.
+   Claim writes `status:` rungs through `gh-issue-state.py`, and every bridge task 5 left
+   is gone, in the same change. Three things it settled that the plan had not:
+   - **The deterministic parts are code now.** `commands/handlers/assets/gh-issue-claim.py`
+     owns the branch name, the branch→issue parser, the in-flight count and
+     acquire/release. Its **exit codes are the contract** the handler branches on —
+     `0` won, `3` lost the race, `4` neither. `4` is the case prose kept getting wrong.
+   - **The branch is `<branch_prefix>task-<n>`, not `bestdan/task-<n>`.** The plan named a
+     literal prefix; that is one owner's house rule inside a handler every installed user
+     runs. It became the optional `gh-issue.branch_prefix` config key, empty by default
+     (`task-142`). Deterministic across racers either way — both read one repo's config —
+     and the parser ignores the prefix, so a routine's `claude/task-142` still resolves.
+   - **Claim now consults native `blocked_by`.** `gh-issue-ready.py` gained a
+     candidate-scoped `--issue N` mode and claim asks about exactly the candidates it
+     ranked, rather than a second bounded query that could drop one silently.
+
+   Co-review (codex + the reconciler) caught four things, all fixed in the same PR: the
+   claim re-read narrowed the `status:` rung but not `auto:eligible`; the two-write board
+   marker had no instruction for a failure between the writes; and `/do-tasks` plus
+   `gh-issue-state.py`'s own docstring still described the pre-migration world.
 5. ~~[phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md)~~ — State model across add / list / promote / do. **Done** — PR #439, merged `a4815d7`.
-   Added `gh-issue-ready.py` for dependency-readiness. It left **migration bridges**
-   that task 4 must remove, listed under task 4 below.
-6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop.
+   Added `gh-issue-ready.py` for dependency-readiness. The **migration bridges** it left
+   were removed by task 4.
+6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. **NEXT.**
 7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants.
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
+   **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
+   speaks `auto-eligible` / `auto-claimed` / `priority:*`, so on a migrated board its
+   `statusType` derivation matches nothing and every issue reads as `new`. Task 4 removed
+   the definitions it pointed at and left it a scope note saying so, rather than migrating
+   it in a PR about claiming.
 
 **Phase 4 — migrate**
 
