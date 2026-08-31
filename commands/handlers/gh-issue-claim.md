@@ -2,19 +2,58 @@
 
 Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
 
-**Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
+**Shared reference:** the label vocabulary is `commands/handlers/assets/labels.yml`, read the same way by `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md`; every label write on this path goes through `commands/handlers/assets/gh-issue-state.py`; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
-**Branch name.** The work branch is the handler's deterministic `task/<n>` — the same
-name the jira handler uses, because it is also the claim lock (see
-`claim-lock.md`). This path deliberately no longer uses `gh issue develop`: its
+**The deterministic parts are a script, not prose.** `commands/handlers/assets/gh-issue-claim.py` owns the four steps two racing sessions must perform **identically** — the branch name, parsing an issue number back out of a branch, the in-flight count, and the acquire/release of the lock ref. Its **exit codes are the contract** this file branches on; re-deriving any of it in prose reopens the race it closes.
+
+**Branch name.** The work branch is `<branch_prefix>task-<n>`, and it is also the claim
+lock ref (see `claim-lock.md`). `<branch_prefix>` is the `gh-issue.branch_prefix` key in
+`dev_docs/tasks/.task-config.yml`, empty by default — so the name is `task-142` unless a
+repo configures one, and `bestdan/task-142` where `branch_prefix: bestdan/`. Never build
+the name by hand; ask for it:
+
+```bash
+branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"])
+```
+
+Three constraints meet here. `claim-lock.md` needs one deterministic name both racers
+compute the same way — which is why it is derived from the issue number and not from the
+title. The number must be **in** the name, so a branch or PR traces back to its issue.
+And a repo may require a branch prefix of its own (this one requires `bestdan/`), which
+a fixed `task/<n>` cannot satisfy. Reading the number back out is therefore
+prefix-agnostic — cloud routines push to `claude/`-prefixed branches, so the parser takes
+the segment after the last `/` and requires exactly `task-<digits>`:
+
+```bash
+n=$(python3 commands/handlers/assets/gh-issue-claim.py issue-number --branch "<branch>")   # exits 1 if not a task branch
+```
+
+This path deliberately does not use `gh issue develop`: its
 generated branch name is not deterministic, so it cannot be probed before the claim,
 and the create it performs yields no rejection this flow can read as a lost race. The
 GitHub-native issue↔branch link is the cost; `Closes #<n>` in the PR body and the
 `[#<n>]` title prefix carry the association instead.
 
+**Every label write is read-modify-write.** `gh-issue-state.py` takes the **complete
+managed set** and refuses a non-`--done` write that is missing exactly one `status:` and
+exactly one `auto:` label. It carries unmanaged labels forward on its own (`follow-up`,
+anything a human added), but not managed ones — so a transition reads the issue's current
+labels, changes the one rung, and passes the whole set back:
+
+```bash
+labels=$(gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>])
+# keep every prio:/est:/auto: label, replace the status: rung, then:
+python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
+  --labels "status:3_started,auto:eligible,prio:1,est:3" --apply
+```
+
+**Never** use `gh issue edit --add-label/--remove-label` on a transition path: it is not
+atomic (8 measured requests), so a crash strands an issue carrying two `status:` rungs or
+none.
+
 > **Hard rule for every phase below: never close a gh issue manually, and never move it to a `completed`/`canceled` state.** Merge is the only completion signal — GitHub closes the issue automatically when the PR (with `Closes #<n>` in its body) merges. If you are about to `gh issue close` from this file, you have a bug — stop.
 
-**Repo.** If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass it as `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the current repo, matching the create/list/promote flows.
+**Repo.** If `gh-issue.repo` is set in `dev_docs/tasks/.task-config.yml`, pass it as `--repo <repo>` on every `gh` call below. Otherwise omit `--repo` to act on the current repo, matching the create/list/promote flows. The asset scripts **require** `--repo`, so resolve it once when the key is unset: `repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)`.
 
 ## Modes: atomic vs. claim/execute split
 
@@ -26,30 +65,30 @@ normal run — passing both is an error: stop and ask which was meant.
 - **default** (neither flag) — run every phase below: pre-claim WIP gate → find
   candidates → pre-flight → judge → claim → branch + execute → PR → move to review.
 - **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
-  candidates, pre-flight, judge, then acquire the `task/<n>` claim lock, assign `@me`,
-  add `auto-claimed`, remove `auto-eligible`), then **stop**: no execution, no PR. The
-  created `task/<n>` lock ref plus the assigned `auto-claimed` issue is the reservation
-  marker — do **not** swap to
-  `needs-review`. `--claim-only` is the one execute-family action safe to batch, so
+  candidates, pre-flight, judge, then acquire the `<branch>` claim lock, assign `@me`,
+  move the rung to `status:3_started`), then **stop**: no execution, no PR. The
+  created `<branch>` lock ref plus the assigned, started issue is the reservation
+  marker — do **not** move it to `status:4_needs_review`. `--claim-only` is the one
+  execute-family action safe to batch, so
   `/do-tasks --all` / `-n N --claim-only` may reserve several issues at once, each
   bounded by the WIP gate.
 - **`--no-claim <#n>`** — skip the claim and resume an issue this caller has
   **already** claimed. **Requires an explicit issue number** — there is no default
   selection. Guard: proceed only when the issue's assignee is this caller
   (`me=$(gh api user --jq .login)`; the issue's `assignees[].login` is exactly that
-  one login) **and** it carries `auto-claimed`. Otherwise **stop and explain** —
+  one login) **and** it carries `status:3_started`. Otherwise **stop and explain** —
   executing an unclaimed issue reopens the race the claim step closes. When the guard
   passes, **check out the existing claim branch** rather than branching fresh from
-  `HEAD` — the claim created the handler's deterministic `task/<n>`, so there is nothing
+  `HEAD` — the claim created the deterministic `<branch>`, so there is nothing
   to look up:
 
   ```bash
-  git fetch origin && git switch "task/<n>"
+  git fetch origin && git switch "<branch>"
   ```
 
   If that branch exists neither locally nor on the remote — the claim ran on the
   degraded comment-election path, which creates no ref (see `claim-lock.md`) — create it
-  now: `git switch -c "task/<n>" "origin/<base>"` (`<base>` defaults to the repo's
+  now: `git switch -c "<branch>" "origin/<base>"` (`<base>` defaults to the repo's
   default branch). Then run "Branch + execute" (skipping branch creation), "PR", and
   "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
@@ -70,20 +109,24 @@ claims nothing, skips it.
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr and
    linear handlers use).
-2. Count current in-flight work = open issues **assigned to this caller** labeled
-   `auto-claimed` (claimed, PR not yet open) **or** `needs-review` (PR open, in review).
-   An in-flight issue holds exactly one of the two, so sum two counts:
+2. Count current in-flight work:
 
    ```bash
-   c1=$(gh issue list --state open --search "label:auto-claimed assignee:@me" --limit 100 --json number [--repo <repo>] --jq length)
-   c2=$(gh issue list --state open --search "label:needs-review assignee:@me" --limit 100 --json number [--repo <repo>] --jq length)
-   count=$((c1 + c2))
+   python3 commands/handlers/assets/gh-issue-claim.py wip --repo <repo> --wip-limit <wip_limit> --json
    ```
 
-   Both labels count because the WIP limit exists to bound the human PR-review queue:
-   "Move to review on PR open" swaps `auto-claimed → needs-review`, so a `needs-review`
-   issue is an open PR still awaiting review — in-flight, not done. (This mirrors the
-   linear gate, which counts both `In Progress` and `In Review`.)
+   In flight = open issues **assigned to this caller** carrying `status:3_started`
+   (claimed, PR not yet open) **or** `status:4_needs_review` (PR open, in review). An
+   in-flight issue holds exactly one of the two, and GitHub's issue search takes a
+   comma-separated label list as an OR, so that is **one** query rather than two counts
+   summed. Read `count` and `at_limit` from the JSON.
+
+   Both rungs count because the WIP limit exists to bound the human PR-review queue:
+   "Move to review on PR open" moves `status:3_started → status:4_needs_review`, so a
+   `status:4_needs_review` issue is an open PR still awaiting review — in-flight, not
+   done. (This mirrors the linear gate, which counts both `In Progress` and `In Review`.)
+   Both names are read from `labels.yml`, so a rename there fails loudly instead of
+   silently counting zero.
 
    `assignee:@me` scopes the count to **this operator's** work, matching the jira and
    linear gates. "Claim the issue" self-assigns, so the filter is exact rather than a
@@ -106,22 +149,29 @@ nothing and report the WIP-limit decline).
 ## Find candidates
 
 ```bash
-gh issue list --state open --search 'label:"status:2_ready","auto-eligible" no:assignee -label:auto-claimed -label:human-approval-requested -label:blocked' --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
+gh issue list --state open --search 'label:"status:2_ready" label:"auto:eligible" no:assignee -label:blocked' --limit 50 --json number,title,body,labels,assignees,createdAt [--repo <repo>]
 ```
 
-- `label:"status:2_ready","auto-eligible"` selects ready issues in **either** spelling — a comma-separated list is an OR in GitHub's issue search, verified against the live API (`label:"a","b"` returns the union in both term orders, including when one term matches nothing). `/promote-tasks` now writes `status:2_ready` while this file still writes `auto-claimed`, so during the migration a repo holds both; asking for only one spelling finds half the board. **Delete the `auto-eligible` arm once the claim lifecycle moves to the `status:` vocabulary** — it is a migration bridge, not a supported dialect. Quote each value: `status:2_ready` contains a colon, which is also the search syntax's own separator.
-- `no:assignee` skips anything already claimed; `-label:auto-claimed -label:human-approval-requested -label:blocked` excludes already-claimed, unrefined, or blocked issues. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present.
+- The two positive terms **AND** together and are both load-bearing. `status:2_ready` is where the work is; `auto:eligible` is whether automation may take it. `/promote-tasks` writes them as a pair precisely so a human can mark an issue ready and still withhold it from the loop — a `status:2_ready` issue carrying `auto:human-review-needed` is **not** a candidate here. Quote each value: the names contain a colon, which is also the search syntax's own separator.
+- `no:assignee` skips anything already claimed; `-label:blocked` excludes the manual block override. All filters ride in `--search` because `gh issue list` ignores a separate `--label` flag once `--search` is present. No `status:` exclusions are needed — an open issue carries exactly one rung, so asking for `status:2_ready` already excludes the others.
 
-  > **The ready term has to stay on the server.** Dropping it and filtering the
+  > **Both positive terms have to stay on the server.** Dropping one and filtering the
   > returned `labels` client-side looks equivalent and is not: `--limit 50` is applied
   > by the API **before** any local filter runs, so on a repo with more than 50 other
   > unassigned open issues the window can contain no ready issue at all and
   > `/do-tasks` reports "no candidate" — silently, and worst for exactly the oldest
   > issues the ranking below most wants, since the search returns newest first.
 
-- As a backstop to the query filter (e.g. label-index lag), drop any issue labeled `auto-claimed`, `human-approval-requested`, or `blocked` that still slips through, and keep only issues whose returned `labels` carry one of the two ready spellings — these receive no claim action.
-- **Rank** by priority, accepting either spelling for the same reason as the ready filter above: `prio:0` → `prio:1` → `prio:2` → `prio:3` (the current vocabulary), or the legacy `priority:urgent` → `high` → `medium` → `low`. An issue carrying neither sorts last. Then by issue age (oldest `createdAt` first — let aging issues bubble up). **Drop the `priority:` arm when the `auto-eligible` one goes.** Without both, a newly promoted issue carries `prio:1` and reads as unprioritised, so `/do-tasks` would pick work in the wrong order rather than visibly failing.
-- **This path does not yet honour native dependencies.** `-label:blocked` above catches the manual override, but nothing here reads `dependencies/blocked_by`, so `/list-tasks` can show an issue as dependency-blocked while `/do-tasks` claims it. Pre-existing — claim never consulted the graph — and surfaced only now that listing does. It belongs with the claim lifecycle migration, which is where a candidate-scoped `gh-issue-ready.py` pass fits.
+- As a backstop to the query filter (e.g. label-index lag), drop any issue whose returned `labels` do not carry **both** `status:2_ready` and `auto:eligible`, or that carries `blocked` — these receive no claim action.
+- **Rank** by priority: `prio:0` → `prio:1` → `prio:2` → `prio:3`. An issue carrying none sorts last. Then by issue age (oldest `createdAt` first — let aging issues bubble up).
+- **Then drop the dependency-blocked.** The query above catches only the manual `blocked` label; GitHub's native `blocked_by` graph is a separate fact, and without this pass `/list-tasks` shows an issue as blocked while `/do-tasks` claims it. Ask about **exactly** the ranked candidates:
+
+  ```bash
+  python3 commands/handlers/assets/gh-issue-ready.py --repo <repo> --issue <n1> --issue <n2> ... --json
+  ```
+
+  Keep the candidates in its `ready` array, in the ranked order above; drop those in `blocked`, reporting each with the open blockers it names. Pass the numbers rather than letting the script run its own board query: `--limit` is applied by the API before anything local runs, so a second bounded query could omit a candidate silently, and a missing verdict is indistinguishable from a ready one.
+
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 
 Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. If no candidate remains, report that and stop.
@@ -130,14 +180,14 @@ Take the ranked candidates **one at a time**: for each candidate in ranked order
 
 Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<#n>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight: catch a sibling session that is already building this issue before spending the full issue-body read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
-1. **Claim branch + its PR.** The claim pushes the deterministic `task/<n>` (see "Claim the issue"), so probing that one ref catches a sibling session mid-build:
+1. **Claim branch + its PR.** The claim creates the deterministic `<branch>` (see "Claim the issue"), so probing that one ref catches a sibling session mid-build:
 
    ```bash
-   git ls-remote --heads origin "task/<n>"
-   gh pr list --state open --head "task/<n>" --json number,url,headRefName [--repo <repo>]
+   git ls-remote --heads origin "<branch>"
+   gh pr list --state open --head "<branch>" --json number,url,headRefName [--repo <repo>]
    ```
 
-   If `git ls-remote` returns the ref, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch task/<n> already exists`.
+   If `git ls-remote` returns the ref, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch <branch> already exists`.
 
    This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
 
@@ -167,31 +217,45 @@ Keeping the order as pre-flight → judge → claim is acceptable here because t
 
 ## Claim the issue
 
-The claim locks on an **atomic primitive** — pushing the `task/<n>` ref, a server-side compare-and-swap — because GitHub exposes no compare-and-swap on issue fields and a same-account racer reads back the identical `assignees`. Mechanics, the branch-pinned fallback, and the release rule live in **`commands/handlers/claim-lock.md`**; read it and follow it here rather than re-deriving them. The assignee and `auto-claimed` label below stay on as the **human-visible** claim marker — they no longer decide the race.
+The claim locks on an **atomic primitive** — creating the `<branch>` ref, a server-side compare-and-swap — because GitHub exposes no compare-and-swap on issue fields and a same-account racer reads back the identical `assignees`. Mechanics, the branch-pinned fallback, and the release rule live in **`commands/handlers/claim-lock.md`**; read it and follow it here rather than re-deriving them. The assignee and `status:3_started` rung below stay on as the **human-visible** claim marker — they no longer decide the race.
 
-1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or carries `auto-claimed`, **another session beat you** — return `race`, fall back to the next candidate. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it).
+1. **Re-read** the chosen issue (`gh issue view <n> --json assignees,labels [--repo <repo>]`). If it now has an assignee, or its rung has moved off `status:2_ready`, **another session beat you** — return `race`, fall back to the next candidate. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it). Keep the label list — step 3 needs it.
 2. **Acquire the lock** — `claim-lock.md` → "Primitive: create-only ref creation via the GitHub API", with `<base>` the repo's default branch (or `--base` when `/do-tasks` passed one), and `<repo>` = `gh-issue.repo` if set, else the current repo:
 
    ```bash
    git fetch origin
    base_sha=$(git rev-parse "origin/<base>")
-   gh api --method POST "repos/<repo>/git/refs" -f "ref=refs/heads/task/<n>" -f "sha=$base_sha"
+   python3 commands/handlers/assets/gh-issue-claim.py acquire \
+     --repo <repo> --issue <n> --base-sha "$base_sha" [--prefix "<branch_prefix>"]
    ```
 
-   **HTTP 422 `Reference already exists`** → **you lost**: leave the issue's assignee and labels untouched, return `race`, and fall back to the next candidate. **Any other failure** (403/404, protected-ref ruleset, branch-pinned environment) → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason. Only **HTTP 201** proceeds to step 3 — check the branch out first (`git fetch origin "task/<n>" && git switch -c "task/<n>" FETCH_HEAD`). Do **not** substitute `git push origin task/<n>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
-3. **Mark it on the board** — assign yourself, flip the status label:
+   **Branch on the exit code — it is the election, and it is the only thing that decides it:**
+
+   | exit | meaning                                                                      | do                                                                                                                  |
+   | ---- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+   | `0`  | acquired (HTTP 201)                                                          | proceed to step 3                                                                                                   |
+   | `3`  | lost — the ref already exists (HTTP 422)                                     | leave the issue's assignee and labels **untouched**, return `race`, fall back to the next candidate                 |
+   | `4`  | neither — 403/404, protected-ref ruleset, branch-pinned environment, network | degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason |
+
+   Exit `4` is **not** a lost race and **not** a held claim; never report a claim you did not acquire atomically. On exit `0`, check the branch out before step 3: `git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD`. Do **not** substitute `git push origin <branch>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
+
+3. **Mark it on the board** — assign yourself, then move the rung to `status:3_started` through the writer, carrying the issue's other managed labels forward:
 
    ```bash
-   gh issue edit <n> --add-assignee @me --add-label auto-claimed --remove-label auto-eligible [--repo <repo>]
+   gh issue edit <n> --add-assignee @me [--repo <repo>]
+   python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
+     --labels "status:3_started,<the issue's auto: rung>[,<its prio: label>][,<its est: label>]" --apply
    ```
 
-4. **Confirm the marker landed** (not the race — the push in step 2 already decided that). Resolve your own login once (`me=$(gh api user --jq .login)`; `@me` is only valid as a `--add-assignee`/`--remove-assignee` argument, never a value you can match in the JSON), then re-read the issue's `assignees`. If a **different** login appears, a same-second sibling wrote the marker even though you hold the lock: leave the assignee alone (stomping it would disrupt a human's deliberate reassignment) and report `#<n>: claim lock held, but assignee is <other> — the board marker disagrees with the lock`. Do **not** return `race` on this signal alone — you hold `task/<n>` and no one else can push it, so the atomic winner is you.
+   The `auto:` rung is carried through unchanged — it answers "may automation take this?", which claiming does not change. `--add-assignee` is safe on its own path because it touches no label; the writer refuses a set missing exactly one `status:` and one `auto:` label, so a partial set fails before the network call rather than stranding the issue.
 
-(`gh issue edit` errors if a label doesn't exist; create it first with `gh label create "<label>" [--repo <repo>] 2>/dev/null`, mirroring the create flow.)
+4. **Confirm the marker landed** (not the race — the acquire in step 2 already decided that). Resolve your own login once (`me=$(gh api user --jq .login)`; `@me` is only valid as a `--add-assignee`/`--remove-assignee` argument, never a value you can match in the JSON), then re-read the issue's `assignees`. If a **different** login appears, a same-second sibling wrote the marker even though you hold the lock: leave the assignee alone (stomping it would disrupt a human's deliberate reassignment) and report `#<n>: claim lock held, but assignee is <other> — the board marker disagrees with the lock`. Do **not** return `race` on this signal alone — you hold `<branch>` and no one else can create it, so the atomic winner is you.
+
+(The writer validates every name against `labels.yml` before it writes, so an undefined label is refused locally rather than created by the raw REST call. Provision a repo's vocabulary once with `python3 commands/handlers/assets/gh-label-sync.py --repo <repo> --apply`.)
 
 ## Branch + execute
 
-1. **Branch** — already done. "Claim the issue" step 2 created `task/<n>` from `<base>` (the repo's default branch unless `/do-tasks` passed `--base`) and pushed it as the claim lock, so this session is already on it. Confirm with `git branch --show-current` and do **not** re-create it. Only on the degraded comment-election path (no ref was pushed) create it now: `git switch -c "task/<n>" "origin/<base>"`.
+1. **Branch** — already done. "Claim the issue" step 2 created `<branch>` from `<base>` (the repo's default branch unless `/do-tasks` passed `--base`) as the claim lock, so this session is already on it. Confirm with `git branch --show-current` and do **not** re-create it. Only on the degraded comment-election path (no ref was created) create it now: `git switch -c "<branch>" "origin/<base>"`.
 2. **Execute** — do the work, then run the project's quality gate (`just check` here). Keep the diff scoped to this one issue.
 
 ## PR
@@ -210,25 +274,34 @@ gh issue comment <n> --body "PR opened: <PR URL>" [--repo <repo>]
 
 ## Move to review on PR open
 
-Swap the in-progress label for the review label (the issue stays open — review is signalled by the label and the linked PR):
+Move the rung from `status:3_started` to `status:4_needs_review` (the issue stays open — review is signalled by the rung and the linked PR). Read the current labels, replace the one rung, pass the complete managed set:
 
 ```bash
-gh issue edit <n> --remove-label auto-claimed --add-label needs-review [--repo <repo>]
+python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
+  --labels "status:4_needs_review,<the issue's auto: rung>[,<its prio: label>][,<its est: label>]" --apply
 ```
 
-Never `gh issue close` here, regardless of how done the work feels — merge handles closure via `Closes #<n>`.
+Never `gh issue close` here, and never pass `--done`, regardless of how done the work feels — merge handles closure via `Closes #<n>`.
 
 ## Bail (when execution proves infeasible mid-flight)
 
 ```bash
 git stash push -u
-git switch - && git push origin --delete "task/<n>"   # release the claim lock
-gh issue edit <n> --remove-label auto-claimed --add-label human-approval-requested --remove-assignee @me [--repo <repo>]
+git switch -
+python3 commands/handlers/assets/gh-issue-claim.py release --repo <repo> --issue <n> [--prefix "<branch_prefix>"]
+python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
+  --labels "status:1_needs_refinement,auto:human-review-needed[,<its prio: label>][,<its est: label>]" --apply
+gh issue edit <n> --remove-assignee @me [--repo <repo>]
 gh issue comment <n> --body "Bailed by /do-tasks: <what was tried, what tripped the bail>" [--repo <repo>]
 ```
 
+The bail writes **both** rungs, and they say different things: `status:1_needs_refinement`
+puts the work back in front of a human, and `auto:human-review-needed` withholds it from
+the loop — without the second, the next `/do-tasks` run would re-select the issue the
+moment a human promoted it back, and bail again for the same reason.
+
 Release the lock **first** (`claim-lock.md` → "Release the lock") so the issue never
-returns to the ready lane while a stale `task/<n>` still blocks the next session's
+returns to the ready lane while a stale `<branch>` still blocks the next session's
 acquire. On the degraded election path there is no ref to delete — delete this session's
 token comment instead (`gh api --method DELETE repos/<repo>/issues/comments/<id>`).
 

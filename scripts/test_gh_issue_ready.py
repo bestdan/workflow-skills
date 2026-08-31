@@ -213,5 +213,46 @@ class ScopeAndPagingTests(unittest.TestCase):
         self.assertIn("task-loop", listing)
 
 
+class CandidateScopedTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def test_issue_flags_skip_the_list_call_and_evaluate_exactly_those_numbers(self):
+        repo = FakeRepo({7: "seven", 9: "nine"}, blocked_by={9: [(99, "open")]})
+        gh_issue_ready.run_gh = repo.run_gh
+
+        result = gh_issue_ready.compute("o/n", LABELS_FILE, 50, issue_numbers=[7, 9])
+
+        self.assertEqual([c[:2] for c in repo.calls if c[:2] == ["issue", "list"]], [])
+        self.assertEqual(result["checked"], 2)
+        self.assertEqual([i["number"] for i in result["ready"]], [7])
+        self.assertEqual(result["blocked"][0]["number"], 9)
+        self.assertEqual(result["blocked"][0]["open_blockers"], [99])
+
+    def test_cli_issue_mode_makes_no_list_call(self):
+        repo = FakeRepo({7: "seven", 9: "nine"})
+        gh_issue_ready.run_gh = repo.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_ready.main(
+                [
+                    "--repo",
+                    "owner/name",
+                    "--labels-file",
+                    str(LABELS_FILE),
+                    "--issue",
+                    "7",
+                    "--issue",
+                    "9",
+                    "--json",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "list"]], [])
+        result = json.loads(out.getvalue())
+        self.assertEqual(sorted(i["number"] for i in result["ready"]), [7, 9])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,17 @@ Usage:
   python3 gh-issue-ready.py --repo owner/name
   python3 gh-issue-ready.py --repo owner/name --limit 100 --json
   python3 gh-issue-ready.py --repo owner/name --label follow-up   # match a board's scope
+  python3 gh-issue-ready.py --repo owner/name --issue 7 --issue 9 # candidate-scoped pass
+
+One or more --issue switches to candidate-scoped mode: the candidate set is
+EXACTLY those numbers and the `gh issue list` query is skipped entirely.
+--limit and --label are ignored in this mode. This is what the claim flow
+needs: it has already selected and ranked its candidates through its own
+board query, and re-deriving them here through a second bounded list query
+could silently drop one — `--limit` is applied by the API before anything
+local runs, so a missing verdict is indistinguishable from a ready one.
+Passing the numbers removes that window. There is no title in this mode (no
+list call was made), so each issue reports an empty title.
 """
 
 import argparse
@@ -118,11 +129,17 @@ def open_blockers(repo, issue):
     return [b["number"] for b in blockers if b.get("state") == "open"]
 
 
-def compute(repo, labels_file, limit, scope_labels=()):
+def compute(repo, labels_file, limit, scope_labels=(), issue_numbers=()):
     groups, _colors = load_vocabulary(labels_file)
     label = ready_label(groups)
 
-    candidates = list_ready_issues(repo, label, limit, scope_labels)
+    if issue_numbers:
+        # Candidate-scoped: skip the list query entirely. Re-deriving the set
+        # through a second bounded query risks silently dropping a candidate
+        # the caller already selected — see the module docstring.
+        candidates = [{"number": n, "title": ""} for n in issue_numbers]
+    else:
+        candidates = list_ready_issues(repo, label, limit, scope_labels)
     ready = []
     blocked = []
     for issue in candidates:
@@ -138,43 +155,76 @@ def compute(repo, labels_file, limit, scope_labels=()):
     return {
         "repo": repo,
         "checked": len(candidates),
+        "scoped": bool(issue_numbers),
         "ready": ready,
         "blocked": blocked,
     }
 
 
+def label_for(issue):
+    """`#<n> <title>`, or bare `#<n>` when no title was fetched (candidate-scoped mode)."""
+    return (
+        f"#{issue['number']} {issue['title']}"
+        if issue["title"]
+        else f"#{issue['number']}"
+    )
+
+
 def report(result):
-    print(f"{result['repo']}: {result['checked']} issue(s) carry status:2_ready")
+    # Candidate-scoped mode never asked about the ready label — the caller's own
+    # query already did — so the header says what was actually checked.
+    scope = "candidate(s)" if result["scoped"] else "issue(s) carrying status:2_ready"
+    print(f"{result['repo']}: checked {result['checked']} {scope}")
 
     ready = result["ready"]
     print(f"\nReady ({len(ready)}):")
     for issue in ready:
-        print(f"  #{issue['number']} {issue['title']}")
+        print(f"  {label_for(issue)}")
 
     blocked = result["blocked"]
     print(f"\nBlocked ({len(blocked)}):")
     for issue in blocked:
         blockers = ", ".join(f"#{n}" for n in issue["open_blockers"])
-        print(f"  #{issue['number']} {issue['title']} — waiting on {blockers}")
+        print(f"  {label_for(issue)} — waiting on {blockers}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", required=True, help="owner/name")
-    parser.add_argument("--limit", type=int, default=50, help="max issues to check")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="max issues to check (ignored with --issue)",
+    )
     parser.add_argument(
         "--label",
         action="append",
         default=[],
         dest="scope_labels",
         metavar="LABEL",
-        help="narrow to issues also carrying this label; repeatable (AND)",
+        help="narrow to issues also carrying this label; repeatable (AND); ignored with --issue",
+    )
+    parser.add_argument(
+        "--issue",
+        action="append",
+        type=int,
+        default=[],
+        dest="issue_numbers",
+        metavar="N",
+        help=(
+            "check exactly this issue number instead of querying for candidates; "
+            "repeatable; skips the `gh issue list` call entirely and ignores "
+            "--limit/--label"
+        ),
     )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
-    result = compute(args.repo, args.labels_file, args.limit, args.scope_labels)
+    result = compute(
+        args.repo, args.labels_file, args.limit, args.scope_labels, args.issue_numbers
+    )
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:

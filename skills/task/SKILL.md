@@ -19,7 +19,7 @@ Repo-native system for capturing follow-up work with full context and processing
 When the user opens work on an issue that already exists in the tracker — "work on
 PRE-683", "let's do ABC-142", "pick up ENG-9", or a pasted Jira/Linear issue URL —
 that issue must be **claimed before the first edit**: assigned to the user and moved
-into its tracker's started state (`In Progress` on Jira/Linear; the `auto-claimed`
+into its tracker's started state (`In Progress` on Jira/Linear; the `status:3_started`
 label on gh-issue, which has no status field). Without that, the board silently shows the
 work as unstarted and unowned for its whole lifetime, and a parallel session can
 claim the same issue.
@@ -41,13 +41,13 @@ Each claims on a primitive that can elect one winner among sessions authenticate
 merge is the only completion signal.
 
 The primitive differs per handler, and reporting a claim means reporting which one held:
-jira and gh-issue create the `task/<KEY>` ref through GitHub's create-ref API, which
+jira and gh-issue create the claim ref through GitHub's create-ref API, which
 returns 422 rather than updating a ref that exists (a plain `git push` is **not** the
 lock — see `commands/handlers/claim-lock.md`), and linear runs a
 first-writer-wins election on a comment log carrying a unique per-session token. An
 assignee re-read is **not** a lock on any of them: it confirms only that the final
 assignee is your own account, which is identical for two sessions on the same account.
-In a branch-pinned environment that cannot create `task/<KEY>`, jira and gh-issue degrade
+In a branch-pinned environment that cannot create that ref, jira and gh-issue degrade
 to the same comment-token election and say so explicitly — never report an atomic claim
 the run did not make.
 
