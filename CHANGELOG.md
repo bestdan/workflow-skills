@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.15.0] - 2026-08-31
+
+### Features
+
+- move the claim lifecycle onto the status vocabulary (#442) (06fd72c)
+
 ## [2.14.0] - 2026-08-31
 
 ### Features
