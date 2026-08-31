@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.13.2] - 2026-08-31
+
+### Fixes
+
+- devin cannot start in a fresh worktree (#438) (082df6e)
+
 ## [2.13.1] - 2026-08-30
 
 ### Fixes
