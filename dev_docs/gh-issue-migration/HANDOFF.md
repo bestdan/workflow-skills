@@ -29,8 +29,12 @@ ignored) over keeping it here."
 
 ## The one thing that will trip you up
 
-**Those 17 labels are inert. Nothing reads or writes them.** The handler still uses a
-different, older vocabulary, and the two do not overlap:
+**Two label vocabularies are live at once, deliberately.** Task 5 migrated add / list /
+promote / complete to the new one; task 4 has not yet migrated **claim**, which still
+writes `auto-claimed` and `needs-review`. Bridges in three files accept both spellings so
+the loop keeps working across the gap — do not remove one without doing task 4.
+
+The two vocabularies:
 
 | Handler applies today        | The provisioned vocabulary |
 | ---------------------------- | -------------------------- |
@@ -39,9 +43,14 @@ different, older vocabulary, and the two do not overlap:
 | `needs-review`               | `status:4_needs_review`    |
 | `priority:urgent\|high\|...` | `prio:0`–`prio:3`          |
 
-That is deliberate — PR #415 landed primitives only, so the handler transitions migrate
-in one move rather than half-now. **Task 5 is that move**, and it is the natural next
-task: it gives `gh-issue-state.py` its first caller.
+**Task 5 did that move** — PR #439, merged `a4815d7`. `/add-task`, `/list-tasks`,
+`/promote-tasks` and `/complete-task` now read and write the new vocabulary through
+`gh-issue-state.py`, and `gh-issue-ready.py` answers dependency-readiness.
+
+**Task 4 is next**, and it carries a second job: deleting the migration bridges task 5
+left behind. See the task 4 entry in the epic for the exact list — while claim writes
+the old markers and promote writes the new ones, both spellings are live in a repo, so
+a bridge removed early breaks the loop rather than tidying it.
 
 Two consequences:
 

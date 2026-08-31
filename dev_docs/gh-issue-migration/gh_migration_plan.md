@@ -80,8 +80,22 @@ join, and `gh` covers it only partially.
 
 **Phase 3 — handler**
 
-4. [phase_3_handler/gh_migration_task_4.md](phase_3_handler/gh_migration_task_4.md) — Claim lifecycle at `linear`-level depth.
-5. [phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md) — State model across add / list / promote / do.
+4. [phase_3_handler/gh_migration_task_4.md](phase_3_handler/gh_migration_task_4.md) — Claim lifecycle at `linear`-level depth. **NEXT.**
+   It also owns deleting the bridges task 5 left, all marked in-file. Removing them
+   is not optional tidying: while claim writes the old markers and promote writes the
+   new ones, both spellings are live, and dropping a bridge early breaks the loop.
+   - `gh-issue-claim.md` — the either-spelling ready term in the candidate query, and
+     the legacy `priority:` arm in the ranking.
+   - `gh-issue-promote.md` — the `-label:auto-eligible -label:human-approval-requested`
+     exclusions in the query and the matching backstop clause.
+   - `gh-issue.md` — the legacy `auto-eligible` / `human-approval-requested` arms in the
+     `## List` section table, and the legacy `priority:` fallback in the card line.
+   - Task 5 also left claim **not** consulting native `blocked_by`, so `/list-tasks` can
+     show an issue dependency-blocked while `/do-tasks` claims it. A candidate-scoped
+     `gh-issue-ready.py` pass belongs here.
+5. ~~[phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md)~~ — State model across add / list / promote / do. **Done** — PR #439, merged `a4815d7`.
+   Added `gh-issue-ready.py` for dependency-readiness. It left **migration bridges**
+   that task 4 must remove, listed under task 4 below.
 6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop.
 7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants.
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
