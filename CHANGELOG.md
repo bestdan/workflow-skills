@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.14.0] - 2026-08-31
+
+### Features
+
+- carry the state model through add, list, promote and complete (#439) (a4815d7)
+
 ## [2.13.2] - 2026-08-31
 
 ### Fixes
