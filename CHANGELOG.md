@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.15.1] - 2026-08-31
+
+### Fixes
+
+- point --no-claim at the branch the claim actually creates (#443) (62a1141)
+
 ## [2.15.0] - 2026-08-31
 
 ### Features
