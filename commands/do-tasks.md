@@ -89,9 +89,9 @@ that message — never a question).
     judging feasibility (the judge now runs after the claim, which `--claim-only` skips).
   - `gh-issue`: run through "Claim the issue" in
     `commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
-    pre-flight → judge → acquire the atomic `task/<n>` claim lock → assign `@me`, add
-    `auto-claimed`, remove `auto-eligible`), then stop before "Branch + execute". The
-    created `task/<n>` lock ref plus the assigned `auto-claimed` issue is the
+    pre-flight → judge → acquire the atomic `<branch_prefix>task-<n>` claim lock →
+    assign `@me`, move the rung to `status:3_started`), then stop before "Branch +
+    execute". The created lock ref plus the assigned, started issue is the
     reservation marker — no PR.
   - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
     (pre-claim WIP gate → find candidates → pre-flight → judge → acquire the atomic
@@ -112,7 +112,7 @@ that message — never a question).
   the highest-ranked ready one. Guard: proceed only when that task is already
   claimed by this caller — `status: in_progress` (`repo-pr`), assigned to the
   caller in a `started`-type state (`linear`), assigned to the caller with
-  `auto-claimed` (`gh-issue`), or assigned to the caller in an `indeterminate`
+  `status:3_started` (`gh-issue`), or assigned to the caller in an `indeterminate`
   (In Progress) category status (`jira`). Otherwise **stop and explain** —
   executing an unclaimed task reopens the race the claim step closes. When the
   guard passes, **first check out the existing claim branch** — do **not** branch
