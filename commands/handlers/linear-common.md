@@ -55,6 +55,16 @@ linear:
   # above. Default = top-level wip_limit. Set to 0 to never ranked-claim unassigned work.
   # Only takes effect when 1+ projects are configured — with none, the whole-team scope already
   # covers everything, so there is no "outside".
+  active_issue_quota: 250 # optional, used by /promote-tasks (linear-promote.md step 7) — the
+  # workspace-wide cap on ACTIVE issues (states of type `unstarted` + `started`; Backlog/Done/
+  # Canceled are excluded) that Linear's free plan enforces. A HIGH promotion moves an issue
+  # Backlog -> Todo, which grows this count, so the promoter checks it before applying a batch
+  # rather than discovering the cap mid-run. Must be an integer 0-250 (250 is Linear's actual
+  # free-plan hard cap, not an arbitrary ceiling -- the check isn't safely computable past it
+  # with this tool). Default 250. Set to 0 to disable the check entirely (e.g. on a paid plan
+  # with no cap). Any other out-of-range/non-numeric value disables the check for that run with
+  # a warning -- fail OPEN on the quota, not closed like an invalid orphan_claim_hours below;
+  # step 8's live-race handling is the backstop that makes that acceptable.
   orphan_claim_hours: 24 # optional, used by /reconcile-tasks row 4 (linear-reconcile.md) —
   # idle-hours threshold before a started+auto-claimed issue with no resolvable PR and no
   # remote branch is treated as an orphaned claim and demoted back to Backlog. Default 24.
@@ -84,6 +94,7 @@ linear:
 - `remote_batch` is optional and lives under `linear:`. It is the deterministic opt-out for `/do-tasks` batch remote dispatch — `false` degrades `--all` / `-n N` to a single foreground claim; absent or `true` dispatches one remote session per issue (each self-checks for the connector). Default `true`. See `commands/do-tasks.md` §3 "Tracker-batch subroutine".
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
 - `orphan_claim_hours` is optional and lives under `linear:`. It is read only by `/reconcile-tasks` row 4 (`linear-reconcile.md`) as the idle-hours threshold before an orphaned claim (started + `auto-claimed`, no resolvable PR, no remote branch) is demoted back to Backlog. Default `24`. **Must be a finite number > 0** — it is the sole guard for a fresh pre-branch claim, so row 4 treats a `0`, negative, or non-numeric value as invalid and fails closed (disables the row for that run) rather than mass-demoting.
+- `active_issue_quota` is optional and lives under `linear:`. It is read only by `/promote-tasks` (`linear-promote.md` step 7) as the workspace-wide cap on active (`unstarted` + `started`) issues before a HIGH-scored batch is applied. **Must be an integer `0`–`250`** — `250` is Linear's actual free-plan hard cap, not an arbitrary ceiling, and the count is calibrated against it. Default `250`; `0` disables the check. Any other value (negative, non-integer, non-numeric, or `> 250`) is invalid and disables the check for that run, with a warning, rather than doing arithmetic against an uncheckable ceiling. Note this is the **opposite** direction from `orphan_claim_hours`: disabling that row withholds a write (fail closed), whereas disabling this check lets the batch promote unguarded (fail open). It is acceptable only because `linear-promote.md` step 8's live-race handling is the backstop — Linear enforces the real cap, and a rejected write becomes `held (quota)`.
 - `unassigned_wip_limit` is optional and lives under `linear:`. It caps the synthetic **Unassigned** bucket (issues with no project or in an unconfigured project) and defaults to the top-level `wip_limit`; `0` means "never ranked-claim unassigned work". It is only meaningful when 1+ projects are configured (with none, the whole-team scope already spans everything).
 
 ### Resolve configured projects
