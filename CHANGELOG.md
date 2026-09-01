@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.16.0] - 2026-09-01
+
+### Features
+
+- precheck workspace active-issue quota in /promote-tasks (#436) (6131b9f)
+
 ## [2.15.1] - 2026-08-31
 
 ### Fixes
