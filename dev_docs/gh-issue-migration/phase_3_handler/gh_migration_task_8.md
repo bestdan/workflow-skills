@@ -31,10 +31,45 @@ a handler gap, not a platform one.
 
 Rewrite `gh-issue-reoptimize.md` to apply dependency edits natively rather than
 reporting them: create and remove `blocked_by` edges, detect cycles across the
-real graph, and drop the body-footer convention entirely.
+real graph, and drop the body-footer convention entirely — **but read the
+constraint below before acting on that last clause.**
 
 Migrate any existing `Blocked by:` footers in `workflow-skills` issue bodies into
 native edges as part of this task.
+
+## Constraint — dropping the footer takes the last signal a routine can see
+
+Recorded 2026-09-02, from task 15 (PR #444).
+
+**A cloud routine cannot read the native dependency graph in any form.** It has
+no `gh`, raw HTTP carries no credential, and the GitHub MCP connector has no
+dependency tool — measured 2026-08-24,
+[`2026-08-24-routine-claim-channel.md`](../../decisions/2026-08-24-routine-claim-channel.md).
+Both `gh-issue-ready.py` (read) and `gh-issue-deps.py` (write, new in task 15)
+shell out to `gh`, so the whole dependency path is local-only.
+
+Issue **bodies**, however, are readable through the connector. So
+`Blocked by: #<n>` is the only blocked-ness signal available unattended, and
+"drop the body-footer convention entirely" removes it.
+
+This does **not** settle the question — it supplies the fact the decision needs:
+
+- The footer is a **hint, not the graph.** Nothing keeps it in sync with the
+  edge, and this flow writes footer lines for dependencies that have no edge at
+  all, so a routine reading one can be reading a proposal that was never
+  applied. It cannot be sold as a supported unattended dependency check.
+- Task 15 kept the footer on the `/push-plan` path as a **human-readable echo of
+  the edge** (`push-plan.md` §5, `gh-issue.md` step 2). Dropping it here while
+  push-plan still writes it leaves the two paths disagreeing about whether the
+  footer means anything — decide for both, not one.
+- The acceptance criterion below, "No `Blocked by:` footer-writing code path
+  remains", presumes the drop. If the footer stays, that criterion is what
+  changes.
+
+The clean resolution is probably to keep writing the footer as an echo and stop
+_reading_ it, which is what makes the edge the single source of truth without
+blinding the routine channel. Whoever runs this task decides; the point is that
+the choice is now visible.
 
 ## Acceptance Criteria
 
