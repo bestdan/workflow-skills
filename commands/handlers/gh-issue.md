@@ -38,7 +38,11 @@ gh-issue:
    > task slugs — e.g. `/push-plan` translates blockers to `#142`, `#143` after
    > creating them in dependency order — render this line as
    > `Blocked by: #142, #143` instead of `Blocked by task: …`, so the footer is a
-   > real cross-issue link.
+   > real cross-issue link. It is a **human-readable echo** of the native
+   > `blocked_by` edge `/push-plan` §5.5 draws, never a substitute for it —
+   > `/list-tasks` and `/do-tasks` read the native edge, not the footer.
+   > (`gh-issue-reoptimize.md` still parses the footer; that flow has not
+   > migrated to the edge yet.)
 
 3. **Ensure labels exist.** For each label in `gh-issue.labels`:
 

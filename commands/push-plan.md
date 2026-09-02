@@ -1,6 +1,6 @@
 ---
-description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic (with native blocker links), in dependency order
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
+description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic, in dependency order, with native blocker links on all three
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
 argument-hint: "<plan-name> [--ready-only]"
 ---
 
@@ -87,11 +87,11 @@ legitimately ship with tasks that still need their own sub-plan.
    > **`--ready-only` caveat — a held blocker's native link is lost.** If a
    > pushed `ready` task is blocked by a task held back this run, that blocker's
    > slug isn't in the map yet, so it falls through to the markdown footer rather
-   > than the handler's resolved form — no native `blockedBy` on Linear, a slug
-   > instead of `Blocked by: #<number>` on gh-issue. Because v1 never updates an
-   > existing issue (§6), that resolved link stays missing even after the held
-   > task is pushed later. **Warn** when this happens so the user can push the
-   > whole plan instead if the resolved links matter.
+   > than the handler's resolved form — no native `blockedBy` on Linear, no native
+   > `blocked_by` edge and a slug instead of `Blocked by: #<number>` on gh-issue.
+   > Because v1 never updates an existing issue (§6), that resolved link stays
+   > missing even after the held task is pushed later. **Warn** when this happens
+   > so the user can push the whole plan instead if the resolved links matter.
 
 Already-pushed tasks (those with a `tracker_id`) are skipped regardless — they
 still appear in the summary as `already pushed (<tracker_id>)`.
@@ -278,14 +278,32 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
 
 The gh-issue path mirrors the Linear path (§4) — same topological order, same
 live slug→id map, same create-missing-only idempotency (§6). Only the container
-and the blocker encoding differ: gh-issue groups under a **milestone** and has
-**no native dependency edge**, so blockers become a `Blocked by: #<number>` body
-footer (spike §3.1 / §3.3).
+differs: gh-issue groups under a **milestone** rather than a project (spike
+§3.1).
 
-> **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so a
-> gh-issue push produces a board you then work **manually** — it does not become
-> auto-executable. The grouping + blocker footer are still worth pushing for
-> visibility; just don't expect the headless runner to drain it.
+Blockers are drawn as **native `blocked_by` edges** in a second pass (§5.5), the
+same shape as the jira path's §5b.5, because an edge needs the blocker's issue
+number and v1 never updates an issue after creation (§6). The
+`Blocked by: #<number>` body footer stays alongside them as a **human-readable
+echo of the edge, never a substitute for one** — the edge is what
+`/list-tasks` and `/do-tasks` read (`gh-issue.md`, `gh-issue-ready.py`), and it
+is the only encoding either one honours. The footer is worth keeping because it
+is visible in the issue body where the dependency panel is easy to miss, and
+because a blocker held back by `--ready-only` has no issue to link to and can
+only be recorded as prose. Its strongest reason is the routine channel: a
+cloud routine cannot read the edge in any form. It has no `gh`, and the
+GitHub MCP connector exposes no dependency tool
+(`dev_docs/decisions/2026-08-24-routine-claim-channel.md`). Issue bodies are
+readable through the connector, so the footer is the only blocked-ness signal
+available unattended. Read it as a hint, never as the graph: nothing keeps the
+footer and the edge in sync, and `gh-issue-reoptimize.md` writes footer lines
+for dependencies that have no edge, so a footer can record a proposal that was
+never applied. Dropping it is `gh-issue-reoptimize.md`'s call to
+make, not this file's.
+
+> **Value note.** `/do-tasks` reads this board — `gh-issue` execution is single
+> and foreground (`do-tasks.md`), not the parallel Linear runner. The edges this
+> pass draws are what make its dependency gate fire at all.
 
 ### 5.1 Preflight
 
@@ -373,10 +391,12 @@ Walk the tasks in topological order. For each:
    (`#<number>`); **pass through unchanged** any entry already shaped like an
    issue ref or absent from the map. Render the resolved blockers as the footer
    `Blocked by: #<number>[, #<number>…]` (see `gh-issue.md` step 2 — passing
-   issue-ref values makes its footer read `Blocked by: …`). Blockers held back by
-   `--ready-only` aren't in the map yet, so they fall through to a slug footer and
-   never gain the `#<number>` form on a later create-missing-only run — **warn**,
-   matching the Linear `--ready-only` caveat in §3.
+   issue-ref values makes its footer read `Blocked by: …`). The footer is the
+   human-readable echo; the edge §5.5 draws is the machine-readable half, and
+   neither replaces the other. Blockers held back by `--ready-only` aren't in the
+   map yet, so they fall through to a slug footer, gain no edge, and never gain
+   the `#<number>` form on a later create-missing-only run — **warn**, matching
+   the Linear `--ready-only` caveat in §3.
 4. **Create the issue** by following `gh-issue.md` steps 2–5 (build body + footer,
    ensure labels, `gh issue create`, return the URL), adding the container from
    §5.2: `--milestone "<milestone number>"` (milestone path — pass the resolved
@@ -388,11 +408,59 @@ Walk the tasks in topological order. For each:
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map
    so later dependents resolve.
 
-### 5.5 Cleanup — delete each migrated task file
+### 5.5 Second pass — native blocker edges
+
+After **every** issue in the batch exists (so all blocker numbers are in the map),
+walk the tasks again and translate each `is_blocked_by` through the map, exactly
+as the jira path does in §5b.5. Walk **only tasks whose own slug resolved to an
+issue number** — a task held back by `--ready-only`, or whose create failed, has
+no issue to attach an edge to and contributes no `--edge`. The helper refuses a
+non-numeric blocked side and writes nothing at all, so one held task in a batched
+call would cost every other edge in it. Unresolved **blocker** values still pass
+through: those the helper warns about and reports under `skipped`. Hand the whole resolved edge set to
+`gh-issue-deps.py` in **one** call — for a task A blocked by B, one
+`--edge <A>:<B>`; a task with a **list** of blockers contributes one `--edge` per
+blocker:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-deps.py" \
+  --repo "<repo>" --edge "<A>:<B>" [--edge "<C>:<B>" …] --apply --json
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/gh-issue-deps.py`. `--repo` is required: resolve it with
+`gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
+unset, matching §5.2.
+
+Four things the helper settles, so don't re-derive them here:
+
+- The POST body carries the blocker's **database id**, not its `#<number>` — the
+  helper resolves it. Writing the number links the wrong issue.
+- Edge creation is **create-missing-only**, checked against the paginated
+  `blocked_by` list, so a re-push adds no duplicate.
+- An `is_blocked_by` entry that stayed a bare slug (a blocker held back by
+  `--ready-only`) or names another repo has no issue to link to. The helper
+  **warns and skips** it and reports it under `skipped` — surface that in §7,
+  matching the `--ready-only` caveat in §3.
+- A blocker number the repo does not have **fails loudly** rather than being
+  skipped, because reaching that means this pass ran before its issues existed.
+
+Without `--apply` the helper writes nothing and reports what it would create, so
+drop the flag for a rehearsal. Two limits worth stating plainly: this path is
+**local only** — a cloud routine has no `gh` and the GitHub MCP connector has no
+dependency tool (`dev_docs/decisions/2026-08-24-routine-claim-channel.md`) — and
+the local `sandbox-network-guard` hook blocks non-GET `gh api`, so `--apply`
+needs the sandbox escape.
+
+### 5.6 Cleanup — delete each migrated task file
 
 Run the **§4.5 cleanup** unchanged, using gh-issue's slug→reference map (§5.4) and
 its id shape `/^(\S*#)?\d+$/` (§5.3). Each migrated task file is deleted once its
 `tracker_id` is recorded; held/failed files stay.
+
+For gh-issue this **must run after the §5.5 edge pass**, for the reason jira's
+§5b.6 gives: the edge pass walks every task to draw its `blocked_by` edges, so the
+files and the in-memory map must still be intact when it runs.
 
 ## 5b. jira path
 
@@ -551,7 +619,9 @@ re-runs safely — this is **create-missing-only** (spike §4):
   held task resolves its blockers (and keeps native links) on a later push.
 - For jira, the §5b.5 link pass is create-missing-only too: it checks the
   dependent's existing `Blocks` links before adding one, so a re-push draws no
-  duplicate "is blocked by" edges.
+  duplicate "is blocked by" edges. The gh-issue §5.5 edge pass is the same:
+  `gh-issue-deps.py` reads the dependent's paginated `blocked_by` list first and
+  creates only what is missing.
 - v1 **never updates or deletes** remote **issues** (tasks). The one remote write
   on reuse is narrow and container-only: the overview is written into (overwriting)
   a **plan-dedicated** container's description (§4.2), never onto a shared one and
@@ -566,7 +636,8 @@ Print:
 - The container: created (`<title>` → `<project / milestone / Epic id>`) or reused
   (`<id>`); for gh-issue, note when the `plan:<name>` label fallback was used; for
   jira, note any blocker links skipped because the `Blocks` link type was absent
-  (§5b.5).
+  (§5b.5); for gh-issue, note any dependency edges `gh-issue-deps.py` reported as
+  `skipped` because the blocker never became an issue (§5.5).
 - **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
   resolved blockers if any.
 - **Deleted locally:** each migrated task file removed by the §4.5 cleanup —
