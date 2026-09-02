@@ -52,13 +52,22 @@ dependency-readiness. **Task 4** — PR #442 — moved `/do-tasks`'s claim lifec
 `gh-issue-claim.py` for the parts two racing sessions must perform identically, taught
 claim to consult native `blocked_by`, and removed task 5's bridges.
 
-**Task 15 is next, then 6.** Task 14 — the `--no-claim` branch-name defect task 4 shipped
-— is **done** (PR #443).
+**Task 6 is next.** Task 14 — the `--no-claim` branch-name defect task 4 shipped — is
+**done** (PR #443), and so is task 15.
 
-**Task 15** is the one that matters: dependency-blocking is **inert**. Tasks 4 and 5 both
-taught the loop to read GitHub's native `blocked_by` graph; nothing writes one, so both
-checks pass everything. Fixing the write side is what makes two already-shipped read paths
-do anything.
+**Task 15 — PR #444, merged `09aa71f`.** Dependency-blocking is no longer inert.
+`commands/handlers/assets/gh-issue-deps.py` creates the native `blocked_by` edges and
+`/push-plan` §5.5 calls it as a second pass after every issue exists, so the read paths
+tasks 4 and 5 shipped now have data to read. Two facts it pinned, both silent when wrong:
+the POST body carries **`issue_id`, a database id**, not the issue number, and
+`blocked_by` is paginated, so the create-missing-only check reads it with
+`--paginate --slurp`. It also retired the "no native dependency edge" claim in **four**
+files — the three the task named plus `commands/reoptimize-tasks.md`.
+
+**The footer stayed**, as a human-readable echo of the edge. The deciding reason turned up
+late: a cloud routine can read an issue **body** but has no way to reach the edge, so
+`Blocked by: #<n>` is the only blocked-ness signal available unattended — a hint, never
+the graph. See task 8's **Constraint** section before changing that.
 
 The same audit produced the epic's **In-flight PRs against files this plan owns**
 section. Read it before touching `gh-issue-claim.md` or `gh-issue-promote.md` — three
@@ -95,11 +104,10 @@ This file was wrong twice by asserting routine behaviour from documentation. Pro
   than degrading. Switching `.task-config.yml` to `gh-issue` takes this repo out of
   unattended operation until that is fixed.
 - **`gh-issue-reoptimize.md` has not migrated** — see above. Owned by task 8.
-- **Nothing creates a native dependency edge**, so `/list-tasks`'s and `/do-tasks`'s
-  dependency checks are correct and inert. Owned by task 15, which also retires the
-  "GitHub Issues have no native dependency edge" claim still asserted in three files —
-  a claim that was true when written, is false now, and has already misled one open PR
-  (#426) into building a body-footer parser.
+- ~~**Nothing creates a native dependency edge**~~ — **resolved by task 15** (PR #444).
+  The stale claim it retired had already misled one open PR (#426) into building a
+  body-footer parser; that PR still needs its **Dependency-ready selection** section
+  deleted rather than reconciled (see the epic's in-flight section).
 - **Tasks 12 and 13 have no task file** — they exist only as entries in the epic. Every
   other task has one under a `phase_*/` directory.
 

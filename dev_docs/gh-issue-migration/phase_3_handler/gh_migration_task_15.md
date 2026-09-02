@@ -2,8 +2,10 @@
 title: Create native dependency edges on the write side
 priority: high
 size: 3
-status: new
+status: done
 created: 2026-08-31
+completed: 2026-09-02
+tracker_id: "bestdan/workflow-skills#444"
 source_branch: bestdan/gh-issue-migration
 parent: gh_migration
 related_files:

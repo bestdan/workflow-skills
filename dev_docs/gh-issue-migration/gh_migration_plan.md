@@ -103,7 +103,7 @@ join, and `gh` covers it only partially.
 5. ~~[phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md)~~ — State model across add / list / promote / do. **Done** — PR #439, merged `a4815d7`.
    Added `gh-issue-ready.py` for dependency-readiness. The **migration bridges** it left
    were removed by task 4.
-6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. Next after task 15.
+6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. **NEXT.**
 7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants.
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
    **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
@@ -137,13 +137,24 @@ join, and `gh` covers it only partially.
     gets `command not found`). Both are the same lesson: a partial sweep reads as a
     complete one, and an unrunnable command sends a reader back to the literal the
     instruction exists to forbid.
-15. [phase_3_handler/gh_migration_task_15.md](phase_3_handler/gh_migration_task_15.md) — **Create native dependency edges on the write
-    side. NEXT.** Tasks 4 and 5 both taught the loop to _read_ GitHub's native `blocked_by`
-    graph. Nothing _writes_ one — `/push-plan` still emits a prose footer — so both
-    checks pass everything and dependency-blocking is inert. This is the task that makes
-    them do something. It also retires the "GitHub Issues have no native dependency edge"
-    claim still asserted in `gh-issue-reoptimize.md`, `task-config.md:33` and
-    `push-plan.md:282`, which task 8's own context already falsifies.
+15. ~~[phase_3_handler/gh_migration_task_15.md](phase_3_handler/gh_migration_task_15.md)~~ — Create native dependency edges on the write
+    side. **Done** — PR #444, merged `09aa71f`. `gh-issue-deps.py` writes the edges and
+    `/push-plan` §5.5 calls it as a second pass once every issue exists, which is what
+    made the read paths tasks 4 and 5 shipped stop passing everything. The
+    "no native dependency edge" claim was retired in **four** files, not the three this
+    entry originally named — `commands/reoptimize-tasks.md` asserted it too.
+    Three things it settled that the plan had not:
+    - **The POST body wants a database id.** `issue_id` is the blocker's REST `id`, not
+      its `#<number>`; passing the number links a different issue and reads back as a
+      plausible edge. The helper resolves it.
+    - **The footer stays, as a human-readable echo.** The deciding argument arrived after
+      the review: a cloud routine can read an issue body but not the edge, so the footer
+      is the only unattended blocked-ness signal — a hint, never the graph. Task 8's
+      **Constraint** section carries this; it bears on that task's "drop the footer
+      entirely" instruction.
+    - **Reoptimize's limit is now a handler gap, not a platform one.** Its report-only
+      status is unchanged, but the reason in the prose is corrected. Task 8 still owns
+      teaching it to write edges.
 
 **Phase 4 — migrate (added 2026-08-30)**
 
@@ -204,7 +215,9 @@ look healthy doing it:
 - It adds a **"Dependency-ready selection"** section that parses the `Blocked by: #<n>`
   body footer, on the stated premise that "GitHub Issues has no native blocking
   relationship this handler can query." That premise is false (task 8's context, and the
-  live endpoint `gh-issue-ready.py` uses). **Delete that section rather than reconciling
+  live endpoint `gh-issue-ready.py` uses) — and task 15 has since retired the claim that
+  produced it, so the repo no longer tells a reader what it told #426.
+  **Delete that section rather than reconciling
   it** — task 4 already drops dependency-blocked candidates via
   `gh-issue-ready.py --issue N`, scoped exactly the way #426 wants.
 - Its capability-matrix flip to `yes` is directionally right but must land **last**:
