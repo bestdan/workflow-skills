@@ -116,6 +116,11 @@ join, and `gh` covers it only partially.
 
 9. [phase_4_migrate/gh_migration_task_9.md](phase_4_migrate/gh_migration_task_9.md) — Export Linear, import the active `workflow-skills` issues.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
+    **Blocked by task 13's postponement, unless the pilot runs attended.** Flipping
+    `.task-config.yml` to `gh-issue` drops this repo out of auto-pilot entirely (task 13),
+    so a pilot run today is a hand-driven one. That is a legitimate way to run it — the
+    handler works fine in a foreground session — but decide it deliberately rather than
+    discovering it at switch time.
 
 **Phase 3 — handler (added by co-review of PR #415)**
 
@@ -158,8 +163,12 @@ join, and `gh` covers it only partially.
 
 **Phase 4 — migrate (added 2026-08-30)**
 
-13. **Teach auto-pilot the `gh-issue` handler.** `/auto-pilot` today supports **linear
-    and plan sources only**: `skills/auto-pilot/SKILL.md:92` stops outright on "any
+13. **Teach auto-pilot the `gh-issue` handler. POSTPONED 2026-09-02** — `/auto-pilot`
+    is under active development with a new harness. Teaching it a fifth handler against a
+    moving target buys rework, so this waits until that harness lands; resume by
+    re-reading the three `SKILL.md` line references below, which will have moved.
+    **This holds Phase 4 with it** — see the note under task 10. `/auto-pilot` today
+    supports **linear and plan sources only**: `skills/auto-pilot/SKILL.md:92` stops outright on "any
     handler other than `linear`/`repo-pr`". So the moment `workflow-skills` switches its
     `.task-config.yml` to `gh-issue`, **the repo drops out of auto-pilot entirely** — it
     does not degrade, it refuses to launch. Three pieces need doing:

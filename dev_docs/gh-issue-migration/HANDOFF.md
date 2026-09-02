@@ -100,9 +100,11 @@ This file was wrong twice by asserting routine behaviour from documentation. Pro
 - **`sandbox-network-guard` blocks non-GET `gh api`.** Until an allowlist entry exists in
   the operator's dotfiles, `gh-issue-state.py`'s PATCH cannot run locally — so task 5
   cannot test its own write path. **Outside this repo; needs the operator.**
-- **`/auto-pilot` does not support `gh-issue`** (task 13, new). It stops outright rather
-  than degrading. Switching `.task-config.yml` to `gh-issue` takes this repo out of
-  unattended operation until that is fixed.
+- **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
+  because `/auto-pilot` is under active development with a new harness and teaching it a
+  fifth handler against a moving target is rework. It stops outright rather than
+  degrading, so switching `.task-config.yml` to `gh-issue` takes this repo out of
+  unattended operation until the harness lands and task 13 is done.
 - **`gh-issue-reoptimize.md` has not migrated** — see above. Owned by task 8.
 - ~~**Nothing creates a native dependency edge**~~ — **resolved by task 15** (PR #444).
   The stale claim it retired had already misled one open PR (#426) into building a
@@ -114,8 +116,13 @@ This file was wrong twice by asserting routine behaviour from documentation. Pro
 ## This repo is still on Linear
 
 `dev_docs/tasks/.task-config.yml` says `handler: linear`, with four Linear projects.
-Nothing has switched yet, and nothing should until task 13 is at least scoped —
-switching today would end unattended operation rather than degrade it.
+Nothing has switched yet, and **the switch now waits on the auto-pilot harness** — task 13
+is postponed until it lands (see the open blockers above), and switching before then ends
+unattended operation rather than degrading it.
+
+That is a postponement, not a dead end. Every handler verb works in a foreground session
+today, so the repo could switch and be driven by hand deliberately. What it cannot do is
+switch and stay unattended.
 
 A consequence worth naming: **task 4's acceptance criteria are not all met yet.** Its
 code-enforced ones are (hermetic tests for the race, the branch parser and the WIP cap),
