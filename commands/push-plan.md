@@ -290,7 +290,15 @@ echo of the edge, never a substitute for one** — the edge is what
 is the only encoding either one honours. The footer is worth keeping because it
 is visible in the issue body where the dependency panel is easy to miss, and
 because a blocker held back by `--ready-only` has no issue to link to and can
-only be recorded as prose. Dropping it is `gh-issue-reoptimize.md`'s call to
+only be recorded as prose. Its strongest reason is the routine channel: a
+cloud routine cannot read the edge in any form. It has no `gh`, and the
+GitHub MCP connector exposes no dependency tool
+(`dev_docs/decisions/2026-08-24-routine-claim-channel.md`). Issue bodies are
+readable through the connector, so the footer is the only blocked-ness signal
+available unattended. Read it as a hint, never as the graph: nothing keeps the
+footer and the edge in sync, and `gh-issue-reoptimize.md` writes footer lines
+for dependencies that have no edge, so a footer can record a proposal that was
+never applied. Dropping it is `gh-issue-reoptimize.md`'s call to
 make, not this file's.
 
 > **Value note.** `/do-tasks` reads this board — `gh-issue` execution is single
@@ -404,7 +412,12 @@ Walk the tasks in topological order. For each:
 
 After **every** issue in the batch exists (so all blocker numbers are in the map),
 walk the tasks again and translate each `is_blocked_by` through the map, exactly
-as the jira path does in §5b.5. Hand the whole resolved edge set to
+as the jira path does in §5b.5. Walk **only tasks whose own slug resolved to an
+issue number** — a task held back by `--ready-only`, or whose create failed, has
+no issue to attach an edge to and contributes no `--edge`. The helper refuses a
+non-numeric blocked side and writes nothing at all, so one held task in a batched
+call would cost every other edge in it. Unresolved **blocker** values still pass
+through: those the helper warns about and reports under `skipped`. Hand the whole resolved edge set to
 `gh-issue-deps.py` in **one** call — for a task A blocked by B, one
 `--edge <A>:<B>`; a task with a **list** of blockers contributes one `--edge` per
 blocker:
