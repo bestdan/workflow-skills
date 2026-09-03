@@ -98,6 +98,40 @@ class ForwardTransitionTests(unittest.TestCase):
         self.assertIn("status:4_needs_review", remote.labels)
         self.assertNotIn("status:3_started", remote.labels)
 
+    def test_opened_makes_the_same_move_as_ready_for_review(self):
+        # A PR opened straight to non-draft never emits `ready_for_review`, so
+        # `opened` has to reach the identical transition or that PR is uncaught.
+        # The draft case never gets here — the workflow's `if:` filters it.
+        remote = FakeRemote(READY)
+        code, result = run(
+            remote,
+            [
+                "--repo",
+                "o/n",
+                "--branch",
+                "bestdan/task-142",
+                "--event",
+                "opened",
+                "--apply",
+            ],
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNone(result["skipped"])
+        self.assertEqual(result["target"], "status:4_needs_review")
+        self.assertIn("status:4_needs_review", remote.labels)
+
+    def test_opened_on_an_issue_already_in_review_is_a_no_op(self):
+        # The rung gate is what keeps the two routes from fighting: whichever
+        # event arrives second finds the issue already moved and does nothing.
+        remote = FakeRemote(IN_REVIEW)
+        code, result = run(
+            remote,
+            ["--repo", "o/n", "--branch", "task-9", "--event", "opened", "--apply"],
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNotNone(result["skipped"])
+        self.assertEqual(remote.patches(), [])
+
     def test_both_branch_prefixes_reach_the_write(self):
         for branch in ("bestdan/task-142", "claude/task-142", "task-142"):
             remote = FakeRemote(READY)
@@ -348,13 +382,30 @@ class WorkflowTriggerTests(unittest.TestCase):
         self.assertIsNotNone(match, "no `types: [...]` list in the workflow")
         return [t.strip() for t in match.group(1).split(",") if t.strip()]
 
-    def test_triggers_on_ready_for_review_and_closed_but_not_opened(self):
+    def test_triggers_on_every_event_that_makes_a_pr_reviewable_or_ends_it(self):
         types = self.trigger_types()
+        # `opened` and `ready_for_review` are two routes to the same transition:
+        # a PR opened straight to non-draft NEVER emits `ready_for_review`, so
+        # dropping `opened` reopens the gap this trigger list exists to close.
+        self.assertIn("opened", types)
         self.assertIn("ready_for_review", types)
         self.assertIn("closed", types)
-        # A draft PR is not needs_review, and the house convention makes some
-        # repos' PRs always draft.
-        self.assertNotIn("opened", types)
+
+    def test_opened_is_gated_on_draft_so_a_draft_pr_is_never_moved(self):
+        # This is the term `opened` bought. A draft PR is not needs_review, and
+        # the house convention makes some repos' PRs always draft — without the
+        # guard, `opened` would move an issue on every draft they open.
+        condition = re.search(r"(?ms)^\s+if:.*?\n\n", self.text)
+        self.assertIsNotNone(condition, "no `if:` guard on the job")
+        guard = condition.group(0)
+        self.assertIn("github.event.pull_request.draft", guard)
+        # `closed` must stay exempt: a draft can be closed, and the reverse
+        # transition has to run for it.
+        self.assertIn("github.event.action == 'closed'", guard)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            guard,
+        )
 
     def test_declares_the_issues_write_permission_the_patch_needs(self):
         self.assertRegex(self.text, r"(?m)^\s+issues:\s*write\s*$")

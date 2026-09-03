@@ -4,11 +4,21 @@
 On GitHub the open PR *is* the `needs_review` state — there is no separate
 review field — so two transitions have to happen when a PR changes shape:
 
-- a PR marked ready for review moves its issue `3_started` -> `4_needs_review`
+- a PR that becomes ready for review moves its issue `3_started` ->
+  `4_needs_review`. Two events mean that: `ready_for_review` (a draft was
+  marked ready) and `opened` on a PR that was NOT opened as a draft. They are
+  one transition, so they share a row in TRANSITIONS.
 - a PR closed WITHOUT merging moves it back `4_needs_review` -> `3_started`
 
 Without the second one an issue sits in `needs_review` forever with no open PR
 to review, which is indistinguishable from work waiting on a human.
+
+**A draft PR is not `needs_review`, and this file cannot tell.** The `opened`
+event fires for a draft too, and nothing in the arguments here says which it
+was — the caller has that fact, so the caller carries the gate. The workflow
+declines to invoke this script at all for a draft; see the `if:` in
+.github/workflows/gh-issue-pr-sync.yml. Passing `--event opened` for a draft PR
+would move it, and correctly so: the caller asserted it is not one.
 
 A merged PR is deliberately NOT a transition here: `Closes #<n>` in the PR body
 makes GitHub close the issue itself, and closure IS completion under this
@@ -82,8 +92,12 @@ NEEDS_REVIEW = "status:4_needs_review"
 
 # (expected current rung, rung to write). A PR becoming ready and a PR closing
 # unmerged are exact inverses, which is why the table reads as one pair rather
-# than two rules: whatever one does, the other undoes.
+# than two rules: whatever one does, the other undoes. `opened` and
+# `ready_for_review` are the same transition reached by two events — a PR opened
+# straight to non-draft never emits `ready_for_review`, and a PR opened as a
+# draft emits it later — so both map to the same row.
 TRANSITIONS = {
+    "opened": (STARTED, NEEDS_REVIEW),
     "ready_for_review": (STARTED, NEEDS_REVIEW),
     "closed": (NEEDS_REVIEW, STARTED),
 }

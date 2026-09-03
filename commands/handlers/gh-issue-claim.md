@@ -283,7 +283,7 @@ python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
 
 Never `gh issue close` here, and never pass `--done`, regardless of how done the work feels — merge handles closure via `Closes #<n>`.
 
-**A backstop also runs, and its reverse has no other owner.** `.github/workflows/gh-issue-pr-sync.yml` calls `commands/handlers/assets/gh-issue-pr-sync.py`, which performs the same transition from the PR's `ready_for_review` event — so a PR opened outside this loop still moves its issue. It writes only when the issue is already on `status:3_started`, so doing the write here first makes the Action a no-op rather than a conflict.
+**A backstop also runs, and its reverse has no other owner.** `.github/workflows/gh-issue-pr-sync.yml` calls `commands/handlers/assets/gh-issue-pr-sync.py`, which performs the same transition from the PR's `opened` and `ready_for_review` events — so a PR opened outside this loop still moves its issue, whether it was opened as a draft and later marked ready or opened non-draft in one step. A draft PR is filtered by the workflow's own `if:`, never by the script. The backstop writes only when the issue is already on `status:3_started`, so doing the write here first makes the Action a no-op rather than a conflict.
 
 The reverse transition is the backstop's alone: a PR **closed without merging** moves the issue back to `status:3_started`, because nothing else is watching at that point and the issue would otherwise sit in `needs_review` forever with no open PR. Both directions need the workflow's `issues: write` permission, and the workflow ships only in this repo — a consumer repo adopting the `gh-issue` handler must copy it.
 

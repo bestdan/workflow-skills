@@ -9,11 +9,20 @@ name: gh-issue PR status sync
 # outside that loop, and it is the only channel that catches a PR CLOSED
 # outside it, because nothing is watching then.
 #
-# Triggers on `ready_for_review`, deliberately NOT on `opened`: a draft PR is
-# not `needs_review`, and the house convention makes some repos' PRs always
-# draft. The consequence is that a PR opened directly as non-draft emits no
-# `ready_for_review` and is not caught here — that case belongs to the agent
-# that opened it.
+# A PR becomes ready for review by one of two events, and BOTH are needed:
+# `ready_for_review` fires when a draft is marked ready, and `opened` fires for
+# a PR that was never a draft — such a PR never emits `ready_for_review` at all,
+# so without `opened` it would go uncaught forever.
+#
+# `opened` is exactly why the `draft` half of the job's `if:` exists. That event
+# fires for a draft PR too, and a draft is NOT `needs_review` — the house
+# convention makes some repos' PRs always draft, so moving one would be wrong on
+# every PR they open. The guard, not the trigger list, is what keeps drafts out;
+# do not add `opened` anywhere without it.
+#
+# `reopened` is deliberately absent. Reopening a closed PR is the inverse of the
+# close this file already handles, so it is a real gap — but it needs its own
+# thinking about a PR reopened as a draft, and nobody has done it.
 #
 # `workflow-skills` is public, so Actions minutes are free; this is not
 # optimized for them.
@@ -24,7 +33,7 @@ name: gh-issue PR status sync
 
 on:
   pull_request:
-    types: [ready_for_review, closed]
+    types: [opened, ready_for_review, closed]
 
 # `issues: write` is the point of this file. The default token is
 # `contents: read`, which cannot PATCH an issue's labels.
@@ -35,10 +44,21 @@ permissions:
 jobs:
   sync:
     name: Sync issue status to PR state
-    # A fork PR's token is read-only no matter what `permissions` asks for, so
-    # the write would fail and paint the run red for a reason unrelated to the
-    # change. Same-repo PRs are the only ones this loop produces anyway.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Two independent gates.
+    #
+    # Fork PRs: their token is read-only no matter what `permissions` asks for,
+    # so the write would fail and paint the run red for a reason unrelated to
+    # the change. Same-repo PRs are the only ones this loop produces anyway.
+    #
+    # Drafts: a draft PR is not `needs_review`. The `draft` field is checked
+    # rather than the event name because `opened` alone cannot tell the two
+    # apart. `closed` is exempt: a draft can be closed too, and the reverse
+    # transition should still run for it. `ready_for_review` passes the check on
+    # its own — the PR is non-draft by the time it fires — so the term is
+    # load-bearing only for `opened`.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && (github.event.action == 'closed' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
