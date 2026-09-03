@@ -283,8 +283,25 @@ installed for claude.ai/code** — not a claude.ai connector, so it is absent
 from a routine's connector list and there is nothing to attach.
 `dev_docs/decisions/2026-08-24-routine-claim-channel.md` records it enumerated
 in full (58 tools) from inside a routine; `claim-lock.md` documents the same
-channel. That doc does **not** name a PR-search tool, so pick whichever the
-live surface exposes rather than a hardcoded name.
+channel.
+
+The tools, from upstream `github/github-mcp-server`'s `pull_requests` toolset:
+
+- **Step 2 (title search)** → `search_pull_requests`, with `owner` + `repo`
+  carrying what `-R` carries on the `gh` path, and the same
+  `<IDENTIFIER> in:title` query. The literal-bracket-token post-filter still
+  applies — it is a search either way.
+- **Step 3 (branch)** → `list_pull_requests`, with `owner` + `repo` and its
+  `head` filter (plus `state`), matching `gh pr list --head`.
+
+Both accept `fields` to trim the response; omitting `body` drops the largest
+per-result payload, and this flow never reads PR body text.
+
+That naming is inferred, not attested from inside a routine: only
+`create_branch` is directly confirmed there, and it does appear in the same
+upstream toolset, which is what makes the rest credible. The App may still
+enable a subset — so if a named tool is absent, fall back to whichever PR
+search/read tool the live surface does expose.
 
 **If no PR search or read tool is exposed, that is `left: unresolved` for every
 issue reaching steps 2–3 — never "no-PR skipped".** A missing capability is not
@@ -327,15 +344,23 @@ resolved the PR.)
 Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
 candidate for step 5.
 
-**In a `claude-web` environment (no `gh`), read the same fields over the
-GitHub MCP connector** — see "Steps 2–3 in a `claude-web` environment" above
-for the environment split and the tool-naming caveat. This read is required in
-**every** environment: it is the merge verification the whole sweep rests on,
-and it runs for every issue regardless of which step-3 source found the PR —
-including an issue resolved from its `links` attachment, which proves a PR is
-linked but never that it merged. If the merge state cannot be read at all,
-every affected PR is an unread PR under precedence rule 3 below, so the issue
-lands in `left: unresolved` and is not completed.
+**In a `claude-web` environment (no `gh`), read the same fields with
+`mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
+`claude-web` environment" above for the environment split and the provenance
+of that name. It takes `owner`, `repo`, and `pullNumber`; **it has no URL
+parameter**, so parse all three out of the PR URL and pass them together. That
+is the same guarantee the URL rule above buys on the `gh` path — the repo
+travels with the number — and it is why a bare `pullNumber` with an inferred
+owner/repo is the one form to avoid here. Read the merged flag (and merge
+timestamp) off the returned pull request; treat anything short of an explicit
+merged reading as unread, not as unmerged.
+
+This read is required in **every** environment: it is the merge verification
+the whole sweep rests on, and it runs for every issue regardless of which
+step-3 source found the PR — including an issue resolved from its `links`
+attachment, which proves a PR is linked but never that it merged. If the merge
+state cannot be read at all, every affected PR is an unread PR under precedence
+rule 3 below, so the issue lands in `left: unresolved` and is not completed.
 
 **Multi-PR precedence.** An issue can carry more than one resolved PR (a
 stale one plus a newer one). Classify the whole issue by this precedence,
