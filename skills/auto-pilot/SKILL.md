@@ -79,6 +79,10 @@ than as "wrong repo", which is how it went undiagnosed. If
 `**/scripts/<name>.sh`. Prose that names a subcommand without giving a command
 to run (`spawn-orchestrator.sh status`, `claude-usage.sh --session-status`)
 belongs to this context too — same script, same resolution, just not a command.
+A markdown **link** to a file in this repo
+([`scripts/claude-usage.sh`](../../scripts/claude-usage.sh) in
+[`references/run-budget.md`](references/run-budget.md), say) names a path for a
+reader, not an executor; it stays repo-relative and is never pinned.
 
 **2. The target repo's own scripts — repo-relative, correctly.** E.g.
 `bash scripts/check.sh` in

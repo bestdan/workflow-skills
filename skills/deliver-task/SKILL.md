@@ -27,7 +27,7 @@ copied.
 | Claim                                           | the handler's own claim section (see step 2) — never a bespoke claim                            |
 | Route the worker                                | `select-coder` (`skills/select-coder/SKILL.md`), non-interactive                                |
 | Run the worker in isolation, integrate the diff | the worktree + integrate rules in `orchestrate-coders` (`skills/orchestrate-coders/SKILL.md`)   |
-| Base-freshness                                  | `scripts/preflight-freshness.sh`                                                                |
+| Base-freshness                                  | `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh"`                                        |
 | Exercise the feature                            | driving the changed behavior end-to-end, inline (see step 3)                                    |
 | Review the PR                                   | `/co-review --non-interactive` (`skills/co-review/SKILL.md`)                                    |
 | Open the PR + hand off                          | the handler's own PR-link + review-state sections (see steps 4, 7) — never a bespoke transition |
@@ -60,7 +60,8 @@ copied.
 ## Auto-pilot reserve gate
 
 Only when `--run-state <RUN.md>` is supplied, read the persisted `reserve`
-as the **fixed floor** and obtain `scripts/claude-usage.sh --session-status`
+as the **fixed floor** and obtain
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status`
 once at the start of this delivery cycle. Cache that cycle's successful
 `<percent> <reset_epoch>` status; do not re-read it at later lifecycle
 boundaries. Before the first gate decision, use this same cached status to
@@ -131,7 +132,7 @@ the local base ref **explicitly** (a bare `git fetch` may not move the local
 
 ```bash
 git fetch origin <base>:<base>          # default <base> = main
-scripts/preflight-freshness.sh --ref <base>
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
 
 On `stale`, stop and surface it (the work branch would start behind); on
@@ -212,7 +213,7 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    broker.** A `sandbox-exec`-jailed orchestrator can't run `bash scripts/check.sh`
    directly — the harnesses execve-deny (`bad interpreter`, exit 126) and children
    inherit the jail — so when the run installed a verify broker
-   (`scripts/spawn-orchestrator.sh write-verify-broker`,
+   (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker`,
    [`launch-runtime.md`](../auto-pilot/references/launch-runtime.md) §5), verify is:
    drop a request (`verify-request --worktree <task worktree> --cmd-hash <hash of
    the pinned verify_command>`), then block on `verify-await` and gate on the
