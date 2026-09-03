@@ -34,7 +34,11 @@ issue ahead of where it belongs, never retires live work.
 
 **Row 2 refuses to guess on purpose.** Which rung a bare issue should carry is a
 human's call. Defaulting it to `0_untriaged` would quietly demote started work;
-defaulting it to anything else would invent state.
+defaulting it to anything else would invent state. "Carrying a rung" means
+carrying one the vocabulary defines — the same reading `gh-issue-state.py`'s
+`validate()` enforces. A hand-typed `status:blocked` is not a rung, and testing
+the bare prefix instead would leave that issue invisible to every row, since
+row 1 has no ladder position to rank it by either.
 
 **Row 3 is the backstop for merge-as-completion.** Closing IS completion under
 this schema, so a stray or mistaken `Closes #<n>` in an unrelated PR body
@@ -86,9 +90,11 @@ GitHub's `state_reason` so those are dismissible on sight.
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    `**/handlers/assets/gh-issue-reconcile.py`.
 
-   The script reads the 50 newest issues per state. Widen that with `--limit`
-   when a run needs a longer window, and mind the cost: row 3 spends one API
-   call per **closed** issue in the window, so the limit is what bounds the run.
+   The script reads the 50 most recently **created** issues per state — `gh
+   issue list` orders by creation date, not by close date, so a long-lived issue
+   closed yesterday can sit outside the window and go unaudited by row 3. Widen
+   it with `--limit`, and mind the cost: row 3 spends one API call per **closed**
+   issue in the window, so the limit is what bounds the run.
 
    Row 1's repair goes through `gh-issue-state.py` — validate, then one full-set
    PATCH — so it carries `follow-up` and every other unmanaged label forward

@@ -200,6 +200,27 @@ class RuleTwoTests(ReconcileTestCase):
 
         self.assertEqual(result["missing_rung"][0]["missing"], ["status", "auto"])
 
+    def test_an_out_of_vocabulary_label_does_not_count_as_a_rung(self):
+        """`status:blocked` alone would otherwise be invisible to every rule."""
+        repo = FakeRepo(open_issues={1: ["status:blocked", "auto:eligible"]})
+        result = self._compute(repo)
+
+        finding = result["missing_rung"][0]
+        self.assertEqual(finding["missing"], ["status"])
+        self.assertEqual(finding["unrecognized"], ["status:blocked"])
+        # Rule 1 skips it too — it has no ladder position — so rule 2 is the
+        # only rule that can see this issue at all.
+        self.assertEqual(result["double_status"], [])
+
+    def test_a_vocabulary_rung_alongside_a_bogus_one_is_not_flagged(self):
+        """The rung is present; the bogus name is rule 1's and the writer's problem."""
+        repo = FakeRepo(
+            open_issues={1: ["status:2_ready", "status:blocked", "auto:eligible"]}
+        )
+        result = self._compute(repo)
+
+        self.assertEqual(result["missing_rung"], [])
+
     def test_a_healthy_issue_is_not_flagged(self):
         repo = FakeRepo(open_issues={1: ["status:2_ready", "auto:eligible"]})
         result = self._compute(repo)

@@ -33,10 +33,14 @@ both rungs and is a rule-2 hit. Pass `--label` for each of the repo's configured
 repeated flags AND together. Unscoped, rule 2 reports the whole repo and the
 report says so rather than letting the noise read as drift.
 
-Rule 3 costs one API call per closed issue, so `--limit` bounds it. `gh issue
-list` returns newest first, so the window is the most recently closed issues —
-which is the drift worth catching, since an old stray closure has already been
-lived with.
+Rule 3 costs one API call per closed issue, so `--limit` bounds it. Mind what the
+window actually holds: `gh issue list` orders by CREATION date descending, not by
+close date (measured 2026-09-03), so it is the most recently created issues, and a
+long-lived issue closed yesterday can sit outside a small `--limit` and never be
+audited. There is no close-date ordering to reach for: GitHub search has no
+`sort:closed`. `--search "sort:updated-desc"` is the nearest proxy and does
+compose with `--label` (measured), but `updated` moves on a comment after the
+close, so it is not the same question — this script does not use it.
 
 Rule 3 asks whether the label was EVER applied, across the issue's whole event
 history, not whether it was applied before the last close. An issue reopened and
@@ -239,17 +243,31 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
 
         # Reported independently of rule 1: an issue can break both invariants,
         # and rule 1's repair deliberately does not fix this one.
-        missing = [
-            group
-            for group in ("status", "auto")
-            if not any(label.startswith(f"{group}:") for label in current)
-        ]
+        #
+        # Membership in the vocabulary, not the bare `status:` prefix, is what
+        # counts as carrying a rung — the same definition gh-issue-state.py's
+        # validate() enforces, where a name outside labels.yml is rejected
+        # outright. A prefix test would read a hand-typed `status:blocked` as a
+        # rung and leave the issue invisible to every rule: rule 1 already skips
+        # it, having no ladder position to rank it by. That is the exact input
+        # this audit exists for.
+        missing = []
+        unrecognized = []
+        for group in ("status", "auto"):
+            prefixed = [label for label in current if label.startswith(f"{group}:")]
+            if any(label in vocabulary for label in prefixed):
+                continue
+            missing.append(group)
+            unrecognized += [label for label in prefixed if label not in vocabulary]
         if missing:
             missing_rung.append(
                 {
                     "number": issue["number"],
                     "title": issue["title"],
                     "missing": missing,
+                    # Named so the report does not say "no status: label" about
+                    # an issue that visibly carries one.
+                    "unrecognized": unrecognized,
                 }
             )
 
@@ -314,7 +332,11 @@ def report(result):
     print(f"\nRule 2 — open issue missing a rung, FLAG only ({len(findings)}):")
     for finding in findings:
         missing = ", ".join(f"{group}:" for group in finding["missing"])
-        print(f"  #{finding['number']} {finding['title']} — no {missing} label")
+        line = f"  #{finding['number']} {finding['title']} — no {missing} label"
+        if finding["unrecognized"]:
+            names = ", ".join(finding["unrecognized"])
+            line += f" (carries {names}, not in labels.yml)"
+        print(line)
 
     findings = result["closed_unreviewed"]
     print(
@@ -339,7 +361,7 @@ def main(argv=None):
         "--limit",
         type=int,
         default=50,
-        help="max issues to read per state (newest first)",
+        help="max issues to read per state (newest by creation date)",
     )
     parser.add_argument(
         "--label",
