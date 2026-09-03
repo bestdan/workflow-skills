@@ -21,7 +21,7 @@ support live.
 
 | Skill                                            | Trigger                                                               | What it does                                                                                                                                                                                                                               |
 | ------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [**co-review**](skills/co-review/SKILL.md)       | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.               |
+| [**co-review**](skills/co-review/SKILL.md)       | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot, hyper) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.        |
 | [**local-review**](skills/local-review/SKILL.md) | "let me look over these changes", "open the diff so I can comment"    | Open a GitHub-style split-diff UI on localhost so _you_ read an agent's changes and leave inline line comments; the feedback is written to a file the agent acts on. Local-only — nothing touches GitHub unless you flag a comment for it. |
 
 **Run local-review by hand** (no agent needed): the server is a plain script —
@@ -53,7 +53,10 @@ fixed input file on stdin (or via `--prompt-file` for devin), so the command
 string never changes and you can approve each reviewer with an exact-match,
 read-only rule instead of a broad wildcard. The skill's **Permissions** section
 has the exact JSON — merge it into `permissions.allow` in
-`~/.claude/settings.json` or the repo's `.claude/settings.json`.
+`~/.claude/settings.json` or the repo's `.claude/settings.json`. `hyper` is
+the exception: it is an HTTP call made by a plugin script, not a CLI, so the
+shared `python3` prefix rule covers it and it ships no rule of its own. It is
+also never auto-enabled — list it in `.co-review.yml` to opt a repo in.
 
 ### Planning
 
