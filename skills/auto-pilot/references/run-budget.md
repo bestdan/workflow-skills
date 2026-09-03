@@ -83,7 +83,7 @@ a consumed-percent threshold: for a successful `--session-status` read of
 `<percent> <reset_epoch>`, compute `headroom = 100 - percent`; when `headroom < reserve`, do not start the operation.
 
 At the start of a delivery cycle, `/deliver-task` calls
-`scripts/claude-usage.sh --session-status` once and cache its successful
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` once and cache its successful
 `percent` and raw `reset_epoch` for that cycle. Apply that cached reading before
 **claim**, **verify**, enabled **co-review**, and every iterate-round
 **re-verify** and repeated **co-review**; do not make equivalent usage reads
@@ -223,8 +223,11 @@ So the supervisor carries a **third** kind, neither an agent pause nor a
 supervisor pause: a **supervisor halt**. It is implemented entirely in shell,
 before or on `claude -p`'s exit — a rate-limited or auth-dead agent cannot run
 its own bookkeeping, so the supervisor decides in shell what it can decide in
-shell (`scripts/spawn-orchestrator.sh classify-exit` / `supervisor-check`,
-called by the generated launch script after every wake):
+shell (`spawn-orchestrator.sh classify-exit` / `supervisor-check` — bare on
+purpose: `write-launch` bakes its own absolute path into the generated wrapper,
+and `$CLAUDE_PLUGIN_ROOT` does not exist under launchd
+([`../SKILL.md`](../SKILL.md) "Script paths", context 3) — called by the
+generated launch script after every wake):
 
 - **Fatal, non-retryable** — the exit's captured stdout+stderr names an auth
   failure (`authentication_failed`, `Invalid authentication credentials`,

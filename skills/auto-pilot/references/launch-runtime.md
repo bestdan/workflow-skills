@@ -63,7 +63,10 @@ launchd-tracked PID was `claude` itself, never a wrapper shell. That leaves
 no way for the supervisor to see the exit: `exec` replaces the process, so
 nothing runs after `claude` dies. The script instead runs the jailed `claude`
 in the foreground, captures its exit code, and calls
-`scripts/spawn-orchestrator.sh supervisor-check` before exiting itself — the
+`spawn-orchestrator.sh supervisor-check` (bare on purpose — `write-launch`
+bakes its own absolute path into the generated wrapper, and `$CLAUDE_PLUGIN_ROOT`
+does not exist under launchd; [`../SKILL.md`](../SKILL.md) "Script paths",
+context 3) before exiting itself — the
 launchd-tracked PID is now this wrapper, not `claude`, which is the
 deliberate trade against being able to classify the exit at all.
 
@@ -382,7 +385,7 @@ Operation not permitted`, exit 126) **regardless of the diff** — they fail
 identically on pristine `main`. And a `sandbox-exec`-confined process's **children
 inherit the profile**, so the jailed orchestrator **cannot** simply spawn an
 un-jailed verifier. So verify runs in a **separate, un-jailed launchd job** — the
-**verify broker** (`scripts/spawn-orchestrator.sh write-verify-broker` installs it;
+**verify broker** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker` installs it;
 `verify-request` / `verify-broker` / `verify-await` are the handshake):
 
 1. The jailed orchestrator drops a **request sentinel** (`verify-request`) into a
@@ -445,13 +448,21 @@ actually reach a human. That is also the only place it _could_ work anyway: a
 rate-limited or auth-dead orchestrator cannot make a model call to alert anyone
 (the same reasoning that put `classify-exit` / `supervisor-check` in shell).
 
-| Side                       | Subcommand                                                                         | What it can do                                                                                                                                                                                                                                                                            |
-| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
-| **Orchestrator** (jailed)  | `spawn-orchestrator.sh alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+| Side                       | Subcommand                                                                                                         | What it can do                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`                                         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
+| **Orchestrator** (jailed)  | `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+
+The two rows take **opposite** path forms for the **same script**, and that is
+correct: the supervisor side is invoked from the generated launchd wrapper (bare,
+standing for the absolute path baked in at generation — no `$CLAUDE_PLUGIN_ROOT`
+under launchd), the orchestrator side by the agent (pinned). See
+[`../SKILL.md`](../SKILL.md) "Script paths".
 
 **The wake's shape: bookkeeping, then the gate, then the agent.** The generated
-wrapper runs, in order:
+wrapper runs, in order — paths shown bare, but the generated script carries the
+absolute path `write-launch` baked in ([`../SKILL.md`](../SKILL.md) "Script
+paths", context 3):
 
 ```sh
 spawn-orchestrator.sh supervisor-scan  --dir … --label …   # EVERY wake — the alarm scan

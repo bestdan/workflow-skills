@@ -62,6 +62,49 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   against run-state.md's crash-reconciliation table before falling into the run
   loop. The Resume phase summarizes this; the mechanics live here.
 
+## Script paths
+
+A script reference's path form is decided by **who executes the line, and in
+what environment** — not by how the line reads. There are three contexts, and
+a reference in the wrong form for its context is a real bug.
+
+**1. Agent-executed — pin to `"${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh"`.**
+Any plugin-shipped helper the orchestrator itself runs: `preflight.sh`,
+`spawn-orchestrator.sh`, `probe-coders.sh`, `claude-usage.sh`, and the rest of
+this repo's `scripts/`. The orchestrator runs with cwd = the **target repo**,
+not this plugin, so a bare `scripts/<name>.sh` resolves against the target
+repo's tree, where the file doesn't exist — and it fails as "not found" rather
+than as "wrong repo", which is how it went undiagnosed. If
+`$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/<name>.sh`. Prose that names a subcommand without giving a command
+to run (`spawn-orchestrator.sh status`, `claude-usage.sh --session-status`)
+belongs to this context too — same script, same resolution, just not a command.
+A markdown **link** to a file in this repo
+([`scripts/claude-usage.sh`](../../scripts/claude-usage.sh) in
+[`references/run-budget.md`](references/run-budget.md), say) names a path for a
+reader, not an executor; it stays repo-relative and is never pinned.
+
+**2. The target repo's own scripts — repo-relative, correctly.** E.g.
+`bash scripts/check.sh` in
+[`references/launch-runtime.md`](references/launch-runtime.md) "Verify broker",
+which is the repo-under-automation's declared verify command. It runs in that
+repo, so `${CLAUDE_PLUGIN_ROOT}` would be flatly wrong.
+
+**3. Inside the generated launchd wrapper — bare, standing for a baked-in
+absolute path.** `spawn-orchestrator.sh write-launch` bakes its own absolute
+path into the wrapper it generates (`self="$ROOT/scripts/spawn-orchestrator.sh"`,
+`printf '%q'`-quoted into the script). That wrapper runs under **launchd**,
+where `$CLAUDE_PLUGIN_ROOT` is **not set** — so docs quoting the wrapper's
+contents show the bare name as shorthand for that absolute path, and pinning
+them would document something false.
+
+The alarm table in [`references/launch-runtime.md`](references/launch-runtime.md)
+"The alarm" is the case that makes the taxonomy worth stating: two adjacent rows
+for the **same script** correctly take **opposite** forms — the supervisor row
+bare (context 3, wrapper-executed) and the orchestrator row pinned (context 1,
+agent-executed). No list of exemptions can express that; the executor is the
+only axis that explains it.
+
 ## Launch phase (interactive)
 
 Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
@@ -117,7 +160,7 @@ The full mechanics of each step are in
 
 1. **Worktree + run-state branch** (BLOCKS LAUNCH) — create the run worktree
    and the `auto-pilot/<run_id>` branch; an untracked plan is a blocker.
-2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `scripts/preflight.sh`
+2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
    plus per-credential probes (GitHub, Linear, coder CLIs, MCP), each through
    the run's sandbox wrapper; capture the environment fingerprint / class; a
    probe that would prompt is itself the failure. Includes the less-claude CAO
@@ -154,11 +197,11 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   (zero or many is fail-closed), and **guard against a live orchestrator** at the
   recorded PID + start-time — **before the doctor**, which _repairs_ and so must
   never run against a run someone else is still driving.
-- **Clear the run's alarms** (`spawn-orchestrator.sh alarm-clear --dir
-  <run-dir>`) — after that guard, **before the doctor**, so clearing never
+- **Clear the run's alarms** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
+  alarm-clear --dir <run-dir>`) — after that guard, **before the doctor**, so clearing never
   deletes an `alarm-request` a doctor halt is about to file
   ([`references/resume.md`](references/resume.md)).
-- **Clear the terminal exit state too** (`spawn-orchestrator.sh
+- **Clear the terminal exit state too** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
   clear-exit-state --dir <run-worktree>`) — the done-sentinel and
   `exit_reason*` are durable and would otherwise make a resumed live run read
   back as finished ([`references/resume.md`](references/resume.md)).
@@ -198,15 +241,16 @@ declare the exit reason, then exit          # every termination path, no excepti
 ```
 
 **The exit contract.** Before exiting, for any reason, run
-`scripts/spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r>`
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r>`
 (`continuing` | `paused` | `done` | `systemic` | `deadline`), and beat the
-heartbeat (`spawn-orchestrator.sh heartbeat --dir <run worktree> --note
-<where>`) at each loop iteration and `/deliver-task` sub-step boundary. Full
+heartbeat (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" heartbeat
+--dir <run worktree> --note <where>`) at each loop iteration and
+`/deliver-task` sub-step boundary. Full
 semantics, precedence, and fail-safe rules:
 [`references/run-state.md`](references/run-state.md) "Exit contract" and
 "Heartbeat".
 
-**Every iteration opens with the run doctor**, `scripts/spawn-orchestrator.sh
+**Every iteration opens with the run doctor**, `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
 doctor` — a cheap, deterministic, no-model-call audit of seven invariants
 (HALT on `status: systemic`, exit 30 — the loop must not dispatch). The
 invariant table, each one's repair, the exit codes, and the finding-#22/#23

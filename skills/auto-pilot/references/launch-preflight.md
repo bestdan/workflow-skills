@@ -26,7 +26,7 @@ reachable. Fail here with the specific missing artifact, not a generic error.
 
 ## Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
-Run `scripts/preflight.sh --source <plan|linear> --base <base branch>` first
+Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base <base branch>` first
 — the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
@@ -56,7 +56,7 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
   Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
   the team) to confirm auth actually works, not just that it resolves.
 - **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
-  configured coder's auth probe via `scripts/probe-coders.sh`, the **single
+  configured coder's auth probe via `"${CLAUDE_PLUGIN_ROOT}/scripts/probe-coders.sh"`, the **single
   source of truth** (don't restate its per-coder commands here — they'd drift).
   A logged-out coder the run depends on is a blocker, not a silent skip.
 - **MCP** — any MCP the tasks touch: one cheap read call to confirm a live token.
@@ -76,7 +76,7 @@ a different environment re-runs that join.
 Also confirm **unattended viability** here, up front while the human is
 present rather than at spawn: a `local-full` run needs the machine to stay
 awake for the run's duration — a human judgment call, not a probe, so it
-stays here rather than in `scripts/preflight.sh`
+stays here rather than in `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
 ([`launch-runtime.md`](launch-runtime.md) "Laptop
 sleep"). If it can't be guaranteed, **BLOCKS LAUNCH**.
 
@@ -141,7 +141,7 @@ task's `/deliver-task` verifies the same way.
 
 Because the orchestrator runs **jailed** and `verify_command` can't pass
 inside the jail (execve-deny, exit 126), install the **verify broker** here
-so verify runs **outside** the jail: `scripts/spawn-orchestrator.sh
+so verify runs **outside** the jail: `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
 write-verify-broker` registers a second, un-jailed launchd job that runs the
 **pinned** `verify_command` in a run-root-confined worktree, and each task's
 verify becomes a `verify-request` → `verify-await` handshake
