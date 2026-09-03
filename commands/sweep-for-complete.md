@@ -40,6 +40,14 @@ wraps it.
   "Preflight + resolve scope" for how the warning is computed at zero extra
   API cost.
 
+Scope is **Linear-side**, never repo-side: one run covers every configured
+project, whatever repo each project's work lives in. Completion is verified
+against the issue's own `links` attachment, which carries a full GitHub PR
+URL. Only the title/branch fallbacks — used for PRs opened outside
+`/do-tasks` — query a single repo, and they take it from the project's
+`repo:` key (see the handler file's "Resolve each issue's PR"). Give each
+project a `repo:` before scheduling one sweep across a multi-repo workspace.
+
 ## 1. Resolve the handler
 
 Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `commands/task-config.md` → "Resolving the handler"):

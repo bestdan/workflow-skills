@@ -201,7 +201,7 @@ PRs verified as merged (report that one):
 2. **Fallback — title search.**
 
    ```bash
-   gh pr list --state all --search "<IDENTIFIER> in:title" --json number,url,title,state
+   gh pr list -R "<resolved-repo>" --state all --search "<IDENTIFIER> in:title" --json number,url,title,state
    ```
 
    GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter
@@ -214,8 +214,41 @@ PRs verified as merged (report that one):
    `branchName` if not already fetched, then:
 
    ```bash
-   gh pr list --state all --head "<branchName>" --json number,url,state
+   gh pr list -R "<resolved-repo>" --state all --head "<branchName>" --json number,url,state
    ```
+
+**`<resolved-repo>` — resolve per issue, from the scope that issue came from.**
+Step 1 needs no repo: a `links` attachment carries a full
+`github.com/<owner>/<name>/pull/<n>` URL, so it resolves in any repo. Steps 2
+and 3 are `gh pr list` queries, which search **one** repo — without `-R` that
+is whatever repo the sweep happens to run in. A Linear workspace spans repos,
+so a scheduled sweep run from one checkout would silently return no match for
+every issue whose PR lives elsewhere, and file it as "no-PR skipped".
+
+Resolve in this order — the same order `linear-false-closures.md` step 2 uses,
+so the two flows agree on which repo owns a project's work:
+
+1. The scope's own `repo:` under `linear.projects` (carried on the resolved
+   scope by `linear-common.md` "Resolve configured projects").
+2. Else the current repo's `origin`:
+
+   ```bash
+   gh repo view --json nameWithOwner --jq .nameWithOwner
+   ```
+
+The whole-team scope (`--all`, or no configured projects) and the Unassigned
+bucket have no project to read a `repo:` from, so both fall back to `origin`.
+That is the pre-existing behavior, and it is why a cross-repo workspace wants
+its projects configured with `repo:` rather than swept with `--all`.
+
+A project whose work spans several repos still resolves to one repo per run —
+name the repo whose merged PRs cover most of it, and rely on step 1's
+attachment for the rest. `/do-tasks` and `/deliver-task` write that attachment
+on every PR they open, so issues they created never depend on these fallbacks.
+
+If the `gh repo view` fallback itself fails (the sweep is running outside any
+repo, or `gh` cannot reach the remote), treat every issue that reaches steps
+2–3 as **`left: unresolved`** under the rule below — not as "no-PR skipped".
 
 If none of the three resolve a PR, **skip the issue** — but only when every
 discovery probe **succeeded** and simply returned no match. The `gh pr list`
