@@ -2,7 +2,7 @@
 title: Add reconciler rules for the label invariants
 priority: medium
 size: 3
-status: new
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration

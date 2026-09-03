@@ -110,7 +110,28 @@ join, and `gh` covers it only partially.
    PR opened straight to non-draft emits no `ready_for_review` and is never caught.
    Follow-ups live in Linear: PRE-822 (`reopened` unhandled), PRE-823 (does a runner's
    token reach the dependency endpoints — the fact task 8 now turns on).
-7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants. **NEXT.**
+7. ~~[phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md)~~ — Reconciler rules for the label invariants. **Done** — PR #464.
+   `/reconcile-tasks` had answered "unsupported" for `gh-issue` on the grounds that GitHub
+   closes issues natively on merge. That is true and it is a different question, so the
+   handler now reconciles what it actually can drift in: the label state model, audited
+   against `labels.yml` by `commands/handlers/assets/gh-issue-reconcile.py`. Three things
+   it settled that the plan had not:
+   - **"Has a rung" means a vocabulary rung.** Rule 2 first tested the bare `status:` /
+     `auto:` prefix, which a hand-typed `status:blocked` satisfies — leaving that issue
+     invisible to every rule at once, since rule 1 has no ladder position to rank it by
+     either. Caught in co-review. The vocabulary reading is what `gh-issue-state.py`'s
+     `validate()` always meant, and it now holds across the handler.
+   - **Deviation from the task file: rule 3 reads `issues/{n}/events`, not `timeline`.**
+     Measured — both carry the same `labeled` stream, and `timeline` adds
+     `cross-referenced` and comment entries the rule has no use for.
+   - **The `--limit` window is not what it looked like.** `gh issue list` orders by
+     creation date, so a long-lived issue closed yesterday can fall outside it and go
+     unaudited by rule 3. Documented rather than papered over; GitHub search has no
+     `sort:closed`.
+
+   Two invariants were deliberately **not** given rules, because the table is closed:
+   duplicate `prio:`/`est:`, and a closed issue still carrying live rungs (reachable with
+   a bare `gh issue close`). Both are recorded in HANDOFF.md.
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
    **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
    speaks `auto-eligible` / `auto-claimed` / `priority:*`, so on a migrated board its
