@@ -5,39 +5,57 @@
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
 
-## Your last commit updates this file — read this before you start
+## Redraft this file when you finish — read this before you start
 
-**Whoever finishes a task owns leaving this handoff true for the next one.** This is
-part of the task, not tidying after it. Do it in the same PR as the work, not a
-follow-up — a follow-up is how it got skipped before.
+**Finishing a task includes rewriting this file for the agent who picks up the next
+one.** Rewrite, not append. Do it in the same PR as the work — a follow-up is how it
+got skipped before.
 
-Task 6 is the worked example of the failure. It merged and left **three** places still
-saying it was next, plus a launcher doc telling a fresh session to start it. The next
-agent's first act would have been to redo a merged task. Each item below is one of those:
+The distinction is the whole rule. Patching adds your paragraph and leaves the previous
+five in place, and the file becomes a changelog: a record of what was done, in the order
+it was done, which is the one thing the next agent does not need. **They need what is
+true now and what will bite them.** Git history and the PR record already hold the
+narrative, and hold it better.
 
-1. **Advance the pointer.** Change "**Task N is next**" in this file, and move the
-   **NEXT.** marker in the plan's task list to the task that actually is.
-2. **Retire the finished task in all three places** — they drift independently:
-   its own file's `status:` frontmatter (`new` → `done`), its plan-list entry
-   (strikethrough + **Done** — PR #n, merged `<sha>`), and this file's status section.
-3. **Record what you settled that OTHER tasks rest on**, not just that you shipped.
-   The test: did you measure something that makes a sentence elsewhere in this plan
-   false? If so, amend that sentence where it lives and say what replaced it. Task 6
-   measured a third credentialed channel and falsified an inference in task 8's
-   `Constraint`, which no amount of detail in task 6's own entry would have surfaced.
-   **Link to the PR; do not copy its evidence here** — a committed copy of run IDs and
-   PR state rots with no invalidation.
-4. **Say where you deviated from the task file, and why.** Task 6's trigger list
-   contradicted its own acceptance criterion for a reason that only became visible
-   during the work. A deviation nobody wrote down reads as a mistake later.
-5. **Delete your launcher doc.** These live untracked under `.dev_docs/task_N_handoff.md`
-   and say "paste this into a fresh session". Once the task ships, that instruction is
-   actively harmful, and being untracked it has no history to recover — so it is only
-   ever deleted deliberately. Three had accumulated by task 6.
-6. **Anything you learned that is not a task** goes to the tracker, not here. Task 6
-   produced PRE-822 and PRE-823 that way.
+So each time: read this file as if you were the next agent, and rewrite what you find.
 
-If you finish a task and this file needed no edit, you almost certainly missed item 3.
+**What survives a redraft** — anything still operative:
+
+- Which task is next, and what blocks it.
+- Facts that were **measured**, that later tasks rest on. Keep the fact and a link to
+  where it was measured; never copy the evidence, which rots with no invalidation.
+- Conventions and limitations that will trip the next agent.
+- Open questions, and who owns them.
+
+**What goes** — anything whose job is finished:
+
+- Per-task narratives of completed work. "Task N — PR #x, merged `<sha>`" belongs in the
+  plan's task list, once, not here.
+- Reasoning that has since been settled, or superseded by a measurement.
+- Anything the next agent would read and then have to work out no longer applies.
+
+**Two things to carry across that are easy to lose in a rewrite:**
+
+1. **What you settled that OTHER tasks rest on.** The test: did you measure something
+   that makes a sentence elsewhere in this plan false? If so, amend that sentence where
+   it lives, not only here. Task 6 measured a third credentialed channel and falsified
+   an inference inside task 8's `Constraint` — no amount of detail in task 6's own entry
+   would have surfaced that.
+2. **Where you deviated from the task file, and why.** Task 6's trigger list contradicted
+   its own acceptance criterion, for a reason that only became visible mid-work. An
+   undocumented deviation reads as a mistake later.
+
+Also retire the finished task in the two places that drift independently of this file:
+its own `status:` frontmatter (`new` → `done`) and its plan-list entry. And anything you
+learned that is not a task goes to the tracker, not here — task 6 produced PRE-822 and
+PRE-823 that way.
+
+**Do not leave an untracked launcher doc behind.** The pointer that starts a session is
+ephemeral — paste it and let it go. Three `.dev_docs/task_N_handoff.md` files had
+accumulated by task 6, each a stale copy of plan content telling a fresh session to
+begin already-merged work, none with any git history to recover from.
+
+If your redraft looks like the previous version with a paragraph added, you patched it.
 
 ## Where this lives, and why it moved
 
