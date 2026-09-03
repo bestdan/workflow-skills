@@ -103,8 +103,14 @@ join, and `gh` covers it only partially.
 5. ~~[phase_3_handler/gh_migration_task_5.md](phase_3_handler/gh_migration_task_5.md)~~ — State model across add / list / promote / do. **Done** — PR #439, merged `a4815d7`.
    Added `gh-issue-ready.py` for dependency-readiness. The **migration bridges** it left
    were removed by task 4.
-6. [phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md) — `needs_review` transition, its reverse, and the Action backstop. **NEXT.**
-7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants.
+6. ~~[phase_3_handler/gh_migration_task_6.md](phase_3_handler/gh_migration_task_6.md)~~ — `needs_review` transition, its reverse, and the Action backstop. **Done** — PR #447, merged `4261eb67`, shipped v2.18.0.
+   **Pieces 1 and 2 only.** Piece 3 (the agent writing the rung as it opens the PR) is
+   deferred behind the auto-pilot harness, same reason as task 13. It also **deviated from
+   the task file's trigger list**, adding `opened` behind a `draft` guard — without it a
+   PR opened straight to non-draft emits no `ready_for_review` and is never caught.
+   Follow-ups live in Linear: PRE-822 (`reopened` unhandled), PRE-823 (does a runner's
+   token reach the dependency endpoints — the fact task 8 now turns on).
+7. [phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md) — Reconciler rules for the label invariants. **NEXT.**
 8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
    **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
    speaks `auto-eligible` / `auto-claimed` / `priority:*`, so on a migrated board its

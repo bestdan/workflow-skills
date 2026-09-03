@@ -52,8 +52,33 @@ dependency-readiness. **Task 4** — PR #442 — moved `/do-tasks`'s claim lifec
 `gh-issue-claim.py` for the parts two racing sessions must perform identically, taught
 claim to consult native `blocked_by`, and removed task 5's bridges.
 
-**Task 6 is next.** Task 14 — the `--no-claim` branch-name defect task 4 shipped — is
-**done** (PR #443), and so is task 15.
+**Task 7 is next.** Task 14 — the `--no-claim` branch-name defect task 4 shipped — is
+**done** (PR #443), and so are tasks 15 and 6.
+
+**Task 6 — PR #447, merged `4261eb67`, shipped v2.18.0.** The `needs_review` transition
+and its reverse are automated by `.github/workflows/gh-issue-pr-sync.yml` +
+`commands/handlers/assets/gh-issue-pr-sync.py`. Pieces 1 and 2 only — piece 3 (the agent
+writing the rung when it opens the PR) is still deferred behind the auto-pilot harness,
+same reason task 13 is. Four things it settled that this plan depended on:
+
+- **A runner is a third credentialed channel** — see the bullet under "Do not re-derive
+  these". This is the finding with reach beyond task 6.
+- **The trigger set is `opened` + `ready_for_review` + `closed`**, not the task file's
+  `ready_for_review` + `closed`. A PR opened straight to non-draft emits no
+  `ready_for_review`, so the task file's list left that case permanently uncaught. The
+  job's `if:` gates on `draft` rather than the event name, which is what makes `opened`
+  safe.
+- **The two runs for one PR race**, and the fix is a `concurrency:` group keyed on the PR
+  number with `cancel-in-progress: false`. Reproduced and fixed under A/B on live
+  runners — mark a PR ready then close it seconds later and the close reads a stale rung,
+  no-ops green, and strands the issue in `needs_review`.
+- **The backstop assumes the tracker is the code's own repo.** `GITHUB_TOKEN` is
+  repo-scoped, so a repo whose `gh-issue.repo` points elsewhere must not run it.
+
+Two follow-ups are tracked in Linear rather than here, because neither is a migration
+task: **PRE-822** (`reopened` is still unhandled) and **PRE-823** (probe whether a
+runner's token reaches the dependency endpoints — the fact task 8's `Constraint` now
+turns on).
 
 **Task 15 — PR #444, merged `09aa71f`.** Dependency-blocking is no longer inert.
 `commands/handlers/assets/gh-issue-deps.py` creates the native `blocked_by` edges and
@@ -66,8 +91,11 @@ files — the three the task named plus `commands/reoptimize-tasks.md`.
 
 **The footer stayed**, as a human-readable echo of the edge. The deciding reason turned up
 late: a cloud routine can read an issue **body** but has no way to reach the edge, so
-`Blocked by: #<n>` is the only blocked-ness signal available unattended — a hint, never
-the graph. See task 8's **Constraint** section before changing that.
+`Blocked by: #<n>` is the only blocked-ness signal available **to a routine** — a hint,
+never the graph. That is narrower than it was first written: this said "unattended", which
+task 6 falsified by measuring a runner that is unattended and has `gh`. Whether a runner
+can read the edge is unmeasured (PRE-823). See task 8's **Constraint** section, which
+carries the full amendment, before changing that.
 
 The same audit produced the epic's **In-flight PRs against files this plan owns**
 section. Read it before touching `gh-issue-claim.md` or `gh-issue-promote.md` — three
