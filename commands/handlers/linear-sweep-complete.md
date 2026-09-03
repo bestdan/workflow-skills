@@ -210,10 +210,27 @@ PRs verified as merged (report that one):
 
    GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter
    — the same caveat `linear-claim.md` "Pre-flight" step 3 documents. Before
-   accepting a match, require the returned PR's `title` to actually contain
-   the literal `[<IDENTIFIER>]` bracket token (the exact form the tracker
-   execute path puts in every PR title). Discard any hit that doesn't carry
-   that literal token.
+   accepting a match, post-filter on the returned PR's `title`.
+
+   **Match the identifier as a whole token, in any surrounding punctuation.**
+   Accept the title when `<IDENTIFIER>` appears with a non-alphanumeric
+   character (or the string edge) on each side, and **not** followed by
+   another digit. So `[PRE-73]`, `(PRE-73)`, `PRE-73:` and a trailing
+   `… (PRE-73)` all match, while `PRE-731` does not, and neither does a title
+   that merely contains the tokens `PRE` and `73` separately — which is the
+   false positive the post-filter exists to stop. Discard any hit that fails
+   this.
+
+   > **Do not require the `[<IDENTIFIER>]` bracket form.** Only the tracker
+   > execute path writes that shape; a hand-opened PR routinely puts the id in
+   > parentheses or at the end of the title. Requiring brackets makes the
+   > search find the PR and then throw it away, and the issue is filed as
+   > "no-PR skipped" — indistinguishable from having no PR at all. Observed in
+   > the nightly tidy run of 2026-09-02: `repo:bestdan/finplan PRE-73 in:title`
+   > returned open PR #1003, `Scaffold packages/rest-server FastAPI package
+   > (PRE-73)`, and the run reported PRE-73 as having "genuinely no PR found
+   > yet". Hand-opened PRs are exactly the population these fallbacks exist
+   > for, since anything `/do-tasks` opened already resolved at step 1.
 3. **Fallback — branch name.** Call `<linear-mcp>__get_issue` for the issue's
    `branchName` if not already fetched, then:
 

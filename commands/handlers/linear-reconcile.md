@@ -92,7 +92,7 @@ live there — don't restate them). Then apply **row-2-specific PR resolution:**
 - An issue with **no** matching attachment is **not** a row-2 candidate on this
   path; skip it silently. This is a **narrower skip** than the floor below: the
   fast path resolves only attachment-linked PRs, so an issue whose open PR is
-  discoverable **solely** by `[<IDENTIFIER>]` title-match or `branchName` is
+  discoverable **solely** by identifier title-match or `branchName` is
   picked up only when its scope floors — an accepted edge case (the tracked
   claim/open flow always writes the PR attachment), not fixed by expanding
   `linear-scan.py`.
@@ -113,7 +113,7 @@ per scope.
    with row 1. Don't restate those mechanics here.
 
 2. **Resolve each issue's PR(s).** Use the **same priority order** as
-   `linear-sweep-complete.md` step 3 (`links` attachment → `[<IDENTIFIER>]`
+   `linear-sweep-complete.md` step 3 (`links` attachment → identifier
    title match → `branchName`) — reference that step, do not duplicate it —
    **including its multi-PR rule**: keep **every** PR the resolving source
    yields, not just the first, so an issue's full PR set reaches "Both paths"
@@ -207,7 +207,7 @@ alone it is claimed forever.
 
 1. **Take row 1's `no-PR skipped` bucket as the candidate pool** — the
    started-type issues `linear-sweep-complete.md` step 3 already found no
-   `links` attachment, no `[<IDENTIFIER>]` PR, and no PR on `branchName` for.
+   `links` attachment, no identifier-title PR, and no PR on `branchName` for.
    No extra scan query — same reuse pattern as row 3's `left: closed
    unmerged` bucket.
 
