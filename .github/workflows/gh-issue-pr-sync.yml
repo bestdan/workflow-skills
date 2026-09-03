@@ -1,0 +1,127 @@
+name: gh-issue PR status sync
+
+# Backstop for the gh-issue handler's `needs_review` transition and its reverse.
+#
+# On GitHub the open PR IS the `needs_review` state, so an issue's `status:`
+# rung has to follow its PR: ready-for-review moves `3_started` ->
+# `4_needs_review`, and closing without merging moves it back. The agent that
+# opens the PR is meant to write the rung itself; this catches the PRs opened
+# outside that loop, and it is the only channel that catches a PR CLOSED
+# outside it, because nothing is watching then.
+#
+# A PR becomes ready for review by one of two events, and BOTH are needed:
+# `ready_for_review` fires when a draft is marked ready, and `opened` fires for
+# a PR that was never a draft — such a PR never emits `ready_for_review` at all,
+# so without `opened` it would go uncaught forever.
+#
+# `opened` is exactly why the `draft` half of the job's `if:` exists. That event
+# fires for a draft PR too, and a draft is NOT `needs_review` — the house
+# convention makes some repos' PRs always draft, so moving one would be wrong on
+# every PR they open. The guard, not the trigger list, is what keeps drafts out;
+# do not add `opened` anywhere without it.
+#
+# `reopened` is deliberately absent. Reopening a closed PR is the inverse of the
+# close this file already handles, so it is a real gap — but it needs its own
+# thinking about a PR reopened as a draft, and nobody has done it.
+#
+# LIMITATION — this backstop only works when the issue tracker IS this
+# repository. It targets `github.repository`, but `gh-issue.repo` may point at
+# another repo (`commands/handlers/gh-issue.md`, "optional; defaults to the
+# current repo"). Under that configuration this would read THIS repo's
+# same-numbered issue while the real tracker goes unwritten. Do not fix it by
+# plumbing a cross-repo credential through: `GITHUB_TOKEN` is repo-scoped by
+# design, and a PAT here would be a long-lived secret in a job that needs none.
+# A repo whose `gh-issue.repo` points elsewhere should not run this workflow.
+#
+# `workflow-skills` is public, so Actions minutes are free; this is not
+# optimized for them.
+#
+# Note what does NOT happen here: a MERGED PR is left alone. `Closes #<n>` in
+# the PR body makes GitHub close the issue, and closure is completion under
+# this schema. Never add a merged branch that writes a rung.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, closed]
+
+# `issues: write` is the point of this file. The default token is
+# `contents: read`, which cannot PATCH an issue's labels.
+permissions:
+  contents: read
+  issues: write
+
+# One PR emits two of these events in quick succession — mark a PR ready, close
+# it fifteen seconds later — and without this the two runs interleave. The close
+# run reads the rung BEFORE the ready run's PATCH lands, sees `3_started`,
+# no-ops on the rung gate and exits green; the ready run then writes
+# `4_needs_review`. The issue ends parked in `needs_review` with a closed PR and
+# nothing left watching, which is the exact state the reverse transition exists
+# to prevent — reached silently, with both runs green.
+#
+# Keyed on the PR number, which is what shares an issue. `cancel-in-progress`
+# stays FALSE deliberately: the queued run re-reads the issue after the first
+# one's PATCH, so each event still sees true current state, and no run is ever
+# killed between its read and its write.
+concurrency:
+  group: gh-issue-pr-sync-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync issue status to PR state
+    # Two independent gates.
+    #
+    # Fork PRs: their token is read-only no matter what `permissions` asks for,
+    # so the write would fail and paint the run red for a reason unrelated to
+    # the change. Same-repo PRs are the only ones this loop produces anyway.
+    #
+    # Drafts: a draft PR is not `needs_review`. The `draft` field is checked
+    # rather than the event name because `opened` alone cannot tell the two
+    # apart. `closed` is exempt: a draft can be closed too, and the reverse
+    # transition should still run for it. `ready_for_review` passes the check on
+    # its own — the PR is non-draft by the time it fires — so the term is
+    # load-bearing only for `opened`.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && (github.event.action == 'closed' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    steps:
+      # The bare checkout resolves the PR's merge ref, so this runs the PR's own
+      # copy of the sync script. That is deliberate: the workflow is its own
+      # integration test, and this PR was verified by exactly that route.
+      #
+      # Pinning `ref:` to the default branch has been proposed as a security fix
+      # and is not one — on `pull_request` GitHub reads this YAML from the PR
+      # branch too, so anyone who could abuse the token could delete the pin in
+      # the same commit. The `if:` gate above is the control, and it admits only
+      # people who already have push access.
+      #
+      # Pinning would also actively hurt: it splits one change across two refs.
+      # A PR that edits the invocation and the script together could never run
+      # green on itself, and a script-only change would reach main unexercised,
+      # first running for real against someone else's issue.
+      - uses: actions/checkout@v7
+
+      - name: Sync
+        # The branch name and the repo travel as env vars, never interpolated
+        # into the shell line: `${{ }}` splices attacker-controlled text (a
+        # branch name is chosen by whoever opens the PR) straight into the
+        # command.
+        #
+        # The script is a no-op for any branch that is not `<prefix>task-<n>`,
+        # which is most PRs in this repo, so a green run here usually means it
+        # decided to do nothing and said so.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          EVENT: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          merged_flag=""
+          if [ "$MERGED" = "true" ]; then
+            merged_flag="--merged"
+          fi
+          python3 commands/handlers/assets/gh-issue-pr-sync.py \
+            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" \
+            $merged_flag --apply
