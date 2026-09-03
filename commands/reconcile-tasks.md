@@ -1,6 +1,6 @@
 ---
-description: Bounded, schedulable reconciler that fixes issues sitting in the wrong state against a fixed, enumerated rule table (v1 rows 1-2 only, promote/complete-only, never demotes) — composes with /loop and /schedule
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
+description: Bounded, schedulable reconciler that fixes issues sitting in the wrong state against a fixed, enumerated rule table (linear repairs PR-versus-column drift; gh-issue audits the label invariants) — composes with /loop and /schedule
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(python3 *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
 argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
@@ -9,8 +9,16 @@ argument-hint: "[--apply] [--all] [--project <id|name>]"
 `/sweep-for-complete` catches one specific drift: a started-type issue whose
 own linked PR merged. `/reconcile-tasks` is the **bounded reconciler** built on
 top of it — it fixes issues sitting in the **wrong** state against a fixed,
-enumerated rule table, not open-ended "fix whatever looks off" judgment. **v1
-enforces exactly two rows**, both promote/complete-only:
+enumerated rule table, not open-ended "fix whatever looks off" judgment.
+
+**Each handler's table is its own**, because the two trackers drift in different
+places. The rows below are the **`linear`** table; the `gh-issue` table is three
+rows auditing the label invariants and lives in
+`commands/handlers/gh-issue-reconcile.md`. What both tables share is the
+doctrine: a closed rule set, and no rule that retires live work on an ambiguous
+read.
+
+For `linear`, **v1 enforces exactly two rows**, both promote/complete-only:
 
 1. Linked PR **merged**, issue still in a **started**-type state → **Done**
    (delegated to the `/sweep-for-complete` flow, whose started-type scope this
@@ -31,18 +39,27 @@ lives in whichever of those two wraps it.
 
 ## Arguments
 
-- **`--apply`** — actually apply the two rules' corrections. Without it, the
-  command only prints the combined candidate table and changes nothing
-  (dry-run is the default posture, mirroring `/archive-tasks` and
-  `/sweep-for-complete`).
+All three flags pass through to whichever handler file runs. What each one
+scopes is that handler's business — the descriptions below are `linear`'s, with
+the `gh-issue` reading named alongside.
+
+- **`--apply`** — actually apply the rules' corrections. Without it, the
+  command only prints the candidate table and changes nothing (dry-run is the
+  default posture, mirroring `/archive-tasks` and `/sweep-for-complete`). For
+  `gh-issue` this repairs its **row 1 only**; its other two rows are flag-only
+  and write nothing at any flag combination.
 - **`--all`** — widen scope to the whole team instead of the default (the
   configured projects + project-less Unassigned issues). See the handler
-  file's "Preflight + scope" for exactly what this changes.
+  file's "Preflight + scope" for exactly what this changes. For `gh-issue`
+  there is no team: `--all` drops the configured-label scope and audits every
+  issue in the repo.
 - **`--project <id|name>`** — narrow scope to exactly one project (configured
   or a live/unconfigured one). Mutually exclusive with `--all`. The **default**
   (neither flag) is bounded to your configured `linear.projects` plus issues
   with no project at all — it does **not** include every other project's
   in-flight work on the team; that requires `--all` or a specific `--project`.
+  **`gh-issue` does not support this flag** — it has no project dimension yet —
+  and says so rather than silently scoping by nothing.
 
 ## 1. Resolve the handler
 
@@ -64,11 +81,17 @@ Overlay the local override on the committed config — mappings merge recursivel
   handler repo-pr — a merged PR **is** the done signal for repo-pr; there is
   no separate tracker state to reconcile. `/reconcile-tasks` has nothing to
   do."
-- `handler: gh-issue` → **UNSUPPORTED.** Print: "unsupported for handler
-  gh-issue — GitHub already closes the issue natively on merge via
-  `Closes #<n>` in the PR body, and there is no separate review-column state
-  to reconcile. `/reconcile-tasks` has nothing to add; if auto-close didn't
-  fire, close the issue directly with `gh issue close <n>`."
+- `handler: gh-issue` → read and follow
+  **`commands/handlers/gh-issue-reconcile.md`**. It reconciles something
+  different from the Linear rows above, and deliberately: GitHub closes the
+  issue natively on merge via `Closes #<n>` and the open PR **is** the review
+  state, so the PR-versus-column drift rows 1–2 repair cannot occur. What can
+  drift is the **label** state model, which the web UI can edit by hand — so
+  that handler audits the `labels.yml` invariants instead, on its own closed
+  three-row table (double `status:` rung → keep the highest; a missing
+  `status:`/`auto:` rung → flag; closed without ever reaching
+  `status:4_needs_review` → flag). Only the first row writes, and only under
+  `--apply`.
 - `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
   Jira's completion path is its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
@@ -78,7 +101,7 @@ Overlay the local override on the committed config — mappings merge recursivel
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative path doesn't resolve, find the handler file with **Glob**
-(`**/commands/handlers/linear-reconcile.md`) and Read the result. Pass
+(`**/commands/handlers/<handler>-reconcile.md`) and Read the result. Pass
 `--apply`, `--all`, and `--project` through.
 
 ## 2. Report
@@ -87,9 +110,11 @@ The handler file owns its report format, but every outcome fits this
 skeleton:
 
 - **Unsupported handler** — the one-line pointer above, nothing mutated.
-- **Dry-run (default)** — the scope line, the combined candidate table
-  grouped by rule (`→ Done` rows, `→ In Review` rows), each with its driving
-  PR, plus the left/skipped lines and an explicit "nothing changed (dry-run)".
+- **Dry-run (default)** — the scope line, the candidate table grouped by
+  rule, plus the left/skipped lines and an explicit "nothing changed
+  (dry-run)". `linear` groups by correction (`→ Done` rows, `→ In Review`
+  rows), each with its driving PR; `gh-issue` groups by invariant, with no PR
+  involved.
 - **Applied (`--apply`)** — the same scope line and table, now with each
   row's outcome, plus the per-rule counts the handler's "Report" step
   defines.
