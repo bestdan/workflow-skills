@@ -85,9 +85,21 @@ Full evidence in
 (committed) and §10b of the requirements record.
 
 - A cloud routine has **no `gh`** and **no credential on raw HTTP**. The GitHub MCP
-  connector is the credentialed channel.
-- On both channels a label write **replaces** the whole set and **auto-creates** unknown
-  names. Hence validate-then-replace, always, before any network call.
+  connector is its credentialed channel.
+- **There is a THIRD credentialed channel: a GitHub Actions runner.** Measured
+  2026-09-02 by task 6 ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) —
+  a runner has `gh`, and its ambient `GITHUB_TOKEN`, with `permissions: issues: write`
+  declared on the workflow, PATCHes an issue's labels. No PAT, no extra secret. Do not
+  read "unattended" as "cloud routine" anywhere in this plan; a runner is unattended too,
+  and it is **not** channel-starved the way a routine is.
+  - It is the same REST path local `gh` uses, so the label-write semantics below are the
+    same mechanism rather than a third set to re-measure.
+  - What is **not** measured: whether that token reaches the dependency / sub-issue
+    endpoints. Task 8's constraint turns on exactly that — probe before relying on it.
+  - The token is repo-scoped, so a runner can only write its **own** repo's issues.
+- On the local-`gh` and connector channels a label write **replaces** the whole set and
+  **auto-creates** unknown names. Hence validate-then-replace, always, before any network
+  call.
 - A routine **can** acquire the claim ref (`mcp__github__create_branch`, create-only) but
   **cannot release** it — no delete-ref tool, and `git push --delete` 403s. So routines
   stay on the comment election. Task 12 (the stale-ref sweep) gates flipping that.

@@ -49,8 +49,29 @@ Both `gh-issue-ready.py` (read) and `gh-issue-deps.py` (write, new in task 15)
 shell out to `gh`, so the whole dependency path is local-only.
 
 Issue **bodies**, however, are readable through the connector. So
-`Blocked by: #<n>` is the only blocked-ness signal available unattended, and
+`Blocked by: #<n>` is the only blocked-ness signal available **to a routine**, and
 "drop the body-footer convention entirely" removes it.
+
+> **Amended 2026-09-02 — "unattended" is wider than "routine".** This section
+> originally said the footer was the only blocked-ness signal available
+> _unattended_. That does not follow. Task 6
+> ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) measured a
+> **third** credentialed channel: a GitHub Actions runner, which is unattended,
+> **has `gh`**, and whose ambient `GITHUB_TOKEN` writes issue labels when the
+> workflow declares `permissions: issues: write`.
+>
+> That does not settle this question either — it removes a premise. The paragraph
+> above rests on "unattended ⇒ no `gh`", which is false. Whether a runner can read
+> the dependency graph is **unmeasured**: the token reaching the issues API does
+> not establish it reaching the dependency / sub-issue endpoints, and
+> `gh-issue-ready.py` shelling out to `gh` is no longer disqualifying on its own,
+> because a runner has `gh`.
+>
+> **Probe it before deciding.** One workflow with `issues: read` calling the
+> dependency endpoint answers it. If a runner can read the graph, the footer is
+> not the last signal and this constraint stops blocking "drop the footer" — the
+> unattended reader becomes a scheduled workflow rather than a routine. The token
+> is repo-scoped, so that only holds where the tracker is the code's own repo.
 
 This does **not** settle the question — it supplies the fact the decision needs:
 

@@ -185,6 +185,16 @@ join, and `gh` covers it only partially.
     Linear control kept it. Sequence 13 before 10, and before flipping
     `.task-config.yml`.
 
+    **Amended 2026-09-02 — a runner is a third credentialed channel.** Task 6
+    ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) measured that a
+    GitHub Actions runner has `gh` and can write issue labels with its ambient
+    `GITHUB_TOKEN` under `permissions: issues: write`. That does not do this task's work
+    — auto-pilot's refusal is a `SKILL.md` check, not a credential problem, so the three
+    pieces above stand unchanged. It does change what "unattended" can mean for the
+    gh-issue handler generally: some of what this plan assumed needed either a foreground
+    session or the MCP connector can run in a workflow instead. Weigh that when the
+    harness lands, rather than porting the two-channel assumption into the new design.
+
 **Phase 5 — cleanup**
 
 11. [phase_5_cleanup/gh_migration_task_11.md](phase_5_cleanup/gh_migration_task_11.md) — Graduate durable decisions to `dev_docs/`, delete the plan folder.
