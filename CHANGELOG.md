@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.18.0] - 2026-09-03
+
+### Features
+
+- sync an issue's status rung to its PR's lifecycle (#447) (4261eb6)
+
 ## [2.17.0] - 2026-09-02
 
 ### Features
