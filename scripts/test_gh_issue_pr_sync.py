@@ -7,11 +7,16 @@ nothing shells out to `gh` or touches the network. Covers the two transitions
 fact that a write is one PATCH carrying the complete set — never
 `--add-label`, which is not atomic.
 
-Also asserts the workflow that drives it triggers on `ready_for_review` and
-`closed` but NOT `opened`, and declares the `issues: write` permission the
-PATCH needs. Those live in YAML rather than Python, but they are load-bearing
-behavior: with `opened` in the list a draft PR would be moved to needs_review,
-and without the permission every write would 403.
+Also asserts three things about the workflow that drives it, which live in YAML
+rather than Python but are load-bearing behavior:
+
+- it triggers on `opened`, `ready_for_review` AND `closed`. Dropping `opened`
+  reopens the gap it closes: a PR opened straight to non-draft never emits
+  `ready_for_review`, so nothing would ever catch it.
+- the job's `if:` gates on `github.event.pull_request.draft`, with `closed`
+  exempt. That gate, not the trigger list, is what keeps drafts out — `opened`
+  fires for a draft too, and a draft PR is not `needs_review`.
+- it declares `issues: write`, without which every write would 403.
 """
 
 import importlib.util
