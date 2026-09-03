@@ -129,6 +129,10 @@ else
 fi
 # Self-registering: every scripts/test-*.sh harness is picked up by this glob,
 # so a new one needs no edit here (the exact gap PRE-650 exists to close).
+# A file named scripts/test-*.sh is by definition a standalone harness that
+# exits non-zero on failure; shared helpers and fixture preludes live in
+# scripts/lib/ (see scripts/lib/spawn-orchestrator-test-prelude.sh) and are
+# never matched here.
 # Three families are excluded on purpose, not forgotten:
 #   - scripts/test-*-live.sh — opt-in live-API smoke tests (see
 #     scripts/test-shell-live.sh's own aggregating glob); never part of the
