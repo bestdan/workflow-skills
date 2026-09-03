@@ -76,7 +76,7 @@ join, and `gh` covers it only partially.
    `commands/handlers/assets/gh-issue-state.py`, not `gh-label-write.py`, because it
    settles labels AND open/closed in one PATCH — under this schema a closed issue is
    exactly "no rungs", so the two are one fact. `--done` closes; live rungs on a closed
-   issue need `--reopen`. **Nothing calls it yet** — that is task 5.
+   issue need `--reopen`. Task 5 wired the callers; every status write now goes through it.
 
 **Phase 3 — handler**
 
