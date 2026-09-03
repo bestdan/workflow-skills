@@ -127,23 +127,24 @@ if [[ "$fast" == 1 ]]; then
 else
   run scripts/lint-shell.sh
 fi
-run scripts/test-task-scan.sh
-run scripts/test-validate.sh
-run scripts/test-plan-graph.sh
-run scripts/test-local-review.sh
-[[ "$fast" == 1 ]] || run scripts/test-research-spike.sh
-run scripts/test-claim-scan.sh
-run scripts/test-gh-label-sync.sh
-run scripts/test-gh-issue-state.sh
-run scripts/test-gh-issue-ready.sh
-run scripts/test-gh-issue-claim.sh
-run scripts/test-gh-issue-deps.sh
-run scripts/test-gh-issue-pr-sync.sh
-run scripts/test-linear-archive.sh
-run scripts/test-linear-ready.sh
-run scripts/test-secret-resolve.sh
-run scripts/test-coreview-rule-drift.sh
-run scripts/test-verify-fix.sh
+# Self-registering: every scripts/test-*.sh harness is picked up by this glob,
+# so a new one needs no edit here (the exact gap PRE-650 exists to close).
+# Three families are excluded on purpose, not forgotten:
+#   - scripts/test-*-live.sh — opt-in live-API smoke tests (see
+#     scripts/test-shell-live.sh's own aggregating glob); never part of the
+#     deterministic gate.
+#   - scripts/test-spawn-orchestrator*.sh — test-spawn-orchestrator.sh and its
+#     scripts/test-spawn-orchestrator-<part>.sh members are invoked by
+#     scripts/test-shell.sh, not directly by this gate.
+#   - scripts/test-shell.sh itself — scheduled last below, with its own --fast
+#     flag; see that comment for why.
+for test_script in scripts/test-*.sh; do
+  case "$test_script" in
+    scripts/test-*-live.sh | scripts/test-spawn-orchestrator*.sh | scripts/test-shell.sh) continue ;;
+    scripts/test-research-spike.sh) [[ "$fast" == 1 ]] && continue ;;
+  esac
+  run "$test_script"
+done
 # Scheduled LAST because the replay loop is strictly index-ordered: this is the
 # longest check, and anything after it would have its output held back behind
 # it. At the end, the fast checks drain as they finish and only this one blocks.
