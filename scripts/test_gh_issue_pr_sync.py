@@ -412,6 +412,18 @@ class WorkflowTriggerTests(unittest.TestCase):
             guard,
         )
 
+    def test_runs_for_one_pr_are_serialized_against_each_other(self):
+        # One PR emits two events in quick succession (ready, then closed), and
+        # without serialization the close run reads the rung before the ready
+        # run's PATCH lands, no-ops, and leaves the issue in needs_review with a
+        # closed PR. Both runs go green, so nothing else would catch this.
+        block = re.search(r"(?ms)^concurrency:\n(?:[ \t]+.*\n)+", self.text)
+        self.assertIsNotNone(block, "no workflow-level `concurrency:` block")
+        group = block.group(0)
+        self.assertIn("github.event.pull_request.number", group)
+        # Cancelling would kill a run between its read and its write.
+        self.assertRegex(group, r"cancel-in-progress:\s*false")
+
     def test_declares_the_issues_write_permission_the_patch_needs(self):
         self.assertRegex(self.text, r"(?m)^\s+issues:\s*write\s*$")
 
