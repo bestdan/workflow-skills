@@ -271,37 +271,35 @@ environment split `skills/auto-pilot/references/launch-preflight.md` calls
 outside `/do-tasks` (no `links` attachment) is unresolvable — which is the bulk
 of hand-opened work.
 
-On `claude-web`, run steps 2–3 over the **GitHub MCP connector** instead,
-against the same `<resolved-repo>`: search that repo's pull requests for the
-`[<IDENTIFIER>]` title token (step 2), then for head branch `<branchName>`
-(step 3). Apply the identical post-filters — step 2's literal-bracket-token
-check still applies, because an MCP search tokenizes no more precisely than
-`gh` does.
-
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent
-from a routine's connector list and there is nothing to attach.
-`dev_docs/decisions/2026-08-24-routine-claim-channel.md` records it enumerated
-in full (58 tools) from inside a routine; `claim-lock.md` documents the same
-channel.
+from a routine's connector list and there is nothing to attach. Confirmed in
+production: the nightly Linear tidy routine lists only Google-Drive, Linear,
+Slack, Todoist and visualize under `mcp_connections`, and calls
+`mcp__github__*` successfully anyway.
 
-The tools, from upstream `github/github-mcp-server`'s `pull_requests` toolset:
+**Load the tools first.** In a routine these are deferred — call `ToolSearch`
+with `select:mcp__github__search_pull_requests,mcp__github__list_pull_requests,mcp__github__pull_request_read`
+before the first use, or the call fails as an unknown tool.
 
-- **Step 2 (title search)** → `search_pull_requests`, with `owner` + `repo`
-  carrying what `-R` carries on the `gh` path, and the same
-  `<IDENTIFIER> in:title` query. The literal-bracket-token post-filter still
-  applies — it is a search either way.
-- **Step 3 (branch)** → `list_pull_requests`, with `owner` + `repo` and its
-  `head` filter (plus `state`), matching `gh pr list --head`.
+The tools, each attested from a routine run (2026-09-02), not merely inferred
+from upstream:
+
+- **Step 2 (title search)** → `search_pull_requests`. Put the repo **in the
+  query** as a `repo:<owner>/<name>` qualifier — `"repo:bestdan/finplan
+  PRE-808 in:title"` is the attested form — which is what carries `-R` here.
+  (`owner`/`repo` parameters also exist; either works.)
+- **Step 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
+  `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
+  `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
+  --head`, which takes the branch alone. A bare branch here returns `[]` with
+  no error, which this flow would read as "no PR" and file as "no-PR skipped".
 
 Both accept `fields` to trim the response; omitting `body` drops the largest
 per-result payload, and this flow never reads PR body text.
 
-That naming is inferred, not attested from inside a routine: only
-`create_branch` is directly confirmed there, and it does appear in the same
-upstream toolset, which is what makes the rest credible. The App may still
-enable a subset — so if a named tool is absent, fall back to whichever PR
-search/read tool the live surface does expose.
+Apply the identical post-filters — step 2's title check still applies, because
+an MCP search tokenizes no more precisely than `gh` does.
 
 **If no PR search or read tool is exposed, that is `left: unresolved` for every
 issue reaching steps 2–3 — never "no-PR skipped".** A missing capability is not
@@ -346,9 +344,11 @@ candidate for step 5.
 
 **In a `claude-web` environment (no `gh`), read the same fields with
 `mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
-`claude-web` environment" above for the environment split and the provenance
-of that name. It takes `owner`, `repo`, and `pullNumber`; **it has no URL
-parameter**, so parse all three out of the PR URL and pass them together. That
+`claude-web` environment" above for the environment split. It takes `owner`,
+`repo`, and `pullNumber` (the attested call shape is
+`{method: "get", owner: "bestdan", repo: "finplan", pullNumber: 1149}`);
+**it has no URL parameter**, so parse all three out of the PR URL and pass them
+together. That
 is the same guarantee the URL rule above buys on the `gh` path — the repo
 travels with the number — and it is why a bare `pullNumber` with an inferred
 owner/repo is the one form to avoid here. Read the merged flag (and merge
