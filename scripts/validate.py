@@ -48,6 +48,35 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 PLUGIN_ROOT_REF_RE = re.compile(
     r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
 )
+# --- shell logic in runtime markdown ---
+# A fenced shell block in a skill/command/handler/agent body is runtime prompt
+# text. `scripts/lint-shell.sh` globs only `*.sh`/`*.bash`/`*.bats` from
+# `git ls-files`, so nothing in the gate ever syntax-checks, shellchecks or runs
+# such a block — see the "Logic goes in a typed file" section of CONTRIBUTING.md
+# for the incident that produced this check.
+SHELL_FENCE_RE = re.compile(r"^\s*```(bash|sh|shell|zsh)\s*$")
+SHELL_OPENER_RE = re.compile(r"^\s*(if|for|while|until|case)\s")
+# The prose filter. Several fenced `bash` blocks here are not shell at all —
+# `repo-pr-execute.md` and `repo-pr.md` are `claude --remote "..."` prompt
+# payloads, English with placeholders — and their sentences start with the words
+# "if", "for" and "while" often enough that opener-counting alone flags them
+# (measured: 11 hits in a block with zero lines of shell). A bare `fi`/`done`/
+# `esac` on its own line is the thing English never writes, so requiring one is
+# what separates a program from a paragraph. It also exempts guarded one-liners
+# for free: `if ...; then ...; fi` keeps its terminator on the opener's line.
+SHELL_TERMINATOR_RE = re.compile(r"^\s*(fi|done|esac)\s*(;|&&|\|\||#.*)?\s*$")
+# One multi-line construct still reads inline; two openers is a program.
+SHELL_OPENER_MAX = 1
+# Blocks that predate the check, with the count they are allowed to keep. A new
+# offending block anywhere — including a third one here — fails. Shrink an entry
+# when you extract one; never raise one to make a new block pass.
+#
+# skills/local-review/SKILL.md: real logic, but written against a literal
+# `<scratch>` placeholder, so it is not valid shell and needs parameterising
+# before it can move to a file. Declared out of scope by
+# https://github.com/bestdan/workflow-skills/issues/465.
+SHELL_LOGIC_ALLOWLIST = {"skills/local-review/SKILL.md": 2}
+
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
 BODY_WARN_LINES = 450
@@ -249,6 +278,61 @@ for f in plugin_root_ref_files:
                     rel(f),
                     f"line {n}: ${{CLAUDE_PLUGIN_ROOT}}/{captured} does not exist",
                 )
+
+
+# --- shell logic in runtime markdown ---
+# Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
+# exactly the set an agent executes at runtime.
+def shell_logic_blocks(text: str):
+    """Yield (start_line, opener_count) for each fenced shell block with logic."""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if SHELL_FENCE_RE.match(lines[i]):
+            i += 1
+            start = i
+            openers = 0
+            terminators = 0
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                if SHELL_OPENER_RE.match(lines[i]):
+                    openers += 1
+                if SHELL_TERMINATOR_RE.match(lines[i]):
+                    terminators += 1
+                i += 1
+            if openers > SHELL_OPENER_MAX and terminators:
+                yield start, openers
+        i += 1
+
+
+for f in plugin_root_ref_files:
+    offenders = list(shell_logic_blocks(f.read_text()))
+    allowed = SHELL_LOGIC_ALLOWLIST.get(str(rel(f)), 0)
+    if len(offenders) > allowed:
+        for line_no, openers in offenders[allowed:]:
+            err(
+                rel(f),
+                f"line {line_no}: fenced shell block carries {openers} control-flow "
+                f"statements (max {SHELL_OPENER_MAX}). Nothing in the gate can lint or "
+                f"run shell inside markdown — move the logic to a typed file "
+                f"(commands/handlers/assets/<name>.py or scripts/<name>.sh) and call it "
+                f"from here. See CONTRIBUTING.md, 'Logic goes in a typed file'.",
+            )
+# An allowlist entry with more headroom than the file needs is stale config
+# pretending to be a rule; fail on it so extractions actually shrink the list.
+# A *missing* file is skipped rather than flagged: validate.py is copied into
+# the fixture plugins scripts/test-validate.sh builds, and those carry none of
+# this repo's own skills.
+for allowed_path, count in SHELL_LOGIC_ALLOWLIST.items():
+    target = ROOT / allowed_path
+    if not target.exists():
+        continue
+    present = len(list(shell_logic_blocks(target.read_text())))
+    if present < count:
+        err(
+            "scripts/validate.py",
+            f"SHELL_LOGIC_ALLOWLIST allows {count} block(s) in {allowed_path} but it "
+            f"has {present} — lower the entry, or drop it if the count is 0",
+        )
 
 # --- task files (task_dir/**/*.md, default ROOT/dev_docs/tasks) ---
 # The repo-native task store (see skills/task/SKILL.md). Lenient like the rest

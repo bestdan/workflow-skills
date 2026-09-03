@@ -48,32 +48,28 @@ gh issue list --state open --search '-label:"status:1_needs_refinement" -label:"
 
 Set aside (do **not** score) — as a backstop to the query filter — any issue whose returned `labels` carry a `status:` rung other than `0_untriaged` and that still slips through (e.g. label-index lag, or a quoting failure in the search string): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no write. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is set aside with reason `blocked` (no write), reported in step 6. Report and exit if no un-scored candidates remain.
 
-### 3a. Filter parent rollups via GraphQL
+### 3a. Filter parent rollups
 
 Set aside any candidate that is a **parent rollup** — an issue broken into sub-issues that now serves only as a shell. Promoting a parent rollup would move an empty shell to `status:2_ready` + `auto:eligible`, where `/do-tasks` would try to claim it (the gh analogue of `linear-promote.md` step 5).
 
-GitHub's `gh issue list` does not expose sub-issue counts as a filterable field, but `gh api graphql` can retrieve them in bulk for all open issues in one call:
+`gh issue list` does not expose sub-issue counts as a filterable field, so the set comes from a bulk GraphQL query. Do **not** write that query inline here — run the helper:
 
 ```bash
-REPO="<repo>"  # gh-issue.repo from .task-config.yml if set (step 2a); else resolve cwd
-if [ -z "$REPO" ]; then
-  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-fi
-OWNER=${REPO%%/*}
-REPONAME=${REPO##*/}
-gh api graphql -f query='
-  query($owner: String!, $repo: String!) {
-    repository(owner: $owner, name: $repo) {
-      issues(states: [OPEN], first: 100) {
-        nodes { number subIssues(first: 0) { totalCount } }
-      }
-    }
-  }' -F owner="$OWNER" -F repo="$REPONAME"
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-rollups.py" --repo "<repo>"
 ```
 
-Build a parent-number set from every issue in the response where `subIssues.totalCount > 0`. Any candidate whose number appears in that set is a parent rollup — add it to the `skipped` list with reason `parent rollup` and exclude it from scoring.
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-rollups.py` (the same fallback step 5 uses for `gh-issue-state.py`). `<repo>` is `gh-issue.repo` from `.task-config.yml` if set (step 2), else `gh repo view --json nameWithOwner --jq .nameWithOwner`.
 
-**Fallback:** if the GraphQL call errors with an unknown-field error on `subIssues` (the field is available only on repos/orgs where GitHub's sub-issues feature is active), skip parent detection and note `parent rollup detection skipped (subIssues field unavailable)` in the step-6 report. The promote run still continues with all remaining candidates.
+The helper paginates to exhaustion, validates every page's shape, and fails closed on any doubt. It is a file rather than a fenced block here for a reason: seven defects were found in the block this replaces, every one of them a wrong or empty result that read as a clean run, and none of them reachable by the gate. Its docstring names each one; `scripts/test_gh_issue_rollups.py` pins them.
+
+**Read its stdout — that is the contract.** Steps run as separate tool calls with no shared shell state, so nothing survives the invocation except what it printed:
+
+- `ROLLUP_OK=1` on the first line, then the parent issue numbers, one per line, sorted and unique. **`ROLLUP_OK=1` with no numbers means the repo genuinely has no rollups** — a real, successful, empty answer.
+- `ROLLUP_OK=0` then `ROLLUP_REASON=<reason>`, with a non-zero exit, on any failure. The reason is the text to quote in the fallback below.
+
+Any candidate whose number appears in the list is a parent rollup — add it to the `skipped` list with reason `parent rollup` and exclude it from scoring.
+
+**Fallback:** on `ROLLUP_OK=0`, skip parent detection and continue the run with all remaining candidates, but **lead** the step-6 report with `parent rollup detection skipped (<reason>)`, quoting the `ROLLUP_REASON` value — not as a trailing footnote. A run that could not check for rollups may promote one, so the reader has to see that before the promotion list, not after it. The most common reason is `subIssues field unavailable`: GitHub's sub-issues feature is active only on some repos and orgs.
 
 ### 4. Score each candidate
 
@@ -138,6 +134,7 @@ If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handler
 Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`) so it's clear what the run covered:
 
 ```
+parent rollup detection skipped (subIssues field unavailable)
 scope: milestone v2.0
 Promoted 5 of 8 candidates:
   ready (3):
@@ -153,4 +150,6 @@ Promoted 5 of 8 candidates:
     - #111  (blocked)
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 3 if it applied. If parent rollup detection was skipped due to the `subIssues` field being unavailable, append that note here too.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 3 if it applied.
+
+**If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that.

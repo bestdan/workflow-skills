@@ -74,7 +74,9 @@ Four deterministic, blocking checks, plus the shell lint and Bats suites:
      directory and the `^[a-z0-9-]+$` slug rules; `description` non-empty and
      ≤1024 chars; SKILL.md body ≤500 lines;
    - `plugin.json` and `marketplace.json` versions are present and **equal**;
-   - the README "N skills, M commands, K subagent" sentence matches reality.
+   - the README "N skills, M commands, K subagent" sentence matches reality;
+   - no fenced shell block in a runtime `.md` carries more than one control-flow
+     statement — see **Logic goes in a typed file** below.
 4. **`scripts/typecheck.sh`** — mypy over the repo's Python, at a version pinned
    in the script (fetched by `uvx`, so it needs network on the first run of a
    given pin). Two tiers, split by annotation coverage rather than by what
@@ -122,6 +124,63 @@ co-review pass, before a second pass caught it. The same split applies to
 `commands/handlers/<handler>.md` (loaded when a task command dispatches into
 it), and `agents/<name>.md` (loaded when the subagent spawns): their bodies are
 runtime prompts, not documentation.
+
+## Logic goes in a typed file
+
+**Write code in a `.py` or `.sh` file and call it from the markdown. Do not
+write it as a fenced block inside a skill, command, handler, or agent body.**
+
+The gate cannot see a fenced block. `scripts/lint-shell.sh` globs `*.sh`,
+`*.bash` and `*.bats` from `git ls-files`, so shell inside a `.md` is never
+syntax-checked, never shellchecked, and never run. Nothing else covers it
+either. A fenced block is the one place in this repo where code ships with no
+check at all.
+
+That is not theoretical. `gh-issue-promote.md` step 3a carried a 36-line
+GraphQL pagination loop, and **seven defects were found in it across three
+review rounds on one PR — every one by a human reviewer, none by the gate.**
+They shared a signature: a wrong or empty result that read as a clean run (no
+pagination; no failure check; a computed result that printed nothing; unchecked
+`jq`; a string `totalCount` passing a numeric comparison; a null cursor
+re-fetching the same page forever; a valid-but-unchanging cursor doing the
+same). The density is the argument: each prose fix is a bet that the eighth
+defect is not there, and nothing can check the bet. It is now
+`commands/handlers/assets/gh-issue-rollups.py` with
+`scripts/test_gh_issue_rollups.py` pinning each defect.
+
+**Where it goes.** A helper a runtime prompt shells out to belongs in
+`commands/handlers/assets/<name>.py` — Python, matching every existing asset
+there, and it replaces `jq` with real JSON handling. Dev/CI tooling belongs in
+`scripts/`. Either way, add the test pair: `scripts/test_<name>.py` (stdlib
+`unittest`, no network, the subprocess seam stubbed) plus a thin
+`scripts/test-<name>.sh` that `exec`s it. `scripts/check.sh` discovers
+`scripts/test-*.sh` by glob, so the gate picks it up with no edit.
+
+**How to call it.** Mirror `gh-issue-promote.md` step 3a:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<name>.py" --repo "<repo>"
+```
+
+and document the `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob
+`**/handlers/assets/<name>.py`). Steps run as separate tool calls with no shared
+shell state, so **the helper's stdout is the contract** — a shell variable or a
+temp path does not survive the invocation. Say in the prose what the helper
+prints, and keep the two in sync: prose disagreeing with the output channel is
+one of the seven defects above, and it recurred twice.
+
+**What is still fine inline.** A `gh` invocation, a one-liner with a `||`
+fallback, a guarded `if ...; then ...; fi`. The check fires on a fenced shell
+block with **two or more** control-flow statements plus a bare `fi`/`done`/`esac`
+line. The terminator requirement is what keeps the prompt payloads in
+`repo-pr-execute.md` and `repo-pr.md` — English wearing a `bash` fence — from
+being flagged; English does not write a bare `done`.
+
+**The allowlist is not an escape hatch.** `SHELL_LOGIC_ALLOWLIST` in
+`scripts/validate.py` names the blocks that predate the check and the count each
+may keep, and validate.py fails if an entry has more headroom than its file
+needs. Shrink an entry when you extract a block. Never raise one to land a new
+block — extract instead.
 
 ## Adding a command
 
