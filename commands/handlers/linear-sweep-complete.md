@@ -99,8 +99,11 @@ block is the single source of truth; it is not restated here.
 
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
    Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
-   identifier, title, url, state, attachments, project } ] }` object described
-   in the script's header comment; a parse failure is itself a fallback
+   identifier, title, url, state, attachments, project, scope } ] }` object
+   described in the script's header comment — `project` is the issue's **own**
+   `{ id, name }` (or `null`), and `scope` is the query that returned it; see
+   `linear-common.md` "In-flight scan" for why the two are not
+   interchangeable. A parse failure is itself a fallback
    trigger (see above). The **Unassigned bucket's exclusion pass** has no
    equivalent in the script (it has no null-project filter, same limitation
    `linear-claim.md` "Find candidates" step 1 documents for `linear-ready.py`)
@@ -231,21 +234,23 @@ step 2 uses, so the two flows agree on which repo owns a project's work:
 
 1. The `repo:` of **the issue's own project** — match `issue.project.id`
    against the `linear.projects` entries (`linear-common.md` "Resolve
-   configured projects" carries `repo` on each).
+   configured projects" carries `repo` on each). On the fast path `project`
+   comes straight from `linear-scan.py`; on the MCP floor it comes from the
+   per-issue `get_issue` that step 3.1 already makes for `attachments` — read
+   it off that response rather than adding a call.
 2. Else the current repo's `origin`:
 
    ```bash
    gh repo view --json nameWithOwner --jq .nameWithOwner
    ```
 
-**Resolve from the issue, never from the run's scope.** `--all` deliberately
-skips project resolution for the _query_ (step 1 above), but every issue the
-scan returns still carries its own `project` — so read `linear.projects` for
-the **mapping** even when it was not used for **scoping**. Deriving the repo
-from the scope instead would leave `--all` and the Unassigned bucket with no
-repo at all and fall the whole run back to `origin`, which is exactly the
-cross-repo failure this resolution exists to prevent. An issue with no project,
-or in a project with no `repo:`, correctly falls to `origin`.
+**Resolve from the issue's `project`, never from its `scope`.** `--all`
+deliberately skips project resolution for the _query_ (step 1 above), so
+`scope` is the **team** name on every issue there and answers nothing — which
+is exactly why the scan carries the issue's own `project` alongside it (see
+`linear-common.md` "In-flight scan"). Read `linear.projects` for the
+**mapping** even when it was not used for **scoping**. An issue with no
+project, or in a project with no `repo:`, correctly falls to `origin`.
 
 A project whose work spans several repos still resolves to one repo — name the
 repo whose merged PRs cover most of it, and rely on step 1's attachment for the
@@ -298,8 +303,17 @@ merge-state read that can't be completed.)
 For **each** of the issue's resolved PRs (step 3 can yield several), call:
 
 ```bash
-gh pr view <url-or-number> --json number,url,state,mergedAt
+gh pr view <url> --json number,url,state,mergedAt
 ```
+
+**Pass the URL, never the number.** A PR number is repository-local, and step 3
+can now resolve a PR in another repo — so a number would read the merge state
+of whatever same-numbered PR exists in the current checkout, and a false
+`MERGED` completes an issue whose real PR never merged. The `-R` on step 3's
+probes does not carry into this command; each `gh` invocation is independent.
+All three step-3 sources already yield a URL (a `links` attachment **is** one;
+both probes request `url` in `--json`), so there is never a reason to fall back
+to the number.
 
 (`number` and `url` are captured here so step 6's completion comment has
 them from the merge-verification read itself, whichever step-3 fallback

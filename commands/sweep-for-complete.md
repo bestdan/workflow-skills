@@ -50,9 +50,11 @@ across a multi-repo workspace.
 
 Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`;
 in a **cloud routine there is no `gh`**, so both run over the GitHub MCP
-connector, and the routine must have it attached. Without it a run resolves
-only `links`-attached PRs and reports everything else as `left: unresolved` —
-never as "no PR".
+connector, and the routine must have it attached. **Without it a run completes
+nothing.** Resolving a PR from a `links` attachment is discovery, not
+verification — it proves a PR is linked, never that it merged — and the
+merge-check that would prove it is the very read that cannot run. So every
+in-flight issue lands in `left: unresolved`, never in "no PR".
 
 ## 1. Resolve the handler
 

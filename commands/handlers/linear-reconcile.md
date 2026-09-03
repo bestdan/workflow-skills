@@ -128,8 +128,12 @@ per scope.
    resolved PR:
 
    ```bash
-   gh pr view <url-or-number> --json number,url,state
+   gh pr view <url> --json number,url,state
    ```
+
+   Pass the URL, never the number — a number is repository-local, and this
+   flow's discovery (`linear-sweep-complete.md` "Resolve each issue's PR") can
+   resolve a PR in another repo. Same rule, same reason as that file's step 4.
 
    Act if **any** of the issue's PRs is `state == "OPEN"` (the same "check
    **all** of a source's PRs" rule as `linear-sweep-complete.md` step 4).
