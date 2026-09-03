@@ -137,6 +137,27 @@ class ForwardTransitionTests(unittest.TestCase):
         for label in ("auto:eligible", "prio:1", "est:3", "follow-up", "bug"):
             self.assertIn(label, remote.labels)
 
+    def test_labels_the_write_purges_are_named_not_silently_deleted(self):
+        # The full-set write is right to purge a `prio:urgent` a human invented,
+        # but unattended an Actions log is the only place anyone could see it go.
+        remote = FakeRemote([*READY, "prio:urgent", "est:99"])
+        code, result = run(
+            remote,
+            [
+                "--repo",
+                "o/n",
+                "--branch",
+                "task-9",
+                "--event",
+                "ready_for_review",
+                "--apply",
+            ],
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(result["dropped"]), ["est:99", "prio:urgent"])
+        for label in ("prio:urgent", "est:99"):
+            self.assertNotIn(label, remote.labels)
+
     def test_write_is_one_patch_carrying_the_complete_set(self):
         remote = FakeRemote(READY)
         run(

@@ -156,6 +156,8 @@ def main(argv=None):
             print(
                 f"{verb} {args.repo}#{fields['issue']}: {', '.join(fields['labels'])}"
             )
+            if fields.get("dropped"):
+                print(f"Dropped (not in labels.yml): {', '.join(fields['dropped'])}")
         return 0
 
     issue, outcome = decide(args.event, args.merged, args.branch)
@@ -188,6 +190,10 @@ def main(argv=None):
         and gh_issue_state.in_managed_namespace(label, set(groups))
         and label in vocabulary
     ]
+    # Report those deletions. The full-set write is right to purge a `prio:urgent`
+    # a human invented, but the deletion is invisible unless it is named — and
+    # unattended, an Actions log is the only place anyone could ever see it.
+    dropped = gh_issue_state.dropped_unrecognized(current, set(groups), vocabulary)
 
     try:
         gh_issue_state.validate(managed, vocabulary)
@@ -199,7 +205,14 @@ def main(argv=None):
     labels = managed + [label for label in preserved if label not in managed]
     if args.apply:
         gh_issue_state.patch_issue(args.repo, issue, labels)
-    return report(None, issue=issue, labels=labels, applied=args.apply, target=target)
+    return report(
+        None,
+        issue=issue,
+        labels=labels,
+        dropped=dropped,
+        applied=args.apply,
+        target=target,
+    )
 
 
 if __name__ == "__main__":
