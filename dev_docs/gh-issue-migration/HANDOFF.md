@@ -1,9 +1,43 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Updated 2026-08-30.** Read this first, then
+**Updated 2026-09-03.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
+
+## Your last commit updates this file — read this before you start
+
+**Whoever finishes a task owns leaving this handoff true for the next one.** This is
+part of the task, not tidying after it. Do it in the same PR as the work, not a
+follow-up — a follow-up is how it got skipped before.
+
+Task 6 is the worked example of the failure. It merged and left **three** places still
+saying it was next, plus a launcher doc telling a fresh session to start it. The next
+agent's first act would have been to redo a merged task. Each item below is one of those:
+
+1. **Advance the pointer.** Change "**Task N is next**" in this file, and move the
+   **NEXT.** marker in the plan's task list to the task that actually is.
+2. **Retire the finished task in all three places** — they drift independently:
+   its own file's `status:` frontmatter (`new` → `done`), its plan-list entry
+   (strikethrough + **Done** — PR #n, merged `<sha>`), and this file's status section.
+3. **Record what you settled that OTHER tasks rest on**, not just that you shipped.
+   The test: did you measure something that makes a sentence elsewhere in this plan
+   false? If so, amend that sentence where it lives and say what replaced it. Task 6
+   measured a third credentialed channel and falsified an inference in task 8's
+   `Constraint`, which no amount of detail in task 6's own entry would have surfaced.
+   **Link to the PR; do not copy its evidence here** — a committed copy of run IDs and
+   PR state rots with no invalidation.
+4. **Say where you deviated from the task file, and why.** Task 6's trigger list
+   contradicted its own acceptance criterion for a reason that only became visible
+   during the work. A deviation nobody wrote down reads as a mistake later.
+5. **Delete your launcher doc.** These live untracked under `.dev_docs/task_N_handoff.md`
+   and say "paste this into a fresh session". Once the task ships, that instruction is
+   actively harmful, and being untracked it has no history to recover — so it is only
+   ever deleted deliberately. Three had accumulated by task 6.
+6. **Anything you learned that is not a task** goes to the tracker, not here. Task 6
+   produced PRE-822 and PRE-823 that way.
+
+If you finish a task and this file needed no edit, you almost certainly missed item 3.
 
 ## Where this lives, and why it moved
 
@@ -14,7 +48,7 @@ committed under `dev_docs/gh-issue-migration/`, per the `.gitignore` comment blo
 advice: "Prefer graduating durable wisdom to a top-level `dev_docs/<name>.md` (never
 ignored) over keeping it here."
 
-## State: phase 1–2 and tasks 4, 5 and 14 are done
+## State: phase 1–2 and tasks 4, 5, 6, 14 and 15 are done
 
 **PR #415 merged as `d7aa23a`.** It shipped:
 
