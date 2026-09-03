@@ -278,10 +278,15 @@ against the same `<resolved-repo>`: search that repo's pull requests for the
 check still applies, because an MCP search tokenizes no more precisely than
 `gh` does.
 
-Tool names vary by connector build, so use whichever PR search/read tools the
-connected server exposes rather than a hardcoded name; `mcp__github__` is the
-prefix this repo's `claim-lock.md` already documents. **If the connector
-exposes no PR search or read tool at all, that is `left: unresolved` for every
+The prefix is `mcp__github__`, and the surface comes from the **GitHub App
+installed for claude.ai/code** — not a claude.ai connector, so it is absent
+from a routine's connector list and there is nothing to attach.
+`dev_docs/decisions/2026-08-24-routine-claim-channel.md` records it enumerated
+in full (58 tools) from inside a routine; `claim-lock.md` documents the same
+channel. That doc does **not** name a PR-search tool, so pick whichever the
+live surface exposes rather than a hardcoded name.
+
+**If no PR search or read tool is exposed, that is `left: unresolved` for every
 issue reaching steps 2–3 — never "no-PR skipped".** A missing capability is not
 a confirmed absence of a PR, and `/reconcile-tasks` row 4 GC's the skipped
 bucket.

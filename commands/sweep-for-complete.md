@@ -1,6 +1,6 @@
 ---
 description: Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the /complete-task primitive — composes with /loop and /schedule, no new scheduling infra
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github, mcp__claude_ai_GitHub
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github
 argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
@@ -49,12 +49,17 @@ each issue's PR"). Give each project a `repo:` before scheduling one sweep
 across a multi-repo workspace.
 
 Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`;
-in a **cloud routine there is no `gh`**, so both run over the GitHub MCP
-connector, and the routine must have it attached. **Without it a run completes
-nothing.** Resolving a PR from a `links` attachment is discovery, not
-verification — it proves a PR is linked, never that it merged — and the
-merge-check that would prove it is the very read that cannot run. So every
-in-flight issue lands in `left: unresolved`, never in "no PR".
+in a **cloud routine there is no `gh`**, so both run over the `mcp__github__*`
+tools. That surface comes from the **GitHub App installed for claude.ai/code**,
+not from a claude.ai connector — so it will not appear in a routine's connector
+list, and there is nothing to "attach" there. `dev_docs/decisions/2026-08-24-routine-claim-channel.md`
+records the surface enumerated in full (58 tools) from inside a routine.
+
+**If those tools are absent, the run completes nothing.** Resolving a PR from a
+`links` attachment is discovery, not verification — it proves a PR is linked,
+never that it merged — and the merge-check that would prove it is the very read
+that cannot run. So every in-flight issue lands in `left: unresolved`, never in
+"no PR".
 
 ## 1. Resolve the handler
 
