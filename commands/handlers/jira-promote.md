@@ -112,6 +112,8 @@ As on the file path, the scope gate is **model judgment, not a deterministic rul
 
 If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `transitionJiraIssue`/`addCommentToJiraIssue` call.
 
+**Batch writes — never fire them all in parallel.** Issuing `transitionJiraIssue`/`addCommentToJiraIssue` for every scored candidate at once can saturate the Atlassian MCP transport, causing cascading timeouts and partial-state corruption — some candidates end up transitioned while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
+
 Otherwise, for each scored candidate, first **resolve the target status name to a transition id** — `transitionJiraIssue` accepts a transition **id** (`transition: { id: "<id>" }`), not a status name:
 
 ```

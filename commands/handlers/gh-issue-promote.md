@@ -106,6 +106,8 @@ gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>]
 
 Keep that issue's `prio:` and `est:` labels verbatim, drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3` — omitting `prio:1,est:3` from the `--labels` value would delete them.
 
+**Batch writes — never fire them all in parallel.** Each candidate costs a `gh issue view` read, a `gh-issue-state.py` PATCH, and — for LOW — a `gh issue comment`. Firing those for every scored candidate at once can saturate the GitHub API transport, causing cascading timeouts and partial-state corruption: some candidates end up relabeled while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
+
 Then, for each scored candidate (`<managed>` is the set just assembled):
 
 - **HIGH** — `status:2_ready` + `auto:eligible`, plus the issue's existing `prio:`/`est:`:

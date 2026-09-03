@@ -92,6 +92,8 @@ Linear's free plan caps the **workspace-wide** count of **active** issues (state
 
 If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below) and exit **without** calling `save_issue`. Include the quota precheck's projected outcome in the dry-run output too — the point of checking it upfront is to surface the constraint before a real run ever hits it mid-batch.
 
+**Batch writes — never fire them all in parallel.** The Linear MCP transport has limited concurrency headroom; issuing `save_issue`/`save_comment` for every scored candidate at once (a "dozens of tool calls in one turn" pattern) has caused cascading timeouts and partial-state corruption in practice — some candidates land transitioned while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 `save_issue` calls in a single turn). Wait for each group to finish before starting the next.
+
 Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` = candidate `id`, including any backfilled `priority`/`estimate` from step 6 regardless of HIGH/LOW/held (a LOW-scored or quota-held issue still gets its backfilled fields saved, so the human has less to fix):
 
 - **HIGH (promoted):** `state` = the `unstarted`-type target state id from step 2; `labels` = the issue's existing label ids **plus** `auto-eligible` (the `save_issue` field is named `labels` and **replaces** the set — include existing labels to avoid clobbering); `priority`/`estimate` = the backfilled value(s) from step 6, if any.
