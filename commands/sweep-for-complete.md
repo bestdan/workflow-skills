@@ -1,6 +1,6 @@
 ---
 description: Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the /complete-task primitive — composes with /loop and /schedule, no new scheduling infra
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github, mcp__claude_ai_GitHub
 argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
@@ -41,12 +41,18 @@ wraps it.
   API cost.
 
 Scope is **Linear-side**, never repo-side: one run covers every configured
-project, whatever repo each project's work lives in. Completion is verified
-against the issue's own `links` attachment, which carries a full GitHub PR
-URL. Only the title/branch fallbacks — used for PRs opened outside
-`/do-tasks` — query a single repo, and they take it from the project's
-`repo:` key (see the handler file's "Resolve each issue's PR"). Give each
-project a `repo:` before scheduling one sweep across a multi-repo workspace.
+project, whatever repo each project's work lives in. The title/branch
+fallbacks — used for PRs opened outside `/do-tasks`, which carry no `links`
+attachment — query a single repo, taken from **the issue's own project**
+`repo:` key, so they work under `--all` too (see the handler file's "Resolve
+each issue's PR"). Give each project a `repo:` before scheduling one sweep
+across a multi-repo workspace.
+
+Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`;
+in a **cloud routine there is no `gh`**, so both run over the GitHub MCP
+connector, and the routine must have it attached. Without it a run resolves
+only `links`-attached PRs and reports everything else as `left: unresolved` —
+never as "no PR".
 
 ## 1. Resolve the handler
 

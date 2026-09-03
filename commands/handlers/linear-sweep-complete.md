@@ -125,8 +125,9 @@ block is the single source of truth; it is not restated here.
    issue) for every fast-path issue — feed `issue.attachments` directly into
    that step's GitHub-PR-URL match instead. Steps 3.2–3.3 (the title-search
    and branch-name fallbacks) still apply if no attachment resolves a PR, and
-   step 4's `gh pr view` merge-check runs unchanged for every issue regardless
-   of which path found it.
+   step 4's merge-check runs unchanged for every issue regardless of which
+   path found it — over `gh` on `local-full`, over the GitHub MCP on
+   `claude-web`.
 
 ### MCP floor (fallback)
 
@@ -217,38 +218,68 @@ PRs verified as merged (report that one):
    gh pr list -R "<resolved-repo>" --state all --head "<branchName>" --json number,url,state
    ```
 
-**`<resolved-repo>` — resolve per issue, from the scope that issue came from.**
+**`<resolved-repo>` — resolve per issue, from that issue's own project.**
 Step 1 needs no repo: a `links` attachment carries a full
 `github.com/<owner>/<name>/pull/<n>` URL, so it resolves in any repo. Steps 2
-and 3 are `gh pr list` queries, which search **one** repo — without `-R` that
-is whatever repo the sweep happens to run in. A Linear workspace spans repos,
-so a scheduled sweep run from one checkout would silently return no match for
-every issue whose PR lives elsewhere, and file it as "no-PR skipped".
+and 3 search **one** repo — without `-R` that is whatever repo the sweep
+happens to run in. A Linear workspace spans repos, so a scheduled sweep would
+silently return no match for every issue whose PR lives elsewhere, and file it
+as "no-PR skipped".
 
-Resolve in this order — the same order `linear-false-closures.md` step 2 uses,
-so the two flows agree on which repo owns a project's work:
+Resolve per issue, in this order — the same order `linear-false-closures.md`
+step 2 uses, so the two flows agree on which repo owns a project's work:
 
-1. The scope's own `repo:` under `linear.projects` (carried on the resolved
-   scope by `linear-common.md` "Resolve configured projects").
+1. The `repo:` of **the issue's own project** — match `issue.project.id`
+   against the `linear.projects` entries (`linear-common.md` "Resolve
+   configured projects" carries `repo` on each).
 2. Else the current repo's `origin`:
 
    ```bash
    gh repo view --json nameWithOwner --jq .nameWithOwner
    ```
 
-The whole-team scope (`--all`, or no configured projects) and the Unassigned
-bucket have no project to read a `repo:` from, so both fall back to `origin`.
-That is the pre-existing behavior, and it is why a cross-repo workspace wants
-its projects configured with `repo:` rather than swept with `--all`.
+**Resolve from the issue, never from the run's scope.** `--all` deliberately
+skips project resolution for the _query_ (step 1 above), but every issue the
+scan returns still carries its own `project` — so read `linear.projects` for
+the **mapping** even when it was not used for **scoping**. Deriving the repo
+from the scope instead would leave `--all` and the Unassigned bucket with no
+repo at all and fall the whole run back to `origin`, which is exactly the
+cross-repo failure this resolution exists to prevent. An issue with no project,
+or in a project with no `repo:`, correctly falls to `origin`.
 
-A project whose work spans several repos still resolves to one repo per run —
-name the repo whose merged PRs cover most of it, and rely on step 1's
-attachment for the rest. `/do-tasks` and `/deliver-task` write that attachment
-on every PR they open, so issues they created never depend on these fallbacks.
+A project whose work spans several repos still resolves to one repo — name the
+repo whose merged PRs cover most of it, and rely on step 1's attachment for the
+rest. `/do-tasks` and `/deliver-task` write that attachment on every PR they
+open, so issues they created never depend on these fallbacks.
 
 If the `gh repo view` fallback itself fails (the sweep is running outside any
 repo, or `gh` cannot reach the remote), treat every issue that reaches steps
 2–3 as **`left: unresolved`** under the rule below — not as "no-PR skipped".
+
+### Steps 2–3 in a `claude-web` environment (no `gh`)
+
+The probes above are `gh`, and a cloud routine has no `gh` CLI — the same
+environment split `skills/auto-pilot/references/launch-preflight.md` calls
+`local-full` vs `claude-web`, and the reason `push-plan.md` and
+`gh-issue-deps.py` already carry MCP-side notes. Without a substitute, a
+`claude-web` sweep resolves **only** step 1, so every issue whose PR was opened
+outside `/do-tasks` (no `links` attachment) is unresolvable — which is the bulk
+of hand-opened work.
+
+On `claude-web`, run steps 2–3 over the **GitHub MCP connector** instead,
+against the same `<resolved-repo>`: search that repo's pull requests for the
+`[<IDENTIFIER>]` title token (step 2), then for head branch `<branchName>`
+(step 3). Apply the identical post-filters — step 2's literal-bracket-token
+check still applies, because an MCP search tokenizes no more precisely than
+`gh` does.
+
+Tool names vary by connector build, so use whichever PR search/read tools the
+connected server exposes rather than a hardcoded name; `mcp__github__` is the
+prefix this repo's `claim-lock.md` already documents. **If the connector
+exposes no PR search or read tool at all, that is `left: unresolved` for every
+issue reaching steps 2–3 — never "no-PR skipped".** A missing capability is not
+a confirmed absence of a PR, and `/reconcile-tasks` row 4 GC's the skipped
+bucket.
 
 If none of the three resolve a PR, **skip the issue** — but only when every
 discovery probe **succeeded** and simply returned no match. The `gh pr list`
@@ -276,6 +307,16 @@ resolved the PR.)
 
 Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
 candidate for step 5.
+
+**In a `claude-web` environment (no `gh`), read the same fields over the
+GitHub MCP connector** — see "Steps 2–3 in a `claude-web` environment" above
+for the environment split and the tool-naming caveat. This read is required in
+**every** environment: it is the merge verification the whole sweep rests on,
+and it runs for every issue regardless of which step-3 source found the PR —
+including an issue resolved from its `links` attachment, which proves a PR is
+linked but never that it merged. If the merge state cannot be read at all,
+every affected PR is an unread PR under precedence rule 3 below, so the issue
+lands in `left: unresolved` and is not completed.
 
 **Multi-PR precedence.** An issue can carry more than one resolved PR (a
 stale one plus a newer one). Classify the whole issue by this precedence,
