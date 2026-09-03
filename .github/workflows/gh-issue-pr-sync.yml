@@ -1,0 +1,68 @@
+name: gh-issue PR status sync
+
+# Backstop for the gh-issue handler's `needs_review` transition and its reverse.
+#
+# On GitHub the open PR IS the `needs_review` state, so an issue's `status:`
+# rung has to follow its PR: ready-for-review moves `3_started` ->
+# `4_needs_review`, and closing without merging moves it back. The agent that
+# opens the PR is meant to write the rung itself; this catches the PRs opened
+# outside that loop, and it is the only channel that catches a PR CLOSED
+# outside it, because nothing is watching then.
+#
+# Triggers on `ready_for_review`, deliberately NOT on `opened`: a draft PR is
+# not `needs_review`, and the house convention makes some repos' PRs always
+# draft. The consequence is that a PR opened directly as non-draft emits no
+# `ready_for_review` and is not caught here — that case belongs to the agent
+# that opened it.
+#
+# `workflow-skills` is public, so Actions minutes are free; this is not
+# optimized for them.
+#
+# Note what does NOT happen here: a MERGED PR is left alone. `Closes #<n>` in
+# the PR body makes GitHub close the issue, and closure is completion under
+# this schema. Never add a merged branch that writes a rung.
+
+on:
+  pull_request:
+    types: [ready_for_review, closed]
+
+# `issues: write` is the point of this file. The default token is
+# `contents: read`, which cannot PATCH an issue's labels.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    name: Sync issue status to PR state
+    # A fork PR's token is read-only no matter what `permissions` asks for, so
+    # the write would fail and paint the run red for a reason unrelated to the
+    # change. Same-repo PRs are the only ones this loop produces anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sync
+        # The branch name and the repo travel as env vars, never interpolated
+        # into the shell line: `${{ }}` splices attacker-controlled text (a
+        # branch name is chosen by whoever opens the PR) straight into the
+        # command.
+        #
+        # The script is a no-op for any branch that is not `<prefix>task-<n>`,
+        # which is most PRs in this repo, so a green run here usually means it
+        # decided to do nothing and said so.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          EVENT: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          merged_flag=""
+          if [ "$MERGED" = "true" ]; then
+            merged_flag="--merged"
+          fi
+          python3 commands/handlers/assets/gh-issue-pr-sync.py \
+            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" \
+            $merged_flag --apply

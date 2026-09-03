@@ -138,6 +138,7 @@ run scripts/test-gh-issue-state.sh
 run scripts/test-gh-issue-ready.sh
 run scripts/test-gh-issue-claim.sh
 run scripts/test-gh-issue-deps.sh
+run scripts/test-gh-issue-pr-sync.sh
 run scripts/test-linear-archive.sh
 run scripts/test-linear-ready.sh
 run scripts/test-secret-resolve.sh
