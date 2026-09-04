@@ -38,7 +38,18 @@ falsification pass: `/private/tmp/claude-501/-Users-danielegan-src-finplan/b3fd6
 
 **In scope:** the `gh-issue` handler at `linear`-level depth; the label state
 model; label provisioning; claim locking; `needs_review` automation; the
-reconciler; migration of `workflow-skills` issues.
+reconciler; batch execution (`/do-tasks --all`); migration of `workflow-skills`
+issues.
+
+> **Widened 2026-09-04 to add batch execution**, absorbing Linear PRE-117 as
+> [task 16](phase_3_handler/gh_migration_task_16.md). Recorded here rather than done
+> quietly, because scope that grows without a reason reads as creep later. The reason:
+> batch touches `do-tasks.md` and `gh-issue-claim.md`, the two files this epic churns
+> hardest, and its first attempt ([#426](https://github.com/bestdan/workflow-skills/pull/426))
+> died of exactly that collision — built against a vocabulary and a dependency premise
+> this plan replaced while the PR was open. Keeping it outside the epic would set the
+> same collision up again, and "at `linear`-level depth" already implied it: `linear`
+> has batch and `gh-issue` does not.
 
 **Not in scope:**
 
@@ -188,6 +199,19 @@ join, and `gh` covers it only partially.
       status is unchanged, but the reason in the prose is corrected. Task 8 still owns
       teaching it to write edges.
 
+**Phase 3 — handler (added 2026-09-04, absorbing Linear PRE-117)**
+
+16. [phase_3_handler/gh_migration_task_16.md](phase_3_handler/gh_migration_task_16.md) — Batch execution (`/do-tasks --all`) on the
+    tracker-batch subroutine. **Unblocked** — task 4 settled the claim contract and task
+    15 the dependency edges, both merged; it does not depend on task 8, so it sequences
+    anywhere in Phase 3 without disturbing the existing order. It absorbs **PRE-117**,
+    cancelled as superseded, and supersedes the parked draft
+    [#426](https://github.com/bestdan/workflow-skills/pull/426) — whose §4 batch
+    machinery is worth lifting even though its candidate query, WIP count, lock spelling
+    and dependency section are not. See **#426 in detail** below for the five defects,
+    every one of which fails silently. Retires `do-tasks.md:646`'s "until the gh-issue
+    batch task lands" and flips `process — batch × gh-issue` in the capability matrix.
+
 **Phase 4 — migrate (added 2026-08-30)**
 
 13. **Teach auto-pilot the `gh-issue` handler. POSTPONED 2026-09-02** — `/auto-pilot`
@@ -254,14 +278,15 @@ either order once each is separately reconciled.
 
 ### #426 in detail — it would ship a silently dead feature
 
-> **Parked 2026-09-04.** #426 was converted back to **draft** (verified: open, draft,
-> tip `bc7bf0b`) after a co-review found the same defects listed below, plus two this
-> plan had not recorded — see the next paragraph. Its five-item verdict is preserved as
-> a [parking comment on the PR](https://github.com/bestdan/workflow-skills/pull/426#issuecomment-5540130672).
-> **Do not start the rebase**: where gh-issue batch lives — this epic's task list, or
-> PRE-117 as its own tracker home — is an open decision for the owner, and PRE-117 is
-> untouched and still points at #426. Nothing below is stale; it is simply not live work
-> until that lands.
+> **Parked 2026-09-04, then superseded.** #426 was converted back to **draft**
+> (verified: open, draft, tip `bc7bf0b`) after a co-review found the defects listed
+> below. Its five-item verdict is preserved as a
+> [parking comment on the PR](https://github.com/bestdan/workflow-skills/pull/426#issuecomment-5540130672).
+> **Do not rebase it.** The work it was attempting is now
+> [task 16](phase_3_handler/gh_migration_task_16.md), which builds against the current
+> contract as a fresh edit; PRE-117 is cancelled as superseded and points there. This
+> section survives as task 16's list of what not to repeat, not as a merge checklist —
+> except its **§4 batch machinery**, which was never the problem and is worth lifting.
 >
 > Two items to add to the list below, both verified against `origin/main` by the
 > reviewing session: the PR spells `task/<n>` throughout while task 4 moved the lock to
