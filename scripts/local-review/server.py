@@ -1057,6 +1057,11 @@ function safeHref(raw){
   return ['http:','https:','mailto:'].indexOf(u.protocol) === -1 ? null : u.href;
 }
 
+// Not a security gate — safeHref is. This only splits an already-rejected
+// href into the two that read differently: one that wanted to be absolute
+// (a scheme, or protocol-relative) is struck through, and a plain relative
+// path is left inert but normal, so an internal link does not read as an
+// attack. The regexes look alike; they answer different questions.
 function hostileHref(raw){
   const s = String(raw == null ? '' : raw).trim();
   return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(s);

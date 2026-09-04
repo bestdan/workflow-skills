@@ -2746,7 +2746,7 @@ const linkShape = src => {
   return links;
 };
 out.relativeLinkShape = linkShape('[e](../submit) [f](/x/y) [g](sneaky.html)');
-out.hostileLinkShape = linkShape('[x](javascript:alert(1))');
+out.hostileLinkShape = linkShape('[x](javascript:alert(1)) [h](//evil.test/x)');
 
 // Anchoring: CRLF must not drift, and table rows get their own line.
 const crlf = describe('# One\r\n\r\nTwo\r\n\r\nThree\r\n');
@@ -2934,8 +2934,8 @@ console.log(JSON.stringify(out));
                   ".md-inertlink{color:var(--accent);text-decoration:none}" in server.PAGE,
                   "md-inertlink lacks accent styling")
             check("preview: hostile links keep rejected styling",
-                  len(_o["hostileLinkShape"]) == 1
-                  and _o["hostileLinkShape"][0]["class"] == "md-deadlink",
+                  len(_o["hostileLinkShape"]) == 2
+                  and all(x["class"] == "md-deadlink" for x in _o["hostileLinkShape"]),
                   _o["hostileLinkShape"])
             check("preview: a __proto__ frontmatter key does not pollute Object.prototype",
                   _o["protoPolluted"] is False, _o["protoPolluted"])
