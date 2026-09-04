@@ -385,7 +385,7 @@ The remaining steps depend on disposition.
     - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns). Each such finding keeps its conventional-comment label.
     - `comments` = an array of `{path, line, body}`, one per anchored candidate. Each `body` opens with the finding's conventional-comment label (see **Comment style**). `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
 
-13. **Report the result.** Print the review URL (`gh pr view <n> --json url` plus the review, or the API response's `html_url`). Don't commit or push anything — you changed no files.
+13. **Report the result.** Print the review URL (`gh pr view <n> --repo <owner>/<name> --json url` plus the review, or the API response's `html_url` — `<owner>/<name>` is the same resolved repo from step 2, not necessarily `cwd`'s). Don't commit or push anything — you changed no files.
 
 ## Rules
 
