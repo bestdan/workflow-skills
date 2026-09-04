@@ -68,15 +68,23 @@ worktree off `main`; edit these plan docs on this branch.
 
 ## Where things stand
 
-**Task 16 is the one available task.** It is unblocked and nothing else in Phase 3 is
-open: tasks 4–8, 14 and 15 are done, 12 is unclaimed but gates only the routine claim
-default, and 13 is postponed — which **holds all of Phase 4** with it.
+**Two available tasks, 16 and 17.** Both unblocked, neither blocking the other. Tasks
+4–8, 14 and 15 are done; 12 is unclaimed but gates only the routine claim default; 13 is
+postponed, which **holds all of Phase 4** with it.
+
+**Take 17 first if you want a short one** — it is size 1, it is a defect in shipped work
+rather than new surface, and it is the reason `/reconcile-tasks` output cannot currently
+be read on an under-provisioned board.
 
 - **Task 16** — batch execution (`/do-tasks --all`), absorbed from Linear PRE-117
   (cancelled as superseded). Read the closed PR #426 before starting: its §4 batch
   machinery is reusable and its five defects are the list of what not to repeat. Task 16
   carries the fetch command for its code. **Do not rebase #426** — it applies almost
   cleanly and is almost all wrong.
+- **Task 17** — reconciler row 3 hits every closed issue on a repo where
+  `status:4_needs_review` was never provisioned. Fix the row **and** the step-2 paragraph
+  that claims the label scope already prevents it; a false explanation costs more than
+  the bug, because it stops the next reader looking.
 - **Task 12** — stale claim-ref sweep. Unclaimed, no task file. Gates flipping the
   routine claim default, nothing else.
 
@@ -193,31 +201,19 @@ behaviour from documentation. Probe it.
   indistinguishable afterwards. No task covers it. It now costs more than it did: task
   8's stale-versus-satisfied split reads `state_reason` to decide whether an edge blocks
   forever or is already met, and every issue this loop closes reports the same reason.
-- **Reconciler row 3 never checks that the rung it looks for is provisioned.** Found
-  2026-09-04 by running task 7's own dispatch check against `bestdan/dotfiles`. Row 3
-  flags an issue "closed although it was never labelled `status:4_needs_review`" by
-  reading its `labeled` events — but if that label was never created on the repo, no
-  issue can ever have carried it, so **every** closed issue in the window is a hit. The
-  run reported 50 of 50, with total confidence and no signal.
-  `gh-issue-reconcile.md` step 2 claims the label scope prevents exactly this ("every
-  issue in the repo that is _not_ part of the task loop … is a row-2 **and** a row-3
-  hit"), and that claim is false as written: the issues were correctly scoped by the
-  configured label and still all hit. The scope separates loop issues from strangers; it
-  does nothing about a rung the repo never provisioned. The cheap fix is a preflight —
-  if `status:4_needs_review` is absent from the repo's labels, row 3's premise is void,
-  so report that instead of 50 findings. **Unowned; not task 8's, and outside PR #478.**
-  Same shape as the bug this migration keeps hitting: a check confidently answering a
-  question nobody populated the data for.
-- **A partially provisioned repo makes the audits lie, and nothing detects it.** The
-  above is the symptom; this is the class. `gh-label-sync.py` is idempotent and
-  **dry-run by default**, so `python3 …/gh-label-sync.py --repo <repo>` prints the gap
-  for free — run it before trusting any audit's output on a board, and before reading a
-  pilot result. As of 2026-09-04 `bestdan/dotfiles` is missing a double-figure share of
-  the vocabulary, including both top `status:` rungs and every `prio:`/`est:` label,
-  while still carrying the pre-migration `auto-eligible` / `human-approval-requested` /
-  `priority:*` names. That inventory is live state and will drift — **do not trust this
-  sentence, run the dry run.** Provisioning it is a write to a live tracker and needs the
-  operator.
+- **A partially provisioned repo makes the audits lie, and nothing detects it.**
+  `gh-label-sync.py` is idempotent and **dry-run by default**, so
+  `python3 …/gh-label-sync.py --repo <repo>` prints the gap for free — run it before
+  trusting any audit's output on a board, and before reading a pilot result. The
+  instance that exposed this is **task 17** (reconciler row 3), now a plan task rather
+  than a loose blocker; the class is wider than that one row, so it stays here.
+  As of 2026-09-04 `bestdan/dotfiles` is missing a double-figure share of the vocabulary
+  and is **half-migrated** besides — 110 of its 254 issues carry the old and new
+  vocabularies at once. That inventory is live state and will drift, so **do not trust
+  this sentence, run the dry run.** Both are filed on that repo's own tracker
+  ([#675](https://github.com/bestdan/dotfiles/issues/675) provisions,
+  [#676](https://github.com/bestdan/dotfiles/issues/676) migrates, natively linked) —
+  they are that repo's work, not this plan's.
 - **Two label invariants have no reconciler rule.** Task 7's rule table is deliberately
   **closed**, so these were left out rather than becoming rows four and five:
   - `at most one prio:` / `at most one est:` — a duplicate stays invisible until the next

@@ -238,6 +238,16 @@ join, and `gh` covers it only partially.
     every one of which fails silently. Retires `do-tasks.md:646`'s "until the gh-issue
     batch task lands" and flips `process — batch × gh-issue` in the capability matrix.
 
+**Phase 3 — handler (added 2026-09-04, from task 7's dispatch check)**
+
+17. [phase_3_handler/gh_migration_task_17.md](phase_3_handler/gh_migration_task_17.md) — **Defect from task 7.** Reconciler row 3 asks
+    whether an issue ever carried `status:4_needs_review` without asking whether that
+    label exists on the repo. Where it was never provisioned the row hits every closed
+    issue — measured at 50 of 50 against `bestdan/dotfiles`. Size 1, unblocked, and it
+    lands in the same file task 7 shipped. Its step-2 prose is wrong too, and in the more
+    expensive way: it claims the label scope already prevents this, so a reader who
+    trusts it stops looking.
+
 **Phase 4 — migrate (added 2026-08-30)**
 
 13. **Teach auto-pilot the `gh-issue` handler. POSTPONED 2026-09-02** — `/auto-pilot`
