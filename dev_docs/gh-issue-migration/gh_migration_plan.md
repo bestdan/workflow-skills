@@ -254,6 +254,23 @@ either order once each is separately reconciled.
 
 ### #426 in detail — it would ship a silently dead feature
 
+> **Parked 2026-09-04.** #426 was converted back to **draft** (verified: open, draft,
+> tip `bc7bf0b`) after a co-review found the same defects listed below, plus two this
+> plan had not recorded — see the next paragraph. Its five-item verdict is preserved as
+> a [parking comment on the PR](https://github.com/bestdan/workflow-skills/pull/426#issuecomment-5540130672).
+> **Do not start the rebase**: where gh-issue batch lives — this epic's task list, or
+> PRE-117 as its own tracker home — is an open decision for the owner, and PRE-117 is
+> untouched and still points at #426. Nothing below is stale; it is simply not live work
+> until that lands.
+>
+> Two items to add to the list below, both verified against `origin/main` by the
+> reviewing session: the PR spells `task/<n>` throughout while task 4 moved the lock to
+> `<branch_prefix>task-<n>` (`gh-issue-claim.md:9-12`, and line 23 says a fixed
+> `task/<n>` cannot satisfy the scheme) — so a batch session creates a ref that misses
+> the real lock and every racer thinks it won; and the PR re-derives the WIP count in
+> prose rather than calling `gh-issue-claim.py wip`, whose docstring exists to say a
+> caller must not re-derive it.
+
 Merged after a mechanical rebase, gh-issue batch would report "no candidate" forever and
 look healthy doing it:
 

@@ -121,7 +121,7 @@ left in `gh-issue-promote.md` or `gh-issue-claim.md`, only two prose mentions of
 `auto-eligible` as history. The epic's **In-flight PRs against files this plan owns**
 table still describes all three as open; read it for #426 only.
 
-#426 is the one that matters, and it is the dangerous one: it was misled by a
+#426 was **parked back to draft on 2026-09-04** — do not start its rebase; where gh-issue batch lives is an open decision for the owner (see the epic's `#426 in detail`). It remains the one that matters, and the dangerous one: it was misled by a
 since-retired claim into building a body-footer parser, so its **Dependency-ready
 selection** section needs **deleting, not reconciling**. It also still spells the old
 vocabulary and `task/<n>`, so it applies almost cleanly and would ship a feature that
