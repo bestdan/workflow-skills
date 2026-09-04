@@ -673,14 +673,16 @@ asked for.
 ### gh-issue batch (`--all` / `-n N`, without `--claim-only` or `--no-claim`)
 
 This is section 3's **Tracker-batch subroutine** with gh-issue's substitutions
-filled in. **Read that subroutine first** — its `--no-claim` and `--local`
-rejections, its rule that a batch never offers the attended override, and its
-warning that a dispatching session's attendedness never transfers to the sessions
-it dispatches all carry over. Only what is written below is gh-issue's.
+filled in. **Read that subroutine first** — its `--no-claim` **rejection**
+(`--all --no-claim` is a contradiction), its rule that a batch never offers the
+attended override, and its warning that a dispatching session's attendedness never
+transfers to the sessions it dispatches all carry over unchanged. Only what is
+written below is gh-issue's.
 
-One substitution inside those rejections, because §3 spells it in Linear's terms:
-`--local` still caps the batch at **1**, but it runs that issue through
-`gh-issue-claim.md`'s default flow, **not** §3's "Claim and execute".
+`--local` is a **cap**, not a rejection, and it is the one clause §3 spells in
+Linear's terms: it caps the batch at **1** and runs that single highest-ranked
+issue foreground — through `gh-issue-claim.md`'s default flow here, **not** §3's
+"Claim and execute".
 
 **First, the deterministic opt-out.** If `gh-issue.remote_batch` is `false` in
 `.task-config.yml`, do **not** dispatch: degrade `--all` / `-n N` to a single
