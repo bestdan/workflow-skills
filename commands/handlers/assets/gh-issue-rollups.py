@@ -45,8 +45,13 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+from typing import NamedTuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _shape import ShapeError, expect  # noqa: E402
 
 QUERY = """
 query($owner: String!, $repo: String!, $cursor: String) {
@@ -69,10 +74,38 @@ class LookupFailed(Exception):
     """A page could not be trusted. Carries the reason for `ROLLUP_REASON=`."""
 
 
+class GhResult(NamedTuple):
+    """What `gh` returned. Named because two of the three fields are `str`.
+
+    A plain tuple unpacks positionally, so swapping stdout and stderr
+    type-checks and runs — it just reports the wrong text as the failure reason.
+    Naming the fields does not make that swap impossible, and an earlier version
+    of this docstring overclaimed that it did. What it does is make the swap
+    visible where the value is BUILT: `run_gh` constructs with keywords, so a
+    transposition there has to be written past the field names.
+
+    The call sites still unpack positionally, deliberately — tests stub `run_gh`
+    with a plain 3-tuple, and that affordance holds only while consumers unpack
+    rather than reach for `.stdout`.
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class Page(NamedTuple):
+    """One validated page of the issues connection."""
+
+    parents: list
+    has_next: bool
+    end_cursor: object
+
+
 def run_gh(args):
-    """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
+    """Run `gh` and return a GhResult. The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-    return proc.returncode, proc.stdout, proc.stderr
+    return GhResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
 def fetch_page(owner, repo, cursor):
@@ -119,82 +152,65 @@ def fetch_page(owner, repo, cursor):
             f"GraphQL errors: {_first_line(json.dumps(payload['errors']))}"
         )
 
-    return _validate_page(payload)
+    try:
+        return _validate_page(payload)
+    except ShapeError as exc:
+        raise LookupFailed(str(exc)) from exc
 
 
 def _first_line(text):
     return (text or "").strip().splitlines()[0] if (text or "").strip() else "no detail"
 
 
-def _is_number(value):
-    """A real number, not a bool and not a numeric string.
-
-    Defect (5): the original compared `totalCount > 0` in `jq`, which orders
-    every number before every string, so a string `totalCount` satisfied the
-    test and a promotable issue was silently skipped as a rollup. `bool` is
-    excluded because Python makes it a subclass of `int`.
-    """
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 def _validate_page(payload):
-    """Return (parent_numbers, has_next, end_cursor) or raise LookupFailed."""
-    # Guarded rather than `(payload.get("data") or {})`: a truthy non-dict
-    # `data` has no `.get`, so that form raises AttributeError, which escapes
-    # LookupFailed and prints neither ROLLUP_OK=0 nor ROLLUP_REASON — the one
-    # failure shape this file must never produce.
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        raise LookupFailed(
-            f"response data is not an object (got {type(data).__name__})"
-        )
-    issues = data.get("repository")
-    if not isinstance(issues, dict):
-        raise LookupFailed("response has no repository object")
-    issues = issues.get("issues")
-    if not isinstance(issues, dict):
-        raise LookupFailed("response has no issues connection")
+    """Return a validated Page, or raise ShapeError.
 
-    nodes = issues.get("nodes")
-    if not isinstance(nodes, list):
-        raise LookupFailed("issues.nodes is not an array")
+    Every read goes through expect(), so a malformed response produces one
+    sentence naming the field rather than a KeyError traceback — and each
+    result is narrowed to its type at the call site, which is what lets the
+    comparisons below be checked rather than taken on faith.
+    """
+    issues = expect(
+        expect(
+            expect(payload, "data", dict, "response"),
+            "repository",
+            dict,
+            "response.data",
+        ),
+        "issues",
+        dict,
+        "response.data.repository",
+    )
+    nodes = expect(issues, "nodes", list, "issues")
 
     parents = []
     for node in nodes:
-        if not isinstance(node, dict):
-            raise LookupFailed("issues.nodes contains a non-object")
-        number = node.get("number")
-        if not _is_number(number):
-            raise LookupFailed(f"issue node has a non-numeric number: {number!r}")
-        sub = node.get("subIssues")
-        if not isinstance(sub, dict):
-            raise LookupFailed(f"issue #{number} has no subIssues object")
-        total = sub.get("totalCount")
-        if not _is_number(total):
-            raise LookupFailed(
-                f"issue #{number} has a non-numeric subIssues.totalCount: {total!r}"
-            )
-        if total > 0:
+        number = expect(node, "number", int, "issue node")
+        sub = expect(node, "subIssues", dict, f"issue #{number}")
+        # Defect (5): the shell block compared this in `jq`, which orders every
+        # number before every string, so a string totalCount satisfied `> 0` and
+        # a promotable issue was silently skipped as a rollup. expect() rejects
+        # both a string and a bool here.
+        if expect(sub, "totalCount", int, f"issue #{number}.subIssues") > 0:
             parents.append(number)
 
-    page_info = issues.get("pageInfo")
-    if not isinstance(page_info, dict):
-        raise LookupFailed("issues.pageInfo is missing")
-    has_next = page_info.get("hasNextPage")
-    if not isinstance(has_next, bool):
-        raise LookupFailed(f"pageInfo.hasNextPage is not a boolean: {has_next!r}")
+    page_info = expect(issues, "pageInfo", dict, "issues")
+    has_next = expect(page_info, "hasNextPage", bool, "issues.pageInfo")
 
     end_cursor = page_info.get("endCursor")
     if has_next:
         # Defect (6): `hasNextPage: true` with a missing/null/empty `endCursor`
         # set the shell's CURSOR to the literal string "null" and re-fetched the
-        # same page forever — a hang, not a failure.
+        # same page forever — a hang, not a failure. Read with .get() rather
+        # than expect(): a null endCursor is legal on the LAST page, so absence
+        # is only an error under has_next.
         if not isinstance(end_cursor, str) or not end_cursor:
-            raise LookupFailed(
-                f"pageInfo.hasNextPage is true but endCursor is {end_cursor!r}"
+            raise ShapeError(
+                f"issues.pageInfo.endCursor: hasNextPage is true but endCursor "
+                f"is {end_cursor!r}"
             )
 
-    return parents, has_next, end_cursor
+    return Page(parents, has_next, end_cursor)
 
 
 def collect_parents(repo):
@@ -214,17 +230,17 @@ def collect_parents(repo):
     cursor = None
     seen_cursors = set()
     while True:
-        page_parents, has_next, end_cursor = fetch_page(owner, name, cursor)
-        parents.update(page_parents)
-        if not has_next:
+        page = fetch_page(owner, name, cursor)
+        parents.update(page.parents)
+        if not page.has_next:
             return sorted(parents)
         # Defect (7): a valid but *unchanging* cursor loops forever, and the
         # guard for defect (6) does not cover it — that cursor is a non-empty
         # string, so it passes every shape check.
-        if end_cursor in seen_cursors:
-            raise LookupFailed(f"pagination repeated cursor {end_cursor!r}")
-        seen_cursors.add(end_cursor)
-        cursor = end_cursor
+        if page.end_cursor in seen_cursors:
+            raise LookupFailed(f"pagination repeated cursor {page.end_cursor!r}")
+        seen_cursors.add(page.end_cursor)
+        cursor = page.end_cursor
 
 
 def main(argv=None):

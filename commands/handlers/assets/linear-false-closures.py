@@ -69,11 +69,13 @@ import os
 import re
 import subprocess
 import sys
+from typing import NoReturn
 import urllib.request
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -119,7 +121,7 @@ mutation($id: String!, $state: String!) {
 """
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     sys.exit(f"linear-false-closures: {msg}")
 
 
@@ -142,9 +144,21 @@ def gql(key, query, variables=None):
     )
     with urllib.request.urlopen(req) as r:
         payload = json.loads(r.read())
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def to_since(s):
@@ -411,7 +425,8 @@ def main():
         return 1
 
     print(f"\nRestoring {len(to_restore)}...")
-    cache, ok, fail = {}, 0, 0
+    cache: dict = {}
+    ok = fail = 0
     for issue, _ in to_restore:
         try:
             todo = resolve_todo_state(key, issue["team"]["id"], cache)

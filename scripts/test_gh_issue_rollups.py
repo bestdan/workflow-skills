@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -24,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "commands" / "handlers" / "assets" / "gh-issue-rollups.py"
 
 _spec = importlib.util.spec_from_file_location("gh_issue_rollups", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 rollups = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rollups)
 
@@ -200,10 +202,36 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         body = json.dumps(
             {"data": {"repository": {"issues": {"nodes": {}, "pageInfo": {}}}}}
         )
-        self.assert_fails((0, body, ""), contains="nodes is not an array")
+        self.assert_fails(
+            (0, body, ""), contains="issues.nodes: expected list, got dict"
+        )
+
+    def test_a_non_object_inside_nodes_is_rejected(self):
+        """`nodes` is a list of objects, and nothing guarantees the API sends
+        one. A scalar here must fail closed rather than reach `.get()` on an
+        int. Found by mutation: removing expect()'s container check left the
+        whole suite green, because no case covered this shape."""
+        body = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "nodes": [42],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        )
+        self.assert_fails(
+            (0, body, ""), contains="issue node: expected an object, got int"
+        )
 
     def test_missing_repository_object(self):
-        self.assert_fails((0, json.dumps({"data": {}}), ""), contains="no repository")
+        self.assert_fails(
+            (0, json.dumps({"data": {}}), ""),
+            contains="response.data.repository: missing",
+        )
 
     def test_truthy_non_dict_data_is_rejected(self):
         """A truthy non-dict `data` has no `.get`, so an unguarded dereference
@@ -211,7 +239,8 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         no verdict at all. The falsy `{"data": {}}` case above does not cover
         this: `{} or {}` still yields a dict."""
         self.assert_fails(
-            (0, json.dumps({"data": "unexpected"}), ""), contains="not an object"
+            (0, json.dumps({"data": "unexpected"}), ""),
+            contains="response.data: expected dict, got str",
         )
 
     def test_string_total_count_is_rejected(self):
@@ -219,18 +248,22 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         every number before every string, so a promotable issue was silently
         skipped as a rollup."""
         self.assert_fails(
-            (0, page([node(1, "0")]), ""), contains="non-numeric subIssues.totalCount"
+            (0, page([node(1, "0")]), ""),
+            contains="subIssues.totalCount: expected int, got str",
         )
 
     def test_boolean_total_count_is_rejected(self):
+        """`bool` is an `int` subclass, so this must be rejected by its own
+        carve-out, not by the str check above — assert `got bool`."""
         self.assert_fails(
-            (0, page([node(1, True)]), ""), contains="non-numeric subIssues.totalCount"
+            (0, page([node(1, True)]), ""),
+            contains="subIssues.totalCount: expected int, got bool",
         )
 
     def test_non_numeric_issue_number_is_rejected(self):
         self.assert_fails(
             (0, page([{"number": "12", "subIssues": {"totalCount": 1}}]), ""),
-            contains="non-numeric number",
+            contains="number: expected int, got str",
         )
 
     def test_has_next_page_must_be_boolean_typed(self):
@@ -246,7 +279,7 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
                 }
             }
         )
-        self.assert_fails((0, body, ""), contains="hasNextPage is not a boolean")
+        self.assert_fails((0, body, ""), contains="hasNextPage: expected bool, got str")
 
     def test_null_end_cursor_with_has_next_page_fails_rather_than_hanging(self):
         """Defect (6): `hasNextPage: true` with a missing/null/empty `endCursor`
@@ -323,6 +356,50 @@ class TestFailureOutputChannel(RollupTestCase):
         self.assertIn(
             f"ROLLUP_REASON={rollups.SUBISSUES_UNAVAILABLE}", out.splitlines()[1]
         )
+
+
+class TestRunGhIsTheOneUnstubbedSeam(unittest.TestCase):
+    """Every other case in this file REPLACES run_gh with a fake, so the real
+    one — the only place GhResult is constructed — is otherwise never executed.
+    That is the classic hole a stubbed seam leaves, and it is exactly where a
+    transposed stdout/stderr would live.
+    """
+
+    def test_fields_map_to_the_streams_they_are_named_for(self):
+        class FakeProc:
+            returncode = 7
+            stdout = "THIS-IS-STDOUT"
+            stderr = "THIS-IS-STDERR"
+
+        with mock.patch.object(rollups.subprocess, "run", return_value=FakeProc()):
+            result = rollups.run_gh(["api", "graphql"])
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout, "THIS-IS-STDOUT")
+        self.assertEqual(result.stderr, "THIS-IS-STDERR")
+
+    def test_positional_unpacking_keeps_the_documented_order(self):
+        """The docstring and CONTRIBUTING both promise a plain 3-tuple stub
+        stays valid, which holds only while the field order is (returncode,
+        stdout, stderr). Pin it — every other test in this file depends on it."""
+
+        class FakeProc:
+            returncode = 3
+            stdout = "OUT"
+            stderr = "ERR"
+
+        with mock.patch.object(rollups.subprocess, "run", return_value=FakeProc()):
+            code, out, err = rollups.run_gh(["api"])
+
+        self.assertEqual((code, out, err), (3, "OUT", "ERR"))
+
+    def test_it_calls_gh_with_the_arguments_it_was_given(self):
+        with mock.patch.object(rollups.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            rollups.run_gh(["api", "graphql", "-f", "query=x"])
+        argv = run.call_args[0][0]
+        self.assertEqual(argv[0], "gh", "the binary must be gh")
+        self.assertEqual(argv[1:], ["api", "graphql", "-f", "query=x"])
 
 
 class TestQueryShape(RollupTestCase):

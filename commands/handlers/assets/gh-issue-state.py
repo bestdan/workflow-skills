@@ -128,7 +128,7 @@ def validate(labels, vocabulary, done=False):
             + ", ".join(unknown)
         )
 
-    counts = {}
+    counts: dict = {}
     for label in labels:
         counts[group_of(label)] = counts.get(group_of(label), 0) + 1
 

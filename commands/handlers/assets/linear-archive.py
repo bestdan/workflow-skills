@@ -49,7 +49,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -142,9 +143,21 @@ def gql(key, query, variables=None):
         sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
     except urllib.error.URLError as e:
         sys.exit(f"Network error: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def terminal_passes():
@@ -237,11 +250,19 @@ def find_by_ref(key, team, identifiers, uuids):
     them explicitly, so an already-archived issue is a no-op to report rather
     than a lookup failure. Only `nodes` are archive candidates.
     """
-    nodes, archived, seen = [], [], set()
+    nodes: list = []
+    archived: list = []
+    seen = set()
     if identifiers:
         team_field = "id" if UUID_RE.match(team) else "name"
         query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
-        numbers = sorted({int(IDENTIFIER_RE.match(i).group(2)) for i in identifiers})
+        # parse_issue_refs() already rejected every ref that does not match
+        # IDENTIFIER_RE, so each match here is non-None. Assert it rather than
+        # dereferencing blind: a future caller reaching find_by_ref() directly
+        # gets this line instead of `NoneType has no attribute 'group'`.
+        matches = [IDENTIFIER_RE.match(i) for i in identifiers]
+        assert all(matches), f"unparsed identifier in {identifiers}"
+        numbers = sorted({int(m.group(2)) for m in matches if m})
         wanted = set(identifiers)
         for node in gql(key, query, {"team": team, "numbers": numbers})["issues"][
             "nodes"

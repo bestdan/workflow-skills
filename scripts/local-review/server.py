@@ -355,13 +355,16 @@ def parse_diff(text):
     hunk = None
     old_ln = new_ln = 0
     hunk_old_left = hunk_new_left = 0  # old/new lines the active hunk still owes, per its @@ counts
-    pend_del = []
-    pend_add = []
+    pend_del: list = []
+    pend_add: list = []
     headerless = False  # cur was opened from a bare ---/+++ pair, no `diff --git`
     pend_old_path = None  # a `--- ` line seen while awaiting its `+++ ` pair
 
     def flush_pairs():
         nonlocal pend_del, pend_add
+        # Every call site guards on a live hunk (`flush_pairs() if hunk else None`);
+        # rows have nowhere to go without one.
+        assert hunk is not None, "flush_pairs() called with no open hunk"
         n = max(len(pend_del), len(pend_add))
         for k in range(n):
             left = pend_del[k] if k < len(pend_del) else {"t": "empty"}
@@ -2790,6 +2793,10 @@ class Handler(BaseHTTPRequestHandler):
             os.replace(tmp_path, self.out_path)
             self._durable = True
             if Handler.mode == "threads":
+                # round_no is minted in the earlier block guarded by this same
+                # condition, so it is an int by here. The checker cannot
+                # correlate two separate `if`s on the same expression.
+                assert round_no is not None
                 with Handler._threads_lock:
                     Handler.round = round_no
                     Handler._thread_counter = counter
@@ -2827,8 +2834,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            resp = {"ok": True, "count": len(payload.get("comments", [])),
-                     "github_flagged": len(flagged)}
+            resp: dict = {"ok": True, "count": len(payload.get("comments", [])),
+                          "github_flagged": len(flagged)}
             if Handler.mode == "threads":
                 resp["ids"] = [c["id"] for c in payload.get("comments", [])]
                 resp["round"] = round_no

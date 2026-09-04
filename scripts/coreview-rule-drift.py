@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sys
+from typing import NoReturn
 from pathlib import Path
 
 # Placeholders a reviewer file leaves for the operator to substitute. The
@@ -76,7 +77,7 @@ RULE_LINE_RE = re.compile(r'^\s*("Bash\(.*\)")\s*,?\s*$')
 FENCE_RE = re.compile(r"^\s*```(\w*)")
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     print(f"coreview-rule-drift: {msg}", file=sys.stderr)
     sys.exit(2)
 
@@ -179,7 +180,8 @@ def load_allow_rules(paths):
     override); one that is present but unparseable is a real problem the caller
     must hear about, so it is fatal rather than silently skipped.
     """
-    rules, read = [], []
+    rules: list = []
+    read: list = []
     for p in paths:
         if not p.exists():
             continue

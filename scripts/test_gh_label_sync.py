@@ -21,6 +21,7 @@ ASSET = ROOT / "commands" / "handlers" / "assets" / "gh-label-sync.py"
 LABELS_FILE = ROOT / "commands" / "handlers" / "assets" / "labels.yml"
 
 _spec = importlib.util.spec_from_file_location("gh_label_sync", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 gh_label_sync = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gh_label_sync)
 

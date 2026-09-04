@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "commands" / "handlers" / "assets" / "gh-issue-deps.py"
 
 _spec = importlib.util.spec_from_file_location("gh_issue_deps", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 gh_issue_deps = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gh_issue_deps)
 
