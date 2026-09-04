@@ -751,8 +751,9 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    entries separate from both — a blocked issue and a held one need different
    answers from the reader.
 5. **Dispatch one remote session per selected issue.** Each selected issue gets its
-   **own** session running `gh-issue-claim.md` against **that one issue number**, as
-   a direct `<#n>` pick. **Skip "Find candidates"** — this dispatcher already ranked
+   **own** session running `gh-issue-claim.md`'s flow — **inlined into the prompt**,
+   since the VM cannot read that file — against **that one issue number**, as a
+   direct `<#n>` pick. **Skip "Find candidates"** — this dispatcher already ranked
    and selected — and never instruct a session to claim more than one issue. Every
    gate before the claim is **verification-only** in the dispatched session: a
    blocked dependency, a pre-flight trip, a feasibility reject, or a lost claim
@@ -761,22 +762,54 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
 
    The prompt must be **self-contained** — the VM has no plugin installed **and** a
    fresh clone has no local task config (`/task-config` gitignores
-   `dev_docs/tasks/`). Inline the issue number, the claim+execute instructions, and
-   the already-resolved **non-secret** gh-issue config the single-issue flow needs:
-   `gh-issue.repo` if set, the base branch, `branch_prefix`, and `wip_limit`.
-   **Never** inline a token or any other secret — the dispatched session
-   authenticates through its own `gh`. That is also what step 2's bound assumes:
-   `wip` counts `assignee:@me`, so the dispatched sessions must authenticate as
-   the **dispatching** account or their claims never enter the next run's `slack`.
+   `dev_docs/tasks/`). Inline the issue number, the claim+execute instructions
+   themselves (**not** a pointer to `gh-issue-claim.md` or `claim-lock.md`, which
+   the VM cannot read), and the already-resolved **non-secret** gh-issue config the
+   single-issue flow needs: `gh-issue.repo` if set, the base branch,
+   `branch_prefix`, and `wip_limit`. **Never** inline a token or any other secret —
+   the dispatched session authenticates through its own `gh`. That is also what
+   step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
+   must authenticate as the **dispatching** account or their claims never enter the
+   next run's `slack`.
 
-   **Self-check first.** The prompt's first step must be: "If `gh auth status` fails
-   in this session, do **not** claim — stop immediately and report `remote gh CLI
-   unavailable`." Every phase of this handler shells out to `gh`, so a session
-   without it can do nothing; the self-check makes that degrade **loudly** on one
-   issue rather than silently. It sits inside the dispatched session, not in a
-   pre-check here, for section 3's reason: the dispatcher has no deterministic way
-   to introspect what the VM will inherit. The deterministic opt-out for a host that
-   already knows the answer is `remote_batch`, read **before** step 1 above.
+   **Resolve every value you can here, so the session needs fewer of the plugin's
+   assets.** The branch name is the clearest case: run `branch-name` **in this
+   session** and inline the **literal** it prints, rather than telling the VM to run
+   a script it does not have.
+
+   ```bash
+   branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name \
+     --issue <n> [--prefix "<branch_prefix>"])
+   ```
+
+   The result is `<branch_prefix>task-<n>` (`gh-issue-claim.md` "Branch name"). A
+   literal `task/<n>` is **wrong** anywhere on this path: it probes and creates a
+   ref that is not the real lock, so every racer concludes it won. Deriving it once
+   here also means both sides of a race compute it the same way, which is the
+   property `claim-lock.md` depends on.
+
+   **Self-check first, on two things.** The prompt's first step must be: "If
+   `gh auth status` fails, or the handler's asset scripts are not present at
+   `commands/handlers/assets/` (`gh-issue-state.py` and `_labels.py` at minimum),
+   do **not** claim — stop immediately and report `remote gh CLI unavailable` or
+   `remote handler assets unavailable`." Both are necessary and `gh` alone is not
+   sufficient: every phase of this handler shells out to `gh`, **and** the label
+   writes go through `gh-issue-state.py`, which validates against `labels.yml`
+   before any network call. A session that claims an issue and then cannot write
+   its rung strands exactly the half-written state `gh-issue-claim.md` "Claim the
+   issue" step 3 warns about — assigned and lock-held but still `status:2_ready`,
+   which nothing picks up and nothing cleans.
+
+   **This is the handler's local-only limitation reaching the batch path, and the
+   self-check is the whole answer to it.** Every gh-issue asset shells out to `gh`
+   and lives in the plugin, which a dispatched VM does not have; the plan's own
+   note that "the whole handler is local-only" is what this inherits. Rather than
+   gate dispatch on an un-introspectable pre-check — section 3's reason, unchanged
+   — put the check where the capability is visible and let a fleet that lacks the
+   assets fail **loudly on one issue** instead of silently claiming and stranding
+   it. A host that already knows its VMs cannot run the handler should set
+   `remote_batch: false` (read **before** step 1 above) and never dispatch at all;
+   that is the deterministic half of this same question.
 
    **Declare the session unattended.** Inline `--non-interactive` semantics
    verbatim: "No human is present in this session — never prompt; if the WIP gate is
@@ -784,16 +817,6 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    failure mode in the design — without this, each dispatched session concludes it
    is attended and offers itself the override its dispatcher was gated by.
 
-   **Get the branch name from the script:**
-
-   ```bash
-   branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name \
-     --issue <n> [--prefix "<branch_prefix>"])
-   ```
-
-   A literal `task/<n>` is **wrong** here: the lock is `<branch_prefix>task-<n>`
-   (`gh-issue-claim.md` "Branch name"), so a hand-built name probes and creates a
-   ref that is not the real lock, and every racer concludes it won.
 6. **Dispatched sessions claim on the comment election, not the ref lock.** This is
    the one place a dispatched session's flow differs from the single path. Instruct
    it to run `claim-lock.md`'s **comment-token election** and to **skip**
