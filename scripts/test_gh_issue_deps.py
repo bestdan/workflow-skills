@@ -43,6 +43,7 @@ class FakeRepo:
         self.page_size = page_size
         self.calls = []
         self.posts = []
+        self.deletes = []
 
     def run_gh(self, args, stdin=None):
         self.calls.append((args, stdin))
@@ -51,6 +52,13 @@ class FakeRepo:
             issue = int(path.split("/issues/")[1].split("/")[0])
             self.posts.append((issue, json.loads(stdin)))
             return 0, "{}", ""
+        if args[:3] == ["api", "--method", "DELETE"]:
+            path = args[3]
+            issue = int(path.split("/issues/")[1].split("/")[0])
+            # The last path segment is the identifier under test: the blocker's
+            # DATABASE id, not its issue number.
+            self.deletes.append((issue, int(path.rsplit("/", 1)[1])))
+            return 0, "", ""
         if args[:3] == ["api", "--paginate", "--slurp"]:
             issue = int(args[3].split("/issues/")[1].split("/")[0])
             entries = [
@@ -207,6 +215,70 @@ class DepsTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(repo.calls, [])
         self.assertIn("cannot block itself", err)
+
+    # --- removal: stale-link repair for /reoptimize-tasks ------------------
+
+    def test_removal_deletes_by_the_blockers_database_id(self):
+        """Same identifier the POST body carries, in the path's last segment.
+
+        The issue number there addresses a different edge, or none — and either
+        way GitHub answers 204, so getting it wrong is silent.
+        """
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, blocked_by={12: [11]})
+        code, _, _ = self._run(repo, ["--remove-edge", "12:11", "--apply"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(repo.deletes, [(12, 900011)])
+
+    def test_removal_is_a_delete_not_a_body_edit(self):
+        """The stale footer line is not the dependency; the edge is."""
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, blocked_by={12: [11]})
+        self._run(repo, ["--remove-edge", "12:11", "--apply"])
+
+        self.assertEqual(
+            [args for args, _ in repo.calls if args[:2] == ["issue", "edit"]], []
+        )
+
+    def test_removing_an_edge_that_is_not_there_is_a_no_op(self):
+        """Remove-existing-only, so re-running an approved repair costs nothing."""
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, blocked_by={12: []})
+        code, out, _ = self._run(repo, ["--remove-edge", "12:11", "--apply"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(repo.deletes, [])
+        removal = json.loads(out)["removal"]
+        self.assertEqual(removal["removed"], [])
+        self.assertEqual(removal["absent"], [{"blocked": 12, "blocker": 11}])
+
+    def test_a_repeated_removal_is_sent_once(self):
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, blocked_by={12: [11]})
+        code, out, _ = self._run(
+            repo, ["--remove-edge", "12:11", "--remove-edge", "12:11", "--apply"]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(repo.deletes), 1)
+        self.assertEqual(len(json.loads(out)["removal"]["removed"]), 1)
+
+    def test_removal_without_apply_writes_nothing(self):
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, blocked_by={12: [11]})
+        code, out, _ = self._run(repo, ["--remove-edge", "12:11"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(repo.deletes, [])
+        self.assertEqual(repo.mutating_calls(), [])
+        self.assertEqual(json.loads(out)["removal"]["removed"][0]["blocker"], 11)
+
+    def test_a_malformed_removal_is_refused_before_any_creation_runs(self):
+        """Both lists are parsed first, so a half-written graph is impossible."""
+        repo = FakeRepo(ids={11: 900011, 12: 900012})
+        code, _, err = self._run(
+            repo, ["--edge", "12:11", "--remove-edge", "12", "--apply"]
+        )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(repo.calls, [])
+        self.assertIn("<blocked>:<blocker>", err)
 
     def test_a_malformed_edge_is_refused_before_any_network_call(self):
         repo = FakeRepo(ids={12: 900012})

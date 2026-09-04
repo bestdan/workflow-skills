@@ -30,6 +30,15 @@ number the repo does not have fails loudly on the GET.
 
 Edge creation is create-missing-only, so a re-push adds no duplicates.
 
+`--remove-edge` is the mirror, added for `/reoptimize-tasks`'s stale-link repair
+(`gh-issue-reoptimize.md` Dimension 1): an edge whose blocker is closed
+`not_planned` blocks forever, and removing it is the fix. It is
+remove-existing-only for the same reason creation is create-missing-only — an
+edge that is already gone reports as `absent`, not as an error, so a re-run of an
+approved repair is a no-op. The DELETE path carries the blocker's **database
+id**, exactly as the POST body does; passing the issue number there addresses a
+different edge or none.
+
 A cloud routine has no `gh`, and the GitHub MCP connector has no dependency tool
 (measured — `dev_docs/decisions/2026-08-24-routine-claim-channel.md`), so this
 path is LOCAL ONLY. There is no unattended equivalent to fall back to.
@@ -41,6 +50,7 @@ Usage:
   # <blocked>:<blocker>, both issue numbers; repeatable
   python3 gh-issue-deps.py --repo owner/name --edge 12:11 --edge 12:10
   python3 gh-issue-deps.py --repo owner/name --edge 12:11 --apply --json
+  python3 gh-issue-deps.py --repo owner/name --remove-edge 12:11 --apply
 
 Without `--apply` nothing is written: the reads still run, so the report says
 exactly which edges would be created, which already exist, and which were
@@ -181,6 +191,71 @@ def create_edge(repo, blocked, blocker_id):
     return out
 
 
+def delete_edge(repo, blocked, blocker_id):
+    """One DELETE. The blocker's DATABASE id is the last path segment.
+
+    Same identifier the POST body carries, in a different position — a number
+    there names a different edge, or none, and either way reports success.
+    """
+    code, out, err = run_gh(
+        [
+            "api",
+            "--method",
+            "DELETE",
+            f"repos/{repo}/issues/{blocked}/dependencies/blocked_by/{blocker_id}",
+        ]
+    )
+    if code != 0:
+        raise SystemExit(
+            f"DELETE blocked_by {repo}#{blocked} <- id {blocker_id} failed: "
+            f"{err.strip() or out.strip()}"
+        )
+    return out
+
+
+def remove_edges(repo, edges, apply=False):
+    """The mirror of apply_edges: remove-existing-only.
+
+    An edge that is not on the issue's `blocked_by` list reports as `absent`
+    rather than failing, so re-running an approved repair is a no-op — the same
+    idempotency creation has, in the other direction.
+    """
+    id_cache: dict = {}
+    edge_cache: dict = {}
+    removed, absent, skipped = [], [], []
+
+    for blocked, blocker_ref in edges:
+        blocker = parse_ref(blocker_ref, repo)
+        if blocker is None:
+            skipped.append({"blocked": blocked, "blocker": blocker_ref})
+            print(
+                f"warning: #{blocked} blocked by {blocker_ref!r} — not an issue in "
+                f"{repo}, so there is no native edge to remove",
+                file=sys.stderr,
+            )
+            continue
+        if blocker not in existing_blockers(repo, blocked, edge_cache):
+            absent.append({"blocked": blocked, "blocker": blocker})
+            continue
+        blocker_id = issue_database_id(repo, blocker, id_cache)
+        if apply:
+            delete_edge(repo, blocked, blocker_id)
+        # Dropped from the cache whether or not the DELETE was sent, so a
+        # repeated --remove-edge reports the second copy as already absent.
+        edge_cache[blocked].discard(blocker)
+        removed.append(
+            {"blocked": blocked, "blocker": blocker, "blocker_id": blocker_id}
+        )
+
+    return {
+        "repo": repo,
+        "applied": apply,
+        "removed": removed,
+        "absent": absent,
+        "skipped": skipped,
+    }
+
+
 def apply_edges(repo, edges, apply=False):
     id_cache: dict = {}
     edge_cache: dict = {}
@@ -220,6 +295,23 @@ def apply_edges(repo, edges, apply=False):
     }
 
 
+def report_removal(result):
+    verb = "removed" if result["applied"] else "would remove"
+    print(f"{result['repo']}: {verb} {len(result['removed'])} edge(s)")
+    for edge in result["removed"]:
+        print(f"  #{edge['blocked']} no longer blocked_by #{edge['blocker']}")
+    if result["absent"]:
+        print(f"\nNo such edge ({len(result['absent'])}):")
+        for edge in result["absent"]:
+            print(f"  #{edge['blocked']} was not blocked_by #{edge['blocker']}")
+    if result["skipped"]:
+        print(
+            f"\nSkipped — not an issue in {result['repo']} ({len(result['skipped'])}):"
+        )
+        for edge in result["skipped"]:
+            print(f"  #{edge['blocked']} blocked by {edge['blocker']}")
+
+
 def report(result):
     verb = "created" if result["applied"] else "would create"
     print(f"{result['repo']}: {verb} {len(result['created'])} edge(s)")
@@ -249,21 +341,42 @@ def main(argv=None):
             "`owner/repo#<n>` naming --repo; repeatable"
         ),
     )
-    parser.add_argument("--apply", action="store_true", help="send the POSTs")
+    parser.add_argument(
+        "--remove-edge",
+        action="append",
+        default=[],
+        dest="removals",
+        metavar="BLOCKED:BLOCKER",
+        help=(
+            "remove the edge saying BLOCKED is blocked by BLOCKER, same ref shapes "
+            "as --edge; repeatable. Stale-link repair for /reoptimize-tasks"
+        ),
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="send the POSTs and DELETEs"
+    )
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
+    # Creations and removals are refused together, before either runs. A pass
+    # that wrote half its edges and then rejected a malformed removal would
+    # leave the graph in a state no caller asked for.
     try:
         edges = parse_edges(args.edges, args.repo)
+        removals = parse_edges(args.removals, args.repo)
     except EdgeError as exc:
         print(f"refusing to write edges in {args.repo}: {exc}", file=sys.stderr)
         return 2
 
     result = apply_edges(args.repo, edges, apply=args.apply)
+    removal = remove_edges(args.repo, removals, apply=args.apply)
     if args.as_json:
-        print(json.dumps(result, indent=2))
+        print(json.dumps({**result, "removal": removal}, indent=2))
     else:
         report(result)
+        if removals:
+            print()
+            report_removal(removal)
     return 0
 
 

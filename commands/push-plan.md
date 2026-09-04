@@ -296,10 +296,20 @@ GitHub MCP connector exposes no dependency tool
 (`dev_docs/decisions/2026-08-24-routine-claim-channel.md`). Issue bodies are
 readable through the connector, so the footer is the only blocked-ness signal
 available unattended. Read it as a hint, never as the graph: nothing keeps the
-footer and the edge in sync, and `gh-issue-reoptimize.md` writes footer lines
-for dependencies that have no edge, so a footer can record a proposal that was
-never applied. Dropping it is `gh-issue-reoptimize.md`'s call to
-make, not this file's.
+footer and the edge in sync between writes, so a hand-edited body can claim a
+dependency the graph does not have.
+
+> **Settled by task 8 (`gh-issue-reoptimize.md`).** That flow used to write
+> footer lines for dependencies with no edge, which is what made a footer
+> unreadable as evidence — you could not tell a recorded dependency from an
+> unapplied proposal. It no longer does: it writes the edge and reconciles the
+> footer against it, in both directions (`footer_only` gets an edge,
+> `edge_only` gets a footer). So the rule is now uniform across every path that
+> writes one — **the footer follows the edge, and a footer alone is never a
+> dependency.** Keeping it stays the right call for the reason above, and the
+> decision holds whether or not a GitHub Actions runner turns out to reach the
+> dependency endpoints (PRE-823): the deciding argument is that `/push-plan` and
+> `/reoptimize-tasks` must not disagree about what a footer means.
 
 > **Value note.** `/do-tasks` reads this board — `gh-issue` execution is single
 > and foreground (`do-tasks.md`), not the parallel Linear runner. The edges this
