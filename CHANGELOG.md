@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.20.0] - 2026-09-04
+
+### Features
+
+- stop a review before it lands on contested text (#474) (f6d4762)
+
 ## [2.19.0] - 2026-09-04
 
 ### Features
