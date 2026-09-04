@@ -227,16 +227,28 @@ join, and `gh` covers it only partially.
 
 **Phase 3 — handler (added 2026-09-04, absorbing Linear PRE-117)**
 
-16. [phase_3_handler/gh_migration_task_16.md](phase_3_handler/gh_migration_task_16.md) — Batch execution (`/do-tasks --all`) on the
-    tracker-batch subroutine. **Unblocked** — task 4 settled the claim contract and task
-    15 the dependency edges, both merged; it does not depend on task 8, so it sequences
-    anywhere in Phase 3 without disturbing the existing order. It absorbs **PRE-117**,
-    cancelled as superseded, and supersedes the closed
-    [#426](https://github.com/bestdan/workflow-skills/pull/426) — whose §4 batch
-    machinery is worth lifting even though its candidate query, WIP count, lock spelling
-    and dependency section are not. See **#426 in detail** below for the five defects,
-    every one of which fails silently. Retires `do-tasks.md:646`'s "until the gh-issue
-    batch task lands" and flips `process — batch × gh-issue` in the capability matrix.
+16. ~~[phase_3_handler/gh_migration_task_16.md](phase_3_handler/gh_migration_task_16.md)~~ — Batch execution (`/do-tasks --all`) on the
+    tracker-batch subroutine. **Delivered, not merged** —
+    [PR #482](https://github.com/bestdan/workflow-skills/pull/482), open and ready for
+    review. Absorbed **PRE-117** and superseded the closed
+    [#426](https://github.com/bestdan/workflow-skills/pull/426), which was rebuilt as a
+    fresh edit rather than ported. Every deterministic value on the new path reads from a
+    script whose output is the contract — the migrated candidate query, `gh-issue-ready.py`
+    against the native `blocked_by` graph, `gh-issue-claim.py wip` (which gained a clamped
+    `slack` field) and `branch-name`. Two things it settled that the plan had not:
+
+    - **Deviation: the capability matrix reads `opt`, not `yes`.** The task file said flip
+      it to `yes`. Remote dispatch needs the dispatched session to run a plugin script,
+      which reaches a cloud session only from a committed `.claude/settings.json` — a
+      mechanism that is **documented and unprobed**. So `gh-issue.remote_batch` defaults
+      to `false` and the gap is only partly closed. The probe that would flip it is in the
+      handoff, unowned.
+    - **The "a cloud VM has no plugin / has no `gh`" premise is in doubt**, which reaches
+      further than this task. See the handoff's first section, and open question 0 below.
+
+    Also surfaced and **not** repaired: a crashed claim strands its issue at
+    `status:3_started` with an assignee, invisible to the candidate query on both counts,
+    on both lock paths. No task owns it.
 
 **Phase 3 — handler (added 2026-09-04, from task 7's dispatch check)**
 
@@ -373,16 +385,23 @@ about #436.
 
 ## Open questions
 
-0. **RESOLVED 2026-08-24 — a routine CAN drive the loop, with two gaps.** MCP is the
-   credentialed channel (raw HTTP carries no credential and `gh` is absent). Issue
-   writes work; `mcp__github__create_branch` is create-only and rejects duplicates, so
-   the claim lock holds. Two confirmed gaps change the design:
-   **(a)** a routine cannot _release_ a lock — no delete-ref tool, and `git push
+0. **RESOLVED 2026-08-24 — a routine CAN drive the loop, with two gaps.**
+   > **Partly reopened 2026-09-04 by task 16.** Anthropic's current documentation says a
+   > cloud session has `gh` preinstalled and proxy-authenticated, and installs plugins a
+   > repo declares in a committed `.claude/settings.json` — both contradicting the
+   > measurement below. Documentation is not measurement and this was **not** re-probed;
+   > treat the channel question as open. The handoff carries the probe that would settle
+   > it. Gaps (a) and (b) below are unaffected: neither turns on `gh`.
+   >
+   > MCP is the credentialed channel (raw HTTP carries no credential and `gh` is absent). Issue
+   > writes work; `mcp__github__create_branch` is create-only and rejects duplicates, so
+   > the claim lock holds. Two confirmed gaps change the design:
+   > **(a)** a routine cannot _release_ a lock — no delete-ref tool, and `git push
    --delete` 403s — so a bailing routine strands a claim (task 4);
-   **(b)** there is **no dependency tool**, so `blocked_by`/`blocking` edges are
-   unreachable unattended, making task 8 and dependency-aware selection local-only.
-   Still open: whether `issue_write` **replaces** or **merges** labels, which decides
-   whether task 3's atomicity guarantee holds on the routine path. See §10b.
+   > **(b)** there is **no dependency tool**, so `blocked_by`/`blocking` edges are
+   > unreachable unattended, making task 8 and dependency-aware selection local-only.
+   > Still open: whether `issue_write` **replaces** or **merges** labels, which decides
+   > whether task 3's atomicity guarantee holds on the routine path. See §10b.
 1. **Image attachments.** GitHub reportedly has no API for uploading issue
    images (browser-only). Unverified. If true, Linear-hosted screenshots in
    comments cannot be migrated headlessly. Accept the loss, or re-home them into
