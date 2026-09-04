@@ -221,6 +221,13 @@ wrong one whenever `gh-issue.repo` is configured.
 - The dependency POST body and the removal DELETE path both carry the blocker's
   **database id**, not its `#<number>`. `gh-issue-deps.py` resolves it; that is
   why the edge writes go through the helper rather than a hand-rolled `gh api`.
+- **GitHub refuses a directly reciprocal edge with a 422, and refuses nothing
+  else.** Measured — creating `A blocked_by B` when `B blocked_by A` exists is
+  rejected, while `A → B → C → A` is created without complaint. So a proposed
+  edge can come back `refused`; report those in the summary rather than treating
+  the batch as failed, and never read GitHub's guard as a guarantee that the
+  graph is acyclic. That one-hop guard is exactly why Dimension 1's cycle check
+  reads the real graph instead of trusting the API.
 - The local `sandbox-network-guard` hook blocks non-GET `gh api`, so any
   `--apply` run needs the sandbox escape. A blocked write surfaces as a hook
   refusal, not as a failed edge.

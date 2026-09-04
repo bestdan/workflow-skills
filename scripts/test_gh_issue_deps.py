@@ -37,10 +37,16 @@ class FakeRepo:
     beyond page one — the shape `gh api --paginate --slurp` returns.
     """
 
-    def __init__(self, ids, blocked_by=None, page_size=100):
+    def __init__(
+        self, ids, blocked_by=None, page_size=100, refuse_cycles=False, post_error=None
+    ):
         self.ids = dict(ids)
         self.blocked_by = dict(blocked_by or {})
         self.page_size = page_size
+        # Reproduces GitHub's measured 422 on a directly reciprocal edge, and
+        # (separately) an unrelated POST failure that must stay fatal.
+        self.refuse_cycles = refuse_cycles
+        self.post_error = post_error
         self.calls = []
         self.posts = []
         self.deletes = []
@@ -50,6 +56,20 @@ class FakeRepo:
         if args[:3] == ["api", "--method", "POST"]:
             path = args[3]
             issue = int(path.split("/issues/")[1].split("/")[0])
+            if self.post_error:
+                return 1, "", self.post_error
+            blocker_id = json.loads(stdin)["issue_id"]
+            blocker = next(n for n, i in self.ids.items() if i == blocker_id)
+            if self.refuse_cycles and issue in self.blocked_by.get(blocker, []):
+                return (
+                    1,
+                    "",
+                    (
+                        "gh: An error occurred while adding the blocking issue to the "
+                        "issue. Validation failed: this dependency would create a cycle "
+                        "where the target is already blocked by the source (HTTP 422)"
+                    ),
+                )
             self.posts.append((issue, json.loads(stdin)))
             return 0, "{}", ""
         if args[:3] == ["api", "--method", "DELETE"]:
@@ -215,6 +235,42 @@ class DepsTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(repo.calls, [])
         self.assertIn("cannot block itself", err)
+
+    # --- GitHub's own reciprocal-cycle guard (measured, live, 2026-09-04) ---
+
+    def test_a_reciprocal_edge_is_recorded_as_refused_not_crashed(self):
+        """GitHub 422s the reciprocal edge; the rest of the batch must survive.
+
+        `/reoptimize-tasks` infers edges from prose, and contradictory prose is
+        exactly what produces a reciprocal pair — so this is a reachable case,
+        not a defensive one.
+        """
+        repo = FakeRepo(ids={11: 900011, 12: 900012, 13: 900013}, refuse_cycles=True)
+        repo.blocked_by = {11: [12]}  # 11 already blocked_by 12
+        code, out, err = self._run(
+            repo, ["--edge", "12:11", "--edge", "13:11", "--apply"]
+        )
+
+        self.assertEqual(code, 0)
+        result = json.loads(out)
+        # The reciprocal was refused...
+        self.assertEqual(len(result["refused"]), 1)
+        self.assertEqual(result["refused"][0]["blocked"], 12)
+        self.assertIn("cycle", result["refused"][0]["reason"].lower())
+        self.assertIn("refused", err)
+        # ...and the unrelated edge in the same batch still landed.
+        self.assertEqual([e["blocked"] for e in result["created"]], [13])
+        self.assertEqual(repo.posts, [(13, {"issue_id": 900011})])
+
+    def test_a_non_cycle_post_failure_still_fails_loudly(self):
+        """Only GitHub's cycle refusal is survivable; a real error must stop."""
+        repo = FakeRepo(ids={11: 900011, 12: 900012}, post_error="gh: 500 boom")
+        gh_issue_deps.run_gh = repo.run_gh
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                gh_issue_deps.main(["--repo", REPO, "--edge", "12:11", "--apply"])
+
+        self.assertIn("boom", str(caught.exception))
 
     # --- removal: stale-link repair for /reoptimize-tasks ------------------
 

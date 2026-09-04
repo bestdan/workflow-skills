@@ -30,6 +30,15 @@ number the repo does not have fails loudly on the GET.
 
 Edge creation is create-missing-only, so a re-push adds no duplicates.
 
+**GitHub refuses a directly reciprocal edge, and only that.** Measured
+2026-09-04 against a live repo: creating `A blocked_by B` when `B blocked_by A`
+already exists returns **422**, "this dependency would create a cycle where the
+target is already blocked by the source". The guard is exactly one hop deep —
+the same probe built `A -> B -> C -> A` with no complaint. So the API prevents
+the trivial cycle and nothing more, which is precisely why `gh-issue-graph.py`
+detects cycles over the real graph rather than trusting GitHub to have none.
+A refused edge is recorded in `refused` and the batch continues.
+
 `--remove-edge` is the mirror, added for `/reoptimize-tasks`'s stale-link repair
 (`gh-issue-reoptimize.md` Dimension 1): an edge whose blocker is closed
 `not_planned` blocks forever, and removing it is the fix. It is
@@ -70,6 +79,23 @@ ISSUE_REF = re.compile(r"^(?:(?P<repo>[^\s#]+)#|#)?(?P<number>\d+)$")
 
 class EdgeError(Exception):
     """A caller mistake that must stop the run before anything is written."""
+
+
+class EdgeRefused(Exception):
+    """GitHub declined this edge on its own merits — not a transport failure.
+
+    Measured 2026-09-04 against a live repo: `POST .../dependencies/blocked_by`
+    returns **422** with "this dependency would create a cycle where the target
+    is already blocked by the source" when the reciprocal edge already exists.
+    GitHub's guard is only one hop deep — the same probe built `669 -> 670 ->
+    671 -> 669` without complaint — so this is a refusal of one edge, never a
+    guarantee that the graph is acyclic.
+
+    It is a per-edge outcome rather than a run-ending error because the flow that
+    writes edges in batches (`/reoptimize-tasks`) infers them from prose, and
+    contradictory prose is exactly what produces a reciprocal pair. Aborting
+    mid-batch would leave the earlier edges written and the rest unattempted.
+    """
 
 
 def run_gh(args, stdin=None):
@@ -184,9 +210,11 @@ def create_edge(repo, blocked, blocker_id):
         stdin=json.dumps({"issue_id": blocker_id}),
     )
     if code != 0:
+        detail = err.strip() or out.strip()
+        if "cycle" in detail.lower():
+            raise EdgeRefused(detail)
         raise SystemExit(
-            f"POST blocked_by {repo}#{blocked} <- id {blocker_id} failed: "
-            f"{err.strip() or out.strip()}"
+            f"POST blocked_by {repo}#{blocked} <- id {blocker_id} failed: {detail}"
         )
     return out
 
@@ -259,7 +287,7 @@ def remove_edges(repo, edges, apply=False):
 def apply_edges(repo, edges, apply=False):
     id_cache: dict = {}
     edge_cache: dict = {}
-    created, existing, skipped = [], [], []
+    created, existing, skipped, refused = [], [], [], []
 
     for blocked, blocker_ref in edges:
         blocker = parse_ref(blocker_ref, repo)
@@ -278,7 +306,20 @@ def apply_edges(repo, edges, apply=False):
             continue
         blocker_id = issue_database_id(repo, blocker, id_cache)
         if apply:
-            create_edge(repo, blocked, blocker_id)
+            try:
+                create_edge(repo, blocked, blocker_id)
+            except EdgeRefused as exc:
+                # GitHub declined this one edge. Report it and keep going — the
+                # rest of the batch is unaffected, and stopping here would leave
+                # the edges already written with no record of what was skipped.
+                refused.append(
+                    {"blocked": blocked, "blocker": blocker, "reason": str(exc)}
+                )
+                print(
+                    f"warning: GitHub refused #{blocked} blocked_by #{blocker}: {exc}",
+                    file=sys.stderr,
+                )
+                continue
         # Recorded whether or not it was sent, so a repeated --edge reports the
         # second copy as already linked instead of as a second creation.
         edge_cache[blocked].add(blocker)
@@ -292,6 +333,7 @@ def apply_edges(repo, edges, apply=False):
         "created": created,
         "existing": existing,
         "skipped": skipped,
+        "refused": refused,
     }
 
 
@@ -325,6 +367,12 @@ def report(result):
         print(f"\nSkipped — no issue to link ({len(result['skipped'])}):")
         for edge in result["skipped"]:
             print(f"  #{edge['blocked']} blocked by {edge['blocker']}")
+    if result["refused"]:
+        print(f"\nRefused by GitHub ({len(result['refused'])}):")
+        for edge in result["refused"]:
+            print(
+                f"  #{edge['blocked']} blocked_by #{edge['blocker']} — {edge['reason']}"
+            )
 
 
 def main(argv=None):
