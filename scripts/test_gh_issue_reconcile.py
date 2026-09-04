@@ -14,9 +14,11 @@ status ladder whose numbering was renamed away.
 """
 
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,8 +30,16 @@ assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 gh_issue_reconcile = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gh_issue_reconcile)
 gh_issue_state = gh_issue_reconcile.gh_issue_state
+gh_label_sync = gh_issue_reconcile.gh_label_sync
 
 REVIEW = "status:4_needs_review"
+
+# The vocabulary a fully provisioned repo carries. Tests that say nothing about
+# provisioning get this, so they read exactly as they did before the row-3
+# preflight existed.
+FULL_VOCABULARY = sorted(
+    gh_issue_reconcile.expected_labels(*gh_issue_reconcile.load_vocabulary(LABELS_FILE))
+)
 
 
 class FakeRepo:
@@ -43,16 +53,28 @@ class FakeRepo:
     """
 
     def __init__(
-        self, open_issues=None, closed_issues=None, events=None, page_size=100
+        self,
+        open_issues=None,
+        closed_issues=None,
+        events=None,
+        page_size=100,
+        repo_labels=None,
     ):
         self.open_issues = dict(open_issues or {})
         self.closed_issues = dict(closed_issues or {})
         self.events = dict(events or {})
         self.page_size = page_size
+        # `None` means a fully provisioned repo — the state every test that
+        # predates the provisioning preflight assumed without saying so.
+        self.repo_labels = (
+            list(FULL_VOCABULARY) if repo_labels is None else list(repo_labels)
+        )
         self.calls = []
 
     def run_gh(self, args, stdin=None):
         self.calls.append((args, stdin))
+        if args[:2] == ["label", "list"]:
+            return 0, json.dumps([{"name": n} for n in self.repo_labels]), ""
         if args[:2] == ["issue", "list"]:
             state = args[args.index("--state") + 1]
             issues = self.open_issues if state == "open" else self.closed_issues
@@ -82,6 +104,14 @@ class FakeRepo:
             return 0, "{}", ""
         raise AssertionError(f"unexpected gh call: {args}")
 
+    def event_reads(self):
+        """Every `…/events` call rule 3 made — one per closed issue, or none."""
+        return [
+            args
+            for args, _ in self.calls
+            if args[0] == "api" and any(a.endswith("/events") for a in args)
+        ]
+
     def writes(self):
         """Every mutating call either module made."""
         return [args for args, _ in self.calls if "--method" in args]
@@ -96,17 +126,28 @@ class FakeRepo:
 
 class ReconcileTestCase(unittest.TestCase):
     def setUp(self):
-        originals = (gh_issue_reconcile.run_gh, gh_issue_state.run_gh)
+        originals = (
+            gh_issue_reconcile.run_gh,
+            gh_issue_state.run_gh,
+            gh_label_sync.run_gh,
+        )
         self.addCleanup(self._restore, originals)
 
     def _restore(self, originals):
-        gh_issue_reconcile.run_gh, gh_issue_state.run_gh = originals
+        (
+            gh_issue_reconcile.run_gh,
+            gh_issue_state.run_gh,
+            gh_label_sync.run_gh,
+        ) = originals
 
     def _compute(self, repo, apply=False, scope_labels=(), labels_file=LABELS_FILE):
         gh_issue_reconcile.run_gh = repo.run_gh
         # gh-issue-state.py's PATCH goes through its OWN seam, so the repair
-        # path stays live unless this one is stubbed too.
+        # path stays live unless this one is stubbed too. Same for
+        # gh-label-sync.py's `gh label list`, which the provisioning preflight
+        # reaches through.
         gh_issue_state.run_gh = repo.run_gh
+        gh_label_sync.run_gh = repo.run_gh
         return gh_issue_reconcile.compute(
             repo="owner/name",
             labels_file=labels_file,
@@ -114,6 +155,16 @@ class ReconcileTestCase(unittest.TestCase):
             scope_labels=scope_labels,
             apply=apply,
         )
+
+    def _labels_file(self, text):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".yml", delete=False, encoding="utf-8"
+        )
+        handle.write(text)
+        handle.close()
+        path = Path(handle.name)
+        self.addCleanup(path.unlink)
+        return path
 
 
 class RuleOneTests(ReconcileTestCase):
@@ -305,6 +356,159 @@ class RuleThreeTests(ReconcileTestCase):
         self.assertEqual(finding["state_reason"], "completed")
 
 
+class ProvisioningTests(ReconcileTestCase):
+    """A row must check that the labels it looks for exist on the repo.
+
+    Measured 2026-09-04 against `bestdan/dotfiles`, which has never provisioned
+    `status:4_needs_review`: rule 3 flagged 50 of 50 closed issues, correctly
+    scoped and entirely noise.
+    """
+
+    def test_rule_three_is_void_when_the_review_rung_is_not_provisioned(self):
+        without_review = [n for n in FULL_VOCABULARY if n != REVIEW]
+        repo = FakeRepo(
+            closed_issues={1: [], 2: [], 3: []},
+            events={1: [], 2: [], 3: []},
+            repo_labels=without_review,
+        )
+        result = self._compute(repo)
+
+        self.assertFalse(result["review_label_provisioned"])
+        self.assertEqual(result["closed_unreviewed"], [])
+        self.assertIn(REVIEW, result["missing_vocabulary"])
+        # The premise is void, so the per-issue reads are not just wasted, they
+        # are the entire API cost of the row.
+        self.assertEqual(repo.event_reads(), [])
+
+    def test_the_json_does_not_claim_the_closed_issues_were_checked(self):
+        """The key name is the claim, so the printed verb alone is not enough.
+
+        A machine consumer reads `checked`, never the report, and would get the
+        same wrong answer the report used to give.
+        """
+        repo = FakeRepo(
+            closed_issues={1: [], 2: []},
+            events={1: [], 2: []},
+            repo_labels=[n for n in FULL_VOCABULARY if n != REVIEW],
+        )
+        checked = self._compute(repo)["checked"]
+
+        self.assertEqual(checked["closed"], 2)
+        self.assertEqual(checked["closed_examined"], 0)
+
+    def test_a_provisioned_rung_examines_every_closed_issue_it_listed(self):
+        repo = FakeRepo(closed_issues={1: [], 2: []}, events={1: [], 2: []})
+        checked = self._compute(repo)["checked"]
+
+        self.assertEqual(checked["closed_examined"], checked["closed"])
+
+    def test_the_void_row_says_so_rather_than_reading_as_a_clean_board(self):
+        without_review = [n for n in FULL_VOCABULARY if n != REVIEW]
+        repo = FakeRepo(
+            closed_issues={1: []}, events={1: []}, repo_labels=without_review
+        )
+        result = self._compute(repo)
+
+        printed = io.StringIO()
+        with redirect_stdout(printed):
+            gh_issue_reconcile.report(result)
+        output = printed.getvalue()
+
+        self.assertIn("VOID", output)
+        self.assertIn(REVIEW, output)
+        self.assertIn("gh-label-sync.py", output)
+
+    def test_rule_three_is_unchanged_when_the_review_rung_is_provisioned(self):
+        """The same two issues the un-preflighted row would have judged.
+
+        The repo is deliberately missing OTHER vocabulary labels. Rule 3 asks
+        about exactly one, so a guard that voided the row on any provisioning
+        gap would silence it on almost every real board — dotfiles was short 12
+        labels when this defect was found, and only one of them mattered.
+        """
+        repo = FakeRepo(
+            closed_issues={1: ["prio:1"], 2: ["prio:1"]},
+            events={1: ["status:3_started"], 2: ["status:3_started", REVIEW]},
+            repo_labels=[n for n in FULL_VOCABULARY if not n.startswith("est:")],
+        )
+        result = self._compute(repo)
+
+        self.assertTrue(result["missing_vocabulary"])
+
+        self.assertTrue(result["review_label_provisioned"])
+        self.assertEqual([f["number"] for f in result["closed_unreviewed"]], [1])
+        self.assertEqual(len(repo.event_reads()), 2)
+
+    def test_a_partly_provisioned_status_group_still_leaves_rule_two_answerable(self):
+        """dotfiles' real shape: some rungs missing, so a bare issue is a hit."""
+        partial = [n for n in FULL_VOCABULARY if n not in {REVIEW, "status:3_started"}]
+        repo = FakeRepo(open_issues={1: ["follow-up"]}, repo_labels=partial)
+        result = self._compute(repo)
+
+        self.assertEqual(result["unprovisioned_groups"], [])
+        self.assertEqual(result["missing_rung"][0]["missing"], ["status", "auto"])
+
+    def test_rule_two_is_void_for_a_group_with_no_label_provisioned_at_all(self):
+        no_auto = [n for n in FULL_VOCABULARY if not n.startswith("auto:")]
+        repo = FakeRepo(
+            open_issues={1: ["status:2_ready"], 2: ["follow-up"]},
+            repo_labels=no_auto,
+        )
+        result = self._compute(repo)
+
+        self.assertEqual(result["unprovisioned_groups"], ["auto"])
+        # #1 carried a status rung and is missing only the unassignable auto:
+        # one, so it drops out entirely; #2 is still flagged for status:.
+        self.assertEqual(
+            [(f["number"], f["missing"]) for f in result["missing_rung"]],
+            [(2, ["status"])],
+        )
+
+
+class RemediationCommandTests(ReconcileTestCase):
+    """The provisioning gap is only useful with a command that closes THAT gap."""
+
+    def _void_repo(self):
+        return FakeRepo(
+            closed_issues={1: []},
+            events={1: []},
+            repo_labels=[n for n in FULL_VOCABULARY if n != REVIEW],
+        )
+
+    def test_the_command_names_the_vocabulary_the_gap_was_computed_from(self):
+        """Under --labels-file, a command naming the default provisions the wrong
+        labels and leaves the reported gap open — a silent wrong write."""
+        path = self._labels_file(
+            "status: [0_untriaged, 2_ready, 4_needs_review]\n"
+            "auto: [eligible]\n"
+            "prio: [0]\n"
+            "est: [1]\n"
+            "colors:\n"
+            "  status: 1d76db\n"
+            "  auto: 0e8a16\n"
+            "  prio: d93f0b\n"
+            "  est: 5319e2\n"
+        )
+        repo = FakeRepo(closed_issues={1: []}, events={1: []}, repo_labels=[])
+        result = self._compute(repo, labels_file=path)
+
+        command = gh_issue_reconcile.provision_command(result)
+
+        self.assertIn("--labels-file", command)
+        self.assertIn(str(path), command)
+
+    def test_the_default_vocabulary_needs_no_labels_file_flag(self):
+        result = self._compute(self._void_repo())
+
+        command = gh_issue_reconcile.provision_command(result)
+
+        self.assertNotIn("--labels-file", command)
+        self.assertIn("gh-label-sync.py", command)
+        self.assertIn("--apply", command)
+        # A path, not an ellipsis — this line exists to be copied and run.
+        self.assertNotIn("...", command)
+
+
 class DryRunTests(ReconcileTestCase):
     def test_all_three_rules_are_no_ops_without_apply(self):
         repo = FakeRepo(
@@ -338,16 +542,6 @@ class ScopeTests(ReconcileTestCase):
 
 
 class VocabularyTests(ReconcileTestCase):
-    def _labels_file(self, text):
-        handle = tempfile.NamedTemporaryFile(
-            "w", suffix=".yml", delete=False, encoding="utf-8"
-        )
-        handle.write(text)
-        handle.close()
-        path = Path(handle.name)
-        self.addCleanup(path.unlink)
-        return path
-
     def test_a_renamed_review_value_fails_loudly_rather_than_flagging_everything(self):
         path = self._labels_file(
             "status: [0_untriaged, 2_ready, 3_started, 9_in_review]\n"

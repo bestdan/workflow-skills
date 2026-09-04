@@ -26,6 +26,13 @@ starting point. Do not add a fourth row, and do not widen these three.
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
 
+A row checks that the labels it asks about are provisioned, because a label
+namespace is per-repo and an absent rung makes the question unanswerable rather
+than answered "no". Row 3 is **void** where its one review label is absent. Row 2
+skips only a `status:`/`auto:` group with no vocabulary member provisioned, and
+still runs for the other. Each reports the gap once instead of flagging every
+issue. Row 1 needs no guard: it ranks labels the issue already carries.
+
 **Row 1 is the only row that writes**, and only under `--apply`. It keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
 exactly so that "highest" is a fact rather than a judgment — and keeping it is
@@ -48,6 +55,15 @@ to inspect. It reports rather than reopens: an issue can be legitimately closed
 without review (abandoned, duplicate, filed by hand), and the finding carries
 GitHub's `state_reason` so those are dismissible on sight.
 
+**Two things about that guard were decided, not inherited**, and a reader of the
+table would otherwise re-derive them. Row 2 is guarded by **group, not
+completeness** — its premise is that a rung was assignable, which still holds
+while its group has any member provisioned. And the report says **absent**, never
+"never created": several histories produce the same current label set, and the
+row cannot tell them apart. The measurement behind both, and what provisioning
+the label does and does not fix, live in `gh-issue-reconcile.py`'s module
+docstring.
+
 > **This is an audit, not a load-bearing repair.** Every status write goes
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the
 > whole label set in a single request — so row 1's drift cannot arise on the
@@ -66,6 +82,14 @@ GitHub's `state_reason` so those are dismissible on sight.
    a bug a user filed, a bot's issue — is missing both rungs and never reached
    review, so it is a row-2 **and** a row-3 hit. Unscoped, the report is mostly
    issues that were never wrong.
+
+   **What the scope does not do is vouch for the labels themselves.** It
+   separates loop issues from strangers; it says nothing about whether the rung a
+   row asks about is provisioned on the repo. Those are independent, and reading
+   the scope as covering both is what made row 3 flag every correctly-scoped
+   closed issue on an under-provisioned board. The script guards that itself —
+   see step 4 — so this is a note about what to conclude from a clean report, not
+   a step to perform.
 
    When `gh-issue.labels` is **empty or unset** there is no marker to scope by.
    **Stop** and report that this audit needs at least one configured label to
@@ -106,7 +130,13 @@ GitHub's `state_reason` so those are dismissible on sight.
    operator asks for a wider window, add `--limit <N>` to the invocation above —
    it is a flag on this script, not on `/reconcile-tasks`, so it never arrives
    as a command argument. Mind the cost: row 3 spends one API call per
-   **closed** issue in the window, so the limit is what bounds the run.
+   **closed** issue in the window, so the limit is what bounds the run — unless
+   `status:4_needs_review` is absent from the repo, in which case row 3 is void,
+   skips those reads entirely, and the run costs three base `gh` invocations —
+   one `gh label list` and one `gh issue list` per state, before any row-1 repair
+   under `--apply` adds writes of its own. The script makes that `gh label list`
+   before any per-issue work to decide the row's fate, and its report opens with
+   the repo's provisioning gap and the `gh-label-sync.py` command that closes it.
 
    Row 1's repair goes through `gh-issue-state.py` — validate, then one full-set
    PATCH — so it carries `follow-up` and every other unmanaged label forward
