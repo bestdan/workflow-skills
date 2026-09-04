@@ -10,49 +10,48 @@
 # a type checker whose diagnostics move between releases turns a green gate
 # red on a day nobody touched the code.
 #
-# THREE TIERS, deliberately.
+# FOUR TIERS, split by WHO RUNS THE FILE.
 #
-#   strict   scripts/research-spike.py — the one file already annotated end to
-#            end (93/93 return types, 0/187 untyped parameters), so --strict
-#            costs nothing to hold and catches the class of defect this repo
-#            actually hits: a well-typed value that is None on a path nobody
-#            walked.
+# That is the rule. A file's tier follows the interpreter it has to survive, not
+# the directory it sits in — see the comments on the arrays below, where two
+# files under scripts/ are consumer code and are checked as such.
 #
-#   default  the other scripts/ entrypoints and the handler assets under
-#            commands/handlers/assets/, plus --check-untyped-defs. Tiering here is
-#            about annotation coverage, NOT about what ships — the assets are
-#            invoked through ${CLAUDE_PLUGIN_ROOT} by the linear handlers and
-#            run on consumers' machines just as research-spike.py does. They
-#            are simply unannotated (validate.py 7 untyped parameters,
-#            task-scan.py 3, plan-graph.py 1, the assets 83 between them and
-#            not one return type), and --strict would demand every one of
-#            those annotations as the price of any type checking at all.
-#            Default settings still catch real defects — every finding on this
-#            tier at adoption was genuine — and raising a file to the strict
-#            tier is then a small, self-contained follow-up rather than a
-#            precondition.
+#   strict    scripts/research-spike.py — the one file annotated end to end
+#             (93/93 return types, 0/187 untyped parameters), so --strict costs
+#             nothing to hold and catches the defect class this repo actually
+#             hits: a well-typed value that is None on a path nobody walked.
 #
-#            --check-untyped-defs is what makes this tier mean anything.
-#            Without it mypy reads only signatures, and since none of these
-#            files annotates one, it read no function BODY at all: the tier
-#            covering every consumer-executed file was checking nothing. Turning
-#            it on surfaced 14 findings in 6 files, all fixed in the PR that
-#            added the flag.
+#   consumer  Everything executed as bare `python3` on someone else's machine,
+#             pinned to --python-version 3.9. That pin is the point: which
+#             Python these must run under was a claim in prose and nothing
+#             enforced it.
 #
-#   tests    scripts/test_*.py at default settings WITHOUT
-#            --check-untyped-defs. They were previously in no tier at all.
-#            The flag is held off deliberately rather than forgotten: these
-#            files stub seams on modules loaded through importlib
-#            (`rollups.run_gh = fake`), which mypy sees only as ModuleType, so
-#            the flag turns 30 fixable errors into 81 — 48 of them
-#            attr-defined on that one pattern. Buying coverage with ~48
-#            `type: ignore` comments is worse than the gap it closes; a typed
-#            loader shim returning a Protocol is the way in, and is not this
-#            PR. Default settings still catch the loader idiom itself, which is
-#            why every one of these files now asserts its spec resolved.
+#   dev       Everything only this repo's contributors and CI run, pinned to
+#             3.11 — the floor validate.py already declares in its uv header.
+#             Pinned rather than left to default, which would follow whatever
+#             interpreter uvx resolved and make diagnostics differ between a
+#             laptop and CI.
 #
-# All three tiers always run, and the exit code is their OR, so one tier
-# failing never hides another's findings.
+#   tests     scripts/test_*.py, with --disable-error-code=attr-defined and
+#             nothing else disabled. These stub seams on modules loaded through
+#             importlib (`rollups.run_gh = fake`), which mypy sees only as
+#             ModuleType: 48 findings on that one idiom, versus 3 real ones
+#             once it is off. One flag beats 48 inline ignore comments, and a
+#             misspelled attribute in a test crashes the test anyway.
+#
+# Every tier but `strict` runs --check-untyped-defs, and that flag is what makes
+# them mean anything. Without it mypy reads only signatures; since almost
+# nothing here annotates one, it read no function BODY at all — the tier
+# covering every consumer-executed file was checking nothing. Turning it on
+# surfaced 14 findings in 6 files.
+#
+# Deliberately uncovered: skills/analysis-pipeline/example/*.py. Those are
+# teaching examples shipped inside a skill, not entrypoints; editing them to
+# satisfy a checker would make them worse at the job they exist for. Every
+# other tracked .py file is in exactly one tier — if you add one, add it here.
+#
+# All four tiers always run, and the exit code is their OR, so one tier failing
+# never hides another's findings.
 #
 # Why not `ty`: evaluated at adoption (dev_docs/research/) and it found the
 # same substantive defects with better diagnostics, but it is 0.0.x with an
@@ -93,8 +92,17 @@ STRICT_FILES=(scripts/research-spike.py)
 # (legal 3.9 SYNTAX, TypeError at 3.9 RUNTIME) and `X | Y` annotations without
 # `from __future__ import annotations`. Raise this number only by deciding to
 # drop support, never to make a diagnostic go away.
-ASSET_FILES=(commands/handlers/assets/*.py)
-ASSET_PYTHON=3.9
+# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Two of
+# these live under scripts/ and are still consumer code: server.py is launched
+# as bare `python3` by skills/local-review/SKILL.md and README.md, and
+# coreview-rule-drift.py is invoked through ${CLAUDE_PLUGIN_ROOT} by
+# skills/co-review/SKILL.md and commands/doctor.md.
+CONSUMER_FILES=(
+  commands/handlers/assets/*.py
+  scripts/local-review/server.py
+  scripts/coreview-rule-drift.py
+)
+CONSUMER_PYTHON=3.9
 
 # Dev-only: these run under the contributor's or CI's interpreter, never a
 # consumer's, so they are pinned to the floor validate.py already declares in
@@ -102,7 +110,7 @@ ASSET_PYTHON=3.9
 # default, which would follow whatever interpreter uvx happened to resolve and
 # make diagnostics differ between a laptop and CI.
 DEV_FILES=(
-  scripts/local-review/server.py
+  scripts/bump-version.py
   scripts/plan-graph.py
   scripts/task-scan.py
   scripts/validate.py
@@ -120,9 +128,9 @@ echo "→ mypy --strict (py${DEV_PYTHON}): ${STRICT_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --strict \
   --python-version "$DEV_PYTHON" "${STRICT_FILES[@]}" || rc=1
 
-echo "→ mypy --check-untyped-defs (py${ASSET_PYTHON}, consumer floor): ${ASSET_FILES[*]}"
+echo "→ mypy --check-untyped-defs (py${CONSUMER_PYTHON}, consumer floor): ${CONSUMER_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
-  --python-version "$ASSET_PYTHON" "${ASSET_FILES[@]}" || rc=1
+  --python-version "$CONSUMER_PYTHON" "${CONSUMER_FILES[@]}" || rc=1
 
 echo "→ mypy --check-untyped-defs (py${DEV_PYTHON}): ${DEV_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \

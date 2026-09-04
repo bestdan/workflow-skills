@@ -180,7 +180,8 @@ def load_allow_rules(paths):
     override); one that is present but unparseable is a real problem the caller
     must hear about, so it is fatal rather than silently skipped.
     """
-    rules, read = [], []
+    rules: list = []
+    read: list = []
     for p in paths:
         if not p.exists():
             continue

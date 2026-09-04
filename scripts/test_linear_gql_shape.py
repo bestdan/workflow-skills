@@ -96,6 +96,24 @@ class TestEveryLinearAssetUnwrapsSafely(unittest.TestCase):
                 assert isinstance(code, str), f"bare exit, no message: {code!r}"
                 self.assertIn("expected dict, got str", code)
 
+    def test_a_scalar_or_list_root_exits_with_a_message(self):
+        """The case this suite originally missed. Both malformed payloads it
+        covered were dicts, so nothing exercised a scalar root — and
+        `"errors" in None` raises TypeError *before* the shape check, which is
+        the traceback the whole seam exists to remove. `[]` and `"str"` reach
+        the shape check by a different route (`in` works on both), so all four
+        shapes are here to pin the guard rather than one path through it."""
+        for path in LINEAR_ASSETS:
+            for body in (None, 5, [1, 2], "a string"):
+                with self.subTest(asset=path.name, body=body):
+                    mod = load(path)
+                    with serving(body):
+                        with self.assertRaises(SystemExit) as ctx:
+                            mod.gql("key", "query {}")
+                    code = ctx.exception.code
+                    assert isinstance(code, str), f"bare exit, no message: {code!r}"
+                    self.assertIn("GraphQL response", code)
+
     def test_a_graphql_errors_envelope_still_exits(self):
         """Pre-existing behaviour that must survive the unwrap change: an
         `errors` envelope arrives with HTTP 200 and has to stop the run."""

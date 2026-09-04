@@ -81,9 +81,13 @@ Five deterministic, blocking checks, plus the shell lint and Bats suites:
    in the script (fetched by `uvx`, so it needs network on the first run of a
    given pin). Four tiers, split by **who runs the file**, each with
    `--python-version` pinned so diagnostics can't drift with the interpreter:
-   `--strict` on `scripts/research-spike.py`; the handler assets at **3.9**, the
-   consumer floor; the dev `scripts/` entrypoints at 3.11; and `scripts/test_*.py`
-   at 3.11 with `attr-defined` off. All but the strict tier run
+   `--strict` on `scripts/research-spike.py`; everything consumers execute as
+   bare `python3` at **3.9** — the handler assets _plus_ `local-review/server.py`
+   and `coreview-rule-drift.py`, which live under `scripts/` but are launched
+   through `${CLAUDE_PLUGIN_ROOT}`; the genuinely dev-only `scripts/`
+   entrypoints at 3.11; and `scripts/test_*.py` at 3.11 with `attr-defined` off.
+   **A file's tier follows the interpreter it must survive, not the directory it
+   sits in.** All but the strict tier run
    `--check-untyped-defs` — without it mypy reads no unannotated function body,
    which is every file here. Every tier always runs and the exit code is their
    OR, so one failing never hides another's findings. The script's header
@@ -201,8 +205,11 @@ worked example for both.
 **Name a multi-value return whose fields share a type.** `code, out, err =
 run_gh(...)` unpacks positionally, and two of those three are `str` — so
 swapping stdout and stderr type-checks, runs, and quietly reports the wrong text
-as the failure reason. No annotation catches that; named fields make it
-unwriteable:
+as the failure reason. No annotation catches that. A `NamedTuple` does not make
+the swap impossible either — construct or unpack it positionally and you are
+back where you started. What it buys is a name at the point the value is
+**built**, so construct with keywords and the transposition has to be written
+past the field names:
 
 ```python
 class GhResult(NamedTuple):

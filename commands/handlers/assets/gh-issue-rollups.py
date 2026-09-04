@@ -77,10 +77,16 @@ class LookupFailed(Exception):
 class GhResult(NamedTuple):
     """What `gh` returned. Named because two of the three fields are `str`.
 
-    A plain tuple unpacks positionally, so swapping stdout and stderr type-checks
-    and runs — it just reports the wrong text as the failure reason. Named fields
-    make that swap unwriteable. Tests may still stub `run_gh` with a plain
-    3-tuple; unpacking is identical either way.
+    A plain tuple unpacks positionally, so swapping stdout and stderr
+    type-checks and runs — it just reports the wrong text as the failure reason.
+    Naming the fields does not make that swap impossible, and an earlier version
+    of this docstring overclaimed that it did. What it does is make the swap
+    visible where the value is BUILT: `run_gh` constructs with keywords, so a
+    transposition there has to be written past the field names.
+
+    The call sites still unpack positionally, deliberately — tests stub `run_gh`
+    with a plain 3-tuple, and that affordance holds only while consumers unpack
+    rather than reach for `.stdout`.
     """
 
     returncode: int
@@ -99,7 +105,7 @@ class Page(NamedTuple):
 def run_gh(args):
     """Run `gh` and return a GhResult. The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-    return GhResult(proc.returncode, proc.stdout, proc.stderr)
+    return GhResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
 def fetch_page(owner, repo, cursor):
