@@ -163,8 +163,11 @@ join, and `gh` covers it only partially.
      branches, so the probe was not run for this purpose.
 
    Its analysis half is `commands/handlers/assets/gh-issue-graph.py` (read-only), and
-   `gh-issue-deps.py` gained `--remove-edge` for stale-link repair. **That removal's
-   DELETE path shape is unmeasured** — see HANDOFF.md's blocker list.
+   `gh-issue-deps.py` gained `--remove-edge` for stale-link repair. Both were probed
+   against live issues, which turned up a fact the plan had assumed the other way:
+   **GitHub refuses a directly reciprocal edge (422) and refuses nothing else** — a
+   3-cycle is created without complaint. So its guard cannot be read as acyclicity, and
+   a batch write now survives a per-edge refusal instead of aborting half-applied.
 
 **Phase 4 — migrate**
 

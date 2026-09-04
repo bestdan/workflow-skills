@@ -146,6 +146,16 @@ Full evidence in
 - A label write **replaces** the whole set and **auto-creates** unknown names. Hence
   validate-then-replace, always, before any network call.
 - The dependency POST body carries **`issue_id`, a database id**, not the issue number.
+  So does the **removal DELETE**, as its last path segment:
+  `DELETE repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by/{issue_id}`. Measured
+  2026-09-04 by task 8 — the edge is gone on readback, and the removal is idempotent.
+- **GitHub refuses a directly reciprocal edge, and refuses nothing else.** Creating
+  `A blocked_by B` when `B blocked_by A` exists returns **422** ("this dependency would
+  create a cycle where the target is already blocked by the source"); the same probe
+  built `A -> B -> C -> A` with no complaint. Measured 2026-09-04. Two consequences:
+  never read GitHub's guard as a guarantee that the graph is acyclic — which is why
+  cycle detection reads the real graph — and a batch edge write must survive a per-edge
+  refusal rather than aborting with earlier edges already written.
 - `blocked_by` is **paginated** — read it with `--paginate --slurp`. A bare read stops at
   30, and an invisible edge is a cycle that reads as absent.
 
@@ -166,15 +176,6 @@ behaviour from documentation. Probe it.
 
 ## Open blockers, and who owns them
 
-- **The dependency DELETE path shape is unmeasured** — new with task 8
-  ([PR #478](https://github.com/bestdan/workflow-skills/pull/478)).
-  `gh-issue-deps.py --remove-edge` sends
-  `DELETE repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by/{issue_id}`, taken from
-  convention rather than a probe. Task 15 measured the POST half; nobody has measured
-  this one. It needs a real edge on a real repo, and two routes were blocked in-session:
-  the auto-mode classifier refuses a throwaway repo, and `sandbox-network-guard` blocks
-  non-GET `gh api` and says to ask the operator. **Needs the operator**, and it is
-  exactly the "silent when wrong" shape above.
 - **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
   because `/auto-pilot` is under active development with a new harness. It stops outright
   rather than degrading. **This holds Phase 4**, task 10's pilot included.
@@ -218,5 +219,7 @@ repo actually on the `gh-issue` handler. Run them when one exists:
 - **Task 7** — `/reconcile-tasks` end to end through the command rather than the script.
   The script itself was verified against the live API.
 - **Task 8** — `/reoptimize-tasks` against a migrated backlog, spot-checking three edges
-  in the GitHub UI. This is also the cheapest way to settle the DELETE probe above.
+  in the GitHub UI. Only the command dispatch is untested: the underlying scripts were
+  exercised against live issues on `bestdan/dotfiles` (edges created, a 3-cycle detected,
+  an edge deleted and confirmed gone, stale/satisfied classified off real state).
 - **Task 15** — its user-run check.
