@@ -35,7 +35,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --remote` / `/do-tasks --local` — choose where execution runs (default: remote dispatch)
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
-- `/do-tasks --project <name|id|unassigned|any>` — **tracker handler only**: pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
+- `/do-tasks --project <name|id|unassigned|any>` — **`linear` only** (the other tracker handlers have no project dimension: `gh-issue` refuses the flag, see section 4; `jira` has no scope prompt): pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
 - `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All five prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
@@ -727,7 +727,7 @@ each session loudly on its own issue.
    arithmetic collapses to a single number. Read it; do not compute it:
 
    ```bash
-   python3 commands/handlers/assets/gh-issue-claim.py wip \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" wip \
      --repo <repo> --wip-limit <wip_limit> --json
    ```
 
@@ -743,7 +743,7 @@ each session loudly on its own issue.
    candidates from step 1:
 
    ```bash
-   python3 commands/handlers/assets/gh-issue-ready.py \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
      --repo <repo> --issue <n1> --issue <n2> ... --json
    ```
 
@@ -809,10 +809,15 @@ each session loudly on its own issue.
    number, the claim+execute instructions themselves (**not** a pointer to
    `gh-issue-claim.md` or `claim-lock.md`), and the already-resolved **non-secret**
    gh-issue config the single-issue flow needs: `gh-issue.repo` if set, the base
-   branch, `branch_prefix`, and `wip_limit`. The **scripts** are a different case —
+   branch, and `branch_prefix`. **Not `wip_limit`** — the dispatcher discharged
+   that gate, so a session handed a limit is being invited to run a check it
+   should not, and a decline there would strand a dispatched issue with nothing
+   done. The **scripts** are a different case —
    the gate above means the plugin is installed, so have the session call them at
-   **`$CLAUDE_PLUGIN_ROOT`**, never by the repo-relative path this file uses (that
-   spelling resolves only when the cwd is the plugin's own repo).
+   **`$CLAUDE_PLUGIN_ROOT`**, the spelling `CONTRIBUTING.md` mandates and the one
+   used above. `gh-issue-claim.md` still writes its asset calls repo-relative,
+   which resolves only when the cwd is the plugin's own repo — so those are the
+   calls that need rewriting as you inline.
 
    **Rewrite the paths as you inline, and check the inlined text before you
    dispatch.** `gh-issue-claim.md` spells every asset call
@@ -820,8 +825,11 @@ each session loudly on its own issue.
    spelling into the prompt and the session's first script call fails — after the
    self-check has passed, since the self-check probes `$CLAUDE_PLUGIN_ROOT` and the
    copied call does not. Each becomes
-   `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. No
-   `commands/handlers/assets/` string may survive in the dispatched prompt. **Never** inline a token or any other secret —
+   `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. The check is on the
+   **unprefixed** spelling: no `python3 commands/handlers/assets/` may survive in
+   the dispatched prompt. Every asset call must carry the `$CLAUDE_PLUGIN_ROOT/`
+   prefix — which of course still contains `commands/handlers/assets/`, so do not
+   grep for that substring alone. **Never** inline a token or any other secret —
    the dispatched session authenticates through its own `gh`. That is also what
    step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
    must authenticate as the **dispatching** account or their claims never enter the
@@ -833,9 +841,13 @@ each session loudly on its own issue.
    a script it does not have.
 
    ```bash
-   branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name \
+   branch=$(python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" branch-name \
      --issue <n> [--prefix "<branch_prefix>"])
    ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and a path above does not resolve, Glob
+   `**/handlers/assets/<name>.py` — the fallback `CONTRIBUTING.md` documents for
+   every asset call.
 
    The result is `<branch_prefix>task-<n>` (`gh-issue-claim.md` "Branch name"). A
    literal `task/<n>` is **wrong** anywhere on this path: it probes and creates a
@@ -886,7 +898,11 @@ each session loudly on its own issue.
    `T_unclaimed`, mint a token, post the claim comment, write the board markers,
    sleep a jittered ~2–3 s, re-list and elect on the lowest comment id among
    markers that are both at-or-after `T_unclaimed` and state-backed, and retract
-   your own comment if it loses. The prompt must **omit** `gh-issue-claim.py
+   your own comment if it loses. Carry **step 7** across too — if the re-list
+   returns only your own marker, treat it as inconclusive and re-poll once or
+   twice before declaring a win. No server-side CAS backs this path, and a batch
+   runs it N times unattended, so the one step that guards read lag is the last
+   one to drop. The prompt must **omit** `gh-issue-claim.py
    acquire` entirely — there is no ref to create on this path.
 
    The session then creates its work branch itself,
