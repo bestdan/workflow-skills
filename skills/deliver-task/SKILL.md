@@ -283,6 +283,15 @@ are never applied silently:
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
 
+**Verification tests come back with the findings.** Co-review's step 9 hands
+over a list of real-machine checks, each naming the environment it needs and
+who runs it. In the first round, run the items marked as yours and record what
+each produced; leave the user's items unrun — you are not the human they need.
+Then refresh the PR body's **how-to-evaluate steps** slot (step 4) with the
+results and the still-unrun items: that body was written before this list
+existed, so it does not yet describe them. Unrun items ride out in the hand-off
+summary (step 7).
+
 **Cross-cutting or round-bound deferrals also get filed.** When `--questions`
 is passed (running under `/auto-pilot`) and a deferred finding is
 **cross-cutting** — its faithful fix would touch a file outside this task's
@@ -311,7 +320,7 @@ remaining findings and proceed — don't loop.
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), and evidence paths.
+  deferred judgment calls), any verification tests left unrun, and evidence paths.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base
