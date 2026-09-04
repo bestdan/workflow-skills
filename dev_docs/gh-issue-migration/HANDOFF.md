@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-03, after task 7.** Read this first, then
+**Redrafted 2026-09-03 after task 7; PR states re-checked 2026-09-04 after it merged.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -104,12 +104,28 @@ satisfies it, so an issue carrying only that name reads as healthy while being i
 nothing can act on. Anything new that asks "does this issue have a rung?" must ask the
 vocabulary.
 
-**Three open PRs edit files this plan owns**, against the old vocabulary — and they all
-apply almost cleanly, which is what makes them dangerous. Read the epic's **In-flight PRs
-against files this plan owns** section before touching `gh-issue-claim.md` or
-`gh-issue-promote.md`. One of them (#426) was misled by a since-retired claim into
-building a body-footer parser; its **Dependency-ready selection** section needs deleting,
-not reconciling.
+**A scope this handler cannot honour, plus a write, is a refusal.** `/reconcile-tasks`
+passes `--project` through, and the gh-issue handler has no project dimension to honour
+it with. Continuing repo-wide would answer a request to _narrow_ with a _wider_ run —
+harmless while reading, and under `--apply` it writes outside the scope the user named.
+So task 7's handler stops on `--project` **with `--apply`** and continues at the default
+label scope without it, which is the same rule `gh-issue-archive.md` step 2 applies to a
+missing label scope. Task 8 writes too; the shape recurs wherever a scope flag reaches a
+handler that cannot implement it.
+
+**One open PR still edits files this plan owns: #426.** Checked 2026-09-04 —
+[#411](https://github.com/bestdan/workflow-skills/pull/411) and
+[#432](https://github.com/bestdan/workflow-skills/pull/432) have since merged, and they
+merged **reconciled**: `git grep` over `origin/main` finds no live old-vocabulary query
+left in `gh-issue-promote.md` or `gh-issue-claim.md`, only two prose mentions of
+`auto-eligible` as history. The epic's **In-flight PRs against files this plan owns**
+table still describes all three as open; read it for #426 only.
+
+#426 is the one that matters, and it is the dangerous one: it was misled by a
+since-retired claim into building a body-footer parser, so its **Dependency-ready
+selection** section needs **deleting, not reconciling**. It also still spells the old
+vocabulary and `task/<n>`, so it applies almost cleanly and would ship a feature that
+matches zero issues.
 
 ## Do not re-derive these — they were measured, not read
 

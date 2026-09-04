@@ -110,7 +110,7 @@ join, and `gh` covers it only partially.
    PR opened straight to non-draft emits no `ready_for_review` and is never caught.
    Follow-ups live in Linear: PRE-822 (`reopened` unhandled), PRE-823 (does a runner's
    token reach the dependency endpoints — the fact task 8 now turns on).
-7. ~~[phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md)~~ — Reconciler rules for the label invariants. **Done** — PR #464.
+7. ~~[phase_3_handler/gh_migration_task_7.md](phase_3_handler/gh_migration_task_7.md)~~ — Reconciler rules for the label invariants. **Done** — PR #464, merged `afd2d00`, shipped v2.19.0.
    `/reconcile-tasks` had answered "unsupported" for `gh-issue` on the grounds that GitHub
    closes issues natively on merge. That is true and it is a different question, so the
    handler now reconciles what it actually can drift in: the label state model, audited
@@ -227,6 +227,12 @@ join, and `gh` covers it only partially.
 11. [phase_5_cleanup/gh_migration_task_11.md](phase_5_cleanup/gh_migration_task_11.md) — Graduate durable decisions to `dev_docs/`, delete the plan folder.
 
 ## In-flight PRs against files this plan owns
+
+> **Re-checked 2026-09-04: only #426 is still open.** #432 and #411 merged, and merged
+> reconciled — `git grep` over `origin/main` finds no live old-vocabulary query left in
+> `gh-issue-promote.md` or `gh-issue-claim.md`. Their rows below are kept as the record of
+> what was required, not as work outstanding. **#426 is the live one**, and it is the row
+> that was always the most dangerous.
 
 Three open PRs modify handler files this migration has since rewritten. They are tracked
 in Linear, not here — **this section records only what the migration requires of each**,
