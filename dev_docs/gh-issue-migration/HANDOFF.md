@@ -211,15 +211,41 @@ switch waits on the auto-pilot harness — switching before then ends unattended
 rather than degrading it. That is a postponement, not a dead end: every handler verb works
 in a foreground session today, so the repo could switch and be driven by hand deliberately.
 
-Four acceptance criteria are consequently **unmet, and none is a defect** — each needs a
-repo actually on the `gh-issue` handler. Run them when one exists:
+Four acceptance criteria are consequently **unmet, and none is a defect**. Each needs a
+repo on the `gh-issue` handler — but read that carefully, because it is **not** the same
+as needing this repo to switch: **`bestdan/dotfiles` is already `handler: gh-issue`**
+(its `dev_docs/tasks/.task-config.yml`, `repo: bestdan/dotfiles`, `labels: [task-add]`).
+Anything testing only **handler dispatch** can run there today, against a real board,
+with no migration and no config change. What dotfiles cannot stand in for is a
+**migrated** backlog: it was never on Linear, so it carries none of the imported issues,
+old-vocabulary labels or `Blocked by:` footers the migration criteria are about. Sort
+each criterion by which of the two it actually needs:
 
-- **Task 4** — two `/do-tasks` sessions against the same ready issue, confirming exactly
-  one proceeds.
-- **Task 7** — `/reconcile-tasks` end to end through the command rather than the script.
-  The script itself was verified against the live API.
-- **Task 8** — `/reoptimize-tasks` against a migrated backlog, spot-checking three edges
-  in the GitHub UI. Only the command dispatch is untested: the underlying scripts were
-  exercised against live issues on `bestdan/dotfiles` (edges created, a 3-cycle detected,
-  an edge deleted and confirmed gone, stale/satisfied classified off real state).
+- **Task 7 — dispatch only, and runnable on `bestdan/dotfiles` today.** Its own entry
+  says what is untested is "only the handler dispatch"; the script was already verified
+  against the live API. Task 7 shipped in **v2.19.0**, so the installed plugin already
+  carries it — unlike task 8's check, this one is not waiting on a release. Cheapest
+  outstanding item on this list.
+- **Task 4 — dispatch, and runnable on `bestdan/dotfiles` today.** Two `/do-tasks`
+  sessions against the same ready issue, confirming exactly one proceeds. Needs an issue
+  at `status:2_ready` on that board and two concurrent sessions; the racing is the point,
+  so a serial run proves nothing.
+- **Task 8** — `/reoptimize-tasks` against the migrated `workflow-skills` backlog,
+  spot-checking three edges in the GitHub UI. Needs task 9, so it waits on Phase 4.
+  Only the **command dispatch** is untested: the scripts under it were exercised against
+  live issues on `bestdan/dotfiles` — edges created, a 3-cycle detected through transitive
+  backfill, an edge deleted and confirmed gone on readback, stale/satisfied classified off
+  real `state_reason`.
+  - **Run the dispatch half early, on `bestdan/dotfiles`, once a release ships.** That
+    repo is already `handler: gh-issue`, so it needs no migration and no config change —
+    the only thing blocking it is the version. **Do not run it before the release:** a
+    slash command dispatches to the **installed** plugin under
+    `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/`, which is a real
+    directory rather than a symlink to a checkout, so running it today exercises the old
+    report-only prose and returns a green result that says nothing about the change. Once
+    the version carrying [PR #478](https://github.com/bestdan/workflow-skills/pull/478) is
+    installed, this costs minutes and covers what the live probe could not: that the
+    command routes to the handler and its steps are followable as written. Expect zero
+    dependency findings — dotfiles has no edges — so read it as a dispatch check, not a
+    coverage one.
 - **Task 15** — its user-run check.
