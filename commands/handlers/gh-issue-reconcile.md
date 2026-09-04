@@ -26,8 +26,8 @@ starting point. Do not add a fourth row, and do not widen these three.
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
 
-Rows 2 and 3 are **void** where the labels they ask about are not provisioned on
-the repo; each reports that gap once instead of flagging every issue. See below.
+Rows 2 and 3 are **void** where the labels they ask about are absent from the
+repo; each reports that gap once instead of flagging every issue. See below.
 
 **Row 1 is the only row that writes**, and only under `--apply`. It keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
@@ -54,14 +54,21 @@ GitHub's `state_reason` so those are dismissible on sight.
 **A row checks that the label it looks for is provisioned.** Label namespaces are
 per-repo, so a rung may simply never have been created — and then the row's
 question is unanswerable, not answered "no". Row 3 is the sharp case: without
-`status:4_needs_review` on the repo, no issue can ever have carried it, so every
-closed issue in the window is a hit. Measured 2026-09-04 against
+`status:4_needs_review` on the repo, every closed issue in the window is a hit.
+Measured 2026-09-04 against
 `bestdan/dotfiles`: 50 of 50, correctly scoped, all noise. The script reports the
 gap once and returns no findings. Row 2 is guarded by group rather than by
 completeness — its premise is that a rung was assignable and nobody assigned it,
 which still holds while the group has any member provisioned, so only a `status:`
 or `auto:` group with **none** voids it. Row 1 needs no guard: it ranks labels the
 issue already carries, which cannot exist unprovisioned.
+
+Say **absent**, not "never created". Deleting a label after issues carried it
+leaves the same current label set, and the `labeled` events keep the name, so the
+evidence row 3 wants would still be there. Voiding is still the right default —
+the current label set is the only cheap signal, and a shouted gap beats a
+confident wrong answer — but the report must not claim to know which of the two
+happened.
 
 > **This is an audit, not a load-bearing repair.** Every status write goes
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the
@@ -130,11 +137,12 @@ issue already carries, which cannot exist unprovisioned.
    it is a flag on this script, not on `/reconcile-tasks`, so it never arrives
    as a command argument. Mind the cost: row 3 spends one API call per
    **closed** issue in the window, so the limit is what bounds the run — unless
-   `status:4_needs_review` is unprovisioned, in which case row 3 is void, skips
-   those reads entirely, and the run costs three calls in total. The script makes
-   one `gh label list` before any per-issue work to decide that, and its report
-   opens with the repo's provisioning gap and the `gh-label-sync.py` command that
-   closes it.
+   `status:4_needs_review` is absent from the repo, in which case row 3 is void,
+   skips those reads entirely, and the run costs three base `gh` invocations —
+   one `gh label list` and one `gh issue list` per state, before any row-1 repair
+   under `--apply` adds writes of its own. The script makes that `gh label list`
+   before any per-issue work to decide the row's fate, and its report opens with
+   the repo's provisioning gap and the `gh-label-sync.py` command that closes it.
 
    Row 1's repair goes through `gh-issue-state.py` — validate, then one full-set
    PATCH — so it carries `follow-up` and every other unmanaged label forward

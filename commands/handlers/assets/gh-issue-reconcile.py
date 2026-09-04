@@ -22,7 +22,7 @@ Three rules, matching the invariants labels.yml states:
    FLAG. Under this schema a merge IS completion, so a stray or mistaken
    `Closes #<n>` in an unrelated PR body closes an issue that never passed
    review, and nothing else in the loop would notice. Void where that label is
-   not provisioned on the repo — see the provisioning note below.
+   not present on the repo — see the provisioning note below.
 
 Rule 1 is the only rule that can write, and only with `--apply`. Rules 2 and 3
 never write, at any flag combination.
@@ -30,8 +30,8 @@ never write, at any flag combination.
 **Every rule checks that the labels it looks for are provisioned.** Label
 namespaces are per-repo, so a rung this audit asks about may simply never have
 been created — and then the question is unanswerable rather than answered "no".
-Rule 3 is the sharp case: on a repo without `status:4_needs_review`, no issue can
-ever have carried it, so every closed issue is a hit. Measured 2026-09-04 against
+Rule 3 is the sharp case: on a repo without `status:4_needs_review`, every closed
+issue is a hit. Measured 2026-09-04 against
 `bestdan/dotfiles` — 50 of 50, correctly scoped by the configured label, every
 one of them noise. So one `gh label list` runs before any per-issue work, and a
 row whose premise is void reports THAT, once, and returns no findings.
@@ -237,7 +237,7 @@ def unprovisioned_groups(present, groups):
     return [
         group
         for group in ("status", "auto")
-        if not any(f"{group}:{value}" in present for value in groups.get(group, []))
+        if not any(f"{group}:{value}" in present for value in groups[group])
     ]
 
 
@@ -341,11 +341,16 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
         repo, "closed", limit, scope_labels, "number,title,stateReason"
     )
     # Rule 3's premise is that the rung EXISTS and this issue never carried it.
-    # Where the repo never provisioned it, no issue can ever have carried it, so
-    # every closed issue in the window is a hit — measured 2026-09-04 against
-    # bestdan/dotfiles: 50 of 50, correctly scoped, all of them noise. Report the
-    # gap once instead, and skip the event reads, which is also the run's whole
-    # per-issue API cost.
+    # Where it is absent from the repo, every closed issue in the window is a hit
+    # — measured 2026-09-04 against bestdan/dotfiles: 50 of 50, correctly scoped,
+    # all of them noise. Report the gap once instead, and skip the event reads,
+    # which is also the run's whole per-issue API cost.
+    #
+    # Absence now is not proof the label was NEVER provisioned: deleting it after
+    # issues carried it reads the same, and the `labeled` events keep the name, so
+    # the evidence this row wants would still be there. Voiding is still right —
+    # the current label set is the only cheap signal, and a shouted gap beats a
+    # confident wrong answer — but say "not present", never "never created".
     for issue in closed_issues if review_provisioned else ():
         if ever_labelled(repo, issue["number"], review):
             continue
@@ -388,10 +393,14 @@ def report(result):
         else "whole repo (rule 2 will flag every issue outside the task loop)"
     )
     checked = result["checked"]
+    # "listed" rather than "checked" when rule 3 is void: the closed issues were
+    # read into the window but nothing examined them. The count stays, because it
+    # is the only signal of how much the provisioning gap is costing.
+    closed_verb = "checked" if result["review_label_provisioned"] else "listed"
     print(
         f"{result['repo']}: checked {checked['open']} open and "
-        f"{checked['closed']} closed issue(s), limit {result['limit']} — "
-        f"scope: {scope}"
+        f"{closed_verb} {checked['closed']} closed issue(s), "
+        f"limit {result['limit']} — scope: {scope}"
     )
 
     if result["missing_vocabulary"]:
@@ -399,8 +408,8 @@ def report(result):
         print(
             f"\nProvisioning gap — {len(result['missing_vocabulary'])} vocabulary "
             f"label(s) absent from this repo: {names}\n"
-            "  Provision with: python3 .../gh-label-sync.py --repo "
-            f"{result['repo']} --apply"
+            f"  Provision with: python3 {ASSETS / 'gh-label-sync.py'} "
+            f"--repo {result['repo']} --apply"
         )
 
     findings = result["double_status"]
@@ -440,10 +449,11 @@ def report(result):
     if not result["review_label_provisioned"]:
         print(
             f"\nRule 3 — closed, never labelled {REVIEW_STATUS_VALUE}: VOID.\n"
-            f"  `{result['review_label']}` is not provisioned on {result['repo']}, "
-            "so no issue can ever have carried it and every closed issue would\n"
-            "  read as a hit. Provision the label, run the loop, then re-run this "
-            "audit."
+            f"  `{result['review_label']}` is not present on {result['repo']} — "
+            "either never created, or deleted after issues carried it.\n"
+            "  Either way the row cannot be answered from the current label set, "
+            "and every closed issue would read as a hit.\n"
+            "  Provision the label, run the loop, then re-run this audit."
         )
     else:
         print(

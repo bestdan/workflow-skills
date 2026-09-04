@@ -44,15 +44,45 @@ def run_gh(args):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+LABEL_LIST_LIMIT = 500
+
+
 def existing_labels(repo):
+    """Every label on the repo, or a loud failure — never a truncated list.
+
+    `gh label list` has no `--paginate`, so the cap is the only bound and a
+    silently truncated read is indistinguishable from a complete one. That is
+    tolerable for this file's own sync(), where a present-but-omitted label makes
+    the follow-up `gh label create` fail nonzero. It is not tolerable for
+    gh-issue-reconcile.py, which reads ABSENCE from this list as proof a rung was
+    never provisioned and voids a whole rule on it — there the same truncation
+    silently suppresses findings and prints a confident VOID line. So refuse at
+    the cap rather than let either caller conclude anything from a partial list.
+    """
     code, out, err = run_gh(
-        ["label", "list", "--repo", repo, "--limit", "500", "--json", "name"]
+        [
+            "label",
+            "list",
+            "--repo",
+            repo,
+            "--limit",
+            str(LABEL_LIST_LIMIT),
+            "--json",
+            "name",
+        ]
     )
     if code != 0:
         raise SystemExit(
             f"gh label list failed for {repo}: {err.strip() or out.strip()}"
         )
-    return [entry["name"] for entry in json.loads(out or "[]")]
+    names = [entry["name"] for entry in json.loads(out or "[]")]
+    if len(names) >= LABEL_LIST_LIMIT:
+        raise SystemExit(
+            f"gh label list hit the {LABEL_LIST_LIMIT}-label cap for {repo}: the "
+            "list may be truncated, so neither presence nor absence can be "
+            "concluded from it. Raise LABEL_LIST_LIMIT."
+        )
+    return names
 
 
 def create_label(repo, name, color):

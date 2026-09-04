@@ -143,6 +143,33 @@ class SyncTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_a_label_list_at_the_cap_refuses_rather_than_truncating(self):
+        """`gh label list` has no --paginate, so the cap is the only bound.
+
+        A truncated read is indistinguishable from a complete one, and
+        gh-issue-reconcile.py concludes ABSENCE from this list — it voids a whole
+        audit rule on it. Concluding anything from a possibly-partial list is the
+        silent wrong answer this refusal exists to prevent.
+        """
+        repo = FakeRepo(labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT)])
+        gh_label_sync.run_gh = repo.run_gh
+
+        with self.assertRaises(SystemExit) as caught:
+            gh_label_sync.existing_labels("owner/name")
+
+        self.assertIn("cap", str(caught.exception))
+        self.assertEqual(repo.created(), [])
+
+    def test_a_label_list_below_the_cap_is_returned_normally(self):
+        repo = FakeRepo(
+            labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT - 1)]
+        )
+        gh_label_sync.run_gh = repo.run_gh
+
+        names = gh_label_sync.existing_labels("owner/name")
+
+        self.assertEqual(len(names), gh_label_sync.LABEL_LIST_LIMIT - 1)
+
     def test_malformed_vocabulary_raises_rather_than_dropping_a_group(self):
         # A scalar where an inline list belongs.
         bad = self._bad_vocabulary("status: 0_untriaged\n")
