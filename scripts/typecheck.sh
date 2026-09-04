@@ -113,6 +113,7 @@ DEV_FILES=(
   scripts/bump-version.py
   scripts/plan-graph.py
   scripts/task-scan.py
+  scripts/tier-coverage.py
   scripts/validate.py
 )
 DEV_PYTHON=3.11
@@ -122,7 +123,23 @@ DEV_PYTHON=3.11
 # files was checked at all until recently.
 TEST_FILES=(scripts/test_*.py)
 
+# Deliberately unchecked. Not a suppression list — scripts/tier-coverage.py
+# requires the arrays above plus this one to account for every tracked .py file,
+# so anything here is a visible decision rather than an omission.
+#
+# skills/analysis-pipeline/example/*.py: teaching examples shipped inside a
+# skill, not entrypoints. The one diagnostic there (a `min(key=...)` overload)
+# would be silenced by making the example worse at the job it exists for.
+# shellcheck disable=SC2034  # read by scripts/tier-coverage.py, which parses
+# this file's arrays as text; bash itself never expands this one.
+EXCLUDED_FROM_TYPECHECK=(skills/analysis-pipeline/example/*.py)
+
 rc=0
+
+# Before any mypy run: a tier list that has drifted from the tracked files makes
+# every result below an answer to the wrong question.
+echo "→ tier coverage"
+python3 "$ROOT/scripts/tier-coverage.py" || rc=1
 
 echo "→ mypy --strict (py${DEV_PYTHON}): ${STRICT_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --strict \
