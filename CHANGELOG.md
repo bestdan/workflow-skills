@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.21.1] - 2026-09-04
+
+### Fixes
+
+- void a reconciler row whose label was never provisioned (#479) (446b45f)
+
 ## [2.21.0] - 2026-09-04
 
 ### Features
