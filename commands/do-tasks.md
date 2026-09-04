@@ -905,15 +905,27 @@ each session loudly on its own issue.
    one to drop. The prompt must **omit** `gh-issue-claim.py
    acquire` entirely — there is no ref to create on this path.
 
-   **One addition to those steps, and it is what makes the mixed-path race
-   detectable.** Between posting the claim comment and writing the board markers,
-   have the session re-run pre-flight's ref probe —
-   `git ls-remote --heads origin "<branch>"`. If a ref now exists, a **local**
-   session acquired the lock after this session's own pre-flight: retract the
-   claim comment, write **nothing** to the board, and stop with
-   `Skipped #<n>: claim lost — <branch> acquired by another session`. The probe
-   costs one read and it is the only point where a ref-lock winner is visible to
-   an election-path session before it writes.
+   **Two additions to those steps, and they are what make the mixed-path race
+   detectable.** The election cannot see a ref, so the session has to look for one
+   itself — `git ls-remote --heads origin "<branch>"`, pre-flight's probe, run
+   **twice**:
+
+   - **Before writing the board markers**, right after posting the claim comment.
+     A ref here means a local session acquired after this session's pre-flight:
+     retract the comment, write **nothing** to the board, stop.
+   - **After the jittered sleep, with the re-list.** This is the one that matters,
+     because the first probe leaves the election's own ~2–3 s sleep wide open —
+     and a local session needs only a `git fetch` and one POST to acquire inside
+     it. A ref here is a lost claim **regardless of comment ordering**: retract
+     your comment and stop. The markers are already written by then; **leave
+     them**, exactly as fallback step 6 says — they carry the same account values
+     the local winner writes, so stomping them helps nobody.
+
+   Either way report `Skipped #<n>: claim lost — <branch> already exists on
+   origin`, `claim-lock.md`'s own wording for this observation. Do **not** write
+   "acquired by another session": a bare `ls-remote` hit cannot tell a live claim
+   from a ref an earlier crash stranded, and this section is where that
+   distinction is load-bearing.
 
    The session then creates its work branch itself,
    `git switch -c "<branch>" "origin/<base>"` (the case `gh-issue-claim.md`
@@ -963,15 +975,19 @@ each session loudly on its own issue.
    asymmetry and it is not closed by a lock; it is closed by each side reading for
    the other's marker, and each direction has one:
 
-   - **Local acquires the ref first** → the dispatched session's re-probe in step 6
-     sees the ref before it writes anything, retracts, and stops.
+   - **Local acquires the ref first** → one of the dispatched session's two ref
+     probes in step 6 sees it — the first before any board write, the second
+     after the election's sleep, which is the interval the first cannot cover —
+     and it retracts and stops.
    - **The dispatched session writes its markers first** → the local session's
      "Claim the issue" step 1 re-read sees the assignee and the moved rung and
      returns `race` before its own acquire.
 
    What is left is genuine simultaneity: the two reads interleaving inside the
-   window between one session's probe and the other's write. Nothing here makes
-   that impossible, and the honest bound is that it is narrow rather than closed —
+   window between the dispatched session's **second** probe and the local
+   session's acquire, which is milliseconds rather than the seconds the sleep
+   would otherwise have contributed. Nothing here makes that impossible, and the
+   honest bound is that it is narrow rather than closed —
    `claim-lock.md`'s existing mixed-path window, which batch makes ordinary rather
    than exceptional. Taking the ref lock in the dispatched session would close it
    and reopen the permanent strand step 6 exists to avoid; that trade is the
