@@ -39,10 +39,10 @@ The resolved scope — a single `projectId`, the set of all configured `projectI
 Call `<linear-mcp>__list_issues` with:
 
 - `teamId`: resolved team id
-- `projectId`: from step 4 — omit when whole-team; for a single configured project use its `id`; for the all-configured scope run this query once per configured project `id` and merge the candidates (tag each with its project for the report).
+- `projectId`: from step 4 — omit when whole-team; for a single configured project use its `id`; for the all-configured scope run this query once per configured project `id`, **in a fixed order**, and merge the candidates (tag each with its project for the report) — subject to the single shared budget below, so a project queried later in that order can end up contributing zero candidates once the budget is already spent.
 - `stateId`: each `backlog`-type state id from step 2 (loop or pass as list per the tool's accepted shape)
 - `includeArchived`: `false`
-- Limit: 50. If more exist, note the truncation in the report; do not paginate.
+- Limit: 250 (the tool's max) per call, and **paginate to exhaustion** against **one shared 500-candidate budget for the whole collection phase — not 500 per project.** Maintain a single running total across every project query and every page within it (a single project's collection is just the degenerate one-project case of the same budget). While a page's `hasNextPage` is `true` **and** the running total is still under 500, re-call with `cursor` set to the returned cursor and merge the results; the instant the running total reaches 500 — mid-page, at a page boundary, or moving on to the next project in the all-configured union — stop the **entire** collection phase (no further pages, no further projects), not just the current project's loop. This is deliberately a single global ceiling rather than 500-per-query: an all-configured union of `N` projects must not admit up to `500×N` candidates just because each project's own query is capped at 500 — that would make the ceiling's advertised magnitude (matching `gh-issue-promote.md`'s single 500-issue cap) meaningless for any run scoring more than one project, and would make step 9's "`M` is the ceiling on a hit" claim false for exactly the union case. Hitting the shared budget earns its own prominent report line in step 9 (not a footnote), not a silent stop. Kept well short of the tool's practical reach deliberately: step 5's parent-rollup check below still costs one serial `list_issues` call per surviving candidate, and the Linear MCP is token-expensive (`linear-common.md`) — a higher ceiling would multiply that fan-out directly. A batched check (one bulk GraphQL query over `children(first: 1)` per candidate, mirroring `linear-ready.py`'s fast path) would remove that constraint but is out of scope here; this ceiling is the interim bound.
 
 Set aside (do **not** score) any candidate that **already** carries `auto-eligible` or `human-approval-requested` — the promoter, like the file path, only acts on issues that have not yet been scored (the Linear analogue of `status: new`). Keep these in a separate `skipped` list so step 9 can report them (mirroring the file path's `skipped (…, already past new)` line); they receive no `save_issue` call. Report and exit if no un-scored candidates remain.
 
@@ -114,10 +114,11 @@ Never move an issue to a `completed`- or `canceled`-type state, and never touch 
 
 ### 9. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`) so it's clear what the run covered:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`), and — if step 5's collection phase hit the shared 500-candidate budget — a prominent warning line **before** the summary (not a trailing footnote), naming the resolved scope and, for the all-configured union, which project the budget ran out on (candidates from later projects in the fixed query order were never collected). Because the budget is shared across the whole collection phase — never 500 per project — the `Promoted N of M candidates` line directly below always carries the true count: on a hit `M` **is** the budget, whatever the scope, so the warning states the truncation and the summary states the number. Neither repeats the other:
 
 ```
 scope: project Payments revamp
+⚠ candidate query for project Payments revamp hit the 500-candidate cap — some backlog issues may not have been scored this run.
 Promoted 4 of 8 candidates:
   ready (3):
     - PRE-12  Fix broken import  (backfilled: estimate)
@@ -136,7 +137,7 @@ backfilled (2):
   - PRE-18  (priority, estimate)
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. **`held (quota)`** is a separate section from `skipped`: these scored HIGH and would otherwise have promoted, but step 7's quota precheck held them back — every one names the `active_count`/`active_issue_quota` reading and points at `/archive-tasks`, so the note in step 7 is not silently lost between the check and the report. Omit the section entirely when nothing was held. Append the truncation note from step 5 if it applied.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. **`held (quota)`** is a separate section from `skipped`: these scored HIGH and would otherwise have promoted, but step 7's quota precheck held them back — every one names the `active_count`/`active_issue_quota` reading and points at `/archive-tasks`, so the note in step 7 is not silently lost between the check and the report. Omit the section entirely when nothing was held. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". Make the remediation **scope-aware**, and note that the whole-team backlog has **no per-run override** — it is scored only when **no** projects are configured (step 4 cases 1–2), a config-level state, not a flag. For example:
 
