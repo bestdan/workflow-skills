@@ -10,6 +10,10 @@ gh-issue:
   repo: owner/name # optional; defaults to the current repo
   labels: [follow-up] # optional; each is created if missing
   assignees: [] # optional GitHub usernames
+  remote_batch: true # optional; true/absent → /do-tasks --all dispatches one remote
+  # session per issue (each self-checks for `gh`). false → --all degrades to a single
+  # foreground claim. The deterministic opt-out for a host whose VMs have no `gh` —
+  # same role as `linear.remote_batch`. See commands/do-tasks.md §4 "gh-issue batch".
   max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
   # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`
   # (see commands/handlers/linear-common.md "Config block"). gh-issue has no per-project
@@ -85,7 +89,7 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only — one `gh issue list` query, no edits, no claims. Renders the repo's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which scores an issue to `status:2_ready` + `auto:eligible` or `status:1_needs_refinement` + `auto:human-review-needed`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `<branch_prefix>task-<n>` ref-creation lock plus the `@me` + `status:3_started` board marker — and swaps to the needs-review rung on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is not yet supported.
+> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which scores an issue to `status:2_ready` + `auto:eligible` or `status:1_needs_refinement` + `auto:human-review-needed`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `<branch_prefix>task-<n>` ref-creation lock plus the `@me` + `status:3_started` board marker — and swaps to the needs-review rung on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is supported too — one dispatched remote session per dependency-ready issue, bounded by the WIP limit (`commands/do-tasks.md` §4 "gh-issue batch").
 
 **The vocabulary lives in `commands/handlers/assets/labels.yml`** — four namespaces (`status:`, `auto:`, `prio:`, `est:`) and the invariants that govern them. Read the names from there; never hardcode one. Two of those invariants decide how this section reads a board: an **open** issue carries exactly one `status:` and exactly one `auto:` rung, and a **closed** issue carries neither while keeping its `prio:`/`est:`. `status:` and `auto:` answer different questions — where the work is, versus whether automation may take it — so listing reads `status:` for the section and ignores `auto:` entirely.
 

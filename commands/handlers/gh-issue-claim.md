@@ -1,6 +1,8 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+
+In **single** mode (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`, `--claim-only`) this flow runs in the **current session**. In **batch** mode (`/do-tasks --all` / `-n N`, without `--claim-only` or `--no-claim`) it runs once per selected issue inside a dispatched **remote** session — see `commands/do-tasks.md` §4 "gh-issue batch", which reuses this file's find/rank, dependency and pre-flight phases as the dispatcher's own selection and then hands each session a single pinned issue number. **Two things change in a dispatched session and nothing else does:** "Find candidates" is skipped (the dispatcher already selected), and the claim runs `claim-lock.md`'s comment-token election instead of the ref acquire in "Claim the issue" step 2 — because an unattended session that crashes after acquiring strands the lock ref permanently. §4 steps 5–7 own both substitutions and the reasoning; do not re-derive either here.
 
 **Shared reference:** the label vocabulary is `commands/handlers/assets/labels.yml`, read the same way by `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md`; every label write on this path goes through `commands/handlers/assets/gh-issue-state.py`; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -92,6 +94,8 @@ normal run — passing both is an error: stop and ask which was meant.
   default branch). Then run "Branch + execute" (skipping branch creation), "PR", and
   "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
+
+**`--all` / `-n N` without `--claim-only`** is **not** driven from this file. `commands/do-tasks.md` §4 "gh-issue batch" ranks and selects the dependency-ready candidates itself, then dispatches one remote session per selected issue, each running the **default** flow above against its one issue number. In that session every pre-claim gate is verification-only: a blocked dependency, a pre-flight trip, a feasibility reject, or a lost claim **stops and reports** rather than advancing to another candidate — advancing would put two dispatched sessions on one issue. `--all` / `-n N` with `--local` never dispatches: it caps the batch at 1 and runs the single highest-ranked issue through the default flow in the current session.
 
 ## Pre-claim WIP gate
 

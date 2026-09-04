@@ -6,7 +6,7 @@ network. Covers the branch-name model (deterministic, any-prefix parseable),
 the acquire election's exit-code contract (0 won / 3 lost / 4 indeterminate)
 including the concurrency case where a second acquire against the same fake
 remote must lose without ever touching the issue, the wip count's single
-query and both in-flight labels, and release.
+query, both in-flight labels and its clamped batch `slack`, and release.
 """
 
 import contextlib
@@ -257,6 +257,33 @@ class WipTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
         self.assertTrue(json.loads(out.getvalue())["at_limit"])
+
+    def test_slack_is_the_remaining_batch_ceiling(self):
+        """A batch reads `slack`, never `limit - count` done in prose."""
+        remote = FakeRemote(wip_issues=[(1, "a"), (2, "b")])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        self.assertEqual(json.loads(out.getvalue())["slack"], 1)
+
+        remote_at = FakeRemote(wip_issues=[(1, "a"), (2, "b"), (3, "c")])
+        gh_issue_claim.run_gh = remote_at.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        self.assertEqual(json.loads(out.getvalue())["slack"], 0)
+
+    def test_slack_is_clamped_at_zero_over_the_limit(self):
+        """An over-limit board must not hand a batch a negative ceiling."""
+        remote = FakeRemote(wip_issues=[(n, "x") for n in range(1, 6)])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["slack"], 0)
 
     def test_exits_0_regardless_of_at_limit(self):
         remote = FakeRemote(wip_issues=[(1, "a"), (2, "b"), (3, "c")])

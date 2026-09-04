@@ -2,7 +2,7 @@
 
 The default. Creates the task file on a branch from main and opens a PR — without touching local state. Lands on main (via auto-merge) decoupled from the feature branch, where `/do-tasks` can later pick it up.
 
-It does git plumbing, so it uses an agent + the remote/subagent/local cascade. The `linear` tracker handler also dispatches **remote** sessions, but only for batch `/do-tasks --all` (see `commands/do-tasks.md` §3 "Tracker-batch subroutine"); its single path, and the CLI/MCP handlers (`gh-issue`, `jira`), are single foreground calls.
+It does git plumbing, so it uses an agent + the remote/subagent/local cascade. The `linear` and `gh-issue` tracker handlers also dispatch **remote** sessions, but only for batch `/do-tasks --all` (see `commands/do-tasks.md` §3 "Tracker-batch subroutine" and its gh-issue instantiation in §4); their single paths, and the `jira` handler, are single foreground calls.
 
 ## Detect dispatch mode
 
