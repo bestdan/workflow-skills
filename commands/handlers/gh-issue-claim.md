@@ -1,6 +1,6 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow: **find candidates** (read-only), **dependency-ready selection** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP. In **single** mode (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`) this flow runs in the **current session**; in **batch** mode (`/do-tasks --all` / `-n N`, without `--claim-only`) it runs unchanged, once per selected issue, inside a dispatched **remote** session — see `commands/do-tasks.md` §3 "Tracker-batch subroutine", which gh-issue batch reuses with this file's find/dependency/claim phases as the per-handler substitution.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow: **find candidates** (read-only), **dependency-ready selection** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP. In **single** mode (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`) this flow runs in the **current session**; in **batch** mode (`/do-tasks --all` / `-n N`, without `--claim-only`) it runs unchanged, once per selected issue, inside a dispatched **remote** session — see `commands/do-tasks.md` §4 "gh-issue batch", the gh-issue instantiation of §3's Tracker-batch subroutine, which reuses this file's find/dependency/claim phases as the per-handler substitution.
 
 **Shared reference:** the status-label vocabulary is the same one `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md` use; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -55,14 +55,17 @@ normal run — passing both is an error: stop and ask which was meant.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
 
 **`--all` / `-n N` with `--remote` (the default, without `--claim-only`)** is **not**
-run from this file directly — `commands/do-tasks.md` §3 "Tracker-batch subroutine"
-ranks and selects dependency-ready candidates itself (reusing "Find candidates" and
-"Dependency-ready selection" below), then dispatches one remote session **per
-selected issue**, each running this file's **default** atomic claim-and-execute flow
-(pre-claim WIP gate → find candidates → dependency-ready → pre-flight → judge →
-claim → branch + execute → PR → move to review) against that one issue number.
-Nothing in this file changes between single and batch mode — a batch session is just
-this file's default flow, run unattended, pinned to one already-selected issue.
+run from this file directly — `commands/do-tasks.md` §4 "gh-issue batch"
+(instantiating §3's Tracker-batch subroutine) ranks and selects dependency-ready
+candidates itself (reusing "Find candidates" and "Dependency-ready selection"
+below), then dispatches one remote session **per selected issue**, each running
+this file's **default** atomic claim-and-execute flow as a direct `<#n>` pick
+against that one issue number (pre-claim WIP gate → dependency-ready → pre-flight →
+judge → claim → branch + execute → PR → move to review; "Find candidates" is
+skipped — the dispatcher already selected). In that session every pre-claim gate is
+verification-only: a blocked dependency, a pre-flight trip, a feasibility reject, or
+a lost claim race stops and reports instead of advancing to the next candidate.
+Nothing else in this file changes between single and batch mode.
 **`--all` / `-n N --local` never dispatches remotely** — it caps the batch at 1 and
 runs the single highest-ranked dependency-ready issue through this file's default
 flow **in the current session** instead (`commands/do-tasks.md` §4).

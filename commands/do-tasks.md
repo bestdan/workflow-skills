@@ -680,17 +680,22 @@ substituting:
 3. **Select dependency-ready candidates lazily, in ranked order** — walk the ranked
    list and apply `gh-issue-claim.md` "Dependency-ready selection" (the
    `Blocked by: #<n>[, owner/repo#<n>…]` footer, each reference resolved via a lazy
-   `gh issue view --json state,stateReason` against its own repo, `NOT_PLANNED`
-   closes and lookup errors both treated as **not** satisfied — see that section for
+   `gh issue view --json state,stateReason` against its own repo; `NOT_PLANNED`
+   closes and every lookup error **except not-found** treated as **not** satisfied,
+   a not-found reference treated as satisfied (gone) — see that section for
    the full classification) one candidate at a time; keep ready issues, record the
    rest as `waiting on #<n>`. Stop once you have `N` issues (for `-n N`),
    the WIP slack is exhausted, or the list is exhausted. Record any candidate left
    unexamined as `held (WIP limit reached)` or `held (-n N ceiling)`.
 4. **Dispatch one remote session per selected issue** — each issue's own cloud VM
-   runs `gh-issue-claim.md`'s **default** flow end to end (pre-claim WIP gate → find
-   candidates → dependency-ready → pre-flight → judge → claim the `task/<n>` ref →
-   branch + execute → `gh pr create` with `[#<n>]` + `Closes #<n>` → move to review)
-   against **that one issue number** — never instruct a session to claim more than
+   runs `gh-issue-claim.md`'s **default** flow as a direct `/do-tasks <#n>` pick
+   against **that one issue number** (pre-claim WIP gate → dependency-ready →
+   pre-flight → judge → claim the `task/<n>` ref → branch + execute → `gh pr create`
+   with `[#<n>]` + `Closes #<n>` → move to review). **Skip "Find candidates"** — the
+   dispatcher already ranked and selected. Every gate before the claim is
+   **verification-only** in the remote session: a blocked dependency, a pre-flight
+   trip, a feasibility reject, or a lost claim race **stops the session and reports**
+   — it never advances to another issue. Never instruct a session to claim more than
    one. The prompt must be self-contained (the VM has no plugin installed and a
    fresh clone has no local task config) — inline the issue number, the
    claim+execute instructions, and the resolved **non-secret** gh-issue config
