@@ -87,10 +87,18 @@ ISSUE_FIELDS = "number,title,body,state,stateReason,labels,milestone,createdAt"
 # names a plan task that never became an issue, so there is no edge to migrate
 # it to. Anchored to a line start so a sentence mentioning the phrase in prose
 # is not mistaken for the footer.
+# A leading `>` is NOT allowed: a generated footer is never quoted, so
+# `> Blocked by: #42` is someone quoting a footer in prose — a plan doc, a
+# review comment pasted into a body. Migrating that would propose a dependency
+# from a quotation.
 FOOTER_LINE = re.compile(
-    r"^[ \t>]*Blocked by:(?P<refs>.*)$", re.IGNORECASE | re.MULTILINE
+    r"^[ \t]*Blocked by:(?P<refs>.*)$", re.IGNORECASE | re.MULTILINE
 )
-FOOTER_REF = re.compile(r"#(\d+)")
+# Qualified refs are matched so they can be REJECTED, not so they can be
+# stripped: `other/repo#42` reduced to `#42` names a different, real issue in
+# this repo, and `gh-issue-deps.py` refuses cross-repo edges precisely so that
+# cannot happen. Matching only `#(\d+)` would smuggle one past it.
+FOOTER_REF = re.compile(r"(?P<repo>[\w.-]+/[\w.-]+)?#(?P<number>\d+)")
 
 STARTED_STATUS_VALUE = "3_started"
 
@@ -188,7 +196,7 @@ def prio_rank(value, vocabulary):
     return order.index(value) if value in order else len(order)
 
 
-def build_node(issue, vocabulary, in_scope):
+def build_node(issue, vocabulary, in_scope, repo):
     names = label_names(issue)
     milestone = issue.get("milestone") or {}
     return {
@@ -205,22 +213,36 @@ def build_node(issue, vocabulary, in_scope):
         "prio": group_value(names, "prio", vocabulary),
         "est": group_value(names, "est", vocabulary),
         "status": group_value(names, "status", vocabulary),
+        # `auto` is carried for the same reason `body` is: the priority-inversion
+        # repair writes through `gh-issue-state.py`, which takes the COMPLETE
+        # managed set and refuses an open issue that is not carrying exactly one
+        # `auto:` rung. Without this the caller cannot build a legal write.
+        "auto": group_value(names, "auto", vocabulary),
         "created_at": issue.get("createdAt"),
         "in_scope": in_scope,
-        "footer_blockers": footer_blockers(issue.get("body") or "", issue["number"]),
+        "footer_blockers": footer_blockers(
+            issue.get("body") or "", issue["number"], repo
+        ),
     }
 
 
-def footer_blockers(body, self_number):
+def footer_blockers(body, self_number, repo):
     """Issue numbers named by `Blocked by: #<n>` footer lines in a body.
 
     Read in exactly one place — the `footer_only` migration input. A body
-    restating its own number never yields a self-block.
+    restating its own number never yields a self-block, and a reference
+    qualified with a DIFFERENT repo is dropped rather than localised: this path
+    feeds edge creation, and `#42` in another repo is not `#42` in this one.
+    A reference qualified with THIS repo is kept — that is the shape
+    `/push-plan` writes when `gh-issue.repo` is configured.
     """
     found = []
     for match in FOOTER_LINE.finditer(body):
-        for ref in FOOTER_REF.findall(match.group("refs")):
-            number = int(ref)
+        for ref in FOOTER_REF.finditer(match.group("refs")):
+            named = ref.group("repo")
+            if named and named != repo:
+                continue
+            number = int(ref.group("number"))
             if number != self_number and number not in found:
                 found.append(number)
     return found
@@ -308,7 +330,7 @@ def analyse(repo, labels_file, milestone, scope_labels, limit, issue_numbers):
 
     nodes = {}
     for issue in raw:
-        nodes[issue["number"]] = build_node(issue, vocabulary, in_scope=True)
+        nodes[issue["number"]] = build_node(issue, vocabulary, in_scope=True, repo=repo)
 
     edges = {}
     pending = list(nodes)
@@ -321,7 +343,7 @@ def analyse(repo, labels_file, milestone, scope_labels, limit, issue_numbers):
                 # Analysis-only. Without it a cross-milestone edge has no
                 # `state` and its stale/satisfied verdict is unknowable.
                 nodes[blocker] = build_node(
-                    view_issue(repo, blocker), vocabulary, in_scope=False
+                    view_issue(repo, blocker), vocabulary, in_scope=False, repo=repo
                 )
                 pending.append(blocker)
 
@@ -422,9 +444,14 @@ def report(result):
             print(f"  {render(row)}")
 
     section(
-        "Cycles — human decision, never auto-resolved",
+        # Members, not a path. `cycles` holds sorted strongly-connected-component
+        # members, so rendering them with arrows would assert an ordering the
+        # component does not carry — printing `#1 -> #2 -> #3` for a graph whose
+        # edges are 1->3->2->1 claims two edges that do not exist, to a human who
+        # is about to approve a repair.
+        "Cycles — mutually blocking, in no particular order; human decision",
         result["cycles"],
-        lambda c: " -> ".join(f"#{n}" for n in c) + " -> ...",
+        lambda c: "{" + ", ".join(f"#{n}" for n in c) + "}",
     )
     section(
         "Stale edges — blocker closed not_planned, blocks forever",

@@ -284,6 +284,57 @@ class GraphTests(unittest.TestCase):
         repo = FakeRepo(scope=[issue(1, body="---\nBlocked by task: some_slug")])
         self.assertEqual(self._run(repo)["footer_only"], [])
 
+    def test_a_quoted_footer_is_not_a_footer(self):
+        """`> Blocked by: #2` is someone quoting one, not carrying one.
+
+        Generated footers are never blockquoted, and migrating a quotation would
+        propose a dependency from prose that only described one.
+        """
+        repo = FakeRepo(scope=[issue(1, body="> Blocked by: #2"), issue(2)])
+        self.assertEqual(self._run(repo)["footer_only"], [])
+
+    def test_a_cross_repo_footer_ref_is_dropped_not_localised(self):
+        """`other/repo#2` is not `#2` here — localising it links the wrong issue.
+
+        `gh-issue-deps.py` refuses cross-repo edges, so a stripped qualifier
+        would smuggle one past that refusal as a real local issue.
+        """
+        repo = FakeRepo(
+            scope=[issue(1, body="---\nBlocked by: other/repo#2"), issue(2)]
+        )
+        self.assertEqual(self._run(repo)["footer_only"], [])
+
+    def test_a_footer_ref_qualified_with_this_repo_is_kept(self):
+        """The shape `/push-plan` writes when `gh-issue.repo` is configured."""
+        repo = FakeRepo(scope=[issue(1, body=f"---\nBlocked by: {REPO}#2"), issue(2)])
+        self.assertEqual(self._run(repo)["footer_only"], [{"blocked": 1, "blocker": 2}])
+
+    def test_the_node_carries_the_auto_rung_the_priority_repair_needs(self):
+        """`gh-issue-state.py` refuses an open-issue write without one."""
+        repo = FakeRepo(scope=[issue(1, labels=["status:2_ready", "auto:eligible"])])
+        node = self._run(repo)["nodes"][0]
+
+        self.assertEqual(node["auto"], "eligible")
+        self.assertEqual(node["status"], "2_ready")
+
+    def test_a_cycle_is_reported_as_members_not_as_a_path(self):
+        """Arrows would assert an order the component does not carry.
+
+        Edges 1->3->2->1 render as `#1 -> #2 -> #3` under an arrow join, claiming
+        two edges that do not exist — to a human about to approve a repair.
+        """
+        repo = FakeRepo(
+            scope=[issue(1), issue(2), issue(3)], edges={1: [3], 3: [2], 2: [1]}
+        )
+        gh_issue_graph.run_gh = repo.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_graph.main(["--repo", REPO])
+        rendered = out.getvalue()
+
+        self.assertIn("{#1, #2, #3}", rendered)
+        self.assertNotIn("#1 -> #2", rendered)
+
     def test_a_body_restating_its_own_number_is_not_a_self_block(self):
         repo = FakeRepo(scope=[issue(7, body="---\nBlocked by: #7, #8"), issue(8)])
         self.assertEqual(self._run(repo)["footer_only"], [{"blocked": 7, "blocker": 8}])

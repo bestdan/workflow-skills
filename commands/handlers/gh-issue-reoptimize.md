@@ -105,10 +105,12 @@ gh-issue.
      further (gh-issue graphs at this scale are rare, matching the no-paginate
      stance the other gh-issue handlers take).
 
-5. **Derive per-node judgment from the returned labels.** Each node carries
-   `prio`, `est` and `status` already resolved against the vocabulary, plus
-   `state` / `state_reason` and its `body` — so the prose parse the Dimensions
-   below run needs no second fetch. Map them the way the rest of the handler does:
+5. **Derive per-node judgment from the returned labels.** Each node carries all
+   four managed values — `status`, `auto`, `prio`, `est` — already resolved
+   against the vocabulary, plus `state` / `state_reason` and its `body`. So the
+   prose parse the Dimensions run needs no second fetch, and §Apply's priority
+   repair can build its complete managed label set from the node it already has.
+   Map them the way the rest of the handler does:
    an open issue's `status:` value is its position on the ladder; a closed issue
    with `state_reason: completed` is done, with `not_planned` is canceled.
 
@@ -138,10 +140,23 @@ can execute it verbatim.
   `re-scoped per`, `part of … plan`. Exclude the issue's own number so a body
   restating its own id never yields a self-block. For each referenced issue with
   **no native edge already** (check `edges` from step 4, not the footer),
-  classify by phrasing strength: strong (`blocked on/by`, `relies on`, `depends
-  on`, `requires`, `unblocks`) → propose a **`blocked_by` edge**; weak (`part
-  of`, `re-scoped per`, a bare mention) → propose a `Related: #<n>` footer line,
-  which is a cross-reference and stays prose.
+  classify by phrasing strength: strong → propose a **`blocked_by` edge**; weak
+  (`part of`, `re-scoped per`, a bare mention) → propose a `Related: #<n>` footer
+  line, which is a cross-reference and stays prose.
+
+  > **Get the direction right — one strong phrase points the other way.**
+  > `gh-issue-deps.py --edge` takes `<blocked>:<blocker>`, so the orientation is
+  > part of the finding, not a detail of applying it. Reading issue `#A` whose
+  > body names `#B`:
+  >
+  > | Phrase in #A's body                                                              | Edge             |
+  > | -------------------------------------------------------------------------------- | ---------------- |
+  > | `blocked on #B`, `blocked by #B`, `relies on #B`, `depends on #B`, `requires #B` | `--edge A:B`     |
+  > | **`unblocks #B`**                                                                | **`--edge B:A`** |
+  >
+  > `unblocks` is the reverse of every other strong phrase — "#A unblocks #B"
+  > means #B waits on #A. Both directions are valid edges and neither errors, so
+  > a mistake here writes a real dependency backwards and nothing catches it.
 - **Cycles.** `cycles` from step 4, computed over the real edges. **Report** the
   members; never auto-resolve — breaking a cycle means deciding which dependency
   is wrong, which is a human call, same as Linear. A cycle that appears only in
@@ -204,19 +219,36 @@ always a human decision here, same as Linear never auto-merges.
 
 For each **approved** finding:
 
-| Finding                    | Action                                                                                                                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a dependency           | `gh-issue-deps.py --repo "<repo>" --edge <blocked>:<blocker> --apply`. Create-missing-only, so an approved edge that already exists is a no-op. Repeat `--edge` to batch a run. **Then** add the `Blocked by: #<n>` echo to the body, per the row below.                           |
-| Remove a stale dependency  | `gh-issue-deps.py --repo "<repo>" --remove-edge <blocked>:<blocker> --apply`. Remove-existing-only. **Then** drop the matching `Blocked by:` line from the body, so the echo does not outlive the edge.                                                                            |
-| Add or drop a footer echo  | Read the current body (`gh issue view <n> --repo "<repo>" --json body --jq .body`), add or remove **only** that `Blocked by:` / `Related:` line (create a `---` footer section per `gh-issue.md` step 2 if none exists), write it back with `gh issue edit <n> --body-file <tmp>`. |
-| Fix a priority inversion   | `gh-issue-state.py --repo "<repo>" --issue <blocker> --labels "<the issue's full label set with prio: set to raise_blocker_to>" --apply`. The helper replaces the whole set, so **every** label the issue should keep must appear in the value.                                    |
-| Mark a suspected duplicate | `gh issue edit <n> --repo "<repo>" --add-label duplicate` (create it first if missing: `gh label create duplicate --repo "<repo>" 2>/dev/null`) + `gh issue comment` per Dimension 4.                                                                                              |
+| Finding                    | Action                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a dependency           | `gh-issue-deps.py --repo "<repo>" --edge <blocked>:<blocker> --apply`. Create-missing-only, so an approved edge that already exists is a no-op. Repeat `--edge` to batch a run. **Then** add the `Blocked by: #<n>` echo to the body, per the row below.                                                 |
+| Remove a stale dependency  | `gh-issue-deps.py --repo "<repo>" --remove-edge <blocked>:<blocker> --apply`. Remove-existing-only. **Then** drop the matching `Blocked by:` line from the body, so the echo does not outlive the edge.                                                                                                  |
+| Add or drop a footer echo  | Read the current body (`gh issue view <n> --repo "<repo>" --json body --jq .body`), edit **only the one reference**, and write it back with `gh issue edit <n> --repo "<repo>" --body-file <tmp>`. See the note below — the footer is an aggregate, so removing a blocker is rarely a whole-line delete. |
+| Fix a priority inversion   | `gh-issue-state.py --repo "<repo>" --issue <blocker> --labels "<the blocker's four managed labels, with prio: set to raise_blocker_to>" --apply`. Pass the **managed set only** — see the note below.                                                                                                    |
+| Mark a suspected duplicate | `gh issue edit <n> --repo "<repo>" --add-label duplicate` (create it first if missing: `gh label create duplicate --repo "<repo>" 2>/dev/null`) + `gh issue comment` per Dimension 4.                                                                                                                    |
 
 Every `gh` call above takes `--repo "<repo>"` (the value resolved in §Load step
 2) — omitting it silently targets the current directory's repo, which is the
 wrong one whenever `gh-issue.repo` is configured.
 
-**Two mechanical notes that fail silently when missed:**
+**Four mechanical notes that fail silently when missed:**
+
+- **The `Blocked by:` footer is an aggregate line, so removing one blocker is
+  not a line delete.** `/push-plan` renders every blocker onto one line —
+  `Blocked by: #2, #3`. Dropping the line to retire the stale `#2` silently takes
+  `#3`'s echo with it, and `edge_only` will then report `#3` as missing its
+  footer on the next run. Remove the one reference and its separator; delete the
+  line only when nothing is left on it.
+- **`gh-issue-state.py --labels` takes the COMPLETE MANAGED set, not the
+  issue's whole label list.** It validates against `labels.yml` **before** any
+  network call and refuses a name the vocabulary does not define, so passing
+  `follow-up` alongside the rungs makes the write fail rather than preserving it.
+  Unmanaged labels are carried forward by the helper itself and must be omitted
+  from the value. The managed set is the issue's `status:` / `auto:` / `prio:` /
+  `est:` labels — all four are on the node `gh-issue-graph.py` returned, so build
+  the value from that rather than re-reading the issue. An open issue must carry
+  exactly one `status:` and one `auto:`, so a blocker missing either is refused;
+  that is row 2 of the reconciler's table holding, not a bug here.
 
 - The dependency POST body and the removal DELETE path both carry the blocker's
   **database id**, not its `#<number>`. `gh-issue-deps.py` resolves it; that is
