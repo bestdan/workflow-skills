@@ -205,7 +205,7 @@ join, and `gh` covers it only partially.
     tracker-batch subroutine. **Unblocked** — task 4 settled the claim contract and task
     15 the dependency edges, both merged; it does not depend on task 8, so it sequences
     anywhere in Phase 3 without disturbing the existing order. It absorbs **PRE-117**,
-    cancelled as superseded, and supersedes the parked draft
+    cancelled as superseded, and supersedes the closed
     [#426](https://github.com/bestdan/workflow-skills/pull/426) — whose §4 batch
     machinery is worth lifting even though its candidate query, WIP count, lock spelling
     and dependency section are not. See **#426 in detail** below for the five defects,
@@ -278,9 +278,12 @@ either order once each is separately reconciled.
 
 ### #426 in detail — it would ship a silently dead feature
 
-> **Parked 2026-09-04, then superseded.** #426 was converted back to **draft**
-> (verified: open, draft, tip `bc7bf0b`) after a co-review found the defects listed
-> below. Its five-item verdict is preserved as a
+> **Closed 2026-09-04 as superseded.** #426 was parked to draft after a co-review found
+> the defects listed below, then closed once
+> [task 16](phase_3_handler/gh_migration_task_16.md) took over the work. It was
+> conflicting with `main` at the time, and its tracker issue PRE-117 is cancelled. Its
+> code stays reachable through the pull ref — see task 16, which carries the fetch
+> command; that ref outlives the head branch. Its five-item verdict is preserved as a
 > [parking comment on the PR](https://github.com/bestdan/workflow-skills/pull/426#issuecomment-5540130672).
 > **Do not rebase it.** The work it was attempting is now
 > [task 16](phase_3_handler/gh_migration_task_16.md), which builds against the current

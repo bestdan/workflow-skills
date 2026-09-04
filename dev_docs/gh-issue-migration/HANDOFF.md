@@ -81,7 +81,7 @@ postponement — see the blockers below.
 **Task 16 is new (2026-09-04) and also unblocked**: batch execution (`/do-tasks --all`),
 absorbed from Linear PRE-117, which is cancelled as superseded. It does not depend on
 task 8, so take whichever suits. It widened the epic's Scope section, deliberately and
-with the reason recorded there. Its predecessor, the parked draft #426, is worth reading
+with the reason recorded there. Its predecessor, the closed PR #426, is worth reading
 before starting — its §4 batch machinery is reusable and its five defects are the list of
 what not to repeat.
 
@@ -128,7 +128,7 @@ left in `gh-issue-promote.md` or `gh-issue-claim.md`, only two prose mentions of
 `auto-eligible` as history. The epic's **In-flight PRs against files this plan owns**
 table still describes all three as open; read it for #426 only.
 
-#426 was **parked back to draft on 2026-09-04 and is now superseded by task 16** — do not rebase it. Its verdict below survives as task 16's list of what not to repeat, and it was the dangerous one because: it was misled by a
+#426 was **closed on 2026-09-04, superseded by task 16** — do not reopen or rebase it; its code is reachable through the pull ref, which task 16 carries. Its verdict below survives as task 16's list of what not to repeat, and it was the dangerous one because: it was misled by a
 since-retired claim into building a body-footer parser, so its **Dependency-ready
 selection** section needs **deleting, not reconciling**. It also still spells the old
 vocabulary and `task/<n>`, so it applies almost cleanly and would ship a feature that

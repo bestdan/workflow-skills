@@ -35,11 +35,22 @@ edges, and both are merged. It does not depend on task 8.
 
 ## What already exists — do not rewrite it
 
-[PR #426](https://github.com/bestdan/workflow-skills/pull/426) is a **parked draft**,
-branch `dpegan/pre-117-build-gh-issue-batch-do-tasks-all-on-the-tracker-batch`, tip
-`bc7bf0b`. Do not rebase it — but do not ignore it either. Its **§4 batch machinery** is
-the valuable half and was never the problem: remote dispatch, the WIP bound, the
-`gh auth` self-check, the unattended declaration, and the report. Lift that.
+[PR #426](https://github.com/bestdan/workflow-skills/pull/426) is **closed** (3 commits,
+tip `bc7bf0b`, conflicting with `main` when it was closed). Do not reopen or rebase it —
+but do not ignore it either. Its **§4 batch machinery** is the valuable half and was
+never the problem: remote dispatch, the WIP bound, the `gh auth` self-check, the
+unattended declaration, and the report. Lift that.
+
+Read it through the **pull ref**, not the branch:
+
+```bash
+git fetch origin refs/pull/426/head && git show FETCH_HEAD
+```
+
+`refs/pull/426/head` is `bc7bf0b` (verified 2026-09-04) and GitHub retains it for the
+life of the PR, so it survives the head branch being pruned —
+`dpegan/pre-117-build-gh-issue-batch-do-tasks-all-on-the-tracker-batch` may not be there
+when you look.
 
 Its five recorded defects are in the epic's **#426 in detail** section. Read them there;
 the short form is that every one of them **fails silently**:
