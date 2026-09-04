@@ -48,10 +48,12 @@ Claim / execute split below.)
 
 For the **tracker** handlers, the execution mode now splits by handler:
 
-- **`linear`** and **`gh-issue`** support **true batch execution**. `--all` /
-  `-n N` (without `--claim-only`) dispatches **one remote session per
-  dependency-ready issue** (each its own cloud VM), bounded by WIP slack, via the
-  **Tracker-batch subroutine** in section 3 — which `linear` runs directly and
+- **`linear`** supports **true batch execution**, and **`gh-issue`** supports it
+  **on opt-in** (`gh-issue.remote_batch: true`; off by default, see section 4 —
+  without it `--all` / `-n N` degrades to a single foreground claim). Where it
+  runs, `--all` / `-n N` (without `--claim-only`) dispatches **one remote session
+  per dependency-ready issue** (each its own cloud VM), bounded by WIP slack, via
+  the **Tracker-batch subroutine** in section 3 — which `linear` runs directly and
   `gh-issue` instantiates in section 4. Bare `/do-tasks` stays single and
   foreground, and `--local` caps the batch at **1** (single highest-ranked issue,
   foreground).
