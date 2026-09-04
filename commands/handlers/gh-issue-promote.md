@@ -38,13 +38,13 @@ When `<scope-milestone>` is set, step 3 adds `--milestone "<scope-milestone>"` t
 ### 3. Query candidates
 
 ```bash
-gh issue list --state open --search '-label:"status:1_needs_refinement" -label:"status:2_ready" -label:"status:3_started" -label:"status:4_needs_review" -label:blocked' --limit 50 --json number,title,body,labels [--milestone "<scope-milestone>"] [--repo <repo>]
+gh issue list --state open --search '-label:"status:1_needs_refinement" -label:"status:2_ready" -label:"status:3_started" -label:"status:4_needs_review" -label:blocked' --limit 500 --json number,title,body,labels [--milestone "<scope-milestone>"] [--repo <repo>]
 ```
 
 - `--state open` only — closed issues are `done` and are never scored.
-- The `--search` filter selects the **un-scored** issues by excluding every `status:` rung past `0_untriaged`. Stating it as an exclusion rather than `label:"status:0_untriaged"` is deliberate: a pre-migration issue carries no `status:` label at all and must still be a candidate, and an inclusion filter would drop it. This mirrors how `linear-promote.md` reads candidates only from the `backlog` state, and keeps the 50-item window from being consumed by already-scored issues. Quote each label value — the names contain a colon, which is also the search syntax's own separator. The filter also excludes `blocked`-labeled issues, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
+- The `--search` filter selects the **un-scored** issues by excluding every `status:` rung past `0_untriaged`. Stating it as an exclusion rather than `label:"status:0_untriaged"` is deliberate: a pre-migration issue carries no `status:` label at all and must still be a candidate, and an inclusion filter would drop it. This mirrors how `linear-promote.md` reads candidates only from the `backlog` state, and keeps the 500-item window from being consumed by already-scored issues. Quote each label value — the names contain a colon, which is also the search syntax's own separator. The filter also excludes `blocked`-labeled issues, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
 - `--milestone "<scope-milestone>"` only when step 2a resolved a milestone scope; omit it on an `all`/no-milestone run.
-- Limit 50. If exactly 50 issues are returned the page may be truncated — note possible truncation in the report; do not paginate.
+- Limit 500 — a soft cap, not a hard page size (`gh issue list --limit` fetches through as many API pages as needed under the hood, so this is effectively exhaustive for any repo backlog short of the cap; mirrors the ceiling `gh-issue-reoptimize.md` uses for the same reason). If exactly 500 issues are returned, the query may be truncated: surface that as its own prominent report line in step 6 (not a footnote) rather than paginating further — see step 6.
 
 Set aside (do **not** score) — as a backstop to the query filter — any issue whose returned `labels` carry a `status:` rung other than `0_untriaged` and that still slips through (e.g. label-index lag, or a quoting failure in the search string): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no write. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is set aside with reason `blocked` (no write), reported in step 6. Report and exit if no un-scored candidates remain.
 
@@ -131,11 +131,12 @@ If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handler
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`) so it's clear what the run covered:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`), and — if step 3's query hit the 500-issue cap — a prominent warning line **before** the summary (not a trailing footnote). The `Promoted N of M candidates` line directly below carries the true count: under a cap hit `M` **is** the cap, so the warning states the truncation and the summary states the number. Neither repeats the other:
 
 ```
 parent rollup detection skipped (subIssues field unavailable)
 scope: milestone v2.0
+⚠ candidate query hit the 500-issue cap — some open issues may not have been scored this run.
 Promoted 5 of 8 candidates:
   ready (3):
     - #142  Fix broken import
@@ -150,6 +151,6 @@ Promoted 5 of 8 candidates:
     - #111  (blocked)
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. Append the truncation note from step 3 if it applied.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that.
