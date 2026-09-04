@@ -26,9 +26,12 @@ starting point. Do not add a fourth row, and do not widen these three.
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
 
-Row 3 is **void** where its one review label is absent from the repo. Row 2 skips
-only a `status:`/`auto:` group with no vocabulary member provisioned, and still
-runs for the other. Each reports the gap once instead of flagging every issue.
+A row checks that the labels it asks about are provisioned, because a label
+namespace is per-repo and an absent rung makes the question unanswerable rather
+than answered "no". Row 3 is **void** where its one review label is absent. Row 2
+skips only a `status:`/`auto:` group with no vocabulary member provisioned, and
+still runs for the other. Each reports the gap once instead of flagging every
+issue. Row 1 needs no guard: it ranks labels the issue already carries.
 
 **Row 1 is the only row that writes**, and only under `--apply`. It keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
@@ -52,19 +55,14 @@ to inspect. It reports rather than reopens: an issue can be legitimately closed
 without review (abandoned, duplicate, filed by hand), and the finding carries
 GitHub's `state_reason` so those are dismissible on sight.
 
-**Rows 2 and 3 check that the labels they look for are provisioned.** Label
-namespaces are per-repo, so a rung may never have been created on the board — and
-then the row's question is unanswerable, not answered "no", and it reports the
-gap once instead of flagging every issue. Row 1 needs no guard: it ranks labels
-the issue already carries, which cannot exist unprovisioned.
-
-Two things decided here, because a reader of this table will otherwise re-derive
-them. Row 2 is guarded by **group, not completeness** — its premise is that a
-rung was assignable, which still holds while its group has any member
-provisioned. And the report says **absent**, never "never created": several
-histories produce the same current label set, and the row cannot tell them apart.
-The measurement behind all of this, and the reasoning, live in
-`gh-issue-reconcile.py`'s module docstring.
+**Two things about that guard were decided, not inherited**, and a reader of the
+table would otherwise re-derive them. Row 2 is guarded by **group, not
+completeness** — its premise is that a rung was assignable, which still holds
+while its group has any member provisioned. And the report says **absent**, never
+"never created": several histories produce the same current label set, and the
+row cannot tell them apart. The measurement behind both, and what provisioning
+the label does and does not fix, live in `gh-issue-reconcile.py`'s module
+docstring.
 
 > **This is an audit, not a load-bearing repair.** Every status write goes
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the
