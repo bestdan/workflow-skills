@@ -24,6 +24,7 @@ ASSET = ROOT / "commands" / "handlers" / "assets" / "gh-issue-reconcile.py"
 LABELS_FILE = ROOT / "commands" / "handlers" / "assets" / "labels.yml"
 
 _spec = importlib.util.spec_from_file_location("gh_issue_reconcile", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 gh_issue_reconcile = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gh_issue_reconcile)
 gh_issue_state = gh_issue_reconcile.gh_issue_state
