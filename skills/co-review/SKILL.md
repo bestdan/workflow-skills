@@ -22,7 +22,7 @@ Three mode choices:
 ### Flags
 
 - `--local` — review local changes instead of a PR. Diff comes from `git diff <base>`: your working tree (committed **and** uncommitted changes) compared against `<base>`, **plus** any untracked files (`git ls-files --others --exclude-standard`), which `git diff` does not show — read those so brand-new files aren't silently skipped. No `gh` calls are made and no PR is required. Caveat: `git diff <base>` compares against `<base>`'s current tip, so if `<base>` has advanced since you branched it will also surface those upstream commits as reversed changes — diff against the merge-base instead (compute it in a separate call; don't use `$(...)`, per step 2).
-- `--base <branch>` — base to diff against in `--local` mode. Defaults to `main`.
+- `--base <branch>` — base to diff against in `--local` mode, and the base the conflict pre-flight tests the merge against. Defaults to `main`. In the PR modes the base comes from the PR (`baseRefName`), not from this flag.
 - `--remote` — skip local agents for this run: the main agent reviews and folds in GitHub comments as usual, but codex is not probed, asked about, or dispatched, and the config is left untouched. Useful for a quick "just the normal PR review" without spinning up extra agents. Mutually exclusive with `--local` (which drops GitHub entirely); if both are passed, stop and ask which the user meant.
 - `--post` — review someone else's PR and post the vetted findings **back to the PR** instead of editing local files. The review and reconciliation are identical to the default flow, but the auto-fix step is replaced: nothing in the working tree is ever changed, and high/medium findings (after you vet them) are submitted as a single GitHub PR review with inline comments. Requires a PR — mutually exclusive with `--local`; if both are passed, stop and ask which the user meant. Composes with `--remote` (post a Claude-only review) and with local reviewers (post a reconciled multi-agent review).
 - `--non-interactive` — run unattended: never prompt, bound every reviewer wait, and disable untrusted custom commands. Built for callers with no human in the loop (the auto-pilot `/deliver-task` lifecycle). Every decision that would otherwise prompt takes a documented default or is skipped with a logged note, and the run summary reports which reviewer classes actually ran. See **Non-interactive mode** for the full policy. Composes with all other flags.
@@ -163,6 +163,32 @@ Verdict handling:
 
 `git ls-remote` needs network, so this call must run unsandboxed in the Bash tool (like the cloud reviewer dispatches).
 
+## Conflict pre-flight
+
+The freshness check above answers one question: is the local copy behind its own remote tip? It never asks whether the branch is behind its **base**. A branch that matches its remote exactly can still conflict with `main`, and `fresh` is then a correct answer to the wrong question — the review gets spent on text the rebase is about to delete.
+
+**Distance is not the signal.** A branch 25 commits behind its base can merge cleanly, and a branch one commit behind can conflict, so counting drift answers nothing and has no threshold to tune. Simulate the merge instead, with the shared fixture:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-conflict.sh" --base <branch> [--ref <branch>]
+```
+
+It fetches the base and runs `git merge-tree --write-tree`, which computes the merge in the object store — the working tree, the index, and the current branch are untouched, and the fetch only moves `FETCH_HEAD`. It ends with a parseable `CONFLICT:` line naming the conflicted paths (see the script header).
+
+Verdict handling:
+
+- **exit 0 (`clean`)** → proceed.
+- **exit 1 (`conflicting`)** → stop, name the conflicted paths from the `paths=` field, and offer to rebase. Don't auto-rebase — moving the branch under in-flight work is the user's call.
+- **exit 3 (`unknown`)** → the base couldn't be resolved: a sandboxed or offline fetch, a git older than 2.38 (no `merge-tree --write-tree`), or no local base tip under `--no-fetch`. Warn, proceed, and note it in the run summary. An environment failure is never a conflict verdict.
+
+Which modes run it:
+
+- **Default (your PR)** — yes. Take the base from the PR (`baseRefName`, read at the top of step 3) rather than assuming `main`. The script fetches that base from `origin`; if `origin` is a fork rather than the repository the PR targets, pass `--remote <upstream>` so it tests against the real base tip.
+- **`--local`** — yes, and mind the limit: `merge-tree` compares **commits**, so this tests `HEAD` against the base and says nothing about uncommitted work, which is usually most of what `--local` is reviewing. It is still worth running: a conflict in the committed history poisons the review either way.
+- **`--post`** — no. You may not have the branch locally at all, so ask the forge instead: `gh pr view <n> --json mergeable,mergeStateStatus`. `CONFLICTING` (or `mergeStateStatus=DIRTY`) → warn, proceed, and record it — you touch no files, but comments may land on lines the rebase removes. `UNKNOWN`, which GitHub returns for a few seconds after a push, gets one re-query and then the same warn-and-proceed; so does a failed `gh` call.
+
+Under `--non-interactive`, a conflict in the **default disposition** is a **logged hard error that ends the run** — not the `stale` treatment. `stale` is proceeded past because the auto-pilot caller runs its own fetch-and-freshness gate upstream; that gate compares a branch to its own remote tip, which is precisely the question this section exists to say is the wrong one, so nothing upstream covers a base conflict. `--post` warns and proceeds as above. See **Non-interactive mode**.
+
 ## Non-interactive mode
 
 `--non-interactive` makes the whole flow safe to run with **no human in the loop** — the auto-pilot orchestrator's `/deliver-task` lifecycle calls it this way. Two guarantees hold for the entire run: **it never prompts**, and **every wait is bounded**. When the flag is absent, everything below is unchanged — the interactive behavior documented elsewhere in this file is the default.
@@ -179,6 +205,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 - **Conflicting flags** (`--local`+`--remote`, `--local`+`--post`) — can't be resolved without asking, so this is a **hard error**: stop with a logged reason (not a prompt). A correct caller passes a valid combination; the orchestrator does.
 - **Staleness `stale`** (step 3) — do **not** stop and offer to update. Log the stale refs and **proceed** (the auto-pilot caller runs its own per-task `git fetch` + freshness gate upstream, per the spec). An `unknown` verdict is warned-and-continued as usual.
+- **Conflict** (step 3, default disposition) — a **logged hard error that ends the run**, never a prompt. The check runs before any reviewer is dispatched, so no review work is lost by stopping here. Proceeding is worse than wasted spend: steps 10–12 would push fixes onto text the rebase deletes, under a commit message saying they landed, and the caller's freshness gate compares the branch only to its own remote tip so it cannot catch this. Log `conflicting: rebase onto <base>, then re-run /co-review`. Under `--post`, warn and proceed as in the interactive path. An `unknown` verdict — a sandboxed or offline fetch, a git older than 2.38 — is warned-and-continued as usual.
 - **Reviewer config absent** (step 4) — do **not** prompt and do **not** write `.co-review.yml`. Probe `PATH` and run the **built-in** reviewers that are available and pass their auth probe; if none are, run Claude-only. Log which were used. (The auto-pilot launch phase is where reviewer config is meant to be resolved deliberately; absent config unattended just means "built-ins if present.")
 - **Untrusted custom / non-built-in command** (Local reviewers, step 5) — **skip it** with a logged note, **unless** its `command:` string was pre-approved via `--allow-command <cmd>` (byte-for-byte). Repo-controlled code is never run unattended on the strength of the config alone.
 - **Medium-confidence findings** (default disposition, steps 9/11) — there's no one to answer the per-item yes/no. Apply **only** high-confidence auto-fixes; record every medium finding as a **deferred judgment call** in the summary (the `/deliver-task` caller logs these to its `QUESTIONS.md` for morning review). Never apply a medium item unattended.
@@ -190,7 +217,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 The reviewer command is **invariant**: everything that varies per PR (the diff and any reviewer-specific requests) travels in the `<INPUT>` file — reached on stdin with a fixed pointer argument (`codex`, `copilot`), named by its fixed path inside the `-p` pointer (`agy`), or via `--prompt-file "<INPUT>"` from a fixed neutral cwd (`devin` — that cwd is load-bearing, not incidental; see [`reviewers/devin.md`](reviewers/devin.md)) — so the command string never changes. Approve each reviewer **once** with an **exact-match** rule — no broad wildcard. Two layers of rules:
 
-**Shared rules** (input assembly, staleness pre-flight, allow-rule pre-flight) — add once, they cover every reviewer:
+**Shared rules** (input assembly, staleness and conflict pre-flights, allow-rule pre-flight) — add once, they cover every reviewer:
 
 ```json
 {
@@ -198,8 +225,10 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
     "allow": [
       "Bash(cat:*)",
       "Bash(gh pr diff:*)",
+      "Bash(gh pr view:*)",
       "Bash(git diff:*)",
       "Bash(git ls-remote:*)",
+      "Bash(<PLUGIN-CACHE>/workflow-skills/workflow-skills/:*)",
       "Bash(python3 <PLUGIN-CACHE>/workflow-skills/workflow-skills/:*)"
     ]
   }
@@ -215,6 +244,8 @@ Why this is narrow:
 - The per-reviewer rules are **exact** — each authorizes only its one read-only review command with that exact prompt/flags, pinning the read-only posture into the approved string (see each reviewer file for the details: `codex --sandbox read-only`; `agy --sandbox --model …`; `devin --permission-mode auto` with a literal `--prompt-file "<INPUT>"` path and a fixed neutral cwd; `copilot --no-ask-user` with **no** `--allow-all-tools`/`--yolo`). None grant arbitrary runs of the agent. Edit the pointer, path, or flags and Claude Code re-prompts, so the approval can't silently come to mean something else. The pointer/flags must match **byte-for-byte** between the reviewer file's invocation and its rule — if you edit one, edit the other.
 - The `agy`/`devin` probe rules (`Bash(agy models)`, `Bash(devin auth status)`) are read-only status queries with no varying arguments — exact-match, safe to approve once. `copilot` has no probe rule (no `auth status` command; failures are caught from output).
 - `Bash(git ls-remote:*)` covers the staleness pre-flight — it only reads remote ref tips and mutates nothing (no fetch).
+- The bare `<PLUGIN-CACHE>/…` prefix covers the shell fixtures this skill invokes by path — `preflight-freshness.sh`, `preflight-conflict.sh`, `await-pr-review.sh`, `pr-fix-guard.sh`. It is a prefix rather than an exact match for the same reason as the `python3` rule below it: the installed path carries the plugin's version, so an exact rule dies at the next release. What it widens to is shell scripts shipped by this plugin, which you already trust by having installed it. Note that a rule on a script's _inner_ commands does not authorize the script — the matcher sees the invocation, not what it runs — so without this prefix the pre-flights are denied under `--non-interactive`, silently, since a denied command is not queued, and the run reviews a conflicting branch exactly as if the check had passed.
+- `Bash(gh pr view:*)` covers the PR-metadata read in step 3 and the `--post` conflict check — both read-only queries against the PR.
 - The `python3 <PLUGIN-CACHE>/…` prefix covers the allow-rule pre-flight. That checker only reads the plugin's own reviewer files and your settings, and never writes (see `scripts/coreview-rule-drift.py`). Without this rule the pre-flight is denied under `--non-interactive` — silently, since a denied command is not queued — so the check meant to explain a missing reviewer goes missing itself.
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
@@ -272,7 +303,7 @@ label is the only signal of how hard each finding is meant to land.
    - Otherwise: run `git branch --show-current` first, then `gh pr list --head <branch> --json number,url` with the literal branch value substituted in. Do **not** combine them with `$(...)` — command substitution inside a Bash tool call is rejected by the permission matcher even when both subcommands are allowlisted.
    - If none, stop and say so (or suggest `--local` if the user just wants to review uncommitted work).
 
-3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Under `--non-interactive`, a `stale` verdict is **logged and proceeded past** rather than stopped on (see **Non-interactive mode**). Then:
+3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Under `--non-interactive`, a `stale` verdict is **logged and proceeded past** rather than stopped on (see **Non-interactive mode**). Then, **in the PR modes, read the PR metadata first** — `gh pr view <n> --json title,body,reviews,comments,files,baseRefName` — so `baseRefName` is in hand for the next check. Then run the **conflict pre-flight** (see the section above): `preflight-conflict.sh --base <baseRefName>` in the default disposition, `preflight-conflict.sh --base <base>` in `--local`, or `gh pr view <n> --json mergeable,mergeStateStatus` under `--post`. Run it **before dispatching any reviewer**, so a conflicting branch costs one metadata read and one check rather than a whole review — the expensive item in this step is the bot wait below, which stays after it. On a conflict, stop and offer to rebase in the default disposition, warn and continue under `--post`; on `unknown`, warn and continue. Under `--non-interactive`, a conflict in the default disposition is a **logged hard error that ends the run** rather than a stop-and-offer (see **Non-interactive mode**); `--post` still warns and continues. Then:
    - **GitHub mode** (in parallel):
      - **Wait for the bot reviewer first if the PR was just opened.** When you want to reconcile against a bot reviewer (e.g. Copilot) that hasn't posted yet, don't hand-write a `gh pr view … | sleep` poll loop — they drift on interval, timeout, and (critically) the reviewer login. Invoke the shared fixture instead and proceed once it reports `landed`:
 
@@ -281,7 +312,7 @@ label is the only signal of how hard each finding is meant to land.
        ```
 
        It defaults to the `Copilot` reviewer, fast-returns if the review already exists, and matches both the `reviews[]` author login (`copilot-pull-request-reviewer`) and the `reviewRequests[]` display name (`Copilot`) — see the script header. Skip this if you're not waiting on a bot (the review is already there, or there's no bot reviewer). Under `--non-interactive`, bound the wait at the remote-bot ceiling — pass `--timeout 1200` (20 min) — and invoke it tolerantly (`… || true`, since it **exits non-zero on timeout** and would otherwise fail the Bash call and halt the run); on timeout, proceed with whatever landed and note the bot class as skipped (see **Non-interactive mode**).
-     - `gh pr view <n> --json title,body,reviews,comments,files`
+     - `gh pr view <n> --json title,body,reviews,comments,files,baseRefName` — already run at the top of this step for `baseRefName`; reuse that response rather than calling it twice.
      - `gh pr diff <n>`
      - `gh api repos/{owner}/{repo}/pulls/<n>/comments` for inline review comments (top-level `comments` from `gh pr view` does not include inline diff comments).
    - **Local mode** (`--local`): `git diff <base>` (default `base = main`) for tracked changes, **plus** untracked files via `git ls-files --others --exclude-standard` so new files aren't missed (mind the merge-base caveat in the Flags section if `<base>` has advanced). No `gh` calls. There are no GitHub comments to reconcile.
