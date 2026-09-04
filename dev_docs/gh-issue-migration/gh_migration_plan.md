@@ -143,12 +143,28 @@ join, and `gh` covers it only partially.
    Two invariants were deliberately **not** given rules, because the table is closed:
    duplicate `prio:`/`est:`, and a closed issue still carrying live rungs (reachable with
    a bare `gh issue close`). Both are recorded in HANDOFF.md.
-8. [phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md) — Upgrade `reoptimize` from report-only to native dependency edges.
-   **It also inherits reoptimize's vocabulary migration.** `gh-issue-reoptimize.md` still
-   speaks `auto-eligible` / `auto-claimed` / `priority:*`, so on a migrated board its
-   `statusType` derivation matches nothing and every issue reads as `new`. Task 4 removed
-   the definitions it pointed at and left it a scope note saying so, rather than migrating
-   it in a PR about claiming.
+8. ~~[phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md)~~ — Upgrade `reoptimize` from report-only to native dependency edges. **Done** — PR #478.
+   It also carried reoptimize's **vocabulary migration**, which was the last one: every
+   gh-issue verb now speaks `labels.yml`, and no bridge remains anywhere. Three things it
+   settled that the plan had not:
+   - **The real defect was not the missing feature.** The flow wrote `Blocked by:` footer
+     lines for dependencies it created no edge for, so a footer could record a proposal
+     nobody applied — indistinguishable from one echoing a real edge. That is what made
+     every footer in the repo unreadable as evidence.
+   - **Deviation from the task file: the footer stays.** Its acceptance criterion "No
+     `Blocked by:` footer-writing code path remains" is deliberately unmet, which the task
+     file anticipated. `/push-plan` and `/reoptimize-tasks` must not disagree about what a
+     footer means. The rule is now uniform instead: **the footer follows the edge, and a
+     footer alone is never a dependency.**
+   - **PRE-823 does not gate that decision, and the task file was wrong to say it did.**
+     Whether an Actions runner reaches the dependency endpoints does not discriminate: if
+     it can, the footer is redundant but harmless and `/push-plan` writes it anyway; if it
+     cannot, the footer is the only unattended signal. Consistency decides it in both
+     branches, so the probe was not run for this purpose.
+
+   Its analysis half is `commands/handlers/assets/gh-issue-graph.py` (read-only), and
+   `gh-issue-deps.py` gained `--remove-edge` for stale-link repair. **That removal's
+   DELETE path shape is unmeasured** — see HANDOFF.md's blocker list.
 
 **Phase 4 — migrate**
 
@@ -192,12 +208,10 @@ join, and `gh` covers it only partially.
       plausible edge. The helper resolves it.
     - **The footer stays, as a human-readable echo.** The deciding argument arrived after
       the review: a cloud routine can read an issue body but not the edge, so the footer
-      is the only unattended blocked-ness signal — a hint, never the graph. Task 8's
-      **Constraint** section carries this; it bears on that task's "drop the footer
-      entirely" instruction.
-    - **Reoptimize's limit is now a handler gap, not a platform one.** Its report-only
-      status is unchanged, but the reason in the prose is corrected. Task 8 still owns
-      teaching it to write edges.
+      is the only unattended blocked-ness signal — a hint, never the graph. **Task 8 then
+      made that rule uniform** across both writing paths, and kept the footer for a
+      second reason: the two paths must not disagree about what one means.
+    - **Reoptimize's limit was a handler gap, not a platform one.** Task 8 closed it.
 
 **Phase 3 — handler (added 2026-09-04, absorbing Linear PRE-117)**
 

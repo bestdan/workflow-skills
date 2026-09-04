@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-03 after task 7; PR states re-checked 2026-09-04 after it merged.** Read this first, then
+**Redrafted 2026-09-04 after task 8.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -9,9 +9,9 @@
 
 **Finishing a task includes rewriting this file for the agent who picks up the next
 one.** Rewrite, not append. Land it in the same unit of work as the task — a follow-up
-is how it got skipped before. Note the plan docs live on this branch (draft PR #441)
-while a task's own code goes to a fresh branch off `main`, so "the same PR" is not
-literally available; land both before you call the task done.
+is how it got skipped before. The plan docs live on this branch (draft PR #441) while a
+task's own code goes to a fresh branch off `main`, so "the same PR" is not literally
+available; land both before you call the task done.
 
 The distinction is the whole rule. Patching adds your paragraph and leaves the previous
 five in place, and the file becomes a changelog: a record of what was done, in the order
@@ -59,83 +59,65 @@ If your redraft looks like the previous version with a paragraph added, you patc
 
 This plan used to live under `dev_docs/tasks/gh_migration_plan/`, which `.gitignore:31`
 excludes — so it existed in exactly one git worktree, uncommitted, with no history and no
-remote. Tearing that worktree down would have destroyed it. It is now committed under
-`dev_docs/gh-issue-migration/`, per the `.gitignore` comment block's own advice: "Prefer
-graduating durable wisdom to a top-level `dev_docs/<name>.md` (never ignored) over keeping
-it here."
+remote. It is now committed under `dev_docs/gh-issue-migration/`, per the `.gitignore`
+comment block's own advice: "Prefer graduating durable wisdom to a top-level
+`dev_docs/<name>.md` (never ignored) over keeping it here."
 
 It is still on **draft PR #441**, not on `main`. Do the migration's own work in a fresh
 worktree off `main`; edit these plan docs on this branch.
 
 ## Where things stand
 
-**Two tasks are available, 8 and 16.** Neither blocks the other and neither is blocked;
-the launcher picks. If nothing said which, take **8** — it is the older commitment and it
-unblocks nothing else waiting.
+**Task 16 is the one available task.** It is unblocked and nothing else in Phase 3 is
+open: tasks 4–8, 14 and 15 are done, 12 is unclaimed but gates only the routine claim
+default, and 13 is postponed — which **holds all of Phase 4** with it.
 
-- **Task 8** — upgrade `reoptimize` from report-only to native dependency edges. Its
-  blocker (task 5) is done. Read its **Constraint** section before touching the body
-  footer: whether to keep writing it as a human-readable echo is still open, and it is
-  that task's main judgment call rather than a detail. It also inherits reoptimize's
-  vocabulary migration — see the next section.
-- **Task 16** — batch execution (`/do-tasks --all`), new on 2026-09-04, absorbed from
-  Linear PRE-117 (cancelled as superseded). It widened the epic's Scope section,
-  deliberately and with the reason recorded there. Read the closed PR #426 before
-  starting: its §4 batch machinery is reusable and its five defects are the list of what
-  not to repeat. Task 16 carries the fetch command for its code.
-
-Phase 1–2 and tasks 4, 5, 6, 7, 14, 15 are done; the plan's task list carries each one's
-PR and merge sha. Tasks 12, 13 and 16 are unclaimed. **Phase 4 is held** by task 13's
-postponement — see the blockers below.
+- **Task 16** — batch execution (`/do-tasks --all`), absorbed from Linear PRE-117
+  (cancelled as superseded). Read the closed PR #426 before starting: its §4 batch
+  machinery is reusable and its five defects are the list of what not to repeat. Task 16
+  carries the fetch command for its code. **Do not rebase #426** — it applies almost
+  cleanly and is almost all wrong.
+- **Task 12** — stale claim-ref sweep. Unclaimed, no task file. Gates flipping the
+  routine claim default, nothing else.
 
 ## What will bite you
 
-**One verb is still on the old vocabulary: `reoptimize` — and it is yours.** Tasks 4 and
-5 moved add / list / promote / complete / claim onto the namespaced names in `labels.yml`,
-and task 4 deleted the bridges that let both spellings coexist.
-`gh-issue-reoptimize.md` was in neither scope and still reads `auto-eligible` /
-`auto-claimed` / `priority:*`, so **on a migrated board it classifies every issue as
-`new`**. It carries a scope note saying so. Task 8 owns migrating it alongside the
-dependency-edge work.
-
-| Pre-migration                | The provisioned vocabulary |
-| ---------------------------- | -------------------------- |
-| `auto-eligible`              | `auto:eligible`            |
-| `human-approval-requested`   | `auto:human-review-needed` |
-| `auto-claimed`               | `status:3_started`         |
-| `needs-review`               | `status:4_needs_review`    |
-| `priority:urgent\|high\|...` | `prio:0`–`prio:3`          |
+**The vocabulary migration is finished.** Task 8 moved the last verb;
+`gh-issue-reoptimize.md` was the file still reading `auto-eligible` / `auto-claimed` /
+`priority:*`, which made it classify every issue on a migrated board as `new`. Every
+gh-issue verb now speaks `labels.yml`. There is no bridge left anywhere — task 4 deleted
+the last one. If you find an old spelling, it is a defect, not a migration in progress.
 
 **"Carrying a rung" means carrying one `labels.yml` defines** — never merely a label
-whose name starts with `status:` or `auto:`. `gh-issue-state.py`'s `validate()` has always
-read it that way (it rejects any name outside the vocabulary outright), and task 7's
-reconciler now does too. The prefix reading is the trap: a hand-typed `status:blocked`
-satisfies it, so an issue carrying only that name reads as healthy while being in a state
-nothing can act on. Anything new that asks "does this issue have a rung?" must ask the
-vocabulary.
+whose name starts with `status:` or `auto:`. The same holds for `prio:` and `est:`.
+`gh-issue-state.py`'s `validate()` has always read it that way, task 7's reconciler does,
+and task 8's `gh-issue-graph.py` does. The prefix reading is the trap: a hand-typed
+`status:blocked` or `prio:urgent` satisfies it, so the issue reads as healthy while being
+in a state nothing can act on — or gets ranked by an order nothing defines. Anything new
+that asks "does this issue have a rung?" must ask the vocabulary.
 
-**A scope this handler cannot honour, plus a write, is a refusal.** `/reconcile-tasks`
-passes `--project` through, and the gh-issue handler has no project dimension to honour
-it with. Continuing repo-wide would answer a request to _narrow_ with a _wider_ run —
-harmless while reading, and under `--apply` it writes outside the scope the user named.
-So task 7's handler stops on `--project` **with `--apply`** and continues at the default
-label scope without it, which is the same rule `gh-issue-archive.md` step 2 applies to a
-missing label scope. Task 8 writes too; the shape recurs wherever a scope flag reaches a
-handler that cannot implement it.
+**The `Blocked by:` footer is an echo of a native edge, never a dependency in itself.**
+Settled by task 8 for every path at once, which is the part that matters — the rule was
+previously true on `/push-plan` and false on `/reoptimize-tasks`, and one path writing
+unbacked footers is what made every footer unreadable as evidence. Two consequences:
+- Nothing may read a footer to decide blocked-ness. `gh-issue-ready.py`, `/list-tasks`,
+  `/do-tasks` and now `/reoptimize-tasks` all read the edge.
+- Nothing may write a footer for a dependency with no edge. Write the edge, then echo it.
 
-**One open PR still edits files this plan owns: #426.** Checked 2026-09-04 —
-[#411](https://github.com/bestdan/workflow-skills/pull/411) and
-[#432](https://github.com/bestdan/workflow-skills/pull/432) have since merged, and they
-merged **reconciled**: `git grep` over `origin/main` finds no live old-vocabulary query
-left in `gh-issue-promote.md` or `gh-issue-claim.md`, only two prose mentions of
-`auto-eligible` as history. The epic's **In-flight PRs against files this plan owns**
-table still describes all three as open; read it for #426 only.
+The footer was **kept rather than dropped**, against task 8's own acceptance criterion,
+which that task file explicitly anticipated. The deciding argument is that `/push-plan`
+and `/reoptimize-tasks` must not disagree about what a footer means — and note that
+argument **does not turn on PRE-823**: if a runner can read the graph the footer is
+redundant but harmless, and if it cannot the footer is the only unattended signal, so
+consistency decides it either way. Do not treat PRE-823 as blocking a footer decision
+again.
 
-#426 was **closed on 2026-09-04, superseded by task 16** — do not reopen or rebase it; its code is reachable through the pull ref, which task 16 carries. Its verdict below survives as task 16's list of what not to repeat, and it was the dangerous one because: it was misled by a
-since-retired claim into building a body-footer parser, so its **Dependency-ready
-selection** section needs **deleting, not reconciling**. It also still spells the old
-vocabulary and `task/<n>`, so it applies almost cleanly and would ship a feature that
-matches zero issues.
+**A scope this handler cannot honour, plus a write, is a refusal.** The gh-issue handler
+has no initiative dimension and no project dimension of its own. `/reconcile-tasks` stops
+on `--project` **with `--apply`** and continues at the default label scope without it;
+`/reoptimize-tasks` stops on an `initiative` scope outright, because that flow writes in
+every mode. Continuing wider would answer a request to _narrow_ with a _wider_ run. The
+shape recurs wherever a scope flag reaches a handler that cannot implement it.
 
 ## Do not re-derive these — they were measured, not read
 
@@ -146,29 +128,26 @@ Full evidence in
 **Three credentialed channels, not two.**
 
 - A cloud routine has **no `gh`** and **no credential on raw HTTP**. The GitHub MCP
-  connector is its credentialed channel.
+  connector is its credentialed channel, and it has **no dependency-edge tool**.
 - A **GitHub Actions runner** is the third. Measured 2026-09-02 by task 6
   ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) — a runner has `gh`,
   and its ambient `GITHUB_TOKEN`, with `permissions: issues: write` declared, PATCHes an
   issue's labels. No PAT, no extra secret. **Do not read "unattended" as "cloud routine"
   anywhere in this plan**; a runner is unattended too and is not channel-starved.
-  - Same REST path local `gh` uses, so the label-write rule below is one mechanism, not a
-    third to re-measure.
-  - **Unmeasured:** whether that token reaches the dependency / sub-issue endpoints.
-    Task 8's `Constraint` turns on exactly this — tracked as **PRE-823**.
+  - Same REST path local `gh` uses, so the label-write rule below is one mechanism.
   - The token is repo-scoped, so a runner writes only its **own** repo's issues. A repo
     whose `gh-issue.repo` points elsewhere must not run the task-6 backstop.
 - A routine **can** acquire the claim ref (`mcp__github__create_branch`, create-only) but
   **cannot release** it — no delete-ref tool, and `git push --delete` 403s. Routines stay
   on the comment election; task 12 gates flipping that.
-- The connector has **no dependency-edge tool**.
 
 **Writes.**
 
 - A label write **replaces** the whole set and **auto-creates** unknown names. Hence
   validate-then-replace, always, before any network call.
 - The dependency POST body carries **`issue_id`, a database id**, not the issue number.
-- `blocked_by` is **paginated** — read it with `--paginate --slurp`.
+- `blocked_by` is **paginated** — read it with `--paginate --slurp`. A bare read stops at
+  30, and an invisible edge is a cycle that reads as absent.
 
 **Reads**, measured 2026-09-03 by task 7
 ([PR #464](https://github.com/bestdan/workflow-skills/pull/464)).
@@ -180,45 +159,49 @@ Full evidence in
   `--limit` window over closed issues holds the most recently _created_ ones, and a
   long-lived issue closed yesterday can sit outside it. GitHub search has no
   `sort:closed`; `--search "sort:updated-desc"` is the nearest proxy and does compose
-  with `--label`, but `updated` moves on a post-close comment, so it answers a different
-  question.
+  with `--label`, but `updated` moves on a post-close comment.
 
 Both write facts are silent when wrong. This file was wrong twice by asserting routine
 behaviour from documentation. Probe it.
 
 ## Open blockers, and who owns them
 
+- **The dependency DELETE path shape is unmeasured** — new with task 8
+  ([PR #478](https://github.com/bestdan/workflow-skills/pull/478)).
+  `gh-issue-deps.py --remove-edge` sends
+  `DELETE repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by/{issue_id}`, taken from
+  convention rather than a probe. Task 15 measured the POST half; nobody has measured
+  this one. It needs a real edge on a real repo, and two routes were blocked in-session:
+  the auto-mode classifier refuses a throwaway repo, and `sandbox-network-guard` blocks
+  non-GET `gh api` and says to ask the operator. **Needs the operator**, and it is
+  exactly the "silent when wrong" shape above.
 - **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
-  because `/auto-pilot` is under active development with a new harness and teaching it a
-  fifth handler against a moving target is rework. It stops outright rather than
-  degrading. **This holds Phase 4**, task 10's pilot included.
+  because `/auto-pilot` is under active development with a new harness. It stops outright
+  rather than degrading. **This holds Phase 4**, task 10's pilot included.
 - **`sandbox-network-guard` blocks non-GET `gh api`.** Task 7 confirmed the workaround,
-  not a fix: `gh-issue-state.py --apply` PATCHed a live issue successfully when the call
-  ran **unsandboxed**. So this is friction rather than a wall, and every local write
-  still costs a sandbox escape until an allowlist entry exists.
+  not a fix: an asset's `--apply` PATCHes fine when the call runs **unsandboxed**,
+  because the hook matches the `gh api` text and a python helper hides it. So this is
+  friction rather than a wall, and every local write costs a sandbox escape.
   **Outside this repo; needs the operator.**
-- **`gh-issue-reoptimize.md` has not migrated** — see above. Owned by task 8.
-- **The whole handler is local-only: every asset shells out to `gh`.** A cloud routine has
-  none, so the loop still owes an MCP branch reusing `labels.yml` for the same
-  validate-then-replace rule. `gh-issue-reconcile.py` (task 7) inherits this and says so.
+- **The whole handler is local-only: every asset shells out to `gh`.** A cloud routine
+  has none, so the loop still owes an MCP branch reusing `labels.yml` for the same
+  validate-then-replace rule. `gh-issue-reconcile.py` and `gh-issue-graph.py` both
+  inherit this and say so.
 - **`state_reason` on the close path is unowned.** `gh-issue-state.py --done` writes
   `state: closed` and nothing else, so a completed issue and an abandoned one are
-  indistinguishable afterwards — GitHub's `state_reason` (`completed` / `not_planned`) is
-  never set. No task covers it. Task 7's rule 3 now _reads_ `state_reason` as context on a
-  finding, which makes the gap cheaper to live with and no less real: every issue this
-  loop closes reports the same reason.
-- **Two label invariants have no reconciler rule.** Found while building task 7's three.
-  Its rule table is deliberately **closed**, so these were left out rather than becoming
-  rows four and five. Both are real and neither is covered anywhere else:
+  indistinguishable afterwards. No task covers it. It now costs more than it did: task
+  8's stale-versus-satisfied split reads `state_reason` to decide whether an edge blocks
+  forever or is already met, and every issue this loop closes reports the same reason.
+- **Two label invariants have no reconciler rule.** Task 7's rule table is deliberately
+  **closed**, so these were left out rather than becoming rows four and five:
   - `at most one prio:` / `at most one est:` — a duplicate stays invisible until the next
     write, which then refuses.
   - a **closed** issue still carrying live `status:`/`auto:` rungs. Reachable with a bare
-    `gh issue close`, which is what a human reaches for; only `gh-issue-state.py --done`
-    clears them.
-- **Tasks 12 and 13 have no task file** — they exist only as entries in the epic. Every
-  other task has one under a `phase_*/` directory.
+    `gh issue close`, which is what a human reaches for.
+- **Tasks 12 and 13 have no task file** — they exist only as entries in the epic.
 - Two non-migration follow-ups live in Linear: **PRE-822** (`reopened` unhandled by the
-  task-6 backstop) and **PRE-823** (the dependency-endpoint probe above).
+  task-6 backstop) and **PRE-823** (does a runner's token reach the dependency
+  endpoints). PRE-823 no longer blocks anything in this plan — see the footer note above.
 
 ## This repo is still on Linear
 
@@ -227,12 +210,13 @@ switch waits on the auto-pilot harness — switching before then ends unattended
 rather than degrading it. That is a postponement, not a dead end: every handler verb works
 in a foreground session today, so the repo could switch and be driven by hand deliberately.
 
-Three acceptance criteria are consequently **unmet, and none is a defect** — each needs a
+Four acceptance criteria are consequently **unmet, and none is a defect** — each needs a
 repo actually on the `gh-issue` handler. Run them when one exists:
 
 - **Task 4** — two `/do-tasks` sessions against the same ready issue, confirming exactly
   one proceeds.
 - **Task 7** — `/reconcile-tasks` end to end through the command rather than the script.
-  The script itself was verified against the live API (a hand-edited double-rung issue was
-  reported, then repaired), so what is untested is only the handler dispatch.
+  The script itself was verified against the live API.
+- **Task 8** — `/reoptimize-tasks` against a migrated backlog, spot-checking three edges
+  in the GitHub UI. This is also the cheapest way to settle the DELETE probe above.
 - **Task 15** — its user-run check.
