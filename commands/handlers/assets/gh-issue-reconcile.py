@@ -87,6 +87,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -346,11 +347,13 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
     # all of them noise. Report the gap once instead, and skip the event reads,
     # which is also the run's whole per-issue API cost.
     #
-    # Absence now is not proof the label was NEVER provisioned: deleting it after
-    # issues carried it reads the same, and the `labeled` events keep the name, so
-    # the evidence this row wants would still be there. Voiding is still right —
-    # the current label set is the only cheap signal, and a shouted gap beats a
-    # confident wrong answer — but say "not present", never "never created".
+    # Absence now is not proof the label was NEVER provisioned. A label deleted
+    # after issues carried it reads the same, and the `labeled` events keep the
+    # name, so the evidence this row wants would still be there; a label created
+    # and deleted unused reads the same again. The current set cannot tell those
+    # apart. Voiding is still right — it is the only cheap signal, and a shouted
+    # gap beats a confident wrong answer — but say "not present", and do not
+    # enumerate the histories that could have produced it.
     for issue in closed_issues if review_provisioned else ():
         if ever_labelled(repo, issue["number"], review):
             continue
@@ -369,6 +372,11 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
 
     return {
         "repo": repo,
+        # Carried so the remediation command can name the same vocabulary the
+        # gap was computed from. Without it a run under --labels-file prints a
+        # command that provisions the DEFAULT labels — a wrong write, against a
+        # gap it does not close.
+        "labels_file": str(labels_file),
         "scope_labels": list(scope_labels),
         "limit": limit,
         "checked": {"open": len(open_issues), "closed": len(closed_issues)},
@@ -384,6 +392,26 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
         "closed_unreviewed": closed_unreviewed,
         "applied": apply,
     }
+
+
+def provision_command(result):
+    """The gh-label-sync invocation that closes the reported gap.
+
+    It carries `--labels-file` whenever the audit ran against a non-default
+    vocabulary: the gap was computed from THAT file, so a command naming the
+    default would provision a different label set and leave the gap open. Every
+    path is shell-quoted — this line exists to be copied and run.
+    """
+    parts = [
+        "python3",
+        str(ASSETS / "gh-label-sync.py"),
+        "--repo",
+        result["repo"],
+    ]
+    if Path(result["labels_file"]) != DEFAULT_LABELS_FILE:
+        parts += ["--labels-file", result["labels_file"]]
+    parts.append("--apply")
+    return " ".join(shlex.quote(part) for part in parts)
 
 
 def report(result):
@@ -408,8 +436,7 @@ def report(result):
         print(
             f"\nProvisioning gap — {len(result['missing_vocabulary'])} vocabulary "
             f"label(s) absent from this repo: {names}\n"
-            f"  Provision with: python3 {ASSETS / 'gh-label-sync.py'} "
-            f"--repo {result['repo']} --apply"
+            f"  Provision with: {provision_command(result)}"
         )
 
     findings = result["double_status"]
@@ -449,10 +476,10 @@ def report(result):
     if not result["review_label_provisioned"]:
         print(
             f"\nRule 3 — closed, never labelled {REVIEW_STATUS_VALUE}: VOID.\n"
-            f"  `{result['review_label']}` is not present on {result['repo']} — "
-            "either never created, or deleted after issues carried it.\n"
-            "  Either way the row cannot be answered from the current label set, "
-            "and every closed issue would read as a hit.\n"
+            f"  `{result['review_label']}` is not present on {result['repo']} "
+            "now, and the current label set cannot say why.\n"
+            "  So the row cannot be answered from it, and every closed issue "
+            "would read as a hit.\n"
             "  Provision the label, run the loop, then re-run this audit."
         )
     else:

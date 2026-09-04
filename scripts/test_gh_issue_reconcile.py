@@ -156,6 +156,16 @@ class ReconcileTestCase(unittest.TestCase):
             apply=apply,
         )
 
+    def _labels_file(self, text):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".yml", delete=False, encoding="utf-8"
+        )
+        handle.write(text)
+        handle.close()
+        path = Path(handle.name)
+        self.addCleanup(path.unlink)
+        return path
+
 
 class RuleOneTests(ReconcileTestCase):
     def test_keeps_the_highest_numbered_status_label(self):
@@ -433,6 +443,50 @@ class ProvisioningTests(ReconcileTestCase):
         )
 
 
+class RemediationCommandTests(ReconcileTestCase):
+    """The provisioning gap is only useful with a command that closes THAT gap."""
+
+    def _void_repo(self):
+        return FakeRepo(
+            closed_issues={1: []},
+            events={1: []},
+            repo_labels=[n for n in FULL_VOCABULARY if n != REVIEW],
+        )
+
+    def test_the_command_names_the_vocabulary_the_gap_was_computed_from(self):
+        """Under --labels-file, a command naming the default provisions the wrong
+        labels and leaves the reported gap open — a silent wrong write."""
+        path = self._labels_file(
+            "status: [0_untriaged, 2_ready, 4_needs_review]\n"
+            "auto: [eligible]\n"
+            "prio: [0]\n"
+            "est: [1]\n"
+            "colors:\n"
+            "  status: 1d76db\n"
+            "  auto: 0e8a16\n"
+            "  prio: d93f0b\n"
+            "  est: 5319e2\n"
+        )
+        repo = FakeRepo(closed_issues={1: []}, events={1: []}, repo_labels=[])
+        result = self._compute(repo, labels_file=path)
+
+        command = gh_issue_reconcile.provision_command(result)
+
+        self.assertIn("--labels-file", command)
+        self.assertIn(str(path), command)
+
+    def test_the_default_vocabulary_needs_no_labels_file_flag(self):
+        result = self._compute(self._void_repo())
+
+        command = gh_issue_reconcile.provision_command(result)
+
+        self.assertNotIn("--labels-file", command)
+        self.assertIn("gh-label-sync.py", command)
+        self.assertIn("--apply", command)
+        # A path, not an ellipsis — this line exists to be copied and run.
+        self.assertNotIn("...", command)
+
+
 class DryRunTests(ReconcileTestCase):
     def test_all_three_rules_are_no_ops_without_apply(self):
         repo = FakeRepo(
@@ -466,16 +520,6 @@ class ScopeTests(ReconcileTestCase):
 
 
 class VocabularyTests(ReconcileTestCase):
-    def _labels_file(self, text):
-        handle = tempfile.NamedTemporaryFile(
-            "w", suffix=".yml", delete=False, encoding="utf-8"
-        )
-        handle.write(text)
-        handle.close()
-        path = Path(handle.name)
-        self.addCleanup(path.unlink)
-        return path
-
     def test_a_renamed_review_value_fails_loudly_rather_than_flagging_everything(self):
         path = self._labels_file(
             "status: [0_untriaged, 2_ready, 3_started, 9_in_review]\n"

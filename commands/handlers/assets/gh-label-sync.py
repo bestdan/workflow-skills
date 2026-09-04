@@ -54,10 +54,10 @@ def existing_labels(repo):
     silently truncated read is indistinguishable from a complete one. That is
     tolerable for this file's own sync(), where a present-but-omitted label makes
     the follow-up `gh label create` fail nonzero. It is not tolerable for
-    gh-issue-reconcile.py, which reads ABSENCE from this list as proof a rung was
-    never provisioned and voids a whole rule on it — there the same truncation
-    silently suppresses findings and prints a confident VOID line. So refuse at
-    the cap rather than let either caller conclude anything from a partial list.
+    gh-issue-reconcile.py, which treats a rung's ABSENCE from this list as the
+    signal that voids a whole audit rule — there the same truncation silently
+    suppresses findings and prints a confident VOID line. So refuse at the cap
+    rather than let either caller conclude anything from a partial list.
     """
     code, out, err = run_gh(
         [
