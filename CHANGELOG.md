@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.22.0] - 2026-09-04
+
+### Features
+
+- derive verification tests during review (#484) (14dfdb9)
+
 ## [2.21.2] - 2026-09-04
 
 ### Fixes
