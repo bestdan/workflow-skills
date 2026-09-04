@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -355,6 +356,50 @@ class TestFailureOutputChannel(RollupTestCase):
         self.assertIn(
             f"ROLLUP_REASON={rollups.SUBISSUES_UNAVAILABLE}", out.splitlines()[1]
         )
+
+
+class TestRunGhIsTheOneUnstubbedSeam(unittest.TestCase):
+    """Every other case in this file REPLACES run_gh with a fake, so the real
+    one — the only place GhResult is constructed — is otherwise never executed.
+    That is the classic hole a stubbed seam leaves, and it is exactly where a
+    transposed stdout/stderr would live.
+    """
+
+    def test_fields_map_to_the_streams_they_are_named_for(self):
+        class FakeProc:
+            returncode = 7
+            stdout = "THIS-IS-STDOUT"
+            stderr = "THIS-IS-STDERR"
+
+        with mock.patch.object(rollups.subprocess, "run", return_value=FakeProc()):
+            result = rollups.run_gh(["api", "graphql"])
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout, "THIS-IS-STDOUT")
+        self.assertEqual(result.stderr, "THIS-IS-STDERR")
+
+    def test_positional_unpacking_keeps_the_documented_order(self):
+        """The docstring and CONTRIBUTING both promise a plain 3-tuple stub
+        stays valid, which holds only while the field order is (returncode,
+        stdout, stderr). Pin it — every other test in this file depends on it."""
+
+        class FakeProc:
+            returncode = 3
+            stdout = "OUT"
+            stderr = "ERR"
+
+        with mock.patch.object(rollups.subprocess, "run", return_value=FakeProc()):
+            code, out, err = rollups.run_gh(["api"])
+
+        self.assertEqual((code, out, err), (3, "OUT", "ERR"))
+
+    def test_it_calls_gh_with_the_arguments_it_was_given(self):
+        with mock.patch.object(rollups.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            rollups.run_gh(["api", "graphql", "-f", "query=x"])
+        argv = run.call_args[0][0]
+        self.assertEqual(argv[0], "gh", "the binary must be gh")
+        self.assertEqual(argv[1:], ["api", "graphql", "-f", "query=x"])
 
 
 class TestQueryShape(RollupTestCase):
