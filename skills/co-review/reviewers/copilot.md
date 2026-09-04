@@ -29,7 +29,7 @@ Because it's stateful and agentic, drive it as a reviewer this way:
 
 ## Permission allow-rule (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see SKILL.md → Permissions). There is **no probe rule** — copilot has no `auth status` command; failures are caught from output:
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). There is **no probe rule** — copilot has no `auth status` command; failures are caught from output:
 
 ```json
 "Bash(copilot -s -p \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\" --no-ask-user)"

@@ -41,7 +41,7 @@ Two mechanics to know if you do change the model:
 
 ## Permission allow-rule (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see SKILL.md → Permissions):
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)):
 
 ```json
 "Bash(codex exec --sandbox read-only --model \"gpt-5.5\" \"Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\")"
