@@ -285,8 +285,10 @@ are never applied silently:
 
 **Verification tests come back with the findings.** Co-review's step 9 hands
 over a list of real-machine checks, each naming the environment it needs and
-who runs it. In the first round, run the items marked as yours and record what
-each produced; leave the user's items unrun — you are not the human they need.
+who runs it. Run the items marked as yours once, against the final branch tip
+— after the last round that changes it, or straight after step 5 when no round
+does — and record what each produced; leave the user's items unrun, since you
+are not the human they need.
 Then refresh the PR body's **how-to-evaluate steps** slot (step 4) with the
 results and the still-unrun items: that body was written before this list
 existed, so it does not yet describe them. Unrun items ride out in the hand-off
