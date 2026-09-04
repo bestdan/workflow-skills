@@ -224,6 +224,12 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
                 "rungs": rungs,
                 "keep": keep,
                 "drop": [label for label in rungs if label != keep],
+                # Seeded rather than assigned only on the success path: `--json`
+                # is an interface, and a key that appears only when the repair
+                # worked is one a consumer discovers by breaking on the first
+                # refused issue.
+                "labels": None,
+                "dropped": [],
                 "applied": False,
                 "refused": None,
             }
@@ -236,6 +242,14 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
                 finding["refused"] = str(exc)
             else:
                 finding["labels"] = labels
+                # The full-set write also purges any managed-namespace label the
+                # vocabulary does not define — a `prio:urgent` someone invented.
+                # Purging it is right; doing so without naming it is not, which
+                # is why gh-issue-state.py exposes this and why every other
+                # caller prints it. Rule 1 was the one that did not.
+                finding["dropped"] = gh_issue_state.dropped_unrecognized(
+                    current, set(groups), vocabulary
+                )
                 if apply:
                     gh_issue_state.patch_issue(repo, issue["number"], labels)
                     finding["applied"] = True
@@ -327,6 +341,12 @@ def report(result):
         else:
             outcome = f"would keep {finding['keep']}, drop {dropped}"
         print(f"  #{finding['number']} {finding['title']} — {outcome}")
+        # Named on its own line: these are deletions the repair makes beyond the
+        # rung it exists to drop, so folding them into `outcome` would read as
+        # part of the ordinary transition.
+        if finding.get("dropped"):
+            names = ", ".join(finding["dropped"])
+            print(f"      also dropped (not in labels.yml): {names}")
 
     findings = result["missing_rung"]
     print(f"\nRule 2 — open issue missing a rung, FLAG only ({len(findings)}):")

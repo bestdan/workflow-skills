@@ -58,8 +58,10 @@ the `gh-issue` reading named alongside.
   (neither flag) is bounded to your configured `linear.projects` plus issues
   with no project at all — it does **not** include every other project's
   in-flight work on the team; that requires `--all` or a specific `--project`.
-  **`gh-issue` does not support this flag** — it has no project dimension yet —
-  and says so rather than silently scoping by nothing.
+  **`gh-issue` does not support this flag** — it has no project dimension yet.
+  It says so rather than silently scoping by nothing, and **paired with
+  `--apply` it stops**: a request to narrow must not come back as a write
+  outside the narrowing.
 
 ## 1. Resolve the handler
 

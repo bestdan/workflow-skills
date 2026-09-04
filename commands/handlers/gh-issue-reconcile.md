@@ -74,10 +74,20 @@ GitHub's `state_reason` so those are dismissible on sight.
    explicit override: it drops the label scope and audits the whole repo, which
    is the right call on a repo whose issues are _all_ task issues.
 
-3. **`--project` is unsupported here.** Say so and continue with the repo-wide
-   run: the gh-issue handler has no project dimension yet — milestones are the
-   presumed mapping and that is still an open question on the migration plan, so
-   guessing one would scope the audit by something nothing writes.
+3. **`--project` is unsupported here.** The gh-issue handler has no project
+   dimension yet — milestones are the presumed mapping and that is still an open
+   question on the migration plan, so guessing one would scope the audit by
+   something nothing writes.
+
+   With `--apply`, **stop**. A request to narrow that produces a write outside
+   the narrowing is the one combination worth refusing, and it is the same rule
+   step 2 applies to a missing label scope: a scope this handler cannot honour,
+   plus a write, acts outside what the user named. Say `--project` is
+   unsupported and ask them to re-run without it, or without `--apply`.
+
+   Without `--apply` the run is read-only, so say `--project` is unsupported and
+   continue at the default label scope — a report the user did not quite ask for
+   costs them nothing, and refusing it would throw away a free answer.
 
 4. **Run the audit.** Dry-run by default; `--apply` repairs row 1 and nothing
    else:
@@ -92,13 +102,19 @@ GitHub's `state_reason` so those are dismissible on sight.
 
    The script reads the 50 most recently **created** issues per state — `gh
    issue list` orders by creation date, not by close date, so a long-lived issue
-   closed yesterday can sit outside the window and go unaudited by row 3. Widen
-   it with `--limit`, and mind the cost: row 3 spends one API call per **closed**
-   issue in the window, so the limit is what bounds the run.
+   closed yesterday can sit outside the window and go unaudited by row 3. If the
+   operator asks for a wider window, add `--limit <N>` to the invocation above —
+   it is a flag on this script, not on `/reconcile-tasks`, so it never arrives
+   as a command argument. Mind the cost: row 3 spends one API call per
+   **closed** issue in the window, so the limit is what bounds the run.
 
    Row 1's repair goes through `gh-issue-state.py` — validate, then one full-set
    PATCH — so it carries `follow-up` and every other unmanaged label forward
-   rather than deleting them. If the repaired set would still be illegal (row 1
+   rather than deleting them. It does purge a label **inside** the four managed
+   namespaces that `labels.yml` does not define (`prio:urgent`, invented by
+   hand), which is the point of validate-then-replace — and it names each one it
+   purged, because a deletion nobody reports is indistinguishable from a label
+   that was never there. If the repaired set would still be illegal (row 1
    drift on an issue that is _also_ missing its `auto:` rung), the script
    **refuses that issue** and reports why. That is row 2's ban holding: it will
    not invent the missing rung to make its own write legal.

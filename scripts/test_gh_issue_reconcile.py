@@ -162,6 +162,27 @@ class RuleOneTests(ReconcileTestCase):
             sorted(["status:3_started", "auto:eligible", "prio:1", "follow-up"]),
         )
 
+    def test_the_repair_names_every_managed_label_it_deletes(self):
+        """`prio:urgent` is purged by the full-set write; silence would hide it."""
+        repo = FakeRepo(
+            open_issues={
+                1: [
+                    "status:2_ready",
+                    "status:3_started",
+                    "auto:eligible",
+                    "prio:urgent",
+                    "follow-up",
+                ]
+            }
+        )
+        finding = self._compute(repo, apply=True)["double_status"][0]
+
+        self.assertEqual(finding["dropped"], ["prio:urgent"])
+        self.assertNotIn("prio:urgent", repo.patched_labels(1))
+        # The unmanaged label still rides through — only the four namespaces
+        # are this helper's to purge.
+        self.assertIn("follow-up", repo.patched_labels(1))
+
     def test_an_out_of_vocabulary_status_label_is_not_a_second_rung(self):
         """`status:blocked` has no ladder position, so it cannot be ranked."""
         repo = FakeRepo(
