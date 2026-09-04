@@ -240,13 +240,14 @@ join, and `gh` covers it only partially.
 
 **Phase 3 — handler (added 2026-09-04, from task 7's dispatch check)**
 
-17. [phase_3_handler/gh_migration_task_17.md](phase_3_handler/gh_migration_task_17.md) — **Defect from task 7.** Reconciler row 3 asks
+17. [phase_3_handler/gh_migration_task_17.md](phase_3_handler/gh_migration_task_17.md) — **DONE.**
+    [PR #479](https://github.com/bestdan/workflow-skills/pull/479). Reconciler row 3 asked
     whether an issue ever carried `status:4_needs_review` without asking whether that
-    label exists on the repo. Where it was never provisioned the row hits every closed
-    issue — measured at 50 of 50 against `bestdan/dotfiles`. Size 1, unblocked, and it
-    lands in the same file task 7 shipped. Its step-2 prose is wrong too, and in the more
-    expensive way: it claims the label scope already prevents this, so a reader who
-    trusts it stops looking.
+    label exists on the repo, so on an under-provisioned repo it hit every closed issue —
+    measured at 50 of 50 against `bestdan/dotfiles`. Each row now checks its own premise
+    against one `gh label list`; row 2 is guarded by group rather than completeness, and
+    row 1 needs no guard. Step 2's claim that the label scope already prevented this is
+    corrected.
 
 **Phase 4 — migrate (added 2026-08-30)**
 

@@ -2,7 +2,7 @@
 title: Reconciler row 3 must check the rung it looks for is provisioned
 priority: medium
 size: 1
-status: new
+status: done
 created: 2026-09-04
 source_branch: bestdan/gh-issue-migration
 parent: gh_migration

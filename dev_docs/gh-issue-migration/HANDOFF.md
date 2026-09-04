@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-04 after task 8.** Read this first, then
+**Redrafted 2026-09-04 after task 17.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -68,57 +68,66 @@ worktree off `main`; edit these plan docs on this branch.
 
 ## Where things stand
 
-**Two available tasks, 16 and 17.** Both unblocked, neither blocking the other. Tasks
-4–8, 14 and 15 are done; 12 is unclaimed but gates only the routine claim default; 13 is
-postponed, which **holds all of Phase 4** with it.
-
-**Take 17 first if you want a short one** — it is size 1, it is a defect in shipped work
-rather than new surface, and it is the reason `/reconcile-tasks` output cannot currently
-be read on an under-provisioned board.
+**One available task, 16.** Tasks 4–8, 14, 15 and 17 are done. Task 12 is unclaimed but
+gates only the routine claim default. Task 13 is postponed, which **holds all of
+Phase 4** with it.
 
 - **Task 16** — batch execution (`/do-tasks --all`), absorbed from Linear PRE-117
   (cancelled as superseded). Read the closed PR #426 before starting: its §4 batch
   machinery is reusable and its five defects are the list of what not to repeat. Task 16
   carries the fetch command for its code. **Do not rebase #426** — it applies almost
   cleanly and is almost all wrong.
-- **Task 17** — reconciler row 3 hits every closed issue on a repo where
-  `status:4_needs_review` was never provisioned. Fix the row **and** the step-2 paragraph
-  that claims the label scope already prevents it; a false explanation costs more than
-  the bug, because it stops the next reader looking.
 - **Task 12** — stale claim-ref sweep. Unclaimed, no task file. Gates flipping the
   routine claim default, nothing else.
 
+**Two user-run checks are now unblocked and cheap.** Neither is a task; both are
+acceptance criteria sitting on already-merged work, and both run against
+`bestdan/dotfiles` today. See "Acceptance criteria still owed" below.
+
 ## What will bite you
 
-**The vocabulary migration is finished.** Task 8 moved the last verb;
-`gh-issue-reoptimize.md` was the file still reading `auto-eligible` / `auto-claimed` /
-`priority:*`, which made it classify every issue on a migrated board as `new`. Every
-gh-issue verb now speaks `labels.yml`. There is no bridge left anywhere — task 4 deleted
-the last one. If you find an old spelling, it is a defect, not a migration in progress.
+**The vocabulary migration is finished.** Every gh-issue verb speaks `labels.yml`; there
+is no bridge left anywhere. If you find an old spelling (`auto-eligible`, `priority:*`),
+it is a defect, not a migration in progress.
 
 **"Carrying a rung" means carrying one `labels.yml` defines** — never merely a label
-whose name starts with `status:` or `auto:`. The same holds for `prio:` and `est:`.
-`gh-issue-state.py`'s `validate()` has always read it that way, task 7's reconciler does,
-and task 8's `gh-issue-graph.py` does. The prefix reading is the trap: a hand-typed
-`status:blocked` or `prio:urgent` satisfies it, so the issue reads as healthy while being
-in a state nothing can act on — or gets ranked by an order nothing defines. Anything new
-that asks "does this issue have a rung?" must ask the vocabulary.
+whose name starts with `status:` or `auto:`. The same holds for `prio:` and `est:`. The
+prefix reading is the trap: a hand-typed `status:blocked` satisfies it, so the issue
+reads as healthy while being in a state nothing can act on. Anything new that asks "does
+this issue have a rung?" must ask the vocabulary.
+
+**A check must also ask whether the label it looks for is PROVISIONED.** This is the
+sharper twin of the rule above and it is new with task 17. Label namespaces are per-repo,
+so a rung the vocabulary defines may never have been created on the board — and then the
+check's question is unanswerable, not answered "no". Reconciler row 3 asked whether a
+closed issue had ever carried `status:4_needs_review` and hit **50 of 50** correctly
+scoped closed issues on a repo that never provisioned it. Two things follow, and the
+second is the one that generalises:
+
+- The **scope does not vouch for the labels.** A label scope separates loop issues from
+  strangers; it says nothing about provisioning. `gh-issue-reconcile.md` step 2 asserted
+  otherwise and was corrected by task 17 — a false explanation costs more than the bug,
+  because it stops the next reader looking.
+- **Guard by group, not by completeness.** Row 2's premise is that a rung was
+  _assignable_ and nobody assigned it, which still holds while its group has any member
+  provisioned. Only an entirely empty group voids it. Row 1 needs no guard at all,
+  because it ranks labels the issue already carries. Decide this per check rather than
+  applying one blanket guard; a guard that is too wide silences a working row.
 
 **The `Blocked by:` footer is an echo of a native edge, never a dependency in itself.**
-Settled by task 8 for every path at once, which is the part that matters — the rule was
-previously true on `/push-plan` and false on `/reoptimize-tasks`, and one path writing
-unbacked footers is what made every footer unreadable as evidence. Two consequences:
+Settled by task 8 for every path at once, which is the part that matters. Two
+consequences:
+
 - Nothing may read a footer to decide blocked-ness. `gh-issue-ready.py`, `/list-tasks`,
-  `/do-tasks` and now `/reoptimize-tasks` all read the edge.
+  `/do-tasks` and `/reoptimize-tasks` all read the edge.
 - Nothing may write a footer for a dependency with no edge. Write the edge, then echo it.
 
 The footer was **kept rather than dropped**, against task 8's own acceptance criterion,
 which that task file explicitly anticipated. The deciding argument is that `/push-plan`
-and `/reoptimize-tasks` must not disagree about what a footer means — and note that
-argument **does not turn on PRE-823**: if a runner can read the graph the footer is
-redundant but harmless, and if it cannot the footer is the only unattended signal, so
-consistency decides it either way. Do not treat PRE-823 as blocking a footer decision
-again.
+and `/reoptimize-tasks` must not disagree about what a footer means — and that argument
+**does not turn on PRE-823**: if a runner can read the graph the footer is redundant but
+harmless, and if it cannot the footer is the only unattended signal. Do not treat
+PRE-823 as blocking a footer decision again.
 
 **A scope this handler cannot honour, plus a write, is a refusal.** The gh-issue handler
 has no initiative dimension and no project dimension of its own. `/reconcile-tasks` stops
@@ -158,11 +167,9 @@ Full evidence in
   `DELETE repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by/{issue_id}`. Measured
   2026-09-04 by task 8 — the edge is gone on readback, and the removal is idempotent.
 - **GitHub refuses a directly reciprocal edge, and refuses nothing else.** Creating
-  `A blocked_by B` when `B blocked_by A` exists returns **422** ("this dependency would
-  create a cycle where the target is already blocked by the source"); the same probe
-  built `A -> B -> C -> A` with no complaint. Measured 2026-09-04. Two consequences:
-  never read GitHub's guard as a guarantee that the graph is acyclic — which is why
-  cycle detection reads the real graph — and a batch edge write must survive a per-edge
+  `A blocked_by B` when `B blocked_by A` exists returns **422**; the same probe built
+  `A -> B -> C -> A` with no complaint. Measured 2026-09-04. Never read GitHub's guard as
+  a guarantee that the graph is acyclic, and a batch edge write must survive a per-edge
   refusal rather than aborting with earlier edges already written.
 - `blocked_by` is **paginated** — read it with `--paginate --slurp`. A bare read stops at
   30, and an invisible edge is a cycle that reads as absent.
@@ -178,6 +185,24 @@ Full evidence in
   long-lived issue closed yesterday can sit outside it. GitHub search has no
   `sort:closed`; `--search "sort:updated-desc"` is the nearest proxy and does compose
   with `--label`, but `updated` moves on a post-close comment.
+
+**Provisioning**, measured 2026-09-04 by task 17
+([PR #479](https://github.com/bestdan/workflow-skills/pull/479)).
+
+- `gh-label-sync.py` is idempotent and **dry-run by default**, so
+  `python3 …/gh-label-sync.py --repo <repo>` prints a board's gap for free. One
+  `gh label list` is the whole cost, which is why the reconciler now makes that call
+  itself before any per-issue work.
+- **`bestdan/dotfiles` is the only live under-provisioned board, and it is deliberately
+  still under-provisioned.** It is missing 12 of the 17 vocabulary labels
+  (`status:3_started`, `status:4_needs_review`, every `prio:` and every `est:`) and is
+  half-migrated besides. That inventory is live state and will drift, so **do not trust
+  this sentence, run the dry run.** Both are filed on that repo's own tracker
+  ([#675](https://github.com/bestdan/dotfiles/issues/675) provisions,
+  [#676](https://github.com/bestdan/dotfiles/issues/676) migrates, natively linked) —
+  they are that repo's work, not this plan's. **When #675 lands, the reproduction is
+  gone**: anything testing under-provisioned behaviour then needs a fixture. Task 17's
+  hermetic tests are that fixture, and they are the model to copy.
 
 Both write facts are silent when wrong. This file was wrong twice by asserting routine
 behaviour from documentation. Probe it.
@@ -198,24 +223,16 @@ behaviour from documentation. Probe it.
   inherit this and say so.
 - **`state_reason` on the close path is unowned.** `gh-issue-state.py --done` writes
   `state: closed` and nothing else, so a completed issue and an abandoned one are
-  indistinguishable afterwards. No task covers it. It now costs more than it did: task
-  8's stale-versus-satisfied split reads `state_reason` to decide whether an edge blocks
+  indistinguishable afterwards. No task covers it. It costs more than it did: task 8's
+  stale-versus-satisfied split reads `state_reason` to decide whether an edge blocks
   forever or is already met, and every issue this loop closes reports the same reason.
-- **A partially provisioned repo makes the audits lie, and nothing detects it.**
-  `gh-label-sync.py` is idempotent and **dry-run by default**, so
-  `python3 …/gh-label-sync.py --repo <repo>` prints the gap for free — run it before
-  trusting any audit's output on a board, and before reading a pilot result. The
-  instance that exposed this is **task 17** (reconciler row 3), now a plan task rather
-  than a loose blocker; the class is wider than that one row, so it stays here.
-  As of 2026-09-04 `bestdan/dotfiles` is missing a double-figure share of the vocabulary
-  and is **half-migrated** besides — 110 of its 254 issues carry the old and new
-  vocabularies at once. That inventory is live state and will drift, so **do not trust
-  this sentence, run the dry run.** Both are filed on that repo's own tracker
-  ([#675](https://github.com/bestdan/dotfiles/issues/675) provisions,
-  [#676](https://github.com/bestdan/dotfiles/issues/676) migrates, natively linked) —
-  they are that repo's work, not this plan's.
+- **The provisioning class is wider than the reconciler.** Task 17 guarded the three
+  reconciler rows, which is where it was measured. Every other verb that asks whether an
+  issue carries a rung inherits the same blind spot and is unaudited for it. Nothing
+  detects that; there is no task.
 - **Two label invariants have no reconciler rule.** Task 7's rule table is deliberately
-  **closed**, so these were left out rather than becoming rows four and five:
+  **closed**, so these were left out rather than becoming rows four and five — and task
+  17 kept it closed:
   - `at most one prio:` / `at most one est:` — a duplicate stays invisible until the next
     write, which then refuses.
   - a **closed** issue still carrying live `status:`/`auto:` rungs. Reachable with a bare
@@ -223,7 +240,7 @@ behaviour from documentation. Probe it.
 - **Tasks 12 and 13 have no task file** — they exist only as entries in the epic.
 - Two non-migration follow-ups live in Linear: **PRE-822** (`reopened` unhandled by the
   task-6 backstop) and **PRE-823** (does a runner's token reach the dependency
-  endpoints). PRE-823 no longer blocks anything in this plan — see the footer note above.
+  endpoints). PRE-823 no longer blocks anything in this plan.
 
 ## This repo is still on Linear
 
@@ -232,48 +249,40 @@ switch waits on the auto-pilot harness — switching before then ends unattended
 rather than degrading it. That is a postponement, not a dead end: every handler verb works
 in a foreground session today, so the repo could switch and be driven by hand deliberately.
 
-Four acceptance criteria were consequently unmet, **and none is a defect** — task 7's is
-now run (below), leaving three. Each needs a
-repo on the `gh-issue` handler — but read that carefully, because it is **not** the same
-as needing this repo to switch: **`bestdan/dotfiles` is already `handler: gh-issue`**
-(its `dev_docs/tasks/.task-config.yml`, `repo: bestdan/dotfiles`, `labels: [task-add]`).
-Anything testing only **handler dispatch** can run there today, against a real board,
-with no migration and no config change. What dotfiles cannot stand in for is a
-**migrated** backlog: it was never on Linear, so it carries none of the imported issues,
-old-vocabulary labels or `Blocked by:` footers the migration criteria are about. Sort
-each criterion by which of the two it actually needs:
+### Acceptance criteria still owed
 
-- **Task 7 — RUN 2026-09-04 against `bestdan/dotfiles`. Dispatch passes.** Config →
-  `gh-issue` → `gh-issue-reconcile.md` → the script → its report; every step followable
-  as written, and the handler's own arguments (label scope from config, `--project`
-  unsupported, dry-run default) behaved as documented.
-  **One gap left, and it is small:** the session's cwd was `workflow-skills`, so the
-  config was resolved against `$HOME/src/dotfiles` explicitly rather than through
-  `git rev-parse --show-toplevel`. Everything downstream of that one line was the real
-  path. A session launched **in** a gh-issue repo closes it.
-  **It also found a defect** — row 3's unprovisioned-rung blind spot, in the blocker
-  list below. That is the check earning its keep: it was sitting on this list looking
-  blocked when it was runnable, and free.
-- **Task 4 — dispatch, and runnable on `bestdan/dotfiles` today.** Two `/do-tasks`
-  sessions against the same ready issue, confirming exactly one proceeds. Needs an issue
-  at `status:2_ready` on that board and two concurrent sessions; the racing is the point,
-  so a serial run proves nothing.
-- **Task 8** — `/reoptimize-tasks` against the migrated `workflow-skills` backlog,
-  spot-checking three edges in the GitHub UI. Needs task 9, so it waits on Phase 4.
-  Only the **command dispatch** is untested: the scripts under it were exercised against
-  live issues on `bestdan/dotfiles` — edges created, a 3-cycle detected through transitive
-  backfill, an edge deleted and confirmed gone on readback, stale/satisfied classified off
-  real `state_reason`.
-  - **Run the dispatch half early, on `bestdan/dotfiles`, once a release ships.** That
-    repo is already `handler: gh-issue`, so it needs no migration and no config change —
-    the only thing blocking it is the version. **Do not run it before the release:** a
-    slash command dispatches to the **installed** plugin under
-    `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/`, which is a real
-    directory rather than a symlink to a checkout, so running it today exercises the old
-    report-only prose and returns a green result that says nothing about the change. Once
-    the version carrying [PR #478](https://github.com/bestdan/workflow-skills/pull/478) is
-    installed, this costs minutes and covers what the live probe could not: that the
-    command routes to the handler and its steps are followable as written. Expect zero
-    dependency findings — dotfiles has no edges — so read it as a dispatch check, not a
-    coverage one.
+Each needs a repo on the `gh-issue` handler — but read that carefully, because it is
+**not** the same as needing this repo to switch: **`bestdan/dotfiles` is already
+`handler: gh-issue`** (its `dev_docs/tasks/.task-config.yml`, `repo: bestdan/dotfiles`,
+`labels: [task-add]`). Anything testing only **handler dispatch** can run there today,
+against a real board, with no migration and no config change. What dotfiles cannot stand
+in for is a **migrated** backlog: it was never on Linear, so it carries none of the
+imported issues, old-vocabulary labels or `Blocked by:` footers the migration criteria
+are about.
+
+- **Task 8's dispatch half — runnable NOW, and the cheapest thing on this list.**
+  `/reoptimize-tasks` against `bestdan/dotfiles`. The only thing that blocked it was the
+  version, and **v2.21.0 shipped 2026-09-04 carrying PR #478**. A slash command
+  dispatches to the **installed** plugin under
+  `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/`, a real directory
+  rather than a symlink to a checkout, so confirm the installed version is v2.21.0 or
+  later before reading the result — running against an older one exercises the old
+  report-only prose and returns a green result that says nothing. Expect zero dependency
+  findings, since dotfiles has no edges; read it as a dispatch check, not a coverage one.
+  The scripts underneath were already exercised against live issues.
+- **Task 17's re-run — done, and this is the one to imitate.** Run 2026-09-04 against
+  `bestdan/dotfiles` both before and after the fix: row 3 went from 50 findings to a
+  single provisioning-gap report, and row 2's five real findings were unchanged. Keeping
+  the _before_ run is what made the _after_ run mean anything.
+- **Task 4 — dispatch, runnable on `bestdan/dotfiles` today.** Two `/do-tasks` sessions
+  against the same ready issue, confirming exactly one proceeds. Needs an issue at
+  `status:2_ready` on that board and two concurrent sessions; the racing is the point, so
+  a serial run proves nothing. Note `status:2_ready` **is** provisioned there.
+- **Task 8's migrated-backlog half** — `/reoptimize-tasks` against the migrated
+  `workflow-skills` backlog, spot-checking three edges in the UI. Needs task 9, so it
+  waits on Phase 4.
 - **Task 15** — its user-run check.
+
+None of these is a defect. Task 7's was run and **found** task 17's defect, which is that
+check earning its keep: the row was sitting on a blocked-looking list when it was
+runnable, and free.
