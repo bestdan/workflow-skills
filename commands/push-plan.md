@@ -320,9 +320,11 @@ dependency the graph does not have.
 > dependency endpoints (PRE-823): the deciding argument is that `/push-plan` and
 > `/reoptimize-tasks` must not disagree about what a footer means.
 
-> **Value note.** `/do-tasks` reads this board — `gh-issue` execution is single
-> and foreground (`do-tasks.md`), not the parallel Linear runner. The edges this
-> pass draws are what make its dependency gate fire at all.
+> **Value note.** `/do-tasks` reads this board — on `gh-issue` it now batches
+> like the Linear runner, one dispatched remote session per dependency-ready
+> issue (`do-tasks.md` §4 "gh-issue batch"). The edges this pass draws are what
+> make its dependency gate fire at all, and the batch is where they matter
+> most: it selects across the whole ready set at once.
 
 ### 5.1 Preflight
 

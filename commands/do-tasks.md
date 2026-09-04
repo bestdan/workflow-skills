@@ -655,19 +655,20 @@ report format. If the relative path doesn't resolve, find it with **Glob**
   `--no-claim` — **true batch execution**: one dispatched remote session per
   selected issue, via **gh-issue batch** below. `--remote` is the default;
   `--local` caps the batch at **1** and runs the single highest-ranked issue
-  foreground through this file's single flow.
+  foreground through `gh-issue-claim.md`'s default flow.
 
 The claim/execute split (`--claim-only` / `--no-claim`) and the pre-claim WIP gate
 are documented in `gh-issue-claim.md` ("Modes: atomic vs. claim/execute split" and
 "Pre-claim WIP gate").
 
-**`--project` is refused on this handler.** `--project` is section 3's, and the
-gh-issue handler has no project dimension to pin it to — GitHub Projects are not
-this handler's scope, which is the repo plus its label vocabulary. Running the
-batch anyway would answer a request to **narrow** with a run that is **wider** than
-what was asked for, and a batch writes. So stop with `--project is not supported by
-the gh-issue handler — its scope is the configured repo` rather than ignoring the
-flag.
+**`--project` is refused on this handler**, for the reason
+`commands/handlers/gh-issue-reconcile.md` step 3 already gives and owns: the
+gh-issue handler has no project dimension **yet**, milestones being the presumed
+mapping. Read it there rather than here. The refusal follows that file's rule
+exactly — a scope this handler cannot honour, plus a write, acts outside what the
+user named, and a batch always writes. So stop with `--project is not supported by
+the gh-issue handler` rather than ignoring the flag and running wider than was
+asked for.
 
 ### gh-issue batch (`--all` / `-n N`, without `--claim-only` or `--no-claim`)
 
@@ -675,12 +676,16 @@ This is section 3's **Tracker-batch subroutine** with gh-issue's substitutions
 filled in. **Read that subroutine first** — its `--no-claim` and `--local`
 rejections, its rule that a batch never offers the attended override, and its
 warning that a dispatching session's attendedness never transfers to the sessions
-it dispatches all apply here unchanged. Only what is written below is gh-issue's.
+it dispatches all carry over. Only what is written below is gh-issue's.
+
+One substitution inside those rejections, because §3 spells it in Linear's terms:
+`--local` still caps the batch at **1**, but it runs that issue through
+`gh-issue-claim.md`'s default flow, **not** §3's "Claim and execute".
 
 **First, the deterministic opt-out.** If `gh-issue.remote_batch` is `false` in
 `.task-config.yml`, do **not** dispatch: degrade `--all` / `-n N` to a single
-foreground claim through this file's single flow and note `remote batch disabled —
-claiming one issue`. Absent or `true` → run the steps below, each dispatched session
+foreground claim through `gh-issue-claim.md`'s default flow and note `remote batch
+disabled — claiming one issue`. Absent or `true` → run the steps below, each dispatched session
 self-checking for `gh` (step 5). This is the deterministic half of the same
 availability question step 5's self-check answers at runtime, and it is read here so
 a host that has opted out never ranks, counts, or resolves dependencies first.
@@ -711,7 +716,7 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    subtract `count` from `limit` here — an over-limit board (a human claimed by
    hand, or the limit was lowered under running work) makes that difference
    negative, and `gh-issue-claim.py` owns the clamp so no caller has to remember it.
-   If `slack` is `0`, dispatch nothing and report `WIP limit <limit> reached
+   If `slack` is `0`, dispatch nothing and report `WIP limit <wip_limit> reached
    (<count> in flight) — nothing dispatched`. This bound is **unconditional**: a
    batch never offers the attended override (`commands/handlers/attendedness.md`
    step 2).
@@ -758,7 +763,9 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    the already-resolved **non-secret** gh-issue config the single-issue flow needs:
    `gh-issue.repo` if set, the base branch, `branch_prefix`, and `wip_limit`.
    **Never** inline a token or any other secret — the dispatched session
-   authenticates through its own `gh`.
+   authenticates through its own `gh`. That is also what step 2's bound assumes:
+   `wip` counts `assignee:@me`, so the dispatched sessions must authenticate as
+   the **dispatching** account or their claims never enter the next run's `slack`.
 
    **Self-check first.** The prompt's first step must be: "If `gh auth status` fails
    in this session, do **not** claim — stop immediately and report `remote gh CLI
@@ -805,6 +812,13 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    election is immune to. This is **not** a claim that a dispatched session lacks
    the credential to release: one that passed the `gh auth status` self-check could
    delete the ref. It is that a crash is precisely the case where it never gets to.
+
+   What the election removes is the **window**, not the ref: the session pushes
+   `<branch>` to open its PR, so the ref exists again from that moment. The
+   difference is what a strand then means — an hour of unattended execution can no
+   longer end in an empty ref that makes the issue skipped forever, and a ref left
+   after the push is accompanied by finished work and an open PR that pre-flight
+   reports rather than a silent forever-skip.
 7. **What guards the race — and what does not.** Two dispatched sessions never
    contend: step 5 pins each to a distinct issue number and none falls back to
    another issue, which is why the batch needs no equivalent of repo-pr's draft
