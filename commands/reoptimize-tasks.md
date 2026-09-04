@@ -40,13 +40,15 @@ Dispatch on the `handler:` key (same resolution as `/push-plan` §1):
 - `handler: linear` → follow `commands/handlers/linear-reoptimize.md` (§Linear
   below names the steps; that file has the detail). If the relative path doesn't
   resolve, find it with **Glob** (`**/commands/handlers/linear-reoptimize.md`).
-- `handler: gh-issue` → follow `commands/handlers/gh-issue-reoptimize.md` — a
-  **report-only** downgrade of the Linear flow — a handler gap, not a platform
-  one: GitHub Issues has a native `blocked_by` edge that `/push-plan` writes
-  and `/do-tasks` reads, but this flow does not write one yet, so Dimensions
-  1–2 only ever propose a suggested `Blocked by:`/`Related:` body footer line;
-  priority/label fixes still apply via `gh issue edit`. If the relative path doesn't resolve, find
-  it with **Glob** (`**/commands/handlers/gh-issue-reoptimize.md`).
+- `handler: gh-issue` → follow `commands/handlers/gh-issue-reoptimize.md`.
+  Dimensions 1–2 read and write the **native `blocked_by` edge** — the same one
+  `/push-plan` draws and `/do-tasks` reads — creating, removing and cycle-checking
+  it directly; the `Blocked by:` body footer is a human-readable echo of an edge
+  that exists, never a substitute for one. Priority fixes apply through
+  `gh-issue-state.py`. Two things have no native counterpart and stay prose:
+  `Related:` (a cross-reference, not a blocking relation) and `duplicateOf`. If
+  the relative path doesn't resolve, find it with **Glob**
+  (`**/commands/handlers/gh-issue-reoptimize.md`).
 - `handler: jira` → **planned, not yet implemented.** **stop** with:
   "`/reoptimize-tasks` supports the `linear` and `gh-issue` handlers today;
   `jira` re-optimize is a planned follow-up. For now, re-order in your tracker
