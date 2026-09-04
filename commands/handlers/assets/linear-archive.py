@@ -237,11 +237,19 @@ def find_by_ref(key, team, identifiers, uuids):
     them explicitly, so an already-archived issue is a no-op to report rather
     than a lookup failure. Only `nodes` are archive candidates.
     """
-    nodes, archived, seen = [], [], set()
+    nodes: list = []
+    archived: list = []
+    seen = set()
     if identifiers:
         team_field = "id" if UUID_RE.match(team) else "name"
         query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
-        numbers = sorted({int(IDENTIFIER_RE.match(i).group(2)) for i in identifiers})
+        # parse_issue_refs() already rejected every ref that does not match
+        # IDENTIFIER_RE, so each match here is non-None. Assert it rather than
+        # dereferencing blind: a future caller reaching find_by_ref() directly
+        # gets this line instead of `NoneType has no attribute 'group'`.
+        matches = [IDENTIFIER_RE.match(i) for i in identifiers]
+        assert all(matches), f"unparsed identifier in {identifiers}"
+        numbers = sorted({int(m.group(2)) for m in matches if m})
         wanted = set(identifiers)
         for node in gql(key, query, {"team": team, "numbers": numbers})["issues"][
             "nodes"

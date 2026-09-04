@@ -182,8 +182,8 @@ def create_edge(repo, blocked, blocker_id):
 
 
 def apply_edges(repo, edges, apply=False):
-    id_cache = {}
-    edge_cache = {}
+    id_cache: dict = {}
+    edge_cache: dict = {}
     created, existing, skipped = [], [], []
 
     for blocked, blocker_ref in edges:

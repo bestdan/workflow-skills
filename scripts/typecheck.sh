@@ -10,7 +10,7 @@
 # a type checker whose diagnostics move between releases turns a green gate
 # red on a day nobody touched the code.
 #
-# TWO TIERS, deliberately.
+# THREE TIERS, deliberately.
 #
 #   strict   scripts/research-spike.py — the one file already annotated end to
 #            end (93/93 return types, 0/187 untyped parameters), so --strict
@@ -18,8 +18,8 @@
 #            actually hits: a well-typed value that is None on a path nobody
 #            walked.
 #
-#   default  everything else: the other three scripts/ entrypoints and the six
-#            handler assets under commands/handlers/assets/. Tiering here is
+#   default  the other scripts/ entrypoints and the handler assets under
+#            commands/handlers/assets/, plus --check-untyped-defs. Tiering here is
 #            about annotation coverage, NOT about what ships — the assets are
 #            invoked through ${CLAUDE_PLUGIN_ROOT} by the linear handlers and
 #            run on consumers' machines just as research-spike.py does. They
@@ -32,8 +32,27 @@
 #            tier is then a small, self-contained follow-up rather than a
 #            precondition.
 #
-# Both tiers always run, and the exit code is the OR of the two, so one
-# tier failing never hides the other's findings.
+#            --check-untyped-defs is what makes this tier mean anything.
+#            Without it mypy reads only signatures, and since none of these
+#            files annotates one, it read no function BODY at all: the tier
+#            covering every consumer-executed file was checking nothing. Turning
+#            it on surfaced 14 findings in 6 files, all fixed in the PR that
+#            added the flag.
+#
+#   tests    scripts/test_*.py at default settings WITHOUT
+#            --check-untyped-defs. They were previously in no tier at all.
+#            The flag is held off deliberately rather than forgotten: these
+#            files stub seams on modules loaded through importlib
+#            (`rollups.run_gh = fake`), which mypy sees only as ModuleType, so
+#            the flag turns 30 fixable errors into 81 — 48 of them
+#            attr-defined on that one pattern. Buying coverage with ~48
+#            `type: ignore` comments is worse than the gap it closes; a typed
+#            loader shim returning a Protocol is the way in, and is not this
+#            PR. Default settings still catch the loader idiom itself, which is
+#            why every one of these files now asserts its spec resolved.
+#
+# All three tiers always run, and the exit code is their OR, so one tier
+# failing never hides another's findings.
 #
 # Why not `ty`: evaluated at adoption (dev_docs/research/) and it found the
 # same substantive defects with better diagnostics, but it is 0.0.x with an
@@ -84,8 +103,15 @@ rc=0
 echo "→ mypy --strict: ${STRICT_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --strict "${STRICT_FILES[@]}" || rc=1
 
-echo "→ mypy: ${DEFAULT_FILES[*]}"
-uvx --with "$STUBS" "mypy@${MYPY_VERSION}" "${DEFAULT_FILES[@]}" || rc=1
+echo "→ mypy --check-untyped-defs: ${DEFAULT_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs "${DEFAULT_FILES[@]}" || rc=1
+
+# The test tier. Globbed rather than listed: a new scripts/test_*.py is covered
+# the day it lands, which is the failure mode this tier exists to close — every
+# one of these files was uncovered simply because nobody added it to a list.
+TEST_FILES=(scripts/test_*.py)
+echo "→ mypy: ${TEST_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" "${TEST_FILES[@]}" || rc=1
 
 if [[ "$rc" == 0 ]]; then
   echo "typecheck: OK"

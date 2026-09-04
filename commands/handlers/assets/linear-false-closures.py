@@ -411,7 +411,8 @@ def main():
         return 1
 
     print(f"\nRestoring {len(to_restore)}...")
-    cache, ok, fail = {}, 0, 0
+    cache: dict = {}
+    ok = fail = 0
     for issue, _ in to_restore:
         try:
             todo = resolve_todo_state(key, issue["team"]["id"], cache)

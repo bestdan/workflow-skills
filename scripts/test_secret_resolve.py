@@ -29,6 +29,7 @@ ASSET = (
 )
 
 _spec = importlib.util.spec_from_file_location("_secret_resolve", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 secret_resolve = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(secret_resolve)
 

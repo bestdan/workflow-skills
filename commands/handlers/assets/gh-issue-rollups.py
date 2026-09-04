@@ -47,6 +47,7 @@ import argparse
 import json
 import subprocess
 import sys
+from typing import NamedTuple
 
 QUERY = """
 query($owner: String!, $repo: String!, $cursor: String) {
@@ -69,10 +70,32 @@ class LookupFailed(Exception):
     """A page could not be trusted. Carries the reason for `ROLLUP_REASON=`."""
 
 
+class GhResult(NamedTuple):
+    """What `gh` returned. Named because two of the three fields are `str`.
+
+    A plain tuple unpacks positionally, so swapping stdout and stderr type-checks
+    and runs — it just reports the wrong text as the failure reason. Named fields
+    make that swap unwriteable. Tests may still stub `run_gh` with a plain
+    3-tuple; unpacking is identical either way.
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class Page(NamedTuple):
+    """One validated page of the issues connection."""
+
+    parents: list
+    has_next: bool
+    end_cursor: object
+
+
 def run_gh(args):
-    """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
+    """Run `gh` and return a GhResult. The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-    return proc.returncode, proc.stdout, proc.stderr
+    return GhResult(proc.returncode, proc.stdout, proc.stderr)
 
 
 def fetch_page(owner, repo, cursor):
@@ -126,19 +149,20 @@ def _first_line(text):
     return (text or "").strip().splitlines()[0] if (text or "").strip() else "no detail"
 
 
-def _is_number(value):
-    """A real number, not a bool and not a numeric string.
-
-    Defect (5): the original compared `totalCount > 0` in `jq`, which orders
-    every number before every string, so a string `totalCount` satisfied the
-    test and a promotable issue was silently skipped as a rollup. `bool` is
-    excluded because Python makes it a subclass of `int`.
-    """
-    return isinstance(value, int) and not isinstance(value, bool)
+# Defect (5): the original compared `totalCount > 0` in `jq`, which orders every
+# number before every string, so a string `totalCount` satisfied the test and a
+# promotable issue was silently skipped as a rollup. Both numeric checks below
+# spell `isinstance(x, int) and not isinstance(x, bool)` inline rather than
+# calling a helper: a helper returning plain `bool` tells the type checker
+# nothing, so it still sees `Any | None` at the comparison and cannot flag the
+# next unguarded one. `typing.TypeGuard` would fix that, but it is 3.10+ and no
+# asset here uses 3.10+ syntax — raising the floor for consumers is a bigger
+# cost than one repeated expression. `bool` is excluded from both because Python
+# makes it a subclass of `int`.
 
 
 def _validate_page(payload):
-    """Return (parent_numbers, has_next, end_cursor) or raise LookupFailed."""
+    """Return a validated Page, or raise LookupFailed."""
     # Guarded rather than `(payload.get("data") or {})`: a truthy non-dict
     # `data` has no `.get`, so that form raises AttributeError, which escapes
     # LookupFailed and prints neither ROLLUP_OK=0 nor ROLLUP_REASON — the one
@@ -164,13 +188,13 @@ def _validate_page(payload):
         if not isinstance(node, dict):
             raise LookupFailed("issues.nodes contains a non-object")
         number = node.get("number")
-        if not _is_number(number):
+        if not isinstance(number, int) or isinstance(number, bool):
             raise LookupFailed(f"issue node has a non-numeric number: {number!r}")
         sub = node.get("subIssues")
         if not isinstance(sub, dict):
             raise LookupFailed(f"issue #{number} has no subIssues object")
         total = sub.get("totalCount")
-        if not _is_number(total):
+        if not isinstance(total, int) or isinstance(total, bool):
             raise LookupFailed(
                 f"issue #{number} has a non-numeric subIssues.totalCount: {total!r}"
             )
@@ -194,7 +218,7 @@ def _validate_page(payload):
                 f"pageInfo.hasNextPage is true but endCursor is {end_cursor!r}"
             )
 
-    return parents, has_next, end_cursor
+    return Page(parents, has_next, end_cursor)
 
 
 def collect_parents(repo):
@@ -214,17 +238,17 @@ def collect_parents(repo):
     cursor = None
     seen_cursors = set()
     while True:
-        page_parents, has_next, end_cursor = fetch_page(owner, name, cursor)
-        parents.update(page_parents)
-        if not has_next:
+        page = fetch_page(owner, name, cursor)
+        parents.update(page.parents)
+        if not page.has_next:
             return sorted(parents)
         # Defect (7): a valid but *unchanging* cursor loops forever, and the
         # guard for defect (6) does not cover it — that cursor is a non-empty
         # string, so it passes every shape check.
-        if end_cursor in seen_cursors:
-            raise LookupFailed(f"pagination repeated cursor {end_cursor!r}")
-        seen_cursors.add(end_cursor)
-        cursor = end_cursor
+        if page.end_cursor in seen_cursors:
+            raise LookupFailed(f"pagination repeated cursor {page.end_cursor!r}")
+        seen_cursors.add(page.end_cursor)
+        cursor = page.end_cursor
 
 
 def main(argv=None):

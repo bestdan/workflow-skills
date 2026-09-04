@@ -32,6 +32,7 @@ ASSET = ROOT / "commands" / "handlers" / "assets" / "gh-issue-pr-sync.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "gh-issue-pr-sync.yml"
 
 _spec = importlib.util.spec_from_file_location("gh_issue_pr_sync", ASSET)
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 pr_sync = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pr_sync)
 
