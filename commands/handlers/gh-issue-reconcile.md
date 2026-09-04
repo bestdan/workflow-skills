@@ -26,8 +26,9 @@ starting point. Do not add a fourth row, and do not widen these three.
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
 
-Rows 2 and 3 are **void** where the labels they ask about are absent from the
-repo; each reports that gap once instead of flagging every issue. See below.
+Row 3 is **void** where its one review label is absent from the repo. Row 2 skips
+only a `status:`/`auto:` group with no vocabulary member provisioned, and still
+runs for the other. Each reports the gap once instead of flagging every issue.
 
 **Row 1 is the only row that writes**, and only under `--apply`. It keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
@@ -86,11 +87,11 @@ The measurement behind all of this, and the reasoning, live in
 
    **What the scope does not do is vouch for the labels themselves.** It
    separates loop issues from strangers; it says nothing about whether the rung a
-   row asks about was ever provisioned on the repo. Those are independent, and
-   reading the scope as covering both is what let row 3 flag 50 correctly-scoped
-   closed issues on `bestdan/dotfiles`, which has never created
-   `status:4_needs_review`. The script guards that itself — see step 4 — so this
-   is a note about what to conclude from a clean report, not a step to perform.
+   row asks about is provisioned on the repo. Those are independent, and reading
+   the scope as covering both is what made row 3 flag every correctly-scoped
+   closed issue on an under-provisioned board. The script guards that itself —
+   see step 4 — so this is a note about what to conclude from a clean report, not
+   a step to perform.
 
    When `gh-issue.labels` is **empty or unset** there is no marker to scope by.
    **Stop** and report that this audit needs at least one configured label to

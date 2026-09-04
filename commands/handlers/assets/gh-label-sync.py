@@ -59,6 +59,10 @@ def existing_labels(repo):
     suppresses findings and prints a confident VOID line. So refuse at the cap
     rather than let either caller conclude anything from a partial list.
     """
+    # Ask for one MORE than the cap, so a full result is evidence of overflow
+    # rather than of an exact fit. Requesting exactly the cap cannot tell a repo
+    # with exactly that many labels from a truncated read, and would refuse the
+    # complete one.
     code, out, err = run_gh(
         [
             "label",
@@ -66,7 +70,7 @@ def existing_labels(repo):
             "--repo",
             repo,
             "--limit",
-            str(LABEL_LIST_LIMIT),
+            str(LABEL_LIST_LIMIT + 1),
             "--json",
             "name",
         ]
@@ -76,11 +80,11 @@ def existing_labels(repo):
             f"gh label list failed for {repo}: {err.strip() or out.strip()}"
         )
     names = [entry["name"] for entry in json.loads(out or "[]")]
-    if len(names) >= LABEL_LIST_LIMIT:
+    if len(names) > LABEL_LIST_LIMIT:
         raise SystemExit(
-            f"gh label list hit the {LABEL_LIST_LIMIT}-label cap for {repo}: the "
-            "list may be truncated, so neither presence nor absence can be "
-            "concluded from it. Raise LABEL_LIST_LIMIT."
+            f"{repo} has more than {LABEL_LIST_LIMIT} labels: the list would be "
+            "truncated, so neither presence nor absence can be concluded from "
+            "it. Raise LABEL_LIST_LIMIT."
         )
     return names
 

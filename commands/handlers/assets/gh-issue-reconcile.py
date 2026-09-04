@@ -36,6 +36,15 @@ issue is a hit. Measured 2026-09-04 against
 one of them noise. So one `gh label list` runs before any per-issue work, and a
 row whose premise is void reports THAT, once, and returns no findings.
 
+**Provisioning the label does not end the noise, it moves it.** This guard is not
+a migration story. Every issue that closed BEFORE the rung existed still has no
+`labeled` event for it, so the run after provisioning flags exactly the issues
+this one suppresses. Answering that needs a rollout boundary — evidence the rung
+was assignable when each issue closed — which is state this repo would then own
+and keep in step, and it is out of scope here. Until then, read row 3's first
+post-provisioning run as a backlog, not as drift, and mind that the boundary is
+per-repo so no date can be hardcoded.
+
 Rule 2 is guarded by group, not by completeness. Its premise is that a rung was
 assignable and nobody assigned it, which holds as long as the group has any
 member provisioned; a partly provisioned `status:` group still makes a bare issue
@@ -461,8 +470,13 @@ def report(result):
     print(f"\nRule 2 — open issue missing a rung, FLAG only ({len(findings)}):")
     for group in result["unprovisioned_groups"]:
         print(
-            f"  VOID for {group}: — this repo has no `{group}:` label provisioned, "
-            "so the rung is unassignable rather than unassigned. Not checked."
+            # "no vocabulary rung", not "no `status:` label": this test reads the
+            # vocabulary, so a hand-typed `status:blocked` can be sitting on the
+            # repo while this line prints. Saying the label does not exist would
+            # be false, and visibly so to whoever typed it.
+            f"  VOID for {group}: — no vocabulary `{group}:` rung is provisioned "
+            "on this repo, so the rung is unassignable rather than unassigned. "
+            "Not checked."
         )
     for finding in findings:
         missing = ", ".join(f"{group}:" for group in finding["missing"])

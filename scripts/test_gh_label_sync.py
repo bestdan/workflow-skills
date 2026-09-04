@@ -36,7 +36,12 @@ class FakeRepo:
     def run_gh(self, args):
         self.calls.append(args)
         if args[:2] == ["label", "list"]:
-            return 0, json.dumps([{"name": n} for n in self.labels]), ""
+            # Honour --limit the way `gh` does. Without this the truncation the
+            # sentinel read exists to detect never happens in the fake, and the
+            # boundary tests would pass against a read that cannot truncate.
+            limit = int(args[args.index("--limit") + 1])
+            names = self.labels[:limit]
+            return 0, json.dumps([{"name": n} for n in names]), ""
         if args[:2] == ["label", "create"]:
             name = args[2]
             if name in self.labels:
@@ -143,7 +148,7 @@ class SyncTests(unittest.TestCase):
         path.write_text(text)
         return path
 
-    def test_a_label_list_at_the_cap_refuses_rather_than_truncating(self):
+    def test_more_labels_than_the_cap_refuses_rather_than_truncating(self):
         """`gh label list` has no --paginate, so the cap is the only bound.
 
         A truncated read is indistinguishable from a complete one, and
@@ -151,24 +156,30 @@ class SyncTests(unittest.TestCase):
         audit rule on it. Concluding anything from a possibly-partial list is the
         silent wrong answer this refusal exists to prevent.
         """
-        repo = FakeRepo(labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT)])
+        repo = FakeRepo(
+            labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT + 1)]
+        )
         gh_label_sync.run_gh = repo.run_gh
 
         with self.assertRaises(SystemExit) as caught:
             gh_label_sync.existing_labels("owner/name")
 
-        self.assertIn("cap", str(caught.exception))
+        self.assertIn(str(gh_label_sync.LABEL_LIST_LIMIT), str(caught.exception))
         self.assertEqual(repo.created(), [])
 
-    def test_a_label_list_below_the_cap_is_returned_normally(self):
-        repo = FakeRepo(
-            labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT - 1)]
-        )
+    def test_exactly_the_cap_is_a_complete_list_and_is_returned(self):
+        """The boundary the sentinel read exists to get right.
+
+        Requesting exactly the cap cannot tell a repo holding exactly that many
+        labels from a truncated read, so it would refuse a complete list. Asking
+        for one more makes a full result mean overflow.
+        """
+        repo = FakeRepo(labels=[f"l{n}" for n in range(gh_label_sync.LABEL_LIST_LIMIT)])
         gh_label_sync.run_gh = repo.run_gh
 
         names = gh_label_sync.existing_labels("owner/name")
 
-        self.assertEqual(len(names), gh_label_sync.LABEL_LIST_LIMIT - 1)
+        self.assertEqual(len(names), gh_label_sync.LABEL_LIST_LIMIT)
 
     def test_malformed_vocabulary_raises_rather_than_dropping_a_group(self):
         # A scalar where an inline list belongs.
