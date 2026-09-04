@@ -163,6 +163,27 @@ Verdict handling:
 
 `git ls-remote` needs network, so this call must run unsandboxed in the Bash tool (like the cloud reviewer dispatches).
 
+## Conflict pre-flight (PR modes)
+
+The freshness check above answers one question: is the local copy behind its own remote tip? It never asks whether the branch is behind its **base**. A branch that matches its remote exactly can still sit 25 commits behind `main` and conflict with it, and `fresh` is then a correct answer to the wrong question. Reviewing such a branch wastes the pass — findings get applied to text the rebase is about to delete.
+
+In the modes that have a PR, GitHub already computes the answer, so don't measure drift locally. After identifying the PR (step 2) and before gathering the diff, run:
+
+```bash
+gh pr view <n> --json mergeable,mergeStateStatus
+```
+
+Verdict handling:
+
+- **`mergeable=MERGEABLE`** → proceed.
+- **`mergeable=CONFLICTING`** (or `mergeStateStatus=DIRTY`) → the branch conflicts with its base. In the **default disposition**, stop and tell the user, and offer to rebase — reviewing and pushing fixes onto contested text is the failure this check exists to prevent. Don't auto-rebase; moving the branch under in-flight work is the user's call. Under **`--post`** you touch no files, so warn and proceed, and record the conflict in the summary — comments may land on lines the rebase removes.
+- **`mergeable=UNKNOWN`** → GitHub computes mergeability asynchronously and answers `UNKNOWN` for a few seconds after a push. Re-query once; if it is still unknown, treat it like the freshness `unknown` verdict — warn, proceed, note it in the run summary.
+- **`gh` fails** (offline, sandboxed, no auth) → same as `UNKNOWN`. Never fatal.
+
+Under `--non-interactive`, a `CONFLICTING` verdict is **logged and proceeded past** rather than stopped on, exactly like `stale` — see **Non-interactive mode**.
+
+`--local` mode has no PR, so this check does not apply there; that mode gets only the freshness check on `<base>`.
+
 ## Non-interactive mode
 
 `--non-interactive` makes the whole flow safe to run with **no human in the loop** — the auto-pilot orchestrator's `/deliver-task` lifecycle calls it this way. Two guarantees hold for the entire run: **it never prompts**, and **every wait is bounded**. When the flag is absent, everything below is unchanged — the interactive behavior documented elsewhere in this file is the default.
@@ -179,6 +200,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 - **Conflicting flags** (`--local`+`--remote`, `--local`+`--post`) — can't be resolved without asking, so this is a **hard error**: stop with a logged reason (not a prompt). A correct caller passes a valid combination; the orchestrator does.
 - **Staleness `stale`** (step 3) — do **not** stop and offer to update. Log the stale refs and **proceed** (the auto-pilot caller runs its own per-task `git fetch` + freshness gate upstream, per the spec). An `unknown` verdict is warned-and-continued as usual.
+- **Conflict `CONFLICTING`** (step 3) — do **not** stop and offer to rebase. Log the conflict and **proceed**, and report it in the run summary so the caller can see that the fixes may have landed on contested text. `UNKNOWN` and a failed `gh` call are warned-and-continued as usual.
 - **Reviewer config absent** (step 4) — do **not** prompt and do **not** write `.co-review.yml`. Probe `PATH` and run the **built-in** reviewers that are available and pass their auth probe; if none are, run Claude-only. Log which were used. (The auto-pilot launch phase is where reviewer config is meant to be resolved deliberately; absent config unattended just means "built-ins if present.")
 - **Untrusted custom / non-built-in command** (Local reviewers, step 5) — **skip it** with a logged note, **unless** its `command:` string was pre-approved via `--allow-command <cmd>` (byte-for-byte). Repo-controlled code is never run unattended on the strength of the config alone.
 - **Medium-confidence findings** (default disposition, steps 9/11) — there's no one to answer the per-item yes/no. Apply **only** high-confidence auto-fixes; record every medium finding as a **deferred judgment call** in the summary (the `/deliver-task` caller logs these to its `QUESTIONS.md` for morning review). Never apply a medium item unattended.
@@ -190,7 +212,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 
 The reviewer command is **invariant**: everything that varies per PR (the diff and any reviewer-specific requests) travels in the `<INPUT>` file — reached on stdin with a fixed pointer argument (`codex`, `copilot`), named by its fixed path inside the `-p` pointer (`agy`), or via `--prompt-file "<INPUT>"` from a fixed neutral cwd (`devin` — that cwd is load-bearing, not incidental; see [`reviewers/devin.md`](reviewers/devin.md)) — so the command string never changes. Approve each reviewer **once** with an **exact-match** rule — no broad wildcard. Two layers of rules:
 
-**Shared rules** (input assembly, staleness pre-flight, allow-rule pre-flight) — add once, they cover every reviewer:
+**Shared rules** (input assembly, staleness and conflict pre-flights, allow-rule pre-flight) — add once, they cover every reviewer:
 
 ```json
 {
@@ -198,6 +220,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
     "allow": [
       "Bash(cat:*)",
       "Bash(gh pr diff:*)",
+      "Bash(gh pr view:*)",
       "Bash(git diff:*)",
       "Bash(git ls-remote:*)",
       "Bash(python3 <PLUGIN-CACHE>/workflow-skills/workflow-skills/:*)"
@@ -215,6 +238,7 @@ Why this is narrow:
 - The per-reviewer rules are **exact** — each authorizes only its one read-only review command with that exact prompt/flags, pinning the read-only posture into the approved string (see each reviewer file for the details: `codex --sandbox read-only`; `agy --sandbox --model …`; `devin --permission-mode auto` with a literal `--prompt-file "<INPUT>"` path and a fixed neutral cwd; `copilot --no-ask-user` with **no** `--allow-all-tools`/`--yolo`). None grant arbitrary runs of the agent. Edit the pointer, path, or flags and Claude Code re-prompts, so the approval can't silently come to mean something else. The pointer/flags must match **byte-for-byte** between the reviewer file's invocation and its rule — if you edit one, edit the other.
 - The `agy`/`devin` probe rules (`Bash(agy models)`, `Bash(devin auth status)`) are read-only status queries with no varying arguments — exact-match, safe to approve once. `copilot` has no probe rule (no `auth status` command; failures are caught from output).
 - `Bash(git ls-remote:*)` covers the staleness pre-flight — it only reads remote ref tips and mutates nothing (no fetch).
+- `Bash(gh pr view:*)` covers the conflict pre-flight and the PR-metadata read in step 3 — both are read-only queries against the PR. Without it the conflict check is denied under `--non-interactive`, silently, since a denied command is not queued — and the run then reviews a conflicting branch exactly as if the check had passed.
 - The `python3 <PLUGIN-CACHE>/…` prefix covers the allow-rule pre-flight. That checker only reads the plugin's own reviewer files and your settings, and never writes (see `scripts/coreview-rule-drift.py`). Without this rule the pre-flight is denied under `--non-interactive` — silently, since a denied command is not queued — so the check meant to explain a missing reviewer goes missing itself.
 - `Bash(cat:*)`, `Bash(gh pr diff:*)`, and `Bash(git diff:*)` cover assembling the input stream — they only **read** repo/PR data; the sole write is the redirected `<INPUT>` temp file (redirection targets aren't constrained by the rule, and it's written and read in the same shell call). Add only the diff source you use (`gh pr diff` for PRs, `git diff` for `--local`).
 - These do **not** cover custom `command:` agents from `.co-review.yml` — those are untrusted by design (see above) and must stay prompt-on-every-run. (Plugins can't ship permission rules — only `agent`/`subagentStatusLine` settings — so this is a manual one-time step per user.)
@@ -272,7 +296,7 @@ label is the only signal of how hard each finding is meant to land.
    - Otherwise: run `git branch --show-current` first, then `gh pr list --head <branch> --json number,url` with the literal branch value substituted in. Do **not** combine them with `$(...)` — command substitution inside a Bash tool call is rejected by the permission matcher even when both subcommands are allowlisted.
    - If none, stop and say so (or suggest `--local` if the user just wants to review uncommitted work).
 
-3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Under `--non-interactive`, a `stale` verdict is **logged and proceeded past** rather than stopped on (see **Non-interactive mode**). Then:
+3. **Gather inputs.** First run the **staleness pre-flight** (see the section above) on the mode's refs — current branch by default, `<base>` in `--local` mode, skipped in `--post` mode. On `stale`, stop and surface it (offer to update) before anything else; on `unknown`, warn and continue. Under `--non-interactive`, a `stale` verdict is **logged and proceeded past** rather than stopped on (see **Non-interactive mode**). Then run the **conflict pre-flight** (see the section above) in the PR modes — `gh pr view <n> --json mergeable,mergeStateStatus`, skipped in `--local` mode, which has no PR. On `CONFLICTING`, stop and offer to rebase in the default disposition, warn and continue under `--post`; on `UNKNOWN` or a failed `gh` call, warn and continue. Then:
    - **GitHub mode** (in parallel):
      - **Wait for the bot reviewer first if the PR was just opened.** When you want to reconcile against a bot reviewer (e.g. Copilot) that hasn't posted yet, don't hand-write a `gh pr view … | sleep` poll loop — they drift on interval, timeout, and (critically) the reviewer login. Invoke the shared fixture instead and proceed once it reports `landed`:
 
