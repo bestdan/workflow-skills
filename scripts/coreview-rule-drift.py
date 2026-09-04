@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sys
+from typing import NoReturn
 from pathlib import Path
 
 # Placeholders a reviewer file leaves for the operator to substitute. The
@@ -76,7 +77,7 @@ RULE_LINE_RE = re.compile(r'^\s*("Bash\(.*\)")\s*,?\s*$')
 FENCE_RE = re.compile(r"^\s*```(\w*)")
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     print(f"coreview-rule-drift: {msg}", file=sys.stderr)
     sys.exit(2)
 

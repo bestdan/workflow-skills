@@ -69,6 +69,7 @@ import os
 import re
 import subprocess
 import sys
+from typing import NoReturn
 import urllib.request
 from datetime import datetime
 
@@ -120,7 +121,7 @@ mutation($id: String!, $state: String!) {
 """
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     sys.exit(f"linear-false-closures: {msg}")
 
 
