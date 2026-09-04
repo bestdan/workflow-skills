@@ -192,6 +192,22 @@ class RuleOneTests(ReconcileTestCase):
 
         self.assertEqual(result["double_status"], [])
 
+    def test_every_finding_carries_the_same_keys_whether_repaired_or_refused(self):
+        """`--json` is an interface; a key present only on the success path is
+        one a consumer discovers by breaking on the first refused issue."""
+        repo = FakeRepo(
+            open_issues={
+                1: ["status:2_ready", "status:3_started", "auto:eligible"],
+                2: ["status:2_ready", "status:3_started"],  # no auto: rung
+            }
+        )
+        findings = self._compute(repo, apply=True)["double_status"]
+
+        repaired, refused = findings[0], findings[1]
+        self.assertIsNone(repaired["refused"])
+        self.assertIsNotNone(refused["refused"])
+        self.assertEqual(sorted(repaired), sorted(refused))
+
     def test_refuses_to_repair_when_the_result_would_still_be_illegal(self):
         """Two status rungs AND no `auto:` rung — inventing one is rule 2's ban."""
         repo = FakeRepo(open_issues={1: ["status:2_ready", "status:3_started"]})
