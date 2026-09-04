@@ -88,11 +88,52 @@ class TestClassify(unittest.TestCase):
 
     def test_a_glob_does_not_match_a_deeper_path(self):
         """`commands/handlers/assets/*.py` must not swallow a file in a
-        subdirectory — that would hide it in a tier it was never checked by."""
+        subdirectory — that would hide it in a tier it was never checked by.
+
+        Note this direction was never the risk: `*` does not cross `/` under
+        either matcher. The sibling case below is the one that caught a bug."""
         uncovered, _ = tier.classify(
             ["commands/handlers/assets/nested/thing.py"], TIERS
         )
         self.assertEqual(uncovered, ["commands/handlers/assets/nested/thing.py"])
+
+    def test_a_tier_pattern_is_anchored_at_the_repository_root(self):
+        """The direction that actually broke. `Path.match()` right-matches a
+        relative pattern, so `fixtures/scripts/test_new.py` matched
+        `scripts/test_*.py` and was reported covered while mypy never read it —
+        a false negative in the checker written to prevent false coverage.
+
+        The test above named itself as if it covered anchoring and did not,
+        which is how the bug survived being written and reviewed."""
+        for path in (
+            "fixtures/scripts/test_new.py",
+            "vendor/commands/handlers/assets/x.py",
+            "test/vendor/scripts/test_helper.py",
+        ):
+            with self.subTest(path=path):
+                uncovered, _ = tier.classify([path], TIERS)
+                self.assertEqual(
+                    uncovered, [path], f"{path} must not match a root-anchored tier"
+                )
+
+
+class TestMatches(unittest.TestCase):
+    """`matches()` is the anchoring rule itself, tested directly."""
+
+    def test_exact_path(self):
+        self.assertTrue(tier.matches("scripts/validate.py", "scripts/validate.py"))
+
+    def test_glob_in_the_last_segment(self):
+        self.assertTrue(tier.matches("scripts/test_shape.py", "scripts/test_*.py"))
+
+    def test_leading_directory_is_not_ignored(self):
+        self.assertFalse(tier.matches("x/scripts/test_shape.py", "scripts/test_*.py"))
+
+    def test_star_does_not_cross_a_separator(self):
+        self.assertFalse(tier.matches("a/b/c.py", "a/*.py"))
+
+    def test_a_shorter_path_does_not_match_a_longer_pattern(self):
+        self.assertFalse(tier.matches("test_x.py", "scripts/test_*.py"))
 
 
 class TestPatterns(unittest.TestCase):

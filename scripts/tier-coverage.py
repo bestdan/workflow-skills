@@ -23,10 +23,11 @@ different floors and the stricter result silently ignored.
 Run directly: python3 scripts/tier-coverage.py
 """
 
+import fnmatch
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 TYPECHECK = ROOT / "scripts" / "typecheck.sh"
@@ -76,6 +77,29 @@ def tracked_python() -> list:
     return proc.stdout.split()
 
 
+def matches(path: str, pattern: str) -> bool:
+    """Anchored, segment-wise glob match — what bash actually does.
+
+    NOT `Path.match()`, which right-matches a relative pattern:
+    `Path("fixtures/scripts/test_new.py").match("scripts/test_*.py")` is True,
+    though bash expands that tier glob only under the real `scripts/`. Using it
+    made the checker report coverage for files mypy never reads, which is the
+    exact false negative this script exists to prevent.
+
+    Not plain `fnmatch` on the whole string either: there `*` crosses `/`, so
+    `commands/handlers/assets/*.py` would swallow a file in a subdirectory.
+    Comparing segment lists of equal length gets both — anchored at the root,
+    and `*` confined to one path component.
+    """
+    if path == pattern:
+        return True
+    parts = PurePosixPath(path).parts
+    globs = PurePosixPath(pattern).parts
+    if len(parts) != len(globs):
+        return False
+    return all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, globs))
+
+
 def classify(files, by_array):
     """Split `files` into (uncovered, doubled) against the tier arrays.
 
@@ -85,9 +109,7 @@ def classify(files, by_array):
     uncovered, doubled = [], []
     for f in files:
         hits = [
-            name
-            for name, pats in by_array.items()
-            if any(f == p or Path(f).match(p) for p in pats)
+            name for name, pats in by_array.items() if any(matches(f, p) for p in pats)
         ]
         if not hits:
             uncovered.append(f)
