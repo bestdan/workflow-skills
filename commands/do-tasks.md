@@ -776,10 +776,12 @@ each session loudly on its own issue.
    The split follows what a VM without the plugin can actually execute:
 
    - **Discharged here, not re-run there** — "Find candidates" (step 1 ranked and
-     selected), the pre-claim WIP gate (step 2's `slack` bounds the whole batch,
-     and dispatching at most `slack` sessions leaves every one of them strictly
-     under `wip_limit` however they interleave), and dependency readiness (step 3,
-     moments earlier). Each is already answered, and each would otherwise cost the
+     selected), the pre-claim WIP gate (step 2's `slack` bounds the whole batch:
+     dispatching at most `slack` sessions leaves each observing a count strictly
+     under `wip_limit`, however the **siblings** interleave — the count starts at
+     `count` and the last to claim sees `count + slack - 1`, so none of them could
+     have declined; that holds against this batch's own dispatches only, per the
+     caveat below), and dependency readiness (step 3, moments earlier). Each is already answered, and each would otherwise cost the
      session a plugin asset it may not have.
 
      **Say what this costs: `slack` becomes the only WIP bound, measured once.**
