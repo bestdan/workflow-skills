@@ -139,7 +139,16 @@ def _is_number(value):
 
 def _validate_page(payload):
     """Return (parent_numbers, has_next, end_cursor) or raise LookupFailed."""
-    issues = (payload.get("data") or {}).get("repository")
+    # Guarded rather than `(payload.get("data") or {})`: a truthy non-dict
+    # `data` has no `.get`, so that form raises AttributeError, which escapes
+    # LookupFailed and prints neither ROLLUP_OK=0 nor ROLLUP_REASON — the one
+    # failure shape this file must never produce.
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise LookupFailed(
+            f"response data is not an object (got {type(data).__name__})"
+        )
+    issues = data.get("repository")
     if not isinstance(issues, dict):
         raise LookupFailed("response has no repository object")
     issues = issues.get("issues")

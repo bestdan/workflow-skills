@@ -331,6 +331,14 @@ while :; do
   CURSOR=$(echo "$RESP" | jq -r '.pageInfo.endCursor')
 done
 ```
+
+A single multi-line construct (not flagged — one opener):
+
+```bash
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
+```
 MD
 
 out_g="$(uv run "$DIR_G/scripts/validate.py" 2>&1)"
@@ -350,6 +358,12 @@ fi
 # the assertions above.
 assert_not_contains "guarded one-liner is not flagged" "$out_g" "cmd.md: line 7"
 assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line 13"
+# The threshold's own boundary: ONE multi-line construct (1 opener + 1 bare
+# terminator) must pass. Without this case the `> SHELL_OPENER_MAX` half of the
+# predicate is untested — the other three blocks are all decided by the
+# terminator clause alone, so dropping the opener threshold left the suite green
+# (verified by mutation).
+assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
 
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"

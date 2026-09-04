@@ -205,6 +205,15 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
     def test_missing_repository_object(self):
         self.assert_fails((0, json.dumps({"data": {}}), ""), contains="no repository")
 
+    def test_truthy_non_dict_data_is_rejected(self):
+        """A truthy non-dict `data` has no `.get`, so an unguarded dereference
+        raises AttributeError — which escapes LookupFailed entirely and prints
+        no verdict at all. The falsy `{"data": {}}` case above does not cover
+        this: `{} or {}` still yields a dict."""
+        self.assert_fails(
+            (0, json.dumps({"data": "unexpected"}), ""), contains="not an object"
+        )
+
     def test_string_total_count_is_rejected(self):
         """Defect (5): a string `totalCount` satisfied `> 0` because jq orders
         every number before every string, so a promotable issue was silently
@@ -283,6 +292,17 @@ class TestFailureOutputChannel(RollupTestCase):
         self.assertIn("403", lines[1])
         # No issue number may appear on a failed run.
         self.assertEqual(len(lines), 2)
+
+    def test_malformed_data_still_prints_the_failure_contract(self):
+        """The regression guard that matters: an unguarded dereference dies with
+        a traceback, so stdout carries no verdict and the handler — which parses
+        stdout — cannot tell a failure from a rollup-free repo."""
+        self.install((0, json.dumps({"data": "unexpected"}), ""))
+        code, out = self.run_main("--repo", "o/r")
+        self.assertEqual(code, 1)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "ROLLUP_OK=0")
+        self.assertTrue(lines[1].startswith("ROLLUP_REASON="))
 
     def test_failure_json_mode(self):
         self.install((0, "", ""))
