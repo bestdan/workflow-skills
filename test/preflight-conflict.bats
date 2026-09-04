@@ -87,3 +87,26 @@ conflict() { run bash -c "cd '$TEST_TMPDIR/clone' && '$REPO_ROOT/scripts/preflig
   conflict --bogus
   assert_failure 2
 }
+
+@test "a tag sharing the branch name does not shadow the branch" {
+  # The branch tip merges cleanly; the same-named tag points at a commit that
+  # conflicts. Git's disambiguation prefers refs/tags/<name>, so a bare
+  # resolution would test the tag and report a conflict about the wrong commit.
+  git -C "$TEST_TMPDIR/clone" checkout -qb shared
+  echo new >"$TEST_TMPDIR/clone/g.txt"
+  git -C "$TEST_TMPDIR/clone" add g.txt
+  git -C "$TEST_TMPDIR/clone" commit -qm "branch tip merges cleanly"
+  git -C "$TEST_TMPDIR/clone" checkout -q main
+  echo main-side >"$TEST_TMPDIR/clone/f.txt"
+  git -C "$TEST_TMPDIR/clone" commit -qam "main moves f.txt"
+  git -C "$TEST_TMPDIR/clone" push -q origin main
+  git -C "$TEST_TMPDIR/clone" checkout -q -b tagged main~1
+  echo tag-side >"$TEST_TMPDIR/clone/f.txt"
+  git -C "$TEST_TMPDIR/clone" commit -qam "tag tip conflicts"
+  git -C "$TEST_TMPDIR/clone" tag shared HEAD
+  git -C "$TEST_TMPDIR/clone" checkout -q shared
+
+  conflict --ref shared
+  assert_success
+  assert_output --partial 'CONFLICT: clean base=main ref=shared'
+}

@@ -114,7 +114,22 @@ else
   }
 fi
 
-ref_commit="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "ref '$ref' does not resolve to a commit"
+# Resolve the branch ref explicitly before falling back to a general commit
+# expression. A bare name goes through git's disambiguation order, which puts
+# refs/tags/<name> ahead of refs/heads/<name> — so a tag sharing a branch's
+# name wins, --quiet swallows the "refname is ambiguous" warning, and the
+# verdict comes back confident and about the wrong commit. A SHA or a
+# remote-tracking ref misses the first lookup and lands on the second.
+# Resolve the branch ref explicitly before falling back to a general commit
+# expression. A bare name goes through git's disambiguation order, which puts
+# refs/tags/<name> ahead of refs/heads/<name>, so a tag sharing a branch's name
+# wins and the verdict comes back confident and about the wrong commit. git does
+# warn ("refname '<x>' is ambiguous") on stderr, but the script's own output is
+# a clean-looking verdict line and callers parse that, so the warning is easy to
+# lose. A SHA or a remote-tracking ref misses the first lookup and lands on the
+# second, so --ref keeps accepting any commit-ish.
+ref_commit="$(git rev-parse --verify --quiet "refs/heads/$ref^{commit}")"
+[ -n "$ref_commit" ] || ref_commit="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "ref '$ref' does not resolve to a commit"
 
 git merge-tree --write-tree --quiet "$base_commit" "$ref_commit" >/dev/null 2>&1
 merge_status=$?
