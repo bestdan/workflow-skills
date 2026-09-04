@@ -203,6 +203,21 @@ Full evidence in
   they are that repo's work, not this plan's. **When #675 lands, the reproduction is
   gone**: anything testing under-provisioned behaviour then needs a fixture. Task 17's
   hermetic tests are that fixture, and they are the model to copy.
+- **Provisioning a rung moves the noise rather than ending it, so expect #675 to be
+  followed by a burst of row-3 findings — that is not a regression.** Every issue that
+  closed before the rung existed still has no `labeled` event for it, so the first
+  reconciler run after #675 flags exactly the issues task 17 taught it to suppress.
+  Answering that needs a rollout boundary — evidence the rung was assignable when each
+  issue closed — which is per-repo state this plan would then own and keep in step. Task
+  17 documented it in `gh-issue-reconcile.py`'s docstring and deliberately did not build
+  it. **Read that first post-provisioning run as a backlog, not as drift**, and do not
+  file it as a task-17 defect.
+- **`gh-label-sync.py`'s `existing_labels()` now refuses above 500 labels rather than
+  truncating.** Task 17 made the reconciler conclude ABSENCE from that list, and a
+  silently truncated read would suppress findings under a confident VOID line. Both
+  callers share the change, so the sync fails loudly on a repo it previously limped
+  through. Anything new that reads a repo's labels should go through that helper rather
+  than re-deriving the call.
 
 Both write facts are silent when wrong. This file was wrong twice by asserting routine
 behaviour from documentation. Probe it.
