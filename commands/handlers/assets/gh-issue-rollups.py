@@ -45,9 +45,13 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from typing import NamedTuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _shape import ShapeError, expect  # noqa: E402
 
 QUERY = """
 query($owner: String!, $repo: String!, $cursor: String) {
@@ -142,80 +146,62 @@ def fetch_page(owner, repo, cursor):
             f"GraphQL errors: {_first_line(json.dumps(payload['errors']))}"
         )
 
-    return _validate_page(payload)
+    try:
+        return _validate_page(payload)
+    except ShapeError as exc:
+        raise LookupFailed(str(exc)) from exc
 
 
 def _first_line(text):
     return (text or "").strip().splitlines()[0] if (text or "").strip() else "no detail"
 
 
-# Defect (5): the original compared `totalCount > 0` in `jq`, which orders every
-# number before every string, so a string `totalCount` satisfied the test and a
-# promotable issue was silently skipped as a rollup. Both numeric checks below
-# spell `isinstance(x, int) and not isinstance(x, bool)` inline rather than
-# calling a helper: a helper returning plain `bool` tells the type checker
-# nothing, so it still sees `Any | None` at the comparison and cannot flag the
-# next unguarded one. `typing.TypeGuard` would fix that, but it is 3.10+ and no
-# asset here uses 3.10+ syntax — raising the floor for consumers is a bigger
-# cost than one repeated expression. `bool` is excluded from both because Python
-# makes it a subclass of `int`.
-
-
 def _validate_page(payload):
-    """Return a validated Page, or raise LookupFailed."""
-    # Guarded rather than `(payload.get("data") or {})`: a truthy non-dict
-    # `data` has no `.get`, so that form raises AttributeError, which escapes
-    # LookupFailed and prints neither ROLLUP_OK=0 nor ROLLUP_REASON — the one
-    # failure shape this file must never produce.
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        raise LookupFailed(
-            f"response data is not an object (got {type(data).__name__})"
-        )
-    issues = data.get("repository")
-    if not isinstance(issues, dict):
-        raise LookupFailed("response has no repository object")
-    issues = issues.get("issues")
-    if not isinstance(issues, dict):
-        raise LookupFailed("response has no issues connection")
+    """Return a validated Page, or raise ShapeError.
 
-    nodes = issues.get("nodes")
-    if not isinstance(nodes, list):
-        raise LookupFailed("issues.nodes is not an array")
+    Every read goes through expect(), so a malformed response produces one
+    sentence naming the field rather than a KeyError traceback — and each
+    result is narrowed to its type at the call site, which is what lets the
+    comparisons below be checked rather than taken on faith.
+    """
+    issues = expect(
+        expect(
+            expect(payload, "data", dict, "response"),
+            "repository",
+            dict,
+            "response.data",
+        ),
+        "issues",
+        dict,
+        "response.data.repository",
+    )
+    nodes = expect(issues, "nodes", list, "issues")
 
     parents = []
     for node in nodes:
-        if not isinstance(node, dict):
-            raise LookupFailed("issues.nodes contains a non-object")
-        number = node.get("number")
-        if not isinstance(number, int) or isinstance(number, bool):
-            raise LookupFailed(f"issue node has a non-numeric number: {number!r}")
-        sub = node.get("subIssues")
-        if not isinstance(sub, dict):
-            raise LookupFailed(f"issue #{number} has no subIssues object")
-        total = sub.get("totalCount")
-        if not isinstance(total, int) or isinstance(total, bool):
-            raise LookupFailed(
-                f"issue #{number} has a non-numeric subIssues.totalCount: {total!r}"
-            )
-        if total > 0:
+        number = expect(node, "number", int, "issue node")
+        sub = expect(node, "subIssues", dict, f"issue #{number}")
+        # Defect (5): the shell block compared this in `jq`, which orders every
+        # number before every string, so a string totalCount satisfied `> 0` and
+        # a promotable issue was silently skipped as a rollup. expect() rejects
+        # both a string and a bool here.
+        if expect(sub, "totalCount", int, f"issue #{number}.subIssues") > 0:
             parents.append(number)
 
-    page_info = issues.get("pageInfo")
-    if not isinstance(page_info, dict):
-        raise LookupFailed("issues.pageInfo is missing")
-    has_next = page_info.get("hasNextPage")
-    if not isinstance(has_next, bool):
-        raise LookupFailed(f"pageInfo.hasNextPage is not a boolean: {has_next!r}")
+    page_info = expect(issues, "pageInfo", dict, "issues")
+    has_next = expect(page_info, "hasNextPage", bool, "issues.pageInfo")
 
     end_cursor = page_info.get("endCursor")
     if has_next:
         # Defect (6): `hasNextPage: true` with a missing/null/empty `endCursor`
         # set the shell's CURSOR to the literal string "null" and re-fetched the
-        # same page forever — a hang, not a failure.
+        # same page forever — a hang, not a failure. Read with .get() rather
+        # than expect(): a null endCursor is legal on the LAST page, so absence
+        # is only an error under has_next.
         if not isinstance(end_cursor, str) or not end_cursor:
-            raise LookupFailed(
-                f"pageInfo.hasNextPage is true but endCursor is {end_cursor!r}"
+            raise ShapeError(
+                f"issues.pageInfo.endCursor: hasNextPage is true but endCursor "
+                f"is {end_cursor!r}"
             )
 
     return Page(parents, has_next, end_cursor)

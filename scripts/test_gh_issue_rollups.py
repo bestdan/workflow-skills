@@ -201,10 +201,36 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         body = json.dumps(
             {"data": {"repository": {"issues": {"nodes": {}, "pageInfo": {}}}}}
         )
-        self.assert_fails((0, body, ""), contains="nodes is not an array")
+        self.assert_fails(
+            (0, body, ""), contains="issues.nodes: expected list, got dict"
+        )
+
+    def test_a_non_object_inside_nodes_is_rejected(self):
+        """`nodes` is a list of objects, and nothing guarantees the API sends
+        one. A scalar here must fail closed rather than reach `.get()` on an
+        int. Found by mutation: removing expect()'s container check left the
+        whole suite green, because no case covered this shape."""
+        body = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "issues": {
+                            "nodes": [42],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        )
+        self.assert_fails(
+            (0, body, ""), contains="issue node: expected an object, got int"
+        )
 
     def test_missing_repository_object(self):
-        self.assert_fails((0, json.dumps({"data": {}}), ""), contains="no repository")
+        self.assert_fails(
+            (0, json.dumps({"data": {}}), ""),
+            contains="response.data.repository: missing",
+        )
 
     def test_truthy_non_dict_data_is_rejected(self):
         """A truthy non-dict `data` has no `.get`, so an unguarded dereference
@@ -212,7 +238,8 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         no verdict at all. The falsy `{"data": {}}` case above does not cover
         this: `{} or {}` still yields a dict."""
         self.assert_fails(
-            (0, json.dumps({"data": "unexpected"}), ""), contains="not an object"
+            (0, json.dumps({"data": "unexpected"}), ""),
+            contains="response.data: expected dict, got str",
         )
 
     def test_string_total_count_is_rejected(self):
@@ -220,18 +247,22 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
         every number before every string, so a promotable issue was silently
         skipped as a rollup."""
         self.assert_fails(
-            (0, page([node(1, "0")]), ""), contains="non-numeric subIssues.totalCount"
+            (0, page([node(1, "0")]), ""),
+            contains="subIssues.totalCount: expected int, got str",
         )
 
     def test_boolean_total_count_is_rejected(self):
+        """`bool` is an `int` subclass, so this must be rejected by its own
+        carve-out, not by the str check above — assert `got bool`."""
         self.assert_fails(
-            (0, page([node(1, True)]), ""), contains="non-numeric subIssues.totalCount"
+            (0, page([node(1, True)]), ""),
+            contains="subIssues.totalCount: expected int, got bool",
         )
 
     def test_non_numeric_issue_number_is_rejected(self):
         self.assert_fails(
             (0, page([{"number": "12", "subIssues": {"totalCount": 1}}]), ""),
-            contains="non-numeric number",
+            contains="number: expected int, got str",
         )
 
     def test_has_next_page_must_be_boolean_typed(self):
@@ -247,7 +278,7 @@ class TestFailuresDiscardPartialResults(RollupTestCase):
                 }
             }
         )
-        self.assert_fails((0, body, ""), contains="hasNextPage is not a boolean")
+        self.assert_fails((0, body, ""), contains="hasNextPage: expected bool, got str")
 
     def test_null_end_cursor_with_has_next_page_fails_rather_than_hanging(self):
         """Defect (6): `hasNextPage: true` with a missing/null/empty `endCursor`

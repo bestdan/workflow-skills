@@ -385,7 +385,8 @@ class WorkflowTriggerTests(unittest.TestCase):
 
     def trigger_types(self):
         match = re.search(r"^\s*types:\s*\[([^\]]*)\]", self.text, re.MULTILINE)
-        self.assertIsNotNone(match, "no `types: [...]` list in the workflow")
+        if match is None:
+            self.fail("no `types: [...]` list in the workflow")
         return [t.strip() for t in match.group(1).split(",") if t.strip()]
 
     def test_triggers_on_every_event_that_makes_a_pr_reviewable_or_ends_it(self):
@@ -402,7 +403,8 @@ class WorkflowTriggerTests(unittest.TestCase):
         # the house convention makes some repos' PRs always draft — without the
         # guard, `opened` would move an issue on every draft they open.
         condition = re.search(r"(?ms)^\s+if:.*?\n\n", self.text)
-        self.assertIsNotNone(condition, "no `if:` guard on the job")
+        if condition is None:
+            self.fail("no `if:` guard on the job")
         guard = condition.group(0)
         self.assertIn("github.event.pull_request.draft", guard)
         # `closed` must stay exempt: a draft can be closed, and the reverse
@@ -419,7 +421,8 @@ class WorkflowTriggerTests(unittest.TestCase):
         # run's PATCH lands, no-ops, and leaves the issue in needs_review with a
         # closed PR. Both runs go green, so nothing else would catch this.
         block = re.search(r"(?ms)^concurrency:\n(?:[ \t]+.*\n)+", self.text)
-        self.assertIsNotNone(block, "no workflow-level `concurrency:` block")
+        if block is None:
+            self.fail("no workflow-level `concurrency:` block")
         group = block.group(0)
         self.assertIn("github.event.pull_request.number", group)
         # Cancelling would kill a run between its read and its write.

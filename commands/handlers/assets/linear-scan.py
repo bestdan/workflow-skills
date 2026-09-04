@@ -45,7 +45,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -124,7 +125,13 @@ def gql(key, query, variables=None):
         sys.exit(f"GraphQL request failed: {e.reason}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):

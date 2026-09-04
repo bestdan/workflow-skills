@@ -79,13 +79,15 @@ Five deterministic, blocking checks, plus the shell lint and Bats suites:
      statement — see **Logic goes in a typed file** below.
 4. **`scripts/typecheck.sh`** — mypy over the repo's Python, at a version pinned
    in the script (fetched by `uvx`, so it needs network on the first run of a
-   given pin). Three tiers, split by annotation coverage rather than by what
-   ships: `--strict` on `scripts/research-spike.py`; `--check-untyped-defs` on
-   the other `scripts/` entrypoints and the handler assets; plain default on
-   `scripts/test_*.py`. Every tier always runs and the exit code is their OR, so
-   one failing never hides another's findings. The script's header carries the
-   full rationale — including why not `ty`, and why the test tier deliberately
-   holds off `--check-untyped-defs`.
+   given pin). Four tiers, split by **who runs the file**, each with
+   `--python-version` pinned so diagnostics can't drift with the interpreter:
+   `--strict` on `scripts/research-spike.py`; the handler assets at **3.9**, the
+   consumer floor; the dev `scripts/` entrypoints at 3.11; and `scripts/test_*.py`
+   at 3.11 with `attr-defined` off. All but the strict tier run
+   `--check-untyped-defs` — without it mypy reads no unannotated function body,
+   which is every file here. Every tier always runs and the exit code is their
+   OR, so one failing never hides another's findings. The script's header
+   carries the full rationale.
 5. **`scripts/lint-python.sh`** — `ruff check` at ruff's **default** rules (E4,
    E7, E9, F), pinned the same way. The selection is a floor held on purpose:
    the repo was clean under it on adoption, so the gate started green and any
@@ -224,11 +226,20 @@ if not isinstance(total, int) or isinstance(total, bool):
 if total > 0:              # `total` is int here, to mypy as well as to you
 ```
 
-`typing.TypeGuard` expresses this better and is the right tool in
-`scripts/`. **Do not reach for it in `commands/handlers/assets/`**: it is 3.10+,
-no asset uses any 3.10+ syntax today, and these files run under whatever
-`python3` a consumer happens to have. Raising that floor costs more than
-repeating an `isinstance` expression twice.
+Prefer `expect()` over a hand-rolled chain: it returns `T`, so the checker
+narrows at the call site with no `TypeGuard` and no `typing_extensions`, and the
+failure is one sentence naming the field instead of a `KeyError` traceback.
+Reach for a literal `isinstance` only where `expect()` does not fit — a value
+that may legitimately be absent, like `endCursor` on the last page.
+
+On `typing.TypeGuard`: it is 3.10+, but that does **not** by itself bar it from
+an asset. Under `if TYPE_CHECKING:` with `from __future__ import annotations` it
+is erased at runtime — verified on CPython 3.9 with `typing_extensions` not
+installed. What bars it is the tier above: at `--python-version 3.9` mypy
+refuses the symbol (`Module "typing" has no attribute "TypeGuard"`) and stops
+narrowing, and `typing_extensions` — which mypy already depends on, so it costs
+no install — would work but is a third-party name in a stdlib-only directory.
+`expect()` gets the same narrowing with neither, which is why it exists.
 
 **A dynamically loaded module needs its spec asserted.** Every
 `scripts/test_*.py` imports a hyphenated asset through `importlib`, where the

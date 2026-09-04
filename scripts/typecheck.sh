@@ -84,34 +84,59 @@ MYPY_VERSION="1.18.2"
 STUBS="types-PyYAML==6.0.12.20260724"
 
 STRICT_FILES=(scripts/research-spike.py)
-# Everything else, including the six consumer-executed handler assets under
-# commands/handlers/assets/ — those are invoked through ${CLAUDE_PLUGIN_ROOT}
-# by the linear handlers, so they ship and run on consumers' machines exactly
-# as research-spike.py does. They are wholly unannotated today (0 return types,
-# 83 untyped parameters between them), which is why they sit on this tier and
-# not the strict one; they pass here as-is.
-DEFAULT_FILES=(
+
+# The consumer floor. These are executed as bare `python3` on OTHER people's
+# machines, so the Python they may use is whatever those machines have — the
+# oldest version this project intends to support. That was a claim in prose and
+# nothing enforced it, which is exactly the drift this repo writes checks for.
+# --python-version 3.9 enforces it: verified to reject `isinstance(v, int | str)`
+# (legal 3.9 SYNTAX, TypeError at 3.9 RUNTIME) and `X | Y` annotations without
+# `from __future__ import annotations`. Raise this number only by deciding to
+# drop support, never to make a diagnostic go away.
+ASSET_FILES=(commands/handlers/assets/*.py)
+ASSET_PYTHON=3.9
+
+# Dev-only: these run under the contributor's or CI's interpreter, never a
+# consumer's, so they are pinned to the floor validate.py already declares in
+# its uv script header (requires-python >=3.11). Pinned rather than left to
+# default, which would follow whatever interpreter uvx happened to resolve and
+# make diagnostics differ between a laptop and CI.
+DEV_FILES=(
   scripts/local-review/server.py
   scripts/plan-graph.py
   scripts/task-scan.py
   scripts/validate.py
-  commands/handlers/assets/*.py
 )
+DEV_PYTHON=3.11
+
+# Globbed rather than listed: a new scripts/test_*.py is covered the day it
+# lands. Being absent from a hand-maintained list is precisely why none of these
+# files was checked at all until recently.
+TEST_FILES=(scripts/test_*.py)
 
 rc=0
 
-echo "→ mypy --strict: ${STRICT_FILES[*]}"
-uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --strict "${STRICT_FILES[@]}" || rc=1
+echo "→ mypy --strict (py${DEV_PYTHON}): ${STRICT_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --strict \
+  --python-version "$DEV_PYTHON" "${STRICT_FILES[@]}" || rc=1
 
-echo "→ mypy --check-untyped-defs: ${DEFAULT_FILES[*]}"
-uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs "${DEFAULT_FILES[@]}" || rc=1
+echo "→ mypy --check-untyped-defs (py${ASSET_PYTHON}, consumer floor): ${ASSET_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
+  --python-version "$ASSET_PYTHON" "${ASSET_FILES[@]}" || rc=1
 
-# The test tier. Globbed rather than listed: a new scripts/test_*.py is covered
-# the day it lands, which is the failure mode this tier exists to close — every
-# one of these files was uncovered simply because nobody added it to a list.
-TEST_FILES=(scripts/test_*.py)
-echo "→ mypy: ${TEST_FILES[*]}"
-uvx --with "$STUBS" "mypy@${MYPY_VERSION}" "${TEST_FILES[@]}" || rc=1
+echo "→ mypy --check-untyped-defs (py${DEV_PYTHON}): ${DEV_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
+  --python-version "$DEV_PYTHON" "${DEV_FILES[@]}" || rc=1
+
+# attr-defined is disabled here and nowhere else. These files stub seams on
+# modules loaded through importlib (`rollups.run_gh = fake`), which mypy sees
+# only as ModuleType — 48 findings on that one idiom, versus 3 real ones once it
+# is off. A misspelled attribute in a test crashes the test, so the code buys
+# nothing here and would cost 48 ignore comments.
+echo "→ mypy --check-untyped-defs (py${DEV_PYTHON}, no attr-defined): ${TEST_FILES[*]}"
+uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
+  --python-version "$DEV_PYTHON" --disable-error-code=attr-defined \
+  "${TEST_FILES[@]}" || rc=1
 
 if [[ "$rc" == 0 ]]; then
   echo "typecheck: OK"
