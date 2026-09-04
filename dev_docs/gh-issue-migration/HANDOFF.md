@@ -69,21 +69,24 @@ worktree off `main`; edit these plan docs on this branch.
 
 ## Where things stand
 
-**Task 8 is next** — upgrade `reoptimize` from report-only to native dependency edges.
-Its blocker (task 5) is done, so it is unblocked. Read its **Constraint** section before
-touching the body footer: whether to keep writing it as a human-readable echo is still
-open, and it is now that task's main judgment call rather than a detail.
+**Two tasks are available, 8 and 16.** Neither blocks the other and neither is blocked;
+the launcher picks. If nothing said which, take **8** — it is the older commitment and it
+unblocks nothing else waiting.
+
+- **Task 8** — upgrade `reoptimize` from report-only to native dependency edges. Its
+  blocker (task 5) is done. Read its **Constraint** section before touching the body
+  footer: whether to keep writing it as a human-readable echo is still open, and it is
+  that task's main judgment call rather than a detail. It also inherits reoptimize's
+  vocabulary migration — see the next section.
+- **Task 16** — batch execution (`/do-tasks --all`), new on 2026-09-04, absorbed from
+  Linear PRE-117 (cancelled as superseded). It widened the epic's Scope section,
+  deliberately and with the reason recorded there. Read the closed PR #426 before
+  starting: its §4 batch machinery is reusable and its five defects are the list of what
+  not to repeat. Task 16 carries the fetch command for its code.
 
 Phase 1–2 and tasks 4, 5, 6, 7, 14, 15 are done; the plan's task list carries each one's
-PR and merge sha. Tasks 12, 13 and **16** are unclaimed. **Phase 4 is held** by task 13's
+PR and merge sha. Tasks 12, 13 and 16 are unclaimed. **Phase 4 is held** by task 13's
 postponement — see the blockers below.
-
-**Task 16 is new (2026-09-04) and also unblocked**: batch execution (`/do-tasks --all`),
-absorbed from Linear PRE-117, which is cancelled as superseded. It does not depend on
-task 8, so take whichever suits. It widened the epic's Scope section, deliberately and
-with the reason recorded there. Its predecessor, the closed PR #426, is worth reading
-before starting — its §4 batch machinery is reusable and its five defects are the list of
-what not to repeat.
 
 ## What will bite you
 
