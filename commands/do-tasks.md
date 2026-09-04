@@ -753,12 +753,25 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
 5. **Dispatch one remote session per selected issue.** Each selected issue gets its
    **own** session running `gh-issue-claim.md`'s flow — **inlined into the prompt**,
    since the VM cannot read that file — against **that one issue number**, as a
-   direct `<#n>` pick. **Skip "Find candidates"** — this dispatcher already ranked
-   and selected — and never instruct a session to claim more than one issue. Every
-   gate before the claim is **verification-only** in the dispatched session: a
-   blocked dependency, a pre-flight trip, a feasibility reject, or a lost claim
-   **stops that session and reports it**. It must never advance to another
-   candidate, which would put two dispatched sessions on one issue.
+   direct `<#n>` pick, and never instruct a session to claim more than one issue.
+
+   **Which gates the session runs, and which this dispatcher already discharged.**
+   The split follows what a VM without the plugin can actually execute:
+
+   - **Discharged here, not re-run there** — "Find candidates" (step 1 ranked and
+     selected), the pre-claim WIP gate (step 2's `slack` bounds the whole batch,
+     and dispatching at most `slack` sessions leaves every one of them strictly
+     under `wip_limit` however they interleave), and dependency readiness (step 3,
+     moments earlier). Each needs a plugin asset the VM does not have, and each is
+     already answered.
+   - **Run in the session** — pre-flight (plain `git ls-remote` and `gh pr list`),
+     the claim election (plain `gh` comment calls), execute, `gh pr create`, and
+     the two label writes.
+
+   Whatever the session does run before the claim is **verification-only**: a
+   pre-flight trip, a feasibility reject, or a lost claim **stops that session and
+   reports it**. It must never advance to another candidate, which would put two
+   dispatched sessions on one issue.
 
    The prompt must be **self-contained** — the VM has no plugin installed **and** a
    fresh clone has no local task config (`/task-config` gitignores
@@ -818,14 +831,23 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    is attended and offers itself the override its dispatcher was gated by.
 
 6. **Dispatched sessions claim on the comment election, not the ref lock.** This is
-   the one place a dispatched session's flow differs from the single path. Instruct
-   it to run `claim-lock.md`'s **comment-token election** and to **skip**
-   `gh-issue-claim.py acquire`. It then creates its work branch itself —
-   `git switch -c "<branch>" "origin/<base>"`, the path `gh-issue-claim.md`
-   "Branch + execute" step 1 already describes for a claim that created no ref — and
-   releases on bail by deleting its own token comment rather than a ref. Have it
-   report `claim: comment election (batch dispatch)`, **not** `claim-lock.md`'s
-   degrade string: that string names an API error, and no API error happened here.
+   the one place a dispatched session's flow differs from the single path, and — as
+   with everything else in step 5 — the dispatcher **inlines the election's steps
+   into the prompt** rather than naming `claim-lock.md`, which the VM cannot read.
+   Copy them from `claim-lock.md` → "Fallback: comment-token election": record
+   `T_unclaimed`, mint a token, post the claim comment, write the board markers,
+   sleep a jittered ~2–3 s, re-list and elect on the lowest comment id among
+   markers that are both at-or-after `T_unclaimed` and state-backed, and retract
+   your own comment if it loses. The prompt must **omit** `gh-issue-claim.py
+   acquire` entirely — there is no ref to create on this path.
+
+   The session then creates its work branch itself,
+   `git switch -c "<branch>" "origin/<base>"` (the case `gh-issue-claim.md`
+   "Branch + execute" step 1 already covers for a claim that created no ref), using
+   the literal `<branch>` step 5 inlined. On bail it deletes its own token comment
+   rather than a ref, and runs **no** `release` call. Have it report
+   `claim: comment election (batch dispatch)`, **not** `claim-lock.md`'s degrade
+   string: that string names an API error, and no API error happened here.
 
    Why: the ref lock has no release an unattended session can be relied on to reach.
    A dispatched session that crashes or times out after acquiring strands `<branch>`
