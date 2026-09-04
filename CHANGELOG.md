@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.18.1] - 2026-09-04
+
+### Fixes
+
+- extract the parent-rollup loop into a tested handler asset (#466) (cc92042)
+
 ## [2.18.0] - 2026-09-03
 
 ### Features
