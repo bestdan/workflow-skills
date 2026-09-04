@@ -101,6 +101,28 @@ MUST NOT derive numbers in markdown files. Markdown is for narrative, decisions,
 
 MUST keep all derived numbers (calculations, savings, sensitivity) in a notebook or script. Markdown may show summary tables with max/realistic ranges but MUST reference the model for derivation.
 
+### Derive the claim, not just the value
+
+A word that characterises a number is an assertion about the data: _flat, rising, dips, doubles, evenly, unchanged, specifically, still, only_. Compute it in the model beside the value it describes, so the sentence changes when the data does.
+
+```python
+# Bad — the number updates, the word does not
+f"balances hold flat ({slope:.2%}/wk)"
+
+# Good — both come from the model
+trend = "still rising" if slope > TOL else "declining" if slope < -TOL else "flat"
+f"balances are {trend} ({slope:.2%}/wk)"
+```
+
+The tell: if a re-run on new data could make the sentence false while leaving its numbers correct, the claim belongs in the model.
+
+Two more things this shape buys:
+
+- **It forces the comparison to exist.** A narrative can call a series "flat" when no post-event slope was ever computed. Deriving the word requires fitting that slope, which is often where the real finding is.
+- **A comparative claim needs both sides in the model.** "Less affected than X" compares a measured quantity against an impression until X is computed too. Once both are computed, such claims sometimes invert.
+
+This is not what `review-facts` is for. The fact-checker catches stale claims, but it runs once, at the end, on a finished artifact — and the same claims regrow on the next re-run. Deriving the claim is the structural fix; the audit is the backstop.
+
 ## Document Structure
 
 When an analysis produces a narrative document (memo, recommendation, report):
