@@ -2737,6 +2737,17 @@ out.tagsOutsideAllowlist = out.tags.filter(t => SAFE_TAGS.indexOf(t) === -1);
 out.hrefs = texts.filter(t => t.startsWith('HREF:')).map(t => t.slice(5)).sort();
 out.protoPolluted = ({}).polluted !== undefined || Object.prototype.polluted !== undefined;
 
+const linkShape = src => {
+  const links = [];
+  walk(describe(src), n => {
+    if(n.tag === 'span' && !n.text && n.kids && n.kids.length)
+      links.push({tag:n.tag, class:(n.attrs || {}).class || ''});
+  });
+  return links;
+};
+out.relativeLinkShape = linkShape('[e](../submit) [f](/x/y) [g](sneaky.html)');
+out.hostileLinkShape = linkShape('[x](javascript:alert(1))');
+
 // Anchoring: CRLF must not drift, and table rows get their own line.
 const crlf = describe('# One\r\n\r\nTwo\r\n\r\nThree\r\n');
 out.crlfLines = (crlf.kids || []).map(k => k.line);
@@ -2910,11 +2921,19 @@ console.log(JSON.stringify(out));
             check("preview: no attribute beyond class/href",
                   _o["attrs"] == ["class", "href"] or _o["attrs"] == ["class"] or _o["attrs"] == ["href"],
                   _o["attrs"])
-            check("preview: javascript:, data:, relative and protocol-relative hrefs are all rejected",
+            check("preview: javascript:, data:, relative and protocol-relative hrefs are not anchors",
                   all(h.startswith("https://") or h.startswith("mailto:") for h in _o["hrefs"]),
                   _o["hrefs"])
             check("preview: the two legitimate hrefs do survive",
                   len(_o["hrefs"]) == 2, _o["hrefs"])
+            check("preview: relative links stay inert with normal styling",
+                  len(_o["relativeLinkShape"]) == 3
+                  and all(x["tag"] == "span" and x["class"] == "" for x in _o["relativeLinkShape"]),
+                  _o["relativeLinkShape"])
+            check("preview: hostile links keep rejected styling",
+                  len(_o["hostileLinkShape"]) == 1
+                  and _o["hostileLinkShape"][0]["class"] == "md-deadlink",
+                  _o["hostileLinkShape"])
             check("preview: a __proto__ frontmatter key does not pollute Object.prototype",
                   _o["protoPolluted"] is False, _o["protoPolluted"])
             check("preview: a document over the byte cap is declined",
