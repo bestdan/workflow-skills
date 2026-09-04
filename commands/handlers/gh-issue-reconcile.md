@@ -51,24 +51,19 @@ to inspect. It reports rather than reopens: an issue can be legitimately closed
 without review (abandoned, duplicate, filed by hand), and the finding carries
 GitHub's `state_reason` so those are dismissible on sight.
 
-**A row checks that the label it looks for is provisioned.** Label namespaces are
-per-repo, so a rung may simply never have been created — and then the row's
-question is unanswerable, not answered "no". Row 3 is the sharp case: without
-`status:4_needs_review` on the repo, every closed issue in the window is a hit.
-Measured 2026-09-04 against
-`bestdan/dotfiles`: 50 of 50, correctly scoped, all noise. The script reports the
-gap once and returns no findings. Row 2 is guarded by group rather than by
-completeness — its premise is that a rung was assignable and nobody assigned it,
-which still holds while the group has any member provisioned, so only a `status:`
-or `auto:` group with **none** voids it. Row 1 needs no guard: it ranks labels the
-issue already carries, which cannot exist unprovisioned.
+**Rows 2 and 3 check that the labels they look for are provisioned.** Label
+namespaces are per-repo, so a rung may never have been created on the board — and
+then the row's question is unanswerable, not answered "no", and it reports the
+gap once instead of flagging every issue. Row 1 needs no guard: it ranks labels
+the issue already carries, which cannot exist unprovisioned.
 
-Say **absent**, not "never created". Deleting a label after issues carried it
-leaves the same current label set, and the `labeled` events keep the name, so the
-evidence row 3 wants would still be there. Voiding is still the right default —
-the current label set is the only cheap signal, and a shouted gap beats a
-confident wrong answer — but the report must not claim to know which of the two
-happened.
+Two things decided here, because a reader of this table will otherwise re-derive
+them. Row 2 is guarded by **group, not completeness** — its premise is that a
+rung was assignable, which still holds while its group has any member
+provisioned. And the report says **absent**, never "never created": several
+histories produce the same current label set, and the row cannot tell them apart.
+The measurement behind all of this, and the reasoning, live in
+`gh-issue-reconcile.py`'s module docstring.
 
 > **This is an audit, not a load-bearing repair.** Every status write goes
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the

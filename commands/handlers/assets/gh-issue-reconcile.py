@@ -27,7 +27,7 @@ Three rules, matching the invariants labels.yml states:
 Rule 1 is the only rule that can write, and only with `--apply`. Rules 2 and 3
 never write, at any flag combination.
 
-**Every rule checks that the labels it looks for are provisioned.** Label
+**Rules 2 and 3 check that the labels they look for are provisioned.** Label
 namespaces are per-repo, so a rung this audit asks about may simply never have
 been created — and then the question is unanswerable rather than answered "no".
 Rule 3 is the sharp case: on a repo without `status:4_needs_review`, every closed
