@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.19.0] - 2026-09-04
+
+### Features
+
+- reconcile the label invariants (#464) (afd2d00)
+
 ## [2.18.1] - 2026-09-04
 
 ### Fixes
