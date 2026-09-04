@@ -91,11 +91,15 @@ gh-issue.
    wrong, so do not reimplement them inline:
    - `blocked_by` is **paginated**. It is read with `--paginate --slurp`; a bare
      read stops at 30 entries, and an edge past that page reads as absent.
-   - **Blockers outside the scope are backfilled** as `"in_scope": false` nodes.
-     A milestone-scoped run otherwise has no `state` for a cross-milestone
-     blocker, so it cannot tell a stale edge from a satisfied one. These nodes
-     are **analysis inputs only, never mutation targets** — §Apply must not touch
-     an issue outside the resolved scope.
+   - **Blockers outside the scope are backfilled** as `"in_scope": false` nodes,
+     and the backfill is **transitive** — it closes the reachable graph. A
+     milestone-scoped run otherwise has no `state` for a cross-milestone blocker,
+     and a cycle that leaves the scope and re-enters it (`#1 → #9 → #5 → #1`
+     across three milestones) would read as absent. These nodes are **analysis
+     inputs only, never mutation targets**: `cycles` and `edges` span the whole
+     closure, while `stale_edges`, `satisfied_edges`, `inversions` and
+     `concurrent` are already filtered to in-scope dependents, so every finding
+     you are handed is one §Apply is allowed to act on.
    - `"truncated": true` means the list came back exactly at `--limit`, so an
      issue outside the window would read as absent. Report it; do not paginate
      further (gh-issue graphs at this scale are rare, matching the no-paginate
@@ -103,7 +107,8 @@ gh-issue.
 
 5. **Derive per-node judgment from the returned labels.** Each node carries
    `prio`, `est` and `status` already resolved against the vocabulary, plus
-   `state` / `state_reason`. Map them the way the rest of the handler does:
+   `state` / `state_reason` and its `body` — so the prose parse the Dimensions
+   below run needs no second fetch. Map them the way the rest of the handler does:
    an open issue's `status:` value is its position on the ladder; a closed issue
    with `state_reason: completed` is done, with `not_planned` is canceled.
 

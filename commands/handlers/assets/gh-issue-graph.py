@@ -44,6 +44,16 @@ milestone-scoped run whose issue is blocked by one in another milestone has no
 skip the edge. Backfilled nodes carry `"in_scope": false` and must never be
 mutated — §Apply in `gh-issue-reoptimize.md` edits in-scope issues only.
 
+**The backfill is transitive, deliberately: it closes the reachable graph.** A
+backfilled node's own blockers are fetched too, because a cycle can leave the
+scope and re-enter it — `1 -> 9 -> 5 -> 1` across three milestones is invisible
+at depth 1, and reporting it as absent is the same silent-wrong-answer the
+pagination rule above refuses. The cost is bounded by the reachable closure
+(`pending` only grows for numbers not already held), whose worst case is the
+whole repo — which is what the `team` scope fetches anyway. The consequence is
+that `edges` and `cycles` span the closure while every **actionable** finding is
+filtered back to in-scope dependents; see `analyse()`.
+
 A cloud routine has no `gh`, so this path is LOCAL ONLY, same as every other
 gh-issue asset.
 
@@ -184,6 +194,11 @@ def build_node(issue, vocabulary, in_scope):
     return {
         "number": issue["number"],
         "title": issue.get("title", ""),
+        # Carried rather than dropped: Dimensions 1, 2 and 4 all parse bodies for
+        # dependency prose, so the caller needs every one of these. Dropping the
+        # field would not save context — it would buy a second download of what
+        # this call already fetched.
+        "body": issue.get("body") or "",
         "state": (issue.get("state") or "").lower(),
         "state_reason": (issue.get("stateReason") or "").lower() or None,
         "milestone": milestone.get("title"),
@@ -320,6 +335,12 @@ def analyse(repo, labels_file, milestone, scope_labels, limit, issue_numbers):
     for edge in flat:
         dependent = nodes[edge["blocked"]]
         blocker = nodes[edge["blocker"]]
+        if not dependent["in_scope"]:
+            # Closing the graph pulls in edges that live entirely outside the
+            # scope. They are why a cross-scope cycle is visible, and they are
+            # not this run's to repair — every fix below mutates the DEPENDENT,
+            # which §Apply's hard rule forbids for an out-of-scope issue.
+            continue
         if blocker["state"] == "closed":
             if blocker["state_reason"] == "not_planned":
                 stale.append(edge)

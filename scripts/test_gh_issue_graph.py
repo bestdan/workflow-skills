@@ -316,6 +316,57 @@ class GraphTests(unittest.TestCase):
 
         self.assertEqual(result["edge_only"], [{"blocked": 1, "blocker": 9}])
 
+    def test_a_cycle_that_leaves_the_scope_and_re_enters_it_is_found(self):
+        """Why the backfill is transitive: depth 1 would report this as absent.
+
+        `1 -> 9 -> 5 -> 1` across three milestones. Only #1 is in scope; closing
+        the reachable graph is what makes the deadlock visible at all.
+        """
+        repo = FakeRepo(
+            scope=[issue(1, milestone="A")],
+            extra=[issue(9, milestone="B"), issue(5, milestone="C")],
+            edges={1: [9], 9: [5], 5: [1]},
+        )
+        result = self._run(repo, ["--milestone", "A"])
+
+        self.assertEqual(result["cycles"], [[1, 5, 9]])
+
+    def test_an_out_of_scope_dependent_yields_no_actionable_finding(self):
+        """Closing the graph must not propose a fix §Apply is forbidden to make.
+
+        Every repair below mutates the DEPENDENT — remove its edge, raise its
+        blocker's priority — so an edge living entirely outside the scope is
+        analysis, never a finding.
+        """
+        repo = FakeRepo(
+            scope=[issue(1, milestone="A")],
+            extra=[
+                issue(9, milestone="B", labels=["prio:0"]),
+                issue(
+                    5,
+                    milestone="C",
+                    labels=["prio:3"],
+                    state="CLOSED",
+                    state_reason="NOT_PLANNED",
+                ),
+            ],
+            edges={1: [9], 9: [5]},
+        )
+        result = self._run(repo, ["--milestone", "A"])
+
+        # #9 blocked_by #5 is stale AND inverted, but #9 is out of scope.
+        self.assertEqual(result["stale_edges"], [])
+        self.assertEqual(result["inversions"], [])
+        # The edge is still in the graph — it is analysis, not a finding.
+        self.assertIn({"blocked": 9, "blocker": 5}, result["edges"])
+
+    def test_the_node_carries_the_body_the_dimensions_parse(self):
+        """Dimensions 1, 2 and 4 parse bodies; dropping the field buys a refetch."""
+        repo = FakeRepo(scope=[issue(1, body="depends on #2")], edges={})
+        node = self._run(repo)["nodes"][0]
+
+        self.assertEqual(node["body"], "depends on #2")
+
     def test_a_full_page_reports_possible_truncation(self):
         repo = FakeRepo(scope=[issue(1), issue(2)])
         self.assertTrue(self._run(repo, ["--limit", "2"])["truncated"])
