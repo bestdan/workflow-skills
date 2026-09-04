@@ -2930,6 +2930,9 @@ console.log(JSON.stringify(out));
                   len(_o["relativeLinkShape"]) == 3
                   and all(x["tag"] == "span" and x["class"] == "md-inertlink" for x in _o["relativeLinkShape"]),
                   _o["relativeLinkShape"])
+            check("preview: relative links retain the accent affordance",
+                  ".md-inertlink{color:var(--accent);text-decoration:none}" in server.PAGE,
+                  "md-inertlink lacks accent styling")
             check("preview: hostile links keep rejected styling",
                   len(_o["hostileLinkShape"]) == 1
                   and _o["hostileLinkShape"][0]["class"] == "md-deadlink",
