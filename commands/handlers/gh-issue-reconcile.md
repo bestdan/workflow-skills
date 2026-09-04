@@ -26,6 +26,9 @@ starting point. Do not add a fourth row, and do not widen these three.
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
 
+Rows 2 and 3 are **void** where the labels they ask about are not provisioned on
+the repo; each reports that gap once instead of flagging every issue. See below.
+
 **Row 1 is the only row that writes**, and only under `--apply`. It keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
 exactly so that "highest" is a fact rather than a judgment — and keeping it is
@@ -48,6 +51,18 @@ to inspect. It reports rather than reopens: an issue can be legitimately closed
 without review (abandoned, duplicate, filed by hand), and the finding carries
 GitHub's `state_reason` so those are dismissible on sight.
 
+**A row checks that the label it looks for is provisioned.** Label namespaces are
+per-repo, so a rung may simply never have been created — and then the row's
+question is unanswerable, not answered "no". Row 3 is the sharp case: without
+`status:4_needs_review` on the repo, no issue can ever have carried it, so every
+closed issue in the window is a hit. Measured 2026-09-04 against
+`bestdan/dotfiles`: 50 of 50, correctly scoped, all noise. The script reports the
+gap once and returns no findings. Row 2 is guarded by group rather than by
+completeness — its premise is that a rung was assignable and nobody assigned it,
+which still holds while the group has any member provisioned, so only a `status:`
+or `auto:` group with **none** voids it. Row 1 needs no guard: it ranks labels the
+issue already carries, which cannot exist unprovisioned.
+
 > **This is an audit, not a load-bearing repair.** Every status write goes
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the
 > whole label set in a single request — so row 1's drift cannot arise on the
@@ -66,6 +81,14 @@ GitHub's `state_reason` so those are dismissible on sight.
    a bug a user filed, a bot's issue — is missing both rungs and never reached
    review, so it is a row-2 **and** a row-3 hit. Unscoped, the report is mostly
    issues that were never wrong.
+
+   **What the scope does not do is vouch for the labels themselves.** It
+   separates loop issues from strangers; it says nothing about whether the rung a
+   row asks about was ever provisioned on the repo. Those are independent, and
+   reading the scope as covering both is what let row 3 flag 50 correctly-scoped
+   closed issues on `bestdan/dotfiles`, which has never created
+   `status:4_needs_review`. The script guards that itself — see step 4 — so this
+   is a note about what to conclude from a clean report, not a step to perform.
 
    When `gh-issue.labels` is **empty or unset** there is no marker to scope by.
    **Stop** and report that this audit needs at least one configured label to
@@ -106,7 +129,12 @@ GitHub's `state_reason` so those are dismissible on sight.
    operator asks for a wider window, add `--limit <N>` to the invocation above —
    it is a flag on this script, not on `/reconcile-tasks`, so it never arrives
    as a command argument. Mind the cost: row 3 spends one API call per
-   **closed** issue in the window, so the limit is what bounds the run.
+   **closed** issue in the window, so the limit is what bounds the run — unless
+   `status:4_needs_review` is unprovisioned, in which case row 3 is void, skips
+   those reads entirely, and the run costs three calls in total. The script makes
+   one `gh label list` before any per-issue work to decide that, and its report
+   opens with the repo's provisioning gap and the `gh-label-sync.py` command that
+   closes it.
 
    Row 1's repair goes through `gh-issue-state.py` — validate, then one full-set
    PATCH — so it carries `follow-up` and every other unmanaged label forward
