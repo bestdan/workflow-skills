@@ -291,6 +291,106 @@ assert_not_contains "placeholder under a missing parent is not flagged" "$out_f"
 assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
   "real-thing.sh does not exist"
 
+# --- Fixture (g): a fenced shell block carrying real logic is flagged ------
+# Also covers the two shapes that must NOT be flagged: a guarded one-liner
+# (one control-flow statement is still legible inline), and a prose "prompt
+# payload" wearing a bash fence, which is where an unanchored keyword match
+# produces false positives — repo-pr-execute.md scores 11 hits that way with
+# zero lines of shell in it.
+DIR_G="$BASE/shell-logic-fail"
+make_plugin_fixture "$DIR_G"
+cat >"$DIR_G/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Guarded one-liner (not flagged):
+
+```bash
+if [ -z "$REPO" ]; then REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner); fi
+```
+
+A prompt payload (not flagged — English, not shell):
+
+```bash
+claude --remote "Read the task file.
+if the acceptance criteria are unclear, ask.
+for each file you touch, run the tests.
+while the gate is red, keep going."
+```
+
+Real logic (flagged):
+
+```bash
+CURSOR=""
+while :; do
+  RESP=$(gh api graphql -f query="$Q" -F cursor="$CURSOR")
+  for n in $(echo "$RESP" | jq -r '.data[]'); do
+    echo "$n"
+  done
+  CURSOR=$(echo "$RESP" | jq -r '.pageInfo.endCursor')
+done
+```
+
+A single multi-line construct (not flagged — one opener):
+
+```bash
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
+```
+MD
+
+out_g="$(uv run "$DIR_G/scripts/validate.py" 2>&1)"
+rc_g=$?
+assert_contains "shell logic block names the file, line and count" "$out_g" \
+  "cmd.md: line 22: fenced shell block carries 2 control-flow statements"
+assert_contains "shell logic block points at the fix" "$out_g" \
+  "move the logic to a typed file"
+if [ "$rc_g" -eq 1 ]; then
+  ok "fenced shell logic: exits 1"
+else
+  bad "fenced shell logic: should exit 1, got $rc_g"
+fi
+# Line 7 is the one-liner's block, line 13 the prompt payload's. Asserting on
+# the line numbers is what distinguishes "the right block was flagged" from
+# "something was flagged" — a check that flagged all three would still satisfy
+# the assertions above.
+assert_not_contains "guarded one-liner is not flagged" "$out_g" "cmd.md: line 7"
+assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line 13"
+# The threshold's own boundary: ONE multi-line construct (1 opener + 1 bare
+# terminator) must pass. Without this case the `> SHELL_OPENER_MAX` half of the
+# predicate is untested — the other three blocks are all decided by the
+# terminator clause alone, so dropping the opener threshold left the suite green
+# (verified by mutation).
+assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
+
+# --- Fixture (h): a plugin with no fenced logic is clean -------------------
+DIR_H="$BASE/shell-logic-pass"
+make_plugin_fixture "$DIR_H"
+cat >"$DIR_H/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Call the helper instead of inlining the loop:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/helper.py" --repo "<repo>"
+```
+MD
+echo "#!/usr/bin/env python3" >"$DIR_H/scripts/helper.py"
+
+out_h="$(uv run "$DIR_H/scripts/validate.py" 2>&1)"
+rc_h=$?
+assert_not_contains "a handler that shells out to a typed file is clean" "$out_h" \
+  "control-flow statements"
+if [ "$rc_h" -eq 0 ]; then
+  ok "no fenced shell logic: exits 0"
+else
+  bad "no fenced shell logic: should exit 0, got $rc_h"
+fi
+
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"

@@ -70,6 +70,14 @@ whether it belongs one level down instead. The answer is usually yes.
   [Conventional Commit](https://www.conventionalcommits.org/) type
   (`feat` / `fix` / `chore` / …) is what decides whether a version ships and how
   big the bump is. Getting it wrong ships a wrong release, not a wrong label.
+- **Logic goes in a typed file, not a fenced block.** A skill/command/handler
+  body is runtime prompt text, and nothing in the gate lints or runs shell
+  inside markdown — that gap shipped seven defects in one 36-line block. Put the
+  code in `commands/handlers/assets/<name>.py` (or `scripts/<name>.sh`), give it
+  a test pair, and call it from the prose. `validate.py` fails a fenced block
+  that carries two or more control-flow statements and closes one on its own
+  line. Full rule, including what stays inline:
+  [CONTRIBUTING.md](CONTRIBUTING.md#logic-goes-in-a-typed-file).
 - **Adding a skill or command means editing `README.md` in the same PR.**
   `validate.py` fails the build if the "N skills, M commands, and K subagent"
   sentence drifts from reality.
