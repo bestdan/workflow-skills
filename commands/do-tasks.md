@@ -905,6 +905,16 @@ each session loudly on its own issue.
    one to drop. The prompt must **omit** `gh-issue-claim.py
    acquire` entirely — there is no ref to create on this path.
 
+   **One addition to those steps, and it is what makes the mixed-path race
+   detectable.** Between posting the claim comment and writing the board markers,
+   have the session re-run pre-flight's ref probe —
+   `git ls-remote --heads origin "<branch>"`. If a ref now exists, a **local**
+   session acquired the lock after this session's own pre-flight: retract the
+   claim comment, write **nothing** to the board, and stop with
+   `Skipped #<n>: claim lost — <branch> acquired by another session`. The probe
+   costs one read and it is the only point where a ref-lock winner is visible to
+   an election-path session before it writes.
+
    The session then creates its work branch itself,
    `git switch -c "<branch>" "origin/<base>"` (the case `gh-issue-claim.md`
    "Branch + execute" step 1 already covers for a claim that created no ref), using
@@ -947,15 +957,25 @@ each session loudly on its own issue.
    contend: step 5 pins each to a distinct issue number and none falls back to
    another issue, which is why the batch needs no equivalent of repo-pr's draft
    `task-claim` PR marker. What **can** contend is a dispatched session and a
-   **local** `/do-tasks` on the same issue, and because step 6 puts them on
-   different elections, neither primitive rejects the other. Three reads narrow it,
-   in the order the dispatched session performs them: pre-flight's
-   `git ls-remote --heads origin "<branch>"` sees a local session's lock ref; the
-   claim's step-1 re-read sees a local winner's assignee and `status:3_started`; and
-   the election's own state-backed filter requires those same markers before
-   electing anyone. What is left is the window between the two sessions' reads —
-   `claim-lock.md`'s existing mixed-path window, not a new one, but batch makes it
-   ordinary rather than exceptional. **Do not run a batch against a repo a local
+   **local** `/do-tasks` on the same issue. Step 6 puts them on different
+   elections, so **neither primitive rejects the other** — the ref acquire cannot
+   see a claim comment and the comment election cannot see a ref. That is a real
+   asymmetry and it is not closed by a lock; it is closed by each side reading for
+   the other's marker, and each direction has one:
+
+   - **Local acquires the ref first** → the dispatched session's re-probe in step 6
+     sees the ref before it writes anything, retracts, and stops.
+   - **The dispatched session writes its markers first** → the local session's
+     "Claim the issue" step 1 re-read sees the assignee and the moved rung and
+     returns `race` before its own acquire.
+
+   What is left is genuine simultaneity: the two reads interleaving inside the
+   window between one session's probe and the other's write. Nothing here makes
+   that impossible, and the honest bound is that it is narrow rather than closed —
+   `claim-lock.md`'s existing mixed-path window, which batch makes ordinary rather
+   than exceptional. Taking the ref lock in the dispatched session would close it
+   and reopen the permanent strand step 6 exists to avoid; that trade is the
+   subject of step 6, not a gap here. **Do not run a batch against a repo a local
    `/do-tasks` is working at the same time.**
 
    The `slack` read in step 2 is not atomic either, so two concurrent batch runs can
