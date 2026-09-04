@@ -813,7 +813,9 @@ each session loudly on its own issue.
    that gate, so a session handed a limit is being invited to run a check it
    should not, and a decline there would strand a dispatched issue with nothing
    done. The **scripts** are a different case —
-   the gate above means the plugin is installed, so have the session call them at
+   the gate above is an operator's assertion that the plugin will be there, not
+   proof that it is (the self-check below is the proof), so address them the way
+   an installed plugin is addressed: have the session call them at
    **`$CLAUDE_PLUGIN_ROOT`**, the spelling `CONTRIBUTING.md` mandates and the one
    used above. `gh-issue-claim.md` still writes its asset calls repo-relative,
    which resolves only when the cwd is the plugin's own repo — so those are the
