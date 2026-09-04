@@ -91,7 +91,10 @@ Five deterministic, blocking checks, plus the shell lint and Bats suites:
    `--check-untyped-defs` — without it mypy reads no unannotated function body,
    which is every file here. Every tier always runs and the exit code is their
    OR, so one failing never hides another's findings. The script's header
-   carries the full rationale.
+   carries the operational detail;
+   [`dev_docs/decisions/python_type_checking.md`](dev_docs/decisions/python_type_checking.md)
+   carries why mypy rather than pyright or `ty`, and **what would change that** —
+   read it before swapping the checker or raising a floor.
 5. **`scripts/lint-python.sh`** — `ruff check` at ruff's **default** rules (E4,
    E7, E9, F), pinned the same way. The selection is a floor held on purpose:
    the repo was clean under it on adoption, so the gate started green and any

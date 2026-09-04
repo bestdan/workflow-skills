@@ -10,56 +10,33 @@
 # a type checker whose diagnostics move between releases turns a green gate
 # red on a day nobody touched the code.
 #
-# FOUR TIERS, split by WHO RUNS THE FILE.
+# FOUR TIERS, split by WHO RUNS THE FILE — a file's tier follows the interpreter
+# it must survive, not the directory it sits in. Two files under scripts/ are
+# consumer code; see the comments on the arrays below.
 #
-# That is the rule. A file's tier follows the interpreter it has to survive, not
-# the directory it sits in — see the comments on the arrays below, where two
-# files under scripts/ are consumer code and are checked as such.
-#
-#   strict    scripts/research-spike.py — the one file annotated end to end
-#             (93/93 return types, 0/187 untyped parameters), so --strict costs
-#             nothing to hold and catches the defect class this repo actually
-#             hits: a well-typed value that is None on a path nobody walked.
-#
-#   consumer  Everything executed as bare `python3` on someone else's machine,
-#             pinned to --python-version 3.9. That pin is the point: which
-#             Python these must run under was a claim in prose and nothing
-#             enforced it.
-#
-#   dev       Everything only this repo's contributors and CI run, pinned to
-#             3.11 — the floor validate.py already declares in its uv header.
-#             Pinned rather than left to default, which would follow whatever
-#             interpreter uvx resolved and make diagnostics differ between a
-#             laptop and CI.
-#
+#   strict    scripts/research-spike.py — annotated end to end, so --strict
+#             costs nothing to hold.
+#   consumer  Executed as bare `python3` on someone else's machine. Pinned to
+#             --python-version 3.9; that pin is the point.
+#   dev       Only this repo's contributors and CI run these. Pinned to 3.11
+#             rather than left to whatever interpreter uvx resolved.
 #   tests     scripts/test_*.py, with --disable-error-code=attr-defined and
-#             nothing else disabled. These stub seams on modules loaded through
-#             importlib (`rollups.run_gh = fake`), which mypy sees only as
-#             ModuleType: 48 findings on that one idiom, versus 3 real ones
-#             once it is off. One flag beats 48 inline ignore comments, and a
-#             misspelled attribute in a test crashes the test anyway.
+#             nothing else disabled — they stub seams on importlib-loaded
+#             modules, which mypy sees only as ModuleType.
 #
-# Every tier but `strict` runs --check-untyped-defs, and that flag is what makes
-# them mean anything. Without it mypy reads only signatures; since almost
-# nothing here annotates one, it read no function BODY at all — the tier
-# covering every consumer-executed file was checking nothing. Turning it on
-# surfaced 14 findings in 6 files.
+# Every tier but `strict` runs --check-untyped-defs. Without it mypy reads only
+# signatures, and since almost nothing here annotates one it reads no function
+# BODY at all — which is how the tier covering every consumer-executed file came
+# to be checking nothing.
 #
-# Deliberately uncovered: skills/analysis-pipeline/example/*.py. Those are
-# teaching examples shipped inside a skill, not entrypoints; editing them to
-# satisfy a checker would make them worse at the job they exist for. Every
-# other tracked .py file is in exactly one tier — if you add one, add it here.
+# All four tiers always run and the exit code is their OR, so one failing never
+# hides another's findings. scripts/tier-coverage.py holds the arrays below to a
+# partition of every .py file, EXCLUDED_FROM_TYPECHECK included.
 #
-# All four tiers always run, and the exit code is their OR, so one tier failing
-# never hides another's findings.
-#
-# Why not `ty`: evaluated at adoption (dev_docs/research/) and it found the
-# same substantive defects with better diagnostics, but it is 0.0.x with an
-# explicit "breaking changes, including changes to diagnostics, may occur
-# between any two versions" policy, and its exhaustive-match rule
-# (astral-sh/ty#1060) — the main reason to want a checker over these enum-ish
-# status strings — has not shipped. Good editor checker, wrong CI gate today.
-# Revisit at 1.0.
+# WHY mypy rather than pyright or `ty`, why the floor is 3.9, and what would
+# legitimately change either answer — with the measurements behind each:
+# dev_docs/decisions/python_type_checking.md
+
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
