@@ -856,11 +856,14 @@ each session loudly on its own issue.
    its first write. Check it here and degrade to the foreground claim with
    `remote batch needs gh-issue.repo to be this repo — claiming one issue`.
 
-   **Declare the session unattended.** Inline `--non-interactive` semantics
-   verbatim: "No human is present in this session — never prompt; if the WIP gate is
-   met, decline and report it." Section 3 gives the reason and it is the sharpest
-   failure mode in the design — without this, each dispatched session concludes it
-   is attended and offers itself the override its dispatcher was gated by.
+   **Declare the session unattended.** Inline `--non-interactive` semantics: "No
+   human is present in this session — never prompt; if any gate you run declines,
+   report it and stop." Do **not** copy section 3's wording verbatim here: it names
+   the WIP gate, which this session does not run (the dispatcher discharged it), so
+   it would instruct the session about a decision it never makes. Section 3's
+   _reason_ still applies in full and is the sharpest failure mode in the design —
+   without the declaration, each dispatched session concludes it is attended and
+   offers itself the override its dispatcher was gated by.
 
 6. **Dispatched sessions claim on the comment election, not the ref lock.** This is
    the one place a dispatched session's flow differs from the single path, and — as
