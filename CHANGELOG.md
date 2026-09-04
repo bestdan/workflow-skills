@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.23.0] - 2026-09-04
+
+### Features
+
+- add crush as a built-in local reviewer (#485) (8a18df5)
+
 ## [2.22.0] - 2026-09-04
 
 ### Features
