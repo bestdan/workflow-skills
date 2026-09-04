@@ -12,6 +12,8 @@ a repository fixture, a subprocess, or a temp checkout.
 """
 
 import importlib.util
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -134,6 +136,109 @@ class TestMatches(unittest.TestCase):
 
     def test_a_shorter_path_does_not_match_a_longer_pattern(self):
         self.assertFalse(tier.matches("test_x.py", "scripts/test_*.py"))
+
+
+class TestMatchesAgreesWithBash(unittest.TestCase):
+    """Differential test against ground truth.
+
+    Every case above asserts what the author BELIEVES bash does. That belief was
+    wrong once already — `Path.match()` right-matches, and the suite happily
+    agreed with it. So this class stops asserting beliefs and asks bash.
+
+    A fixture tree is built containing the shapes that broke the original
+    matcher, each tier pattern is expanded by a real `bash -c 'shopt -s
+    nullglob; printf ...'`, and the result is compared with `matches()`. Any
+    divergence means the checker's model of typecheck.sh has drifted from what
+    typecheck.sh actually passes to mypy.
+
+    Hermetic: a temp directory, no network, nothing outside it is read.
+    """
+
+    # Ordinary layouts plus the adversarial ones. The `fixtures/`, `vendor/` and
+    # `a/b/` entries are the prefix shapes that `Path.match()` wrongly accepted.
+    FIXTURE = [
+        "scripts/validate.py",
+        "scripts/test_shape.py",
+        "scripts/test_tier_coverage.py",
+        "scripts/local-review/server.py",
+        "commands/handlers/assets/x.py",
+        "commands/handlers/assets/nested/deep.py",
+        "fixtures/scripts/test_new.py",
+        "vendor/commands/handlers/assets/y.py",
+        "a/b/scripts/test_z.py",
+    ]
+
+    PATTERNS = [
+        "scripts/test_*.py",
+        "commands/handlers/assets/*.py",
+        "scripts/*.py",
+        "scripts/validate.py",
+        "scripts/local-review/server.py",
+    ]
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        for rel in self.FIXTURE:
+            f = self.root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("# fixture\n")
+
+    def bash_expand(self, pattern):
+        """Which FIXTURE files bash selects for this pattern.
+
+        Intersected with the fixture on purpose. `nullglob` applies only to
+        words containing a wildcard: a literal like `scripts/research-spike.py`
+        is not subject to pathname expansion at all, so bash echoes it back even
+        when no such file exists (verified). typecheck.sh relies on exactly that
+        — it passes a literal to mypy whether or not it resolves — but the
+        question here is which EXISTING files each method selects, so a literal
+        naming an absent file must count for neither.
+        """
+        proc = subprocess.run(
+            ["bash", "-c", f'shopt -s nullglob; printf "%s\\n" {pattern}'],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expanded = {p for p in proc.stdout.split() if p}
+        return sorted(expanded & set(self.FIXTURE))
+
+    def test_the_fixture_still_contains_the_adversarial_shapes(self):
+        """Without these, every comparison below passes under either matcher and
+        the class becomes decoration. Trimming the fixture must fail here."""
+        for shape in (
+            "fixtures/scripts/test_new.py",
+            "vendor/commands/handlers/assets/y.py",
+            "commands/handlers/assets/nested/deep.py",
+        ):
+            self.assertIn(shape, self.FIXTURE)
+
+    def test_every_tier_pattern_expands_the_same_way(self):
+        for pattern in self.PATTERNS:
+            with self.subTest(pattern=pattern):
+                self.assertEqual(
+                    sorted(f for f in self.FIXTURE if tier.matches(f, pattern)),
+                    self.bash_expand(pattern),
+                    f"matches() and bash disagree on {pattern!r}",
+                )
+
+    def test_the_real_tier_patterns_expand_the_same_way(self):
+        """The fixture proves the rule; this proves it for the patterns actually
+        in typecheck.sh, so a newly added pattern of an unanticipated shape is
+        covered without anyone remembering to extend PATTERNS."""
+        source = (ROOT / "scripts" / "typecheck.sh").read_text()
+        real = [p for name in tier.ARRAYS for p in tier.patterns(source, name)]
+        self.assertTrue(real, "no patterns parsed — the comparison would be vacuous")
+        for pattern in real:
+            with self.subTest(pattern=pattern):
+                self.assertEqual(
+                    sorted(f for f in self.FIXTURE if tier.matches(f, pattern)),
+                    self.bash_expand(pattern),
+                    f"matches() and bash disagree on {pattern!r}",
+                )
 
 
 class TestPatterns(unittest.TestCase):
