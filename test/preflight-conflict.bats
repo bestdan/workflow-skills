@@ -110,3 +110,29 @@ conflict() { run bash -c "cd '$TEST_TMPDIR/clone' && '$REPO_ROOT/scripts/preflig
   assert_success
   assert_output --partial 'CONFLICT: clean base=main ref=shared'
 }
+
+@test "a git older than 2.38 reports unknown, not a verdict" {
+  # The version gate runs after the repo/remote checks, so the stub has to be a
+  # real git for everything except --version. Reporting 2.37.9 must produce the
+  # unknown verdict rather than a clean/conflicting one: without
+  # merge-tree --write-tree there is nothing to base a verdict on.
+  real_git="$(command -v git)"
+  mkdir -p "$TEST_TMPDIR/stub"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'if [ "$1" = "--version" ]; then echo "git version 2.37.9"; exit 0; fi'
+    echo "exec \"$real_git\" \"\$@\""
+  } >"$TEST_TMPDIR/stub/git"
+  chmod +x "$TEST_TMPDIR/stub/git"
+
+  git -C "$TEST_TMPDIR/clone" checkout -qb feature
+  echo new >"$TEST_TMPDIR/clone/g.txt"
+  git -C "$TEST_TMPDIR/clone" add g.txt
+  git -C "$TEST_TMPDIR/clone" commit -qm feature
+
+  PATH="$TEST_TMPDIR/stub:$PATH" conflict --ref feature
+  assert_failure 3
+  assert_output --partial 'CONFLICT: unknown reason=merge-tree-unsupported'
+  refute_output --partial 'CONFLICT: clean'
+  refute_output --partial 'CONFLICT: conflicting'
+}
