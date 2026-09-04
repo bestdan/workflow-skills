@@ -143,6 +143,15 @@ join, and `gh` covers it only partially.
    Two invariants were deliberately **not** given rules, because the table is closed:
    duplicate `prio:`/`est:`, and a closed issue still carrying live rungs (reachable with
    a bare `gh issue close`). Both are recorded in HANDOFF.md.
+
+   **Row 3 has a blind spot, found 2026-09-04 when task 7's own dispatch check was
+   finally run** (against `bestdan/dotfiles`, since it needed only a gh-issue repo and
+   not a migrated one). It asks whether an issue was ever labelled
+   `status:4_needs_review` without first asking whether that label exists on the repo. On
+   a partially provisioned board it does not, so no issue can have carried it and **every**
+   closed issue is a hit — the run reported 50 of 50. This entry's claim that the three
+   rules are sound holds for rows 1 and 2; row 3 is sound only where the vocabulary is
+   fully provisioned, which nothing checks. Unowned, and outside task 8. See HANDOFF.md.
 8. ~~[phase_3_handler/gh_migration_task_8.md](phase_3_handler/gh_migration_task_8.md)~~ — Upgrade `reoptimize` from report-only to native dependency edges. **Done** — PR #478.
    It also carried reoptimize's **vocabulary migration**, which was the last one: every
    gh-issue verb now speaks `labels.yml`, and no bridge remains anywhere. Three things it

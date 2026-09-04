@@ -193,6 +193,31 @@ behaviour from documentation. Probe it.
   indistinguishable afterwards. No task covers it. It now costs more than it did: task
   8's stale-versus-satisfied split reads `state_reason` to decide whether an edge blocks
   forever or is already met, and every issue this loop closes reports the same reason.
+- **Reconciler row 3 never checks that the rung it looks for is provisioned.** Found
+  2026-09-04 by running task 7's own dispatch check against `bestdan/dotfiles`. Row 3
+  flags an issue "closed although it was never labelled `status:4_needs_review`" by
+  reading its `labeled` events — but if that label was never created on the repo, no
+  issue can ever have carried it, so **every** closed issue in the window is a hit. The
+  run reported 50 of 50, with total confidence and no signal.
+  `gh-issue-reconcile.md` step 2 claims the label scope prevents exactly this ("every
+  issue in the repo that is _not_ part of the task loop … is a row-2 **and** a row-3
+  hit"), and that claim is false as written: the issues were correctly scoped by the
+  configured label and still all hit. The scope separates loop issues from strangers; it
+  does nothing about a rung the repo never provisioned. The cheap fix is a preflight —
+  if `status:4_needs_review` is absent from the repo's labels, row 3's premise is void,
+  so report that instead of 50 findings. **Unowned; not task 8's, and outside PR #478.**
+  Same shape as the bug this migration keeps hitting: a check confidently answering a
+  question nobody populated the data for.
+- **A partially provisioned repo makes the audits lie, and nothing detects it.** The
+  above is the symptom; this is the class. `gh-label-sync.py` is idempotent and
+  **dry-run by default**, so `python3 …/gh-label-sync.py --repo <repo>` prints the gap
+  for free — run it before trusting any audit's output on a board, and before reading a
+  pilot result. As of 2026-09-04 `bestdan/dotfiles` is missing a double-figure share of
+  the vocabulary, including both top `status:` rungs and every `prio:`/`est:` label,
+  while still carrying the pre-migration `auto-eligible` / `human-approval-requested` /
+  `priority:*` names. That inventory is live state and will drift — **do not trust this
+  sentence, run the dry run.** Provisioning it is a write to a live tracker and needs the
+  operator.
 - **Two label invariants have no reconciler rule.** Task 7's rule table is deliberately
   **closed**, so these were left out rather than becoming rows four and five:
   - `at most one prio:` / `at most one est:` — a duplicate stays invisible until the next
@@ -211,7 +236,8 @@ switch waits on the auto-pilot harness — switching before then ends unattended
 rather than degrading it. That is a postponement, not a dead end: every handler verb works
 in a foreground session today, so the repo could switch and be driven by hand deliberately.
 
-Four acceptance criteria are consequently **unmet, and none is a defect**. Each needs a
+Four acceptance criteria were consequently unmet, **and none is a defect** — task 7's is
+now run (below), leaving three. Each needs a
 repo on the `gh-issue` handler — but read that carefully, because it is **not** the same
 as needing this repo to switch: **`bestdan/dotfiles` is already `handler: gh-issue`**
 (its `dev_docs/tasks/.task-config.yml`, `repo: bestdan/dotfiles`, `labels: [task-add]`).
@@ -221,11 +247,17 @@ with no migration and no config change. What dotfiles cannot stand in for is a
 old-vocabulary labels or `Blocked by:` footers the migration criteria are about. Sort
 each criterion by which of the two it actually needs:
 
-- **Task 7 — dispatch only, and runnable on `bestdan/dotfiles` today.** Its own entry
-  says what is untested is "only the handler dispatch"; the script was already verified
-  against the live API. Task 7 shipped in **v2.19.0**, so the installed plugin already
-  carries it — unlike task 8's check, this one is not waiting on a release. Cheapest
-  outstanding item on this list.
+- **Task 7 — RUN 2026-09-04 against `bestdan/dotfiles`. Dispatch passes.** Config →
+  `gh-issue` → `gh-issue-reconcile.md` → the script → its report; every step followable
+  as written, and the handler's own arguments (label scope from config, `--project`
+  unsupported, dry-run default) behaved as documented.
+  **One gap left, and it is small:** the session's cwd was `workflow-skills`, so the
+  config was resolved against `$HOME/src/dotfiles` explicitly rather than through
+  `git rev-parse --show-toplevel`. Everything downstream of that one line was the real
+  path. A session launched **in** a gh-issue repo closes it.
+  **It also found a defect** — row 3's unprovisioned-rung blind spot, in the blocker
+  list below. That is the check earning its keep: it was sitting on this list looking
+  blocked when it was runnable, and free.
 - **Task 4 — dispatch, and runnable on `bestdan/dotfiles` today.** Two `/do-tasks`
   sessions against the same ready issue, confirming exactly one proceeds. Needs an issue
   at `status:2_ready` on that board and two concurrent sessions; the racing is the point,
