@@ -808,7 +808,16 @@ each session loudly on its own issue.
    branch, `branch_prefix`, and `wip_limit`. The **scripts** are a different case —
    the gate above means the plugin is installed, so have the session call them at
    **`$CLAUDE_PLUGIN_ROOT`**, never by the repo-relative path this file uses (that
-   spelling resolves only when the cwd is the plugin's own repo). **Never** inline a token or any other secret —
+   spelling resolves only when the cwd is the plugin's own repo).
+
+   **Rewrite the paths as you inline, and check the inlined text before you
+   dispatch.** `gh-issue-claim.md` spells every asset call
+   `python3 commands/handlers/assets/…`, so copying its steps verbatim carries that
+   spelling into the prompt and the session's first script call fails — after the
+   self-check has passed, since the self-check probes `$CLAUDE_PLUGIN_ROOT` and the
+   copied call does not. Each becomes
+   `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. No
+   `commands/handlers/assets/` string may survive in the dispatched prompt. **Never** inline a token or any other secret —
    the dispatched session authenticates through its own `gh`. That is also what
    step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
    must authenticate as the **dispatching** account or their claims never enter the
@@ -901,6 +910,19 @@ each session loudly on its own issue.
    longer end in an empty ref that makes the issue skipped forever, and a ref left
    after the push is accompanied by finished work and an open PR that pre-flight
    reports rather than a silent forever-skip.
+
+   **What neither lock fixes: the board markers.** A session that claims and then
+   dies before opening a PR leaves the issue assigned and on `status:3_started`
+   with nothing to show, and the candidate query excludes it on **both** counts
+   (`no:assignee` and `status:2_ready`), so no later run picks it up. That is the
+   handler's own failure mode, identical on the ref path and the election path — a
+   crashed **local** claim strands an issue exactly the same way — so it argues for
+   neither lock and is **not** repaired here. Do not read "the election's orphans
+   are self-healing" as covering it: `claim-lock.md`'s self-healing is about stale
+   claim **comments** losing later elections, not about the board. Batch multiplies
+   the exposure by dispatching N unattended sessions, which is worth knowing before
+   turning `remote_batch` on; recovering such an issue is a human `gh issue edit`
+   today, and a sweep for it has no owner.
 7. **What guards the race — and what does not.** Two dispatched sessions never
    contend: step 5 pins each to a distinct issue number and none falls back to
    another issue, which is why the batch needs no equivalent of repo-pr's draft
