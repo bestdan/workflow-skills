@@ -380,6 +380,28 @@ class ProvisioningTests(ReconcileTestCase):
         # are the entire API cost of the row.
         self.assertEqual(repo.event_reads(), [])
 
+    def test_the_json_does_not_claim_the_closed_issues_were_checked(self):
+        """The key name is the claim, so the printed verb alone is not enough.
+
+        A machine consumer reads `checked`, never the report, and would get the
+        same wrong answer the report used to give.
+        """
+        repo = FakeRepo(
+            closed_issues={1: [], 2: []},
+            events={1: [], 2: []},
+            repo_labels=[n for n in FULL_VOCABULARY if n != REVIEW],
+        )
+        checked = self._compute(repo)["checked"]
+
+        self.assertEqual(checked["closed"], 2)
+        self.assertEqual(checked["closed_examined"], 0)
+
+    def test_a_provisioned_rung_examines_every_closed_issue_it_listed(self):
+        repo = FakeRepo(closed_issues={1: [], 2: []}, events={1: [], 2: []})
+        checked = self._compute(repo)["checked"]
+
+        self.assertEqual(checked["closed_examined"], checked["closed"])
+
     def test_the_void_row_says_so_rather_than_reading_as_a_clean_board(self):
         without_review = [n for n in FULL_VOCABULARY if n != REVIEW]
         repo = FakeRepo(

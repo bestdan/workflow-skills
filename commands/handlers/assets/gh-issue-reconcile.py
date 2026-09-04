@@ -388,7 +388,16 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
         "labels_file": str(labels_file),
         "scope_labels": list(scope_labels),
         "limit": limit,
-        "checked": {"open": len(open_issues), "closed": len(closed_issues)},
+        # `closed` is the window rule 3 was given; `closed_examined` is how many
+        # it actually read. They differ exactly when the row is void, and the
+        # split is in the JSON rather than only in the printed verb because the
+        # key name IS the claim — a consumer reading "checked" got the same wrong
+        # answer the report used to give.
+        "checked": {
+            "open": len(open_issues),
+            "closed": len(closed_issues),
+            "closed_examined": len(closed_issues) if review_provisioned else 0,
+        },
         # Provisioning is reported, not just consumed: a row that went quiet
         # because its premise was void must say so, or the reader reads a clean
         # section as a clean board.
@@ -433,7 +442,9 @@ def report(result):
     # "listed" rather than "checked" when rule 3 is void: the closed issues were
     # read into the window but nothing examined them. The count stays, because it
     # is the only signal of how much the provisioning gap is costing.
-    closed_verb = "checked" if result["review_label_provisioned"] else "listed"
+    closed_verb = (
+        "checked" if checked["closed_examined"] == checked["closed"] else "listed"
+    )
     print(
         f"{result['repo']}: checked {checked['open']} open and "
         f"{closed_verb} {checked['closed']} closed issue(s), "
