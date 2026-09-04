@@ -628,6 +628,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .md-table th,.md-table td{border:1px solid var(--border);padding:4px 9px;text-align:left}
 .md-table th{background:var(--surface2)}
 .md-link{color:var(--accent)}
+.md-inertlink{color:var(--accent);text-decoration:none}
 .md-deadlink{color:var(--del-num);text-decoration:line-through}
 .md-title,.md-img,.md-def{color:var(--dim);font-family:var(--mono);font-size:.85em}
 .md-raw{display:block;font-family:var(--mono);font-size:.85em;color:var(--dim);
@@ -1056,6 +1057,16 @@ function safeHref(raw){
   return ['http:','https:','mailto:'].indexOf(u.protocol) === -1 ? null : u.href;
 }
 
+// Not a security gate — safeHref is. This only splits an already-rejected
+// href into the two that read differently: one that wanted to be absolute
+// (a scheme, or protocol-relative) is struck through, and a plain relative
+// path is left inert but normal, so an internal link does not read as an
+// attack. The regexes look alike; they answer different questions.
+function hostileHref(raw){
+  const s = String(raw == null ? '' : raw).trim();
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(s);
+}
+
 // Frontmatter is not YAML-parsed: split on the first colon, keep an ARRAY of
 // pairs (a plain object would take a __proto__ key straight into prototype
 // pollution), and render both halves as text. An unterminated opener is not
@@ -1118,8 +1129,10 @@ function describeInline(toks, depth){
         // A rejected link is not silently dropped: the reviewer sees the text
         // and the URL it pointed at, as inert text.
         if(!href){
-          out.push(node('span', {attrs:{class:'md-deadlink'}, kids:
-            kids.concat([textNode(' <' + String(t.href) + '>')])}));
+          const rejected = kids.concat([textNode(' <' + String(t.href) + '>')]);
+          out.push(hostileHref(t.href)
+            ? node('span', {attrs:{class:'md-deadlink'}, kids:rejected})
+            : node('span', {attrs:{class:'md-inertlink'}, kids:rejected}));
         }else{
           out.push(node('a', {attrs: {href, class: 'md-link'}, kids}));
         }
