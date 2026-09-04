@@ -595,8 +595,10 @@ capability is actually visible — inside the remote session** — via two concr
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — the VM has no plugin installed **and** a fresh clone has no
-   local task config (`/task-config` gitignores `dev_docs/tasks/` by default) — so
+   **self-contained** — the VM has no plugin **unless the repo declares one in a
+   committed `.claude/settings.json`** (see §4's gate; unprobed), **and** a fresh
+   clone has no local task config (`/task-config` gitignores `dev_docs/tasks/` by
+   default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
@@ -684,14 +686,27 @@ Linear's terms: it caps the batch at **1** and runs that single highest-ranked
 issue foreground — through `gh-issue-claim.md`'s default flow here, **not** §3's
 "Claim and execute".
 
-**First, the deterministic opt-out.** If `gh-issue.remote_batch` is `false` in
-`.task-config.yml`, do **not** dispatch: degrade `--all` / `-n N` to a single
+**First, the gate — and it is off by default.** `gh-issue.remote_batch` defaults
+to **`false`**, unlike `linear.remote_batch`, which defaults to `true`. Unless a
+repo sets it to `true`, do **not** dispatch: degrade `--all` / `-n N` to a single
 foreground claim through `gh-issue-claim.md`'s default flow and note `remote batch
-disabled — claiming one issue`. Absent or `true` → run the steps below, each dispatched session
-self-checking for `gh` (step 5). This is the deterministic half of the same
-availability question step 5's self-check answers at runtime, and it is read here so
-a host that has opted out never ranks, counts, or resolves dependencies first.
-It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
+disabled — claiming one issue`. Read this **before** step 1, so a host that has not
+opted in never ranks, counts, or resolves dependencies first.
+
+**Why the default differs from Linear's.** Linear's remote flow is MCP tool calls
+and prose, both of which inline into a dispatch prompt. This handler's deterministic
+steps are **scripts that ship in the plugin** — every label write goes through
+`gh-issue-state.py` — so a dispatched session needs the plugin itself, not just the
+prompt. A cloud session does get a plugin the repo declares in a **committed
+`.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`), which is
+what makes `true` safe; user-level plugin settings do **not** travel. **That
+mechanism is documented and has not been probed here**, and this repo's own record
+says to probe routine behaviour rather than read it
+(`dev_docs/decisions/2026-08-24-routine-claim-channel.md` — "wrong twice" that way).
+An unprobed mechanism is not a basis for dispatching N sessions by default, so the
+flag is opt-in until someone runs the probe and records it beside that file. Setting
+`true` without the declaration is not silently broken — step 5's self-check stops
+each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
 > the contract.** Do not re-derive a candidate query, an in-flight count, or a
@@ -773,13 +788,16 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    reports it**. It must never advance to another candidate, which would put two
    dispatched sessions on one issue.
 
-   The prompt must be **self-contained** — the VM has no plugin installed **and** a
-   fresh clone has no local task config (`/task-config` gitignores
-   `dev_docs/tasks/`). Inline the issue number, the claim+execute instructions
-   themselves (**not** a pointer to `gh-issue-claim.md` or `claim-lock.md`, which
-   the VM cannot read), and the already-resolved **non-secret** gh-issue config the
-   single-issue flow needs: `gh-issue.repo` if set, the base branch,
-   `branch_prefix`, and `wip_limit`. **Never** inline a token or any other secret —
+   The prompt must be **self-contained** — a fresh clone has no local task config
+   (`/task-config` gitignores `dev_docs/tasks/`), and the handler's **prose** files
+   are plugin files the prompt should carry rather than cite. Inline the issue
+   number, the claim+execute instructions themselves (**not** a pointer to
+   `gh-issue-claim.md` or `claim-lock.md`), and the already-resolved **non-secret**
+   gh-issue config the single-issue flow needs: `gh-issue.repo` if set, the base
+   branch, `branch_prefix`, and `wip_limit`. The **scripts** are a different case —
+   the gate above means the plugin is installed, so have the session call them at
+   **`$CLAUDE_PLUGIN_ROOT`**, never by the repo-relative path this file uses (that
+   spelling resolves only when the cwd is the plugin's own repo). **Never** inline a token or any other secret —
    the dispatched session authenticates through its own `gh`. That is also what
    step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
    must authenticate as the **dispatching** account or their claims never enter the
@@ -802,8 +820,8 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    property `claim-lock.md` depends on.
 
    **Self-check first, on two things.** The prompt's first step must be: "If
-   `gh auth status` fails, or the handler's asset scripts are not present at
-   `commands/handlers/assets/` (`gh-issue-state.py` and `_labels.py` at minimum),
+   `gh auth status` fails, or
+   `$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-state.py` is not present,
    do **not** claim — stop immediately and report `remote gh CLI unavailable` or
    `remote handler assets unavailable`." Both are necessary and `gh` alone is not
    sufficient: every phase of this handler shells out to `gh`, **and** the label
@@ -813,16 +831,19 @@ It mirrors `linear.remote_batch` (section 3, "Optional deterministic opt-out").
    issue" step 3 warns about — assigned and lock-held but still `status:2_ready`,
    which nothing picks up and nothing cleans.
 
-   **This is the handler's local-only limitation reaching the batch path, and the
-   self-check is the whole answer to it.** Every gh-issue asset shells out to `gh`
-   and lives in the plugin, which a dispatched VM does not have; the plan's own
-   note that "the whole handler is local-only" is what this inherits. Rather than
-   gate dispatch on an un-introspectable pre-check — section 3's reason, unchanged
-   — put the check where the capability is visible and let a fleet that lacks the
-   assets fail **loudly on one issue** instead of silently claiming and stranding
-   it. A host that already knows its VMs cannot run the handler should set
-   `remote_batch: false` (read **before** step 1 above) and never dispatch at all;
-   that is the deterministic half of this same question.
+   **This is the backstop for the gate, and it is why an unprobed gate is still
+   safe to offer.** The gate reads a declaration; the self-check reads the VM. If
+   the declaration is there but the install did not happen — a marketplace the
+   session's network could not reach, say — every dispatched session stops on its
+   own issue and says so, rather than claiming work it cannot write back. Keeping
+   the check inside the session is section 3's rule for the same reason: what the
+   VM actually inherits is visible there and nowhere else.
+
+   **Refuse remote dispatch when `gh-issue.repo` is not the session's own repo.** A
+   cloud session's `gh` reaches only the repositories attached to it, so a batch
+   whose tracker is a different repo from the code would have every session fail at
+   its first write. Check it here and degrade to the foreground claim with
+   `remote batch needs gh-issue.repo to be this repo — claiming one issue`.
 
    **Declare the session unattended.** Inline `--non-interactive` semantics
    verbatim: "No human is present in this session — never prompt; if the WIP gate is

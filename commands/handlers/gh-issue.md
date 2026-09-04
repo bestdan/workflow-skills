@@ -10,10 +10,11 @@ gh-issue:
   repo: owner/name # optional; defaults to the current repo
   labels: [follow-up] # optional; each is created if missing
   assignees: [] # optional GitHub usernames
-  remote_batch: true # optional; true/absent → /do-tasks --all dispatches one remote
-  # session per issue (each self-checks for `gh`). false → --all degrades to a single
-  # foreground claim. The deterministic opt-out for a host whose VMs have no `gh` —
-  # same role as `linear.remote_batch`. See commands/do-tasks.md §4 "gh-issue batch".
+  remote_batch: false # optional, DEFAULT false (unlike linear.remote_batch, which
+  # defaults true). true → /do-tasks --all dispatches one cloud session per issue.
+  # Safe only where the repo declares this plugin in a committed .claude/settings.json,
+  # since the handler's label writes run a plugin script — a mechanism that is
+  # documented but not yet probed. See commands/do-tasks.md §4 "gh-issue batch".
   max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
   # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`
   # (see commands/handlers/linear-common.md "Config block"). gh-issue has no per-project
