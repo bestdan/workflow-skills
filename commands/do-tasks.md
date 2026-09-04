@@ -777,8 +777,19 @@ each session loudly on its own issue.
      selected), the pre-claim WIP gate (step 2's `slack` bounds the whole batch,
      and dispatching at most `slack` sessions leaves every one of them strictly
      under `wip_limit` however they interleave), and dependency readiness (step 3,
-     moments earlier). Each needs a plugin asset the VM does not have, and each is
-     already answered.
+     moments earlier). Each is already answered, and each would otherwise cost the
+     session a plugin asset it may not have.
+
+     **Say what this costs: `slack` becomes the only WIP bound, measured once.**
+     The session-side gate was redundant against _this_ batch's own dispatches —
+     that is the arithmetic above — but not against anything else claiming in the
+     meantime: a local `/do-tasks`, a human assigning by hand, another batch run.
+     Re-running it in the session would have caught those late, and now nothing
+     does. The bound is therefore a **dispatcher-side best effort taken at one
+     instant**, not a guarantee the repo stays under `wip_limit`. Accepted at
+     single-operator scale, and the same acceptance section 3 already makes for
+     concurrent batch runs; a repo that needs a hard bound should be claiming from
+     one session.
    - **Run in the session** — pre-flight (plain `git ls-remote` and `gh pr list`),
      the claim election (plain `gh` comment calls), execute, `gh pr create`, and
      the two label writes.
