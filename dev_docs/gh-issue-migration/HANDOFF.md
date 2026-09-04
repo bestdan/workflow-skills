@@ -193,25 +193,28 @@ Full evidence in
   `python3 …/gh-label-sync.py --repo <repo>` prints a board's gap for free. One
   `gh label list` is the whole cost, which is why the reconciler now makes that call
   itself before any per-issue work.
-- **`bestdan/dotfiles` is the only live under-provisioned board, and it is deliberately
-  still under-provisioned.** It is missing 12 of the 17 vocabulary labels
-  (`status:3_started`, `status:4_needs_review`, every `prio:` and every `est:`) and is
-  half-migrated besides. That inventory is live state and will drift, so **do not trust
-  this sentence, run the dry run.** Both are filed on that repo's own tracker
-  ([#675](https://github.com/bestdan/dotfiles/issues/675) provisions,
-  [#676](https://github.com/bestdan/dotfiles/issues/676) migrates, natively linked) —
-  they are that repo's work, not this plan's. **When #675 lands, the reproduction is
-  gone**: anything testing under-provisioned behaviour then needs a fixture. Task 17's
-  hermetic tests are that fixture, and they are the model to copy.
-- **Provisioning a rung moves the noise rather than ending it, so expect #675 to be
-  followed by a burst of row-3 findings — that is not a regression.** Every issue that
-  closed before the rung existed still has no `labeled` event for it, so the first
-  reconciler run after #675 flags exactly the issues task 17 taught it to suppress.
-  Answering that needs a rollout boundary — evidence the rung was assignable when each
-  issue closed — which is per-repo state this plan would then own and keep in step. Task
-  17 documented it in `gh-issue-reconcile.py`'s docstring and deliberately did not build
-  it. **Read that first post-provisioning run as a backlog, not as drift**, and do not
-  file it as a task-17 defect.
+- **There is no longer a live under-provisioned board.**
+  [dotfiles#675](https://github.com/bestdan/dotfiles/issues/675) landed 2026-09-04 and
+  provisioned all 12 missing labels on `bestdan/dotfiles`; a re-run reports no changes,
+  and the 20 unknown labels were left untouched as the script promises. **Anything
+  testing under-provisioned behaviour now needs a fixture** — task 17's hermetic tests
+  are that fixture and are the model to copy. The sibling migration
+  ([#676](https://github.com/bestdan/dotfiles/issues/676), which rewrites issues onto
+  `prio:`/`est:` and retires `priority:*`) is unblocked by that landing and is still that
+  repo's work, not this plan's.
+- **Provisioning a rung moves the row-3 noise rather than ending it. Measured, not
+  predicted.** Immediately after #675, `/reconcile-tasks` against `bestdan/dotfiles`
+  reports **50 of 50** closed issues again — the same count as before task 17, now
+  through a row that is running correctly rather than one whose premise was void. Every
+  issue that closed before the rung existed still has no `labeled` event for it, so
+  those findings are the pre-rollout **backlog**. Answering it needs a rollout boundary —
+  evidence the rung was assignable when each issue closed — which is per-repo state this
+  plan would then own and keep in step; task 17 documented that in
+  `gh-issue-reconcile.py`'s docstring and deliberately did not build it. **Do not file
+  this as a task-17 defect, and do not re-open the blind spot it fixed.** The two are
+  different: the defect was a row answering with total confidence from a void premise,
+  and it shipped fixed in **v2.21.1**. What is left is a real backlog that a human should
+  read once and dismiss, or that a future rollout boundary would scope away.
 - **`gh-label-sync.py`'s `existing_labels()` now refuses above 500 labels rather than
   truncating.** Task 17 made the reconciler conclude ABSENCE from that list, and a
   silently truncated read would suppress findings under a confident VOID line. Both
