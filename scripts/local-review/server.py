@@ -628,6 +628,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .md-table th,.md-table td{border:1px solid var(--border);padding:4px 9px;text-align:left}
 .md-table th{background:var(--surface2)}
 .md-link{color:var(--accent)}
+.md-inertlink{color:var(--accent);text-decoration:none}
 .md-deadlink{color:var(--del-num);text-decoration:line-through}
 .md-title,.md-img,.md-def{color:var(--dim);font-family:var(--mono);font-size:.85em}
 .md-raw{display:block;font-family:var(--mono);font-size:.85em;color:var(--dim);
@@ -1126,7 +1127,7 @@ function describeInline(toks, depth){
           const rejected = kids.concat([textNode(' <' + String(t.href) + '>')]);
           out.push(hostileHref(t.href)
             ? node('span', {attrs:{class:'md-deadlink'}, kids:rejected})
-            : node('span', {kids:rejected}));
+            : node('span', {attrs:{class:'md-inertlink'}, kids:rejected}));
         }else{
           out.push(node('a', {attrs: {href, class: 'md-link'}, kids}));
         }

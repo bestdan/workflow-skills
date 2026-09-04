@@ -2928,7 +2928,7 @@ console.log(JSON.stringify(out));
                   len(_o["hrefs"]) == 2, _o["hrefs"])
             check("preview: relative links stay inert with normal styling",
                   len(_o["relativeLinkShape"]) == 3
-                  and all(x["tag"] == "span" and x["class"] == "" for x in _o["relativeLinkShape"]),
+                  and all(x["tag"] == "span" and x["class"] == "md-inertlink" for x in _o["relativeLinkShape"]),
                   _o["relativeLinkShape"])
             check("preview: hostile links keep rejected styling",
                   len(_o["hostileLinkShape"]) == 1
