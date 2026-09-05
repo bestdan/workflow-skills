@@ -6,7 +6,7 @@
 
 Switching from the most expensive option saves up to $429.60 annually under current usage assumptions.
 
-The lead over the runner-up (Nimbus Cloud) is decisive: $313.20/year, or 12.5%. The word "decisive" is computed in `model.py` against a stated threshold, so re-pricing changes it along with the figures.
+The lead over the runner-up (Nimbus Cloud) is decisive[^margin]: $313.20/year, or 12.5%.
 
 ---
 
@@ -41,3 +41,5 @@ Costs computed from `model.py` using usage assumptions below. Re-run the model i
 - Nimbus Cloud: nimbus.io/pricing (checked 2026-03-29)
 - Stratus Hosting: stratus.io/plans (checked 2026-03-29)
 - CumuloStack: cumulostack.com/pricing (checked 2026-03-29)
+
+[^margin]: "decisive" is computed in `model.py`, not written by hand — it compares the margin against the decisive-margin threshold above. Re-pricing changes the word along with the figures.
