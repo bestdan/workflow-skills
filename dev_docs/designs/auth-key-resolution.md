@@ -19,11 +19,12 @@ That single mechanism is both too narrow and silently failing:
   `opx` (a personal wrapper that forces an approval dialog per read and invalidates the
   session afterwards), `pass`, Vault, or a plain exported variable. Only the first two
   work.
-- **Silently failing.** This repo's own gitignored `.task-config.local.yml` carried
-  `api_key_ref: opx op://<vault>/<item>/<field>`, which resolves as
-  `op read "opx op://…"` and fails. A malformed ref fails in exactly the same shape as a
-  correctly-keyless host, so every Linear fast path here has been flooring to the MCP
-  path unnoticed. Tracked on the local card
+- **Silently failing.** This repo's own gitignored `.task-config.local.yml` carried an
+  `api_key_ref` whose value was prefixed with `opx` — the prefix is the defect, and the
+  reference itself is redacted here. It resolves as `op read "opx op://…"` and fails. A
+  malformed ref fails in exactly the same shape as a correctly-keyless host, so every
+  Linear fast path here has been flooring to the MCP path unnoticed. Tracked on the
+  local card
   `dev_docs/tasks/linear-fastpath-key-never-resolves-from-config.md` (gitignored — a
   card to close, not a file any PR touches).
 
@@ -265,7 +266,7 @@ handling. Two behaviors it adds that do not exist today:
   each hard-code their own precedence chain and call `op read` directly, so a non-`op`
   resolver makes them skip while the scripts themselves work. Their config scrape is also
   already broken for spaced refs — the sed in `test-linear-scan-live.sh:77` matches
-  `[^#[:space:]]*` and truncates `op://Private/PreThink Linear/…` at the space. Both get
+  `[^#[:space:]]*` and truncates `op://TestVault/Item With Spaces/…` at the space. Both get
   fixed by routing them through `--probe` / the helper.
 
 ## Delivery

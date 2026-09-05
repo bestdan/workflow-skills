@@ -178,8 +178,8 @@ class ResolveKeyTests(unittest.TestCase):
             self.assertEqual(ctx.exception.category, "unconfigured")
 
     def test_full_ref_never_in_error_message(self):
-        secret = "dan_local_key"
-        ref = f"op://Private/PreThink Linear/{secret}"
+        secret = "synthetic_field_token"
+        ref = f"op://TestVault/Item With Spaces/{secret}"
         cases = []
 
         write_stub(self.bin_dir, "op", "#!/bin/sh\necho 'access denied' 1>&2; exit 1\n")

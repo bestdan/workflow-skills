@@ -34,8 +34,8 @@ LOCAL_CONFIG="$ROOT/dev_docs/tasks/.task-config.local.yml" # gitignored personal
 # Values may contain internal spaces — 1Password item titles routinely do — so
 # this only strips a trailing ` # comment` and a matching pair of surrounding
 # quotes; it never truncates at the first space the way a `[^[:space:]]*`
-# capture would (that bug used to silently chop `op://Private/PreThink Linear/…`
-# down to `op://Private/PreThink`).
+# capture would (that bug used to silently chop `op://TestVault/Item With Spaces/…`
+# down to `op://TestVault/Item`).
 yaml_leaf() {
   local file="$1" key="$2" val
   [ -f "$file" ] || return 1
