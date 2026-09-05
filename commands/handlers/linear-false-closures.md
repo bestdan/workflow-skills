@@ -46,12 +46,28 @@ frequently does not embed the Linear id and branch matching alone would miss
 delivered work. The sub-issue signal covers parents that were closed once their
 child slices delivered (with no branch or PR of their own).
 
-**Archived issues are trusted, by design.** Archival is a deeper-vetting gate —
-an issue is only archived after it has been reviewed and confirmed correctly
-closed. The query therefore does not pass `includeArchived`: an archived
-completion is settled, not a candidate. This is not a coverage gap. The backstop
-targets exactly the window where the over-close bug is still unreviewed — live
-completed issues — and leaves the vetted archive alone.
+**Archived issues are out of scope, and the reason is ordering — not review.**
+The query does not pass `includeArchived`, so the scan sees only live completed
+issues. What makes that safe is that a false closure is scanned **while it is
+still live**, before anything archives it. It is not that archival implies
+anyone looked: archival is a pure age threshold on both paths that reach it —
+Linear's own team setting (a minimum of one month, unreviewed) and
+`/archive-tasks --older-than N`, which retires terminal-state issues by
+`completedAt` alone and asserts nothing about their correctness.
+
+So the omission is sound only under a caller that runs detection **before**
+archive, with a detection window wider than the archive threshold.
+`/sweep-for-archive` guarantees exactly that by construction — it chains
+`/find-false-closures` → `/sweep-for-complete` → `/archive-tasks` and carries
+the verified id set between them. A scheduled pipeline must reproduce the same
+ordering.
+
+**The residual gap is any archive that runs without detection first** — a bare
+`/archive-tasks` sweep, a standalone archive cron, or a night detection was
+skipped while archive still ran. An issue falsely closed and then archived that
+way is invisible here, and cannot be repaired even once found: the `--apply`
+path has no `issueUnarchive` step. That window is narrow rather than
+theoretical, and it is the thing to close if this backstop ever needs widening.
 
 ## Invoked from `/find-false-closures`
 
