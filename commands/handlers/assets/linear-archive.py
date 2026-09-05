@@ -36,7 +36,16 @@ Usage:
   python3 linear-archive.py --team PreThink --older-than 10
   python3 linear-archive.py --team PreThink --older-than 10 --apply
   python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --apply
+  python3 linear-archive.py --team PreThink --older-than 30 \
+    --project <uuid-1> --project <uuid-2> --apply
   python3 linear-archive.py --team PreThink --issues PRE-12,PRE-13 --apply
+
+--project is repeatable. No --project sweeps the whole team (unchanged
+default); one or more scope the sweep to exactly those projects, looping the
+query once per id and unioning the results (deduped by issue id) — this is how
+a caller resolves `linear.projects` from `.task-config.yml` (see
+linear-archive.md §3 "Resolve configured projects") into a scope this
+script understands, without the script itself reading any config.
 """
 
 import argparse
@@ -289,17 +298,31 @@ def find_by_ref(key, team, identifiers, uuids):
 
 
 def collect_aged(key, args):
-    """Age-threshold sweep: every terminal state, older than the cutoff."""
+    """Age-threshold sweep: every terminal state, older than the cutoff.
+
+    --project may be repeated to scope the sweep to several projects — the
+    query loops once per id and the results are unioned, deduped by issue id
+    (an issue could otherwise appear twice if scopes ever overlapped). No
+    --project sweeps the whole team, unchanged.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
+    projects = args.project or [None]
+    seen = set()
     candidates = []
-    for state_type, ts_field in terminal_passes():
-        for issue in find(key, args.team, args.project, state_type, ts_field, cutoff):
-            issue["_when"] = (issue.get(ts_field) or "")[:10]
-            candidates.append(issue)
+    for project in projects:
+        for state_type, ts_field in terminal_passes():
+            for issue in find(key, args.team, project, state_type, ts_field, cutoff):
+                if issue["id"] in seen:
+                    continue
+                seen.add(issue["id"])
+                issue["_when"] = (issue.get(ts_field) or "")[:10]
+                candidates.append(issue)
 
-    scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
+    scope = f"team={args.team}" + (
+        f", projects={','.join(args.project)}" if args.project else ""
+    )
     print(f"Cutoff: {cutoff}  ({scope}, Done + Canceled + Duplicate)\n")
     return candidates
 
@@ -378,7 +401,13 @@ def main():
         "age. Comma-separated and/or repeated. Ignores --older-than/--project.",
     )
     ap.add_argument(
-        "--project", default=None, help="Optional project UUID to scope to."
+        "--project",
+        action="append",
+        default=[],
+        metavar="UUID",
+        help="Project UUID to scope to. Repeatable — one per configured "
+        "project; the sweep loops per id and unions the results. Omit for "
+        "the whole team.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."
