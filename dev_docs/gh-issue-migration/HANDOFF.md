@@ -1,0 +1,348 @@
+# Handoff — migrating the task loop from Linear to GitHub Issues
+
+**Redrafted 2026-09-05 after the cloud-session probe.** Read this first, then
+[`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
+[`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
+(the measured record).
+
+## Redraft this file when you finish — read this before you start
+
+**Finishing a task includes rewriting this file for the agent who picks up the next
+one.** Rewrite, not append. Land it in the same unit of work as the task — a follow-up
+is how it got skipped before. The plan docs live on this branch (draft PR #441) while a
+task's own code goes to a fresh branch off `main`, so "the same PR" is not literally
+available; land both before you call the task done.
+
+The distinction is the whole rule. Patching adds your paragraph and leaves the previous
+five in place, and the file becomes a changelog: a record of what was done, in the order
+it was done, which is the one thing the next agent does not need. **They need what is
+true now and what will bite them.** Git history and the PR record already hold the
+narrative, and hold it better.
+
+So each time: read this file as if you were the next agent, and rewrite what you find.
+
+**What survives a redraft** — anything still operative:
+
+- Which task is next, and what blocks it.
+- Facts that were **measured**, that later tasks rest on. Keep the fact and a link to
+  where it was measured; never copy the evidence, which rots with no invalidation.
+- Conventions and limitations that will trip the next agent.
+- Open questions, and who owns them.
+
+**What goes** — anything whose job is finished:
+
+- Per-task narratives of completed work. "Task N — PR #x, merged `<sha>`" belongs in the
+  plan's task list, once, not here.
+- Reasoning that has since been settled, or superseded by a measurement.
+- Anything the next agent would read and then have to work out no longer applies.
+
+**Two things to carry across that are easy to lose in a rewrite:**
+
+1. **What you settled that OTHER tasks rest on.** The test: did you measure something
+   that makes a sentence elsewhere in this plan false? If so, amend that sentence where
+   it lives, not only here.
+2. **Where you deviated from the task file, and why.** An undocumented deviation reads
+   as a mistake later.
+
+Also retire the finished task in the two places that drift independently of this file:
+its own `status:` frontmatter and its plan-list entry. And anything you learned that is
+not a task goes to the tracker, not here.
+
+**Do not leave an untracked launcher doc behind.** The pointer that starts a session is
+ephemeral — paste it and let it go. Three `.dev_docs/task_N_handoff.md` files had
+accumulated by task 6, each a stale copy of plan content telling a fresh session to
+begin already-merged work, none with any git history to recover from.
+
+If your redraft looks like the previous version with a paragraph added, you patched it.
+
+## Where this lives, and why it is not on main
+
+This plan used to live under `dev_docs/tasks/gh_migration_plan/`, which `.gitignore:31`
+excludes — so it existed in exactly one git worktree, uncommitted, with no history and no
+remote. It is now committed under `dev_docs/gh-issue-migration/`, per the `.gitignore`
+comment block's own advice: "Prefer graduating durable wisdom to a top-level
+`dev_docs/<name>.md` (never ignored) over keeping it here."
+
+It is still on **draft PR #441**, not on `main`. Do the migration's own work in a fresh
+worktree off `main`; edit these plan docs on this branch.
+
+**Decision records are the exception — they go on `main`**, beside
+`dev_docs/decisions/2026-08-24-routine-claim-channel.md`, because runtime prose under
+`commands/` links to them. The 2026-09-05 record below shipped on `main` in PR #490, not
+here; this branch's links to it resolve once that merges.
+
+## Where things stand
+
+**No task is available to start.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed
+and has no task file. Task 13 is postponed, which **holds all of Phase 4** — so the only
+unclaimed work in this plan is task 12, and it gates nothing anyone is waiting on.
+
+**The cloud-session probe is done and it came back red.** It was the last thing gating
+`gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
+not re-run it, and do not re-derive it from documentation.
+
+**Three user-run checks are unblocked and cheap.** None is a task; all are acceptance
+criteria sitting on already-merged work. See "Acceptance criteria still owed".
+
+## What will bite you
+
+### A cloud session gives a gh-issue batch neither the plugin nor a usable `gh`
+
+**Measured 2026-09-05**, full evidence in
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+(on `main` via PR #490). Probed against `bestdan/dotfiles`, deliberately not this repo.
+
+- **A committed `.claude/settings.json` does NOT install the plugin.** The declaration
+  (`extraKnownMarketplaces` + `enabledPlugins`) was present and correct on the cloned
+  HEAD; `claude plugin list` reported none installed and `$CLAUDE_PLUGIN_ROOT` was
+  empty. The documentation says otherwise. The documentation is wrong here.
+  **The two halves failed differently, which narrows the fix**: after a manual
+  `claude plugin marketplace add`, the next session start showed a **`Scope: project`**
+  entry, which can only come from the committed file. So `enabledPlugins` is honoured
+  once a marketplace exists; it is `extraKnownMarketplaces` that a cold session did not
+  act on. Observed sequence, not a diagnosed cause — no second cold session was run.
+- **`gh` is installed and uncredentialed.** `GH_TOKEN=proxy-injected`, `gh auth status`
+  fails, and every `gh api` call 403s — the **read** as well as the write, so it is not
+  a method restriction.
+- **The GitHub MCP connector is still the credentialed channel**, and it **can** do the
+  label write (`mcp__github__issue_write`, full-set replacement, same as REST). Same
+  channel the 2026-08-24 routine probe found.
+- **Nothing is blocked by network or proxy scoping.** `claude plugin marketplace add`
+  plus `claude plugin install`, run **inside** the session, worked — cloning the
+  unattached public marketplace repo over plain HTTPS.
+
+Two things this deliberately does **not** settle, and the record says so: whether the
+`gh` 403 is proxy policy or a missing Claude GitHub App connection on this account
+(untried), and whether a cloud-environment **setup script** installing the plugin at
+session start would close the gap (plausible, unmeasured, and a per-environment setting
+rather than something a repo can commit).
+
+Consequences for the plan:
+
+- **`gh-issue.remote_batch` stays `false`; the capability matrix stays `opt`.** Task
+  16's acceptance criterion said flip it to `yes`. Do not — the premise that would have
+  justified flipping is now measured false rather than merely unprobed, which is a
+  stronger reason for the same default. **This deviation is now settled, not pending.**
+- **The handler's MCP branch is no longer optional-looking.** It is the only route to
+  a working dispatched session, since `gh` does not work there. It still owes the same
+  `labels.yml` validate-then-replace rule.
+- **`claim-lock.md` no longer claims a dispatched session "usually can" acquire the
+  ref.** PR #490 amended that sentence; the instruction (take the election) is unchanged.
+
+### What task 16 shipped that you will trip over
+
+- **A dispatched session claims on the comment election, never the ref lock**, and it
+  runs **two `git ls-remote` probes** the election itself does not contain — one before
+  the board write, one with the post-sleep re-list. Those probes are the only way a batch
+  session and a local ref-lock session detect each other; the elections cannot see each
+  other's primitive. `claim-lock.md` carries its own entry condition for this.
+- **The dispatcher discharges two gates, and deliberately not the third.** Candidate
+  selection and the pre-claim WIP gate happen dispatcher-side; the session runs
+  pre-flight, the claim, execute, PR, and the two label writes. The WIP gate is
+  discharged because it is **provably** redundant — at most `slack` sessions each
+  observe a count strictly under `wip_limit` however they interleave. **Dependency
+  readiness is re-run in the session** before claiming: a blocker can reopen between
+  selection and claim, and no arithmetic makes that recheck redundant. The distinction is
+  the point — "the dispatcher just asked" is not a reason to skip a gate; only
+  provable redundancy is. The cost of the one real discharge: `slack` is a one-instant,
+  dispatcher-side bound rather than a guarantee, because nothing re-checks WIP after
+  dispatch.
+- **Anything that derives a bound from a bounded query must check the query can see far
+  enough to answer.** A `wip_limit` above `count_wip`'s `--limit` (default 100) used to
+  read a truncated page as an under-limit count and manufacture slack. Found by the PR's
+  bot reviewer, not by the diff-only reviewer that passed it eighteen times.
+- **`--project` is `linear` only.**
+- **Asset calls take `$CLAUDE_PLUGIN_ROOT`.** `CONTRIBUTING.md` mandates it and most
+  handlers follow it; `gh-issue-claim.md` still spells its calls repo-relative, which
+  resolves only inside this plugin's own repo. That deviation is pre-existing and was
+  deliberately left alone — but anything **new** must use the mandated form, and anything
+  inlined into a dispatch prompt must be rewritten to it. Note the probe found
+  `$CLAUDE_PLUGIN_ROOT` **empty** in a cloud session, so the mandated form does not
+  rescue a dispatched session by itself.
+
+### The rest, unchanged and still true
+
+**The vocabulary migration is finished.** Every gh-issue verb speaks `labels.yml`; there
+is no bridge left. An old spelling (`auto-eligible`, `priority:*`) is a defect, not a
+migration in progress.
+
+**"Carrying a rung" means carrying one `labels.yml` defines** — never merely a label
+whose name starts with `status:` or `auto:`. The prefix reading is the trap: a hand-typed
+`status:blocked` satisfies it, so the issue reads as healthy while being in a state
+nothing can act on. Anything that asks "does this issue have a rung?" must ask the
+vocabulary.
+
+**A check must also ask whether the label it looks for is PROVISIONED.** Label namespaces
+are per-repo, so a rung the vocabulary defines may never have been created on the board —
+and then the check's question is unanswerable, not answered "no". Two consequences:
+
+- The **scope does not vouch for the labels.** A label scope separates loop issues from
+  strangers; it says nothing about provisioning.
+- **Guard by group, not by completeness.** A rung being _assignable_ still holds while
+  its group has any member provisioned; only an entirely empty group voids it. Decide
+  per check — a guard that is too wide silences a working row.
+
+**The `Blocked by:` footer is an echo of a native edge, never a dependency in itself.**
+Nothing may read a footer to decide blocked-ness, and nothing may write a footer for a
+dependency with no edge: write the edge, then echo it. The footer was **kept** against
+task 8's own acceptance criterion, because `/push-plan` and `/reoptimize-tasks` must not
+disagree about what a footer means — and that argument does **not** turn on PRE-823.
+
+**A scope this handler cannot honour, plus a write, is a refusal.** No initiative
+dimension and no project dimension. `/reconcile-tasks` stops on `--project` **with
+`--apply`** and continues at the default label scope without it; `/reoptimize-tasks`
+stops on an `initiative` scope outright; `/do-tasks` refuses `--project` on this handler.
+Continuing wider would answer a request to _narrow_ with a _wider_ run.
+
+## Do not re-derive these — they were measured, not read
+
+Full evidence in
+[`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md),
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+and §10b of the requirements record. **All are dated snapshots — read them as what was
+true then.**
+
+**Channels.** A routine's credentialed channel is the GitHub MCP connector, which has
+**no dependency-edge tool**, and it can acquire the claim ref
+(`mcp__github__create_branch`) but **cannot release** it. A cloud session's credentialed
+channel is the same connector, for a different reason — `gh` is present there but its
+token does not work. A **GitHub Actions runner** is a third channel and is the one that
+is not credential-starved: measured 2026-09-02 by task 6
+([PR #447](https://github.com/bestdan/workflow-skills/pull/447)), a runner has `gh` and
+its ambient `GITHUB_TOKEN` PATCHes labels with `permissions: issues: write`. **Do not
+read "unattended" as "cloud routine"** — a runner is unattended too. The token is
+repo-scoped, so a repo whose `gh-issue.repo` points elsewhere must not run the task-6
+backstop.
+
+**Writes.**
+
+- A label write **replaces** the whole set and **auto-creates** unknown names. Hence
+  validate-then-replace, always, before any network call. True on the REST path and on
+  the MCP connector alike.
+- The dependency POST body carries **`issue_id`, a database id**, not the issue number.
+  So does the removal DELETE, as its last path segment. Measured 2026-09-04 by task 8;
+  the removal is idempotent.
+- **GitHub refuses a directly reciprocal edge, and refuses nothing else.** `A blocked_by
+  B` when `B blocked_by A` exists returns **422**; `A -> B -> C -> A` built with no
+  complaint. Never read GitHub's guard as a guarantee of acyclicity, and a batch edge
+  write must survive a per-edge refusal rather than aborting with earlier edges written.
+- `blocked_by` is **paginated** — read it with `--paginate --slurp`. A bare read stops at
+  30, and an invisible edge is a cycle that reads as absent.
+
+**Reads**, measured 2026-09-03 by task 7
+([PR #464](https://github.com/bestdan/workflow-skills/pull/464)).
+
+- `repos/{owner}/{repo}/issues/{n}/events` carries the same `labeled` stream as
+  `timeline`, without `cross-referenced` and comment entries. `events` is the cheaper one.
+- **`gh issue list` orders by creation date descending, not by close date.** A `--limit`
+  window over closed issues holds the most recently _created_ ones, so a long-lived issue
+  closed yesterday can sit outside it. GitHub search has no `sort:closed`;
+  `--search "sort:updated-desc"` is the nearest proxy and `updated` moves on a post-close
+  comment.
+
+**Provisioning**, measured 2026-09-04 by task 17
+([PR #479](https://github.com/bestdan/workflow-skills/pull/479)).
+
+- `gh-label-sync.py` is idempotent and **dry-run by default**, so
+  `python3 …/gh-label-sync.py --repo <repo>` prints a board's gap for one `gh label list`.
+- **There is no longer a live under-provisioned board.**
+  [dotfiles#675](https://github.com/bestdan/dotfiles/issues/675) provisioned all 12
+  missing labels on `bestdan/dotfiles`. **Anything testing under-provisioned behaviour now
+  needs a fixture** — task 17's hermetic tests are that fixture and are the model to copy.
+- **Provisioning a rung moves the row-3 noise rather than ending it.** After #675,
+  `/reconcile-tasks` reports **50 of 50** closed issues again, now through a row running
+  correctly. Every issue that closed before the rung existed has no `labeled` event for
+  it, so those are the pre-rollout **backlog**. Answering it needs a rollout boundary —
+  per-repo state this plan would then own. **Do not file this as a task-17 defect**; the
+  defect (a row answering confidently from a void premise) shipped fixed in **v2.21.1**.
+- **`gh-label-sync.py`'s `existing_labels()` refuses above 500 labels rather than
+  truncating.** Anything reading a repo's labels should go through that helper.
+
+Both write facts are silent when wrong. This file has been wrong three times by
+asserting unattended GitHub behaviour from documentation — twice about routines, once
+about cloud sessions. Probe it.
+
+## Open blockers, and who owns them
+
+- **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
+  because `/auto-pilot` is under active development with a new harness. It stops outright
+  rather than degrading. **This holds Phase 4**, task 10's pilot included.
+- **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
+  same validate-then-replace rule. The probe promoted this from "for any channel without
+  `gh`" to **the** prerequisite for a working dispatched session. **No task owns it.**
+- **A crashed claim strands its issue, and nothing sweeps it.** A session that claims and
+  dies before opening a PR leaves the issue assigned and on `status:3_started`; the
+  candidate query excludes it on **both** counts, so no later run picks it up. This is
+  identical on the ref path and the election path — a crashed **local** claim does it too
+  — so it is the handler's failure mode, not batch's, but a batch multiplies the exposure
+  by N. Recovery today is a human `gh issue edit`. **No task owns this**, and task 12's
+  sweep as described covers refs, not board markers.
+- **`sandbox-network-guard` blocks non-GET `gh api`.** Confirmed as a workaround, not a
+  fix: an asset's `--apply` PATCHes fine **unsandboxed**, because the hook matches the
+  `gh api` text and a python helper hides it. Friction, not a wall; every local write
+  costs a sandbox escape. **Outside this repo; needs the operator.**
+- **`state_reason` on the close path is unowned.** `gh-issue-state.py --done` writes
+  `state: closed` and nothing else, so a completed issue and an abandoned one are
+  indistinguishable afterwards. It costs more than it did: task 8's stale-versus-satisfied
+  split reads `state_reason`.
+- **The provisioning class is wider than the reconciler.** Task 17 guarded the three
+  reconciler rows. Every other verb that asks whether an issue carries a rung inherits the
+  same blind spot and is unaudited. Nothing detects that; there is no task.
+- **Two label invariants have no reconciler rule.** Task 7's rule table is deliberately
+  **closed** and task 17 kept it closed: at most one `prio:` / at most one `est:` (a
+  duplicate stays invisible until the next write, which then refuses), and a **closed**
+  issue still carrying live `status:`/`auto:` rungs (reachable with a bare
+  `gh issue close`).
+- **`skills/task/SKILL.md`'s flag annotations are stale.** `--all`, `-n N`, `--remote` and
+  `--local` are still marked "(file path only)", which was already wrong for `linear`
+  before task 16 and is now wrong for `gh-issue` too. Left alone as pre-existing.
+- **`claude --remote` is a deprecated alias for `claude --cloud`.** §3, §4 and
+  `repo-pr-execute.md` all still say `--remote`. Cosmetic, unowned, one sweep. The probe
+  measured a further wrinkle worth folding in: **`--cloud` refuses `--print`**, so a
+  cloud session cannot be created non-interactively; `claude -p "<msg>" --cloud <id>`
+  only queues into one that already exists.
+- **Tasks 12 and 13 have no task file** — they exist only as entries in the epic.
+- Two non-migration follow-ups live in Linear: **PRE-822** (`reopened` unhandled by the
+  task-6 backstop) and **PRE-823** (does a runner's token reach the dependency endpoints).
+  PRE-823 blocks nothing in this plan.
+
+## This repo is still on Linear
+
+`dev_docs/tasks/.task-config.yml` says `handler: linear`. Nothing has switched, and the
+switch waits on the auto-pilot harness — switching before then ends unattended operation
+rather than degrading it. That is a postponement, not a dead end: every handler verb works
+in a foreground session today.
+
+### Acceptance criteria still owed
+
+Each needs a repo on the `gh-issue` handler — but that is **not** the same as needing this
+repo to switch: **`bestdan/dotfiles` is already `handler: gh-issue`**. Anything testing
+only **handler dispatch** can run there today against a real board. What dotfiles cannot
+stand in for is a **migrated** backlog: it was never on Linear, so it carries none of the
+imported issues, old-vocabulary labels or `Blocked by:` footers the migration criteria are
+about.
+
+- **Task 16's dispatch half is now unrunnable, not merely blocked.** `/do-tasks --all`
+  dispatching bounded sessions needs a repo that can legitimately set
+  `remote_batch: true`, and the probe says none can today. Retire the criterion or
+  rewrite it against whatever closes the plugin gap. The **degrade** path is testable now
+  on `bestdan/dotfiles`: `--all` with the default config must claim exactly one issue in
+  the foreground and say `remote batch disabled — claiming one issue`.
+- **Task 8's dispatch half — runnable NOW, and the cheapest thing here.**
+  `/reoptimize-tasks` against `bestdan/dotfiles`. Confirm the **installed** plugin under
+  `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/` is v2.21.0 or later
+  before reading the result — an older one exercises the old report-only prose and returns
+  a green result that says nothing. Expect zero dependency findings (dotfiles has no
+  edges); read it as a dispatch check, not a coverage one.
+- **Task 4 — dispatch, runnable on `bestdan/dotfiles` today.** Two `/do-tasks` sessions
+  against the same ready issue, confirming exactly one proceeds. Needs an issue at
+  `status:2_ready` (which **is** provisioned there) and two concurrent sessions; the
+  racing is the point, so a serial run proves nothing.
+- **Task 8's migrated-backlog half** — `/reoptimize-tasks` against the migrated
+  `workflow-skills` backlog, spot-checking three edges in the UI. Needs task 9, so it
+  waits on Phase 4.
+- **Task 15** — its user-run check.
+
+None of these is a defect. Task 7's was run and **found** task 17's defect, which is that
+check earning its keep: the row was sitting on a blocked-looking list when it was
+runnable, and free.
