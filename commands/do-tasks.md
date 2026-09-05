@@ -713,9 +713,9 @@ yet speak (see `claim-lock.md`).
 So `true` needs **two** things the probed environment did not have, and the plugin is
 only the first. A repo that sets it needs the plugin installed by some other means — a
 cloud-environment setup script running `claude plugin marketplace add` is the obvious
-candidate, on the marketplace-key reading that record offers and itself marks unsettled — **and** it
-needs its sessions to have a working `gh` credential, because every phase of this
-handler shells out to `gh`. Neither the setup script nor a credentialed session was
+candidate, on the marketplace-key reading that record offers and itself marks
+unsettled — **and** it needs its sessions to have a working `gh` credential, because
+every phase of this handler shells out to `gh`. Neither the setup script nor a credentialed session was
 measured. Setting `true` without them is not silently broken: step 5's self-check stops
 each session loudly on its own issue.
 

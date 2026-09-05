@@ -33,8 +33,8 @@ here**, and the flag stays off.
   `claude-opus-5[1m]`, cwd `/home/user/dotfiles`, `claude --version` **2.1.261** read
   inside the session. It runs as `root` with `$HOME=/root` while the repo is cloned under
   `/home/user`, which is why the transcripts below show both `~/.claude/...` and
-  `/root/.claude/...` for the same paths. Environment log: `Cloning repository bestdan/dotfiles` …
-  `No setup script configured`.
+  `/root/.claude/...` for the same paths. Environment log:
+  `Cloning repository bestdan/dotfiles` … `No setup script configured`.
 - Scratch write target `bestdan/dotfiles#699`, carrying no `task-add` marker so the
   loop's label scope could not see it. Closed after the probe.
 
@@ -159,7 +159,7 @@ mcp__github__issue_read(method=get_labels, …)
    session. Every sentence in this repo that offered the declaration as the thing that
    makes `remote_batch: true` safe was wrong; they were corrected in the same change as
    this file. **Which of the declaration's two keys was ignored is _not_ settled** — see
-   below.
+   "Which of the declaration's two keys was ignored" above.
 2. **`gh` exists in a cloud session but has no working credential**, and the barrier is
    at the account, not the endpoint: reads 403 alongside writes. So the 2026-08-24
    routine finding and this session's finding agree in effect — no usable `gh` — while
@@ -202,7 +202,6 @@ committing the declaration was what made `true` safe. They were corrected in the
 change as this file.
 
 A repo that wants `remote_batch: true` needs the plugin present by some other route, and
-its dispatched
-sessions need a credentialed channel that is currently the MCP connector rather than
-`gh` — which is the same gap `claim-lock.md` already records, and the same reason the
-handler still owes an MCP branch for its label writes.
+its dispatched sessions need a credentialed channel that is currently the MCP connector
+rather than `gh` — which is the same gap `claim-lock.md` already records, and the same
+reason the handler still owes an MCP branch for its label writes.
