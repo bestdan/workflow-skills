@@ -29,7 +29,7 @@ here**, and the flag stays off.
   declares `extraKnownMarketplaces` (`github` / `bestdan/workflow-skills`) and
   `enabledPlugins` (`workflow-skills@workflow-skills`). The session read the file back
   verbatim, so the declaration reached the VM.
-- Session `session_01NjXjJLn92VsumHpC1FsdFo`, Claude Code launched from the CLI, model
+- Session `session_01NjXjJLn92VsumHpC1FsdFo`, created with `claude --cloud`, model
   `claude-opus-5[1m]`, cwd `/home/user/dotfiles`, `claude --version` **2.1.261** read
   inside the session. It runs as `root` with `$HOME=/root` while the repo is cloned under
   `/home/user`, which is why the transcripts below show both `~/.claude/...` and

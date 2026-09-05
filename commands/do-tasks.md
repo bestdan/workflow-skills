@@ -597,10 +597,11 @@ capability is actually visible — inside the remote session** — via two concr
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — the VM has no plugin **unless the repo declares one in a
-   committed `.claude/settings.json`** (see §4's gate; unprobed), **and** a fresh
-   clone has no local task config (`/task-config` gitignores `dev_docs/tasks/` by
-   default) — so
+   **self-contained** — **the VM has no plugin**, and a committed
+   `.claude/settings.json` does not install one (probed 2026-09-05,
+   `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`; see §4's gate),
+   **and** a fresh clone has no local task config (`/task-config` gitignores
+   `dev_docs/tasks/` by default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
