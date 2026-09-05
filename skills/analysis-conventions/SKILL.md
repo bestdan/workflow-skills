@@ -31,7 +31,7 @@ Once the numbers are incorporated into a notebook or model, delete the scratchpa
 
 MUST NOT embed raw calculated numbers in markdown without a visible formula or a reference to the model that produced them.
 
-MUST NOT hand-write the word that characterises a number (_flat, rising, dips, doubles, evenly_) beside a number the model produced. Derive that word in the model too, so it changes when the data does — see the `analysis-pipeline` skill.
+MUST NOT hand-write a qualitative claim about model data (_flat, rising, dips, doubles, evenly_). Derive the characterising word in the model, so it changes when the data does — see the `analysis-pipeline` skill.
 
 ## Notebook/Script Structure
 

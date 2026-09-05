@@ -110,7 +110,7 @@ A word that characterises a number is an assertion about the data: _flat, rising
 f"balances hold flat ({slope:.2%}/wk)"
 
 # Good — both come from the model
-trend = "still rising" if slope > TOL else "declining" if slope < -TOL else "flat"
+trend = "rising" if slope > TOL else "declining" if slope < -TOL else "flat"
 f"balances are {trend} ({slope:.2%}/wk)"
 ```
 
