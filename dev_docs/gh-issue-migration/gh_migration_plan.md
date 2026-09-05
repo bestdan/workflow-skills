@@ -238,12 +238,18 @@ join, and `gh` covers it only partially.
 
     - **Deviation: the capability matrix reads `opt`, not `yes`.** The task file said flip
       it to `yes`. Remote dispatch needs the dispatched session to run a plugin script,
-      which reaches a cloud session only from a committed `.claude/settings.json` — a
-      mechanism that is **documented and unprobed**. So `gh-issue.remote_batch` defaults
-      to `false` and the gap is only partly closed. The probe that would flip it is in the
-      handoff, unowned.
-    - **The "a cloud VM has no plugin / has no `gh`" premise is in doubt**, which reaches
-      further than this task. See the handoff's first section, and open question 0 below.
+      which the documentation said reaches a cloud session from a committed
+      `.claude/settings.json`. **Probed 2026-09-05 and it does not**
+      ([`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md),
+      shipped on `main` in PR #490). The same session's `gh` is uncredentialed, reads and
+      writes alike. So the deviation is **permanent, not pending**: `remote_batch` stays
+      `false`, the matrix stays `opt`, and the criterion that said flip it needs
+      retiring or rewriting against whatever closes the plugin gap.
+    - **The "a cloud VM has no plugin / has no `gh`" premise held**, by a different
+      mechanism than the 2026-08-24 routine probe found: a cloud session has the `gh`
+      binary and a dead token, where a routine had no binary. The credentialed channel is
+      the GitHub MCP connector in both, which makes the handler's unowned MCP branch the
+      prerequisite for any working dispatched session.
 
     Also surfaced and **not** repaired: a crashed claim strands its issue at
     `status:3_started` with an assignee, invisible to the candidate query on both counts,
@@ -385,12 +391,15 @@ about #436.
 ## Open questions
 
 0. **RESOLVED 2026-08-24 — a routine CAN drive the loop, with two gaps.**
-   > **Partly reopened 2026-09-04 by task 16.** Anthropic's current documentation says a
-   > cloud session has `gh` preinstalled and proxy-authenticated, and installs plugins a
-   > repo declares in a committed `.claude/settings.json` — both contradicting the
-   > measurement below. Documentation is not measurement and this was **not** re-probed;
-   > treat the channel question as open. The handoff carries the probe that would settle
-   > it. Gaps (a) and (b) below are unaffected: neither turns on `gh`.
+   > **Reopened 2026-09-04 by task 16, and closed again 2026-09-05 by the probe.**
+   > Anthropic's documentation says a cloud session has `gh` preinstalled and
+   > proxy-authenticated, and installs plugins a repo declares in a committed
+   > `.claude/settings.json`. Measured against a consumer repo, **neither holds**
+   > ([`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)):
+   > nothing was installed, `$CLAUDE_PLUGIN_ROOT` was empty, and every `gh api` call
+   > 403'd — the read as well as the write. The conclusion below stands; only the reason
+   > `gh` is unusable differs between a routine (no binary) and a cloud session (a binary
+   > with a dead token). Gaps (a) and (b) were never in question: neither turns on `gh`.
    >
    > MCP is the credentialed channel (raw HTTP carries no credential and `gh` is absent). Issue
    > writes work; `mcp__github__create_branch` is create-only and rejects duplicates, so

@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-04 after task 16.** Read this first, then
+**Redrafted 2026-09-05 after the cloud-session probe.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -66,69 +66,71 @@ comment block's own advice: "Prefer graduating durable wisdom to a top-level
 It is still on **draft PR #441**, not on `main`. Do the migration's own work in a fresh
 worktree off `main`; edit these plan docs on this branch.
 
+**Decision records are the exception — they go on `main`**, beside
+`dev_docs/decisions/2026-08-24-routine-claim-channel.md`, because runtime prose under
+`commands/` links to them. The 2026-09-05 record below shipped on `main` in PR #490, not
+here; this branch's links to it resolve once that merges.
+
 ## Where things stand
 
-**No task is available to start.** Tasks 4–8 and 14–17 are done, task 16 included
-(merged `547f776`). Task 12 is unclaimed and has no task file. Task 13 is postponed,
-which **holds all of Phase 4** — so the only unclaimed work in this plan is task 12,
-and it gates nothing anyone is waiting on.
+**No task is available to start.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed
+and has no task file. Task 13 is postponed, which **holds all of Phase 4** — so the only
+unclaimed work in this plan is task 12, and it gates nothing anyone is waiting on.
 
-- **Task 16** — batch execution (`/do-tasks --all`) for gh-issue. Merged; see "What
-  task 16 changed that you will trip over" below, because it moved a premise the rest of
-  this plan rests on. **What it shipped is off by default**, so nothing observable
-  changed for any user — the probe below is what turns it on.
-- **Task 12** — stale claim-ref sweep. Unclaimed, no task file. It gates flipping the
-  routine claim default, and it is now also the sweep that would let a dispatched batch
-  session take the ref lock instead of the comment election.
+**The cloud-session probe is done and it came back red.** It was the last thing gating
+`gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
+not re-run it, and do not re-derive it from documentation.
 
 **Three user-run checks are unblocked and cheap.** None is a task; all are acceptance
 criteria sitting on already-merged work. See "Acceptance criteria still owed".
 
 ## What will bite you
 
-### The cloud-session premise moved, and the new one is NOT probed
+### A cloud session gives a gh-issue batch neither the plugin nor a usable `gh`
 
-This is the most important thing on the page, and it is unresolved rather than settled.
+**Measured 2026-09-05**, full evidence in
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+(on `main` via PR #490). Probed against `bestdan/dotfiles`, deliberately not this repo.
 
-`do-tasks.md` §3 asserted for months that a dispatched cloud VM "has no plugin
-installed", and the 2026-08-24 decision record measured that a routine has **no `gh`**.
-Anthropic's current documentation says otherwise on both counts, read 2026-09-04:
+- **A committed `.claude/settings.json` does NOT install the plugin.** The declaration
+  (`extraKnownMarketplaces` + `enabledPlugins`) was present and correct on the cloned
+  HEAD; `claude plugin list` reported none installed and `$CLAUDE_PLUGIN_ROOT` was
+  empty. The documentation says otherwise. The documentation is wrong here.
+- **`gh` is installed and uncredentialed.** `GH_TOKEN=proxy-injected`, `gh auth status`
+  fails, and every `gh api` call 403s — the **read** as well as the write, so it is not
+  a method restriction.
+- **The GitHub MCP connector is still the credentialed channel**, and it **can** do the
+  label write (`mcp__github__issue_write`, full-set replacement, same as REST). Same
+  channel the 2026-08-24 routine probe found.
+- **Nothing is blocked by network or proxy scoping.** `claude plugin marketplace add`
+  plus `claude plugin install`, run **inside** the session, worked — cloning the
+  unattached public marketplace repo over plain HTTPS.
 
-- A cloud session **does** install plugins the repo declares in a **committed
-  `.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`). Plugins
-  enabled only in user settings do **not** travel.
-- `gh` **is** preinstalled and proxy-authenticated (`GH_TOKEN` injected); the proxy
-  scopes API access to the repositories attached to the session.
+Two things this deliberately does **not** settle, and the record says so: whether the
+`gh` 403 is proxy policy or a missing Claude GitHub App connection on this account
+(untried), and whether a cloud-environment **setup script** installing the plugin at
+session start would close the gap (plausible, unmeasured, and a per-environment setting
+rather than something a repo can commit).
 
-**Nothing here was probed.** Docs are not measurement, and this plan's own record exists
-because routine behaviour was got wrong twice by reading documentation
-([`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md)
-— "Probe it."). Treat the conflict as **open**, not as a correction that landed. Two
-specific things stay unknown and are exactly what the probe must answer: whether the
-marketplace clone survives the session's GitHub proxy scoping, and whether a
-`PATCH /repos/{o}/{r}/issues/{n}` label write is permitted through it.
+Consequences for the plan:
 
-**The probe is owed, and it is what gates remote batch.** Declare this plugin in a
-consumer repo's committed `.claude/settings.json`, run one cloud session, and record
-whether `claude plugin list` shows it, `$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/`
-exists, `gh auth status` passes, and a label PATCH succeeds. **Do not run it against
-`workflow-skills` itself** — the assets are in this repo's own checkout, so a green
-result there proves nothing about a consumer repo. Write the answer as a dated file
-beside the 2026-08-24 decision record.
+- **`gh-issue.remote_batch` stays `false`; the capability matrix stays `opt`.** Task
+  16's acceptance criterion said flip it to `yes`. Do not — the premise that would have
+  justified flipping is now measured false rather than merely unprobed, which is a
+  stronger reason for the same default. **This deviation is now settled, not pending.**
+- **The handler's MCP branch is no longer optional-looking.** It is the only route to
+  a working dispatched session, since `gh` does not work there. It still owes the same
+  `labels.yml` validate-then-replace rule.
+- **`claim-lock.md` no longer claims a dispatched session "usually can" acquire the
+  ref.** PR #490 amended that sentence; the instruction (take the election) is unchanged.
 
-### What task 16 changed that you will trip over
+### What task 16 shipped that you will trip over
 
-- **gh-issue batch is opt-in.** `gh-issue.remote_batch` defaults to **`false`** (Linear's
-  defaults to `true`), and the capability matrix reads **`opt`**, not `yes`. This is a
-  **deviation from task 16's own acceptance criterion**, which said flip it to `yes`; the
-  reason is the unprobed premise above. Flipping the default is a one-line change once
-  the probe lands.
 - **A dispatched session claims on the comment election, never the ref lock**, and it
   runs **two `git ls-remote` probes** the election itself does not contain — one before
   the board write, one with the post-sleep re-list. Those probes are the only way a batch
   session and a local ref-lock session detect each other; the elections cannot see each
-  other's primitive. `claim-lock.md` now carries its own entry condition for this, so it
-  is not a rule that lives only in `do-tasks.md` §4.
+  other's primitive. `claim-lock.md` carries its own entry condition for this.
 - **The dispatcher discharges two gates, and deliberately not the third.** Candidate
   selection and the pre-claim WIP gate happen dispatcher-side; the session runs
   pre-flight, the claim, execute, PR, and the two label writes. The WIP gate is
@@ -140,19 +142,18 @@ beside the 2026-08-24 decision record.
   provable redundancy is. The cost of the one real discharge: `slack` is a one-instant,
   dispatcher-side bound rather than a guarantee, because nothing re-checks WIP after
   dispatch.
-- **A `wip_limit` above the query cap used to manufacture slack.** `count_wip`'s
-  `--limit` defaults to 100 and `wip_limit` is unbounded, so a larger limit read a
-  truncated page as an under-limit count. Found by the PR's bot reviewer, not by the
-  diff-only reviewer that passed it eighteen times. Anything new that derives a bound
-  from a bounded query has the same shape: check the query can see far enough to answer.
-- **`--project` is `linear` only.** The flag list in `do-tasks.md` said "tracker handler
-  only", which included gh-issue and jira. It now names `linear`, matching what the
-  handlers implement.
+- **Anything that derives a bound from a bounded query must check the query can see far
+  enough to answer.** A `wip_limit` above `count_wip`'s `--limit` (default 100) used to
+  read a truncated page as an under-limit count and manufacture slack. Found by the PR's
+  bot reviewer, not by the diff-only reviewer that passed it eighteen times.
+- **`--project` is `linear` only.**
 - **Asset calls take `$CLAUDE_PLUGIN_ROOT`.** `CONTRIBUTING.md` mandates it and most
   handlers follow it; `gh-issue-claim.md` still spells its calls repo-relative, which
   resolves only inside this plugin's own repo. That deviation is pre-existing and was
   deliberately left alone — but anything **new** must use the mandated form, and anything
-  inlined into a dispatch prompt must be rewritten to it.
+  inlined into a dispatch prompt must be rewritten to it. Note the probe found
+  `$CLAUDE_PLUGIN_ROOT` **empty** in a cloud session, so the mandated form does not
+  rescue a dispatched session by itself.
 
 ### The rest, unchanged and still true
 
@@ -191,25 +192,28 @@ Continuing wider would answer a request to _narrow_ with a _wider_ run.
 ## Do not re-derive these — they were measured, not read
 
 Full evidence in
-[`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md)
-and §10b of the requirements record. **Both files are dated snapshots — read them as
-what was true then**, and see the cloud-session section above for where that has been
-called into question.
+[`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md),
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+and §10b of the requirements record. **All are dated snapshots — read them as what was
+true then.**
 
 **Channels.** A routine's credentialed channel is the GitHub MCP connector, which has
 **no dependency-edge tool**, and it can acquire the claim ref
-(`mcp__github__create_branch`) but **cannot release** it. A **GitHub Actions runner** is a
-third channel and is not credential-starved: measured 2026-09-02 by task 6
+(`mcp__github__create_branch`) but **cannot release** it. A cloud session's credentialed
+channel is the same connector, for a different reason — `gh` is present there but its
+token does not work. A **GitHub Actions runner** is a third channel and is the one that
+is not credential-starved: measured 2026-09-02 by task 6
 ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)), a runner has `gh` and
 its ambient `GITHUB_TOKEN` PATCHes labels with `permissions: issues: write`. **Do not
 read "unattended" as "cloud routine"** — a runner is unattended too. The token is
 repo-scoped, so a repo whose `gh-issue.repo` points elsewhere must not run the task-6
-backstop. The "a routine has no `gh`" half of this is what the docs now contradict.
+backstop.
 
 **Writes.**
 
 - A label write **replaces** the whole set and **auto-creates** unknown names. Hence
-  validate-then-replace, always, before any network call.
+  validate-then-replace, always, before any network call. True on the REST path and on
+  the MCP connector alike.
 - The dependency POST body carries **`issue_id`, a database id**, not the issue number.
   So does the removal DELETE, as its last path segment. Measured 2026-09-04 by task 8;
   the removal is idempotent.
@@ -249,16 +253,18 @@ backstop. The "a routine has no `gh`" half of this is what the docs now contradi
 - **`gh-label-sync.py`'s `existing_labels()` refuses above 500 labels rather than
   truncating.** Anything reading a repo's labels should go through that helper.
 
-Both write facts are silent when wrong. This file was wrong twice by asserting routine
-behaviour from documentation. Probe it.
+Both write facts are silent when wrong. This file has been wrong three times by
+asserting unattended GitHub behaviour from documentation — twice about routines, once
+about cloud sessions. Probe it.
 
 ## Open blockers, and who owns them
 
 - **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
   because `/auto-pilot` is under active development with a new harness. It stops outright
   rather than degrading. **This holds Phase 4**, task 10's pilot included.
-- **The cloud-session probe is unowned** — see above. It gates the `remote_batch` default
-  and, with it, whether gh-issue batch is real for anyone but this repo.
+- **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
+  same validate-then-replace rule. The probe promoted this from "for any channel without
+  `gh`" to **the** prerequisite for a working dispatched session. **No task owns it.**
 - **A crashed claim strands its issue, and nothing sweeps it.** A session that claims and
   dies before opening a PR leaves the issue assigned and on `status:3_started`; the
   candidate query excludes it on **both** counts, so no later run picks it up. This is
@@ -270,9 +276,6 @@ behaviour from documentation. Probe it.
   fix: an asset's `--apply` PATCHes fine **unsandboxed**, because the hook matches the
   `gh api` text and a python helper hides it. Friction, not a wall; every local write
   costs a sandbox escape. **Outside this repo; needs the operator.**
-- **The handler still owes an MCP branch** reusing `labels.yml` for the same
-  validate-then-replace rule, for any channel without `gh`. How large that gap is now
-  depends on the probe above.
 - **`state_reason` on the close path is unowned.** `gh-issue-state.py --done` writes
   `state: closed` and nothing else, so a completed issue and an abandoned one are
   indistinguishable afterwards. It costs more than it did: task 8's stale-versus-satisfied
@@ -289,7 +292,10 @@ behaviour from documentation. Probe it.
   `--local` are still marked "(file path only)", which was already wrong for `linear`
   before task 16 and is now wrong for `gh-issue` too. Left alone as pre-existing.
 - **`claude --remote` is a deprecated alias for `claude --cloud`.** §3, §4 and
-  `repo-pr-execute.md` all still say `--remote`. Cosmetic, unowned, one sweep.
+  `repo-pr-execute.md` all still say `--remote`. Cosmetic, unowned, one sweep. The probe
+  measured a further wrinkle worth folding in: **`--cloud` refuses `--print`**, so a
+  cloud session cannot be created non-interactively; `claude -p "<msg>" --cloud <id>`
+  only queues into one that already exists.
 - **Tasks 12 and 13 have no task file** — they exist only as entries in the epic.
 - Two non-migration follow-ups live in Linear: **PRE-822** (`reopened` unhandled by the
   task-6 backstop) and **PRE-823** (does a runner's token reach the dependency endpoints).
@@ -311,11 +317,12 @@ stand in for is a **migrated** backlog: it was never on Linear, so it carries no
 imported issues, old-vocabulary labels or `Blocked by:` footers the migration criteria are
 about.
 
-- **Task 16's — needs the cloud-session probe first.** `/do-tasks --all` with
-  `handler: gh-issue` dispatching bounded sessions cannot be exercised until a repo can
-  legitimately set `remote_batch: true`. The **degrade** path is testable today on
-  `bestdan/dotfiles`: `--all` with the default config must claim exactly one issue in the
-  foreground and say `remote batch disabled — claiming one issue`.
+- **Task 16's dispatch half is now unrunnable, not merely blocked.** `/do-tasks --all`
+  dispatching bounded sessions needs a repo that can legitimately set
+  `remote_batch: true`, and the probe says none can today. Retire the criterion or
+  rewrite it against whatever closes the plugin gap. The **degrade** path is testable now
+  on `bestdan/dotfiles`: `--all` with the default config must claim exactly one issue in
+  the foreground and say `remote batch disabled — claiming one issue`.
 - **Task 8's dispatch half — runnable NOW, and the cheapest thing here.**
   `/reoptimize-tasks` against `bestdan/dotfiles`. Confirm the **installed** plugin under
   `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/` is v2.21.0 or later
