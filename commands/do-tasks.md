@@ -717,11 +717,19 @@ each session loudly on its own issue.
 > while looking healthy.
 
 1. **Rank unclaimed candidates.** Run `gh-issue-claim.md` "Find candidates"
-   unchanged — the `status:2_ready` + `auto:eligible` + `no:assignee` +
-   `-label:blocked` server-side search, ranked `prio:0` → `prio:1` → `prio:2` →
-   `prio:3` (an issue carrying none sorts last), then oldest `createdAt` first. Keep
-   both positive terms in `--search` for the reason that section gives. Do not read
-   any issue's dependencies yet.
+   **through its ranking step only** — the `status:2_ready` + `auto:eligible` +
+   `no:assignee` + `-label:blocked` server-side search, ranked `prio:0` → `prio:1` →
+   `prio:2` → `prio:3` (an issue carrying none sorts last), then oldest `createdAt`
+   first. Keep both positive terms in `--search` for the reason that section gives.
+
+   **Stop there — the rest of that section is not the dispatcher's.** It continues
+   into two things the batch reassigns, and running them here would be wrong twice
+   over: its `gh-issue-ready.py` dependency drop belongs to step 3 (do not read any
+   issue's dependencies yet), and its closing "take the ranked candidates one at a
+   time → pre-flight → judge → **advance to the next candidate**" loop belongs to
+   the dispatched sessions, one candidate each. That loop's advance-on-reject is
+   the single instruction this batch most needs not to inherit: step 5 pins every
+   session to one issue precisely so nothing falls through to another.
 2. **Bound by WIP slack.** gh-issue has one top-level `wip_limit` (default `3`) —
    no per-project caps and no global ceiling, so section 3 step 2's per-scope
    arithmetic collapses to a single number. Read it; do not compute it:

@@ -123,7 +123,7 @@ claims nothing, skips it.
    (claimed, PR not yet open) **or** `status:4_needs_review` (PR open, in review). An
    in-flight issue holds exactly one of the two, and GitHub's issue search takes a
    comma-separated label list as an OR, so that is **one** query rather than two counts
-   summed. Read `count` and `at_limit` from the JSON.
+   summed. Read `count`, `at_limit` and `slack` from the JSON.
 
    Both rungs count because the WIP limit exists to bound the human PR-review queue:
    "Move to review on PR open" moves `status:3_started → status:4_needs_review`, so a
@@ -147,8 +147,11 @@ claims nothing, skips it.
    so in the run report. This step owns the **message**; that file owns the **decision**.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
-outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve
-nothing and report the WIP-limit decline).
+outright: reserve at most the JSON's **`slack`** issues (`0` → reserve nothing and
+report the WIP-limit decline). Read it; do **not** subtract `count` from
+`wip_limit` here. The script owns that arithmetic and its clamp for the same
+reason `do-tasks.md` §4 step 2 gives — an over-limit board makes the difference
+negative — and a second copy of it here is the drift that rule exists to prevent.
 
 ## Find candidates
 
