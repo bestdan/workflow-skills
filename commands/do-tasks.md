@@ -940,6 +940,17 @@ each session loudly on its own issue.
      them**, exactly as fallback step 6 says — they carry the same account values
      the local winner writes, so stomping them helps nobody.
 
+   That last clause is an **assumption, and it is the one §4 already requires**:
+   the dispatched sessions authenticate as the dispatching account (step 5), so a
+   racing local session is the same operator and the markers match. If a
+   **different** operator holds the ref, this session has left its own assignee on
+   an issue it did not win — the board disagreeing with the lock, which
+   `gh-issue-claim.md` "Claim the issue" step 4 already owns and reports from the
+   winner's side. Do not add a second cleanup path for it here: writing the markers
+   before the election is decided is `claim-lock.md` step 3's design, because step
+   5 elects only among **state-backed** comments and cannot do so if the poster
+   wrote nothing.
+
    Either way report `Skipped #<n>: claim lost — <branch> already exists on
    origin`, `claim-lock.md`'s own wording for this observation. Do **not** write
    "acquired by another session": a bare `ls-remote` hit cannot tell a live claim
@@ -997,7 +1008,8 @@ each session loudly on its own issue.
    - **Local acquires the ref first** → one of the dispatched session's two ref
      probes in step 6 sees it — the first before any board write, the second
      after the election's sleep, which is the interval the first cannot cover —
-     and it retracts and stops.
+     and it retracts and stops. The two points are inside `claim-lock.md` step 3
+     (between the comment post and the marker write) and within step 5's re-list.
    - **The dispatched session writes its markers first** → the local session's
      "Claim the issue" step 1 re-read sees the assignee and the moved rung and
      returns `race` before its own acquire.

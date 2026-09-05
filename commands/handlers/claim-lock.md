@@ -148,10 +148,10 @@ the report string (`claim: comment election (batch dispatch)`, **not** the degra
 line below — no API error happened). Such a session must **not** attempt the
 acquire first.
 
-It also runs **one step the election below does not have**, and the step is
-load-bearing: a `git ls-remote --heads origin "<branch>"` probe, twice — once
-between step 3's comment post and step 3's marker write, and again with step 5's
-re-list. The election cannot see a ref, so without those probes a batch session
+It also runs **one check the election below does not have**, at **two** points,
+and it is load-bearing: `git ls-remote --heads origin "<branch>"`, run **inside
+step 3** between the comment post and the marker write, and again **as part of
+step 5's re-list**. The election cannot see a ref, so without those probes a batch session
 and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
 §4 step 6 owns both.
 
