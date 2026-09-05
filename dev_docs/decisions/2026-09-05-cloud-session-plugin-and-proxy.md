@@ -19,8 +19,7 @@ documentation about unattended GitHub access, so the standing instruction was to
 it.
 
 Probed. **Both of the premise's claims — the plugin, and a `gh` that works — are false
-here**, and the flag stays off. (Reserve "half" below for the declaration's two keys;
-these two are a different split.)
+here**, and the flag stays off.
 
 ## Setup
 
@@ -200,8 +199,10 @@ than merely unprobed, which is a stronger reason for the same default.
 The correction was to the prose, not the default: `commands/do-tasks.md` §4,
 `commands/task-config.md` and `commands/handlers/gh-issue.md` all told a reader that
 committing the declaration was what made `true` safe. They were corrected in the same
-change as this file. A repo that wants
-`remote_batch: true` needs the plugin present by some other route, and its dispatched
+change as this file.
+
+A repo that wants `remote_batch: true` needs the plugin present by some other route, and
+its dispatched
 sessions need a credentialed channel that is currently the MCP connector rather than
 `gh` — which is the same gap `claim-lock.md` already records, and the same reason the
 handler still owes an MCP branch for its label writes.
