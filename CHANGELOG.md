@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.24.2] - 2026-09-05
+
+### Fixes
+
+- stop naming the vault that holds a full-account Linear key (#489) (6e56071)
+
 ## [2.24.1] - 2026-09-05
 
 ### Fixes
