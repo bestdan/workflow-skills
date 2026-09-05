@@ -303,12 +303,15 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink \
   --issues PRE-12,PRE-13 --apply
 ```
 
-The script's default scope now matches the agent-driven flow's (§3): with 1+
-projects configured under `linear.projects`, pass each project's `id` as its
-own `--project`; with none configured, omit `--project` and it sweeps the
-whole team, exactly as it always has. A cron/Action entry resolves the
-configured project list itself (the script still reads no config) and passes
-one `--project <uuid>` per entry.
+The script's scope can now match the agent-driven flow's (§3), but only when
+the caller passes every configured project's `id` as its own `--project` —
+with 1+ projects configured under `linear.projects`, that is what a cron/Action
+entry must do to sweep the same scope the agent flow does. Omitting `--project`
+does **not** pick this up automatically: the script still reads no config, so
+with no flags at all it sweeps the **whole team**, exactly as it always has,
+even when `linear.projects` is configured. The whole-team default is unchanged
+either way — it is the caller's job to resolve the configured project list and
+pass one `--project <uuid>` per entry when narrower archiving is wanted.
 
 ### `--issues` — archive specific issues, no age threshold
 
