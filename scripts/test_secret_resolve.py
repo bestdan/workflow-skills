@@ -76,7 +76,7 @@ class ResolveKeyTests(unittest.TestCase):
     def test_allow_listed_resolver_op(self):
         write_stub(self.bin_dir, "op", "#!/bin/sh\necho the-secret\n")
         with stubbed_path(self.bin_dir):
-            os.environ["SECRET_REF"] = "op://Private/PreThink Linear/dan_local_key"
+            os.environ["SECRET_REF"] = "op://TestVault/Item With Spaces/field"
             self.assertEqual(secret_resolve.resolve_key("SECRET"), "the-secret")
 
     def test_allow_listed_resolver_opx(self):
@@ -89,7 +89,7 @@ class ResolveKeyTests(unittest.TestCase):
     def test_ref_with_spaces_is_valid(self):
         write_stub(self.bin_dir, "op", "#!/bin/sh\necho spaced-secret\n")
         with stubbed_path(self.bin_dir):
-            os.environ["SECRET_REF"] = "op://Private/PreThink Linear/dan_local_key"
+            os.environ["SECRET_REF"] = "op://TestVault/Item With Spaces/field"
             self.assertEqual(secret_resolve.resolve_key("SECRET"), "spaced-secret")
 
     def test_unknown_resolver_identifier(self):
@@ -178,8 +178,8 @@ class ResolveKeyTests(unittest.TestCase):
             self.assertEqual(ctx.exception.category, "unconfigured")
 
     def test_full_ref_never_in_error_message(self):
-        secret = "dan_local_key"
-        ref = f"op://Private/PreThink Linear/{secret}"
+        secret = "synthetic_field_token"
+        ref = f"op://TestVault/Item With Spaces/{secret}"
         cases = []
 
         write_stub(self.bin_dir, "op", "#!/bin/sh\necho 'access denied' 1>&2; exit 1\n")
@@ -229,7 +229,7 @@ class ProbeTests(unittest.TestCase):
 
     def test_failure_reports_only_the_category(self):
         write_stub(self.bin_dir, "op", "#!/bin/sh\necho 'not signed in' 1>&2; exit 1\n")
-        out = self._probe({"SECRET_REF": "op://Private/PreThink Linear/dan_local_key"})
+        out = self._probe({"SECRET_REF": "op://TestVault/Item With Spaces/field"})
         self.assertNotEqual(out.returncode, 0)
         self.assertEqual(out.stdout, "")
         self.assertEqual(out.stderr.strip(), "no-session")
@@ -244,8 +244,8 @@ class ProbeTests(unittest.TestCase):
 class RedactTests(unittest.TestCase):
     def test_op_ref_reduces_to_vault(self):
         self.assertEqual(
-            secret_resolve.redact("op://Private/PreThink Linear/dan_local_key"),
-            "op://Private/…",
+            secret_resolve.redact("op://TestVault/Item With Spaces/field"),
+            "op://TestVault/…",
         )
 
     def test_other_scheme_reduces_to_generic_phrase(self):
