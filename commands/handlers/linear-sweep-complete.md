@@ -309,8 +309,24 @@ from upstream:
 - **Step 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
   `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
   `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
-  --head`, which takes the branch alone. A bare branch here returns `[]` with
-  no error, which this flow would read as "no PR" and file as "no-PR skipped".
+  --head`, which takes the branch alone.
+
+  > **Get this wrong and the sweep completes the wrong issues.** A `head` with
+  > no colon is not rejected and does not return `[]` — it is **silently
+  > dropped**, and the call returns the repo's unfiltered first page. Measured
+  > against `GET /repos/{owner}/{repo}/pulls`, which these tools wrap: no
+  > `head` → 30 PRs, a bare branch → the same 30, a nonsense value with no
+  > colon → the same 30, while `<owner>:<nonexistent>` → 0 and
+  > `<owner>:<real-branch>` → 1. So the filter is honored only once it carries
+  > a colon.
+  >
+  > That is a false **positive**, not the false negative a dropped filter
+  > sounds like. Those ~30 unrelated PRs flow into step 4, which completes the
+  > issue if **any** resolved PR is `MERGED` — and across an arbitrary page,
+  > one always is. The failure mode is therefore the one this whole command
+  > exists to prevent, and the one `/find-false-closures` has to clean up
+  > after. Build the `<owner>:<branch>` value explicitly; never interpolate a
+  > branch name alone.
 
 Both accept `fields` to trim the response; omitting `body` drops the largest
 per-result payload, and this flow never reads PR body text.
