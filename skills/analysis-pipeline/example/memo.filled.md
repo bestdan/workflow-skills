@@ -6,6 +6,8 @@
 
 Switching from the most expensive option saves up to $429.60 annually under current usage assumptions.
 
+The lead over the runner-up (Nimbus Cloud) is decisive: $313.20/year, or 12.5%. The word "decisive" is computed in `model.py` against a stated threshold, so re-pricing changes it along with the figures.
+
 ---
 
 ## Cost Comparison
@@ -32,6 +34,7 @@ Costs computed from `model.py` using usage assumptions below. Re-run the model i
 
 - Storage: 2400 GB/month
 - API requests: 8500000 requests/month
+- Decisive margin: a lead of 5% or more over the runner-up
 
 **Vendor pricing sources:**
 

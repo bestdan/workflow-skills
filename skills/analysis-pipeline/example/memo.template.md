@@ -6,6 +6,8 @@
 
 Switching from the most expensive option saves up to {{recommendation.max_annual_savings}} annually under current usage assumptions.
 
+The lead over the runner-up ({{recommendation.runner_up}}) is {{recommendation.margin_verdict}}: {{recommendation.margin_vs_runner_up}}/year, or {{recommendation.margin_vs_runner_up_pct}}. The word "{{recommendation.margin_verdict}}" is computed in `model.py` against a stated threshold, so re-pricing changes it along with the figures.
+
 ---
 
 ## Cost Comparison
@@ -32,6 +34,7 @@ Costs computed from `model.py` using usage assumptions below. Re-run the model i
 
 - Storage: {{inputs.usage_assumptions.storage_gb}} GB/month
 - API requests: {{inputs.usage_assumptions.monthly_api_requests}} requests/month
+- Decisive margin: a lead of {{inputs.reporting_thresholds.decisive_margin_pct}} or more over the runner-up
 
 **Vendor pricing sources:**
 
