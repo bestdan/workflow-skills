@@ -96,6 +96,11 @@ criteria sitting on already-merged work. See "Acceptance criteria still owed".
   (`extraKnownMarketplaces` + `enabledPlugins`) was present and correct on the cloned
   HEAD; `claude plugin list` reported none installed and `$CLAUDE_PLUGIN_ROOT` was
   empty. The documentation says otherwise. The documentation is wrong here.
+  **The two halves failed differently, which narrows the fix**: after a manual
+  `claude plugin marketplace add`, the next session start showed a **`Scope: project`**
+  entry, which can only come from the committed file. So `enabledPlugins` is honoured
+  once a marketplace exists; it is `extraKnownMarketplaces` that a cold session did not
+  act on. Observed sequence, not a diagnosed cause — no second cold session was run.
 - **`gh` is installed and uncredentialed.** `GH_TOKEN=proxy-injected`, `gh auth status`
   fails, and every `gh api` call 403s — the **read** as well as the write, so it is not
   a method restriction.
