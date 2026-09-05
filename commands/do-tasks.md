@@ -549,7 +549,11 @@ capability is actually visible — inside the remote session** — via two concr
   begin: "If the Linear MCP connector is not available in this session, do **not** claim —
   stop immediately and report `remote Linear MCP unavailable`." A misconfigured remote then
   degrades **loudly** (a visible bail on that issue) rather than silently doing nothing or
-  half-claiming. Because the claim is the session's first mutation, a bail here leaves no
+  half-claiming. **This self-check covers the connector, not `gh`** — unlike §4's, which
+  probes both. The gap is accepted rather than overlooked: the MCP claim lands first, so a
+  `gh pr create` that then fails leaves a started, assigned issue with no PR. Closing it
+  would mean adding a `gh auth status` probe here too.
+  Because the claim is the session's first mutation, a bail here leaves no
   partial state.
 - **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
   connector can set `linear.remote_batch: false` in `.task-config.yml` to skip remote
@@ -863,10 +867,11 @@ each session loudly on its own issue.
    the dispatched prompt. Every asset call must carry the `$CLAUDE_PLUGIN_ROOT/`
    prefix — which of course still contains `commands/handlers/assets/`, so do not
    grep for that substring alone. **Never** inline a token or any other secret —
-   the dispatched session authenticates through its own `gh`. That is also what
-   step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
-   must authenticate as the **dispatching** account or their claims never enter the
-   next run's `slack`.
+   the dispatched session authenticates through its own `gh` — **documented, not
+   measured; the probed session's `gh` had no working credential at all**, so whose
+   account it would present was never observed. That is also what step 2's bound
+   assumes: `wip` counts `assignee:@me`, so the dispatched sessions must authenticate
+   as the **dispatching** account or their claims never enter the next run's `slack`.
 
    **Resolve every value you can here, so the session needs fewer of the plugin's
    assets.** The branch name is the clearest case: run `branch-name` **in this
