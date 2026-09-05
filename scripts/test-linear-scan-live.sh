@@ -209,17 +209,19 @@ if d is not None:
     # `project` must be the issue's own {id, name} (or null) — never the scope
     # name. A whole-team scan is the case that regressed: it used to stamp every
     # issue with the team name, leaving per-project lookup nothing to key on.
+    # This shape check is what catches that regression, since the stamped value
+    # was a bare string.
     proj_bad = [i.get("identifier") for i in issues
                 if i.get("project") is not None
                 and (not isinstance(i.get("project"), dict) or not {"id", "name"} <= set(i["project"]))]
     ok("every issue's project is {id, name} or null") if not proj_bad else bad("every issue's project is {id, name} or null", str(proj_bad[:5]))
-    proj_ids = {i["project"]["id"] for i in issues if isinstance(i.get("project"), dict)}
-    if len(issues) < 2 or not proj_ids:
-        ok("project ids are per-issue (skipped — too few issues or none has a project)")
-    elif proj_ids == {i.get("scope") for i in issues if isinstance(i.get("project"), dict)}:
-        bad("project ids are per-issue, not the scope name")
-    else:
-        ok("project ids are per-issue, not the scope name")
+    # The regression itself, named directly: `project` holding the value of its
+    # own `scope`. Comparing sets of ids against sets of scope names cannot see
+    # it — the regressed `project` is a string, so it never reaches an id set —
+    # and under `--project <uuid>` scope IS the project id, so that comparison
+    # would fail on correct output instead.
+    proj_is_scope = [i.get("identifier") for i in issues if i.get("project") == i.get("scope")]
+    ok("no issue's project is just its scope") if not proj_is_scope else bad("no issue's project is just its scope", str(proj_is_scope[:5]))
 
 # --- bad-key fallback contract ------------------------------------------------
 ok("bad key: exits non-zero") if bad_rc != 0 else bad("bad key: exits non-zero", "rc=0")

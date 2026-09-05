@@ -365,12 +365,11 @@ candidate for step 5.
 `repo`, and `pullNumber` (the attested call shape is
 `{method: "get", owner: "bestdan", repo: "finplan", pullNumber: 1149}`);
 **it has no URL parameter**, so parse all three out of the PR URL and pass them
-together. That
-is the same guarantee the URL rule above buys on the `gh` path — the repo
-travels with the number — and it is why a bare `pullNumber` with an inferred
-owner/repo is the one form to avoid here. Read the merged flag (and merge
-timestamp) off the returned pull request; treat anything short of an explicit
-merged reading as unread, not as unmerged.
+together. That is the same guarantee the URL rule above buys on the `gh`
+path — the repo travels with the number — and it is why a bare `pullNumber`
+with an inferred owner/repo is the one form to avoid here. Read the merged
+flag (and merge timestamp) off the returned pull request; treat anything
+short of an explicit merged reading as unread, not as unmerged.
 
 This read is required in **every** environment: it is the merge verification
 the whole sweep rests on, and it runs for every issue regardless of which
