@@ -61,8 +61,12 @@ class FakeRemote:
             self.refs.discard(ref)
             return 0, "", ""
         if args[:2] == ["issue", "list"]:
+            # Honour --limit: the real API truncates before anything local
+            # runs, which is the whole reason the caller must ask for enough.
+            limit = int(args[args.index("--limit") + 1])
             payload = [
-                {"number": n, "title": t, "labels": []} for n, t in self.wip_issues
+                {"number": n, "title": t, "labels": []}
+                for n, t in self.wip_issues[:limit]
             ]
             return 0, json.dumps(payload), ""
         raise AssertionError(f"unexpected gh call: {args}")
@@ -284,6 +288,31 @@ class WipTests(unittest.TestCase):
         result = json.loads(out.getvalue())
         self.assertEqual(result["count"], 5)
         self.assertEqual(result["slack"], 0)
+
+    def test_the_query_fetches_enough_to_decide_the_limit(self):
+        """A wip_limit above the query cap must not manufacture slack.
+
+        count_wip's --limit defaults to 100. With a larger wip_limit, a
+        truncated page reads as a count below the limit, so `slack` comes
+        back positive on a board that is already over it and the batch
+        dispatches into the overflow.
+        """
+        remote = FakeRemote(wip_issues=[(n, "x") for n in range(1, 201)])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(
+                ["wip", "--repo", "o/n", "--wip-limit", "150", "--json"]
+            )
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["slack"], 0)
+        self.assertTrue(result["at_limit"])
+
+        list_calls = [args for args, _ in remote.calls if args[:2] == ["issue", "list"]]
+        fetched = int(list_calls[0][list_calls[0].index("--limit") + 1])
+        self.assertGreaterEqual(
+            fetched, 150, "must fetch at least wip_limit before deriving the ceiling"
+        )
 
     def test_exits_0_regardless_of_at_limit(self):
         remote = FakeRemote(wip_issues=[(1, "a"), (2, "b"), (3, "c")])

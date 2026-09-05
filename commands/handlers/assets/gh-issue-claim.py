@@ -159,7 +159,14 @@ def cmd_issue_number(args):
 
 
 def cmd_wip(args):
-    issues = count_wip(args.repo, args.labels_file, args.limit)
+    # Fetch at least `wip_limit` rows, whatever --limit says. The API
+    # truncates before anything local runs, so a page capped below the limit
+    # reads as a count under it: `at_limit` comes back false and `slack`
+    # positive on a board that is already over, and the batch dispatches into
+    # the overflow. Asking for wip_limit rows is sufficient rather than
+    # generous -- if that many come back, count >= wip_limit and slack is 0
+    # whatever the true total is; if fewer, the count is exact.
+    issues = count_wip(args.repo, args.labels_file, max(args.limit, args.wip_limit))
     count = len(issues)
     at_limit = count >= args.wip_limit
     # Clamped, because an over-limit board (a human claimed by hand, or the

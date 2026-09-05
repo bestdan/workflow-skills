@@ -776,13 +776,22 @@ each session loudly on its own issue.
    The split follows what a VM without the plugin can actually execute:
 
    - **Discharged here, not re-run there** — "Find candidates" (step 1 ranked and
-     selected), the pre-claim WIP gate (step 2's `slack` bounds the whole batch:
-     dispatching at most `slack` sessions leaves each observing a count strictly
-     under `wip_limit`, however the **siblings** interleave — the count starts at
-     `count` and the last to claim sees `count + slack - 1`, so none of them could
-     have declined; that holds against this batch's own dispatches only, per the
-     caveat below), and dependency readiness (step 3, moments earlier). Each is already answered, and each would otherwise cost the
-     session a plugin asset it may not have.
+     selected) and the pre-claim WIP gate. The gate is discharged because it is
+     **provably** redundant, not merely because it was asked recently: step 2's
+     `slack` bounds the whole batch, so dispatching at most `slack` sessions leaves
+     each observing a count strictly under `wip_limit`, however the **siblings**
+     interleave — the count starts at `count` and the last to claim sees
+     `count + slack - 1`, so none of them could have declined. That holds against
+     this batch's own dispatches only, per the caveat below.
+   - **Re-run in the session, immediately before the claim: dependency
+     readiness.** Step 3 answered it for the dispatcher, and that answer goes stale
+     — a blocker can be reopened between selection and claim, and unlike the WIP
+     bound there is no arithmetic making the recheck redundant. The session runs
+     `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py"
+     --repo <repo> --issue <n> --json` against its one pinned issue and **stops
+     without claiming** if it comes back `blocked`, naming the open blockers.
+     Claiming an issue whose dependencies are no longer met is a mutation this
+     batch would otherwise make on stale evidence.
 
      **Say what this costs: `slack` becomes the only WIP bound, measured once.**
      The session-side gate was redundant against _this_ batch's own dispatches —
@@ -794,13 +803,13 @@ each session loudly on its own issue.
      single-operator scale, and the same acceptance section 3 already makes for
      concurrent batch runs; a repo that needs a hard bound should be claiming from
      one session.
-   - **Run in the session** — pre-flight (plain `git ls-remote` and `gh pr list`),
-     the claim election (plain `gh` comment calls), execute, `gh pr create`, and
-     the two label writes.
+   - **Also run in the session** — pre-flight (plain `git ls-remote` and
+     `gh pr list`), the claim election (plain `gh` comment calls), execute,
+     `gh pr create`, and the two label writes.
 
-   Whatever the session does run before the claim is **verification-only**: a
-   pre-flight trip, a feasibility reject, or a lost claim **stops that session and
-   reports it**. It must never advance to another candidate, which would put two
+   Everything the session runs before the claim is **verification-only**: a stale
+   dependency, a pre-flight trip, a feasibility reject, or a lost claim **stops
+   that session and reports it**. It must never advance to another candidate, which would put two
    dispatched sessions on one issue.
 
    The prompt must be **self-contained** — a fresh clone has no local task config
