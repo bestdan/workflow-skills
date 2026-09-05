@@ -136,6 +136,25 @@ _name_ — but the branch may not sit at the sha the session read earlier.
 > **Do not re-derive routine behaviour from documentation** — this file was wrong twice
 > that way.
 
+## Batch-dispatched sessions: use the comment election, not the ref lock
+
+A session dispatched by `/do-tasks --all` takes the election below **by choice**,
+not because it cannot acquire — it usually can. The reason is the same asymmetry
+the routine section gives, arriving by a different route: an unattended session
+that crashes or times out after acquiring strands its ref, every later session
+reads that ref as a live claim, and there is no stale-ref sweep. A batch fans out
+N such sessions at once. `commands/do-tasks.md` §4 step 6 owns the reasoning and
+the report string (`claim: comment election (batch dispatch)`, **not** the degrade
+line below — no API error happened). Such a session must **not** attempt the
+acquire first.
+
+It also runs **one check the election below does not have**, at **two** points,
+and it is load-bearing: `git ls-remote --heads origin "<branch>"`, run **inside
+step 3** between the comment post and the marker write, and again **as part of
+step 5's re-list**. The election cannot see a ref, so without those probes a batch session
+and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
+§4 step 6 owns both.
+
 ## Fallback: comment-token election (environments that cannot acquire)
 
 When the acquire call fails for an environment or permission reason

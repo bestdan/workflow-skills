@@ -35,7 +35,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --remote` / `/do-tasks --local` — choose where execution runs (default: remote dispatch)
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
-- `/do-tasks --project <name|id|unassigned|any>` — **tracker handler only**: pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
+- `/do-tasks --project <name|id|unassigned|any>` — **`linear` only** (the other tracker handlers have no project dimension: `gh-issue` refuses the flag, see section 4; `jira` has no scope prompt): pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
 - `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All five prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
@@ -48,14 +48,18 @@ Claim / execute split below.)
 
 For the **tracker** handlers, the execution mode now splits by handler:
 
-- **`linear`** supports **true batch execution**. `--all` / `-n N` (without
-  `--claim-only`) dispatches **one remote session per dependency-ready issue**
-  (each its own cloud VM), bounded by WIP slack, via the **Tracker-batch
-  subroutine** in section 3. Bare `/do-tasks` stays single and foreground, and
-  `--local` caps the batch at **1** (single highest-ranked issue, foreground).
-- **`gh-issue`** and **`jira`** execution is still single and foreground (current
-  session): `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
-  single claim with a one-line note. See sections 4–5.
+- **`linear`** supports **true batch execution**, and **`gh-issue`** supports it
+  **on opt-in** (`gh-issue.remote_batch: true`; off by default, see section 4 —
+  without it `--all` / `-n N` degrades to a single foreground claim). Where it
+  runs, `--all` / `-n N` (without `--claim-only`) dispatches **one remote session
+  per dependency-ready issue** (each its own cloud VM), bounded by WIP slack, via
+  the **Tracker-batch subroutine** in section 3 — which `linear` runs directly and
+  `gh-issue` instantiates in section 4. Bare `/do-tasks` stays single and
+  foreground, and `--local` caps the batch at **1** (single highest-ranked issue,
+  foreground).
+- **`jira`** execution is still single and foreground (current session):
+  `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a single
+  claim with a one-line note. See section 5.
 
 Across all three trackers, `--claim-only` batches regardless (it reserves without
 executing — see the Claim / execute split below), and `/do-tasks <identifier>`
@@ -167,8 +171,9 @@ Overlay the local override on the committed config — mappings merge recursivel
   `commands/handlers/linear-claim.md` (with `commands/handlers/linear-common.md`
   for config/preflight/kanban mapping) for the full claim flow.
 - `handler: gh-issue` → **gh-issue path** (section 4 below). Follow
-  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow
-  (foreground single, current session).
+  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow —
+  foreground single in the current session by default, or batch remote dispatch
+  for `--all` / `-n N` (section 4, "gh-issue batch").
 - `handler: jira` → **jira path** (section 5 below). Follow
   `commands/handlers/jira-claim.md` for the full claim/execute flow
   (foreground single, current session).
@@ -515,10 +520,10 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 
 This is the tracker analogue of the repo-pr remote fan-out
 (`repo-pr-execute.md` §4 "Dispatch remote agents"). It is written **handler-neutral**
-so the gh-issue (section 4) and jira (section 5) batch paths can reference it
-unchanged once their batch tasks land — only the find/rank phase (step 1), the
-dependency-readiness check (step 3), and the per-issue claim+execute flow (step 4)
-differ by handler. It runs **only** for
+so section 4's gh-issue batch path already instantiates it, and the jira batch
+path (section 5) can do the same once its batch task lands — only the find/rank
+phase (step 1), the dependency-readiness check (step 3), and the per-issue
+claim+execute flow (step 4) differ by handler. It runs **only** for
 `--all` / `-n N` **without** `--claim-only` **and without** `--no-claim` (bare
 `/do-tasks` stays single foreground; `--claim-only` keeps its batch-claim behavior;
 `--no-claim` is always single — it resumes one already-claimed issue, so
@@ -592,8 +597,10 @@ capability is actually visible — inside the remote session** — via two concr
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — the VM has no plugin installed **and** a fresh clone has no
-   local task config (`/task-config` gitignores `dev_docs/tasks/` by default) — so
+   **self-contained** — the VM has no plugin **unless the repo declares one in a
+   committed `.claude/settings.json`** (see §4's gate; unprobed), **and** a fresh
+   clone has no local task config (`/task-config` gitignores `dev_docs/tasks/` by
+   default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
@@ -638,21 +645,394 @@ the find-candidates query, the in-flight pre-flight, the feasibility judgment, t
 atomic `<branch_prefix>task-<n>` claim lock (defined in
 `commands/handlers/claim-lock.md`), the work branch, `gh pr create` with
 `Closes #<n>`, the move to the `status:4_needs_review` rung, bail mechanics, and the
-report format.
-`/do-tasks` runs these phases in the **current session** over the `gh` CLI. If the
-relative path doesn't resolve, find it with **Glob**
+report format. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
 
-**Single by nature.** Like the tracker path, gh-issue execution is foreground:
-`--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a single claim
-with a one-line note ("batch isn't supported for gh-issue execution; claiming one
-issue") until the gh-issue batch task lands. The exception is `--claim-only`:
-reserving an issue runs no foreground work, so `--all` / `-n N --claim-only` may
-reserve several issues at once, bounded by the pre-claim WIP gate. `/do-tasks <#n>`
-(a specific issue number) claims that one issue. The claim/execute split
-(`--claim-only` / `--no-claim`) and the pre-claim WIP gate are now wired for
-gh-issue — both are documented in `gh-issue-claim.md` ("Modes: atomic vs.
-claim/execute split" and "Pre-claim WIP gate").
+**Execution modes.**
+
+- `/do-tasks`, `/do-tasks <#n>`, and `--no-claim` — **single and foreground**, in the
+  current session over the `gh` CLI. `/do-tasks <#n>` claims that one issue.
+- `--claim-only` — reserves without executing, so it batches regardless of mode,
+  bounded by the pre-claim WIP gate (`gh-issue-claim.md` "Pre-claim WIP gate").
+  Unchanged by this section.
+- `/do-tasks --all` / `-n N`, **without** `--claim-only` and **without**
+  `--no-claim` — **true batch execution**: one dispatched remote session per
+  selected issue, via **gh-issue batch** below. `--remote` is the default;
+  `--local` caps the batch at **1** and runs the single highest-ranked issue
+  foreground through `gh-issue-claim.md`'s default flow.
+
+The claim/execute split (`--claim-only` / `--no-claim`) and the pre-claim WIP gate
+are documented in `gh-issue-claim.md` ("Modes: atomic vs. claim/execute split" and
+"Pre-claim WIP gate").
+
+**`--project` is refused on this handler**, for the reason
+`commands/handlers/gh-issue-reconcile.md` step 3 already gives and owns: the
+gh-issue handler has no project dimension **yet**, milestones being the presumed
+mapping. Read it there rather than here. The refusal follows that file's rule
+exactly — a scope this handler cannot honour, plus a write, acts outside what the
+user named, and a batch always writes. So stop with `--project is not supported by
+the gh-issue handler` rather than ignoring the flag and running wider than was
+asked for.
+
+### gh-issue batch (`--all` / `-n N`, without `--claim-only` or `--no-claim`)
+
+This is section 3's **Tracker-batch subroutine** with gh-issue's substitutions
+filled in. **Read that subroutine first** — its `--no-claim` **rejection**
+(`--all --no-claim` is a contradiction), its rule that a batch never offers the
+attended override, and its warning that a dispatching session's attendedness never
+transfers to the sessions it dispatches all carry over unchanged. Only what is
+written below is gh-issue's.
+
+`--local` is a **cap**, not a rejection, and it is the one clause §3 spells in
+Linear's terms: it caps the batch at **1** and runs that single highest-ranked
+issue foreground — through `gh-issue-claim.md`'s default flow here, **not** §3's
+"Claim and execute".
+
+**First, the gate — and it is off by default.** `gh-issue.remote_batch` defaults
+to **`false`**, unlike `linear.remote_batch`, which defaults to `true`. Unless a
+repo sets it to `true`, do **not** dispatch: degrade `--all` / `-n N` to a single
+foreground claim through `gh-issue-claim.md`'s default flow and note `remote batch
+disabled — claiming one issue`. Read this **before** step 1, so a host that has not
+opted in never ranks, counts, or resolves dependencies first.
+
+**Why the default differs from Linear's.** Linear's remote flow is MCP tool calls
+and prose, both of which inline into a dispatch prompt. This handler's deterministic
+steps are **scripts that ship in the plugin** — every label write goes through
+`gh-issue-state.py` — so a dispatched session needs the plugin itself, not just the
+prompt. A cloud session does get a plugin the repo declares in a **committed
+`.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`), which is
+what makes `true` safe; user-level plugin settings do **not** travel. **That
+mechanism is documented and has not been probed here**, and this repo's own record
+says to probe routine behaviour rather than read it
+(`dev_docs/decisions/2026-08-24-routine-claim-channel.md` — "wrong twice" that way).
+An unprobed mechanism is not a basis for dispatching N sessions by default, so the
+flag is opt-in until someone runs the probe and records it beside that file. Setting
+`true` without the declaration is not silently broken — step 5's self-check stops
+each session loudly on its own issue.
+
+> **Every deterministic value below comes from a script whose exit code or JSON is
+> the contract.** Do not re-derive a candidate query, an in-flight count, or a
+> branch name in prose. The first attempt at this feature did exactly that against a
+> vocabulary that had since moved, and would have reported "no candidate" forever
+> while looking healthy.
+
+1. **Rank unclaimed candidates.** Run `gh-issue-claim.md` "Find candidates"
+   **through its ranking step only** — the `status:2_ready` + `auto:eligible` +
+   `no:assignee` + `-label:blocked` server-side search, ranked `prio:0` → `prio:1` →
+   `prio:2` → `prio:3` (an issue carrying none sorts last), then oldest `createdAt`
+   first. Keep both positive terms in `--search` for the reason that section gives.
+
+   **Stop there — the rest of that section is not the dispatcher's.** It continues
+   into two things the batch reassigns, and running them here would be wrong twice
+   over: its `gh-issue-ready.py` dependency drop belongs to step 3 (do not read any
+   issue's dependencies yet), and its closing "take the ranked candidates one at a
+   time → pre-flight → judge → **advance to the next candidate**" loop belongs to
+   the dispatched sessions, one candidate each. That loop's advance-on-reject is
+   the single instruction this batch most needs not to inherit: step 5 pins every
+   session to one issue precisely so nothing falls through to another.
+2. **Bound by WIP slack.** gh-issue has one top-level `wip_limit` (default `3`) —
+   no per-project caps and no global ceiling, so section 3 step 2's per-scope
+   arithmetic collapses to a single number. Read it; do not compute it:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" wip \
+     --repo <repo> --wip-limit <wip_limit> --json
+   ```
+
+   The dispatch ceiling is the JSON's **`slack`**, already clamped at `0`. Never
+   subtract `count` from `limit` here — an over-limit board (a human claimed by
+   hand, or the limit was lowered under running work) makes that difference
+   negative, and `gh-issue-claim.py` owns the clamp so no caller has to remember it.
+   If `slack` is `0`, dispatch nothing and report `WIP limit <wip_limit> reached
+   (<count> in flight) — nothing dispatched`. This bound is **unconditional**: a
+   batch never offers the attended override (`commands/handlers/attendedness.md`
+   step 2).
+3. **Drop the dependency-blocked.** One call, over **exactly** the ranked
+   candidates from step 1:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
+     --repo <repo> --issue <n1> --issue <n2> ... --json
+   ```
+
+   Keep the numbers in its `ready` array, **in step 1's ranked order**; record each
+   entry in `blocked` as `waiting on #<b>` naming the open blockers it reports.
+
+   **There is no body-footer path on this handler.** A `Blocked by: #<n>` line in an
+   issue body is a human-readable **echo** of a native `blocked_by` edge, never the
+   edge itself — nothing here may read it to decide blocked-ness. `gh-issue-ready.py`
+   reads the edge.
+
+   This asks about every ranked candidate in one call rather than lazily,
+   **deviating from section 3 step 3**. Two reasons: it is the same call the single
+   path already makes, so both paths answer dependency-readiness identically; and
+   passing the numbers explicitly is what closes the window in which a second
+   bounded board query silently omits a candidate, making a missing verdict
+   indistinguishable from a ready one. The cost is one `blocked_by` read per
+   candidate — at most 50 per batch run, since step 1 is limited to 50.
+4. **Take the first `min(N, slack)`** ready candidates in ranked order (`--all`
+   takes `slack` of them). Record every ranked candidate left over as `held (WIP
+   limit reached)` or `held (-n N ceiling)`, and keep step 3's `waiting on #<b>`
+   entries separate from both — a blocked issue and a held one need different
+   answers from the reader.
+5. **Dispatch one remote session per selected issue.** Each selected issue gets its
+   **own** session running `gh-issue-claim.md`'s flow — **inlined into the prompt**,
+   since the VM cannot read that file — against **that one issue number**, as a
+   direct `<#n>` pick, and never instruct a session to claim more than one issue.
+
+   **Which gates the session runs, and which this dispatcher already discharged.**
+   The split follows what a VM without the plugin can actually execute:
+
+   - **Discharged here, not re-run there** — "Find candidates" (step 1 ranked and
+     selected) and the pre-claim WIP gate. The gate is discharged because it is
+     **provably** redundant, not merely because it was asked recently: step 2's
+     `slack` bounds the whole batch, so dispatching at most `slack` sessions leaves
+     each observing a count strictly under `wip_limit`, however the **siblings**
+     interleave — the count starts at `count` and the last to claim sees
+     `count + slack - 1`, so none of them could have declined. That holds against
+     this batch's own dispatches only, per the caveat below.
+   - **Re-run in the session, immediately before the claim: dependency
+     readiness.** Step 3 answered it for the dispatcher, and that answer goes stale
+     — a blocker can be reopened between selection and claim, and unlike the WIP
+     bound there is no arithmetic making the recheck redundant. The session runs
+     `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py"
+     --repo <repo> --issue <n> --json` against its one pinned issue and **stops
+     without claiming** if it comes back `blocked`, naming the open blockers.
+     Claiming an issue whose dependencies are no longer met is a mutation this
+     batch would otherwise make on stale evidence.
+
+     **Say what this costs: `slack` becomes the only WIP bound, measured once.**
+     The session-side gate was redundant against _this_ batch's own dispatches —
+     that is the arithmetic above — but not against anything else claiming in the
+     meantime: a local `/do-tasks`, a human assigning by hand, another batch run.
+     Re-running it in the session would have caught those late, and now nothing
+     does. The bound is therefore a **dispatcher-side best effort taken at one
+     instant**, not a guarantee the repo stays under `wip_limit`. Accepted at
+     single-operator scale, and the same acceptance section 3 already makes for
+     concurrent batch runs; a repo that needs a hard bound should be claiming from
+     one session.
+   - **Also run in the session** — pre-flight (plain `git ls-remote` and
+     `gh pr list`), the claim election (plain `gh` comment calls), execute,
+     `gh pr create`, and the two label writes.
+
+   Everything the session runs before the claim is **verification-only**: a stale
+   dependency, a pre-flight trip, a feasibility reject, or a lost claim **stops
+   that session and reports it**. It must never advance to another candidate, which would put two
+   dispatched sessions on one issue.
+
+   The prompt must be **self-contained** — a fresh clone has no local task config
+   (`/task-config` gitignores `dev_docs/tasks/`), and the handler's **prose** files
+   are plugin files the prompt should carry rather than cite. Inline the issue
+   number, the claim+execute instructions themselves (**not** a pointer to
+   `gh-issue-claim.md` or `claim-lock.md`), and the already-resolved **non-secret**
+   gh-issue config the single-issue flow needs: `gh-issue.repo` if set, the base
+   branch, and `branch_prefix`. **Not `wip_limit`** — the dispatcher discharged
+   that gate, so a session handed a limit is being invited to run a check it
+   should not, and a decline there would strand a dispatched issue with nothing
+   done. The **scripts** are a different case —
+   the gate above is an operator's assertion that the plugin will be there, not
+   proof that it is (the self-check below is the proof), so address them the way
+   an installed plugin is addressed: have the session call them at
+   **`$CLAUDE_PLUGIN_ROOT`**, the spelling `CONTRIBUTING.md` mandates and the one
+   used above. `gh-issue-claim.md` still writes its asset calls repo-relative,
+   which resolves only when the cwd is the plugin's own repo — so those are the
+   calls that need rewriting as you inline.
+
+   **Rewrite the paths as you inline, and check the inlined text before you
+   dispatch.** `gh-issue-claim.md` spells every asset call
+   `python3 commands/handlers/assets/…`, so copying its steps verbatim carries that
+   spelling into the prompt and the session's first script call fails — after the
+   self-check has passed, since the self-check probes `$CLAUDE_PLUGIN_ROOT` and the
+   copied call does not. Each becomes
+   `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. The check is on the
+   **unprefixed** spelling: no `python3 commands/handlers/assets/` may survive in
+   the dispatched prompt. Every asset call must carry the `$CLAUDE_PLUGIN_ROOT/`
+   prefix — which of course still contains `commands/handlers/assets/`, so do not
+   grep for that substring alone. **Never** inline a token or any other secret —
+   the dispatched session authenticates through its own `gh`. That is also what
+   step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
+   must authenticate as the **dispatching** account or their claims never enter the
+   next run's `slack`.
+
+   **Resolve every value you can here, so the session needs fewer of the plugin's
+   assets.** The branch name is the clearest case: run `branch-name` **in this
+   session** and inline the **literal** it prints, rather than telling the VM to run
+   a script it does not have.
+
+   ```bash
+   branch=$(python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" branch-name \
+     --issue <n> [--prefix "<branch_prefix>"])
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and a path above does not resolve, Glob
+   `**/handlers/assets/<name>.py` — the fallback `CONTRIBUTING.md` documents for
+   every asset call.
+
+   The result is `<branch_prefix>task-<n>` (`gh-issue-claim.md` "Branch name"). A
+   literal `task/<n>` is **wrong** anywhere on this path: it probes and creates a
+   ref that is not the real lock, so every racer concludes it won. Deriving it once
+   here also means both sides of a race compute it the same way, which is the
+   property `claim-lock.md` depends on.
+
+   **Self-check first, on two things.** The prompt's first step must be: "If
+   `gh auth status` fails, or
+   `$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-state.py` is not present,
+   do **not** claim — stop immediately and report `remote gh CLI unavailable` or
+   `remote handler assets unavailable`." Both are necessary and `gh` alone is not
+   sufficient: every phase of this handler shells out to `gh`, **and** the label
+   writes go through `gh-issue-state.py`, which validates against `labels.yml`
+   before any network call. A session that claims an issue and then cannot write
+   its rung strands exactly the half-written state `gh-issue-claim.md` "Claim the
+   issue" step 3 warns about — assigned and lock-held but still `status:2_ready`,
+   which nothing picks up and nothing cleans.
+
+   **This is the backstop for the gate, and it is why an unprobed gate is still
+   safe to offer.** The gate reads a declaration; the self-check reads the VM. If
+   the declaration is there but the install did not happen — a marketplace the
+   session's network could not reach, say — every dispatched session stops on its
+   own issue and says so, rather than claiming work it cannot write back. Keeping
+   the check inside the session is section 3's rule for the same reason: what the
+   VM actually inherits is visible there and nowhere else.
+
+   **Refuse remote dispatch when `gh-issue.repo` is not the session's own repo.** A
+   cloud session's `gh` reaches only the repositories attached to it, so a batch
+   whose tracker is a different repo from the code would have every session fail at
+   its first write. Check it here and degrade to the foreground claim with
+   `remote batch needs gh-issue.repo to be this repo — claiming one issue`.
+
+   **Declare the session unattended.** Inline `--non-interactive` semantics: "No
+   human is present in this session — never prompt; if any gate you run declines,
+   report it and stop." Do **not** copy section 3's wording verbatim here: it names
+   the WIP gate, which this session does not run (the dispatcher discharged it), so
+   it would instruct the session about a decision it never makes. Section 3's
+   _reason_ still applies in full and is the sharpest failure mode in the design —
+   without the declaration, each dispatched session concludes it is attended and
+   offers itself the override its dispatcher was gated by.
+
+6. **Dispatched sessions claim on the comment election, not the ref lock.** This is
+   the one place a dispatched session's flow differs from the single path, and — as
+   with everything else in step 5 — the dispatcher **inlines the election's steps
+   into the prompt** rather than naming `claim-lock.md`, which the VM cannot read.
+   Copy them from `claim-lock.md` → "Fallback: comment-token election": record
+   `T_unclaimed`, mint a token, post the claim comment, write the board markers,
+   sleep a jittered ~2–3 s, re-list and elect on the lowest comment id among
+   markers that are both at-or-after `T_unclaimed` and state-backed, and retract
+   your own comment if it loses. Carry **step 7** across too — if the re-list
+   returns only your own marker, treat it as inconclusive and re-poll once or
+   twice before declaring a win. No server-side CAS backs this path, and a batch
+   runs it N times unattended, so the one step that guards read lag is the last
+   one to drop. The prompt must **omit** `gh-issue-claim.py
+   acquire` entirely — there is no ref to create on this path.
+
+   **Two additions to those steps, and they are what make the mixed-path race
+   detectable.** The election cannot see a ref, so the session has to look for one
+   itself — `git ls-remote --heads origin "<branch>"`, pre-flight's probe, run
+   **twice**:
+
+   - **Before writing the board markers**, right after posting the claim comment.
+     A ref here means a local session acquired after this session's pre-flight:
+     retract the comment, write **nothing** to the board, stop.
+   - **After the jittered sleep, with the re-list.** This is the one that matters,
+     because the first probe leaves the election's own ~2–3 s sleep wide open —
+     and a local session needs only a `git fetch` and one POST to acquire inside
+     it. A ref here is a lost claim **regardless of comment ordering**: retract
+     your comment and stop. The markers are already written by then; **leave
+     them**, exactly as fallback step 6 says — they carry the same account values
+     the local winner writes, so stomping them helps nobody.
+
+   That last clause is an **assumption, and it is the one §4 already requires**:
+   the dispatched sessions authenticate as the dispatching account (step 5), so a
+   racing local session is the same operator and the markers match. If a
+   **different** operator holds the ref, this session has left its own assignee on
+   an issue it did not win — the board disagreeing with the lock, which
+   `gh-issue-claim.md` "Claim the issue" step 4 already owns and reports from the
+   winner's side. Do not add a second cleanup path for it here: writing the markers
+   before the election is decided is `claim-lock.md` step 3's design, because step
+   5 elects only among **state-backed** comments and cannot do so if the poster
+   wrote nothing.
+
+   Either way report `Skipped #<n>: claim lost — <branch> already exists on
+   origin`, `claim-lock.md`'s own wording for this observation. Do **not** write
+   "acquired by another session": a bare `ls-remote` hit cannot tell a live claim
+   from a ref an earlier crash stranded, and this section is where that
+   distinction is load-bearing.
+
+   The session then creates its work branch itself,
+   `git switch -c "<branch>" "origin/<base>"` (the case `gh-issue-claim.md`
+   "Branch + execute" step 1 already covers for a claim that created no ref), using
+   the literal `<branch>` step 5 inlined. On bail it deletes its own token comment
+   rather than a ref, and runs **no** `release` call. Have it report
+   `claim: comment election (batch dispatch)`, **not** `claim-lock.md`'s degrade
+   string: that string names an API error, and no API error happened here.
+
+   Why: the ref lock has no release an unattended session can be relied on to reach.
+   A dispatched session that crashes or times out after acquiring strands `<branch>`
+   on origin; every later session then reads that ref as a live claim and skips the
+   issue **forever**, and this repo has **no stale-ref sweep** (`claim-lock.md` →
+   "Why it is not the default"). The comment election's orphans are self-healing by
+   contrast — its `T_unclaimed` filter and state-backed check discard them. A batch
+   fans out N unattended sessions at once, so it multiplies exactly the failure the
+   election is immune to. This is **not** a claim that a dispatched session lacks
+   the credential to release: one that passed the `gh auth status` self-check could
+   delete the ref. It is that a crash is precisely the case where it never gets to.
+
+   What the election removes is the **window**, not the ref: the session pushes
+   `<branch>` to open its PR, so the ref exists again from that moment. The
+   difference is what a strand then means — an hour of unattended execution can no
+   longer end in an empty ref that makes the issue skipped forever, and a ref left
+   after the push is accompanied by finished work and an open PR that pre-flight
+   reports rather than a silent forever-skip.
+
+   **What neither lock fixes: the board markers.** A session that claims and then
+   dies before opening a PR leaves the issue assigned and on `status:3_started`
+   with nothing to show, and the candidate query excludes it on **both** counts
+   (`no:assignee` and `status:2_ready`), so no later run picks it up. That is the
+   handler's own failure mode, identical on the ref path and the election path — a
+   crashed **local** claim strands an issue exactly the same way — so it argues for
+   neither lock and is **not** repaired here. Do not read "the election's orphans
+   are self-healing" as covering it: `claim-lock.md`'s self-healing is about stale
+   claim **comments** losing later elections, not about the board. Batch multiplies
+   the exposure by dispatching N unattended sessions, which is worth knowing before
+   turning `remote_batch` on; recovering such an issue is a human `gh issue edit`
+   today, and a sweep for it has no owner.
+7. **What guards the race — and what does not.** Two dispatched sessions never
+   contend: step 5 pins each to a distinct issue number and none falls back to
+   another issue, which is why the batch needs no equivalent of repo-pr's draft
+   `task-claim` PR marker. What **can** contend is a dispatched session and a
+   **local** `/do-tasks` on the same issue. Step 6 puts them on different
+   elections, so **neither primitive rejects the other** — the ref acquire cannot
+   see a claim comment and the comment election cannot see a ref. That is a real
+   asymmetry and it is not closed by a lock; it is closed by each side reading for
+   the other's marker, and each direction has one:
+
+   - **Local acquires the ref first** → one of the dispatched session's two ref
+     probes in step 6 sees it — the first before any board write, the second
+     after the election's sleep, which is the interval the first cannot cover —
+     and it retracts and stops. The two points are inside `claim-lock.md` step 3
+     (between the comment post and the marker write) and within step 5's re-list.
+   - **The dispatched session writes its markers first** → the local session's
+     "Claim the issue" step 1 re-read sees the assignee and the moved rung and
+     returns `race` before its own acquire.
+
+   What is left is genuine simultaneity: the two reads interleaving inside the
+   window between the dispatched session's **second** probe and the local
+   session's acquire, which is milliseconds rather than the seconds the sleep
+   would otherwise have contributed. Nothing here makes that impossible, and the
+   honest bound is that it is narrow rather than closed —
+   `claim-lock.md`'s existing mixed-path window, which batch makes ordinary rather
+   than exceptional. Taking the ref lock in the dispatched session would close it
+   and reopen the permanent strand step 6 exists to avoid; that trade is the
+   subject of step 6, not a gap here. **Do not run a batch against a repo a local
+   `/do-tasks` is working at the same time.**
+
+   The `slack` read in step 2 is not atomic either, so two concurrent batch runs can
+   each observe the same slack, dispatch to disjoint issues, and together overshoot
+   `wip_limit`. Accepted at single-operator scale, as in section 3 — don't run two
+   batch dispatches concurrently.
+8. **Report** the dispatched issues (number, title, "remote session started"), then
+   separately those `held` by the WIP / `-n N` bound and those `waiting on #<b>`.
+   Note a truncated candidate page if step 1 returned exactly 50. Point the user at
+   `/tasks` to monitor.
 
 ## 5. jira path (`jira` handler)
 
@@ -666,9 +1046,9 @@ report format. `/do-tasks` runs these phases in the **current session** over the
 Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
-**Single by nature.** Like the gh-issue path (and unlike the Linear tracker path,
-which now batches via the Tracker-batch subroutine in section 3), jira execution is
-foreground: `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
+**Single by nature.** Unlike the Linear tracker path (which batches via the
+Tracker-batch subroutine in section 3) and the gh-issue path (which instantiates
+that subroutine in section 4), jira execution is foreground: `--remote`/`--local` do not apply, and `--all` / `-n N` degrades to a
 single claim with a one-line note ("batch isn't supported for jira execution;
 claiming one issue"). The exception is `--claim-only`: reserving an issue runs no
 foreground work, so `--all` / `-n N --claim-only` may reserve several issues at once,
@@ -699,9 +1079,13 @@ issues (identifier, title, "remote session started"), then separately those held
 the WIP / `-n N` bound and those skipped as waiting on a blocker; point the user at
 `/tasks` to monitor.
 
-For the **gh-issue path**, report per `gh-issue-claim.md` "Report": on success
-print the issue number, the PR URL, and a one-line summary; on bail print the
-issue number, why it bailed, and the issue-comment URL.
+For the **gh-issue path** in **single** mode, report per `gh-issue-claim.md`
+"Report": on success print the issue number, the PR URL, and a one-line summary; on
+bail print the issue number, why it bailed, and the issue-comment URL. In **batch**
+mode (`--all` / `-n N`), report per section 4 "gh-issue batch" step 8: the
+dispatched issues (number, title, "remote session started"), then separately those
+held by the WIP / `-n N` bound and those waiting on a blocker; point the user at
+`/tasks` to monitor.
 
 For the **jira path**, report per `jira-claim.md` "Report": on success print the
 issue key, the PR URL, and a one-line summary; on bail print the issue key and

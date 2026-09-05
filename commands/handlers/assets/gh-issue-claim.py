@@ -15,8 +15,10 @@ sessions could each interpret slightly differently:
   exit code is a contract: 0 (won), 3 (lost the race), and 4 (indeterminate —
   neither won nor lost) mean different things to the caller, and the caller
   branches on the number, not on parsing prose.
-- `wip` counts in-flight work with one server-side query, so a caller cannot
-  under-count by missing a label spelling or over-cost by issuing two calls.
+- `wip` counts in-flight work with one server-side query and reports the
+  remaining batch ceiling as `slack`, so a caller cannot under-count by
+  missing a label spelling, over-cost by issuing two calls, or hand a batch
+  dispatch a negative ceiling by doing the subtraction in prose.
 - `release` deletes a lock ref this session created, on bail.
 
 Usage:
@@ -157,20 +159,34 @@ def cmd_issue_number(args):
 
 
 def cmd_wip(args):
-    issues = count_wip(args.repo, args.labels_file, args.limit)
+    # Fetch at least `wip_limit` rows, whatever --limit says. The API
+    # truncates before anything local runs, so a page capped below the limit
+    # reads as a count under it: `at_limit` comes back false and `slack`
+    # positive on a board that is already over, and the batch dispatches into
+    # the overflow. Asking for wip_limit rows is sufficient rather than
+    # generous -- if that many come back, count >= wip_limit and slack is 0
+    # whatever the true total is; if fewer, the count is exact.
+    issues = count_wip(args.repo, args.labels_file, max(args.limit, args.wip_limit))
     count = len(issues)
     at_limit = count >= args.wip_limit
+    # Clamped, because an over-limit board (a human claimed by hand, or the
+    # limit was lowered under running work) yields a negative difference, and
+    # a batch caller reads this straight into `min(N, slack)` as its dispatch
+    # ceiling. A negative there is not "dispatch nothing" in every prose
+    # reading, so the clamp lives here rather than in the caller.
+    slack = max(0, args.wip_limit - count)
     result = {
         "repo": args.repo,
         "count": count,
         "limit": args.wip_limit,
         "at_limit": at_limit,
+        "slack": slack,
         "issues": issues,
     }
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:
-        print(f"{args.repo}: {count} in flight (limit {args.wip_limit})")
+        print(f"{args.repo}: {count} in flight (limit {args.wip_limit}, slack {slack})")
         for issue in issues:
             print(f"  #{issue['number']} {issue['title']}")
     return 0

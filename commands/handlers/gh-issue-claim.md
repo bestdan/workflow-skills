@@ -1,6 +1,8 @@
 # gh-issue handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow, run in the current session: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+Invoked from `/do-tasks` (section 4, "gh-issue path") when `handler: gh-issue` is configured. This file holds the full gh-issue execute flow: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the `gh` CLI instead of the Linear MCP.
+
+In the **current session** (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`, `--claim-only`) this flow runs here as written — `--claim-only` included, which reserves several issues at once but reserves them all from this session. In **batch** mode (`/do-tasks --all` / `-n N`, without `--claim-only` or `--no-claim`) it runs once per selected issue inside a dispatched **remote** session — see `commands/do-tasks.md` §4 "gh-issue batch", which reuses this file's find/rank and dependency phases as the dispatcher's own selection and then hands each session a single pinned issue number. Pre-flight is not reused that way — it runs in the dispatched session, on plain `git` and `gh`. **Five things change in a dispatched session and nothing else does.** Two phases the dispatcher has already discharged are skipped: "Find candidates" (it ranked and selected) and the **pre-claim WIP gate** (its `slack` bounds the whole batch, provably). **Dependency readiness is not one of them** — the dispatcher's answer can go stale, so the session re-runs `gh-issue-ready.py` against its pinned issue immediately before claiming, and stops if it is blocked. A third change is that narrowing. The fourth is the claim: it runs `claim-lock.md`'s comment-token election instead of the ref acquire in "Claim the issue" step 2, because an unattended session that crashes after acquiring strands the lock ref permanently — **plus the two `git ls-remote` probes §4 step 6 adds to that election**, which are how it and a local ref-lock session detect each other at all. The fifth is mechanical and easy to miss when copying: every asset call in this file is spelled repo-relative and must be rewritten to `$CLAUDE_PLUGIN_ROOT` as it is inlined (see "Modes" below). §4 steps 5–7 own all five substitutions and the reasoning; do not re-derive them here.
 
 **Shared reference:** the label vocabulary is `commands/handlers/assets/labels.yml`, read the same way by `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md`; every label write on this path goes through `commands/handlers/assets/gh-issue-state.py`; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
@@ -93,6 +95,8 @@ normal run — passing both is an error: stop and ask which was meant.
   "Move to review" — without re-claiming.
   `--no-claim` is always single (`--all` / `-n N` do not apply).
 
+**`--all` / `-n N` without `--claim-only`** is **not** driven from this file. `commands/do-tasks.md` §4 "gh-issue batch" ranks and selects the dependency-ready candidates itself, then dispatches one remote session per selected issue, each running the flow above against its one issue number **with §4's five batch substitutions** — "Find candidates" and the pre-claim WIP gate skipped as already discharged; **dependency readiness narrowed rather than skipped**, the dispatcher using it to select and each session re-running `gh-issue-ready.py` against its pinned issue immediately before claiming; and the claim taken on `claim-lock.md`'s comment-token election rather than the ref acquire (the first four this file's opening paragraph names; the asset-path rewrite below is the fifth). Everything else runs as written, **except the asset paths**: every `python3 commands/handlers/assets/…` call in this file is repo-relative and resolves only inside this plugin's own repo, so the inlined prompt must rewrite each one to `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. §4 step 5 says which gates run where, and what discharging the WIP gate costs — `slack` becomes a one-instant, dispatcher-side bound rather than a guarantee. Everything the session runs before the claim is verification-only: a pre-flight trip, a feasibility reject, or a lost claim **stops and reports** rather than advancing to another candidate — advancing would put two dispatched sessions on one issue. `--all` / `-n N` with `--local` never dispatches: it caps the batch at 1 and runs the single highest-ranked issue through the default flow in the current session.
+
 ## Pre-claim WIP gate
 
 Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
@@ -119,7 +123,7 @@ claims nothing, skips it.
    (claimed, PR not yet open) **or** `status:4_needs_review` (PR open, in review). An
    in-flight issue holds exactly one of the two, and GitHub's issue search takes a
    comma-separated label list as an OR, so that is **one** query rather than two counts
-   summed. Read `count` and `at_limit` from the JSON.
+   summed. Read `count`, `at_limit` and `slack` from the JSON.
 
    Both rungs count because the WIP limit exists to bound the human PR-review queue:
    "Move to review on PR open" moves `status:3_started → status:4_needs_review`, so a
@@ -143,8 +147,11 @@ claims nothing, skips it.
    so in the run report. This step owns the **message**; that file owns the **decision**.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
-outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve
-nothing and report the WIP-limit decline).
+outright: reserve at most the JSON's **`slack`** issues (`0` → reserve nothing and
+report the WIP-limit decline). Read it; do **not** subtract `count` from
+`wip_limit` here. The script owns that arithmetic and its clamp for the same
+reason `do-tasks.md` §4 step 2 gives — an over-limit board makes the difference
+negative — and a second copy of it here is the drift that rule exists to prevent.
 
 ## Find candidates
 

@@ -6,7 +6,7 @@ network. Covers the branch-name model (deterministic, any-prefix parseable),
 the acquire election's exit-code contract (0 won / 3 lost / 4 indeterminate)
 including the concurrency case where a second acquire against the same fake
 remote must lose without ever touching the issue, the wip count's single
-query and both in-flight labels, and release.
+query, both in-flight labels and its clamped batch `slack`, and release.
 """
 
 import contextlib
@@ -61,8 +61,12 @@ class FakeRemote:
             self.refs.discard(ref)
             return 0, "", ""
         if args[:2] == ["issue", "list"]:
+            # Honour --limit: the real API truncates before anything local
+            # runs, which is the whole reason the caller must ask for enough.
+            limit = int(args[args.index("--limit") + 1])
             payload = [
-                {"number": n, "title": t, "labels": []} for n, t in self.wip_issues
+                {"number": n, "title": t, "labels": []}
+                for n, t in self.wip_issues[:limit]
             ]
             return 0, json.dumps(payload), ""
         raise AssertionError(f"unexpected gh call: {args}")
@@ -257,6 +261,58 @@ class WipTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
         self.assertTrue(json.loads(out.getvalue())["at_limit"])
+
+    def test_slack_is_the_remaining_batch_ceiling(self):
+        """A batch reads `slack`, never `limit - count` done in prose."""
+        remote = FakeRemote(wip_issues=[(1, "a"), (2, "b")])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        self.assertEqual(json.loads(out.getvalue())["slack"], 1)
+
+        remote_at = FakeRemote(wip_issues=[(1, "a"), (2, "b"), (3, "c")])
+        gh_issue_claim.run_gh = remote_at.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        self.assertEqual(json.loads(out.getvalue())["slack"], 0)
+
+    def test_slack_is_clamped_at_zero_over_the_limit(self):
+        """An over-limit board must not hand a batch a negative ceiling."""
+        remote = FakeRemote(wip_issues=[(n, "x") for n in range(1, 6)])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(["wip", "--repo", "o/n", "--wip-limit", "3", "--json"])
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["slack"], 0)
+
+    def test_the_query_fetches_enough_to_decide_the_limit(self):
+        """A wip_limit above the query cap must not manufacture slack.
+
+        count_wip's --limit defaults to 100. With a larger wip_limit, a
+        truncated page reads as a count below the limit, so `slack` comes
+        back positive on a board that is already over it and the batch
+        dispatches into the overflow.
+        """
+        remote = FakeRemote(wip_issues=[(n, "x") for n in range(1, 201)])
+        gh_issue_claim.run_gh = remote.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_claim.main(
+                ["wip", "--repo", "o/n", "--wip-limit", "150", "--json"]
+            )
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["slack"], 0)
+        self.assertTrue(result["at_limit"])
+
+        list_calls = [args for args, _ in remote.calls if args[:2] == ["issue", "list"]]
+        fetched = int(list_calls[0][list_calls[0].index("--limit") + 1])
+        self.assertGreaterEqual(
+            fetched, 150, "must fetch at least wip_limit before deriving the ceiling"
+        )
 
     def test_exits_0_regardless_of_at_limit(self):
         remote = FakeRemote(wip_issues=[(1, "a"), (2, "b"), (3, "c")])
