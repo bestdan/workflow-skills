@@ -196,10 +196,11 @@ mcp__github__issue_read(method=get_labels, …)
 `opt`. The premise that would have justified flipping it is now measured false rather
 than merely unprobed, which is a stronger reason for the same default.
 
-The correction was to the prose, not the default: `commands/do-tasks.md` §4,
-`commands/task-config.md` and `commands/handlers/gh-issue.md` all told a reader that
-committing the declaration was what made `true` safe. They were corrected in the same
-change as this file.
+The correction was to the prose, not the default. `commands/do-tasks.md` §3 step 4 and
+§4, `commands/task-config.md` and `commands/handlers/gh-issue.md` all told a reader that
+committing the declaration was what made `true` safe; `commands/handlers/claim-lock.md`
+assumed a dispatched session could reach GitHub at all. All four were corrected in the
+same change as this file.
 
 A repo that wants `remote_batch: true` needs the plugin present by some other route, and
 its dispatched sessions need a credentialed channel that is currently the MCP connector

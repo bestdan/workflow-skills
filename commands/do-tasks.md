@@ -534,7 +534,11 @@ the single highest-ranked issue foreground via "Claim and execute" above).
 **Connector availability: fail safe at the remote end, not by a pre-check.** Batch
 dispatch hands each issue's claim, comment, and state transitions to a remote cloud
 session, which can only run them if that session has the handler's MCP connector —
-unlike the repo-pr remote fan-out, which needs only `git`/`gh`. A remote session **may**
+unlike the repo-pr remote fan-out, which needs only `git`/`gh`. That is a smaller
+dependency, not a free one: the 2026-09-05 probe found a cloud session's `gh`
+uncredentialed on reads as well as writes
+(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`), so a session that
+claims over MCP can still fail at `gh pr create`. A remote session **may**
 inherit the Linear connector but does **not** always, and the launching session has **no
 deterministic way to introspect what `claude --remote` will inherit** — the tools loaded
 here say nothing about the VM's environment. So do **not** gate dispatch on an
@@ -907,7 +911,8 @@ each session loudly on its own issue.
    inherits is visible there and nowhere else.
 
    **Refuse remote dispatch when `gh-issue.repo` is not the session's own repo.** A
-   cloud session's `gh` reaches only the repositories attached to it, so a batch
+   cloud session's `gh` is documented to reach only the repositories attached to it —
+   **not measured; the probed session's `gh` reached nothing at all** — so a batch
    whose tracker is a different repo from the code would have every session fail at
    its first write. Check it here and degrade to the foreground claim with
    `remote batch needs gh-issue.repo to be this repo — claiming one issue`.
