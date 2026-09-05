@@ -710,10 +710,13 @@ even a session that found the scripts could not run their `gh api` calls. The
 credentialed channel there is the GitHub MCP connector, which this handler does not
 yet speak (see `claim-lock.md`).
 
-So `true` has no supported route to the plugin today. A repo that sets it needs the
-plugin installed by some other means — a cloud-environment setup script running
-`claude plugin marketplace add` plus `claude plugin install` is the obvious candidate
-and is itself **unmeasured**. Setting `true` without that is not silently broken:
+So `true` needs **two** things the probed environment did not have, and the plugin is
+only the first. A repo that sets it needs the plugin installed by some other means — a
+cloud-environment setup script running `claude plugin marketplace add` is the obvious
+candidate, since the committed `enabledPlugins` did take effect once the marketplace
+existed — **and** it needs its sessions to have a working `gh` credential, because
+every phase of this handler shells out to `gh`. Neither the setup script nor a
+credentialed session was measured. Setting `true` without them is not silently broken:
 step 5's self-check stops each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
@@ -892,13 +895,15 @@ step 5's self-check stops each session loudly on its own issue.
    issue" step 3 warns about — assigned and lock-held but still `status:2_ready`,
    which nothing picks up and nothing cleans.
 
-   **This is the backstop for the gate, and it is why an unprobed gate is still
-   safe to offer.** The gate reads a declaration; the self-check reads the VM. If
-   the declaration is there but the install did not happen — a marketplace the
-   session's network could not reach, say — every dispatched session stops on its
-   own issue and says so, rather than claiming work it cannot write back. Keeping
-   the check inside the session is section 3's rule for the same reason: what the
-   VM actually inherits is visible there and nowhere else.
+   **This is the backstop for the gate, and it is why the flag is safe to offer at
+   all.** The gate reads a config flag; the self-check reads the VM. Both failures
+   it guards against were **measured**, not imagined: a cloud session started with
+   the plugin absent, and its `gh` 403'd on reads as well as writes
+   (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`). So a session
+   dispatched into an environment that has not solved both stops on its own issue
+   and says so, rather than claiming work it cannot write back. Keeping the check
+   inside the session is section 3's rule for the same reason: what the VM actually
+   inherits is visible there and nowhere else.
 
    **Refuse remote dispatch when `gh-issue.repo` is not the session's own repo.** A
    cloud session's `gh` reaches only the repositories attached to it, so a batch

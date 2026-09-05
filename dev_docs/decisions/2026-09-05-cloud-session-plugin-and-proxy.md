@@ -27,8 +27,9 @@ off.
   `enabledPlugins` (`workflow-skills@workflow-skills`). The session read the file back
   verbatim, so the declaration reached the VM.
 - Session `session_01NjXjJLn92VsumHpC1FsdFo`, Claude Code launched from the CLI, model
-  `claude-opus-5[1m]`, cwd `/home/user/dotfiles`. Environment log:
-  `Cloning repository bestdan/dotfiles` … `No setup script configured`.
+  `claude-opus-5[1m]`, cwd `/home/user/dotfiles`, `claude --version` **2.1.261** read
+  inside the session. Environment log: `Cloning repository bestdan/dotfiles` …
+  `No setup script configured`.
 - Scratch write target `bestdan/dotfiles#699`, carrying no `task-add` marker so the
   loop's label scope could not see it. Closed after the probe.
 
@@ -66,13 +67,46 @@ And installing by hand, **inside the session**, worked end to end:
 ```
 $ claude plugin marketplace add bestdan/workflow-skills
 Cloning via HTTPS: https://github.com/bestdan/workflow-skills.git
+Clone complete, validating marketplace…
 √ Successfully added marketplace: workflow-skills (declared in user settings)
+$ claude plugin marketplace list
+Configured marketplaces:
+> workflow-skills   Source: GitHub (bestdan/workflow-skills)
+$ claude plugin install workflow-skills@workflow-skills
+Installing plugin "workflow-skills@workflow-skills"...
+√ Successfully installed plugin: workflow-skills@workflow-skills (scope: user)
+$ claude plugin list
+Installed plugins:
+> workflow-skills@workflow-skills   Version: 2.24.2   Scope: user   Status: √ enabled
 $ ls /root/.claude/plugins/cache/workflow-skills/workflow-skills/2.24.2/commands/handlers/assets
 _labels.py  _secret_resolve.py  _shape.py  gh-issue-claim.py  gh-issue-state.py  …
 ```
 
 So the failure is specifically the **auto-install from committed repo settings**, not
 egress, not proxy repository scoping, and not the marketplace itself.
+
+### Which half of the declaration was ignored
+
+The committed file declares two things. They did not fail together.
+
+Immediately after the manual install, `claude plugin list` showed the plugin **once**,
+at `Scope: user`. On the next session start in the same VM — a fresh Claude Code
+process, with the marketplace now present — it showed **twice**:
+
+```
+> workflow-skills@workflow-skills   Version: 2.24.2   Scope: user      Status: √ enabled
+> workflow-skills@workflow-skills   Version: 2.24.2   Scope: project   Status: √ enabled
+```
+
+Nothing wrote a second user-scope entry in between, and `project` scope can only come
+from the repo's committed `.claude/settings.json`. So the committed **`enabledPlugins`
+was honoured**, once the marketplace it names was resolvable; what the cold session did
+not act on was the committed **`extraKnownMarketplaces`** — at that point
+`claude plugin marketplace list` said `No marketplaces configured`.
+
+Read that as **observed sequence, not diagnosed cause**: this probe did not establish
+why the marketplace was not configured on the cold start, and a second cold session was
+not run to confirm the project entry now appears from a clean VM.
 
 ### `gh` is installed, and unusable
 
@@ -113,10 +147,12 @@ mcp__github__issue_read(method=get_labels, …)
 
 ## What this settles
 
-1. **A committed `.claude/settings.json` does not install a plugin into a cloud
-   session.** Measured false at Claude Code 2.1.261, in a CLI-launched `--cloud`
-   session. Every sentence in this repo that offers the declaration as the thing that
-   makes `remote_batch: true` safe is wrong and must be corrected.
+1. **A committed `.claude/settings.json` does not, on its own, install a plugin into a
+   cloud session.** Measured at Claude Code 2.1.261, in a CLI-launched `--cloud`
+   session. The `enabledPlugins` half works once the marketplace exists; the
+   `extraKnownMarketplaces` half did not produce one. Every sentence in this repo that
+   offers the declaration as the thing that makes `remote_batch: true` safe is wrong
+   and must be corrected.
 2. **`gh` exists in a cloud session but has no working credential**, and the barrier is
    at the account, not the endpoint: reads 403 alongside writes. So the 2026-08-24
    routine finding and this session's finding agree in effect — no usable `gh` — while
@@ -136,10 +172,12 @@ mcp__github__issue_read(method=get_labels, …)
   was not tried. Read finding 2 as "not available on this account today", not as "the
   proxy forbids it".
 - **Whether a setup script fixes the plugin gap.** The environment reported
-  `No setup script configured`. A setup script running `claude plugin marketplace add`
-  plus `claude plugin install` would plainly work — the manual commands above are exactly
-  that — but it was **not** measured as a session-start step, and it is a per-environment
-  setting rather than something a repo can commit.
+  `No setup script configured`. Given the scope finding above, the narrow candidate is a
+  setup script running `claude plugin marketplace add` — the committed `enabledPlugins`
+  then does the rest. That was **not** measured as a session-start step, and a setup
+  script is a per-environment setting rather than something a repo can commit.
+- **Whether the plugin gap matters on its own.** It does not: closing it still leaves
+  `gh`. Both must be solved before `remote_batch: true` dispatches anything that works.
 - **Whether any of this differs on an organization-owned repo, or on a session started
   from the web rather than the CLI.** One session, one personal repo.
 
