@@ -308,6 +308,111 @@ else
         echo "PREFLIGHT SMOKE_EGRESS: FAIL"
         blockers+=("confinement smoke: layer-2 egress allowlist did not render as an enabled, deny-by-default allowlist")
       fi
+
+      # --- 4b. Jailed-commit smoke — the run's load-bearing op ---------------
+      # §4 proves exec, a $HOME write-deny, and egress render, but never the one
+      # operation the orchestrator runs on EVERY wake: a git commit from the run
+      # worktree, under this host's git config, inside the jail. That gap let a
+      # launch that cannot commit read as `go` and wedge silently at 3am
+      # (dev_docs/autopilot-feedback.md, meta-finding + Blockers 1/2). Reproduce
+      # the launch topology — a linked run worktree off a source repo mounted
+      # read-only — and commit inside the jail, under the host's REAL git config
+      # (no hooksPath override), so this one check catches BOTH a linked-worktree
+      # admin dir stranded in the RO repo (index.lock EPERM, Blocker 1) AND an
+      # exec-denied host core.hooksPath (Blocker 2). A failure is a hard no-go.
+      hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+      echo "PREFLIGHT HOOKS_PATH: ${hooks_path:-none}"
+      gitbin="$(command -v git 2>/dev/null || true)"
+      bashbin="$(command -v bash 2>/dev/null || true)"
+      if ! $smoke_exec_ok; then
+        echo "PREFLIGHT SMOKE_JAILED_COMMIT: skip (SMOKE_EXEC failed — exec wall is already a blocker)"
+      elif [ -z "$gitbin" ] || [ -z "$bashbin" ]; then
+        echo "PREFLIGHT SMOKE_JAILED_COMMIT: skip (git and bash not both on PATH)"
+        skip_notes+=("jailed-commit smoke skipped: git or bash missing")
+      else
+        jc="$scratch/jailed-commit"
+        # The throwaway topology must live OUTSIDE any renderer-owned RW grant:
+        # render-profile emits a fixed /tmp/claude-* harness grant, so a fixture
+        # under that tree would let the commit land in a granted scope and
+        # false-pass. $scratch is under $TMPDIR (…/preflight-smoke.XXXX), not that
+        # pattern; guard anyway rather than trust it.
+        case "$jc" in
+          /tmp/claude-* | /private/tmp/claude-*)
+            echo "PREFLIGHT SMOKE_JAILED_COMMIT: skip (scratch collides with the /tmp/claude-* harness grant — cannot isolate the write)"
+            skip_notes+=("jailed-commit smoke skipped: scratch path under the harness /tmp/claude-* grant")
+            jc=""
+            ;;
+        esac
+        if [ -n "$jc" ] \
+          && mkdir -p "$jc/run" "$jc/run/tmp" \
+          && git init -q "$jc/repo" 2>/dev/null \
+          && git -C "$jc/repo" -c user.email=preflight@local -c user.name=preflight commit -q --allow-empty -m base 2>/dev/null \
+          && git -C "$jc/repo" worktree add -q --detach "$jc/run/wt" HEAD 2>/dev/null; then
+          jc_prof="$jc/profile.sb"
+          if bash "$SPAWN" render-profile --confine-under "$jc/run" \
+            --rw "$jc/run" --ro "$jc/repo" --tmpdir "$jc/run/tmp" --toolchain \
+            --exec "$gitbin" --exec "$bashbin" --out "$jc_prof" >/dev/null 2>&1; then
+            jc_err="$jc/commit.err"
+            sandbox-exec -f "$jc_prof" "$bashbin" -c '
+              cd "$1/run/wt" || exit 91
+              printf probe > preflight-smoke-file || exit 92
+              "$2" add preflight-smoke-file || exit 93
+              "$2" -c user.email=preflight@local -c user.name=preflight commit -q -m "jailed commit smoke" || exit 94
+            ' _ "$jc" "$gitbin" >/dev/null 2>"$jc_err"
+            jc_rc=$?
+            if [ "$jc_rc" = 0 ]; then
+              echo "PREFLIGHT SMOKE_JAILED_COMMIT: pass (a git commit from the run worktree succeeds inside the jail)"
+            else
+              jc_reason="$(head -1 "$jc_err" 2>/dev/null)"
+              echo "PREFLIGHT SMOKE_JAILED_COMMIT: FAIL (rc=$jc_rc)"
+              [ -n "$jc_reason" ] && echo "PREFLIGHT SMOKE_JAILED_COMMIT_CAUSE: $jc_reason"
+              case "$jc_reason" in
+                *index.lock* | *worktrees*)
+                  blockers+=("jailed-commit smoke: a git commit from the run worktree is DENIED inside the jail — ${jc_reason:-Operation not permitted}. A linked run worktree keeps its git admin dir under the read-only main repo (dev_docs/autopilot-feedback.md Blocker 1); root the run in a standalone clone inside the confinement root instead.")
+                  ;;
+                *hook* | *"cannot exec"*)
+                  blockers+=("jailed-commit smoke: a git commit from the run worktree is DENIED inside the jail — ${jc_reason}. A host git hook (core.hooksPath=${hooks_path:-?}) is not on the jail's exec allowlist (dev_docs/autopilot-feedback.md Blocker 2); neutralize core.hooksPath in the run root's .git/config.")
+                  ;;
+                *)
+                  blockers+=("jailed-commit smoke: a git commit from the run worktree failed inside the jail (rc=$jc_rc) — ${jc_reason:-unknown cause}. The orchestrator commits run state on every wake; this wedges the run (dev_docs/autopilot-feedback.md meta-finding).")
+                  ;;
+              esac
+            fi
+          else
+            echo "PREFLIGHT SMOKE_JAILED_COMMIT: FAIL (render-profile failed for the run topology)"
+            blockers+=("jailed-commit smoke: render-profile failed to produce a run-topology profile (RO repo + RW run root) — the renderer is broken, not just narrow")
+          fi
+          git -C "$jc/repo" worktree remove --force "$jc/run/wt" >/dev/null 2>&1 || true
+        elif [ -n "$jc" ]; then
+          echo "PREFLIGHT SMOKE_JAILED_COMMIT: skip (could not build the throwaway run topology)"
+          skip_notes+=("jailed-commit smoke skipped: throwaway repo/worktree setup failed")
+        fi
+      fi
+
+      # Push credential path (dev_docs/autopilot-feedback.md Blocker 3). The run
+      # pushes task branches to the git remote (github.com), NOT to the task
+      # tracker's API host ($dest_host) — resolve the helper for the actual push
+      # host, preferring a URL-specific helper over the global default the way git
+      # itself does. A Keychain-bound helper with no provisionable alternative is a
+      # hard blocker (the jail denies Keychain by design); a helper-binary helper
+      # (e.g. gh) is advisory — it CAN work, but only if the launch profile
+      # exec-allows the binary and mounts its credential store, which preflight
+      # cannot cheaply confirm without risking a live/interactive fetch. Full
+      # in-jail credential retrieval is the tracked Blocker-3 follow-up.
+      push_host="$(git remote get-url origin 2>/dev/null | sed -E 's#^https?://([^/@]*@)?([^/]+)/.*#\2#; s#^(ssh://)?git@([^:/]+).*#\2#; s#/$##')"
+      [ -n "$push_host" ] || push_host="github.com"
+      cred_helper="$(git config --get "credential.https://$push_host.helper" 2>/dev/null || true)"
+      [ -n "$cred_helper" ] || cred_helper="$(git config --get credential.helper 2>/dev/null || true)"
+      echo "PREFLIGHT CRED_HELPER: ${cred_helper:-none} (push host=$push_host)"
+      case "$cred_helper" in
+        "!"*gh* | *"/gh " | *"/gh")
+          echo "PREFLIGHT CRED_WARN: helper '$cred_helper' is a gh helper — the launch profile must exec-allow gh and mount its credential store (~/.config/gh) for a non-interactive fetch; not yet verified in-jail (Blocker 3 follow-up)"
+          skip_notes+=("push credential path advisory: gh credential helper requires gh exec + ~/.config/gh mount in the launch profile (Blocker 3, not yet verified in-jail)")
+          ;;
+        osxkeychain | *"credential-osxkeychain"*)
+          blockers+=("push credential path: the effective git credential helper for $push_host is Keychain-bound ('$cred_helper'), which needs macOS Keychain access the jail denies (dev_docs/autopilot-feedback.md Blocker 3). Configure a non-interactive, provisionable helper (e.g. gh, or GH_TOKEN in env) or the run cannot push.")
+          ;;
+      esac
     else
       echo "PREFLIGHT SMOKE: FAIL (render-profile failed for this environment's fingerprint)"
       blockers+=("confinement smoke: render-profile failed to produce a launch profile for this environment's fingerprint — the renderer is broken, not just narrow")
