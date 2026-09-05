@@ -151,8 +151,10 @@ acquire first.
 > **A cloud session may not be able to acquire at all.** Probed 2026-09-05
 > ([`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md)):
 > `gh` is installed there but uncredentialed, and every `gh api` call — read as well as
-> write — returned 403. That does not change the instruction, since the election is
-> taken by choice regardless; it removes the assumption that the acquire was available.
+> write — returned 403. The same dead credential takes down the election's own
+> `gh issue comment`, so such a session claims **nothing** by either primitive —
+> `do-tasks.md` §4 step 5's self-check is what stops it, before it tries. The
+> instruction below is unchanged; what it assumes is an environment whose `gh` works.
 
 It also runs **one check the election below does not have**, at **two** points,
 and it is load-bearing: `git ls-remote --heads origin "<branch>"`, run **inside
