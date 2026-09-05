@@ -1,0 +1,2 @@
+re='[|][[:space:]]*grep -q' # pipefail-lint: allow
+if printf '%s' "$out" | grep -q 'needle'; then echo "see # pipefail-lint: allow"; fi

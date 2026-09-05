@@ -172,7 +172,7 @@ USEOF
   have "status-report: in-flight elapsed is reported" 'task_impl (implementing): elapsed' "$srAmd"
   have "status-report: OVER-ceiling task is flagged" 'task_over (implementing): elapsed' "$srAmd"
   have "status-report: OVER-ceiling task says OVER" 'OVER the per-task ceiling' "$srAmd"
-  ! printf '%s\n' "$srAmd" | grep 'task_impl (implementing)' | grep -q 'OVER' \
+  ! grep -q 'OVER' <<<"$(grep 'task_impl (implementing)' <<<"$srAmd")" \
     && ok "status-report: within-ceiling task is not marked OVER" \
     || bad "status-report: within-ceiling task is not marked OVER"
   # A freshly-claimed branch with NO commits beyond its base must degrade to
@@ -180,7 +180,7 @@ USEOF
   # OLDEST commit and reported the task as running since repository genesis.
   have "status-report: a branch with no commits beyond base reads elapsed unknown, never repo genesis" \
     'task_fresh (implementing): elapsed unknown' "$srAmd"
-  ! printf '%s\n' "$srAmd" | grep 'task_fresh (implementing)' | grep -q 'OVER' \
+  ! grep -q 'OVER' <<<"$(grep 'task_fresh (implementing)' <<<"$srAmd")" \
     && ok "status-report: the fresh branch is never marked OVER off the repo's first commit" \
     || bad "status-report: the fresh branch is never marked OVER off the repo's first commit"
   have "status-report: embeds status --label's own output" 'Live state (from `status' "$srAmd"
@@ -427,7 +427,7 @@ USEOF
     bdout="$("$SCRIPT" status-report --dir "$SR_RUN" --label com.autopilot.sr.bad \
       --report-every "$badv" 2>&1)"
     bdc=$?
-    [ "$bdc" = 2 ] && printf '%s' "$bdout" | grep -qF 'must be off' \
+    [ "$bdc" = 2 ] && grep -qF 'must be off' <<<"$bdout" \
       && ok "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" \
       || bad "status-report: --report-every '$badv' is rejected (digits only, no arithmetic)" "exit=$bdc $bdout"
   done

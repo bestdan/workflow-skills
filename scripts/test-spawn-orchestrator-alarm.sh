@@ -462,7 +462,7 @@ if command -v git >/dev/null 2>&1; then
     local o c
     o="$("$SCRIPT" "$@" 2>&1)"
     c=$?
-    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "alarm fail-closed: $name"; else bad "alarm fail-closed: $name" "exit=$c msg=$o"; fi
+    if [ "$c" = 2 ] && grep -qF "$want" <<<"$o"; then ok "alarm fail-closed: $name"; else bad "alarm fail-closed: $name" "exit=$c msg=$o"; fi
   }
   afc "bad condition charset" "must be [A-Za-z0-9._-]" alarm --dir "$A1" --condition 'bad id' --reason x
   afc "relative --dir" "must be absolute" alarm --dir "rel/ative" --condition x --reason y

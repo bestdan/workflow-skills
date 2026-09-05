@@ -1,0 +1,6 @@
+if grep -q 'needle' <<<"$out"; then echo hit; fi
+n="$(printf '%s\n' "$out" | grep -c '^ok ')"
+lines="$(printf '%s\n' "$out" | grep -v '^#')"
+first="$(printf '%s\n' "$out" | grep -n 'x' | head -1)"
+only="$(printf '%s' "$cell" | grep -oE '[0-9]+')"
+if [ "$s" -eq 0 ] || grep -q 'execvp(' <<<"$errout"; then echo ok; fi

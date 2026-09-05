@@ -118,7 +118,7 @@ CLEOF
       bad "exit contract [$name]: the generated wrapper really invoked claude"
     fi
     if [ "$want_teardown" = yes ]; then
-      if printf '%s' "$lc" | grep -q 'bootout'; then
+      if grep -q 'bootout' <<<"$lc"; then
         ok "exit contract [$name]: supervisor TORE THE JOB DOWN (launchctl bootout observed)"
       else
         bad "exit contract [$name]: supervisor TORE THE JOB DOWN (launchctl bootout observed)" "launchctl log: ${lc:-<empty>}"
@@ -129,7 +129,7 @@ CLEOF
         bad "exit contract [$name]: done-sentinel written (the single relaunch/completion file)"
       fi
     else
-      if printf '%s' "$lc" | grep -q 'bootout'; then
+      if grep -q 'bootout' <<<"$lc"; then
         bad "exit contract [$name]: supervisor did NOT tear down (relaunch expected)" "launchctl log: $lc"
       else
         ok "exit contract [$name]: supervisor did NOT tear down (launchd relaunches on its timer)"
@@ -1179,11 +1179,11 @@ LCFEOF
   # never be smuggled into the terminal sentinel.
   o="$("$SCRIPT" exit-reason --dir "$EC/continuing" --reason bogus 2>&1)"
   ecc=$?
-  [ "$ecc" = 2 ] && printf '%s' "$o" | grep -qF 'unknown exit reason' \
+  [ "$ecc" = 2 ] && grep -qF 'unknown exit reason' <<<"$o" \
     && ok "exit-reason fail-closed: unknown reason" || bad "exit-reason fail-closed: unknown reason" "$o"
   o="$("$SCRIPT" teardown --label com.autopilot.ec.x --reason continuing 2>&1)"
   tdc=$?
-  [ "$tdc" = 2 ] && printf '%s' "$o" | grep -qF 'must be a TERMINAL exit reason' \
+  [ "$tdc" = 2 ] && grep -qF 'must be a TERMINAL exit reason' <<<"$o" \
     && ok "teardown fail-closed: a relaunchable reason can't mark a run terminal" \
     || bad "teardown fail-closed: a relaunchable reason can't mark a run terminal" "$o"
 else

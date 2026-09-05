@@ -45,7 +45,7 @@ failed=()
 while IFS=$'\t' read -r skill prompt_file max_turns; do
   [[ -z "${skill// /}" || "$skill" == \#* ]] && continue
   # optional skill filter from argv
-  if [[ -n "${1:-}" ]] && ! printf '%s\n' "$@" | grep -qx "$skill"; then
+  if [[ -n "${1:-}" ]] && ! grep -qx "$skill" <<<"$(printf '%s\n' "$@")"; then
     continue
   fi
   mt="${max_turns:-$MAX_TURNS_DEFAULT}"

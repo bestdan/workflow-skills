@@ -150,7 +150,7 @@ GHEOF
       "was $head_ref_0@$head_sha_0 now $(git -C "$WORK" rev-parse --abbrev-ref HEAD)@$(git -C "$WORK" rev-parse HEAD)"
   fi
   # …and leaves no scratch worktree registered behind it
-  if git -C "$WORK" worktree list 2>/dev/null | grep -q 'restack-wt'; then
+  if grep -q 'restack-wt' <<<"$(git -C "$WORK" worktree list 2>/dev/null)"; then
     bad "restack: removes its scratch worktree"
   else
     ok "restack: removes its scratch worktree"
@@ -247,7 +247,7 @@ GHEOF
   [ -z "$(git -C "$WORK" status --porcelain 2>/dev/null)" ] \
     && ok "restack: caller's worktree left clean (no half-applied rebase)" \
     || bad "restack: caller's worktree left clean (no half-applied rebase)"
-  if git -C "$WORK" worktree list 2>/dev/null | grep -q 'restack-wt'; then
+  if grep -q 'restack-wt' <<<"$(git -C "$WORK" worktree list 2>/dev/null)"; then
     bad "restack: removes its scratch worktree even on the conflict path"
   else
     ok "restack: removes its scratch worktree even on the conflict path"
@@ -258,7 +258,7 @@ GHEOF
   echo dirty >"$WORK/uncommitted.txt"
   dirty_out="$("$SCRIPT" restack --run-dir "$RUNDIR_RS" --repo "$WORK" --remote origin --gh "$FAKE_GH" 2>&1)"
   dirty_c=$?
-  if [ "$dirty_c" = 2 ] && printf '%s' "$dirty_out" | grep -qF 'worktree is dirty'; then
+  if [ "$dirty_c" = 2 ] && grep -qF 'worktree is dirty' <<<"$dirty_out"; then
     ok "restack: dirty caller worktree fails closed"
   else
     bad "restack: dirty caller worktree fails closed" "exit=$dirty_c msg=$dirty_out"

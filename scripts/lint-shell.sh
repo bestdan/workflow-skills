@@ -78,7 +78,7 @@ narrow_to_touched() { # <touched-list> <file...> -> the files that appear in the
   local touched="$1" file
   shift
   for file in "$@"; do
-    printf '%s\n' "$touched" | grep -qxF -- "$file" && printf '%s\n' "$file"
+    grep -qxF -- "$file" <<<"$touched" && printf '%s\n' "$file"
   done
 }
 
@@ -122,10 +122,15 @@ run() {
 # behind them; it takes its files as ARGUMENTS rather than discovering them,
 # which is what lets test/lint-bash4.bats exercise it against fixtures in a temp
 # dir instead of only through this script's whole-tree scan.
-bash4_files=()
-[ "${#shell_files[@]}" -gt 0 ] && bash4_files+=("${shell_files[@]}")
-[ "${#bats_files[@]}" -gt 0 ] && bash4_files+=("${bats_files[@]}")
-[ "${#bash4_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${bash4_files[@]}"
+lint_files=()
+[ "${#shell_files[@]}" -gt 0 ] && lint_files+=("${shell_files[@]}")
+[ "${#bats_files[@]}" -gt 0 ] && lint_files+=("${bats_files[@]}")
+[ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${lint_files[@]}"
+
+# `<writer> | grep -q` under pipefail: a match can report 141 and read as a
+# miss. scripts/lint-pipefail.sh owns the pattern and the reasoning, and takes
+# its files as arguments for the same testability reason as lint-bash4.sh.
+[ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-pipefail.sh "${lint_files[@]}"
 
 if [ "${#shell_files[@]}" -gt 0 ]; then
   run bash -n "${shell_files[@]}"

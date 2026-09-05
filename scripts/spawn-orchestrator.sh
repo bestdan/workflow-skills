@@ -1173,7 +1173,7 @@ render_network_allowlist() {
     # hosts_to_json_array splits it into a second, unvalidated host — smuggling a
     # wildcard past the allowlist. A real hostname never contains a newline.
     case "$h" in *$'\n'*) die "invalid egress host (embedded newline, fail-closed): $h" ;; esac
-    printf '%s' "$h" | grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' \
+    grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' <<<"$h" \
       || die "invalid egress host (fail-closed): $h"
   done
 
@@ -5839,7 +5839,7 @@ doctor() {
     n_repaired=$((n_repaired + 1))
     repaired_notes+=("I1: discarded stale .auto-pilot/ dirt on $i1_parked_on, HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\` with stale \`.auto-pilot/\` content; tracked changes there were discarded (untracked run logs were left in place — never \`git clean\`ed) and HEAD was restored (see QUESTIONS.md for the deviation record).")
-  elif printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
+  elif grep -q 'HEAD DEVIATION restored' <<<"$i1_out"; then
     n_repaired=$((n_repaired + 1))
     repaired_notes+=("I1: HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\`; restored (see QUESTIONS.md for the deviation record).")
@@ -6365,7 +6365,7 @@ check_profile() {
   local errout status
   errout="$(sandbox-exec -f "$f" /usr/bin/true 2>&1)"
   status=$?
-  if [ "$status" -eq 0 ] || printf '%s' "$errout" | grep -q 'execvp('; then
+  if [ "$status" -eq 0 ] || grep -q 'execvp(' <<<"$errout"; then
     echo "spawn-orchestrator: profile OK $f"
     return 0
   fi

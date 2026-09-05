@@ -97,7 +97,7 @@ assert_eq() {
 
 assert_contains() {
   # assert_contains <description> <haystack> <needle>
-  if printf '%s\n' "$1" | grep -qF "$3"; then
+  if grep -qF "$3" <<<"$1"; then
     ok "$2"
   else
     bad "$2 (did not find '$3')"
@@ -106,7 +106,7 @@ assert_contains() {
 
 assert_not_contains() {
   # assert_not_contains <description> <haystack> <needle>
-  if printf '%s\n' "$1" | grep -qF "$3"; then
+  if grep -qF "$3" <<<"$1"; then
     bad "$2 (unexpectedly found '$3')"
   else
     ok "$2"
