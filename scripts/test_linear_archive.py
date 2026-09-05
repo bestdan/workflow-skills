@@ -146,7 +146,9 @@ class CollectAgedMultiProjectTests(unittest.TestCase):
         return candidates, calls, buf.getvalue()
 
     def test_no_project_sweeps_whole_team_once(self):
-        candidates, calls, _ = self._run([], {None: [{"id": "i-1", "completedAt": "2026-01-01"}]})
+        candidates, calls, _ = self._run(
+            [], {None: [{"id": "i-1", "completedAt": "2026-01-01"}]}
+        )
         self.assertEqual(calls.count(None), 3)  # once per terminal pass
         self.assertEqual([c["id"] for c in candidates], ["i-1"])
 
