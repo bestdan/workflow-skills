@@ -291,10 +291,24 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
   --project <uuid> --apply
 
+# Scope to several configured projects — repeat --project once per id (§3's
+# "Resolve configured projects" list); the sweep loops per project and unions
+# the results, deduped by issue id. Omitting --project entirely still sweeps
+# the whole team.
+python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
+  --project <uuid-1> --project <uuid-2> --apply
+
 # Archive named issues regardless of age (identifiers and/or UUIDs):
 python3 commands/handlers/assets/linear-archive.py --team PreThink \
   --issues PRE-12,PRE-13 --apply
 ```
+
+The script's default scope now matches the agent-driven flow's (§3): with 1+
+projects configured under `linear.projects`, pass each project's `id` as its
+own `--project`; with none configured, omit `--project` and it sweeps the
+whole team, exactly as it always has. A cron/Action entry resolves the
+configured project list itself (the script still reads no config) and passes
+one `--project <uuid>` per entry.
 
 ### `--issues` — archive specific issues, no age threshold
 

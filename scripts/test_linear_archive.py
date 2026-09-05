@@ -116,6 +116,64 @@ class FindQueryTests(unittest.TestCase):
         self.assertIn("team: { id: { eq: $team } }", uuid_query)
 
 
+class CollectAgedMultiProjectTests(unittest.TestCase):
+    """--project is repeatable: collect_aged loops the sweep once per configured
+    project and unions the results, deduped by issue id (PRE-416)."""
+
+    def _run(self, projects, nodes_by_project):
+        """Stub find() to return nodes_by_project[project] for each call, and
+        run collect_aged with those --project values."""
+        calls = []
+
+        def fake_find(key, team, project, state_type, ts_field, cutoff):
+            calls.append(project)
+            # Only the `completed` pass returns anything, to keep the stub simple.
+            if state_type != "completed":
+                return []
+            return list(nodes_by_project.get(project, []))
+
+        args = argparse.Namespace(
+            team="PreThink", project=projects, older_than=10, issues=[]
+        )
+        original = linear_archive.find
+        linear_archive.find = fake_find
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                candidates = linear_archive.collect_aged("k", args)
+        finally:
+            linear_archive.find = original
+        return candidates, calls, buf.getvalue()
+
+    def test_no_project_sweeps_whole_team_once(self):
+        candidates, calls, _ = self._run([], {None: [{"id": "i-1", "completedAt": "2026-01-01"}]})
+        self.assertEqual(calls.count(None), 3)  # once per terminal pass
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+
+    def test_multiple_projects_are_unioned(self):
+        candidates, calls, scope = self._run(
+            ["p-1", "p-2"],
+            {
+                "p-1": [{"id": "i-1", "completedAt": "2026-01-01"}],
+                "p-2": [{"id": "i-2", "completedAt": "2026-01-02"}],
+            },
+        )
+        self.assertEqual(set(calls), {"p-1", "p-2"})
+        self.assertEqual({c["id"] for c in candidates}, {"i-1", "i-2"})
+        self.assertIn("projects=p-1,p-2", scope)
+
+    def test_overlapping_projects_are_deduped_by_id(self):
+        """An issue returned under more than one project scope is counted once."""
+        candidates, _, _ = self._run(
+            ["p-1", "p-2"],
+            {
+                "p-1": [{"id": "i-1", "completedAt": "2026-01-01"}],
+                "p-2": [{"id": "i-1", "completedAt": "2026-01-01"}],
+            },
+        )
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+
+
 class TerminalPassesTests(unittest.TestCase):
     def test_sweeps_every_terminal_state(self):
         """All three of Linear's terminal state types are swept unconditionally.
@@ -284,7 +342,7 @@ class NamedIssueTests(RefLookupCase):
 
     def test_ignored_sweep_flags_are_announced(self):
         args = argparse.Namespace(
-            team="PreThink", project=PROJECT_UUID, older_than=7, issues=["PRE-12"]
+            team="PreThink", project=[PROJECT_UUID], older_than=7, issues=["PRE-12"]
         )
         original = linear_archive.gql
         linear_archive.gql = lambda key, query, variables=None: {
