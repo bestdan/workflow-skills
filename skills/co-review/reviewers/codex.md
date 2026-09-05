@@ -33,9 +33,11 @@ Two mechanics to know if you do change the model:
 
 ## Invocation (assemble + dispatch in one shell call)
 
-- **GitHub mode, with requests** → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.5" "<POINTER>"`
-- **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.5" "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
-- **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md.
+- **GitHub mode, with requests** → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.5" "<POINTER>"`
+- **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.5" "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
+- **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md.
+
+`<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default, since a `--post` review commonly targets a PR that isn't checked out here.
 
 `codex` reads `<INPUT>` from the `cat "<INPUT>" |` pipe, so the path stays out of the command string. `--sandbox read-only` is codex's own read-only enforcement — keep it, and `--model`, in **both** the command and the allow-rule.
 
