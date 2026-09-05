@@ -372,8 +372,15 @@ to the number.
 them from the merge-verification read itself, whichever step-3 fallback
 resolved the PR.)
 
-Only `state == "MERGED"` (equivalently, a non-null `mergedAt`) qualifies as a
-candidate for step 5.
+**What qualifies is per-backend — the two vocabularies do not overlap.** On the
+`gh` path, `state == "MERGED"` (equivalently, a non-null `mergedAt`). On the
+MCP path, **`merged == true`** — and nothing else, because the MCP response is
+shaped by GitHub's REST API, where `state` is only ever `open` or `closed`.
+A merged PR reads `state: "closed"`, so applying the `gh` rule to an MCP
+response qualifies **nothing** and the sweep silently completes zero issues.
+Measured on a merged PR: `gh` reports `state "MERGED"` / `mergedAt`, while REST
+and MCP report `state "closed"` / `merged true` / `merged_at`. Mind the field
+spelling too — `merged_at`, not `mergedAt`.
 
 **In a `claude-web` environment (no `gh`), read the same fields with
 `mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
@@ -383,9 +390,15 @@ candidate for step 5.
 **it has no URL parameter**, so parse all three out of the PR URL and pass them
 together. That is the same guarantee the URL rule above buys on the `gh`
 path — the repo travels with the number — and it is why a bare `pullNumber`
-with an inferred owner/repo is the one form to avoid here. Read the merged
-flag (and merge timestamp) off the returned pull request; treat anything
-short of an explicit merged reading as unread, not as unmerged.
+with an inferred owner/repo is the one form to avoid here.
+
+Read **`merged`** off the returned pull request, per the per-backend rule
+above. That field is always present — it is serialized without `omitempty`, so
+an unmerged PR carries `merged: false` rather than omitting it. **`merged_at`
+is not**: it is omitted entirely when the PR has not merged, so a missing
+`merged_at` is a _merge state read successfully_, not an unread. Only a failed
+or unanswered call is an unread — treat that as unread rather than unmerged,
+per the fail-closed rule below.
 
 This read is required in **every** environment: it is the merge verification
 the whole sweep rests on, and it runs for every issue regardless of which
