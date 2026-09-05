@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.24.1] - 2026-09-05
+
+### Fixes
+
+- resolve sweep PR discovery against each project's repo (#450) (ad46d3f)
+
 ## [2.24.0] - 2026-09-05
 
 ### Features
