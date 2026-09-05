@@ -76,8 +76,13 @@ query($name: String!) {
 }"""
 
 # %s slot: project var decl + extra filter. Skinny fields per linear-common.md's
-# "In-flight scan": id identifier title url state { id type } plus attachments —
-# explicitly no `description`.
+# "In-flight scan": id identifier title url state { id type } plus attachments and
+# the issue's own project — explicitly no `description`.
+#
+# `project { id name }` is the issue's REAL project, not the scope that returned
+# it. Consumers map an issue to its per-project config (e.g. `repo:`) by this id,
+# and a whole-team query — which is what `--all` runs — has no scope id to fall
+# back on, so asking the API per issue is the only thing that answers there.
 ISSUES_QUERY = """
 query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
   issues(first: $first, after: $cursor, filter: {
@@ -88,6 +93,7 @@ query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
     nodes {
       id identifier title url
       state { id type }
+      project { id name }
       attachments { nodes { url } }
     }
     pageInfo { hasNextPage endCursor }
@@ -237,7 +243,12 @@ def main():
             key, team_node["id"], state_types, scope["id"], args.limit
         )
         for issue in issues:
-            issue["project"] = scope["name"]
+            # `project` comes from the API and stays untouched: the issue's own
+            # project as {id, name}, or null when it has none. `scope` records
+            # which query returned it, which is what this used to overwrite
+            # `project` with — a scope name, identical for every issue under a
+            # whole-team query and therefore useless for per-project lookup.
+            issue["scope"] = scope["name"]
             issue["attachments"] = [n["url"] for n in issue["attachments"]["nodes"]]
             all_issues.append(issue)
 

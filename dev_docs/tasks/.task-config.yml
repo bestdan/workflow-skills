@@ -5,9 +5,10 @@ linear:
     - id: ebbc284b-a1c1-4cb3-96e0-914e210a79a2
       name: Handler parity follow-ups
       # repo: owner/name — optional. The GitHub repo whose merged PRs establish
-      # ownership for /find-false-closures. A workspace can span repos, so each
-      # project may name its own; without it the command falls back to the
-      # current repo's origin. Example: repo: bestdan/workflow-skills
+      # ownership for /find-false-closures, and which repo /sweep-for-complete
+      # searches when it falls back to title/branch PR discovery. A workspace can
+      # span repos, so each project may name its own; without it both fall back
+      # to the current repo's origin. Example: repo: bestdan/workflow-skills
       repo: bestdan/workflow-skills
     - id: dff1565c-9aea-49cf-86e9-3254eb14e4fa
       name: workflow-skills backlog

@@ -439,7 +439,7 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 2. **Pre-flight** — `linear-claim.md` "Pre-flight: is work already in flight?":
    on the **top-ranked candidate**, before claiming (no feasibility judgment yet —
    that runs after the claim), check for an existing open PR (by Linear's
-   `branchName` and by `[<IDENTIFIER>]` title) and an existing remote branch, plus
+   `branchName` and by identifier title-match) and an existing remote branch, plus
    the `started`/`auto-claimed`/assigned-to-another gates. If in flight, skip with a
    clear message — ranked mode moves to the next candidate (re-run pre-flight on it);
    a direct `<identifier>` pick stops. This full gate runs on the paths that **begin**

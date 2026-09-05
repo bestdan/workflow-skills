@@ -110,7 +110,7 @@ Runs on the **top-ranked candidate** immediately **before "Claim the issue"** �
    gh pr list --state open --search "<IDENTIFIER> in:title" --json number,url,title
    ```
 
-   GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter (`PRE-12` matches the tokens `PRE` and `12`, which can also hit unrelated titles). Before skipping, confirm a returned PR's `title` actually contains the literal `[<IDENTIFIER>]` bracket token — only then **skip** with the same message. (The branch check in step 2 is exact and needs no post-filter.)
+   GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter (`PRE-12` matches the tokens `PRE` and `12`, which can also hit unrelated titles). Before skipping, confirm a returned PR's `title` carries the identifier **as a whole token** — `<IDENTIFIER>` bounded by a non-alphanumeric character or the string edge on each side, and not followed by another digit — only then **skip** with the same message. This is the same post-filter `linear-sweep-complete.md` step 3.2 defines; see the note there for why it is not the `[<IDENTIFIER>]` bracket form. Here the looser match is also the safer one: this check exists to avoid starting work someone else already has in flight, and a hand-opened PR titled `… (<IDENTIFIER>)` is exactly such work. (The branch check in step 2 is exact and needs no post-filter.)
 
 4. **Remote branch (no PR yet).** A pushed branch with no PR is a strong signal another session is mid-build:
 

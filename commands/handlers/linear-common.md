@@ -43,8 +43,11 @@ linear:
       wip_limit: 5 # optional — per-project override (else inherits the top-level wip_limit).
       max_estimate: 5 # optional — per-project override (else inherits linear.max_estimate).
       repo: bestdan/workflow-skills # optional — GitHub owner/name whose merged PRs establish
-    # ownership for /find-false-closures. A workspace can span repos, so each project may name
-    # its own; absent → /find-false-closures falls back to the current repo's origin.
+    # ownership for /find-false-closures, and which repo /sweep-for-complete searches when it
+    # falls back to title/branch PR discovery. A workspace can span repos, so each project may
+    # name its own; absent → both fall back to the current repo's origin, which is wrong for
+    # every project whose work lives in another repo. Set it on each project once the workspace
+    # spans more than one.
     - id: 9f3a0b1c-0000-0000-0000-000000000000 # a second project, no overrides → inherits wip_limit 3, max_estimate 3.
   global_wip_limit: 6 # optional — absolute ceiling on TOTAL in-flight across ALL configured
   # projects, enforced on top of the per-project caps (absent → no global ceiling; the sum of
@@ -89,7 +92,7 @@ linear:
 
 - `projects` **absent or empty** → whole-team scope with the single top-level `wip_limit` (preserves today's "no pin" behavior). **Exactly one** entry → equivalent to today's single pin.
 - `wip_limit` stays **top-level** so the repo-pr and gh-issue handlers are untouched; per-project entries override it for Linear only. `max_estimate` stays under `linear:` as the inherited default.
-- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (the last read only by `/find-false-closures`). `team`, `base_branch`, `default_priority`, `api_key`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `commands/task-config.md` → "Local override"). `api_key` (a raw key) and `api_key_resolver` (which names a program) are stricter still: both are honored **only** from `.task-config.local.yml` or the environment, and are refused outright in the committed config (see "Key resolution").
+- Per-project override keys are `wip_limit`, `max_estimate`, and `repo` (which consumers read it is stated once, on the `repo` bullet under "Resolve configured projects"). `team`, `base_branch`, `default_priority`, `api_key`, `api_key_ref`, and `api_key_resolver` remain global. `api_key_ref` points at a secret (a full-account bearer token) — its canonical home is the gitignored `.task-config.local.yml`, not the shared `.task-config.yml` (see `commands/task-config.md` → "Local override"). `api_key` (a raw key) and `api_key_resolver` (which names a program) are stricter still: both are honored **only** from `.task-config.local.yml` or the environment, and are refused outright in the committed config (see "Key resolution").
 - Each entry's `id` is **required**; `name` is optional (used for prompts/reports; resolved via `list_projects` when absent).
 - `remote_batch` is optional and lives under `linear:`. It is the deterministic opt-out for `/do-tasks` batch remote dispatch — `false` degrades `--all` / `-n N` to a single foreground claim; absent or `true` dispatches one remote session per issue (each self-checks for the connector). Default `true`. See `commands/do-tasks.md` §3 "Tracker-batch subroutine".
 - `global_wip_limit` is optional and lives under `linear:` (it is Linear-multi-project-specific, unlike the cross-handler top-level `wip_limit`).
@@ -99,14 +102,15 @@ linear:
 
 ### Resolve configured projects
 
-Every Linear-handled command that scopes to projects **must call** this one resolution step instead of reading `default_project`/`projects` directly, so inheritance and the whole-team fallback live in exactly one place. It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate }` with inheritance already applied:
+Every Linear-handled command that scopes to projects **must call** this one resolution step instead of reading `default_project`/`projects` directly, so inheritance and the whole-team fallback live in exactly one place. It returns a **list** of resolved scopes, each `{ id, name, wip_limit, max_estimate, repo }` with inheritance already applied:
 
-1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit, default 3>, max_estimate: <linear.max_estimate, default 3> }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
-2. **Otherwise**, map each entry to `{ id, name, wip_limit, max_estimate }`:
+1. Read `linear.projects`. **If absent or empty**, return a single synthetic **whole-team** scope: `{ id: null, name: null, wip_limit: <top-level wip_limit, default 3>, max_estimate: <linear.max_estimate, default 3>, repo: null }`. `id: null` means "omit `projectId` — operate on the whole team", which is exactly today's no-pin behavior. Stop here.
+2. **Otherwise**, map each entry to `{ id, name, wip_limit, max_estimate, repo }`:
    - `id` — the entry's required `id` (verbatim UUID).
    - `wip_limit` — the entry's `wip_limit` if set, **else** the top-level `wip_limit` (which itself defaults to `3` when unset).
    - `max_estimate` — the entry's `max_estimate` if set, **else** `linear.max_estimate` (which itself defaults to `3` when unset).
    - `name` — the entry's `name` if set; **else** resolve it **lazily** via `<linear-mcp>__list_projects` (match the `id`) only when a name is actually needed for a prompt or report — never eagerly.
+   - `repo` — the entry's `repo` (`owner/name`) if set, **else** `null`. There is **no** inheritance and no default: a repo is a property of the project, not of the workspace, so an absent one must stay absent and let each consumer fall back to the current repo's `origin` at the point of use. Consumers that query GitHub per project read this field: `/find-false-closures` (`linear-false-closures.md` step 2), `/sweep-for-complete`'s PR-discovery fallbacks (`linear-sweep-complete.md` step 3), and `/reconcile-tasks` — which reads it both by delegating to that same sweep step (`linear-reconcile.md` step 2) and directly, to skip a row-4 branch check whose branch lives in another repo (`linear-reconcile.md` row 4). Any consumer that delegates to those steps inherits the field with them.
 
 Consumers that only select a project (`/add-task`, `/list-tasks`, `/promote-tasks`) use `id` + `name`; consumers that enforce WIP (`/do-tasks`, `/archive-tasks` scope) use `wip_limit` too. The optional **`linear.global_wip_limit`** is a separate scalar the `/do-tasks` WIP gate reads alongside this list (the ceiling across all returned scopes); it is not part of a per-project entry. Treat the returned list as read-only config — do not mutate it. This helper returns **only** the configured projects (or the single whole-team scope) — it does **not** include the Unassigned bucket below, so the select/query consumers can pass every returned `id` as a `projectId` safely.
 
@@ -230,7 +234,9 @@ The read `/sweep-for-complete` (row 1's "merged → Done") and `/reconcile-tasks
 
 Either way, resolve state ids by **type only, never display name** (names are user-configurable — see "Kanban mapping" above).
 
-**Skinny fields.** The scan needs only `id identifier title url state { id type }` and **explicitly not `description`**: it never reads issue body text, only state and (downstream) the linked PR. The PR attachment URL is fetched differently per backend: GraphQL folds `attachments { nodes { url } }` into the same scan query, while MCP `list_issues` does **not** return attachments — resolve them via a subsequent `get_issue` per issue (as `linear-sweep-complete.md` step 3 does).
+**Skinny fields.** The scan needs only `id identifier title url state { id type } project { id name }` and **explicitly not `description`**: it never reads issue body text, only state, the issue's own project, and (downstream) the linked PR. The PR attachment URL is fetched differently per backend: GraphQL folds `attachments { nodes { url } }` into the same scan query, while MCP `list_issues` does **not** return attachments — resolve them via a subsequent `get_issue` per issue (as `linear-sweep-complete.md` step 3 does).
+
+**`project` is the issue's own, and `scope` is where it came from — they are not interchangeable.** `project` is `{ id, name }`, or `null` for an issue with no project; consumers key per-project config off `project.id` (see the `repo` bullet under "Resolve configured projects"). `scope` is a separate string naming the query that returned the issue — a configured project id, or the **team** name for a whole-team query. Under `--all` there is exactly one whole-team scope, so `scope` is identical for every issue and carries no project information; only `project.id` answers "which project is this issue in" there. On the **MCP floor** the same distinction holds, but the source differs: `list_issues` results are tagged with their source scope, and the issue's own project comes from the per-issue `get_issue` that `linear-sweep-complete.md` step 3 already makes for attachments — take it from that call rather than adding a read.
 
 **Scope resolution.** Identical to the other commands: with `--all`, a **single whole-team query**, no project resolution and no Unassigned pass; without `--all`, "Resolve configured projects" **plus** the Unassigned bucket's **sweep/reconcile variant** (`projectId == null` only — see "The Unassigned bucket"), **never** the wide claim variant. This scan's only two consumers are the destructive-adjacent verbs `/sweep-for-complete` and `/reconcile-tasks`, so it never uses the claim-path catch-all. The pass is still one extra whole-team query with `projectId` omitted, after which you keep only issues whose `projectId` is `null`.
 
