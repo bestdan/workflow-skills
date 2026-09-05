@@ -303,12 +303,15 @@ def collect_aged(key, args):
     --project may be repeated to scope the sweep to several projects — the
     query loops once per id and the results are unioned, deduped by issue id
     (an issue could otherwise appear twice if scopes ever overlapped). No
-    --project sweeps the whole team, unchanged.
+    --project sweeps the whole team, unchanged. A project id repeated in
+    --project (a caller mistake) is deduped before the loop, same as
+    linear-relations.py / linear-ready.py — otherwise it would re-run all
+    three paginated terminal-state queries for no new candidates.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
-    projects = args.project or [None]
+    projects = list(dict.fromkeys(args.project)) or [None]
     seen = set()
     candidates = []
     for project in projects:
@@ -321,7 +324,7 @@ def collect_aged(key, args):
                 candidates.append(issue)
 
     scope = f"team={args.team}" + (
-        f", projects={','.join(args.project)}" if args.project else ""
+        f", projects={','.join(projects)}" if args.project else ""
     )
     print(f"Cutoff: {cutoff}  ({scope}, Done + Canceled + Duplicate)\n")
     return candidates

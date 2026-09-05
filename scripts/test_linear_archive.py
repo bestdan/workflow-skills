@@ -175,6 +175,20 @@ class CollectAgedMultiProjectTests(unittest.TestCase):
         )
         self.assertEqual([c["id"] for c in candidates], ["i-1"])
 
+    def test_repeated_project_id_is_queried_once(self):
+        """A --project value repeated on the command line (a caller mistake, or
+        the caller resolving the same project twice) must not re-run the three
+        paginated terminal-state queries for it — dedupe the id list itself,
+        not just the resulting candidates, same as linear-relations.py /
+        linear-ready.py."""
+        candidates, calls, scope = self._run(
+            ["p-1", "p-1"], {"p-1": [{"id": "i-1", "completedAt": "2026-01-01"}]}
+        )
+        self.assertEqual(calls.count("p-1"), 3)  # once per terminal pass, not six
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+        self.assertIn("projects=p-1", scope)
+        self.assertNotIn("p-1,p-1", scope)
+
 
 class TerminalPassesTests(unittest.TestCase):
     def test_sweeps_every_terminal_state(self):
