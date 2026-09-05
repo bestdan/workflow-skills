@@ -87,8 +87,8 @@ A reference must start with a scheme — `^[a-z][a-z0-9+.-]*://` at position 0 �
 leading or trailing whitespace and no newline.
 
 Whitespace **inside** a reference is legal and must stay legal: 1Password item titles
-routinely contain spaces, so `op://Private/PreThink Linear/dan_local_key` and
-`op://Private/Linear API/credential` are both valid. What the rule rejects is a value
+routinely contain spaces, so `op://Private/Linear API/credential` — note the space in
+the item title — is valid. What the rule rejects is a value
 that begins with something other than a scheme — notably a command-prefixed one like
 `opx op://Private/x/y`, which is a `malformed-ref` failure with its own distinct message
 rather than a generic "no key" error.

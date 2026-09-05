@@ -20,7 +20,7 @@ That single mechanism is both too narrow and silently failing:
   session afterwards), `pass`, Vault, or a plain exported variable. Only the first two
   work.
 - **Silently failing.** This repo's own gitignored `.task-config.local.yml` carried
-  `api_key_ref: opx op://Private/PreThink Linear/dan_local_key`, which resolves as
+  `api_key_ref: opx op://<vault>/<item>/<field>`, which resolves as
   `op read "opx op://…"` and fails. A malformed ref fails in exactly the same shape as a
   correctly-keyless host, so every Linear fast path here has been flooring to the MCP
   path unnoticed. Tracked on the local card
@@ -140,9 +140,9 @@ feature.
 
 A reference must begin with a scheme — `^[a-z][a-z0-9+.-]*://` at position 0 — and carry
 no leading or trailing whitespace and no newline. Whitespace **inside** the reference is
-legal and must stay legal: 1Password item titles routinely contain spaces
-(`op://Private/PreThink Linear/dan_local_key`), and the canonical example in
-`linear-config.md` is `op://Private/Linear API/credential`. The scheme-at-position-0 rule
+legal and must stay legal: 1Password item titles routinely contain spaces, and the
+canonical example in `linear-config.md` — `op://Private/Linear API/credential` —
+carries one. The scheme-at-position-0 rule
 is what rejects `opx op://…`, and it is sufficient on its own; a blanket no-whitespace
 rule would reject the very configuration this design is meant to make work. Anything
 failing the grammar is a distinct `malformed-ref` failure, not the generic no-key error.
@@ -312,7 +312,7 @@ This repo's own gitignored `.task-config.local.yml` becomes:
 
 ```yaml
 linear:
-  api_key_ref: op://Private/PreThink Linear/dan_local_key
+  api_key_ref: op://Private/Linear API/credential
   api_key_resolver: opx
 ```
 
