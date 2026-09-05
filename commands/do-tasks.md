@@ -699,16 +699,22 @@ opted in never ranks, counts, or resolves dependencies first.
 and prose, both of which inline into a dispatch prompt. This handler's deterministic
 steps are **scripts that ship in the plugin** — every label write goes through
 `gh-issue-state.py` — so a dispatched session needs the plugin itself, not just the
-prompt. A cloud session does get a plugin the repo declares in a **committed
-`.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`), which is
-what makes `true` safe; user-level plugin settings do **not** travel. **That
-mechanism is documented and has not been probed here**, and this repo's own record
-says to probe routine behaviour rather than read it
-(`dev_docs/decisions/2026-08-24-routine-claim-channel.md` — "wrong twice" that way).
-An unprobed mechanism is not a basis for dispatching N sessions by default, so the
-flag is opt-in until someone runs the probe and records it beside that file. Setting
-`true` without the declaration is not silently broken — step 5's self-check stops
-each session loudly on its own issue.
+prompt. Documentation says a cloud session installs a plugin the repo declares in a
+**committed `.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`).
+**Probed 2026-09-05, and it does not**
+(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`): the declaration
+was present on the cloned HEAD, `claude plugin list` reported none installed,
+`$CLAUDE_PLUGIN_ROOT` was empty, and no asset script existed on the box. The same
+session also had `gh` installed but uncredentialed — reads **and** writes 403 — so
+even a session that found the scripts could not run their `gh api` calls. The
+credentialed channel there is the GitHub MCP connector, which this handler does not
+yet speak (see `claim-lock.md`).
+
+So `true` has no supported route to the plugin today. A repo that sets it needs the
+plugin installed by some other means — a cloud-environment setup script running
+`claude plugin marketplace add` plus `claude plugin install` is the obvious candidate
+and is itself **unmeasured**. Setting `true` without that is not silently broken:
+step 5's self-check stops each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
 > the contract.** Do not re-derive a candidate query, an in-flight count, or a

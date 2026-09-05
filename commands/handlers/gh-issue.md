@@ -12,9 +12,11 @@ gh-issue:
   assignees: [] # optional GitHub usernames
   remote_batch: false # optional, DEFAULT false (unlike linear.remote_batch, which
   # defaults true). true → /do-tasks --all dispatches one cloud session per issue.
-  # Safe only where the repo declares this plugin in a committed .claude/settings.json,
-  # since the handler's label writes run a plugin script — a mechanism that is
-  # documented but not yet probed. See commands/do-tasks.md §4 "gh-issue batch".
+  # The handler's label writes run a plugin script, and a cloud session does NOT install
+  # this plugin from a committed .claude/settings.json — probed 2026-09-05, see
+  # dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md. Leave it false
+  # unless the environment installs the plugin some other way.
+  # See commands/do-tasks.md §4 "gh-issue batch".
   max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
   # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`
   # (see commands/handlers/linear-common.md "Config block"). gh-issue has no per-project
