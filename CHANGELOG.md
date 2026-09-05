@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.24.0] - 2026-09-05
+
+### Features
+
+- wire batch execution into the tracker-batch subroutine (#482) (547f776)
+
 ## [2.23.0] - 2026-09-04
 
 ### Features
