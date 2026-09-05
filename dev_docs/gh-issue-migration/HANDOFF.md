@@ -128,11 +128,22 @@ beside the 2026-08-24 decision record.
   session and a local ref-lock session detect each other; the elections cannot see each
   other's primitive. `claim-lock.md` now carries its own entry condition for this, so it
   is not a rule that lives only in `do-tasks.md` §4.
-- **The dispatcher discharges what the session cannot run.** Candidate selection, the WIP
-  gate and dependency readiness all happen dispatcher-side; the session runs pre-flight,
-  the claim, execute, PR, and the two label writes. The cost is stated where it is
-  incurred: `slack` becomes a one-instant, dispatcher-side bound rather than a guarantee,
-  because nothing re-checks WIP after dispatch.
+- **The dispatcher discharges two gates, and deliberately not the third.** Candidate
+  selection and the pre-claim WIP gate happen dispatcher-side; the session runs
+  pre-flight, the claim, execute, PR, and the two label writes. The WIP gate is
+  discharged because it is **provably** redundant — at most `slack` sessions each
+  observe a count strictly under `wip_limit` however they interleave. **Dependency
+  readiness is re-run in the session** before claiming: a blocker can reopen between
+  selection and claim, and no arithmetic makes that recheck redundant. The distinction is
+  the point — "the dispatcher just asked" is not a reason to skip a gate; only
+  provable redundancy is. The cost of the one real discharge: `slack` is a one-instant,
+  dispatcher-side bound rather than a guarantee, because nothing re-checks WIP after
+  dispatch.
+- **A `wip_limit` above the query cap used to manufacture slack.** `count_wip`'s
+  `--limit` defaults to 100 and `wip_limit` is unbounded, so a larger limit read a
+  truncated page as an under-limit count. Found by the PR's bot reviewer, not by the
+  diff-only reviewer that passed it eighteen times. Anything new that derives a bound
+  from a bounded query has the same shape: check the query can see far enough to answer.
 - **`--project` is `linear` only.** The flag list in `do-tasks.md` said "tracker handler
   only", which included gh-issue and jira. It now names `linear`, matching what the
   handlers implement.
