@@ -2,7 +2,7 @@
 title: Build gh-issue batch execution (/do-tasks --all) on the tracker-batch subroutine
 priority: low
 size: 3
-status: needs_review
+status: done
 created: 2026-09-04
 source_branch: bestdan/gh-issue-migration
 parent: gh_migration

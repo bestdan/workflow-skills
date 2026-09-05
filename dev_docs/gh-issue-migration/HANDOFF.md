@@ -68,14 +68,15 @@ worktree off `main`; edit these plan docs on this branch.
 
 ## Where things stand
 
-**No task is available to start.** Tasks 4–8 and 14–17 are done; **task 16 is delivered
-but not merged** ([PR #482](https://github.com/bestdan/workflow-skills/pull/482), open,
-ready for review). Task 12 is unclaimed and has no task file. Task 13 is postponed, which
-**holds all of Phase 4**.
+**No task is available to start.** Tasks 4–8 and 14–17 are done, task 16 included
+(merged `547f776`). Task 12 is unclaimed and has no task file. Task 13 is postponed,
+which **holds all of Phase 4** — so the only unclaimed work in this plan is task 12,
+and it gates nothing anyone is waiting on.
 
-- **Task 16** — batch execution (`/do-tasks --all`) for gh-issue. Delivered; see "What
+- **Task 16** — batch execution (`/do-tasks --all`) for gh-issue. Merged; see "What
   task 16 changed that you will trip over" below, because it moved a premise the rest of
-  this plan rests on.
+  this plan rests on. **What it shipped is off by default**, so nothing observable
+  changed for any user — the probe below is what turns it on.
 - **Task 12** — stale claim-ref sweep. Unclaimed, no task file. It gates flipping the
   routine claim default, and it is now also the sweep that would let a dispatched batch
   session take the ref lock instead of the comment election.

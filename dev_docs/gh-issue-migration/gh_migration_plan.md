@@ -228,9 +228,8 @@ join, and `gh` covers it only partially.
 **Phase 3 — handler (added 2026-09-04, absorbing Linear PRE-117)**
 
 16. ~~[phase_3_handler/gh_migration_task_16.md](phase_3_handler/gh_migration_task_16.md)~~ — Batch execution (`/do-tasks --all`) on the
-    tracker-batch subroutine. **Delivered, not merged** —
-    [PR #482](https://github.com/bestdan/workflow-skills/pull/482), open and ready for
-    review. Absorbed **PRE-117** and superseded the closed
+    tracker-batch subroutine. **Done** — PR #482, merged `547f776`. Absorbed
+    **PRE-117** and superseded the closed
     [#426](https://github.com/bestdan/workflow-skills/pull/426), which was rebuilt as a
     fresh edit rather than ported. Every deterministic value on the new path reads from a
     script whose output is the contract — the migrated candidate query, `gh-issue-ready.py`
