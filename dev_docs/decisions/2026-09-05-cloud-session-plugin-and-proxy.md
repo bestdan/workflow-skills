@@ -168,7 +168,9 @@ mcp__github__issue_read(method=get_labels, …)
 3. **The GitHub MCP connector remains the credentialed channel**, in a cloud session as
    in a routine, and it **can** perform the `gh-issue` label write. It replaces the whole
    label set, matching the REST path — so validate-then-replace stays the rule on both.
-4. **Nothing about the marketplace clone is blocked.** Proxy repository scoping does not
+4. **Closing the plugin gap alone would not be enough.** `gh` stays broken either way.
+   Both must be solved before `remote_batch: true` dispatches anything that works.
+5. **Nothing about the marketplace clone is blocked.** Proxy repository scoping does not
    stop a public unattached repo from being cloned over plain HTTPS.
 
 ## What this does NOT settle
@@ -185,8 +187,6 @@ mcp__github__issue_read(method=get_labels, …)
   per-environment only, or from a committed file — was not checked either**; the
   environment log said only `No setup script configured`, which shows one was absent,
   not that a repo cannot supply one.
-- **Whether the plugin gap matters on its own.** It does not: closing it still leaves
-  `gh`. Both must be solved before `remote_batch: true` dispatches anything that works.
 - **Whether any of this differs on an organization-owned repo, or on a session started
   from the web rather than the CLI.** One session, one personal repo.
 

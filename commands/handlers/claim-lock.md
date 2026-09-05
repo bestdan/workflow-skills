@@ -139,7 +139,7 @@ _name_ — but the branch may not sit at the sha the session read earlier.
 ## Batch-dispatched sessions: use the comment election, not the ref lock
 
 A session dispatched by `/do-tasks --all` takes the election below **by choice**,
-not only because it may be unable to acquire. The reason is the same asymmetry
+not as a degrade from a failed acquire. The reason is the same asymmetry
 the routine section gives, arriving by a different route: an unattended session
 that crashes or times out after acquiring strands its ref, every later session
 reads that ref as a live claim, and there is no stale-ref sweep. A batch fans out
