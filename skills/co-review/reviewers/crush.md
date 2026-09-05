@@ -32,7 +32,7 @@ So the dispatch pins **`--cwd "<NEUTRAL>"`**, a dedicated empty directory holdin
 
 - **GitHub mode, with requests** → `mkdir -p "<NEUTRAL>" && cat "<this skill dir>/reviewers/assets/crush-readonly.json" > "<NEUTRAL>/crush.json" && cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | crush run --cwd "<NEUTRAL>" -q -m "hyper/kimi-k2.7-code" "<POINTER>" 2>&1`
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `mkdir -p "<NEUTRAL>" && cat "<this skill dir>/reviewers/assets/crush-readonly.json" > "<NEUTRAL>/crush.json" && cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | crush run --cwd "<NEUTRAL>" -q -m "hyper/kimi-k2.7-code" "<POINTER>" 2>&1`
-- **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md.
+- **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md.
 
 `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default, since a `--post` review commonly targets a PR that isn't checked out here.
 

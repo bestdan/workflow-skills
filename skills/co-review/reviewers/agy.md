@@ -65,7 +65,7 @@ cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <
 `--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.6 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review; both are pre-approved via their own exact-match allow-rule below, so switching between the two does not re-prompt (see the note under the allow-rules for why the tail is **not** wildcarded). `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox. `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default.
 
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument from the assembling `cat`; the dispatch tail is unchanged.
-- **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.
+- **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.
 
 `<AGY-POINTER>` is agy's own pointer — the shared `<POINTER>` from SKILL.md retargeted from stdin to the input **file**, since agy has no stdin (a pointer that claims otherwise is what produced the spurious `NO INPUT`):
 
