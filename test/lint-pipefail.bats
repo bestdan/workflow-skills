@@ -24,6 +24,11 @@ fx() { printf '%s' "$REPO_ROOT/test/fixtures/lint-pipefail/$1"; }
   # -q, -qF, -Eq, -qxF, -qiF all carry the same hazard, and a pattern anchoring
   # the q would miss most of them. Line 6 pins that the writer need not be
   # printf: any command feeding the pipe can lose the race.
+  #
+  # Lines 7-8 are the long spellings. Three reviewers independently found that
+  # `--quiet` slipped past the first cut of this pattern; `--silent` is grep's
+  # alias for the same flag and would have been the next one. Nothing in this
+  # tree writes them today — the check is for the code that does not exist yet.
   lint "$(fx violations.txt)"
   assert_failure 1
   assert_output --partial "violations.txt:1:"
@@ -32,6 +37,8 @@ fx() { printf '%s' "$REPO_ROOT/test/fixtures/lint-pipefail/$1"; }
   assert_output --partial "violations.txt:4:"
   assert_output --partial "violations.txt:5:"
   assert_output --partial "violations.txt:6:"
+  assert_output --partial "violations.txt:7:"
+  assert_output --partial "violations.txt:8:"
 }
 
 @test "the finding names the fix, not just the fault" {

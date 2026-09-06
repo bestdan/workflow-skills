@@ -41,15 +41,25 @@ if [ "$#" -eq 0 ]; then
 fi
 
 # A pipe into grep whose option words carry a `q` anywhere: `-q`, `-qF`, `-Eq`,
-# `-qiF`, `-Fxq` are all the same hazard. `-e q` is not an option word and does
-# not match; `grep -q` with no preceding pipe is fine and is how the fix reads
-# once the here-string moves the input off the pipeline.
+# `-qiF`, `-Fxq` are all the same hazard, as are the long spellings `--quiet`
+# and its GNU alias `--silent`. `grep -q` with no preceding pipe is fine and is
+# how the fix reads once the here-string moves the input off the pipeline.
+#
+# The long forms are matched even though nothing in this tree writes them: the
+# check exists for the code that does not exist yet, and `--quiet` is the
+# spelling someone reaches for when they want the line to read clearly. It costs
+# one alternation.
+#
+# One miss is left deliberately: an option that takes an argument BEFORE the
+# quiet flag, as in `grep -e needle -q`. The idiomatic order `grep -q -e needle`
+# is caught, and swallowing bare argument words would widen the matcher into the
+# quoted-string false positives below for a spelling nobody writes.
 #
 # The leading `([^|]|^)` is what keeps `cmd || grep -q x <<<"$v"` clean: that is
 # the FIXED form, and matching the second `|` of `||` would flag the repair as
 # the defect. It cost a false positive on scripts/spawn-orchestrator.sh before
 # it was added.
-pf_re='([^|]|^)[|][[:space:]]*grep[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*q' # pipefail-lint: allow
+pf_re='([^|]|^)[|][[:space:]]*grep[[:space:]]+(--?[A-Za-z][A-Za-z-]*[[:space:]]+)*(-[A-Za-z]*q|--(quiet|silent))' # pipefail-lint: allow
 
 fail=0
 # The awk pass re-tests the match against a comment-stripped copy of the line,

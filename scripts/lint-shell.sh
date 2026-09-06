@@ -118,18 +118,21 @@ run() {
   "$@" || fail=1
 }
 
-# The Bash 3.2 floor. scripts/lint-bash4.sh owns the patterns and the reasoning
-# behind them; it takes its files as ARGUMENTS rather than discovering them,
-# which is what lets test/lint-bash4.bats exercise it against fixtures in a temp
-# dir instead of only through this script's whole-tree scan.
+# The file list both pattern lints scan. Each owns its own patterns and the
+# reasoning behind them, and each takes its files as ARGUMENTS rather than
+# discovering them — which is what lets test/lint-bash4.bats and
+# test/lint-pipefail.bats exercise them against fixtures in a temp dir instead
+# of only through this script's whole-tree scan.
 lint_files=()
 [ "${#shell_files[@]}" -gt 0 ] && lint_files+=("${shell_files[@]}")
 [ "${#bats_files[@]}" -gt 0 ] && lint_files+=("${bats_files[@]}")
+
+# The Bash 3.2 floor: bash-4-only constructs, which parse fine on the ubuntu
+# job's Bash 5 and fail only on a contributor's Mac.
 [ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${lint_files[@]}"
 
 # `<writer> | grep -q` under pipefail: a match can report 141 and read as a
-# miss. scripts/lint-pipefail.sh owns the pattern and the reasoning, and takes
-# its files as arguments for the same testability reason as lint-bash4.sh.
+# miss.
 [ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-pipefail.sh "${lint_files[@]}"
 
 if [ "${#shell_files[@]}" -gt 0 ]; then
