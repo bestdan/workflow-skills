@@ -1,6 +1,6 @@
 ---
 name: review-facts
-description: Independent fact-check of a completed analysis pipeline. Spawns the `fact-reviewer` subagent (fresh context, read-only tools apart from the reproducibility re-run, which restores the tree) to verify links, cited values, reproducibility, number-trace, units, formulas, and recommendation correctness. Use when an analysis (model + structured output + filled narrative document, per analysis-pipeline) is complete and needs an audit before it ships.
+description: Independent fact-check of a completed analysis pipeline. Spawns the `fact-reviewer` subagent (fresh context, read-only tools apart from the reproducibility re-run, which restores the tree) to verify links, cited values, reproducibility, number-trace, the descriptors characterising those numbers, units, formulas, and recommendation correctness. Use when an analysis (model + structured output + filled narrative document, per analysis-pipeline) is complete and needs an audit before it ships.
 user-invocable: true
 ---
 
@@ -45,4 +45,4 @@ Skip this skill for drafts in progress, exploratory notebooks, or single-number 
 - It does not re-do the analysis. If methodology is wrong, it's flagged, not silently rewritten.
 - It does not check prose style, tone, or grammar. Out of scope.
 
-The full checklist (links resolve, cited values match sources, output reproducibility, number-trace, units & formulas, source freshness, recommendation matches data, compatibility constraints) lives in the `fact-reviewer` subagent's system prompt — `agents/fact-reviewer.md` in this plugin. Edit there to change what gets checked.
+The full checklist (links resolve, cited values match sources, output reproducibility, number-trace, descriptors match the data, units & formulas, source freshness, recommendation matches data, compatibility constraints) lives in the `fact-reviewer` subagent's system prompt — `agents/fact-reviewer.md` in this plugin. Edit there to change what gets checked.

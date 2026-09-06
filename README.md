@@ -114,11 +114,11 @@ capability matrix.
 
 ### Auditable analysis
 
-| Skill                                                            | Trigger                                                               | What it does                                                                                                                                 |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**analysis-pipeline**](skills/analysis-pipeline/SKILL.md)       | `/analysis-pipeline`, or auto when building report-producing analyses | Structure quantitative work as model → template → fill pipelines, with input provenance and reproducible output. Ships a working `example/`. |
-| [**review-facts**](skills/review-facts/SKILL.md)                 | `/review-facts`                                                       | Spawn the `fact-reviewer` subagent to verify links, cited values, reproducibility, number-trace, units, formulas, and the recommendation.    |
-| [**analysis-conventions**](skills/analysis-conventions/SKILL.md) | auto when writing notebooks or analysis scripts                       | Conventions for analysis code: marimo vs plain scripts, `uv run`, scratchpad patterns, notebook structure. Not user-invocable.               |
+| Skill                                                            | Trigger                                                               | What it does                                                                                                                                           |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**analysis-pipeline**](skills/analysis-pipeline/SKILL.md)       | `/analysis-pipeline`, or auto when building report-producing analyses | Structure quantitative work as model → template → fill pipelines, with input provenance and reproducible output. Ships a working `example/`.           |
+| [**review-facts**](skills/review-facts/SKILL.md)                 | `/review-facts`                                                       | Spawn the `fact-reviewer` subagent to verify links, cited values, reproducibility, number-trace, descriptors, units, formulas, and the recommendation. |
+| [**analysis-conventions**](skills/analysis-conventions/SKILL.md) | auto when writing notebooks or analysis scripts                       | Conventions for analysis code: marimo vs plain scripts, `uv run`, scratchpad patterns, notebook structure. Not user-invocable.                         |
 
 ### Understanding the work
 
