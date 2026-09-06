@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.24.3] - 2026-09-06
+
+### Fixes
+
+- stop pipefail turning a matching grep -q into a miss (#493) (e045ee8)
+
 ## [2.24.2] - 2026-09-05
 
 ### Fixes
