@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.25.0] - 2026-09-06
+
+### Features
+
+- contract the descriptor audit (#494) (3133516)
+
 ## [2.24.3] - 2026-09-06
 
 ### Fixes
