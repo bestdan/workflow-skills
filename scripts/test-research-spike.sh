@@ -2942,6 +2942,168 @@ else
   bad "expected the blocker line exactly once, got $dupes_s15"
 fi
 
+# --- Fixture (s16-s18): the `declared none` tally (PRE-779) ---------------
+# The coverage rule's `none:` escape hatch is never counted anywhere today —
+# not in `Counts`, not in `status`. A track that satisfies coverage everywhere
+# with `none: <reason>` reads as a clean sheet. These three fixtures cover the
+# tally: a track that is nothing *but* the escape hatch, a track that mixes it
+# with real obligations, and the `blocks: none: <reason>` field-position
+# sentinel — a different thing entirely — which must not be swept in.
+
+# All bare `none:`: the section owes nothing, and the report says so instead
+# of a clean sheet.
+DIR_S16="$BASE/status-declared-none-all"
+status_fixture "$DIR_S16" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed — the isolated domain requires no new tooling
+```'
+out_s16="$(python3 "$SCRIPT" --root "$DIR_S16" status alpha 2>&1)"
+exit_s16=$?
+assert_exit "a track whose sections are all bare 'none:' still exits 0" "$exit_s16" 0
+assert_contains "the bare 'none:' block is counted, not a clean sheet" "$out_s16" \
+  "O 0 discharged / 0 open (1 stub) / 1 declared none"
+
+# A mix: the real obligation and the bare `none:` are each counted in their
+# own column, independently of each other.
+DIR_S17="$BASE/status-declared-none-mixed"
+status_fixture "$DIR_S17" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```
+
+### Q2. Does provisioning need a rollback path?
+
+```question
+id: rollback-path
+status: answered
+answer: no — the account-provisioning flow is idempotent
+blocks: account-provisioning
+```
+
+```obligation
+none: the idempotent flow needs no rollback tooling
+```'
+out_s17="$(python3 "$SCRIPT" --root "$DIR_S17" status alpha 2>&1)"
+exit_s17=$?
+assert_exit "a mix of 'none:' and real obligations still exits 0" "$exit_s17" 0
+assert_contains "the real open obligation and the bare 'none:' are both counted" "$out_s17" \
+  "O 0 discharged / 1 open (1 stub) / 1 declared none"
+
+# `blocks: none: <reason>` is a field-position sentinel on a question — it says
+# the question gates no decision, not that a section owes nothing — and must
+# not be swept into the bare-obligation-block tally.
+DIR_S18="$BASE/status-declared-none-field-sentinel"
+status_fixture "$DIR_S18" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: open
+blocks: none: it picks between options the decision already allows
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: discharged
+discharged_by: PR 9
+```'
+out_s18="$(python3 "$SCRIPT" --root "$DIR_S18" status alpha 2>&1)"
+exit_s18=$?
+assert_exit "a question's 'blocks: none:' field sentinel still exits 0" "$exit_s18" 0
+assert_contains "the field-position 'none:' sentinel is not counted as a bare obligation block" \
+  "$out_s18" "O 1 discharged / 0 open (1 stub) / 0 declared none"
+
+# A track literally named `total` is valid — `require_name` only enforces
+# kebab-case — and must not collide with the synthetic aggregate row of the
+# same name: its own tally and the report-wide total are different numbers.
+DIR_S19="$BASE/status-declared-none-track-named-total"
+mkdir -p "$DIR_S19/dev_docs/research/alpha/tracks/account" \
+  "$DIR_S19/dev_docs/research/alpha/tracks/total"
+write_file "$DIR_S19/dev_docs/research/alpha/decisions.md" '# alpha — decisions
+
+```decision
+id: account-provisioning
+state: pending
+```'
+write_file "$DIR_S19/dev_docs/research/alpha/tracks/account/questions.md" \
+  '# account
+
+### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: nothing is owed — the isolated domain requires no new tooling
+```'
+write_file "$DIR_S19/dev_docs/research/alpha/tracks/total/questions.md" \
+  '# total
+
+### Q1. Does the rollout need a feature flag?
+
+```question
+id: rollout-flag
+status: answered
+answer: yes, gated behind a flag
+blocks: account-provisioning
+```
+
+```obligation
+none: the flag ships with the release, no separate tooling
+```
+
+### Q2. Does the rollout need a comms plan?
+
+```question
+id: rollout-comms
+status: answered
+answer: yes, a heads-up to existing users
+blocks: account-provisioning
+```
+
+```obligation
+none: the notice is copy, not tooling
+```'
+out_s19="$(python3 "$SCRIPT" --root "$DIR_S19" status alpha 2>&1)"
+exit_s19=$?
+assert_exit "a track literally named 'total' still exits 0" "$exit_s19" 0
+assert_contains "the 'total' track's own tally is its own two, not the aggregate" "$out_s19" \
+  "O 0 discharged / 0 open / 2 declared none"
+assert_contains "the report-wide aggregate sums every track, 'total' included" "$out_s19" \
+  "O 0 discharged / 0 open / 3 declared none"
+
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do
@@ -3852,8 +4014,8 @@ assert_contains "tutorial step 7: status reproduces exactly what the skill quote
 
   sso-rollout  READY awaiting decision
 
-  auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)
-  total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs)"
+  auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none
+  total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none"
 out_aa_final="$(python3 "$SCRIPT" --root "$DIR_AA" validate --strict 2>&1)"
 exit_aa_final=$?
 assert_exit "tutorial step 8: the finished walkthrough tree validates --strict clean" \
