@@ -289,29 +289,33 @@ attachment) is unresolvable — which is the bulk of hand-opened work.
 
 > **It is not the credential, and REST is not a way round it.** In a scheduled
 > routine `gh` is installed and `gh api user` answers as `bestdan`, so a
-> `gh auth status` check answers the wrong question (it reports the `GH_TOKEN`
-> invalid while calls succeed). `gh pr list` is refused because it is GraphQL:
+> `gh auth status` check answers the wrong question — and worse, it **reports
+> the `GH_TOKEN` invalid and still exits 0**, so a preflight gating on its exit
+> code reads a pass. Never gate on `gh`'s exit code here. `gh pr list` is refused because it is GraphQL:
 >
 >> HTTP 403: This GraphQL query (PullRequestList, sent by `gh pr list`) is not
 >> enabled for this session — only the pinned set of PR-review operations is
 >> served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
 >
-> **The REST the refusal names does not work either.** Every repo-scoped REST
-> call was refused too, attached or not — only the two 403s differ:
+> **The REST the refusal names has not worked either, because no measured
+> environment provisioned it.** Cloning a repo as a source buys **read**
+> access; the GitHub API needs the repo attached **with credentials**, which
+> the refusal itself spells out:
 >
->> unattached: GitHub access to this repository is not enabled for this
->> session. Use `add_repo` to request access.
->>
->> attached: GitHub access is not enabled for this session. An org admin must
->> connect the Claude GitHub App for this organization.
+>> Use `add_repo` to request access. If `add_repo` answers that read access is
+>> already available and you need GitHub API or write access, call `add_repo`
+>> again with `access:"push"` to attach the repository with credentials.
 >
-> The second is org-level, so **attachment is not the gate** and adding a
-> source does not buy `gh` access. Only the non-repo-scoped `gh api user`
-> answers, which is why it is worthless as a health check. Full measurements:
+> A repo sitting in `/home/user/` is therefore not an attached repo, and every
+> repo-scoped REST call measured so far was made against one that was never
+> attached. Only the non-repo-scoped `gh api user` answers, which is why it is
+> worthless as a health check. Full measurements:
 > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
 >
-> The practical upshot: in a routine `mcp__github__*` is the **only** working
-> GitHub channel, and `gh` — every subcommand of it — is not a fallback.
+> The practical upshot **as environments are provisioned today**: treat
+> `mcp__github__*` as the only working GitHub channel and do not route this
+> sweep through `gh`. If a `gh` REST call does start answering, the repo was
+> provisioned since — that is a reason to re-measure, not a malfunction.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent

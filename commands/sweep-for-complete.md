@@ -49,13 +49,16 @@ each issue's PR"). Give each project a `repo:` before scheduling one sweep
 across a multi-repo workspace.
 
 Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`.
-In a **cloud routine no `gh` subcommand reaches GitHub**, and not for want of a
-credential: `gh` is installed and `gh api user` answers, but the GraphQL-backed
-subcommands (`gh pr list`, `gh pr view`) are refused because GraphQL is not
-served, and every repo-scoped `gh api` REST path 403s as well — attached as a
-source or not. No credential fix reaches either, so a `gh auth status` check
-answers the wrong question. Both therefore run over the `mcp__github__*` tools,
-which are the **only** working GitHub channel there. That MCP surface comes
+In a **cloud routine, as environments are provisioned today, no `gh` subcommand
+reaches GitHub.** The GraphQL-backed ones (`gh pr list`, `gh pr view`) are
+refused outright because GraphQL is not served — no provisioning fixes that.
+Repo-scoped `gh api` REST is refused for a different reason: a repo cloned as a
+source has **read** access only, and the GitHub API needs it attached **with
+credentials**, which no measured environment had done. Meanwhile `gh` is
+installed, `gh api user` answers, and `gh auth status` reports the token
+invalid while exiting 0 — so none of the three is a usable health check. Both
+therefore run over the `mcp__github__*` tools, which are the **only** working
+GitHub channel there. That MCP surface comes
 from the **GitHub App installed for claude.ai/code**, not from a claude.ai
 connector — so it will not appear in a routine's connector list, and there is
 nothing to "attach" there. Measurements:
