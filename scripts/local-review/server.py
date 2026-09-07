@@ -2929,7 +2929,9 @@ def bind_server(port):
 
 
 def ssh_hint(port):
-    """Lines to print after the URL when the server was launched over SSH.
+    """Lines to print between the URL and the readiness line when the server
+    was launched over SSH. They go before LOCAL_REVIEW_URL= so a consumer that
+    stops reading at the readiness line has already seen them.
     Loopback on the remote host is unreachable from the reviewer's browser,
     so the URL only opens through a tunnel. The local port must equal the
     bound one: _origin_ok() allows only origins on Handler.port, so a
@@ -2937,7 +2939,7 @@ def ssh_hint(port):
     Empty (no output at all) outside SSH, so a local launch is unchanged."""
     if not (os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY")):
         return []
-    host = socket.gethostname() or "<host>"
+    host = socket.gethostname()
     return [
         f"SSH: this server is on {host}'s loopback; from your own machine run:",
         f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
@@ -3024,9 +3026,9 @@ def main():
     machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
     vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
     print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
-    print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     for line in ssh_hint(port):
         print(line, flush=True)
+    print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 
 

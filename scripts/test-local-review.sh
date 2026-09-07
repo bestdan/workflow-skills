@@ -892,9 +892,11 @@ finally:
 
 # -- SSH hint: printed only when launched over SSH, with the bound port -----
 def run_startup_output(env):
-    # Pin a port so the output can be read whole after shutdown: reading
-    # incrementally would race the SSH lines, which follow LOCAL_REVIEW_URL
-    # in the same write.
+    # Pin a port so the output can be read whole after shutdown. Readiness
+    # is an HTTP response, not a TCP connect: the server listens in its
+    # constructor, before the startup prints, so a connect can succeed
+    # before any line is written. A response proves serve_forever() is
+    # running, which comes after every print.
     probe = _socket.socket()
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
@@ -902,9 +904,11 @@ def run_startup_output(env):
     proc, patch = start_server(["--port", str(port)], env=env)
     for _ in range(100):
         try:
-            _socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            _urlrequest.urlopen(f"http://127.0.0.1:{port}/", timeout=0.5).close()
             break
-        except OSError:
+        except _urlerror.HTTPError:
+            break
+        except (OSError, _urlerror.URLError):
             _time.sleep(0.05)
     proc.terminate()
     try:
@@ -929,6 +933,10 @@ check("ssh hint: names the local-port-must-match failure",
       "Origin check" in out_s and "local port" in out_s, out_s)
 check("ssh hint: offers the permanent LocalForward config with the bound port",
       f"LocalForward {port_s} 127.0.0.1:{port_s}" in out_s, out_s)
+
+tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
+_, out_t = run_startup_output(tty_env)
+check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)

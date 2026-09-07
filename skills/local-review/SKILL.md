@@ -132,9 +132,10 @@ Then open `$review_url` for the user:
 **Over SSH, the URL is dead until the user opens a tunnel.** The server binds
 loopback on the machine it runs on; in an SSH session that is the remote
 host, and the reviewer's browser is on their own machine. The server detects
-`$SSH_CONNECTION` / `$SSH_TTY` and appends `SSH:` lines to the log after
+`$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before
 `LOCAL_REVIEW_URL=`, carrying the tunnel command with the bound port filled
-in. Print them verbatim beside the URL:
+in. The readiness line stays last, so once the poll above has seen it the
+hint is already in the log. Print the lines verbatim beside the URL:
 
 ```bash
 grep '^SSH: ' <scratch>/lr_server.log
