@@ -1,4 +1,4 @@
-# What a cloud routine gives a plugin, and what `gh` will and won't serve
+# What a cloud routine gives a plugin, and why `gh` reaches GitHub for nothing
 
 **Measured 2026-09-07** inside scheduled **routines** (not `claude --cloud`
 sessions), Claude Code 2.1.263, environment `Linear Tidy Routine`. A dated
@@ -9,8 +9,8 @@ Companion to
 (a `claude --cloud` session) and
 [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md)
 (a routine). It **supersedes the 2026-09-05 doc for routines** and reframes why
-`gh pr list` fails there — see "What this changes" below. It does not correct
-that doc, which measured a different environment.
+`gh` fails there — see "What this changes" below. It does not correct that doc,
+which measured a different environment and reached the same operational rule.
 
 ## Why this exists
 
@@ -62,29 +62,45 @@ So: can a routine invoke the plugin instead of describing it?
    resolve its own assets. Whether the variable is populated inside a plugin's
    own execution context was **not** measured here.
 
-5. **`gh pr list` cannot work in a routine, at all.** It is a GraphQL query and
-   GraphQL is not served:
+5. **The GraphQL-backed `gh` subcommands cannot work in a routine, at all.**
+   `gh pr list` is a GraphQL query and GraphQL is not served:
 
    > HTTP 403: This GraphQL query (PullRequestList, sent by `gh pr list`) is not
    > enabled for this session — only the pinned set of PR-review operations is
    > served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
 
    This is a property of the query type, not of credentials, so no amount of
-   auth fixes it. The error names its own replacement.
+   auth fixes it. **`gh pr view` is refused the same way** — measured on
+   `gh pr view <url> --json number,url,state,mergedAt` in run
+   `cse_01M9WzAbESA3hSwBZuYWczNJ`, which matters because that is the merge
+   verification `/sweep-for-complete` step 4 rests on. The error names its own
+   replacement, REST — but see finding 6: the replacement is refused too.
 
-6. **`gh` REST refuses a repository not attached to the session as a source.**
-   Measured on an unattached repo:
+6. **`gh` REST refuses every repo-scoped path, attached or not — so the REST
+   the GraphQL refusal names is not a way round it.** Both cases were measured,
+   and they differ only in the message. Unattached (`bestdan/workflow-skills`
+   before it was a source, run `cse_011MSb2bYVcG7QfzDb6RP33J`):
 
    > HTTP 403: GitHub access to this repository is not enabled for this session.
    > Use `add_repo` to request access.
 
-   `gh api user` succeeds in the same session, because it is not repo-scoped —
-   which is why an earlier reading of "gh works" was too generous. Only this
-   refusal was measured; a REST call against an **attached** repo was never
-   exercised (see "What this does NOT settle"). **Inference, not measurement:**
-   if attachment is what the 403 turns on, sources double as GitHub access
-   scope, and dropping one to avoid a duplicate checkout would also remove that
-   repo from `gh`'s reach.
+   Attached (the same repo once the environment cloned it as a source, run
+   `cse_01M9WzAbESA3hSwBZuYWczNJ`, `gh api repos/bestdan/workflow-skills/pulls/487`):
+
+   > HTTP 403: GitHub access is not enabled for this session. An org admin must
+   > connect the Claude GitHub App for this organization.
+
+   The second refusal is **org-level**, so attachment is not what the 403 turns
+   on and adding a source buys no `gh` access. `gh api user` succeeds in both
+   sessions because it is not repo-scoped — which is why an earlier reading of
+   "gh works" was too generous, and why `gh api user` is worthless as a health
+   check.
+
+   An earlier revision of this document had finding 6 the other way round: it
+   read the unattached 403 as evidence of an attachment gate and inferred that
+   sources double as GitHub access scope. The attached-repo measurement above
+   falsifies that inference. It is recorded rather than deleted because the
+   inference was load-bearing — it was the argument against dropping a source.
 
 7. **The GitHub MCP surface is present and is not a claude.ai connector.** The
    nightly tidy's `mcp_connections` lists only Google-Drive, Linear, Slack,
@@ -95,12 +111,20 @@ So: can a routine invoke the plugin instead of describing it?
 ## What this changes
 
 The 2026-09-05 doc's finding 2 reads _"`gh` exists in a cloud session but has no
-working credential ... reads 403 alongside writes."_ In a **routine** the shape
-is different and more specific: `gh` is credentialed, but REST is limited to
-attached repos and GraphQL-backed subcommands are refused outright. Both docs
-agree `gh pr list` is unusable; they disagree on why, and the why decides the
-fix. Prefer this doc for routines and the 2026-09-05 doc for `--cloud` sessions
-until someone re-measures the latter.
+working credential ... reads 403 alongside writes."_ A routine reaches the same
+practical place by a different route: `gh` **is** credentialed there — `gh api
+user` answers — yet no repo-scoped call of any kind succeeds, because GraphQL
+is not served and repo-scoped REST is refused at the org level. So both
+documents agree on the operational rule, **`gh` is not a channel in the cloud**,
+and the routine measurements say the credential is not the reason. Prefer this
+doc for routines and the 2026-09-05 doc for `--cloud` sessions until someone
+re-measures the latter.
+
+The practical consequence for `/sweep-for-complete`: `mcp__github__*` is the
+only working GitHub channel in a routine, and there is no second one to fall
+back to. A run without those tools resolves nothing — which is what the handler
+said before this document existed, though for a reason that turned out to be
+wrong.
 
 ## What this does NOT settle
 
@@ -116,21 +140,35 @@ until someone re-measures the latter.
   `/reload-plugins` unavailable in cloud. A routine only ever has a first
   session, so that workaround is structurally unavailable — but this was not
   measured here, only read.
-- **Whether `gh api repos/...` REST calls succeed for an attached repo.** Only
-  the unattached 403 and the non-repo-scoped `gh api user` were exercised.
+- **Whether connecting the Claude GitHub App for the org would make repo-scoped
+  REST work.** The attached-repo 403 asks for exactly that, and nobody has
+  tried it. It is the one action that might turn `gh` back into a channel.
+- **Whether `gh` is reliably present.** It answered `gh --version` in every run
+  inspected here, but a second session reported it missing in three of five of
+  its own runs. Not reproduced, and worth knowing before any handler leans on
+  `gh` being installed.
 
 ## Reproducing
 
-One-shot routine in the target environment, `sources` deliberately excluding
-the plugin repo so an install cannot be confused with a source checkout:
+One-shot routine in the target environment. Run it **twice**, once with the
+target repo excluded from `sources` and once with it included — the attached
+and unattached cases return different 403s, and running only one of them is how
+the first revision of finding 6 reached the wrong conclusion:
 
 ```
 claude plugin list
 test -n "$CLAUDE_PLUGIN_ROOT" && echo SET || echo EMPTY
 Skill: workflow-skills:orchestrate-coders      # prefixed, or it proves nothing
-gh api repos/<owner>/<unattached-repo>
+gh api user                                    # succeeds either way — proves nothing
+gh api repos/<owner>/<repo>                    # the repo-scoped read
+gh api repos/<owner>/<repo>/pulls/<n>          # ditto, the merge-check shape
 gh pr list -R <owner>/<repo> --limit 1
+gh pr view <pr-url> --json number,state,mergedAt
 ```
 
 `RemoteTrigger` is **not** available to a subagent — cloud-routine control is
-main-session only, so this loop cannot be delegated.
+main-session only, so this loop cannot be delegated. Reading a past run is
+usually cheaper than commissioning a new one: `RemoteTrigger` `list_runs` on
+the probe routine, then `get_run_log` on the session id, returns the verbatim
+tool output. Every measurement in this document is quoted from such a log, and
+the run ids are named at the findings that rest on them.

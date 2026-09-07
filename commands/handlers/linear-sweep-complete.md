@@ -287,24 +287,31 @@ routine** — the same environment split
 step 1, so every issue whose PR was opened outside `/do-tasks` (no `links`
 attachment) is unresolvable — which is the bulk of hand-opened work.
 
-> **It is the query type, not the credential.** `gh` is installed and
-> credentialed there; `gh pr list` is refused because it is GraphQL:
+> **It is not the credential, and REST is not a way round it.** In a scheduled
+> routine `gh` is installed and `gh api user` answers as `bestdan`, so a
+> `gh auth status` check answers the wrong question (it reports the `GH_TOKEN`
+> invalid while calls succeed). `gh pr list` is refused because it is GraphQL:
 >
 >> HTTP 403: This GraphQL query (PullRequestList, sent by `gh pr list`) is not
 >> enabled for this session — only the pinned set of PR-review operations is
 >> served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
 >
-> So no auth fix reaches it, and a `gh auth status` check answers the wrong
-> question. Two further limits measured alongside it: `gh` REST serves only
-> repositories **attached to the session as sources** (an unattached repo 403s
-> with "Use `add_repo` to request access"), while a non-repo-scoped call like
-> `gh api user` succeeds regardless — so `gh api user` working proves nothing
-> about repo access. Full measurements:
+> **The REST the refusal names does not work either.** Every repo-scoped REST
+> call was refused too, attached or not — only the two 403s differ:
+>
+>> unattached: GitHub access to this repository is not enabled for this
+>> session. Use `add_repo` to request access.
+>>
+>> attached: GitHub access is not enabled for this session. An org admin must
+>> connect the Claude GitHub App for this organization.
+>
+> The second is org-level, so **attachment is not the gate** and adding a
+> source does not buy `gh` access. Only the non-repo-scoped `gh api user`
+> answers, which is why it is worthless as a health check. Full measurements:
 > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
 >
-> That attachment rule cuts both ways: **a repo must stay a source for the
-> sweep to reach its PRs**, so dropping one to avoid a duplicate checkout also
-> drops it out of `gh`'s reach.
+> The practical upshot: in a routine `mcp__github__*` is the **only** working
+> GitHub channel, and `gh` — every subcommand of it — is not a fallback.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent
@@ -317,22 +324,11 @@ Slack, Todoist and visualize under `mcp_connections`, and calls
 with `select:mcp__github__search_pull_requests,mcp__github__list_pull_requests,mcp__github__pull_request_read`
 before the first use, or the call fails as an unknown tool.
 
-**If the MCP tools are unavailable, try `gh api` REST** — it is the channel the
-`gh pr list` refusal above names. A repo **not** attached to the session as a
-source 403s outright; that a call against an **attached** repo succeeds has not
-been measured, so treat a failure here as an expected outcome rather than a
-malfunction, and fall through to `left: unresolved`.
-
-```bash
-gh api "repos/<owner>/<name>/pulls?state=all&head=<owner>:<branchName>"
-gh api "search/issues?q=repo:<owner>/<name>+<IDENTIFIER>+in:title+is:pr"
-```
-
-Both take the same post-filters as their `gh pr list` equivalents — the
-whole-token title match for the search, and nothing extra for the head query.
-Note the head parameter carries the `<owner>:<branch>` form here too, matching
-the MCP tool and **not** `gh pr list --head`. Only fall through to
-`left: unresolved` when neither channel is available.
+**If the MCP tools are unavailable, the run resolves nothing here.** The
+`gh api` REST the `gh pr list` refusal names is itself refused for any
+repo-scoped path, so there is no second channel to fall back to — do not spend
+the run probing for one. Every issue that reaches steps 2–3 lands in
+`left: unresolved`.
 
 The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
@@ -417,7 +413,8 @@ Measured on a merged PR: `gh` reports `state "MERGED"` / `mergedAt`, while REST
 and MCP report `state "closed"` / `merged true` / `merged_at`. Mind the field
 spelling too — `merged_at`, not `mergedAt`.
 
-**In a `claude-web` environment (no `gh`), read the same fields with
+**In a `claude-web` environment, where the `gh pr view` read above is refused
+as a GraphQL query, read the same fields with
 `mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
 `claude-web` environment" above for the environment split. It takes `owner`,
 `repo`, and `pullNumber` (the attested call shape is
@@ -426,6 +423,12 @@ spelling too — `merged_at`, not `mergedAt`.
 together. That is the same guarantee the URL rule above buys on the `gh`
 path — the repo travels with the number — and it is why a bare `pullNumber`
 with an inferred owner/repo is the one form to avoid here.
+
+**`gh api` REST is not a fallback for this read.** A repo-scoped REST call is
+refused in a routine whether or not the repo is attached — measured 2026-09-07,
+so if `mcp__github__pull_request_read` is unavailable the merge state is
+unreadable and the issue lands in `left: unresolved`. See "Steps 2–3 in a
+`claude-web` environment" above.
 
 Read **`merged`** off the returned pull request, per the per-backend rule
 above. That field is always present — it is serialized without `omitempty`, so
