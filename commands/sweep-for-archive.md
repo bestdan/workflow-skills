@@ -19,8 +19,9 @@ and archives it whatever the age; the list this command hands it is exactly the
 set the earlier legs _proved_ was delivered. Archiving is irreversible for the
 backstop (`linear-false-closures.md`: its scan sees only live issues, so it
 never revisits an archived one), so an id that reaches leg 3 on a guess is a
-false closure that can no longer be found. Nothing gets archived here that a merged PR
-did not own.
+false closure that can no longer be found. Nothing gets archived here that
+delivered work did not own — a merged PR, or sub-issues that themselves
+completed.
 
 **`linear` handler only.** Two of the three legs already refuse on
 `repo-pr`/`gh-issue`/`jira` — see step 1.
@@ -81,8 +82,10 @@ leg's mutation is a _restore_, which step 5 gates separately.
 Split its output into two sets and hold both, **tagging each row with the project
 whose invocation produced it** — step 5's restore needs that partition:
 
-- **`verified`** — every `ok <IDENTIFIER> <- <PR URL>` line. A merged PR owns
-  each of these; they are leg 3's candidate list.
+- **`verified`** — every `ok <IDENTIFIER> <- <OWNER>` line. Delivered work owns
+  each of these — usually a merged PR URL, but `<OWNER>` is also `sub-issues
+  <ids> (completed)` for a rollup parent that carries no PR of its own. They are
+  leg 3's candidate list.
 - **`false`** — every `FALSE CLOSURES` row. These are **excluded from `verified`
   permanently** and never reach leg 3, whatever step 5 decides. A false closure
   is unfinished work wearing a Done label; archiving it would bury it.

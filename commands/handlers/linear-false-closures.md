@@ -50,7 +50,8 @@ child slices delivered (with no branch or PR of their own).
 The query does not pass `includeArchived`, so the scan sees only live completed
 issues. What makes that safe is that a false closure is scanned **while it is
 still live**, before anything archives it. It is not that archival implies
-anyone looked: archival is a pure age threshold on both paths that reach it —
+anyone looked: archival is a pure age threshold on both **age-based** paths that
+reach it —
 Linear's own team auto-archive setting (a pure timer, unreviewed, and
 per-workspace — do not assume a duration) and
 `/archive-tasks --older-than N`, which retires terminal-state issues on their
