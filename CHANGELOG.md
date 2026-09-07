@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.26.0] - 2026-09-07
+
+### Features
+
+- count bare none: obligation blocks in status (#413) (495166c)
+
 ## [2.25.0] - 2026-09-06
 
 ### Features
