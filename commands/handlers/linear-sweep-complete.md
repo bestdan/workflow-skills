@@ -317,9 +317,11 @@ Slack, Todoist and visualize under `mcp_connections`, and calls
 with `select:mcp__github__search_pull_requests,mcp__github__list_pull_requests,mcp__github__pull_request_read`
 before the first use, or the call fails as an unknown tool.
 
-**If the MCP tools are unavailable, `gh api` REST is the second option** — it
-is what the `gh pr list` refusal above names, and it serves any repo attached
-to the session:
+**If the MCP tools are unavailable, try `gh api` REST** — it is the channel the
+`gh pr list` refusal above names. A repo **not** attached to the session as a
+source 403s outright; that a call against an **attached** repo succeeds has not
+been measured, so treat a failure here as an expected outcome rather than a
+malfunction, and fall through to `left: unresolved`.
 
 ```bash
 gh api "repos/<owner>/<name>/pulls?state=all&head=<owner>:<branchName>"

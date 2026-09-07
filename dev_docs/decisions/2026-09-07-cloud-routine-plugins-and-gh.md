@@ -8,8 +8,9 @@ Companion to
 [`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md)
 (a `claude --cloud` session) and
 [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md)
-(a routine). It **corrects finding 2 of the 2026-09-05 doc** — see "What this
-changes" below.
+(a routine). It **supersedes the 2026-09-05 doc for routines** and reframes why
+`gh pr list` fails there — see "What this changes" below. It does not correct
+that doc, which measured a different environment.
 
 ## Why this exists
 
@@ -33,7 +34,9 @@ So: can a routine invoke the plugin instead of describing it?
    `< /dev/null`), the env log orders them `Running setup script` → `Setup
    script completed` → `Starting Claude Code`, and the started session lists
    the plugin's skills. A later run logged `Setup script cached from previous
-   run`, so the install is not re-paid nightly.
+   run`, which suggests the install is not re-paid nightly — what that cache
+   covers (script text, installed artifacts, or the filesystem layer) was not
+   established.
 
 2. **Skills are addressed by their prefixed name.** `Skill` with
    `orchestrate-coders` returns `Unknown skill: orchestrate-coders`; the skill
@@ -44,9 +47,11 @@ So: can a routine invoke the plugin instead of describing it?
    series made.
 
 3. **A mid-session `claude plugin install` does NOT register with the running
-   agent.** Same commands, same exit codes, files on disk — and
-   `Skill: workflow-skills:*` unavailable. The install has to land before the
-   session starts, which is what a setup script gives you.
+   agent.** Same commands, same exit codes, files on disk — and `ListPlugins`
+   and `ListSkills` both returned empty after the install. The install has to
+   land before the session starts, which is what a setup script gives you.
+   (That run's `Skill` call used the **bare** name, so per finding 2 it is not
+   part of this evidence; the empty listings are.)
 
 4. **`$CLAUDE_PLUGIN_ROOT` is empty in a Bash tool call**, before and after a
    successful install, in every run measured. So
@@ -67,16 +72,19 @@ So: can a routine invoke the plugin instead of describing it?
    This is a property of the query type, not of credentials, so no amount of
    auth fixes it. The error names its own replacement.
 
-6. **`gh` REST is scoped to the repositories attached to the session.** A repo
-   that is not a source returns:
+6. **`gh` REST refuses a repository not attached to the session as a source.**
+   Measured on an unattached repo:
 
    > HTTP 403: GitHub access to this repository is not enabled for this session.
    > Use `add_repo` to request access.
 
    `gh api user` succeeds in the same session, because it is not repo-scoped —
-   which is why an earlier reading of "gh works" was too generous. **Sources
-   therefore double as GitHub access scope**, and dropping one to avoid a
-   duplicate checkout also removes that repo from `gh`'s reach.
+   which is why an earlier reading of "gh works" was too generous. Only this
+   refusal was measured; a REST call against an **attached** repo was never
+   exercised (see "What this does NOT settle"). **Inference, not measurement:**
+   if attachment is what the 403 turns on, sources double as GitHub access
+   scope, and dropping one to avoid a duplicate checkout would also remove that
+   repo from `gh`'s reach.
 
 7. **The GitHub MCP surface is present and is not a claude.ai connector.** The
    nightly tidy's `mcp_connections` lists only Google-Drive, Linear, Slack,
