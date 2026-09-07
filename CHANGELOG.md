@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.26.1] - 2026-09-07
+
+### Fixes
+
+- print the SSH tunnel command when launched over SSH (#497) (abcb516)
+
 ## [2.26.0] - 2026-09-07
 
 ### Features
