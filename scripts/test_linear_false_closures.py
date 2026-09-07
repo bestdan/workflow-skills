@@ -6,7 +6,7 @@ and subprocess.run so nothing touches the network or a real `gh` binary.
 
 Covers only the new behaviour: --repo/--prs-file mutual exclusivity, the
 --prs-file classification parity with an equivalent --repo run, the coverage
-guard that refuses to classify an issue whose life predates the window, the
+guard that refuses to classify an issue created before the window opened, the
 null-mergedAt filter, and the malformed-input error messages.
 """
 
@@ -41,11 +41,16 @@ def _issue(
     completed_at,
     attachments=None,
     children=None,
+    created_at=None,
 ):
     return {
         "id": f"id-{identifier}",
         "identifier": identifier,
         "title": f"title for {identifier}",
+        # The coverage guard anchors on createdAt. Defaulting it to the issue's
+        # own start keeps every existing fixture's window semantics unchanged;
+        # a case that needs an issue created before it started passes it.
+        "createdAt": created_at or started_at or completed_at,
         "startedAt": started_at,
         "completedAt": completed_at,
         "team": {"id": TEAM_UUID},
@@ -186,10 +191,11 @@ class ParityTests(RunCase):
             Path(prs_path).unlink()
 
         self.assertEqual(repo_code, prs_code)
-        self.assertIn("BAD   PRE-2", repo_out)
-        self.assertIn("BAD   PRE-2", prs_out)
+        self.assertEqual(repo_out, prs_out)
+        # Load-bearing: without these, two *empty* outputs would also compare
+        # equal, so they prove the fixture actually exercised both branches.
         self.assertIn("ok    PRE-1", repo_out)
-        self.assertIn("ok    PRE-1", prs_out)
+        self.assertIn("BAD   PRE-2", repo_out)
 
 
 class CoverageGuardTests(RunCase):
@@ -230,6 +236,33 @@ class CoverageGuardTests(RunCase):
         self.assertIn("FALSE CLOSURES", out)
         self.assertIn("PRE-10", out)
         self.assertEqual(code, 1)
+
+    def test_never_started_issue_created_before_window_is_skipped(self):
+        # This is exactly the population the tool targets: completed with no
+        # work behind it, hence often never started. Before the createdAt
+        # anchor, this was classified -- and could be reopened -- because
+        # completedAt (inside the window by construction) was used instead.
+        issue = _issue(
+            "PRE-11",
+            started_at=None,
+            completed_at="2026-08-09T00:00:00Z",
+            created_at="2026-06-01T00:00:00Z",
+        )
+        self._stub_issues([issue])
+        self._forbid_gh()
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(
+                {"complete_since": "2026-08-08T00:00:00Z", "pull_requests": []}, f
+            )
+            prs_path = f.name
+        try:
+            out, code = self._run_main(["--project", "p", "--prs-file", prs_path])
+        finally:
+            Path(prs_path).unlink()
+
+        self.assertIn("skip  PRE-11", out)
+        self.assertNotIn("FALSE CLOSURES", out)
+        self.assertEqual(code, 0)
 
 
 class NullMergedAtTests(unittest.TestCase):
@@ -306,6 +339,23 @@ class MalformedInputTests(unittest.TestCase):
         )
         self.assertIn("pull_requests", msg)
 
+    def test_pull_requests_entry_that_is_a_bare_string_is_fatal(self):
+        # An agent that flattens the fetched list to URLs produces a file
+        # where every entry is dropped, complete_since still looks valid, and
+        # every in-window issue becomes a false closure -- so this must be loud.
+        msg = self._die_message(
+            payload_text=json.dumps(
+                {
+                    "complete_since": "2026-08-08T00:00:00Z",
+                    "pull_requests": [
+                        "https://github.com/bestdan/workflow-skills/pull/1",
+                    ],
+                }
+            )
+        )
+        self.assertIn("pull_requests", msg)
+        self.assertTrue("[0]" in msg or "str" in msg)
+
     def test_merged_entry_without_a_url_is_fatal(self):
         # Dropping it instead would shrink the ownership evidence and turn
         # delivered work into a "false closure" that --apply reopens.
@@ -320,7 +370,7 @@ class MalformedInputTests(unittest.TestCase):
             )
         )
         self.assertIn("pull_requests", msg)
-        self.assertIn("no url", msg)
+        self.assertIn("url", msg)
 
 
 if __name__ == "__main__":

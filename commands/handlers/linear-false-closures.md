@@ -90,9 +90,15 @@ environment" note.
 
 The MCP response is REST-shaped, not `gh`-shaped, so map fields when writing
 the file: `mergedAt` from `merged_at` (snake_case there), `headRefName` from
-`head.ref`, `url` from `html_url`. Paginate the tool's own way (it does not
-take `--paginate`) until you've covered back to your intended
-`complete_since`.
+`head.ref`, `url` from `html_url`. Call the tool with `state: closed`,
+`sort: updated`, `direction: desc`; keep fetching pages until a page contains
+an entry whose `updated_at` is earlier than your intended cutoff; set
+`complete_since` to that cutoff; keep filtering to entries with a non-null
+`merged_at`. A merge updates the PR, so `updated_at` is at or after
+`merged_at` for every merged PR, which makes "first entry older than the
+cutoff" a sound stopping point — stopping on `merged_at` instead is wrong,
+because an old merged PR that later took a comment surfaces near the top with
+an old `merged_at` and would end the scan early.
 
 The file is a JSON **object**, not a bare list:
 
@@ -118,21 +124,23 @@ null or missing `mergedAt` are dropped — only merged PRs establish ownership.
 
 `complete_since` is the caller's assertion: **this list contains every PR
 merged in this repo at or after this instant.** Set it to the oldest instant
-your `mcp__github__list_pull_requests` fetch actually covers. Understating the
-window (an earlier `complete_since` than you strictly need) is safe — it only
-costs a few issues going unclassified. Overstating it (claiming coverage you
-don't have) is not: it can hide a real owning PR outside the window and let
-`--apply` un-complete delivered work.
+your `mcp__github__list_pull_requests` fetch actually covers. A **later**
+`complete_since` than you strictly need is the safe direction — it only costs
+a few issues going unclassified. An **earlier** one is the dangerous
+direction: the guard classifies an issue whenever its anchor is at or after
+`complete_since`, so moving `complete_since` earlier widens the classified set
+and claims coverage you may not actually have — it can hide a real owning PR
+outside the window and let `--apply` un-complete delivered work.
 
 **The coverage guard.** `--repo` paginates the _whole_ closed-PR history (see
 `merged_prs()`'s own docstring), so every completed issue can be safely
 classified. A `--prs-file` list is inherently a window, so that guarantee has
 to be re-established explicitly: an issue is classified only if the window
 provably covers its whole life. Concretely, the script compares
-`complete_since` against `issue.startedAt` (or `completedAt` if the issue was
-never started); if the issue's life began before the window opened, an owning
-PR could have merged earlier than the file covers, so the script refuses to
-call it either a false closure or `ok` and reports it instead:
+`complete_since` against `issue.createdAt`; an owning PR cannot predate the
+issue it delivers, so if the issue was created before the window opened, an
+owning PR could have merged earlier than the file covers, and the script
+refuses to call it either a false closure or `ok` and reports it instead:
 
 ```
 skip  PRE-123  (merged-PR window starts 2026-08-08T00:00:00Z — not classified)
@@ -153,26 +161,40 @@ then run the script once per project:
    flow is **project-scoped** (the asset queries `project(id:)`), so if no
    projects are configured and none was passed, stop and tell the user to
    configure `linear.projects` or pass `--project`.
-2. **Repo.** Resolve in this order: the caller's `--repo owner/name`; else the
-   project's own `repo:` under `linear.projects` (each configured project may
-   name its repo, since the workspace spans more than one — see
-   `linear-common.md`); else the current repo's `origin`:
+2. **Repo, unless the caller passed `--prs-file`.** The script rejects
+   passing both `--repo` and `--prs-file` (and rejects passing neither), so:
 
-   ```bash
-   gh repo view --json nameWithOwner --jq .nameWithOwner
-   ```
+   - **Caller passed `--prs-file <path>`.** Skip repo resolution entirely —
+     do not resolve or pass `--repo`.
+   - **Otherwise**, resolve the repo in this order: the caller's
+     `--repo owner/name`; else the project's own `repo:` under
+     `linear.projects` (each configured project may name its repo, since the
+     workspace spans more than one — see `linear-common.md`); else the
+     current repo's `origin`:
 
-   (One repo per run — a Linear project whose work spans several repos needs a
-   run per repo, or the widest repo whose merged PRs cover it. `--repo`
-   overrides everything; the per-project `repo:` is what makes a
-   multi-project sweep resolve the right repo for each project.)
+     ```bash
+     gh repo view --json nameWithOwner --jq .nameWithOwner
+     ```
+
+     (One repo per run — a Linear project whose work spans several repos
+     needs a run per repo, or the widest repo whose merged PRs cover it.
+     `--repo` overrides everything; the per-project `repo:` is what makes a
+     multi-project sweep resolve the right repo for each project.)
 
 Then, per resolved project, run the asset (dry-run unless the caller passed
-`--apply`), reading the API key exactly as the standalone path does:
+`--apply`), reading the API key exactly as the standalone path does. With a
+resolved repo:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-false-closures.py" \
   --project "<project-id>" --repo "<owner/name>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
+```
+
+Or, when the caller passed `--prs-file`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-false-closures.py" \
+  --project "<project-id>" --prs-file "<path>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-false-closures.py`.

@@ -94,6 +94,7 @@ query($project: String!, $cursor: String, $since: DateTimeOrDuration!) {
         id
         identifier
         title
+        createdAt
         startedAt
         completedAt
         team { id }
@@ -256,18 +257,42 @@ def load_prs_file(path):
         die(str(exc))
     if not since.strip():
         die("--prs-file: complete_since: blank")
-    if _ts(since) is None:
+    since_parsed = _ts(since)
+    if since_parsed is None:
         die(f"--prs-file: complete_since: unparseable timestamp {since!r}")
-    prs = [pr for pr in prs_raw if isinstance(pr, dict) and pr.get("mergedAt")]
-    # Every kept entry is indexed for `url` downstream, and a malformed one must
-    # be fatal rather than dropped: silently shrinking the ownership evidence
-    # would turn delivered work into a "false closure" that --apply reopens.
-    for pr in prs:
-        if not isinstance(pr.get("url"), str):
+    if since_parsed.tzinfo is None or since_parsed.utcoffset() is None:
+        die(
+            f"--prs-file: complete_since: no timezone offset ({since!r}) -- "
+            f"add one, e.g. {since!r} -> {since + 'Z'!r}"
+        )
+    # A non-dict entry must be fatal rather than dropped: silently shrinking
+    # the ownership evidence would turn delivered work into a "false closure"
+    # that --apply reopens.
+    for i, pr in enumerate(prs_raw):
+        if not isinstance(pr, dict):
             die(
-                f"--prs-file: pull_requests: entry with mergedAt {pr['mergedAt']!r} has no url"
+                f"--prs-file: pull_requests[{i}]: expected an object, got {type(pr).__name__}"
             )
-    return since, prs
+    # Only merged PRs establish ownership -- this is the one intentional
+    # silent exclusion.
+    prs = [(i, pr) for i, pr in enumerate(prs_raw) if pr.get("mergedAt")]
+    # Every kept entry is consumed downstream (number is indexed unguarded;
+    # url/headRefName/title/body establish ownership signals), so a malformed
+    # one must be fatal rather than dropped: silently shrinking the ownership
+    # evidence would turn delivered work into a "false closure" that --apply
+    # reopens.
+    for i, pr in prs:
+        where = f"--prs-file: pull_requests[{i}]"
+        try:
+            expect(pr, "number", int, where)
+            expect(pr, "url", str, where)
+            expect(pr, "headRefName", str, where)
+            expect(pr, "title", str, where)
+            expect(pr, "body", str, where)
+            expect(pr, "mergedAt", str, where)
+        except ShapeError as exc:
+            die(str(exc))
+    return since, [pr for _, pr in prs]
 
 
 PR_IDENTITY = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", re.I)
@@ -436,14 +461,21 @@ def main():
     # (see merged_prs()'s docstring), but a --prs-file list is inherently a
     # window. An issue can only be classified if that window provably covers
     # its whole life -- otherwise an owning PR could have merged before the
-    # window opened, and we cannot prove it did not. Never applies to --repo.
+    # window opened, and we cannot prove it did not. The anchor is the issue's
+    # createdAt: a PR cannot own an issue that predates it, so an owning PR is
+    # only guaranteed captured if the window opened at or before the issue was
+    # created. startedAt/completedAt would pass this guard vacuously for a
+    # never-started issue (completedAt is inside the window by construction),
+    # which is exactly the population this tool targets. Never applies to
+    # --repo. An anchor that cannot be parsed is treated as predating the
+    # window, since we cannot prove otherwise.
     since_ts = _ts(complete_since) if complete_since else None
 
     false_closures, legit, truncated, windowed = [], [], [], []
     for issue in issues:
         if since_ts is not None:
-            anchor_ts = _ts(issue["startedAt"] or issue["completedAt"])
-            if anchor_ts is not None and anchor_ts < since_ts:
+            anchor_ts = _ts(issue["createdAt"])
+            if anchor_ts is None or anchor_ts < since_ts:
                 windowed.append(issue)
                 continue
         owner = owning_pr(issue, prs, merged)
