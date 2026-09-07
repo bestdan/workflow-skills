@@ -57,6 +57,8 @@ Usage:
   # only issues closed recently; restore just the ones you name:
   python3 linear-false-closures.py --project <uuid> --repo owner/name --since 48h
   python3 linear-false-closures.py --project <uuid> --repo owner/name --apply --only PRE-1,PRE-2
+  # cloud routines, where `gh` cannot reach the GitHub API -- see load_prs_file():
+  python3 linear-false-closures.py --project <uuid> --prs-file merged_prs.json
 
 Each false closure is reported with the merged PR that most likely tripped it
 (the one bare-mentioning the id, merged just before the completion instant), so
@@ -220,6 +222,54 @@ def merged_prs(repo):
     return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
 
 
+def load_prs_file(path):
+    """The --prs-file alternative to merged_prs(): a caller-supplied window.
+
+    Where `gh` cannot reach the GitHub API (a Claude Code cloud routine, whose
+    session proxy refuses every repo-scoped REST/GraphQL call), the agent
+    fetches merged PRs itself via mcp__github__list_pull_requests and hands
+    them to this script as JSON instead. The file is an object, not a bare
+    list, because the list alone can't prove it's complete: `complete_since`
+    is the caller's assertion that it contains *every* PR merged in this repo
+    at or after that instant. main() uses it to refuse to classify any issue
+    whose life started before the window opened -- see the coverage guard
+    there. Entries with no mergedAt are dropped: only merged PRs establish
+    ownership.
+
+    Returns (complete_since, prs).
+    """
+    try:
+        with open(path) as f:
+            raw = f.read()
+    except OSError as e:
+        die(f"--prs-file: {e}")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        die(f"--prs-file: invalid JSON: {e}")
+    if not isinstance(payload, dict):
+        die(f"--prs-file: expected an object, got {type(payload).__name__}")
+    try:
+        since = expect(payload, "complete_since", str, "--prs-file")
+        prs_raw = expect(payload, "pull_requests", list, "--prs-file")
+    except ShapeError as exc:
+        die(str(exc))
+    if not since.strip():
+        die("--prs-file: complete_since: blank")
+    if _ts(since) is None:
+        die(f"--prs-file: complete_since: unparseable timestamp {since!r}")
+    prs = [pr for pr in prs_raw if isinstance(pr, dict) and pr.get("mergedAt")]
+    # Every kept entry is indexed for `url` downstream, and a malformed one must
+    # be fatal rather than dropped: silently shrinking the ownership evidence
+    # would turn delivered work into a "false closure" that --apply reopens.
+    for pr in prs:
+        if not isinstance(pr.get("url"), str):
+            die(
+                f"--prs-file: pull_requests: entry with mergedAt {pr['mergedAt']!r} has no url"
+            )
+    return since, prs
+
+
 PR_IDENTITY = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", re.I)
 
 
@@ -342,7 +392,17 @@ def main():
         description="Detect Linear issues closed with no work behind them."
     )
     ap.add_argument("--project", required=True, help="Linear project UUID.")
-    ap.add_argument("--repo", required=True, help="owner/name of the GitHub repo.")
+    ap.add_argument(
+        "--repo",
+        help="owner/name of the GitHub repo whose merged PRs establish "
+        "ownership. Exactly one of --repo / --prs-file is required.",
+    )
+    ap.add_argument(
+        "--prs-file",
+        help="Path to a JSON file with a pre-fetched merged-PR list, for "
+        "hosts where `gh` cannot reach the GitHub API. Exactly one of "
+        "--repo / --prs-file is required.",
+    )
     ap.add_argument(
         "--since",
         help="Only issues completed since this: 48h / 2d shorthand, an ISO "
@@ -359,15 +419,33 @@ def main():
         help="Restore false closures to Todo. Without it, DRY RUN.",
     )
     args = ap.parse_args()
+    if bool(args.repo) == bool(args.prs_file):
+        die("exactly one of --repo or --prs-file is required")
 
     key = get_key()
     project_name, issues = completed_issues(key, args.project, to_since(args.since))
 
-    prs = merged_prs(args.repo)
+    complete_since = None
+    if args.repo:
+        prs = merged_prs(args.repo)
+    else:
+        complete_since, prs = load_prs_file(args.prs_file)
     merged = {k for k in (pr_identity(pr["url"]) for pr in prs) if k}
 
-    false_closures, legit, truncated = [], [], []
+    # --prs-file coverage guard: --repo paginates the whole closed-PR history
+    # (see merged_prs()'s docstring), but a --prs-file list is inherently a
+    # window. An issue can only be classified if that window provably covers
+    # its whole life -- otherwise an owning PR could have merged before the
+    # window opened, and we cannot prove it did not. Never applies to --repo.
+    since_ts = _ts(complete_since) if complete_since else None
+
+    false_closures, legit, truncated, windowed = [], [], [], []
     for issue in issues:
+        if since_ts is not None:
+            anchor_ts = _ts(issue["startedAt"] or issue["completedAt"])
+            if anchor_ts is not None and anchor_ts < since_ts:
+                windowed.append(issue)
+                continue
         owner = owning_pr(issue, prs, merged)
         if owner:
             legit.append((issue, owner))
@@ -383,6 +461,11 @@ def main():
         print(f"  ok    {issue['identifier']}  <- {owner}")
     for issue in truncated:
         print(f"  skip  {issue['identifier']}  (>250 attachments — not classified)")
+    for issue in windowed:
+        print(
+            f"  skip  {issue['identifier']}  (merged-PR window starts "
+            f"{complete_since} — not classified)"
+        )
 
     if not false_closures:
         print("\nno false closures.")
