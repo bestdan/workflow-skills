@@ -129,6 +129,24 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
+**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
+loopback on the machine it runs on; in an SSH session that is the remote
+host, and the reviewer's browser is on their own machine. The server detects
+`$SSH_CONNECTION` / `$SSH_TTY` and appends `SSH:` lines to the log after
+`LOCAL_REVIEW_URL=`, carrying the tunnel command with the bound port filled
+in. Print them verbatim beside the URL:
+
+```bash
+grep '^SSH: ' <scratch>/lr_server.log
+```
+
+The local port must equal the remote one (`ssh -L 8765:127.0.0.1:8765
+<host>`). `_origin_ok()` in `server.py` allows only origins on the bound
+port, so a tunnel on a different local port half-works: GETs are ungated and
+the page renders, but every `/submit` and `/reply` POST is rejected, and the
+reviewer loses the round when they submit it. No `SSH:` lines means a local
+launch; nothing changes.
+
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never
 finishes: `kill "$(cat <scratch>/lr_server.pid)"`.

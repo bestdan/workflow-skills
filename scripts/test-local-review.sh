@@ -890,6 +890,44 @@ finally:
     if acquired:
         hold_sock.close()
 
+# -- SSH hint: printed only when launched over SSH, with the bound port -----
+def run_startup_output(env):
+    # Pin a port so the output can be read whole after shutdown: reading
+    # incrementally would race the SSH lines, which follow LOCAL_REVIEW_URL
+    # in the same write.
+    probe = _socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    proc, patch = start_server(["--port", str(port)], env=env)
+    for _ in range(100):
+        try:
+            _socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            break
+        except OSError:
+            _time.sleep(0.05)
+    proc.terminate()
+    try:
+        out = proc.communicate(timeout=5)[0]
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        out = proc.communicate()[0]
+    os.unlink(patch)
+    return port, out
+
+base_env = {k: v for k, v in os.environ.items() if k not in ("SSH_CONNECTION", "SSH_TTY")}
+port_l, out_l = run_startup_output(base_env)
+check("ssh hint: absent outside SSH",
+      "LOCAL_REVIEW_URL=" in out_l and "SSH:" not in out_l, out_l)
+
+ssh_env = dict(base_env, SSH_CONNECTION="10.0.0.2 51234 10.0.0.1 22")
+port_s, out_s = run_startup_output(ssh_env)
+check("ssh hint: printed under SSH_CONNECTION", "SSH:" in out_s, out_s)
+check("ssh hint: tunnel command pins the bound port on both sides",
+      f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
+check("ssh hint: names the local-port-must-match failure",
+      "Origin check" in out_s and "local port" in out_s, out_s)
+
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")
