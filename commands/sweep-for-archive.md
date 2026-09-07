@@ -16,10 +16,10 @@ invocations — **carries the verified id set between them**.
 
 That carry is the whole point. `/archive-tasks --issues` takes a literal id list
 and archives it whatever the age; the list this command hands it is exactly the
-set the earlier legs _proved_ was delivered. Archiving is the deepest gate in the
-loop (`linear-false-closures.md`: an archived completion is settled and the
-backstop never revisits it), so an id that reaches leg 3 on a guess is a false
-closure that can no longer be found. Nothing gets archived here that a merged PR
+set the earlier legs _proved_ was delivered. Archiving is irreversible for the
+backstop (`linear-false-closures.md`: its scan sees only live issues, so it
+never revisits an archived one), so an id that reaches leg 3 on a guess is a
+false closure that can no longer be found. Nothing gets archived here that a merged PR
 did not own.
 
 **`linear` handler only.** Two of the three legs already refuse on

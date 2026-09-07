@@ -51,23 +51,32 @@ The query does not pass `includeArchived`, so the scan sees only live completed
 issues. What makes that safe is that a false closure is scanned **while it is
 still live**, before anything archives it. It is not that archival implies
 anyone looked: archival is a pure age threshold on both paths that reach it —
-Linear's own team setting (a minimum of one month, unreviewed) and
-`/archive-tasks --older-than N`, which retires terminal-state issues by
-`completedAt` alone and asserts nothing about their correctness.
+Linear's own team auto-archive setting (a pure timer, unreviewed, and
+per-workspace — do not assume a duration) and
+`/archive-tasks --older-than N`, which retires terminal-state issues on their
+terminal timestamp alone — `completedAt` for `completed`, `canceledAt` for
+`canceled` and `duplicate` — and asserts nothing about their correctness.
 
-So the omission is sound only under a caller that runs detection **before**
-archive, with a detection window wider than the archive threshold.
-`/sweep-for-archive` guarantees exactly that by construction — it chains
-`/find-false-closures` → `/sweep-for-complete` → `/archive-tasks` and carries
-the verified id set between them. A scheduled pipeline must reproduce the same
-ordering.
+So the omission is sound only under a caller that archives nothing detection
+has not already had a chance to see. Two different mechanisms deliver that, and
+they are worth keeping apart:
+
+- **`/sweep-for-archive` — bounded by evidence.** It chains
+  `/find-false-closures` → `/sweep-for-complete` → `/archive-tasks`, and leg 3
+  archives an explicit `--issues` list carrying only ids an earlier leg
+  individually proved delivered. There is no age threshold in that path at all,
+  and none is needed: every member arrived with its own proof.
+- **An independent, age-based archive pipeline — bounded by the window.** Here
+  the threshold is doing the work, so detection must run **first**, with a scan
+  window **wider** than the archive threshold. Otherwise an issue becomes
+  archive-eligible in a window detection never covered.
 
 **The residual gap is any archive that runs without detection first** — a bare
-`/archive-tasks` sweep, a standalone archive cron, or a night detection was
+`/archive-tasks` sweep, a standalone archive cron, or a night when detection was
 skipped while archive still ran. An issue falsely closed and then archived that
 way is invisible here, and cannot be repaired even once found: the `--apply`
 path has no `issueUnarchive` step. That window is narrow rather than
-theoretical, and it is the thing to close if this backstop ever needs widening.
+theoretical, and closing it is tracked in `bestdan/workflow-skills#460`.
 
 ## Invoked from `/find-false-closures`
 
