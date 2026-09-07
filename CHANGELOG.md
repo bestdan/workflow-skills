@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.26.2] - 2026-09-07
+
+### Fixes
+
+- pin codex to gpt-5.6-terra, which the account can serve (#499) (d61a0d7)
+
 ## [2.26.1] - 2026-09-07
 
 ### Fixes
