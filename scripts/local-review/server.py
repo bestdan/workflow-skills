@@ -17,6 +17,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import tempfile
@@ -2927,6 +2928,28 @@ def bind_server(port):
         return ThreadingHTTPServer(("127.0.0.1", 0), Handler), True
 
 
+def ssh_hint(port):
+    """Lines to print between the URL and the readiness line when the server
+    was launched over SSH. They go before LOCAL_REVIEW_URL= so a consumer that
+    stops reading at the readiness line has already seen them.
+    Loopback on the remote host is unreachable from the reviewer's browser,
+    so the URL only opens through a tunnel. The local port must equal the
+    bound one: _origin_ok() allows only origins on Handler.port, so a
+    tunnel on another local port renders the page but rejects every POST.
+    Empty (no output at all) outside SSH, so a local launch is unchanged."""
+    if not (os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY")):
+        return []
+    host = socket.gethostname()
+    return [
+        f"SSH: this server is on {host}'s loopback; from your own machine run:",
+        f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
+        f"SSH: then open the URL above. Keep the local port {port} — a tunnel on another "
+        "local port renders the page but the Origin check rejects every submit.",
+        f"SSH: to skip this next time, add `LocalForward {port} 127.0.0.1:{port}` under "
+        f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel.",
+    ]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pr", nargs="?", help="PR number")
@@ -3003,6 +3026,8 @@ def main():
     machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
     vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
     print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
+    for line in ssh_hint(port):
+        print(line, flush=True)
     print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 
