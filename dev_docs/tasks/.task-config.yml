@@ -1,7 +1,9 @@
 handler: gh-issue
 gh-issue:
   repo: bestdan/workflow-skills
-  # Task-loop marker. It matches the marker the transferred issues already carry,
-  # and /archive-tasks + /reconcile-tasks refuse to sweep when it is unset.
-  labels: [task-add]
+  # Unscoped on purpose. gh-issue.labels is an AND filter on /list-tasks, not
+  # just a label applied to new issues, and every issue in this repo is a task
+  # issue — so any marker would hide part of the board rather than focus it.
+  # /reconcile-tasks needs --all here; /archive-tasks has no such override yet.
+  labels: []
   assignees: []
