@@ -22,7 +22,7 @@ If `codex` errors or isn't runnable, note it and skip — a missing reviewer is 
 404 Not Found: The model `gpt-5.5` does not exist or you do not have access to it.
 ```
 
-and codex is the one reviewer with **no pre-flight probe**, so the pin failed the worst available way — the reviewer simply stopped appearing in run summaries, with nothing logged. **An absent reviewer is a worse outcome than a less-measured one**, so the pin moved rather than being dropped.
+and codex is the one reviewer with **no pre-flight probe**, so the pin failed the quietest available way: the dispatch is noted as a skipped reviewer in the run summary and nowhere else, exactly as the verification note below describes. Nothing stops, so a summary nobody re-reads is the only place it shows. **An absent reviewer is a worse outcome than a less-measured one**, so the pin moved rather than being dropped.
 
 **What terra costs.** `gpt-5.6-terra` (TB 2.1 78.4%, `$$`, fast) is scored by the matrix only **for implementation** — "default Codex implementation when cost matters but reasoning still does". It has **no published honesty-suite data**; METR's numbers cover Sol and GPT-5.5 only. So this accepts an unmeasured integrity risk in the one role where a self-report cannot be independently checked, and gives up 4.7 points of Terminal-Bench, in exchange for a reviewer that runs at all.
 
@@ -30,7 +30,7 @@ and codex is the one reviewer with **no pre-flight probe**, so the pin failed th
 
 Two mechanics to know if you do change the model:
 
-- **The config object form does not work for `codex`.** `- {name: codex, model: gpt-5.6-terra}` is valid config, but only `devin` and `copilot` read `model:` today (see [`../SKILL.md`](../SKILL.md) → Local reviewers). A codex entry written that way is accepted and then silently ignored — codex keeps running the invocation's pinned `gpt-5.6-terra`, so your config claims one model while every dispatch uses another. The failure is benign compared to the unpinned era (you never fall through to Sol), but it is still silent. Changing codex's model means editing the invocation itself.
+- **The config object form does not work for `codex`.** `- {name: codex, model: gpt-5.6-luna}` is valid config, but only `devin` and `copilot` read `model:` today (see [`../SKILL.md`](../SKILL.md) → Local reviewers). A codex entry written that way is accepted and then silently ignored — codex keeps running the invocation's pinned `gpt-5.6-terra`, so your config claims one model while every dispatch uses another. The failure is benign compared to the unpinned era (you never fall through to Sol), but it is still silent. Changing codex's model means editing the invocation itself.
 - **This file ships with the plugin,** so a plugin update overwrites your edit while your `settings.json` keeps whatever allow-rules you put there. The invocation reverts to `gpt-5.6-terra`, and if your only approved rule names some other model, its string now matches nothing — codex re-prompts, or is skipped under `--non-interactive`. **Keep the `gpt-5.6-terra` rule below approved** alongside any rule of your own, and re-apply your edit after an update.
 
 **Upgrading from an unpinned version?** Releases before this one dispatched codex with no `--model`, so an older `settings.json` may hold only the unpinned rule. That rule no longer matches the shipped command. Add the pinned rule from [Permission allow-rule](#permission-allow-rule-exact-match-approve-once) below, or codex re-prompts on every run and drops out silently under `--non-interactive`.
