@@ -139,7 +139,7 @@ _name_ — but the branch may not sit at the sha the session read earlier.
 ## Batch-dispatched sessions: use the comment election, not the ref lock
 
 A session dispatched by `/do-tasks --all` takes the election below **by choice**,
-not because it cannot acquire — it usually can. The reason is the same asymmetry
+not as a degrade from a failed acquire. The reason is the same asymmetry
 the routine section gives, arriving by a different route: an unattended session
 that crashes or times out after acquiring strands its ref, every later session
 reads that ref as a live claim, and there is no stale-ref sweep. A batch fans out
@@ -147,6 +147,15 @@ N such sessions at once. `commands/do-tasks.md` §4 step 6 owns the reasoning an
 the report string (`claim: comment election (batch dispatch)`, **not** the degrade
 line below — no API error happened). Such a session must **not** attempt the
 acquire first.
+
+> **A cloud session may not be able to acquire at all.** Probed 2026-09-05
+> ([`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md)):
+> `gh` is installed there but uncredentialed, and every `gh api` call — read as well as
+> write — returned 403. The same dead credential takes down the election's own
+> `gh issue comment` (same token; only `gh api` was exercised), so such a session claims
+> **nothing** by either of this file's `gh`-based primitives — `do-tasks.md` §4 step 5's
+> self-check is what stops it, before it tries. The instruction below is unchanged; what
+> it assumes is an environment whose `gh` works.
 
 It also runs **one check the election below does not have**, at **two** points,
 and it is load-bearing: `git ls-remote --heads origin "<branch>"`, run **inside

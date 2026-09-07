@@ -534,7 +534,11 @@ the single highest-ranked issue foreground via "Claim and execute" above).
 **Connector availability: fail safe at the remote end, not by a pre-check.** Batch
 dispatch hands each issue's claim, comment, and state transitions to a remote cloud
 session, which can only run them if that session has the handler's MCP connector —
-unlike the repo-pr remote fan-out, which needs only `git`/`gh`. A remote session **may**
+unlike the repo-pr remote fan-out, which needs only `git`/`gh`. That is a smaller
+dependency, not a free one: the 2026-09-05 probe found a cloud session's `gh`
+uncredentialed on reads as well as writes
+(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`), so a session that
+claims over MCP can still fail at `gh pr create`. A remote session **may**
 inherit the Linear connector but does **not** always, and the launching session has **no
 deterministic way to introspect what `claude --remote` will inherit** — the tools loaded
 here say nothing about the VM's environment. So do **not** gate dispatch on an
@@ -545,7 +549,11 @@ capability is actually visible — inside the remote session** — via two concr
   begin: "If the Linear MCP connector is not available in this session, do **not** claim —
   stop immediately and report `remote Linear MCP unavailable`." A misconfigured remote then
   degrades **loudly** (a visible bail on that issue) rather than silently doing nothing or
-  half-claiming. Because the claim is the session's first mutation, a bail here leaves no
+  half-claiming. **This self-check covers the connector, not `gh`** — unlike §4's, which
+  probes both. The gap is accepted rather than overlooked: the MCP claim lands first, so a
+  `gh pr create` that then fails leaves a started, assigned issue with no PR. Closing it
+  would mean adding a `gh auth status` probe here too.
+  Because the claim is the session's first mutation, a bail here leaves no
   partial state.
 - **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
   connector can set `linear.remote_batch: false` in `.task-config.yml` to skip remote
@@ -597,10 +605,11 @@ capability is actually visible — inside the remote session** — via two concr
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — the VM has no plugin **unless the repo declares one in a
-   committed `.claude/settings.json`** (see §4's gate; unprobed), **and** a fresh
-   clone has no local task config (`/task-config` gitignores `dev_docs/tasks/` by
-   default) — so
+   **self-contained** — **the VM has no plugin**, and a committed
+   `.claude/settings.json` does not install one (probed 2026-09-05,
+   `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`; see §4's gate),
+   **and** a fresh clone has no local task config (`/task-config` gitignores
+   `dev_docs/tasks/` by default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
@@ -699,15 +708,24 @@ opted in never ranks, counts, or resolves dependencies first.
 and prose, both of which inline into a dispatch prompt. This handler's deterministic
 steps are **scripts that ship in the plugin** — every label write goes through
 `gh-issue-state.py` — so a dispatched session needs the plugin itself, not just the
-prompt. A cloud session does get a plugin the repo declares in a **committed
-`.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`), which is
-what makes `true` safe; user-level plugin settings do **not** travel. **That
-mechanism is documented and has not been probed here**, and this repo's own record
-says to probe routine behaviour rather than read it
-(`dev_docs/decisions/2026-08-24-routine-claim-channel.md` — "wrong twice" that way).
-An unprobed mechanism is not a basis for dispatching N sessions by default, so the
-flag is opt-in until someone runs the probe and records it beside that file. Setting
-`true` without the declaration is not silently broken — step 5's self-check stops
+prompt. Documentation says a cloud session installs a plugin the repo declares in a
+**committed `.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`).
+**Probed 2026-09-05, and it does not**
+(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`): the declaration
+was present on the cloned HEAD, `claude plugin list` reported none installed,
+`$CLAUDE_PLUGIN_ROOT` was empty, and no asset script existed on the box. The same
+session also had `gh` installed but uncredentialed — reads **and** writes 403 — so
+even a session that found the scripts could not run their `gh api` calls. The
+credentialed channel there is the GitHub MCP connector, which this handler does not
+yet speak (see `claim-lock.md`).
+
+So `true` needs **two** things the probed environment did not have, and the plugin is
+only the first. A repo that sets it needs the plugin installed by some other means — a
+cloud-environment setup script running `claude plugin marketplace add` is the obvious
+candidate, on the marketplace-key reading that record offers and itself marks
+unsettled — **and** it needs its sessions to have a working `gh` credential, because
+every phase of this handler shells out to `gh`. Neither the setup script nor a credentialed session was
+measured. Setting `true` without them is not silently broken: step 5's self-check stops
 each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
@@ -849,10 +867,11 @@ each session loudly on its own issue.
    the dispatched prompt. Every asset call must carry the `$CLAUDE_PLUGIN_ROOT/`
    prefix — which of course still contains `commands/handlers/assets/`, so do not
    grep for that substring alone. **Never** inline a token or any other secret —
-   the dispatched session authenticates through its own `gh`. That is also what
-   step 2's bound assumes: `wip` counts `assignee:@me`, so the dispatched sessions
-   must authenticate as the **dispatching** account or their claims never enter the
-   next run's `slack`.
+   the dispatched session authenticates through its own `gh` — **documented, not
+   measured; the probed session's `gh` had no working credential at all**, so whose
+   account it would present was never observed. That is also what step 2's bound
+   assumes: `wip` counts `assignee:@me`, so the dispatched sessions must authenticate
+   as the **dispatching** account or their claims never enter the next run's `slack`.
 
    **Resolve every value you can here, so the session needs fewer of the plugin's
    assets.** The branch name is the clearest case: run `branch-name` **in this
@@ -886,16 +905,19 @@ each session loudly on its own issue.
    issue" step 3 warns about — assigned and lock-held but still `status:2_ready`,
    which nothing picks up and nothing cleans.
 
-   **This is the backstop for the gate, and it is why an unprobed gate is still
-   safe to offer.** The gate reads a declaration; the self-check reads the VM. If
-   the declaration is there but the install did not happen — a marketplace the
-   session's network could not reach, say — every dispatched session stops on its
-   own issue and says so, rather than claiming work it cannot write back. Keeping
-   the check inside the session is section 3's rule for the same reason: what the
-   VM actually inherits is visible there and nowhere else.
+   **This is the backstop for the gate, and it is why the flag is safe to offer at
+   all.** The gate reads a config flag; the self-check reads the VM. Both failures
+   it guards against were **measured**, not imagined: a cloud session started with
+   the plugin absent, and its `gh` 403'd on reads as well as writes
+   (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`). So a session
+   dispatched into an environment that has not solved both stops on its own issue
+   and says so, rather than claiming work it cannot write back. Keeping the check
+   inside the session is section 3's rule for the same reason: what the VM actually
+   inherits is visible there and nowhere else.
 
    **Refuse remote dispatch when `gh-issue.repo` is not the session's own repo.** A
-   cloud session's `gh` reaches only the repositories attached to it, so a batch
+   cloud session's `gh` is documented to reach only the repositories attached to it —
+   **not measured; the probed session's `gh` reached nothing at all** — so a batch
    whose tracker is a different repo from the code would have every session fail at
    its first write. Check it here and degrade to the foreground claim with
    `remote batch needs gh-issue.repo to be this repo — claiming one issue`.
