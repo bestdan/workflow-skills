@@ -278,15 +278,33 @@ If the `gh repo view` fallback itself fails (the sweep is running outside any
 repo, or `gh` cannot reach the remote), treat every issue that reaches steps
 2–3 as **`left: unresolved`** under the rule below — not as "no-PR skipped".
 
-### Steps 2–3 in a `claude-web` environment (no `gh`)
+### Steps 2–3 in a `claude-web` environment
 
-The probes above are `gh`, and a cloud routine has no `gh` CLI — the same
-environment split `skills/auto-pilot/references/launch-preflight.md` calls
-`local-full` vs `claude-web`, and the reason `push-plan.md` and
-`gh-issue-deps.py` already carry MCP-side notes. Without a substitute, a
-`claude-web` sweep resolves **only** step 1, so every issue whose PR was opened
-outside `/do-tasks` (no `links` attachment) is unresolvable — which is the bulk
-of hand-opened work.
+The probes above are `gh pr list`, and **that command cannot run in a cloud
+routine** — the same environment split
+`skills/auto-pilot/references/launch-preflight.md` calls `local-full` vs
+`claude-web`. Without a substitute, a `claude-web` sweep resolves **only**
+step 1, so every issue whose PR was opened outside `/do-tasks` (no `links`
+attachment) is unresolvable — which is the bulk of hand-opened work.
+
+> **It is the query type, not the credential.** `gh` is installed and
+> credentialed there; `gh pr list` is refused because it is GraphQL:
+>
+>> HTTP 403: This GraphQL query (PullRequestList, sent by `gh pr list`) is not
+>> enabled for this session — only the pinned set of PR-review operations is
+>> served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
+>
+> So no auth fix reaches it, and a `gh auth status` check answers the wrong
+> question. Two further limits measured alongside it: `gh` REST serves only
+> repositories **attached to the session as sources** (an unattached repo 403s
+> with "Use `add_repo` to request access"), while a non-repo-scoped call like
+> `gh api user` succeeds regardless — so `gh api user` working proves nothing
+> about repo access. Full measurements:
+> `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
+>
+> That attachment rule cuts both ways: **a repo must stay a source for the
+> sweep to reach its PRs**, so dropping one to avoid a duplicate checkout also
+> drops it out of `gh`'s reach.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent
@@ -298,6 +316,21 @@ Slack, Todoist and visualize under `mcp_connections`, and calls
 **Load the tools first.** In a routine these are deferred — call `ToolSearch`
 with `select:mcp__github__search_pull_requests,mcp__github__list_pull_requests,mcp__github__pull_request_read`
 before the first use, or the call fails as an unknown tool.
+
+**If the MCP tools are unavailable, `gh api` REST is the second option** — it
+is what the `gh pr list` refusal above names, and it serves any repo attached
+to the session:
+
+```bash
+gh api "repos/<owner>/<name>/pulls?state=all&head=<owner>:<branchName>"
+gh api "search/issues?q=repo:<owner>/<name>+<IDENTIFIER>+in:title+is:pr"
+```
+
+Both take the same post-filters as their `gh pr list` equivalents — the
+whole-token title match for the search, and nothing extra for the head query.
+Note the head parameter carries the `<owner>:<branch>` form here too, matching
+the MCP tool and **not** `gh pr list --head`. Only fall through to
+`left: unresolved` when neither channel is available.
 
 The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:

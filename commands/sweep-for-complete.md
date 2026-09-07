@@ -48,18 +48,26 @@ attachment — query a single repo, taken from **the issue's own project**
 each issue's PR"). Give each project a `repo:` before scheduling one sweep
 across a multi-repo workspace.
 
-Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`;
-in a **cloud routine there is no `gh`**, so both run over the `mcp__github__*`
-tools. That surface comes from the **GitHub App installed for claude.ai/code**,
-not from a claude.ai connector — so it will not appear in a routine's connector
-list, and there is nothing to "attach" there. `dev_docs/decisions/2026-08-24-routine-claim-channel.md`
-records the surface enumerated in full (58 tools) from inside a routine.
+Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`.
+In a **cloud routine `gh pr list` is refused** — it is a GraphQL query and
+GraphQL is not served there, so this is not an auth problem and no credential
+fix reaches it. Both run over the `mcp__github__*` tools instead, with
+`gh api` REST as the second option (the refusal names it). That MCP surface
+comes from the **GitHub App installed for claude.ai/code**, not from a
+claude.ai connector — so it will not appear in a routine's connector list, and
+there is nothing to "attach" there. Measurements:
+`dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`; the surface
+was enumerated in full (58 tools) in
+`dev_docs/decisions/2026-08-24-routine-claim-channel.md`.
 
-**If those tools are absent, the run completes nothing.** Resolving a PR from a
-`links` attachment is discovery, not verification — it proves a PR is linked,
-never that it merged — and the merge-check that would prove it is the very read
-that cannot run. So every in-flight issue lands in `left: unresolved`, never in
-"no PR".
+`gh` REST also serves only repositories **attached to the session as sources**,
+so a project's repo must stay attached for the sweep to reach its PRs.
+
+**If neither channel is available, the run completes nothing.** Resolving a PR
+from a `links` attachment is discovery, not verification — it proves a PR is
+linked, never that it merged — and the merge-check that would prove it is the
+very read that cannot run. So every in-flight issue lands in
+`left: unresolved`, never in "no PR".
 
 ## 1. Resolve the handler
 
