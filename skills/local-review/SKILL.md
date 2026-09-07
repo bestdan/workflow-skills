@@ -144,8 +144,11 @@ The local port must equal the remote one (`ssh -L 8765:127.0.0.1:8765
 <host>`). `_origin_ok()` in `server.py` allows only origins on the bound
 port, so a tunnel on a different local port half-works: GETs are ungated and
 the page renders, but every `/submit` and `/reply` POST is rejected, and the
-reviewer loses the round when they submit it. No `SSH:` lines means a local
-launch; nothing changes.
+reviewer loses the round when they submit it. The last `SSH:` line names the
+permanent fix: a `LocalForward` entry for the host in the user's own
+`~/.ssh/config`, after which every session carries the tunnel and the URL
+opens with no extra step. No `SSH:` lines means a local launch; nothing
+changes.
 
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never

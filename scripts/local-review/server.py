@@ -2943,6 +2943,8 @@ def ssh_hint(port):
         f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
         f"SSH: then open the URL above. Keep the local port {port} — a tunnel on another "
         "local port renders the page but the Origin check rejects every submit.",
+        f"SSH: to skip this next time, add `LocalForward {port} 127.0.0.1:{port}` under "
+        f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel.",
     ]
 
 

@@ -927,6 +927,8 @@ check("ssh hint: tunnel command pins the bound port on both sides",
       f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
 check("ssh hint: names the local-port-must-match failure",
       "Origin check" in out_s and "local port" in out_s, out_s)
+check("ssh hint: offers the permanent LocalForward config with the bound port",
+      f"LocalForward {port_s} 127.0.0.1:{port_s}" in out_s, out_s)
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
