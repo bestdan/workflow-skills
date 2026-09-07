@@ -46,9 +46,23 @@ things, neither of which changes completion state:
    When `gh-issue.labels` is **empty/unset**, there is no durable task-loop marker
    to scope by — do **not** fall back to sweeping every closed issue. Instead
    **stop** and report that archiving needs at least one configured label to
-   distinguish loop issues from the rest of the repo. Keep issues whose `closedAt`
-   is more than `N` days before today and that do **not** already carry the
-   `archived` label. Never touch open issues.
+   distinguish loop issues from the rest of the repo. This is the safe default
+   and `--all` is the only thing that changes it.
+
+   **`--all` is the explicit override**: it drops the label scope and sweeps
+   every closed issue in the repo, still bound by the age threshold — the same
+   mechanism `commands/handlers/gh-issue-reconcile.md` step 2 documents for
+   `/reconcile-tasks`. Drop the `--label` flags from the `gh issue list` call:
+
+   ```bash
+   gh issue list --repo <repo> --state closed --limit 200 \
+     --json number,title,closedAt,labels
+   ```
+
+   Everything else still holds regardless of `--all`: only closed issues, only
+   those whose `closedAt` is more than `N` days before today, and only those
+   that do **not** already carry the `archived` label are candidates. Never
+   touch open issues.
 
 3. **Always print the candidate list first** (number + title + closed date). If
    `dry-run`, stop here and report "nothing archived (dry-run)".
