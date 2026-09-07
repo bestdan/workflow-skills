@@ -2942,13 +2942,15 @@ else
   bad "expected the blocker line exactly once, got $dupes_s15"
 fi
 
-# --- Fixture (s16-s18): the `declared none` tally (PRE-779) ---------------
+# --- Fixture (s16-s19): the `declared none` tally (PRE-779) ---------------
 # The coverage rule's `none:` escape hatch is never counted anywhere today —
 # not in `Counts`, not in `status`. A track that satisfies coverage everywhere
-# with `none: <reason>` reads as a clean sheet. These three fixtures cover the
+# with `none: <reason>` reads as a clean sheet. These four fixtures cover the
 # tally: a track that is nothing *but* the escape hatch, a track that mixes it
-# with real obligations, and the `blocks: none: <reason>` field-position
-# sentinel — a different thing entirely — which must not be swept in.
+# with real obligations, the `blocks: none: <reason>` field-position sentinel
+# — a different thing entirely — which must not be swept in, and a track
+# literally named `total`, whose own tally must not collide with the
+# synthetic aggregate row of the same name.
 
 # All bare `none:`: the section owes nothing, and the report says so instead
 # of a clean sheet.
@@ -3099,10 +3101,15 @@ none: the notice is copy, not tooling
 out_s19="$(python3 "$SCRIPT" --root "$DIR_S19" status alpha 2>&1)"
 exit_s19=$?
 assert_exit "a track literally named 'total' still exits 0" "$exit_s19" 0
-assert_contains "the 'total' track's own tally is its own two, not the aggregate" "$out_s19" \
-  "O 0 discharged / 0 open / 2 declared none"
-assert_contains "the report-wide aggregate sums every track, 'total' included" "$out_s19" \
-  "O 0 discharged / 0 open / 3 declared none"
+# Asserted as one ordered block, not as two loose substrings: the `total`
+# track's own row and the synthetic aggregate carry the same label, so a
+# label alone cannot tell them apart and a per-line check would pass with
+# the two numbers on the wrong rows. Position within the block is the only
+# thing that distinguishes them, so the block is what gets pinned.
+assert_contains "the 'total' track's row and the aggregate row carry their own numbers" \
+  "$out_s19" "  account:  Q 1 answered / 0 open / 0 retired    O 0 discharged / 0 open / 1 declared none
+  total:    Q 2 answered / 0 open / 0 retired    O 0 discharged / 0 open / 2 declared none
+  total:    Q 3 answered / 0 open / 0 retired    O 0 discharged / 0 open / 3 declared none"
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"

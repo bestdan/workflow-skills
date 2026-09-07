@@ -2632,9 +2632,10 @@ def render_track_lines(
     `none_counts`/`none_total` (from `derive_none_counts`) are zipped onto
     `rows` positionally, the same way `total: Counts` is passed apart from
     `tracks` rather than folded into a same-named dict entry — `require_name`
-    allows a track literally named `total` (it only enforces kebab-case), and
-    a name-keyed lookup would let that track's own count collide with the
-    synthetic aggregate row's.
+    allows a track literally named `total` (it only enforces kebab-case), so
+    the aggregate is never stored under a `total` key: each track row looks
+    its own name up in `none_counts`, and only the synthetic row's value
+    arrives separately, as `none_total`.
     """
     rows = [*tracks, ("total", total)]
     none_values = [*(none_counts[name] for name, _ in tracks), none_total]
