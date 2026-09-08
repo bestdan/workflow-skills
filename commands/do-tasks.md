@@ -436,10 +436,10 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 
 1. **Preflight** — `linear-common.md` preflight (resolve team) + `linear-claim.md`
    "Find candidates" (resolve workflow states, query unstarted issues, filter by
-   `estimate`/labels/assignee, rank). Also confirm `gh auth status` — **reading its
-   output, not its exit code**, which is 0 even on an invalid token; see the self-check
-   note in section 4 step 5 — plus a clean working tree, and fetch the base branch
-   (`linear.base_branch`, default `main`).
+   `estimate`/labels/assignee, rank). Also confirm `gh auth status` — **checking its
+   exit code _and_ its output**, since it exits 0 even on an invalid token; see the
+   self-check note in section 4 step 5 — plus a clean working tree, and fetch the base
+   branch (`linear.base_branch`, default `main`).
 2. **Pre-flight** — `linear-claim.md` "Pre-flight: is work already in flight?":
    on the **top-ranked candidate**, before claiming (no feasibility judgment yet —
    that runs after the claim), check for an existing open PR (by Linear's
@@ -556,8 +556,8 @@ capability is actually visible — inside the remote session** — via two concr
   half-claiming. **This self-check covers the connector, not `gh`** — unlike §4's, which
   probes both. The gap is accepted rather than overlooked: the MCP claim lands first, so a
   `gh pr create` that then fails leaves a started, assigned issue with no PR. Closing it
-  would mean adding a `gh auth status` probe here too — output-checked, per the note in
-  section 4 step 5.
+  would mean adding a `gh auth status` probe here too, checked on both exit code and
+  output per the note in section 4 step 5.
   Because the claim is the session's first mutation, a bail here leaves no
   partial state.
 - **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
@@ -727,12 +727,17 @@ credentialed channel there is the GitHub MCP connector, which this handler does 
 yet speak (see `claim-lock.md`).
 
 So `true` needs **two** things the probed environment did not have, and the plugin is
-only the first. A repo that sets it needs the plugin installed by some other means — a
-cloud-environment setup script running `claude plugin marketplace add` is the obvious
-candidate, on the marketplace-key reading that record offers and itself marks
-unsettled — **and** it needs its sessions to have a working `gh` credential, because
-every phase of this handler shells out to `gh`. Neither the setup script nor a credentialed session was
-measured. Setting `true` without them is not silently broken: step 5's self-check stops
+only the first. **The plugin half now has a known answer**: a cloud-environment setup
+script running `claude plugin marketplace add` plus `claude plugin install` before the
+session starts does install it (measured 2026-09-07; see that record). Note it is
+**environment** configuration — a repo cannot commit it, which is why looking for it in
+a repo finds nothing.
+
+The `gh` half is still open. Such a session also needs a working `gh` credential,
+because every phase of this handler shells out to `gh`, and the probed session had none.
+**Whether one can be provisioned is untested** — a repo attached with credentials
+(`add_repo` with `access:"push"`) was never tried, and that is the experiment that would
+answer it. Setting `true` before then is not silently broken: step 5's self-check stops
 each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
@@ -901,12 +906,19 @@ each session loudly on its own issue.
    property `claim-lock.md` depends on.
 
    **Self-check first, on two things.** The prompt's first step must be: "Run
-   `gh auth status`. If its **output** reports a login failure or an invalid token, or
+   `gh auth status`. If it **exits nonzero** — including `gh` not being installed at
+   all — **or** its **output** reports a login failure or an invalid token, or
    `$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-state.py` is not present,
    do **not** claim — stop immediately and report `remote gh CLI unavailable` or
    `remote handler assets unavailable`."
 
-   > **Test the output, never the exit code.** `gh auth status` **exits 0 while
+   > **Both conditions, not either one.** The exit code catches what the text cannot —
+   > a missing `gh` (rc 127), a TLS failure, any auth error whose wording nobody
+   > anticipated. The text catches what the exit code cannot, which is the case measured
+   > here. Dropping either half is a fail-open, and an earlier revision of this note
+   > dropped the exit code.
+   >
+   > **Why the exit code alone is not enough.** `gh auth status` **exits 0 while
    > reporting failure**. Measured in a cloud session on 2026-09-05
    > (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`) and again in a
    > routine on 2026-09-07 (run `cse_016MBzxJfhs7w8pgwt1k2Hjd`; recorded in
