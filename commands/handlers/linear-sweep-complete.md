@@ -226,10 +226,10 @@ PRs verified as merged (report that one):
    > parentheses or at the end of the title. Requiring brackets makes the
    > search find the PR and then throw it away, and the issue is filed as
    > "no-PR skipped" — indistinguishable from having no PR at all. Observed in
-   > the nightly tidy run of 2026-09-02: `repo:bestdan/finplan PRE-73 in:title`
-   > returned open PR #1003, `Scaffold packages/rest-server FastAPI package
-   > (PRE-73)`, and the run reported PRE-73 as having "genuinely no PR found
-   > yet". Hand-opened PRs are exactly the population these fallbacks exist
+   > the nightly tidy run of 2026-09-02: a `repo:<owner>/<name> PRE-73
+   > in:title` search returned an open PR whose title _ended_ `… (PRE-73)`
+   > rather than starting `[PRE-73]`, and the run still reported PRE-73 as
+   > having "genuinely no PR found yet". Hand-opened PRs are exactly the population these fallbacks exist
    > for, since anything `/do-tasks` opened already resolved at step 1.
 3. **Fallback — branch name.** Call `<linear-mcp>__get_issue` for the issue's
    `branchName` if not already fetched, then:
@@ -303,12 +303,12 @@ The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
 
 - **Step 2 (title search)** → `search_pull_requests`. Put the repo **in the
-  query** as a `repo:<owner>/<name>` qualifier — `"repo:bestdan/finplan
+  query** as a `repo:<owner>/<name>` qualifier — `"repo:<owner>/<name>
   PRE-808 in:title"` is the attested form — which is what carries `-R` here.
   (`owner`/`repo` parameters also exist; either works.)
 - **Step 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
   `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
-  `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
+  `<owner>:<branch>` — `"acme:alex/pre-507-…"` — unlike `gh pr list
   --head`, which takes the branch alone.
 
   > **Get this wrong and the sweep completes the wrong issues.** A `head` with

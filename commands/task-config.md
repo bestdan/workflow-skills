@@ -122,7 +122,7 @@ jira:
 handler: linear
 wip_limit: 3 # top-level — per-project default each linear.projects entry inherits unless overridden
 linear:
-  team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
+  team: Platform # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
   default_priority: 3
   projects: # replaces scalar default_project; absent/empty → whole team
     - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; optional per-entry wip_limit/max_estimate

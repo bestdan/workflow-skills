@@ -22,7 +22,7 @@ handler: linear
 wip_limit: 3 # top-level — shared with the repo-pr & gh-issue handlers. For Linear it is the
 # per-project default that each `linear.projects` entry inherits unless it sets its own.
 linear:
-  team: PreThink # required — team name (as shown in Linear) or team id/UUID.
+  team: Platform # required — team name (as shown in Linear) or team id/UUID.
   # The team key (e.g. PRE) is not accepted because `list_teams` does not return it.
   default_priority: 3 # optional — 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (default 3).
   max_estimate: 3 # optional default for /do-tasks (tracker path) — exclusive upper bound on
