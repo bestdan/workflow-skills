@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Detect Linear issues that were closed without any work behind them.
 
-This workspace's Linear/GitHub integration treats a bare issue id (``PRE-123``)
-appearing *anywhere* in a merged PR's title or body as a closing reference. A PR
-that merely mentions a sibling issue therefore sweeps that sibling to Done, with
-no branch, no PR, and no code. The culprit is a repo-local merge workflow that
-scrapes ids out of PR text, not Linear's own GitHub integration -- see
-commands/handlers/linear-claim.md, "Why the integration is inert".
+A repo-local merge workflow scraped bare issue ids (``PRE-123``) out of a merged
+PR's title and body and swept every match to Done. A PR that merely mentioned a
+sibling issue therefore closed it, with no branch, no PR, and no code. This was
+not Linear's own GitHub integration, which has never fired on these repositories
+-- see commands/handlers/linear-claim.md, "Why the integration is inert".
 
 This script is the standalone backstop that detects those false closures and
 optionally restores them. (See commands/handlers/linear-false-closures.md for

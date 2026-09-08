@@ -6,10 +6,11 @@ argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>] [--prs-file <
 
 # Find False Closures
 
-Linear's GitHub integration treats a **bare** issue id (`PRE-123`) appearing
-anywhere in a merged PR's title or body as a closing reference, so a PR that
-merely name-drops a sibling issue sweeps that sibling to Done — no branch, no
-PR, no code. `/reconcile-tasks` can't repair it (its rule table is
+A repo-local merge workflow scraped **bare** issue ids (`PRE-123`) out of a
+merged PR's title and body and swept every match to Done, so a PR that merely
+name-dropped a sibling issue closed it — no branch, no PR, no code. It was not
+Linear's own GitHub integration; see `commands/handlers/linear-claim.md`, "Why
+the integration is inert". `/reconcile-tasks` can't repair it (its rule table is
 promote/complete-only and never demotes), and `/sweep-for-complete` is immune
 to the bug but doesn't detect issues already falsely closed.
 
