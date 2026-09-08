@@ -153,7 +153,8 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
      just one.
 
    (`--project X` narrowing — restricting the sweep to a single named project — is
-   deferred; don't build it here.)
+   deferred _for this agent-driven flow_; don't build it here. The standalone
+   script does take `--project`, repeatably — see "Run it without an agent".)
 4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
    `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
    exhausted — a single page silently undercounts a backlog at the cap. The

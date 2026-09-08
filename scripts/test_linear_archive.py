@@ -2,8 +2,8 @@
 """Hermetic tests for commands/handlers/assets/linear-archive.py.
 
 The module talks to Linear over HTTP via ``gql``; these tests stub that seam so
-nothing touches the network. They cover both sweep paths — whole-team (no
-``--project``) and single-project (``--project <uuid>``) — and assert the
+nothing touches the network. They cover every sweep path — whole-team (no ``--project``),
+single-project, and multi-project (``--project`` repeated) — and assert the
 load-bearing invariant that broke in PRE-567: the GraphQL operation must never
 declare a ``$variable`` it does not *reference in the operation body* (Linear
 rejects a declared-but-unused variable with HTTP 400).
@@ -188,6 +188,53 @@ class CollectAgedMultiProjectTests(unittest.TestCase):
         self.assertEqual([c["id"] for c in candidates], ["i-1"])
         self.assertIn("projects=p-1", scope)
         self.assertNotIn("p-1,p-1", scope)
+
+
+class ProjectFlagWiringTests(unittest.TestCase):
+    """The multi-project tests above hand collect_aged a ready-made list. This
+    drives the real parser, so reverting --project to default=None or to a
+    scalar (which would iterate a UUID character by character) fails here."""
+
+    def _sweep(self, *flags):
+        calls = []
+
+        def fake_find(key, team, project, state_type, ts_field, cutoff):
+            calls.append(project)
+            return []
+
+        original_find, original_key, original_argv = (
+            linear_archive.find,
+            linear_archive.get_key,
+            sys.argv,
+        )
+        linear_archive.find = fake_find
+        linear_archive.get_key = lambda: "k"
+        sys.argv = [
+            "linear-archive.py",
+            "--team",
+            "PreThink",
+            "--older-than",
+            "10",
+            *flags,
+        ]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                linear_archive.main()
+        finally:
+            linear_archive.find = original_find
+            linear_archive.get_key = original_key
+            sys.argv = original_argv
+        return calls
+
+    def test_repeated_project_flag_reaches_the_sweep_intact(self):
+        calls = self._sweep("--project", "p-1", "--project", "p-2")
+        self.assertEqual(sorted(set(calls)), ["p-1", "p-2"])
+
+    def test_no_project_flag_sweeps_the_whole_team(self):
+        """Also the only test that catches a revert to default=None: argv
+        supplies a list whenever --project is passed, so the flag-less run is
+        where dict.fromkeys(None) blows up."""
+        self.assertEqual(self._sweep(), [None] * 3)  # once per terminal pass
 
 
 class TerminalPassesTests(unittest.TestCase):
