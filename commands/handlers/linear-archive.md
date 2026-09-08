@@ -170,13 +170,13 @@ workspace (archived 75 issues, 0 failures).
 
 ```bash
 # Dry run (lists candidates, changes nothing):
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 10
 
 # Archive them:
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10 --apply
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 10 --apply
 
 # Scope to a project (all terminal states are swept either way):
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 30 \
   --project <uuid> --apply
 
 # Scope to several configured projects — repeat --project once per id
@@ -187,7 +187,7 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
   --project <uuid-1> --project <uuid-2> --apply
 
 # Archive named issues regardless of age (identifiers and/or UUIDs):
-python3 commands/handlers/assets/linear-archive.py --team PreThink \
+python3 commands/handlers/assets/linear-archive.py --team Platform \
   --issues PRE-12,PRE-13 --apply
 ```
 

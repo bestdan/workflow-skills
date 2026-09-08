@@ -343,12 +343,12 @@ The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
 
 - **Source 2 (title search)** → `search_pull_requests`. Put the repo **in the
-  query** as a `repo:<owner>/<name>` qualifier — `"repo:bestdan/finplan
+  query** as a `repo:<owner>/<name>` qualifier — `"repo:<owner>/<name>
   PRE-808 in:title"` is the attested form — which is what carries `-R` here.
   (`owner`/`repo` parameters also exist; either works.)
 - **Source 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
   `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
-  `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
+  `<owner>:<branch>` — `"acme:alex/pre-507-…"` — unlike `gh pr list
   --head`, which takes the branch alone.
 
   > **Get this wrong and the sweep completes the wrong issues.** A `head` with

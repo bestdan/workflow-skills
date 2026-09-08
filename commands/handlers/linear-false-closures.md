@@ -140,7 +140,7 @@ match — is a JSON **object**, not a bare list:
   "pull_requests": [
     {
       "number": 472,
-      "headRefName": "dpegan/pre-645-...",
+      "headRefName": "alex/pre-645-...",
       "url": "https://github.com/bestdan/workflow-skills/pull/472",
       "title": "...",
       "body": "...",

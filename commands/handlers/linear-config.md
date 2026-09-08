@@ -26,7 +26,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    - Exactly one team → use it; tell the user which one you picked.
    - Multiple teams → ask via `AskUserQuestion` (header: "Linear team", one option per team labeled `<name>` — do NOT label as `<KEY> — <name>` because `list_teams` does not return the team key, so you literally cannot render `<KEY>`. If two teams collide on name, disambiguate with `<name> (<short-id>)`. Cap at 3 so 3 teams + "Other" fits the 4-option max). "Other" lets the user type a team name (not key), which you then re-validate against the list. Never prompt the user to type blind.
 
-   **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PRE`), so a key value will not match downstream and `/add-task`/`/list-tasks`/`/do-tasks` will all stop at preflight with "Configured Linear team `PRE` is not in your accessible teams." The `name` (e.g. `PreThink`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
+   **Write the team's `name` into the config — NOT its `key`.** Linear's MCP `list_teams` tool returns each team's `name` and `id` but NOT its `key` (e.g. `PLAT`), so a key value will not match downstream and `/add-task`/`/list-tasks`/`/do-tasks` will all stop at preflight with "Configured Linear team `PLAT` is not in your accessible teams." The `name` (e.g. `Platform`) is human-readable and matches what `list_teams` returns. The `id` (UUID) also works but is unreadable in a committed config file.
 
 3. **Resolve `projects` — one or more, validated against real projects (no free-text).** The handler scopes to a **list** of projects (`linear.projects`), which replaces the old scalar `default_project`. See `linear-common.md` "Config block" + "Resolve configured projects" for the full schema and the inheritance rules (per-project `wip_limit`/`max_estimate` fall back to the global defaults). An unvalidated id silently breaks `/add-task`, so resolve every entry against `list_projects` — never accept a typed id blind.
 
@@ -53,7 +53,7 @@ Linear's OAuth flow handles auth — no token to paste, and agents installed in 
    ```yaml
    handler: linear
    linear:
-     team: PreThink # team NAME (or UUID id) — never the team key like "PRE"
+     team: Platform # team NAME (or UUID id) — never the team key like "PLAT"
      default_priority: 3
      projects:
        - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; add wip_limit/max_estimate to override the globals
