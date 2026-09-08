@@ -52,7 +52,8 @@ Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`.
 In a **cloud routine, as environments are provisioned today, no repo-scoped
 `gh` subcommand reaches GitHub** — GraphQL is not served, and repo-scoped REST
 needs the repo attached with credentials, which no measured environment had
-done (the attach is untested). `gh` may not even be installed — its presence
+done (attaching works, but no run has yet had both an attach and a `gh`). `gh`
+may not even be installed — its presence
 varies by environment — and where it is, `gh api user` answers and
 `gh auth status` exits 0 while reporting the token invalid, so neither is a
 health check. Both

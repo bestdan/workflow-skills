@@ -292,7 +292,8 @@ attachment) is unresolvable — which is the bulk of hand-opened work.
 > - `gh pr list` and `gh pr view` are refused because they are GraphQL, which
 >   is not served. No provisioning fixes that.
 > - Repo-scoped `gh api` REST was refused in every measured run (the repo was a
->   cloned source, never credential-attached; the attach is untested) — do not
+>   cloned source, never credential-attached; attaching works, but no run has
+>   yet had both an attach and a `gh`) — do not
 >   spend the run probing it.
 > - **`gh` may not be installed at all** — its presence varies by environment
 >   and changed inside one day in the same environment id. Where it does exist,

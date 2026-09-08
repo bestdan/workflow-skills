@@ -126,9 +126,11 @@ So: can a routine invoke the plugin instead of describing it?
    **What this does and does not license.** It licenses the operational rule
    below — as these environments are provisioned today, `gh` serves no
    repo-scoped call and `mcp__github__*` is the only working channel. It does
-   **not** license "`gh` cannot work in the cloud". Nobody has run `add_repo`
-   with `access:"push"`, and nobody has connected the App the second message
-   asks for.
+   **not** license "`gh` cannot work in the cloud". `add_repo` with
+   `access:"push"` has since been run and works (finding 8), but never in a run
+   that also had `gh`, so no repo-scoped `gh` call has ever been made against
+   an attached repo. Nobody has connected the App the second message asks for
+   either.
 
    **`gh auth status` is worse than worthless: it reports the failure and exits
    0.** Measured in `cse_016MBzxJfhs7w8pgwt1k2Hjd` as
@@ -173,6 +175,42 @@ So: can a routine invoke the plugin instead of describing it?
    Todoist and visualize, and it calls `mcp__github__*` successfully anyway. It
    comes from the GitHub App installed for claude.ai/code, so it never appears
    in a routine's connector list and there is nothing to attach.
+
+   **But it is not unconditional — it tracks `sources`.** Two runs eleven
+   minutes apart in the same environment, differing only in whether the trigger
+   declared any `sources`:
+
+   - `cse_01TdwvhMQCgH2xXd5SR51bex`, no sources —
+     `ToolSearch select:mcp__github__get_me,mcp__github__list_issues` returned
+     **`No matching deferred tools found`**, and a broader `github` search
+     surfaced only `mcp__Claude_Code_Remote__*` and `mcp__Linear__*`.
+   - `cse_01V9RMunnPTVfB6n9a1VwfKm`, one source — the same `ToolSearch`
+     resolved **both** tools, and both then answered with live data.
+
+   Two runs is a correlation, not a mechanism, and nothing here rules out
+   flakiness. But a routine with no sources should not be assumed to have a
+   GitHub channel at all, which is the case `/sweep-for-complete` would hit
+   first.
+
+8. **`add_repo` attaches a repo to the session's GitHub scope, and takes three
+   steps.** `mcp__Claude_Code_Remote__add_repo` with
+   `{"access":"push","owner":…,"repo":…}` succeeds on the first call, then the
+   response requires **one** inline clone (its git proxy caps the repo at 2
+   concurrent smart-HTTP ops and 429s both on a second), then
+   `mcp__Claude_Code_Remote__register_repo_root`. Its response says what the
+   attach buys, in its own words:
+
+   > Session currently has 2 repo(s): bestdan/workflow-skills,
+   > bestdan/dotfiles. `bestdan/dotfiles` is now in this session's GitHub
+   > scope, even though the system prompt's Repository Scope list still shows
+   > only the original set. Attaching it widens nothing else.
+
+   After that sequence, `mcp__github__list_issues` returned live issues for the
+   newly attached repo (run `cse_01V9RMunnPTVfB6n9a1VwfKm`). **What this does
+   not establish** is that the attach is what granted it: the same run never
+   called `mcp__github__list_issues` against that repo _before_ attaching, so
+   the before-case is missing. The probe asked for a before/after pair on `gh`
+   and not on MCP — a design gap, recorded rather than papered over.
 
 ## What this changes
 
@@ -235,14 +273,20 @@ one properly is the thing that would change it.
   blanket-blocking.
 
   **State it as unanswered, not as no.** "Can a dispatched session reach GitHub
-  through `gh`?" is still untested: the attach half has now been run, and the
-  `gh` half could not be, because the environment that got the attach had no
-  `gh` in it. Everything above establishes only that `gh` fails without an
-  attach. Answering it needs one run where both halves hold at once — an
-  environment with `gh` present **and** a repo attached with `access:"push"` —
-  which, given that presence varies by environment and by day, means checking
-  `which gh` in the same run rather than assuming it. That is also what would
-  move `gh-issue.remote_batch` off `false` for a reason other than caution.
+  through `gh`?" is still untested after three attempts, each blocked
+  differently: no repo attached, then no `gh`, then no `gh` again. The attach
+  half is now settled (finding 8) and the `gh` half has never once been
+  reachable at the same time.
+
+  It may no longer be answerable in this environment at all — `gh` has been
+  absent from every run since 2026-09-07 evening, so the experiment now needs
+  an environment that still ships `gh`, found by checking `which gh` rather
+  than assumed. Note the practical stakes have dropped: finding 8 shows an
+  attached repo is served through `mcp__github__*`, which is the channel the
+  handlers use anyway, so `gh` is the question that is interesting rather than
+  the one that is blocking. What still rests on it is
+  `gh-issue.remote_batch`, which stays `false` for caution rather than for a
+  measured reason.
 - **~~Whether `gh` is reliably present.~~ Settled, and it is not.** `gh` is a
   property of an environment at a point in time, not of routines. It answered
   `gh --version` as 2.45.0 in every run inspected here on 2026-09-07, and was
@@ -251,6 +295,14 @@ one properly is the thing that would change it.
   **127** (`command not found` from Bash, not from `gh`). The same run found
   none of this repo's gate tools present either. Nine hours, one environment
   id, opposite answers.
+
+  Reproduced twice more the same night — `cse_01TdwvhMQCgH2xXd5SR51bex`
+  (01:36) and `cse_01V9RMunnPTVfB6n9a1VwfKm` (01:47) — so three consecutive
+  runs, and the second of those had `sources` configured while the first did
+  not, which rules out sources as the explanation. `just`, `mise`, `shfmt` and
+  `shellcheck` were all absent too (rc 1 each), and the env log said
+  `Setup script cached from previous run`, so whatever the setup script
+  installs, it is not these.
 
   So every `gh` finding in this document is scoped to the runs that produced
   it, and **no handler may lean on `gh` being installed** — the runtime files
@@ -284,6 +336,21 @@ usually cheaper than commissioning a new one: `RemoteTrigger` `list_runs` on
 the probe routine, then `get_run_log` on the session id, returns the verbatim
 tool output. Every measurement in this document is quoted from such a log, and
 the run ids are named at the findings that rest on them.
+
+Three things about driving `RemoteTrigger` that cost a wasted run each:
+
+- **`sources` lives on the trigger, not the environment.** It is
+  `job_config.ccr.session_context.sources`. Passing the right `environment_id`
+  with no `sources` yields `env[info]: No sources configured` — the right
+  environment, an empty session, and a probe measuring nothing you meant. Copy
+  the list from a trigger known to work before writing a new one.
+- **`update` replaces `job_config.ccr`; it does not merge into it.** A partial
+  update carrying only `session_context` silently emptied `events`, leaving the
+  routine with **no prompt**. Re-send the whole `ccr` object every time, and
+  read the response back — `derived_state.prompt` empty is the tell.
+- **A disabled trigger with a far-future cron (`0 4 29 2 *`) is the
+  manual-run idiom.** It fires only via the `run` action, so a probe cannot go
+  off on its own.
 
 ### The probe that would settle the open question
 
