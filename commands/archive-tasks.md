@@ -180,8 +180,8 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/<handler>-archive.md`) and Read the result. Pass the
-resolved threshold — **or the `--issues` refs** — and the `dry-run` flag
-through.
+resolved threshold — **or the `--issues` refs** — and the `--all` and `dry-run`
+flags through.
 
 ## 2. Report
 

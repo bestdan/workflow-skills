@@ -50,14 +50,23 @@ things, neither of which changes completion state:
    and `--all` is the only thing that changes it.
 
    **`--all` is the explicit override**: it drops the label scope and sweeps
-   every closed issue in the repo, still bound by the age threshold — the same
-   mechanism `commands/handlers/gh-issue-reconcile.md` step 2 documents for
+   closed issues repo-wide, still bound by the age threshold and by the
+   `--limit` window below — the same mechanism
+   `commands/handlers/gh-issue-reconcile.md` step 2 documents for
    `/reconcile-tasks`. Drop the `--label` flags from the `gh issue list` call:
 
    ```bash
    gh issue list --repo <repo> --state closed --limit 200 \
      --json number,title,closedAt,labels
    ```
+
+   `--limit 200` is a window over the 200 most recently **created** issues, not
+   the 200 oldest closures — `gh issue list` orders by creation date, not by
+   close date, the same limitation `gh-issue-reconcile.md` step 4 documents for
+   its own window. Unscoped that window covers the whole repo rather than the
+   loop's own issues, so once a repo holds more closed issues than the limit,
+   the oldest closures — exactly what an age threshold is looking for — fall
+   outside it. Raise `--limit` as the closed count approaches it.
 
    Everything else still holds regardless of `--all`: only closed issues, only
    those whose `closedAt` is more than `N` days before today, and only those
