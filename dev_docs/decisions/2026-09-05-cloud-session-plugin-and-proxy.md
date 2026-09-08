@@ -6,6 +6,14 @@ and is allowed to go stale. It is the companion to
 [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md), which
 measured the same questions in a **routine**.
 
+**Amended 2026-09-07** after a second set of routine probes corrected three claims this
+file made. Those probes are recorded in `2026-09-07-cloud-routine-plugins-and-gh.md`,
+which lands in this directory with **PR #498** — open at the time of writing, so the
+run ids below are cited directly and stay checkable whichever change merges first. The measurements below are unchanged and still
+carry their 2026-09-05 date; what changed is what may be concluded from them. Each
+amendment says so where it sits, and names the earlier wording, so a reader who saw the
+first version can tell what moved.
+
 ## Why this exists
 
 `commands/do-tasks.md` §4 held `gh-issue.remote_batch` off by default on a premise it
@@ -67,7 +75,8 @@ $ git ls-remote https://github.com/bestdan/workflow-skills HEAD
 7319819da14dcf730dc3c5cf718d13730f6ebfb3        HEAD
 ```
 
-And installing by hand, **inside the session**, worked end to end:
+And installing by hand, **inside the session**, put the plugin on disk and got the CLI
+to report it installed:
 
 ```
 $ claude plugin marketplace add bestdan/workflow-skills
@@ -90,6 +99,14 @@ _labels.py  _secret_resolve.py  _shape.py  gh-issue-claim.py  gh-issue-state.py 
 So the failure is specifically the **auto-install from committed repo settings**, not
 egress, not proxy repository scoping, and not the marketplace itself.
 
+**But a mid-session install does not make the plugin usable, and this file must not be
+read as saying it does.** What the block above shows is files on disk and the CLI
+reporting the plugin enabled. This session never invoked a skill from it. A routine that
+did the same mid-session install found `ListPlugins` and `ListSkills` both empty while
+`claude plugin list` reported the plugin enabled — the CLI and the harness disagreeing
+about the same install (workflow-skills-ef, run `cse_016MBzxJfhs7w8pgwt1k2Hjd`). Take
+`claude plugin list` as evidence about the disk, not about the running agent's tools.
+
 ### Which of the declaration's two keys was ignored — not settled
 
 The committed file declares two keys, and there is a hint they did not fail together.
@@ -103,10 +120,19 @@ process, with the marketplace now present — it showed **twice**:
 > workflow-skills@workflow-skills   Version: 2.24.2   Scope: project   Status: √ enabled
 ```
 
-`project` scope can only come from the repo's committed `.claude/settings.json`, so the
-committed `enabledPlugins` was read at that point — and at the cold start
-`claude plugin marketplace list` said `No marketplaces configured`. That **points at**
-`extraKnownMarketplaces` as the ignored key.
+A committed `.claude/settings.json` is the mechanism this probe knows of for a
+`project`-scope entry, so the committed `enabledPlugins` looks to have been read at that
+point — and at the cold start `claude plugin marketplace list` said
+`No marketplaces configured`. That **points at** `extraKnownMarketplaces` as the ignored
+key.
+
+**"Can only" would be wrong here**, and an earlier draft of this file said it. Nothing
+was done to rule out other routes to a project-scope entry, and at least one is
+plausible without being tested: an install that requests that scope. A routine run
+against `bestdan/workflow-skills` — a repo that tracks no `.claude/` files at all —
+reported a `project`-scope entry, which no committed declaration can explain; its setup
+script was cached, so its install invocation is not in any run log and the scope flag
+cannot be read (workflow-skills-ef, run `cse_01M9WzAbESA3hSwBZuYWczNJ`).
 
 **It does not establish it, and this belongs under what is not settled.** The sequence
 ran in one warm VM in which a marketplace _and_ a user-scope install had both been added
@@ -160,11 +186,13 @@ mcp__github__issue_read(method=get_labels, …)
    makes `remote_batch: true` safe was wrong; they were corrected in the same change as
    this file. **Which of the declaration's two keys was ignored is _not_ settled** — see
    "Which of the declaration's two keys was ignored" above.
-2. **`gh` exists in a cloud session but has no working credential**, and the barrier is
-   at the account, not the endpoint: reads 403 alongside writes. So the 2026-08-24
-   routine finding and this session's finding agree in effect — no usable `gh` — while
-   disagreeing on the mechanism (a routine had no `gh` binary at all; a cloud session
-   has the binary and a dead token).
+2. **`gh` exists in a cloud session and had no working credential in the session as
+   provisioned**, reads 403 alongside writes. So the 2026-08-24 routine finding and this
+   session's finding agree in effect — no usable `gh` — while disagreeing on the
+   mechanism (a routine had no `gh` binary at all; a cloud session has the binary and a
+   dead token). **Where the barrier sits is _not_ settled**, and the wording matters: an
+   earlier draft of this file said "the barrier is at the account, not the endpoint" as
+   though that followed from reads-403-too. It does not follow. See below.
 3. **The GitHub MCP connector remains the credentialed channel**, in a cloud session as
    in a routine, and it **can** perform the `gh-issue` label write. It replaces the whole
    label set, matching the REST path — so validate-then-replace stays the rule on both.
@@ -172,21 +200,46 @@ mcp__github__issue_read(method=get_labels, …)
    Both must be solved before `remote_batch: true` dispatches anything that works.
 5. **Nothing about the marketplace clone is blocked.** Proxy repository scoping does not
    stop a public unattached repo from being cloned over plain HTTPS.
+6. **A cloud-environment setup script does install the plugin** — measured after this
+   probe, and it is the route that works. The environment here reported
+   `No setup script configured`; an environment that runs one (`claude plugin
+   marketplace add` plus `claude plugin install` before the session starts) comes up with
+   the plugin enabled (workflow-skills-ef, run `cse_018jEMrUEUUc4ACccCHfSQfy`: env log
+   `Running setup script` → `Setup script completed` → `Starting Claude Code`, then
+   `claude plugin list` reporting it). This also answers the sub-question this file
+   originally left open: a setup script is **environment** configuration, not something a
+   repo can commit — which is why looking for it in a repo finds nothing.
 
 ## What this does NOT settle
 
-- **Whether the `gh` 403 is policy or configuration.** The message names a missing
-  Claude GitHub App connection for the organization. `bestdan/dotfiles` is a personal
-  repo, so "organization" is this account. Connecting the app might make `gh` work; that
-  was not tried. Read finding 2 as "not available on this account today", not as "the
-  proxy forbids it".
-- **Whether a setup script fixes the plugin gap.** The environment reported
-  `No setup script configured`. Given the scope finding above, the narrow candidate is a
-  setup script running `claude plugin marketplace add`, on the reading above. That was
-  **not** measured as a session-start step, and **where a setup script may be declared —
-  per-environment only, or from a committed file — was not checked either**; the
-  environment log said only `No setup script configured`, which shows one was absent,
-  not that a repo cannot supply one.
+- **Where the `gh` 403 comes from.** Three live readings, and this probe distinguishes
+  none of them. **Do not read this bullet as a two-way choice** — an earlier draft framed
+  it as "policy or configuration", which omitted the third and likeliest one.
+  1. **Org-level policy or a missing app.** The message names a missing Claude GitHub App
+     connection for the organization; `bestdan/dotfiles` is a personal repo, so
+     "organization" is this account. Connecting the app was not tried.
+  2. **Repo provisioning.** `bestdan/dotfiles` was the session's **cloned source**, which
+     is not the same thing as a repo attached **with credentials**. A source clone buys
+     read access to the working tree; the GitHub API is a separate grant. Nothing here
+     was measured against a credentialed attach, so the 403 may simply be the
+     un-provisioned state, with nothing about accounts or policy needing to be true.
+     Neither this probe nor the routine probes that corroborate it tested that path
+     (routine probes, PR #498; runs `cse_011MSb2bYVcG7QfzDb6RP33J` for the not-a-source
+     case and `cse_01M9WzAbESA3hSwBZuYWczNJ` for the source-clone case).
+  3. **Something else neither probe looked for.**
+
+  So read finding 2 as "not available in the session as provisioned" — **not** as "the
+  proxy forbids it", and **not** as "`gh` cannot work in a cloud session". The question is
+  **unanswered, not answered no.**
+
+- **Whether a credentialed attach fixes it — the experiment nobody has run.** Calling
+  `add_repo` with `access:"push"` and re-probing is what would settle reading 2, and it
+  is the one result that could move `gh-issue.remote_batch` off `false` for a reason
+  other than caution. A probe design agreed jointly is in the "Reproducing" section of
+  the record landing in PR #498. Its load-bearing rule: **capture the exit code
+  alongside the body for every call.** Every `gh` finding across both probes turned on
+  rc, and `gh auth status` reports failure while exiting 0 — a stdout-only probe
+  reproduces exactly the blind spot that made it look like a working health check.
 - **Whether any of this differs on an organization-owned repo, or on a session started
   from the web rather than the CLI.** One session, one personal repo.
 

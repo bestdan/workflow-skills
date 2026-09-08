@@ -436,8 +436,10 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 
 1. **Preflight** — `linear-common.md` preflight (resolve team) + `linear-claim.md`
    "Find candidates" (resolve workflow states, query unstarted issues, filter by
-   `estimate`/labels/assignee, rank). Also confirm `gh auth status`, a clean
-   working tree, and fetch the base branch (`linear.base_branch`, default `main`).
+   `estimate`/labels/assignee, rank). Also confirm `gh auth status` — **reading its
+   output, not its exit code**, which is 0 even on an invalid token; see the self-check
+   note in section 4 step 5 — plus a clean working tree, and fetch the base branch
+   (`linear.base_branch`, default `main`).
 2. **Pre-flight** — `linear-claim.md` "Pre-flight: is work already in flight?":
    on the **top-ranked candidate**, before claiming (no feasibility judgment yet —
    that runs after the claim), check for an existing open PR (by Linear's
@@ -554,7 +556,8 @@ capability is actually visible — inside the remote session** — via two concr
   half-claiming. **This self-check covers the connector, not `gh`** — unlike §4's, which
   probes both. The gap is accepted rather than overlooked: the MCP claim lands first, so a
   `gh pr create` that then fails leaves a started, assigned issue with no PR. Closing it
-  would mean adding a `gh auth status` probe here too.
+  would mean adding a `gh auth status` probe here too — output-checked, per the note in
+  section 4 step 5.
   Because the claim is the session's first mutation, a bail here leaves no
   partial state.
 - **Optional deterministic opt-out.** Hosts that already know their remote VMs lack the
@@ -897,12 +900,24 @@ each session loudly on its own issue.
    here also means both sides of a race compute it the same way, which is the
    property `claim-lock.md` depends on.
 
-   **Self-check first, on two things.** The prompt's first step must be: "If
-   `gh auth status` fails, or
+   **Self-check first, on two things.** The prompt's first step must be: "Run
+   `gh auth status`. If its **output** reports a login failure or an invalid token, or
    `$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-state.py` is not present,
    do **not** claim — stop immediately and report `remote gh CLI unavailable` or
-   `remote handler assets unavailable`." Both are necessary and `gh` alone is not
-   sufficient: every phase of this handler shells out to `gh`, **and** the label
+   `remote handler assets unavailable`."
+
+   > **Test the output, never the exit code.** `gh auth status` **exits 0 while
+   > reporting failure**. Measured in a cloud session on 2026-09-05
+   > (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`) and again in a
+   > routine on 2026-09-07 (run `cse_016MBzxJfhs7w8pgwt1k2Hjd`; recorded in
+   > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`, PR #498) — both printed `Active account: true` and
+   > `The token in GH_TOKEN is invalid.` and returned **rc 0**. So an `if ! gh auth
+   > status` guard never fires, and this whole self-check silently passes in exactly the
+   > environment it exists to stop. `gh api user` is no better: it succeeds on the same
+   > dead credential, because it is not repo-scoped. If you want a positive check, make
+   > it a **repo-scoped** call and read its body.
+
+   Both are necessary and `gh` alone is not sufficient: every phase of this handler shells out to `gh`, **and** the label
    writes go through `gh-issue-state.py`, which validates against `labels.yml`
    before any network call. A session that claims an issue and then cannot write
    its rung strands exactly the half-written state `gh-issue-claim.md` "Claim the
