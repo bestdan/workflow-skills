@@ -287,35 +287,24 @@ routine** — the same environment split
 step 1, so every issue whose PR was opened outside `/do-tasks` (no `links`
 attachment) is unresolvable — which is the bulk of hand-opened work.
 
-> **It is not the credential, and REST is not a way round it.** In a scheduled
-> routine `gh` is installed and `gh api user` answers as `bestdan`, so a
-> `gh auth status` check answers the wrong question — and worse, it **reports
-> the `GH_TOKEN` invalid and still exits 0**, so a preflight gating on its exit
-> code reads a pass. Never gate on `gh`'s exit code here. `gh pr list` is refused because it is GraphQL:
+> **It is not the credential, and REST is not a way round it.**
 >
->> HTTP 403: This GraphQL query (PullRequestList, sent by `gh pr list`) is not
->> enabled for this session — only the pinned set of PR-review operations is
->> served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
+> - `gh pr list` and `gh pr view` are refused because they are GraphQL, which
+>   is not served. No provisioning fixes that.
+> - Repo-scoped `gh api` REST was refused in every measured run (the repo was a
+>   cloned source, never credential-attached; the attach is untested) — do not
+>   spend the run probing it.
+> - **`gh` may not be installed at all** — its presence varies by environment
+>   and changed inside one day in the same environment id. Where it does exist,
+>   `gh api user` answers and `gh auth status` reports the token invalid
+>   **while exiting 0**. So never gate on `gh` being present, and never gate on
+>   its exit code.
 >
-> **The REST the refusal names has not worked either, because no measured
-> environment provisioned it.** Cloning a repo as a source buys **read**
-> access; the GitHub API needs the repo attached **with credentials**, which
-> the refusal itself spells out:
->
->> Use `add_repo` to request access. If `add_repo` answers that read access is
->> already available and you need GitHub API or write access, call `add_repo`
->> again with `access:"push"` to attach the repository with credentials.
->
-> A repo sitting in `/home/user/` is therefore not an attached repo, and every
-> repo-scoped REST call measured so far was made against one that was never
-> attached. Only the non-repo-scoped `gh api user` answers, which is why it is
-> worthless as a health check. Full measurements:
+> So treat `mcp__github__*` as the only working GitHub channel and do not route
+> this sweep through `gh`. If a `gh` REST call does start answering, the repo
+> was provisioned since — re-measure, do not treat it as a malfunction.
+> Measurements, refusal texts and run ids:
 > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
->
-> The practical upshot **as environments are provisioned today**: treat
-> `mcp__github__*` as the only working GitHub channel and do not route this
-> sweep through `gh`. If a `gh` REST call does start answering, the repo was
-> provisioned since — that is a reason to re-measure, not a malfunction.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent
@@ -428,9 +417,10 @@ together. That is the same guarantee the URL rule above buys on the `gh`
 path — the repo travels with the number — and it is why a bare `pullNumber`
 with an inferred owner/repo is the one form to avoid here.
 
-**`gh api` REST is not a fallback for this read.** A repo-scoped REST call is
-refused in a routine whether or not the repo is attached — measured 2026-09-07,
-so if `mcp__github__pull_request_read` is unavailable the merge state is
+**`gh api` REST is not a fallback for this read.** A repo-scoped REST call was
+refused in every measured routine, in each of which the repo was a cloned
+source that nobody had attached with credentials; a credentialed attach is
+untested. So if `mcp__github__pull_request_read` is unavailable the merge state is
 unreadable and the issue lands in `left: unresolved`. See "Steps 2–3 in a
 `claude-web` environment" above.
 

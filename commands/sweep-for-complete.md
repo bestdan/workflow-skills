@@ -49,14 +49,13 @@ each issue's PR"). Give each project a `repo:` before scheduling one sweep
 across a multi-repo workspace.
 
 Those fallbacks and the merge-check need GitHub. On `local-full` that is `gh`.
-In a **cloud routine, as environments are provisioned today, no `gh` subcommand
-reaches GitHub.** The GraphQL-backed ones (`gh pr list`, `gh pr view`) are
-refused outright because GraphQL is not served — no provisioning fixes that.
-Repo-scoped `gh api` REST is refused for a different reason: a repo cloned as a
-source has **read** access only, and the GitHub API needs it attached **with
-credentials**, which no measured environment had done. Meanwhile `gh` is
-installed, `gh api user` answers, and `gh auth status` reports the token
-invalid while exiting 0 — so none of the three is a usable health check. Both
+In a **cloud routine, as environments are provisioned today, no repo-scoped
+`gh` subcommand reaches GitHub** — GraphQL is not served, and repo-scoped REST
+needs the repo attached with credentials, which no measured environment had
+done (the attach is untested). `gh` may not even be installed — its presence
+varies by environment — and where it is, `gh api user` answers and
+`gh auth status` exits 0 while reporting the token invalid, so neither is a
+health check. Both
 therefore run over the `mcp__github__*` tools, which are the **only** working
 GitHub channel there. That MCP surface comes
 from the **GitHub App installed for claude.ai/code**, not from a claude.ai

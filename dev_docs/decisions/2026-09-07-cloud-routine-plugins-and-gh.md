@@ -149,9 +149,9 @@ So: can a routine invoke the plugin instead of describing it?
    same rc — so this is not routine-specific. `GH_TOKEN` and `GITHUB_TOKEN`
    both read as the literal string `proxy-injected` there.
 
-   That cross-check also carries the attached-repo case: the 2026-09-05 session
+   That cross-check also carries the source-cloned case: the 2026-09-05 session
    got the identical org-level 403 from `gh api repos/bestdan/dotfiles/issues/699`
-   on a repo that **was** its attached source, with the write refused the same
+   on a repo that **was** one of its cloned sources, with the write refused the same
    way, while `mcp__github__issue_write` succeeded on the same issue. Two
    session kinds, two days apart, same wall — and in both, the repo was a
    cloned source that nobody had attached with credentials, so the two
@@ -208,34 +208,64 @@ one properly is the thing that would change it.
   `/reload-plugins` unavailable in cloud. A routine only ever has a first
   session, so that workaround is structurally unavailable — but this was not
   measured here, only read.
-- **Whether a properly provisioned repo serves `gh` REST at all.** This is the
-  big one, and every measurement here is silent on it, because no run had a
-  repo attached with credentials. Two untried actions, each named by one of the
-  refusals: `add_repo` with `access:"push"`, and connecting the Claude GitHub
-  App for the org. Until one is tried, "`gh` REST does not work in the cloud"
-  is a statement about how these environments happen to be set up, not about
-  the platform — and this document must not be cited for the stronger claim.
-  Note the two refusals differ by case, so something is distinguishing them and
-  answering each on its merits rather than blanket-blocking.
+- **Whether a properly provisioned repo serves `gh` REST at all.** Still the
+  big one. Every measurement above is silent on it, because no run that had
+  `gh` had an attached repo.
+
+  **The attach itself now works, and that much is measured.** In run
+  `cse_014DT5cUvE7zGfVjix9fW7fC` (2026-09-08T01:08Z) the tool is
+  `mcp__Claude_Code_Remote__add_repo`, and
+  `{"access":"push","owner":"bestdan","repo":"dotfiles"}` **succeeded on the
+  first call** against a repo that was not a source — no two-step "read access
+  already exists" dance, contrary to what the 403's wording suggests. So
+  `access:"push"` is accepted and attaching is available to a routine.
+
+  **What it buys `gh` is still unmeasured, because that environment had no
+  `gh`** (see the presence bullet below). The run's `mcp__github__*` control
+  passed, and a `git push --dry-run` to the attached repo appears to have
+  authenticated — but its exit code is truncated out of the retrievable log,
+  so by this document's own rule that is recorded as incomplete, not as a
+  pass. Connecting the Claude GitHub App for the org remains untried.
+
+  Until `gh` REST is exercised against an attached repo, "`gh` REST does not
+  work in the cloud" is a statement about how these environments happen to be
+  set up, not about the platform — and this document must not be cited for the
+  stronger claim. Note the two refusals differ by case, so something is
+  distinguishing them and answering each on its merits rather than
+  blanket-blocking.
 
   **State it as unanswered, not as no.** "Can a dispatched session reach GitHub
-  through `gh`?" has not been tested, because the one experiment that would
-  answer it — `add_repo` with `access:"push"` against a repo in one of these
-  environments — provisions credentials on a real account and nobody has run
-  it. Everything above establishes only that `gh` fails without it. That
-  experiment is also what would move `gh-issue.remote_batch` off `false` for a
-  reason other than caution.
-- **Whether `gh` is reliably present.** It answered `gh --version` in every run
-  inspected here, but a second session reported it missing in three of five of
-  its own runs. Not reproduced, and worth knowing before any handler leans on
-  `gh` being installed.
+  through `gh`?" is still untested: the attach half has now been run, and the
+  `gh` half could not be, because the environment that got the attach had no
+  `gh` in it. Everything above establishes only that `gh` fails without an
+  attach. Answering it needs one run where both halves hold at once — an
+  environment with `gh` present **and** a repo attached with `access:"push"` —
+  which, given that presence varies by environment and by day, means checking
+  `which gh` in the same run rather than assuming it. That is also what would
+  move `gh-issue.remote_batch` off `false` for a reason other than caution.
+- **~~Whether `gh` is reliably present.~~ Settled, and it is not.** `gh` is a
+  property of an environment at a point in time, not of routines. It answered
+  `gh --version` as 2.45.0 in every run inspected here on 2026-09-07, and was
+  **absent** from `env_01KURKZo3LcfRKBaEZWcbsrk` — the same environment id — at
+  2026-09-08T01:08Z, where `which gh` exited 1 and `gh --version` returned rc
+  **127** (`command not found` from Bash, not from `gh`). The same run found
+  none of this repo's gate tools present either. Nine hours, one environment
+  id, opposite answers.
+
+  So every `gh` finding in this document is scoped to the runs that produced
+  it, and **no handler may lean on `gh` being installed** — the runtime files
+  now say so. It also means an rc-127 in a future probe is Bash reporting a
+  missing binary, which is not the same failure as any refusal recorded here
+  and must not be read as one.
 
 ## Reproducing
 
 One-shot routine in the target environment. Run it **twice**, once with the
-target repo excluded from `sources` and once with it included — the attached
-and unattached cases return different 403s, and running only one of them is how
-the first revision of finding 6 reached the wrong conclusion:
+target repo excluded from `sources` and once with it included — the
+not-a-source and source-cloned cases return different 403s, and running only
+one of them is how the first revision of finding 6 reached the wrong
+conclusion. Neither case attaches credentials; for that see "The probe that
+would settle the open question" below.
 
 ```
 claude plugin list
