@@ -2,8 +2,8 @@
 """Hermetic tests for commands/handlers/assets/linear-archive.py.
 
 The module talks to Linear over HTTP via ``gql``; these tests stub that seam so
-nothing touches the network. They cover both sweep paths — whole-team (no
-``--project``) and single-project (``--project <uuid>``) — and assert the
+nothing touches the network. They cover every sweep path — whole-team (no ``--project``),
+single-project, and multi-project (``--project`` repeated) — and assert the
 load-bearing invariant that broke in PRE-567: the GraphQL operation must never
 declare a ``$variable`` it does not *reference in the operation body* (Linear
 rejects a declared-but-unused variable with HTTP 400).
@@ -114,6 +114,127 @@ class FindQueryTests(unittest.TestCase):
         uuid_query, _ = self._capture(team=TEAM_UUID, project=None)
         self.assertIn("team: { name: { eq: $team } }", name_query)
         self.assertIn("team: { id: { eq: $team } }", uuid_query)
+
+
+class CollectAgedMultiProjectTests(unittest.TestCase):
+    """--project is repeatable: collect_aged loops the sweep once per configured
+    project and unions the results, deduped by issue id (PRE-416)."""
+
+    def _run(self, projects, nodes_by_project):
+        """Stub find() to return nodes_by_project[project] for each call, and
+        run collect_aged with those --project values."""
+        calls = []
+
+        def fake_find(key, team, project, state_type, ts_field, cutoff):
+            calls.append(project)
+            # Only the `completed` pass returns anything, to keep the stub simple.
+            if state_type != "completed":
+                return []
+            return list(nodes_by_project.get(project, []))
+
+        args = argparse.Namespace(
+            team="PreThink", project=projects, older_than=10, issues=[]
+        )
+        original = linear_archive.find
+        linear_archive.find = fake_find
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                candidates = linear_archive.collect_aged("k", args)
+        finally:
+            linear_archive.find = original
+        return candidates, calls, buf.getvalue()
+
+    def test_no_project_sweeps_whole_team_once(self):
+        candidates, calls, _ = self._run(
+            [], {None: [{"id": "i-1", "completedAt": "2026-01-01"}]}
+        )
+        self.assertEqual(calls.count(None), 3)  # once per terminal pass
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+
+    def test_multiple_projects_are_unioned(self):
+        candidates, calls, scope = self._run(
+            ["p-1", "p-2"],
+            {
+                "p-1": [{"id": "i-1", "completedAt": "2026-01-01"}],
+                "p-2": [{"id": "i-2", "completedAt": "2026-01-02"}],
+            },
+        )
+        self.assertEqual(set(calls), {"p-1", "p-2"})
+        self.assertEqual({c["id"] for c in candidates}, {"i-1", "i-2"})
+        self.assertIn("projects=p-1,p-2", scope)
+
+    def test_overlapping_projects_are_deduped_by_id(self):
+        """An issue returned under more than one project scope is counted once."""
+        candidates, _, _ = self._run(
+            ["p-1", "p-2"],
+            {
+                "p-1": [{"id": "i-1", "completedAt": "2026-01-01"}],
+                "p-2": [{"id": "i-1", "completedAt": "2026-01-01"}],
+            },
+        )
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+
+    def test_repeated_project_id_is_queried_once(self):
+        """A --project value repeated on the command line (a caller mistake, or
+        the caller resolving the same project twice) must not re-run the three
+        paginated terminal-state queries for it — dedupe the id list itself,
+        not just the resulting candidates, same as linear-relations.py /
+        linear-ready.py."""
+        candidates, calls, scope = self._run(
+            ["p-1", "p-1"], {"p-1": [{"id": "i-1", "completedAt": "2026-01-01"}]}
+        )
+        self.assertEqual(calls.count("p-1"), 3)  # once per terminal pass, not six
+        self.assertEqual([c["id"] for c in candidates], ["i-1"])
+        self.assertIn("projects=p-1", scope)
+        self.assertNotIn("p-1,p-1", scope)
+
+
+class ProjectFlagWiringTests(unittest.TestCase):
+    """The multi-project tests above hand collect_aged a ready-made list. This
+    drives the real parser, so reverting --project to default=None or to a
+    scalar (which would iterate a UUID character by character) fails here."""
+
+    def _sweep(self, *flags):
+        calls = []
+
+        def fake_find(key, team, project, state_type, ts_field, cutoff):
+            calls.append(project)
+            return []
+
+        original_find, original_key, original_argv = (
+            linear_archive.find,
+            linear_archive.get_key,
+            sys.argv,
+        )
+        linear_archive.find = fake_find
+        linear_archive.get_key = lambda: "k"
+        sys.argv = [
+            "linear-archive.py",
+            "--team",
+            "PreThink",
+            "--older-than",
+            "10",
+            *flags,
+        ]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                linear_archive.main()
+        finally:
+            linear_archive.find = original_find
+            linear_archive.get_key = original_key
+            sys.argv = original_argv
+        return calls
+
+    def test_repeated_project_flag_reaches_the_sweep_intact(self):
+        calls = self._sweep("--project", "p-1", "--project", "p-2")
+        self.assertEqual(sorted(set(calls)), ["p-1", "p-2"])
+
+    def test_no_project_flag_sweeps_the_whole_team(self):
+        """Also the only test that catches a revert to default=None: argv
+        supplies a list whenever --project is passed, so the flag-less run is
+        where dict.fromkeys(None) blows up."""
+        self.assertEqual(self._sweep(), [None] * 3)  # once per terminal pass
 
 
 class TerminalPassesTests(unittest.TestCase):
@@ -284,7 +405,7 @@ class NamedIssueTests(RefLookupCase):
 
     def test_ignored_sweep_flags_are_announced(self):
         args = argparse.Namespace(
-            team="PreThink", project=PROJECT_UUID, older_than=7, issues=["PRE-12"]
+            team="PreThink", project=[PROJECT_UUID], older_than=7, issues=["PRE-12"]
         )
         original = linear_archive.gql
         linear_archive.gql = lambda key, query, variables=None: {
