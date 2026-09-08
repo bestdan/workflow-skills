@@ -9,7 +9,17 @@
 # by whatever `linear.api_key_resolver` names (local config only; `op` by
 # default). This harness only ever BRIDGES config values onto the environment
 # of the script under test and asks the shared helper whether the result
-# resolves — it never resolves a secret itself.
+# resolves — it never resolves a secret itself, with one narrow exception: the
+# project-id fallback below queries the API directly and resolves in-process,
+# the same carve-out test-linear-relations-live.sh makes for its enum guard.
+#
+# With an APPROVAL-BASED resolver (e.g. opx) that means SIX dialogs per run —
+# the probe, the project-id fallback, and each of the four dry-run invocations
+# of the script under test — since each resolve is separately approved and the
+# session is invalidated between them. That is the resolver working as designed,
+# not a bug; use `LINEAR_API_KEY=… bash <this>` to run it with a single
+# pre-resolved key instead. (The bad-key run passes its own bogus key inline, so
+# it never resolves.)
 # With no key it SKIPS and exits 0 — this keeps `check.sh` green for keyless
 # devs and keeps CI keyless *by construction*: a Linear personal API key is a
 # full-account bearer token that must never live in CI secrets (see
@@ -239,8 +249,14 @@ if len(ids) < 2:
                         break
                 if len(ids) >= 2:
                     break
-    except Exception:
-        pass  # can't resolve/reach Linear right now — assertions below just skip
+    except Exception as e:
+        # Name the failure on stderr rather than swallowing it. stdout is the id
+        # list, so this cannot corrupt it. Reporting matters most under an
+        # approval-based resolver: `opx` invalidates the `op` session after each
+        # read (dev_docs/auth_key_access.md), so the earlier --probe can consume
+        # the approval and this resolve then raises — and the skip note below
+        # would otherwise blame an empty config that is not the reason.
+        print("project lookup failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
 
 for i in ids[:2]:
     print(i)
@@ -319,6 +335,11 @@ def ok(m):
     print("ok   - " + m)
 
 
+def skip(m):
+    # Distinct from ok(): a section that never ran is not a section that passed.
+    print("skip - " + m)
+
+
 def bad(m, x=""):
     global fails
     fails += 1
@@ -382,8 +403,9 @@ team_cands = candidates(team_text)
 
 # --- project scoping (PRE-416: repeatable --project) ----------------------------
 if not multi_ok:
-    ok("project-scoping assertions skipped — fewer than two project ids resolvable "
-       "(no linear.projects entries and no live team projects to fall back on)")
+    skip("project-scoping assertions — fewer than two project ids resolvable. "
+         "Either no linear.projects entries and no live team projects to fall "
+         "back on, or the lookup itself failed; it prints its reason on stderr.")
 else:
     one_text = open(one_out).read()
     dupe_text = open(dupe_out).read()
@@ -419,6 +441,10 @@ else:
         bad("dupe: candidate identifier set equals one's",
             "one=%s dupe=%s" % (sorted(one_cands)[:5], sorted(dupe_cands)[:5]))
 
+    if multi_rc == 0:
+        ok("multi: exits 0")
+    else:
+        bad("multi: exits 0", "rc=%d %s" % (multi_rc, open(multi_err).read()[:200]))
     hm3 = header(multi_text)
     multi_projects = hm3.group(3).split(",") if hm3 and hm3.group(3) else None
     if multi_projects == [p1, p2]:
