@@ -1,7 +1,7 @@
 ---
 description: Retire completed/canceled work items — a handler-dispatched archive/prune of terminal-state tasks past an age threshold
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(mkdir *), Bash(op *), Bash(curl *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
-argument-hint: "[--older-than <N>d] [--issues <refs>] [dry-run]"
+argument-hint: "[--older-than <N>d] [--issues <refs>] [--all] [dry-run]"
 ---
 
 # Archive Tasks
@@ -117,6 +117,13 @@ parse.
   and skipped, never archived), and `dry-run` still works.
   **`linear` handler only** for now; on `repo-pr`/`gh-issue`/`jira`, stop and
   say the handler has no named-issue mode rather than falling back to a sweep.
+- **`--all`** — the explicit override for a repo whose issues are all task
+  issues: it drops the configured `gh-issue.labels` scope and sweeps every
+  closed issue in the repo, still bound by the resolved age threshold like any
+  other sweep. **`gh-issue` handler only**; on `repo-pr`/`linear`/`jira`, stop
+  and say the handler has no such scope mode rather than falling back to a
+  sweep. The safety default is unchanged: without `--all` and with no
+  configured labels, the command still refuses (see below).
 - **`dry-run`** — list the candidates and stop. Change nothing. (A run with no
   resolvable threshold **and** no `--issues` is dry-run-only regardless — see
   below.)
@@ -173,8 +180,8 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 If the relative path doesn't resolve, find the handler file with **Glob**
 (`**/commands/handlers/<handler>-archive.md`) and Read the result. Pass the
-resolved threshold — **or the `--issues` refs** — and the `dry-run` flag
-through.
+resolved threshold — **or the `--issues` refs** — and the `--all` and `dry-run`
+flags through.
 
 ## 2. Report
 
