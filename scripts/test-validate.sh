@@ -391,6 +391,129 @@ else
   bad "no fenced shell logic: should exit 0, got $rc_h"
 fi
 
+# --- crush reviewer asset drift ---------------------------------------
+# CRUSH_MD/CRUSH_ASSET in validate.py are fixed ROOT-relative paths (they
+# check the real files, not a parameterized target), so exercising them needs
+# a fixture with a real skills/co-review/SKILL.md present — otherwise the
+# fixture's own skill-directory and README-count checks fire as unrelated
+# noise on top of whatever this section is testing.
+make_crush_plugin_fixture() {
+  # make_crush_plugin_fixture <dir>
+  local dir="$1"
+  make_plugin_fixture "$dir"
+  mkdir -p "$dir/skills/co-review/reviewers/assets"
+  cat >"$dir/skills/co-review/SKILL.md" <<'MD'
+---
+description: fixture co-review skill
+---
+
+body
+MD
+  cat >"$dir/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+body
+MD
+  cat >"$dir/README.md" <<'MD'
+This fixture plugin has 1 skill, 1 command, and 0 subagents.
+MD
+}
+
+# --- Fixture (i): consistent prose/asset is clean -------------------------
+DIR_I="$BASE/crush-roster-pass"
+make_crush_plugin_fixture "$DIR_I"
+cat >"$DIR_I/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_I/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_i="$(uv run "$DIR_I/scripts/validate.py" 2>&1)"
+rc_i=$?
+assert_not_contains "crush roster: consistent prose/asset is clean" "$out_i" "crush.md:"
+if [ "$rc_i" -eq 0 ]; then
+  ok "crush roster: consistent prose/asset exits 0"
+else
+  bad "crush roster: consistent prose/asset should exit 0, got $rc_i"
+fi
+
+# --- Fixture (j): version gate vs. roster link mismatch is flagged --------
+DIR_J="$BASE/crush-roster-version-mismatch"
+make_crush_plugin_fixture "$DIR_J"
+cat >"$DIR_J/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.91.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_J/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_j="$(uv run "$DIR_J/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: version gate/link mismatch is flagged" "$out_j" \
+  "version gate 'v0.92.0' != roster link tag 'v0.91.0'"
+
+# --- Fixture (k): roster tool-count mismatch is flagged --------------------
+DIR_K="$BASE/crush-roster-count-mismatch"
+make_crush_plugin_fixture "$DIR_K"
+cat >"$DIR_K/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (5 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_K/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_k="$(uv run "$DIR_K/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: tool-count mismatch is flagged" "$out_k" \
+  "roster prose claims 5 tools but"
+
+# --- Fixture (l): a missing/wrong tool name is flagged ---------------------
+DIR_L="$BASE/crush-roster-name-mismatch"
+make_crush_plugin_fixture "$DIR_L"
+cat >"$DIR_L/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `write`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_L/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_l="$(uv run "$DIR_L/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: name mismatch names the asset-only tool" "$out_l" "'bash'"
+assert_contains "crush roster: name mismatch names the prose-only tool" "$out_l" "'write'"
+
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"

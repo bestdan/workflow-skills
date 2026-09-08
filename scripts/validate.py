@@ -487,6 +487,120 @@ else:
             f"claims (skills,commands,subagents)={claimed} but actual={actual}",
         )
 
+
+# --- crush reviewer asset drift ---
+# skills/co-review/reviewers/crush.md carries three prose facts that must stay
+# in sync with skills/co-review/reviewers/assets/crush-readonly.json: the
+# pinned version (the pre-flight probe's gate sentence vs. the config.go link
+# it points at), the disabled-tool count, and the disabled-tool names
+# themselves. Nothing else in the gate reads either file, so drift between
+# them is silent until a live upgrade — see scripts/test-crush-roster-live.sh
+# for the check that actually re-derives the roster from upstream; this one
+# only catches the asset and the prose disagreeing with EACH OTHER.
+CRUSH_MD = ROOT / "skills" / "co-review" / "reviewers" / "crush.md"
+CRUSH_ASSET = (
+    ROOT / "skills" / "co-review" / "reviewers" / "assets" / "crush-readonly.json"
+)
+CRUSH_GATE_VERSION_RE = re.compile(r"pinned \*\*`crush version v(\d+\.\d+\.\d+)`\*\*")
+CRUSH_LINK_VERSION_RE = re.compile(
+    r"\]\(https://github\.com/charmbracelet/crush/blob/v(\d+\.\d+\.\d+)/internal/config/config\.go\)"
+)
+# Captures the tool count and the backtick-quoted roster between "... is" and
+# the sentence-ending period before "The asset disables all of them" — DOTALL
+# because the roster line-wraps in the source.
+CRUSH_ROSTER_SENTENCE_RE = re.compile(
+    r"The list the asset was built against \((\d+) tools,.*?\) is (.+?)\.\s"
+    r"The asset disables all of them",
+    re.DOTALL,
+)
+# Each roster token is either a bare tool name (`agent`) or the abbreviated
+# `` `lsp_*` (8) `` form standing in for 8 lsp_-prefixed names.
+CRUSH_TOKEN_RE = re.compile(r"`([a-zA-Z0-9_*]+)`(?:\s*\((\d+)\))?")
+
+# A rename or move of either file must not silently retire this check, so a
+# one-sided disappearance is an error. Both absent is the only quiet case: a
+# plugin that ships no crush reviewer at all has nothing to keep in sync.
+if CRUSH_MD.exists() != CRUSH_ASSET.exists():
+    err(
+        rel(CRUSH_MD if CRUSH_ASSET.exists() else CRUSH_ASSET),
+        "crush reviewer prose and asset must exist together — one is missing, "
+        "so the roster drift check cannot run",
+    )
+if CRUSH_MD.exists() and CRUSH_ASSET.exists():
+    crush_text = CRUSH_MD.read_text()
+    gate_m = CRUSH_GATE_VERSION_RE.search(crush_text)
+    link_m = CRUSH_LINK_VERSION_RE.search(crush_text)
+    roster_m = CRUSH_ROSTER_SENTENCE_RE.search(crush_text)
+    if not gate_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the pinned 'crush version vX.Y.Z' gate sentence",
+        )
+    if not link_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the config.go roster link carrying the pinned tag",
+        )
+    if not roster_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the 'The list the asset was built against (N tools, ...) "
+            "is ...' roster sentence",
+        )
+    if gate_m and link_m and gate_m.group(1) != link_m.group(1):
+        err(
+            rel(CRUSH_MD),
+            f"version gate 'v{gate_m.group(1)}' != roster link tag 'v{link_m.group(1)}'",
+        )
+    if roster_m:
+        prose_count = int(roster_m.group(1))
+        prose_names: set[str] = set()
+        prose_lsp_count = None
+        for tok in CRUSH_TOKEN_RE.finditer(roster_m.group(2)):
+            name, paren = tok.group(1), tok.group(2)
+            if name == "lsp_*":
+                prose_lsp_count = int(paren) if paren else 0
+            else:
+                prose_names.add(name)
+        asset = json.loads(CRUSH_ASSET.read_text())
+        disabled = asset.get("options", {}).get("disabled_tools", [])
+        if not isinstance(disabled, list):
+            err(rel(CRUSH_ASSET), "options.disabled_tools must be a list")
+        else:
+            asset_names = set(disabled)
+            asset_lsp = {n for n in asset_names if n.startswith("lsp_")}
+            asset_other = asset_names - asset_lsp
+            if prose_count != len(disabled):
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose claims {prose_count} tools but "
+                    f"{rel(CRUSH_ASSET)} disables {len(disabled)}",
+                )
+            if prose_lsp_count is None:
+                err(rel(CRUSH_MD), "roster prose is missing the 'lsp_*' (K) token")
+            elif prose_lsp_count != len(asset_lsp):
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose claims {prose_lsp_count} lsp_ tools but "
+                    f"{rel(CRUSH_ASSET)} has {len(asset_lsp)}",
+                )
+            if prose_names != asset_other:
+                missing_from_prose = asset_other - prose_names
+                missing_from_asset = prose_names - asset_other
+                detail = []
+                if missing_from_prose:
+                    detail.append(
+                        f"in asset but not prose: {sorted(missing_from_prose)}"
+                    )
+                if missing_from_asset:
+                    detail.append(
+                        f"in prose but not asset: {sorted(missing_from_asset)}"
+                    )
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose names disagree with {rel(CRUSH_ASSET)} ({'; '.join(detail)})",
+                )
+
 for w in warnings:
     print(f"  ⚠ {w}")
 
