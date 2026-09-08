@@ -4,8 +4,9 @@
 This workspace's Linear/GitHub integration treats a bare issue id (``PRE-123``)
 appearing *anywhere* in a merged PR's title or body as a closing reference. A PR
 that merely mentions a sibling issue therefore sweeps that sibling to Done, with
-no branch, no PR, and no code. It has done so repeatedly, and it's why that
-integration got disabled.
+no branch, no PR, and no code. The culprit is a repo-local merge workflow that
+scrapes ids out of PR text, not Linear's own GitHub integration -- see
+commands/handlers/linear-claim.md, "Why the integration is inert".
 
 This script is the standalone backstop that detects those false closures and
 optionally restores them. (See commands/handlers/linear-false-closures.md for
@@ -369,7 +370,7 @@ def _ts(s):
 def closing_mention_pr(issue, prs):
     """The merged PR that most likely tripped this false closure, or None.
 
-    The over-close integration fires on a bare id mention in a merged PR and
+    The over-closing automation fires on a bare id mention in a merged PR and
     closes the issue seconds later. So among the merged PRs that bare-mention
     the id, the culprit is the one merged at or just before the completion
     instant. Reported only, to make the flag actionable -- never acted on.
