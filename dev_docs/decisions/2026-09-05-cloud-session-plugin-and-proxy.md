@@ -6,13 +6,16 @@ and is allowed to go stale. It is the companion to
 [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md), which
 measured the same questions in a **routine**.
 
-**Amended 2026-09-07** after a second set of routine probes corrected three claims this
-file made. Those probes are recorded in `2026-09-07-cloud-routine-plugins-and-gh.md`,
-which lands in this directory with **PR #498** — open at the time of writing, so the
-run ids below are cited directly and stay checkable whichever change merges first. The measurements below are unchanged and still
-carry their 2026-09-05 date; what changed is what may be concluded from them. Each
-amendment says so where it sits, and names the earlier wording, so a reader who saw the
-first version can tell what moved.
+**Amended 2026-09-07 and 2026-09-08.** Routine probes on 09-07 corrected three claims
+this file made; a second cloud-session probe on 09-08 corrected two more and added four
+findings. The 09-07 probes are recorded in `2026-09-07-cloud-routine-plugins-and-gh.md`,
+which lands in this directory with **PR #498** — open at the time of writing, so run ids
+are cited directly and stay checkable whichever change merges first. The 09-08 probe is
+session `session_01ERAh8hmMbqq4Xu2hfqbEcA` and is recorded below.
+
+**The 2026-09-05 measurements are unchanged and still carry their date.** What changed
+is what may be concluded from them. Each amendment says so where it sits and names the
+earlier wording, so a reader who saw the first version can tell what moved.
 
 ## Why this exists
 
@@ -48,7 +51,7 @@ here**, and the flag stays off.
 
 ## Measurements
 
-### The committed declaration installed nothing
+### The committed plugin declaration installed nothing
 
 ```
 $ claude plugin list
@@ -64,7 +67,13 @@ $ find / -name 'gh-issue-state.py'     # no output, rc=1
 
 `$CLAUDE_PLUGIN_ROOT` is **empty**, not merely pointing somewhere unexpected. There is
 no assets directory anywhere on the box. The declaration was present and correct on the
-cloned HEAD and was ignored.
+cloned HEAD, and the **`extraKnownMarketplaces` and `enabledPlugins` keys** had no
+effect.
+
+**The rest of the same file did take effect**, which the 2026-09-08 probe established
+and an earlier draft of this section obscured by saying the declaration "was ignored".
+`dotfiles`' committed `hooks` block ran its `SessionStart` hook, and that hook is what
+put `gh` on this box. Read this section as being about the plugin keys only.
 
 ### It is not a network or a scoping problem
 
@@ -178,6 +187,39 @@ mcp__github__issue_read(method=get_labels, …)
   → {"labels":[{"name":"est:1", …}],"totalCount":1}
 ```
 
+### 2026-09-08: the credentialed-attach experiment, and why it did not run here
+
+Session `session_01ERAh8hmMbqq4Xu2hfqbEcA`, `claude --cloud` from the CLI, Claude Code
+2.1.263, source `bestdan/dotfiles` only, so `bestdan/workflow-skills` was **not** a
+source. Every command captured its own exit code.
+
+**`add_repo` does not exist in a cloud session.** Four spellings were searched
+(`add_repo`, `mcp__Claude_Code_Remote__add_repo`, `mcp__claude-code-remote__add_repo`,
+`mcp__github__add_repo`); all returned `No matching deferred tools found`. The MCP
+denial hedges in the same direction: _"If the add_repo tool
+(mcp__claude-code-remote__add_repo) is available in this session…"_. It **is** available
+in a routine, where it succeeded — `{"access":"push","owner":"bestdan","repo":"dotfiles"}`
+on the first call, no two-step dance (run `cse_014DT5cUvE7zGfVjix9fW7fC`).
+
+So the attach half is proven and the effect half is not:
+
+| question                                     | answer                 |
+| -------------------------------------------- | ---------------------- |
+| Does `add_repo` accept `access:"push"`?      | **Yes** — in a routine |
+| Does it then make `gh` REST reach that repo? | **UNTESTED**           |
+
+The routine that could attach had **no `gh`** to test with. The session that had `gh`
+had **no `add_repo`**. Both halves have never held at once, and that — not a refusal —
+is why the question is open.
+
+**The two 403 bodies differ, and only the not-a-source one names the remedy.**
+Source-clone (`dotfiles`): `GitHub access is not enabled for this session. An org admin
+must connect the Claude GitHub App for this organization.` Not-a-source
+(`workflow-skills`): `GitHub access to this repository is not enabled for this session.
+Use add_repo to request access. If add_repo answers that read access is already
+available and you need GitHub API or write access, call add_repo again with
+access:"push" to attach the repository with credentials.`
+
 ## What this settles
 
 1. **A committed `.claude/settings.json` does not, on its own, install a plugin into a
@@ -186,6 +228,20 @@ mcp__github__issue_read(method=get_labels, …)
    makes `remote_batch: true` safe was wrong; they were corrected in the same change as
    this file. **Which of the declaration's two keys was ignored is _not_ settled** — see
    "Which of the declaration's two keys was ignored" above.
+
+   **The file itself is NOT ignored, and an earlier draft of this finding implied it
+   was.** Measured 2026-09-08 in session `session_01ERAh8hmMbqq4Xu2hfqbEcA`: the same
+   repo's committed `hooks` block **ran**. Its `SessionStart` hook apt-installed `gh`,
+   `zsh`, `shellcheck` and `just` — `gh` is **not in the base image**, and that hook is
+   where it comes from. So the correct statement is narrow: the **plugin-declaration
+   keys** did not take effect; the **hooks** key did.
+
+   That also dissolves an apparent contradiction rather than leaving it open. `gh`
+   presence had looked like a property of the environment that changed between runs — a
+   routine sourcing `bestdan/workflow-skills` had no `gh`, while sessions sourcing
+   `bestdan/dotfiles` had it. It is not the environment. It is whether the **source
+   repo** commits a hook that installs `gh`. `workflow-skills` commits no `.claude/`
+   files at all; `dotfiles` commits that hook.
 2. **`gh` exists in a cloud session and had no working credential in the session as
    provisioned**, reads 403 alongside writes. So the 2026-08-24 routine finding and this
    session's finding agree in effect — no usable `gh` — while disagreeing on the
@@ -196,11 +252,34 @@ mcp__github__issue_read(method=get_labels, …)
 3. **The GitHub MCP connector remains the credentialed channel**, in a cloud session as
    in a routine, and it **can** perform the `gh-issue` label write. It replaces the whole
    label set, matching the REST path — so validate-then-replace stays the rule on both.
+
+   **But it is repo-scoped, and this file previously read as though it were not.**
+   Measured 2026-09-08: `mcp__github__list_issues` succeeded on the attached source repo
+   and was **refused** on one that was not attached — `Access denied: repository
+   "bestdan/workflow-skills" is not configured for this session. Allowed repositories:
+   bestdan/dotfiles.` So the connector is not a way around repository scoping. It is
+   scoped the same way `gh` is; it differs by being credentialed **within** that scope.
 4. **Closing the plugin gap alone would not be enough.** `gh` stays broken either way.
    Both must be solved before `remote_batch: true` dispatches anything that works.
 5. **Nothing about the marketplace clone is blocked.** Proxy repository scoping does not
    stop a public unattached repo from being cloned over plain HTTPS.
-6. **A cloud-environment setup script does install the plugin** — measured after this
+6. **`git` is credentialed for the source repo where `gh` REST is not.** Measured
+   2026-09-08 in the same session, on the same repo, seconds apart: `git push --dry-run`
+   to `bestdan/dotfiles` reported `* [new branch] … Would set upstream`, while
+   `gh api repos/bestdan/dotfiles` returned the org-App 403. Both tokens read
+   `proxy-injected`; auth is injected by an agent proxy, and the two paths through it do
+   not agree. A handler that reaches GitHub through `git` is in a different position
+   from one that reaches it through `gh api` — and this one uses `gh api`.
+7. **`gh auth status` reports failure and exits 0.** Confirmed a third time here, after a
+   cloud session on 2026-09-05 and a routine on 2026-09-07. `gh api user` also succeeds
+   on the same dead credential, because it is not repo-scoped. Neither is a usable health
+   check; see `commands/do-tasks.md` §4 step 5.
+8. **`gh pr list` is refused as GraphQL, not as REST.** Verbatim: `This GraphQL query
+   (PullRequestList, sent by gh pr list) is not enabled for this session — only the
+   pinned set of PR-review operations is served. Use REST via
+   gh api repos/{owner}/{repo}/... instead.` So a GraphQL refusal and a REST 403 are
+   different failures and must not be read as one.
+9. **A cloud-environment setup script does install the plugin** — measured after this
    probe, and it is the route that works. The environment here reported
    `No setup script configured`; an environment that runs one (`claude plugin
    marketplace add` plus `claude plugin install` before the session starts) comes up with
@@ -232,14 +311,21 @@ mcp__github__issue_read(method=get_labels, …)
   proxy forbids it", and **not** as "`gh` cannot work in a cloud session". The question is
   **unanswered, not answered no.**
 
-- **Whether a credentialed attach fixes it — the experiment nobody has run.** Calling
+- **Whether a credentialed attach fixes it — attempted twice, still open.** Calling
   `add_repo` with `access:"push"` and re-probing is what would settle reading 2, and it
   is the one result that could move `gh-issue.remote_batch` off `false` for a reason
-  other than caution. A probe design agreed jointly is in the "Reproducing" section of
-  the record landing in PR #498. Its load-bearing rule: **capture the exit code
-  alongside the body for every call.** Every `gh` finding across both probes turned on
-  rc, and `gh auth status` reports failure while exiting 0 — a stdout-only probe
-  reproduces exactly the blind spot that made it look like a working health check.
+  other than caution. **The obstacle is no longer that nobody has tried.** It is that
+  the two halves live in different places: `add_repo` exists in a routine and not in a
+  cloud session, while `gh` arrives from the **source repo's** committed `SessionStart`
+  hook. A routine sourcing a repo with no such hook attaches successfully and has no
+  `gh` to test with; a session sourcing a repo that installs `gh` has no `add_repo`.
+  Whoever runs this next must satisfy both **in one run** — source a repo whose hook
+  installs `gh`, in an environment where `add_repo` is available — and check `which gh`
+  first rather than assuming. A probe design agreed jointly is in the "Reproducing"
+  section of the record landing in PR #498. Its load-bearing rule: **capture the exit
+  code alongside the body for every call.** Every `gh` finding across three probes
+  turned on rc, and `gh auth status` reports failure while exiting 0 — a stdout-only
+  probe reproduces exactly the blind spot that made it look like a working health check.
 - **Whether any of this differs on an organization-owned repo, or on a session started
   from the web rather than the CLI.** One session, one personal repo.
 
