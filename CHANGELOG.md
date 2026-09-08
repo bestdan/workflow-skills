@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.28.1] - 2026-09-08
+
+### Fixes
+
+- close the three tools crush's denylist never named (#518) (e654ed7)
+
 ## [2.28.0] - 2026-09-08
 
 ### Features
