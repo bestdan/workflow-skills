@@ -12,12 +12,11 @@ config schema (`linear.projects`, the Unassigned bucket), and the preflight
 pattern.
 
 > **Hard note — this sweep cannot reproduce the over-close bug that prompted
-> it.** That bug was a repo-local GitHub Actions workflow in `bestdan/finplan`
-> which scraped `<TEAM>-NNN` ids out of PR title and body text on merge and
-> moved **every** match to `Done`, closing issues a PR had merely cited (see
-> `commands/handlers/linear-claim.md`, "Why the integration is inert", for the
-> full account — it was not Linear's own integration, which has never fired on
-> these repositories). This sweep never parses issue ids out of PR text at all.
+> it.** That bug was a repo-local GitHub Actions workflow which scraped
+> `<TEAM>-NNN` ids out of PR title and body text on merge and moved **every**
+> match to `Done`, closing issues a PR had merely cited — not Linear's own
+> integration (see `commands/handlers/linear-claim.md`, "Whether Linear's
+> integration is live"). This sweep never parses issue ids out of PR text at all.
 > It works in the opposite direction: it starts from the issues it already
 > holds in a started-type state, resolves **that issue's own** structurally-
 > linked PR (an explicit Linear `links` attachment, or a title/branch match

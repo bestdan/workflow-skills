@@ -3,9 +3,10 @@
 
 A repo-local merge workflow scraped bare issue ids (``PRE-123``) out of a merged
 PR's title and body and swept every match to Done. A PR that merely mentioned a
-sibling issue therefore closed it, with no branch, no PR, and no code. This was
-not Linear's own GitHub integration, which has never fired on these repositories
--- see commands/handlers/linear-claim.md, "Why the integration is inert".
+sibling issue therefore closed it, with no branch, no PR, and no code. Linear's
+own GitHub integration is not the source: it links by branch name and magic
+word, per its documentation. See commands/handlers/linear-claim.md, "Whether
+Linear's integration is live".
 
 This script is the standalone backstop that detects those false closures and
 optionally restores them. (See commands/handlers/linear-false-closures.md for
