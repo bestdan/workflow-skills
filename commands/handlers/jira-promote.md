@@ -131,7 +131,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
-`**/handlers/assets/jira-resolve-transition.py`. `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. On success the helper prints `<id>\t<to.name>` — capture the id as `<transition-id>`. On `NONE` (exit 2), **do not guess** — surface the configured key and every transition's target name from the fetched response so the user can fix the config, and skip that issue.
+`**/handlers/assets/jira-resolve-transition.py`. `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. On success the helper prints `<id>\t<to.name>` — capture the id as `<transition-id>`. On exit 2 (`NONE` or `AMBIGUOUS`), **do not guess** — surface the configured key and every transition's target name from the fetched response so the user can fix the config, and skip that issue.
 
 Then transition:
 

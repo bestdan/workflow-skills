@@ -104,7 +104,7 @@ def resolve_category(transitions, category, exclude, prefer):
 
 def resolve_exact(transitions, status):
     """Exact-mode resolution: `to.name`, falling back to the transition's own
-    `name`. Returns (Transition, None) or (None, ("NONE", []))."""
+    `name`. Returns (Transition, None) or (None, ("NONE"/"AMBIGUOUS", names))."""
     lowered = status.lower()
     matches = [t for t in transitions if t.to_name.lower() == lowered]
     if not matches:
@@ -113,6 +113,8 @@ def resolve_exact(transitions, status):
         ]
     if not matches:
         return None, ("NONE", [])
+    if len(matches) > 1:
+        return None, ("AMBIGUOUS", [t.to_name for t in matches])
     return matches[0], None
 
 

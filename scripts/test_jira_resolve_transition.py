@@ -126,6 +126,17 @@ class TestExactMatchFallback(ResolveTestCase):
         self.assertEqual(code, 2)
         self.assertEqual(out, "NONE\n")
 
+    def test_ambiguous_when_two_transitions_share_the_target_name(self):
+        payload = {
+            "transitions": [
+                _transition("61", "Done", "done"),
+                _transition("62", "Done", "done"),
+            ]
+        }
+        code, out = self.call(payload, ["--exact", "Done"])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "AMBIGUOUS\nDone\nDone\n")
+
 
 class TestAmbiguous(ResolveTestCase):
     """Several candidates remain and --prefer either wasn't given or doesn't

@@ -77,9 +77,9 @@ date is older than the threshold. Never touch issues in the `To Do` or
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    `**/handlers/assets/jira-resolve-transition.py`. On success it prints
    `<id>\t<to.name>`; call `<atlassian-mcp>__transitionJiraIssue` with that id.
-   On `NONE` (exit 2) — no available transition reaches `archive_status` for
-   this issue — record it as skipped and continue; one unreachable issue must
-   not abort the rest.
+   On exit 2 (`NONE` or `AMBIGUOUS`) — no single transition reaches
+   `archive_status` for this issue — record it as skipped and continue; one
+   unreachable issue must not abort the rest.
 
 6. **Report.** Count transitioned, any skipped (no reachable transition), and in
    dry-run the candidate list plus "nothing archived".
