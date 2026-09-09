@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.37.0] - 2026-09-09
+
+### Features
+
+- generalise gh-issue-claim.py acquire for shared claim-lock prose (#549) (61d77db)
+
 ## [2.36.0] - 2026-09-09
 
 ### Features
