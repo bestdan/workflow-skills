@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.38.0] - 2026-09-09
+
+### Features
+
+- resolve PRs and merge state in a tested script (#550) (4f6dc5d)
+
 ## [2.37.0] - 2026-09-09
 
 ### Features
