@@ -89,6 +89,7 @@ CONSUMER_PYTHON=3.9
 # default, which would follow whatever interpreter uvx happened to resolve and
 # make diagnostics differ between a laptop and CI.
 DEV_FILES=(
+  scripts/build-copilot-instructions.py
   scripts/bump-version.py
   scripts/plan-graph.py
   scripts/task-scan.py
