@@ -97,11 +97,8 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
   pointing at a **`Done`** issue is _satisfied_, not a bug → report it as
   satisfied and offer optional cleanup (low priority); do **not** auto-remove.
 - **Prose → native reconciliation (the core fix).** The dependency-phrase
-  table (`unblocks`, `blocked on`, `blocked by`, `relies on`, `depends on`,
-  `requires`, `with X in place`, `re-scoped per`, `part of … plan`, plus a
-  bare `<issue id="…" href="…/PRE-NNN/…">` or `PRE-NNN` mention) lives once, in
-  `commands/handlers/assets/_body_refs.py` — shared with the gh-issue handler,
-  not restated here.
+  table lives once, in `commands/handlers/assets/_body_refs.py` — shared
+  with the gh-issue handler, not restated here.
 
   - **Fast path.** `linear-relations.py` already ran that table over every
     issue's description while building the graph (§Load). Read its top-level

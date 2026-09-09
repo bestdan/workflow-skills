@@ -82,10 +82,14 @@ API = "https://api.linear.app/graphql"
 # `<issue id="PRE-NNN" href="…">` mention (the `tag_id` group) or a bare
 # `PRE-NNN` (the `bare_id` group), never a fragment of a longer word —
 # `(?<![\w-])`/`(?![\w-])` refuse a match inside e.g. `PRE-142a` or
-# `subPRE-142`.
+# `subPRE-142`. `re.I` so a hand-typed lowercase mention (`pre-142`) still
+# matches; `_body_refs.parse()`'s self-exclusion already compares
+# case-insensitively, but that's moot if the pattern never matches lowercase
+# in the first place.
 LINEAR_BODY_REF_PATTERN = re.compile(
     r'<issue\b[^>]*\bid="(?P<tag_id>[A-Z]+-\d+)"[^>]*>'
-    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])"
+    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])",
+    re.I,
 )
 
 # linear.team may be a team NAME or a UUID id (see linear-common.md / linear-config.md).

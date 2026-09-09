@@ -26,7 +26,8 @@ _spec.loader.exec_module(body_refs)
 GH_ID_PATTERN = re.compile(r"(?<![\w./-])#(?P<num>\d+)\b")
 LINEAR_ID_PATTERN = re.compile(
     r'<issue\b[^>]*\bid="(?P<tag_id>[A-Z]+-\d+)"[^>]*>'
-    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])"
+    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])",
+    re.I,
 )
 
 
@@ -129,6 +130,14 @@ class SelfExclusionTests(unittest.TestCase):
         )
         self.assertEqual(refs, [])
 
+    def test_case_insensitive_matching_finds_a_lowercase_non_self_target(self):
+        """Proves the pattern actually MATCHES lowercase, not just that a
+        lowercase self-mention stays excluded either way — a pattern that
+        never matched lowercase at all would pass the test above vacuously.
+        """
+        refs = body_refs.parse("This depends on pre-189.", "PRE-142", LINEAR_ID_PATTERN)
+        self.assertEqual([r["target"] for r in refs], ["pre-189"])
+
 
 class CodeSpanTests(unittest.TestCase):
     """A mention inside a code span is excluded — decided and pinned here."""
@@ -179,6 +188,39 @@ class CrossRepoExclusionTests(unittest.TestCase):
     def test_qualified_mention_not_matched(self):
         refs = body_refs.parse("See other/repo#2 for prior art.", "1", GH_ID_PATTERN)
         self.assertEqual(refs, [])
+
+
+class WindowBoundaryTests(unittest.TestCase):
+    """A phrase near one reference must never bleed onto a NEIGHBORING one.
+
+    Regression for the reported case: a naive fixed-width window let
+    "Blocked by #2" leak into #3's context and misclassify #3 as blocked_by
+    too, which would write a real dependency edge that was never claimed.
+    """
+
+    def test_phrase_does_not_bleed_across_a_clause_boundary(self):
+        refs = body_refs.parse("Blocked by #2; see #3 for context.", "1", GH_ID_PATTERN)
+        by_target = {r["target"]: r for r in refs}
+        self.assertEqual(by_target["2"]["direction"], "blocked_by")
+        self.assertEqual(by_target["3"]["direction"], "related")
+        self.assertEqual(by_target["3"]["phrase"], "mention")
+
+    def test_phrase_does_not_bleed_across_a_sentence_boundary(self):
+        refs = body_refs.parse(
+            "This is blocked by #2. See #3 for context.", "1", GH_ID_PATTERN
+        )
+        by_target = {r["target"]: r for r in refs}
+        self.assertEqual(by_target["2"]["direction"], "blocked_by")
+        self.assertEqual(by_target["3"]["direction"], "related")
+        self.assertEqual(by_target["3"]["phrase"], "mention")
+
+    def test_two_independent_strong_phrases_each_apply_to_their_own_id(self):
+        refs = body_refs.parse(
+            "This depends on #2 and also requires #3.", "1", GH_ID_PATTERN
+        )
+        by_target = {r["target"]: r for r in refs}
+        self.assertEqual(by_target["2"]["phrase"], "depends on")
+        self.assertEqual(by_target["3"]["phrase"], "requires")
 
 
 if __name__ == "__main__":

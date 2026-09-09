@@ -123,13 +123,25 @@ def parse(body, self_id, id_pattern):
     """
     masked = _mask_code(body)
     self_norm = str(self_id).casefold()
+    # Matched up front, including self-mentions, so a neighboring reference's
+    # position bounds this one's context window even when the neighbor is
+    # excluded from the output below.
+    matches = list(id_pattern.finditer(masked))
     references = []
-    for match in id_pattern.finditer(masked):
+    for i, match in enumerate(matches):
         target = _extract_id(match)
         if target.casefold() == self_norm:
             continue
-        before = masked[max(0, match.start() - _BEFORE_WINDOW) : match.start()]
-        after = masked[match.end() : match.end() + _AFTER_WINDOW]
+        # Windows are clipped at the nearest OTHER reference, never just at a
+        # fixed character count: "Blocked by #2; see #3 for context." would
+        # otherwise let "Blocked by" — fully outside #3's own clause — fall
+        # inside a naive 60-char window and misclassify #3 as blocked_by too.
+        prev_end = matches[i - 1].end() if i > 0 else 0
+        next_start = matches[i + 1].start() if i + 1 < len(matches) else len(masked)
+        before_start = max(prev_end, match.start() - _BEFORE_WINDOW)
+        after_end = min(next_start, match.end() + _AFTER_WINDOW)
+        before = masked[before_start : match.start()]
+        after = masked[match.end() : after_end]
         phrase, direction, strength = _classify(before, after)
         references.append(
             {
