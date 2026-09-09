@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.34.0] - 2026-09-09
+
+### Features
+
+- add diff-anchor-check.py for the batched review POST (#546) (c2632a5)
+
 ## [2.33.0] - 2026-09-09
 
 ### Features
