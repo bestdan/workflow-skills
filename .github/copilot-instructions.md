@@ -59,7 +59,7 @@ tokens in someone's context window.
   force-track anything under it.
 - **`.github/copilot-instructions.md` and `.github/instructions/` are
   generated.** Copilot code review cannot follow links, so those files are a
-  flat copy of the marked spans in this file and `CONTRIBUTING.md`. Edit the
+  flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the
   rule where it lives, then rerun
   `python3 scripts/build-copilot-instructions.py`; the gate fails on drift.
 - **Don't commit state another system owns.** Linear, GitHub, and the changelog
