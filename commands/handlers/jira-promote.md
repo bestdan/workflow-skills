@@ -122,7 +122,16 @@ Otherwise, for each scored candidate, first **resolve the target status name to 
   issueIdOrKey: <KEY>
 ```
 
-From the returned `transitions[]`, pick the entry whose **target status** matches the resolved target status name (`ready_status`/`refinement_status`, whether set in config or chosen in step 3a) — `to.name == <status>` (fall back to the transition's own `name == <status>` for sites where they coincide). `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. Capture its `id` as `<transition-id>`. If no transition matches, **do not guess** — surface the configured key and the available transition names so the user can fix the config, and skip that issue.
+Write the response to a file and let the helper match the resolved target status name (`ready_status`/`refinement_status`, whether set in config or chosen in step 3a) against `to.name`, falling back to the transition's own `name` for sites where they coincide:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+  --exact "<status>" \
+  < <transitions-response.json>
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/jira-resolve-transition.py`. `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. On success the helper prints `<id>\t<to.name>` — capture the id as `<transition-id>`. On exit 2 (`NONE` or `AMBIGUOUS`), **do not guess** — surface the configured key and every transition's target name from the fetched response so the user can fix the config, and skip that issue.
 
 Then transition:
 

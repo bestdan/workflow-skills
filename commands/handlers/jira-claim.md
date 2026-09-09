@@ -210,7 +210,7 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
    - `issueIdOrKey`: `<KEY>`
    - `fields`: `{ "assignee": { "accountId": "<account_id>" } }`
 
-5. **Transition to In Progress.** `transitionJiraIssue` takes a transition **id**, not a status name, so resolve it per issue:
+5. **Transition to In Progress.** `transitionJiraIssue` takes a transition **id**, not a status name. Fetch the candidate's transitions, write the response to a file, and let the helper resolve the start-work one:
 
    ```
    <atlassian-mcp>__getTransitionsForJiraIssue
@@ -218,7 +218,13 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
      issueIdOrKey: <KEY>
    ```
 
-   From the returned `transitions[]`, consider only entries whose target status is in the `indeterminate` (In Progress) category (`to.statusCategory.key == "indeterminate"`), then resolve the start-work status: if exactly one such transition exists, use it; if several exist, prefer one whose `to.name` is `In Progress` (case-insensitive), and if none is named `In Progress`, drop any whose `to.name` signals a non-start in-flight state (matches `hold`, `block`, `review`, `validation`, or `wait`) and use the single remaining candidate. Real workflows often name their start state `In Execution`, `Doing`, etc. — not literally `In Progress` — so don't assume the name. Capture its `id` and transition:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+     --category indeterminate --exclude 'hold|block|review|validation|wait' --prefer 'in progress' \
+     < <transitions-response.json>
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/jira-resolve-transition.py`. Real workflows often name their start state `In Execution`, `Doing`, etc. — not literally `In Progress` — which is why the helper prefers that name rather than assuming it. On success it prints `<id>\t<to.name>` — capture the id and transition:
 
    ```
    <atlassian-mcp>__transitionJiraIssue
@@ -227,7 +233,7 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
      transition: { id: "<transition-id>" }
    ```
 
-   If this leaves **no** candidate, or **more than one** after the filter, **do not guess** — surface the available transition names so the user can disambiguate (or fix the workflow / set a claim-target status in config), release the lock (`claim-lock.md` → "Release the lock"), unassign yourself, and stop. Guessing among several `indeterminate` transitions risks parking a fresh claim in `On Hold/Blocked` or a review status — validated against a real workflow whose In-Progress category spans `In Execution`, `Validation`, and `On Hold/Blocked` with none named `In Progress`.
+   On `AMBIGUOUS`/`NONE` (exit 2), **do not guess** — surface the printed candidate names so the user can disambiguate (or fix the workflow / set a claim-target status in config), release the lock (`claim-lock.md` → "Release the lock"), unassign yourself, and stop. Guessing among several `indeterminate` transitions risks parking a fresh claim in `On Hold/Blocked` or a review status — validated against a real workflow whose In-Progress category spans `In Execution`, `Validation`, and `On Hold/Blocked` with none named `In Progress`.
 
 6. **Confirm the marker landed** (not the race — the push in step 3 already decided that). Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). If a **different** `accountId` appears, a same-second sibling wrote the marker even though you hold the lock: leave the assignee alone (stomping it would disrupt a human's deliberate reassignment), and report `<KEY>: claim lock held, but assignee is <other> — the board marker disagrees with the lock`. Do **not** return `race` on this signal alone — you hold `task/<KEY>` and no one else can push it, so the atomic winner is you.
 

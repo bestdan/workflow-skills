@@ -78,11 +78,19 @@ jira:
 
    Otherwise transition the issue to `ready_status`:
 
-   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`) and find the transition whose target status `to.name` matches `jira.ready_status` (case-insensitive).
+   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`), write the response to a file, and resolve the transition whose target status matches `jira.ready_status`:
+
+      ```bash
+      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+        --exact "<jira.ready_status>" \
+        < <transitions-response.json>
+      ```
+
+      If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/jira-resolve-transition.py`. On success it prints `<id>\t<to.name>`; on exit 2 (`NONE` or `AMBIGUOUS`), no single transition leads to `jira.ready_status` — fall to the first bullet below.
    2. Call `<atlassian-mcp>__transitionJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`, `transition: { id: <transition id> }`).
 
-   Either call can fail, and neither failure is fatal: the issue is already created, and a capture flow must not fail after its artifact exists. **Do not stop and do not guess a different status** — leave the issue where it is and surface the reason in the `/add-task` step 8 report. Report the two causes apart, because they send the user to different places:
-   - No available transition leads to `ready_status` — the board's workflow has no path there from the initial status. "`<key>` created but left in `<current status>` — no transition to `<ready_status>` is available from it."
+   Either call can fail, and neither failure is fatal: the issue is already created, and a capture flow must not fail after its artifact exists. **Do not stop and do not guess a different status** — leave the issue where it is and surface the reason in the `/add-task` step 8 report. Report the causes apart, because they send the user to different places:
+   - No available transition leads to `ready_status` (`NONE`), or more than one does (`AMBIGUOUS`, naming the candidates) — the board's workflow has no single path there from the initial status. "`<key>` created but left in `<current status>` — no unambiguous transition to `<ready_status>` is available from it."
    - `transitionJiraIssue` errored — a permission, validator, or required-field failure on a transition that does exist. "`<key>` created but left in `<current status>` — the transition to `<ready_status>` failed: `<error>`."
 
 6. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.) When step 5 transitioned the issue, name the status it landed in; when step 5 was skipped or failed, say so per the rules above.
