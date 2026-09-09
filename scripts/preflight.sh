@@ -15,21 +15,38 @@
 #
 # Usage:
 #   scripts/preflight.sh --source <plan|linear> [--base <branch>]
+#   scripts/preflight.sh --scout-run-md <path to RUN.md>
 #
-#   --source  Task-graph source the run reads from. Required.
-#   --base    Base branch to check for staleness. Default: main.
+#   --source        Task-graph source the run reads from. Required unless
+#                    --scout-run-md is given.
+#   --base          Base branch to check for staleness. Default: main.
+#   --scout-run-md   Run ONLY the per-task capability-join scout (auto-pilot
+#                    launch step 6 / resume's capability join) against the
+#                    given RUN.md: read each task's `coder` column, probe
+#                    `command -v` per distinct backend, and — only when any
+#                    task's backend is `cao` — run the CAO gate (`cao`,
+#                    `cao-run`, `cao-server` on PATH; `nc -z localhost 9889`;
+#                    every `cao_coder_mapping` key in the fixed CAO fleet
+#                    `codex agy`). `opus` is a native subagent and is never
+#                    probed. Mutually exclusive with --source.
 #
-# Output: parseable `PREFLIGHT <KEY>: <val>` lines on stdout, one key per
-# line, ending in a single `PREFLIGHT VERDICT: go` / `PREFLIGHT VERDICT:
-# no-go — <reason>` line.
+# Output (default mode): parseable `PREFLIGHT <KEY>: <val>` lines on stdout,
+# one key per line, ending in a single `PREFLIGHT VERDICT: go` / `PREFLIGHT
+# VERDICT: no-go — <reason>` line.
+#
+# Output (--scout-run-md): one `BLOCKS LAUNCH: <task> -> <backend> (missing)`
+# line per gap, ending in a single `SCOUT VERDICT: go` / `SCOUT VERDICT:
+# no-go — <reason>` line — the same shape as PREFLIGHT VERDICT above.
 #
 # Exit status:
 #   0  go       — no hard blocker found
-#   1  no-go    — at least one hard blocker (see PREFLIGHT BLOCKER lines)
+#   1  no-go    — at least one hard blocker (see PREFLIGHT/BLOCKS LAUNCH lines)
 #   2  usage or dependency error
 #
 # Env overrides (for tests only — never needed in normal use):
 #   PREFLIGHT_PROBE_CODERS  path to a probe-coders.sh-compatible executable.
+#   PREFLIGHT_NC            path to an `nc`-compatible executable (scout's
+#                            CAO port probe).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,14 +54,157 @@ PROBE_CODERS="${PREFLIGHT_PROBE_CODERS:-$ROOT/scripts/probe-coders.sh}"
 FRESHNESS="$ROOT/scripts/preflight-freshness.sh"
 SPAWN="$ROOT/scripts/spawn-orchestrator.sh"
 FINGERPRINT_BINS="claude git gh codex uv node op"
+NC_BIN="${PREFLIGHT_NC:-nc}"
+CAO_FLEET="codex agy"
 
 die() {
   echo "preflight: $*" >&2
   exit 2
 }
 
+# --- Scout: per-task capability join (--scout-run-md) -----------------------
+# Reads RUN.md's task table's `coder` column (by header name, not position —
+# one home for the probe list regardless of column order) and the front
+# matter's `cao_coder_mapping`, then joins each task's declared backend
+# against this environment. Mirrors
+# skills/auto-pilot/references/run-state.md "RUN.md" table shape and the
+# `_restack_read_run_md` parsing conventions in spawn-orchestrator.sh
+# (blank/`-`/`—` cells are empty; the separator row is pipes/colons/dashes/
+# spaces only).
+run_scout() {
+  local run_md="$1"
+  [ -f "$run_md" ] || die "RUN.md not found: $run_md"
+
+  local front cao_map
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$run_md")"
+  cao_map="$(printf '%s\n' "$front" | sed -n 's/^cao_coder_mapping:[[:space:]]*//p' | head -1)"
+
+  local header
+  header="$(awk '/^\|/{print; exit}' "$run_md")"
+
+  local coder_idx=0 i=0 cell
+  local -a hcols=()
+  if [ -n "$header" ]; then
+    IFS='|' read -ra hcols <<<"$header"
+    for cell in "${hcols[@]}"; do
+      cell="$(printf '%s' "$cell" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+      [ "$cell" = "coder" ] && coder_idx=$i
+      i=$((i + 1))
+    done
+  fi
+
+  # Fail closed on a missing `coder` column: coder_idx stays 0 whether the
+  # header carries no such column or there's no header at all, and 0 is
+  # never a legitimate index (position 0 is the empty cell before the first
+  # `|`) — so this can't be confused with a task's per-cell "not yet
+  # resolved" empty marker, which is handled separately below.
+  if [ "$coder_idx" -eq 0 ]; then
+    echo "BLOCKS LAUNCH: RUN.md task table has no coder column"
+    echo "SCOUT VERDICT: no-go — RUN.md task table has no coder column"
+    return 1
+  fi
+
+  local -a distinct_backends=() backend_tasks=() cao_tasks=()
+  local cao_needed=false
+
+  if [ "$coder_idx" -gt 0 ]; then
+    local line
+    while IFS= read -r line; do
+      case "$line" in *[!'|'' ':-]*) ;; *) continue ;; esac # separator row
+      local -a cols=()
+      IFS='|' read -ra cols <<<"$line"
+      [ "${#cols[@]}" -gt "$coder_idx" ] || continue
+      local task backend
+      task="$(printf '%s' "${cols[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      [ "$task" != "task" ] || continue # header row
+      [ -n "$task" ] || continue
+      backend="$(printf '%s' "${cols[$coder_idx]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      case "$backend" in
+        '' | - | '—') continue ;; # not yet resolved — nothing to check
+        opus) continue ;;         # native subagent, never probed
+        cao)
+          cao_needed=true
+          cao_tasks+=("$task")
+          continue
+          ;;
+      esac
+      local found=false j=0 existing
+      for existing in ${distinct_backends[@]+"${distinct_backends[@]}"}; do
+        if [ "$existing" = "$backend" ]; then
+          backend_tasks[$j]="${backend_tasks[$j]},${task}"
+          found=true
+          break
+        fi
+        j=$((j + 1))
+      done
+      if ! $found; then
+        distinct_backends+=("$backend")
+        backend_tasks+=("$task")
+      fi
+    done < <(awk '/^\|/{print}' "$run_md")
+  fi
+
+  local -a gaps=()
+  local k=0 backend
+  for backend in ${distinct_backends[@]+"${distinct_backends[@]}"}; do
+    if ! command -v "$backend" >/dev/null 2>&1; then
+      local t
+      local -a tarr=()
+      IFS=',' read -ra tarr <<<"${backend_tasks[$k]}"
+      for t in "${tarr[@]}"; do
+        gaps+=("$t -> $backend (missing)")
+      done
+    fi
+    k=$((k + 1))
+  done
+
+  if $cao_needed; then
+    local cao_ok=true b
+    for b in cao cao-run cao-server; do
+      command -v "$b" >/dev/null 2>&1 || cao_ok=false
+    done
+    if $cao_ok; then
+      "$NC_BIN" -z localhost 9889 >/dev/null 2>&1 || cao_ok=false
+    fi
+    if $cao_ok; then
+      local map_body key pair
+      map_body="$(printf '%s' "$cao_map" | sed -e 's/^{//' -e 's/}$//')"
+      if [ -n "$map_body" ]; then
+        local -a pairs=()
+        IFS=',' read -ra pairs <<<"$map_body"
+        for pair in "${pairs[@]}"; do
+          key="$(printf '%s' "${pair%%:*}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          [ -n "$key" ] || continue
+          case " $CAO_FLEET " in
+            *" $key "*) ;;
+            *) cao_ok=false ;;
+          esac
+        done
+      fi
+    fi
+    if ! $cao_ok; then
+      local t
+      for t in "${cao_tasks[@]}"; do
+        gaps+=("$t -> cao (missing)")
+      done
+    fi
+  fi
+
+  if [ "${#gaps[@]}" -gt 0 ]; then
+    local g
+    for g in "${gaps[@]}"; do
+      echo "BLOCKS LAUNCH: $g"
+    done
+    echo "SCOUT VERDICT: no-go — ${gaps[0]}"
+    return 1
+  fi
+  echo "SCOUT VERDICT: go"
+  return 0
+}
+
 source_arg=""
 base="main"
+scout_run_md=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --source)
@@ -57,13 +217,25 @@ while [ $# -gt 0 ]; do
       base="$2"
       shift 2
       ;;
+    --scout-run-md)
+      [ $# -ge 2 ] || die "missing value for --scout-run-md"
+      scout_run_md="$2"
+      shift 2
+      ;;
     -h | --help)
-      sed -n '2,29p' "$0"
+      sed -n '2,49p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
   esac
 done
+
+if [ -n "$scout_run_md" ]; then
+  [ -z "$source_arg" ] || die "--source and --scout-run-md are mutually exclusive"
+  run_scout "$scout_run_md"
+  exit $?
+fi
+
 case "$source_arg" in
   plan | linear) ;;
   "") die "requires --source <plan|linear>" ;;
