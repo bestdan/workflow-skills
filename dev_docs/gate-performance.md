@@ -70,13 +70,14 @@ private fixture tree and the isolation guards, and
 | `alarm`         | ~5.2s        | 475   |
 | `profile`       | ~5.0s        | 882   |
 | `restack`       | ~4.2s        | 538   |
+| `reserve`       | ~1.3s        | 260   |
 | serial sum      | ~57s         |       |
 | via the driver  | **~21s**     |       |
 
 Splitting was worth doing because it cut two costs at once — the suite's wall
 time (~58s → ~21s) and its ShellCheck bill (~33s → ~9s). Note the serial sum
-(~57s) is _worse_ than the monolith's ~58s was by only a hair, because seven
-processes each rebuild the prelude's fixture bundle. Concurrency is what pays
+(~57s) is _worse_ than the monolith's ~58s was by only a hair, because every
+part rebuilds the prelude's fixture bundle. Concurrency is what pays
 for that overhead and then some.
 
 ### What a split of this suite has to preserve

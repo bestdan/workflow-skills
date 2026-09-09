@@ -31,6 +31,7 @@ parts=(
   supervisor
   restack
   alarm
+  reserve
 )
 
 # Same three-arm fallback as the prelude's BASE, and for the same reason: a

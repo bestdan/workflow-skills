@@ -66,38 +66,35 @@ neither alone is enough:
 The run keeps a fixed **reserve floor** of **15% headroom** by default. Launch
 and resume accept `--reserve <pct>` to replace that floor for this run; require
 a numeric percentage from 0 through 100 and record the resolved value in the
-run's durable `reserve` configuration. This task does not rewrite that fixed
-floor or its override. The effective reserve used by the gate is:
+run's durable `reserve` configuration. Nothing rewrites that fixed floor
+afterwards.
 
-```
-observed_worst_task_delta = max(recorded in-window usage_deltas)
-reserve = max(fixed_floor, observed_worst_task_delta * safety)
-```
+**The gate itself is a script, and its header comment is the one home of the
+arithmetic.** `scripts/spawn-orchestrator.sh reserve-gate` computes the
+effective reserve from that floor and the run's recorded intervals, does the
+bookkeeping those intervals need, and prints its verdict; how it derives one
+from the other — the safety factor, the sample threshold, the window rule, the
+record depth — is specified there and nowhere else. It was specified twice
+here and in [`run-state.md`](run-state.md) and hand-walked at four
+`/deliver-task` boundaries, which is exactly how two copies of one rule drift.
 
-where `safety = 1.25`. `max` is deliberately the high-percentile policy here:
-it sizes for the largest retained observed task interval, rather than averaging
-away a costly task. Only recorded, same-window deltas participate. Until there
-are **N = 5** such deltas, set `reserve = fixed_floor`; an empty, malformed, or
-short record never lowers the fixed floor. It remains a headroom threshold, not
-a consumed-percent threshold: for a successful `--session-status` read of
-`<percent> <reset_epoch>`, compute `headroom = 100 - percent`; when `headroom < reserve`, do not start the operation.
+What stays true at this level: the reserve is a **headroom** threshold, not a
+consumed-percent one, and a short or missing record never lowers the fixed
+floor.
 
 At the start of a delivery cycle, `/deliver-task` calls
-`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` once and cache its successful
-`percent` and raw `reset_epoch` for that cycle. Apply that cached reading before
-**claim**, **verify**, enabled **co-review**, and every iterate-round
-**re-verify** and repeated **co-review**; do not make equivalent usage reads
-in one cycle. That same successful cached reading is also the sole input to the
-per-task instrumentation: before evaluating this cycle's gate, atomically
-compare it with `usage_delta_baseline` and update `usage_deltas` and the
-baseline as specified in [`run-state.md`](run-state.md) "`RUN.md`". Thus the
-next cycle's one read accounts for the interval since the preceding read; do
-not issue a second instrumentation query. Discard the cache at the next cycle
-and read again. A failed (non-zero exit) usage read is not permission to
-proceed: use the existing conservative time/dispatch proxy for that hook, and
-if it crosses its threshold take the same near-cap path. It is **not** a sample:
-clear `usage_delta_baseline` atomically and record no delta or fabricated
-`reset_epoch`.
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` once and caches its successful
+`percent` and raw `reset_epoch` for that cycle. It passes that one cached
+reading to a `reserve-gate` call before **claim**, **verify**, enabled
+**co-review**, and every iterate-round **re-verify** and repeated
+**co-review**; it makes no equivalent usage read anywhere else in the cycle,
+and it discards the cache at the next cycle and reads again. A failed
+(non-zero exit) usage read is not permission to proceed: it goes to the same
+subcommand as `--read-failed`, which decides nothing, and the caller falls
+back to the existing conservative time/dispatch proxy for that hook — taking
+the same near-cap path if that crosses its threshold. See
+[`deliver-task/SKILL.md`](../../deliver-task/SKILL.md) "Auto-pilot reserve
+gate" for the call and its exit codes.
 
 If either the direct reading or that fallback says near-cap, use **exactly**
 the checkpoint-then-exit path below: write the pause state with
