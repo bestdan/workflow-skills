@@ -73,6 +73,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from typing import NoReturn
 import urllib.request
 from datetime import datetime
@@ -310,6 +311,13 @@ def _mcp_rows(path, label):
     if isinstance(payload, list):
         rows = payload
     elif isinstance(payload, dict):
+        if payload.get("incomplete_results") is True:
+            die(
+                f"--from-mcp-json: {label}: incomplete_results is true -- "
+                "the search timed out and this capture doesn't cover its "
+                "whole window, so joining against it could silently drop "
+                "merged-PR ownership evidence"
+            )
         for key in ("items", "pull_requests", "results"):
             val = payload.get(key)
             if isinstance(val, list):
@@ -414,7 +422,6 @@ def build_prs_from_mcp_json(search_path, list_path, complete_since):
             f"list.json entry: {sorted(missing)}"
         )
     return {"complete_since": since, "pull_requests": pull_requests}
-
 
 
 def owning_pr(issue, prs, merged):
@@ -581,8 +588,21 @@ def main():
         if args.prs_file == "-":
             sys.stdout.write(text)
         else:
-            with open(args.prs_file, "w") as f:
-                f.write(text)
+            # Write to a temp file in the same directory, then atomically
+            # replace the destination -- a disk-full or interrupted write
+            # must not truncate/corrupt a prior valid --prs-file.
+            out_dir = os.path.dirname(os.path.abspath(args.prs_file)) or "."
+            fd, tmp_path = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(text)
+                os.replace(tmp_path, args.prs_file)
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         return 0
 
     if not args.project:

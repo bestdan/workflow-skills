@@ -459,6 +459,28 @@ class FromMcpJsonTests(unittest.TestCase):
             Path(list_path).unlink()
         self.assertEqual(payload["pull_requests"][0]["number"], 1)
 
+    def test_incomplete_search_results_dies(self):
+        # A timed-out GitHub search sets incomplete_results: true -- joining
+        # against it would let the file assert a complete window while
+        # silently missing merged-PR ownership evidence.
+        search_path = self._write(
+            {
+                "total_count": 1,
+                "incomplete_results": True,
+                "items": [{"number": 1, "title": "a", "body": "a"}],
+            }
+        )
+        list_path = self._write([])
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                linear_false_closures.build_prs_from_mcp_json(
+                    search_path, list_path, "2026-08-08T00:00:00Z"
+                )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertIn("incomplete_results", str(ctx.exception))
+
     def test_bad_complete_since_dies(self):
         search_path = self._write([])
         list_path = self._write([])
@@ -539,21 +561,52 @@ class FromMcpJsonTests(unittest.TestCase):
             Path(search_path).unlink()
             Path(list_path).unlink()
 
+    def test_cli_write_is_atomic_prior_file_survives_a_failed_build(self):
+        # A failed join (the missing-number die()) must never touch a prior
+        # valid --prs-file at the destination -- the write only happens
+        # after the join succeeds, and even then goes through a temp file
+        # + rename rather than truncating the destination directly.
+        search_path = self._write([{"number": 1, "title": "a", "body": "a"}])
+        list_path = self._write([])  # no matching entry -> failed join
+        out_path = tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+        Path(out_path).write_text('{"complete_since": "x", "pull_requests": []}')
+        try:
+            with self.assertRaises(SystemExit):
+                self._run_cli(
+                    [
+                        "--from-mcp-json",
+                        search_path,
+                        list_path,
+                        "--complete-since",
+                        "2026-08-08T00:00:00Z",
+                        "--prs-file",
+                        out_path,
+                    ]
+                )
+            self.assertEqual(
+                Path(out_path).read_text(),
+                '{"complete_since": "x", "pull_requests": []}',
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+            Path(out_path).unlink()
+
     def test_from_mcp_json_rejects_project_or_repo(self):
         with self.assertRaises(SystemExit) as ctx:
-            sys.argv = [
-                "linear-false-closures.py",
-                "--from-mcp-json",
-                "a.json",
-                "b.json",
-                "--complete-since",
-                "2026-08-08T00:00:00Z",
-                "--prs-file",
-                "-",
-                "--project",
-                "p",
-            ]
-            linear_false_closures.main()
+            self._run_cli(
+                [
+                    "--from-mcp-json",
+                    "a.json",
+                    "b.json",
+                    "--complete-since",
+                    "2026-08-08T00:00:00Z",
+                    "--prs-file",
+                    "-",
+                    "--project",
+                    "p",
+                ]
+            )
         self.assertIn("--from-mcp-json cannot be combined", str(ctx.exception))
 
     def _run_cli(self, argv):
