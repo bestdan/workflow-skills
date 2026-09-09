@@ -64,9 +64,12 @@ number):
 ```bash
 git fetch origin
 base_sha=$(git rev-parse "origin/<base>")
-python3 commands/handlers/assets/gh-issue-claim.py acquire-ref \
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" acquire-ref \
   --repo "<repo>" --branch "<branch>" --base-sha "$base_sha"
 ```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/gh-issue-claim.py`.
 
 Branch on the exit code — it is the election, and it is the only thing that decides it:
 

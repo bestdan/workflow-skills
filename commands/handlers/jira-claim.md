@@ -200,9 +200,12 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
    ```bash
    git fetch origin
    base_sha=$(git rev-parse "origin/<base>")
-   python3 commands/handlers/assets/gh-issue-claim.py acquire-ref \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" acquire-ref \
      --repo "<repo>" --branch "task/<KEY>" --base-sha "$base_sha"
    ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+   `**/handlers/assets/gh-issue-claim.py`.
 
    Branch on the exit code (`claim-lock.md` → "Acquire" has the full table): **exit `3`**
    (HTTP 422, `Reference already exists`) → **you lost**: leave the issue's assignee and
