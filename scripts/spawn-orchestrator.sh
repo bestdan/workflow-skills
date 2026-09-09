@@ -64,6 +64,14 @@
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>] \
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
+#   spawn-orchestrator.sh reserve-gate --run-md <path> \
+#       {--percent <p> --reset-epoch <e> | --read-failed} \
+#       [--floor <n>] [--samples <n>]
+#
+#   reserve-gate  The auto-pilot pre-invoke reserve gate: one call does the
+#                 usage_delta bookkeeping rewrite AND the go/no-go. Its own
+#                 comment block below is the ONE home of the formula --
+#                 run-budget.md and run-state.md point at it.
 #   spawn-orchestrator.sh supervisor-scan --dir <run-dir> --label <label> \
 #       [--park-limit <n>] [--pause-exempt-max <seconds>] [--report-every <dur>]
 #   spawn-orchestrator.sh status-report --dir <run-dir> --label <label> \
@@ -3593,6 +3601,330 @@ supervisor_gate() {
 }
 
 # ---------------------------------------------------------------------------
+# reserve-gate — the auto-pilot pre-invoke reserve gate (prose-to-code index
+# row 5). THIS COMMENT IS THE ONE HOME OF THE FORMULA. It used to be specified
+# twice (run-budget.md "Pre-invoke reserve", run-state.md "`RUN.md`") and
+# hand-walked at four /deliver-task boundaries, so a rule could be restated
+# with a drifting exception in one copy and nobody would see it. Those files
+# now point here; keep the arithmetic in this file only.
+#
+# Usage:
+#   spawn-orchestrator.sh reserve-gate --run-md <path> \
+#       --percent <p> --reset-epoch <e> [--floor <n>] [--samples <n>]
+#   spawn-orchestrator.sh reserve-gate --run-md <path> --read-failed
+#
+# One call does BOTH halves of a boundary: the bookkeeping rewrite, then the
+# go/no-go. It is one read-modify-write of RUN.md's front matter (temp file +
+# mv, the same atomic replace _set_front_field uses), on the run-state.md
+# assumption that one orchestrator process writes RUN.md at a time.
+#
+# Bookkeeping — `usage_delta_baseline` is the previous successful
+# `claude-usage.sh --session-status` sample, kept only to close the next
+# interval:
+#   * no stored baseline            → append nothing; baseline := current.
+#   * stored epoch != --reset-epoch → the interval straddles a rate window, so
+#                                     DISCARD it; append nothing; baseline :=
+#                                     current. A fresh window starts fresh.
+#   * epochs match, delta > 0       → append {percent: delta, reset_epoch: e}
+#                                     to `usage_deltas`, keep the newest 20,
+#                                     baseline := current.
+#   * epochs match, delta == 0      → append nothing. THIS IS WHAT MAKES ONE
+#                                     CALL PER BOUNDARY SAFE: /deliver-task
+#                                     reads --session-status once per cycle and
+#                                     re-presents that one cached reading at
+#                                     each of its four boundaries, so calls 2-4
+#                                     see the baseline they just wrote. Recording
+#                                     them would put four entries in the record
+#                                     per task, spuriously reaching the
+#                                     five-sample threshold and evicting real
+#                                     intervals from the 20-entry cap. A
+#                                     genuinely idle interval is discarded too,
+#                                     which costs nothing: the reserve is a max,
+#                                     and a zero never raises one.
+#   * epochs match, delta < 0       → an inconsistent same-window reading:
+#                                     CLEAR the baseline (do not replace it
+#                                     with the anomalous value) and append
+#                                     nothing, so a corrupt read cannot
+#                                     inflate a later interval.
+#   * --read-failed                 → a non-zero usage read is never a sample:
+#                                     CLEAR the baseline, append nothing,
+#                                     synthesize no percent or epoch.
+#
+# Verdict — the effective reserve is a headroom threshold, not a
+# consumed-percent one:
+#   observed_worst = max(usage_deltas whose reset_epoch == --reset-epoch)
+#   reserve        = max(floor, ceil(observed_worst * 1.25))
+#   headroom       = 100 - percent      → pause when headroom < reserve
+# `max` is deliberate: it sizes for the costliest retained task rather than
+# averaging one away. Fewer than --samples (default 5) in-window deltas means
+# the effective reserve is exactly the floor — an empty, short, or
+# cross-window record never LOWERS it. The 1.25 safety factor is applied as a
+# ceiling, the conservative direction, because these are integer percents.
+# The floor defaults to RUN.md's `reserve` field (the launch/resume --reserve
+# value, 15 by default); --floor overrides it for a caller that has one in
+# hand. This never rewrites that configured floor.
+#
+# stdout is the contract:
+#   RESERVE: reserve=<n> headroom=<n> verdict=proceed|pause samples=<n>
+# exit 0  proceed
+# exit 1  pause — the caller takes run-budget.md's "Near-cap → pause +
+#         relaunch past reset" checkpoint-then-exit path
+# exit 2  malformed input (bad flag, bad number, missing/!front-matter RUN.md)
+# exit 3  --read-failed: headroom=unknown, verdict=fallback. NOT proceed and
+#         NOT a measured pause — the caller falls back to auto-pilot's
+#         conservative time/dispatch proxy for this boundary. A distinct code
+#         is what stops "the query failed" from being read as headroom, which
+#         exit 0 would do.
+# ---------------------------------------------------------------------------
+RESERVE_FLOOR_DEFAULT=15
+RESERVE_MIN_SAMPLES_DEFAULT=5
+# The 1.25 safety factor, as an integer percent so the arithmetic stays in the
+# shell (Bash has no floats).
+RESERVE_SAFETY_PERCENT=125
+RESERVE_DELTA_CAP=20
+
+_reserve_uint() { # <value> — true iff a non-empty run of digits
+  case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
+# True iff <key> is declared in <file>'s front matter. Presence and emptiness
+# are different answers here: `usage_delta_baseline:` with no value is the
+# normal cleared state, while a MISSING key means the file is not a RUN.md this
+# subcommand can safely rewrite — so the caller fails closed on absence only.
+_reserve_has_key() {
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$1")"
+  grep -qE "^$2:" <<<"$front"
+}
+
+# Expand a `usage_deltas` flow list into one `percent epoch` line per entry.
+# exit 3 on anything that is not exactly the shape run-state.md documents —
+# this field is written only by this subcommand, so a garbled value is a
+# corrupted RUN.md, not input to guess at.
+_reserve_parse_deltas() {
+  awk -v raw="$1" 'BEGIN {
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    if (raw !~ /^\[.*\]$/) exit 3
+    raw = substr(raw, 2, length(raw) - 2)
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    n = split(raw, parts, /\}[[:space:]]*,[[:space:]]*/)
+    for (i = 1; i <= n; i++) {
+      s = parts[i]
+      if (i < n) s = s "}"
+      if (s !~ /^\{percent:[[:space:]]*[0-9]+,[[:space:]]*reset_epoch:[[:space:]]*[0-9]+\}$/) exit 3
+      p = s; sub(/^\{percent:[[:space:]]*/, "", p); sub(/,.*$/, "", p)
+      e = s; sub(/^.*reset_epoch:[[:space:]]*/, "", e); sub(/\}$/, "", e)
+      print p, e
+    }
+  }'
+}
+
+# Same, for the single-object `usage_delta_baseline`. Prints nothing when the
+# field is empty (the cleared state); exit 3 on a malformed value.
+_reserve_parse_baseline() {
+  awk -v raw="$1" 'BEGIN {
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    if (raw !~ /^\{percent:[[:space:]]*[0-9]+,[[:space:]]*reset_epoch:[[:space:]]*[0-9]+\}$/) exit 3
+    p = raw; sub(/^\{percent:[[:space:]]*/, "", p); sub(/,.*$/, "", p)
+    e = raw; sub(/^.*reset_epoch:[[:space:]]*/, "", e); sub(/\}$/, "", e)
+    print p, e
+  }'
+}
+
+# Rewrite both fields in ONE pass, so the baseline and the deltas can never
+# disagree about which interval has been accounted for. Same temp-file + mv
+# replace as _set_front_field, and fail-closed the same way.
+_reserve_write() { # <file> <baseline value or ""> <deltas value>
+  local f="$1" b="$2" d="$3" dir tmp
+  dir="$(dirname "$f")"
+  tmp="$(mktemp "$dir/.runmd.XXXXXX")" || die "mktemp failed"
+  awk -v b="$b" -v d="$d" '
+    /^---$/ { dashes++; print; next }
+    dashes==1 && /^usage_delta_baseline:/ { print (b == "" ? "usage_delta_baseline:" : "usage_delta_baseline: " b); next }
+    dashes==1 && /^usage_deltas:/ { print "usage_deltas: " d; next }
+    { print }
+  ' "$f" >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to render reserve update for $f"
+  }
+  grep -qE '^usage_deltas: ' "$tmp" || {
+    rm -f "$tmp"
+    die "front-matter key not found (fail-closed): usage_deltas in $f"
+  }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write $f"
+  }
+}
+
+reserve_gate() {
+  local run_md="" percent="" reset_epoch="" floor="" min_samples="" read_failed=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --run-md)
+        [ $# -ge 2 ] || die "missing value for --run-md"
+        run_md="$2"
+        shift 2
+        ;;
+      --percent)
+        [ $# -ge 2 ] || die "missing value for --percent"
+        percent="$2"
+        shift 2
+        ;;
+      --reset-epoch)
+        [ $# -ge 2 ] || die "missing value for --reset-epoch"
+        reset_epoch="$2"
+        shift 2
+        ;;
+      --floor)
+        [ $# -ge 2 ] || die "missing value for --floor"
+        floor="$2"
+        shift 2
+        ;;
+      --samples)
+        [ $# -ge 2 ] || die "missing value for --samples"
+        min_samples="$2"
+        shift 2
+        ;;
+      --read-failed)
+        read_failed=1
+        shift
+        ;;
+      *) die "unknown reserve-gate argument: $1" ;;
+    esac
+  done
+
+  [ -n "$run_md" ] || die "reserve-gate requires --run-md"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+  if [ "$read_failed" = 1 ]; then
+    [ -z "$percent" ] && [ -z "$reset_epoch" ] \
+      || die "--read-failed takes no --percent/--reset-epoch (a failed read has neither)"
+  else
+    [ -n "$percent" ] && [ -n "$reset_epoch" ] \
+      || die "reserve-gate requires --percent and --reset-epoch (or --read-failed)"
+    _reserve_uint "$percent" && [ "$percent" -le 100 ] \
+      || die "--percent must be an integer 0-100: $percent"
+    _reserve_uint "$reset_epoch" || die "--reset-epoch must be an integer: $reset_epoch"
+  fi
+  if [ -n "$min_samples" ]; then
+    _reserve_uint "$min_samples" && [ "$min_samples" -ge 1 ] \
+      || die "--samples must be a positive integer: $min_samples"
+  else
+    min_samples="$RESERVE_MIN_SAMPLES_DEFAULT"
+  fi
+
+  _reserve_has_key "$run_md" usage_delta_baseline \
+    || die "front-matter key not found (fail-closed): usage_delta_baseline in $run_md"
+  _reserve_has_key "$run_md" usage_deltas \
+    || die "front-matter key not found (fail-closed): usage_deltas in $run_md"
+
+  # The floor: --floor wins, else RUN.md's configured `reserve`, else 15. A
+  # RUN.md carrying a non-numeric `reserve` is malformed, not a reason to
+  # silently substitute the default — that would lower a floor an operator set.
+  if [ -z "$floor" ]; then
+    floor="$(_run_md_field "$run_md" reserve)"
+    [ -n "$floor" ] || floor="$RESERVE_FLOOR_DEFAULT"
+  fi
+  _reserve_uint "$floor" && [ "$floor" -le 100 ] \
+    || die "reserve floor must be an integer 0-100: $floor"
+
+  local deltas_raw baseline_raw parsed
+  deltas_raw="$(_run_md_field "$run_md" usage_deltas)"
+  baseline_raw="$(_run_md_field "$run_md" usage_delta_baseline)"
+  parsed="$(_reserve_parse_deltas "$deltas_raw")" \
+    || die "malformed usage_deltas in $run_md: $deltas_raw"
+
+  local d_pct d_epoch n
+  d_pct=()
+  d_epoch=()
+  n=0
+  local p e
+  while read -r p e; do
+    [ -n "$p" ] || continue
+    d_pct[n]="$p"
+    d_epoch[n]="$e"
+    n=$((n + 1))
+  done <<EOF
+$parsed
+EOF
+
+  local b_pct="" b_epoch="" bparsed
+  bparsed="$(_reserve_parse_baseline "$baseline_raw")" \
+    || die "malformed usage_delta_baseline in $run_md: $baseline_raw"
+  if [ -n "$bparsed" ]; then
+    b_pct="${bparsed%% *}"
+    b_epoch="${bparsed##* }"
+  fi
+
+  # --- bookkeeping (see the formula block above) ---
+  local new_b="" delta
+  if [ "$read_failed" = 0 ]; then
+    new_b="{percent: $percent, reset_epoch: $reset_epoch}"
+    if [ -n "$b_epoch" ] && [ "$b_epoch" = "$reset_epoch" ]; then
+      delta=$((percent - b_pct))
+      if [ "$delta" -lt 0 ]; then
+        new_b=""
+      elif [ "$delta" -gt 0 ]; then
+        d_pct[n]="$delta"
+        d_epoch[n]="$reset_epoch"
+        n=$((n + 1))
+      fi
+    fi
+  fi
+
+  # Keep the newest RESERVE_DELTA_CAP entries.
+  local first=0
+  [ "$n" -gt "$RESERVE_DELTA_CAP" ] && first=$((n - RESERVE_DELTA_CAP))
+
+  local rendered="" i
+  i="$first"
+  while [ "$i" -lt "$n" ]; do
+    [ -z "$rendered" ] || rendered="$rendered, "
+    rendered="$rendered{percent: ${d_pct[i]}, reset_epoch: ${d_epoch[i]}}"
+    i=$((i + 1))
+  done
+  _reserve_write "$run_md" "$new_b" "[$rendered]"
+
+  # --- verdict ---
+  local samples=0 worst=0
+  if [ "$read_failed" = 0 ]; then
+    i="$first"
+    while [ "$i" -lt "$n" ]; do
+      if [ "${d_epoch[i]}" = "$reset_epoch" ]; then
+        samples=$((samples + 1))
+        [ "${d_pct[i]}" -gt "$worst" ] && worst="${d_pct[i]}"
+      fi
+      i=$((i + 1))
+    done
+  fi
+
+  local reserve="$floor"
+  if [ "$samples" -ge "$min_samples" ]; then
+    # ceil(worst * 1.25), the conservative rounding direction.
+    local scaled=$(((worst * RESERVE_SAFETY_PERCENT + 99) / 100))
+    [ "$scaled" -gt "$reserve" ] && reserve="$scaled"
+  fi
+
+  if [ "$read_failed" = 1 ]; then
+    echo "RESERVE: reserve=$reserve headroom=unknown verdict=fallback samples=$samples"
+    return 3
+  fi
+  local headroom=$((100 - percent))
+  if [ "$headroom" -lt "$reserve" ]; then
+    echo "RESERVE: reserve=$reserve headroom=$headroom verdict=pause samples=$samples"
+    return 1
+  fi
+  echo "RESERVE: reserve=$reserve headroom=$headroom verdict=proceed samples=$samples"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Task 18 — post-merge restack of stacked PRs (finding #25). Squash-merging a
 # parent orphans a child two ways: LOUD (GitHub deletes the parent's branch,
 # closing a child still based on it) and QUIET (the child still targets the
@@ -6395,6 +6727,7 @@ case "$sub" in
   classify-exit) classify_exit "$@" ;;
   supervisor-check) supervisor_check "$@" ;;
   supervisor-gate) supervisor_gate "$@" ;;
+  reserve-gate) reserve_gate "$@" ;;
   supervisor-scan) supervisor_scan "$@" ;;
   alarm) alarm "$@" ;;
   alarm-request) alarm_request "$@" ;;

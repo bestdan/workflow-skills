@@ -13,21 +13,41 @@ load test_helper
   assert_success
   assert_output "86 $reset"
 
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'headroom = 100 - percent'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'when `headroom < reserve`, do not start'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'reserve = max(fixed_floor, observed_worst_task_delta * safety)'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'are **N = 5** such deltas, set `reserve = fixed_floor`'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" '`usage_deltas` is the rolling, capped (20-entry) record'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" '**re-verify** and repeated **co-review**'
+  # The gate is a subcommand now, so the behavior is pinned in
+  # scripts/test-spawn-orchestrator-reserve.sh. What stays a doc assertion is
+  # the wiring: every boundary makes the call, and the pause path is unchanged.
   assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '--run-state <RUN.md>'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 2, **Claim**'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 3, **Verify**'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'step 5, **Co-review**'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'every **re-verify** and every repeated'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'This is an expected auto-pilot pause, **not a delivery'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'reserve-gate \'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '--run-md <RUN.md> --percent <percent> --reset-epoch <reset_epoch>'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '--run-md <RUN.md> --read-failed'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'Call it immediately before step 2 **Claim**, step 3 **Verify**, step 5'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '**Co-review**, and — in step 6 **Iterate** — every **re-verify** and every'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'An expected auto-pilot pause, **not a delivery failure**'
+  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '`pause_observed_at` and `pause_source`'
   assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'paused_until = reset_epoch + grace'
   assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'paused_until = now + 3600'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" '`pause_observed_at` and `pause_source`'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'every iterate-round **re-verify** and repeated'
+}
+
+@test "the reserve formula has exactly one home, and the prose points at it" {
+  # The defect this replaced: the same rules specified in run-budget.md AND
+  # run-state.md, hand-walked at four /deliver-task boundaries. The header
+  # comment of the subcommand is now the only place the arithmetic is written
+  # down, so assert both halves — it is there, and the two reference files
+  # carry a pointer instead of a copy.
+  assert_doc_contains "$REPO_ROOT/scripts/spawn-orchestrator.sh" 'reserve        = max(floor, ceil(observed_worst * 1.25))'
+  assert_doc_contains "$REPO_ROOT/scripts/spawn-orchestrator.sh" 'headroom       = 100 - percent      → pause when headroom < reserve'
+  assert_doc_contains "$REPO_ROOT/scripts/spawn-orchestrator.sh" 'Fewer than --samples (default 5) in-window deltas means'
+  assert_doc_contains "$REPO_ROOT/scripts/spawn-orchestrator.sh" 'DISCARD it; append nothing; baseline :='
+
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-budget.md" 'is specified there and nowhere else'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" 'is the only writer and the only'
+
+  # And the copies really are gone: no skills/ file may restate an update rule.
+  run grep -rn 'reset_epoch match' "$REPO_ROOT/skills"
+  assert_failure
+  run grep -rn 'retain only the newest 20' "$REPO_ROOT/skills"
+  assert_failure
 }
 
 @test "reserve instrumentation discards a delta across a reset window" {
@@ -45,6 +65,28 @@ load test_helper
   assert_success
   assert_output "4 $second_reset"
 
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" '**discard the cross-window delta**'
-  assert_doc_contains "$REPO_ROOT/skills/deliver-task/SKILL.md" 'Fewer than five valid recorded in-window deltas means the effective'
+  # The two readings above straddle a reset, which is the case the gate must
+  # throw away. Drive the real subcommand with them rather than asserting prose.
+  mkdir -p "$TEST_TMPDIR/run/.auto-pilot"
+  cat >"$TEST_TMPDIR/run/.auto-pilot/RUN.md" <<EOF
+---
+run_id: bats
+status: active
+reserve: 15
+usage_delta_baseline:
+usage_deltas: []
+---
+EOF
+  run bash "$REPO_ROOT/scripts/spawn-orchestrator.sh" reserve-gate \
+    --run-md "$TEST_TMPDIR/run/.auto-pilot/RUN.md" --percent 91 --reset-epoch "$first_reset"
+  # 9% headroom is below the 15% floor, so this boundary pauses — but the
+  # bookkeeping still runs, which is what the second call needs.
+  assert_failure 1
+  run bash "$REPO_ROOT/scripts/spawn-orchestrator.sh" reserve-gate \
+    --run-md "$TEST_TMPDIR/run/.auto-pilot/RUN.md" --percent 4 --reset-epoch "$second_reset"
+  assert_success
+  run grep -F 'usage_deltas: []' "$TEST_TMPDIR/run/.auto-pilot/RUN.md"
+  assert_success
+  run grep -F "usage_delta_baseline: {percent: 4, reset_epoch: $second_reset}" "$TEST_TMPDIR/run/.auto-pilot/RUN.md"
+  assert_success
 }
