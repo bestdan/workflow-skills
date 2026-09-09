@@ -20,7 +20,7 @@ slowest member rather than their sum:
 | ------------------------------------------- | -------- | ------------------------------------------------------------------------ |
 | `scripts/test-research-spike.sh`            | **~27s** | 305 Python invocations; most of each is interpreter startup              |
 | `scripts/test-shell.sh`                     | **~24s** | 10 bats files (~18s serial) alongside the orchestrator suite             |
-| ↳ `scripts/test-spawn-orchestrator.sh`      | ~21s     | 7 parts run concurrently; their serial sum is ~57s                       |
+| ↳ `scripts/test-spawn-orchestrator.sh`      | ~21s     | 8 parts run concurrently; their serial sum is ~58s                       |
 | `shellcheck` inside `scripts/lint-shell.sh` | **~22s** | see [ShellCheck's cost](#shellchecks-cost-is-superlinear-in-file-length) |
 | `scripts/typecheck.sh`                      | ~3s      | ~8s on the first run of a new mypy pin, while `uvx` fetches it           |
 | everything else (9 checks)                  | ≤ ~4s    |                                                                          |
@@ -70,14 +70,14 @@ private fixture tree and the isolation guards, and
 | `alarm`         | ~5.2s        | 475   |
 | `profile`       | ~5.0s        | 882   |
 | `restack`       | ~4.2s        | 538   |
-| `reserve`       | ~1.3s        | 260   |
-| serial sum      | ~57s         |       |
+| `reserve`       | ~1.3s        | 280   |
+| serial sum      | ~58s         |       |
 | via the driver  | **~21s**     |       |
 
 Splitting was worth doing because it cut two costs at once — the suite's wall
 time (~58s → ~21s) and its ShellCheck bill (~33s → ~9s). Note the serial sum
-(~57s) is _worse_ than the monolith's ~58s was by only a hair, because every
-part rebuilds the prelude's fixture bundle. Concurrency is what pays
+(~58s) has caught back up with the monolith's ~58s, because every part rebuilds
+the prelude's fixture bundle. Concurrency is what pays
 for that overhead and then some.
 
 ### What a split of this suite has to preserve
@@ -243,7 +243,7 @@ If bats stops finishing first, the fan-out condition in `scripts/test-shell.sh`
 (search for `if [ "$fast" -eq 1 ]`) should change — as a measurement, not a
 preference. Re-run this whenever the orchestrator parts get faster.
 
-**The split's own concurrency.** The driver running its seven parts concurrently
+**The split's own concurrency.** The driver running its parts concurrently
 versus serially, interleaved A/B of the full `check.sh`:
 
 ```
