@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.42.0] - 2026-09-09
+
+### Features
+
+- generate Copilot review instructions from the canonical docs (#556) (df88afd)
+
 ## [2.41.0] - 2026-09-09
 
 ### Features
