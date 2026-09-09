@@ -69,15 +69,17 @@ STRICT_FILES=(scripts/research-spike.py)
 # (legal 3.9 SYNTAX, TypeError at 3.9 RUNTIME) and `X | Y` annotations without
 # `from __future__ import annotations`. Raise this number only by deciding to
 # drop support, never to make a diagnostic go away.
-# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Two of
+# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Three of
 # these live under scripts/ and are still consumer code: server.py is launched
-# as bare `python3` by skills/local-review/SKILL.md and README.md, and
+# as bare `python3` by skills/local-review/SKILL.md and README.md,
 # coreview-rule-drift.py is invoked through ${CLAUDE_PLUGIN_ROOT} by
-# skills/co-review/SKILL.md and commands/doctor.md.
+# skills/co-review/SKILL.md and commands/doctor.md, and diff-anchor-check.py is
+# invoked the same way by skills/co-review/SKILL.md step 12.
 CONSUMER_FILES=(
   commands/handlers/assets/*.py
   scripts/local-review/server.py
   scripts/coreview-rule-drift.py
+  scripts/diff-anchor-check.py
 )
 CONSUMER_PYTHON=3.9
 

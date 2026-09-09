@@ -383,7 +383,14 @@ The remaining steps depend on disposition.
 12. **Post one batched PR review.** Submit a single review via `gh api repos/<owner>/<name>/pulls/<n>/reviews` — `<owner>/<name>` is the repo resolved in step 2, not necessarily `cwd`'s — (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
     - `event` = the chosen verdict.
     - `body` = a short summary plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns). Each such finding keeps its conventional-comment label.
-    - `comments` = an array of `{path, line, body}`, one per anchored candidate. Each `body` opens with the finding's conventional-comment label (see **Comment style**). `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. Before submitting, anchor-check every comment: confirm its `line` is among the diff's added/modified right-side lines, and fold any that don't anchor into `body` instead. The review POST is **atomic** — a single bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection. If the POST still fails, retry once with the offending comment(s) moved to `body`.
+    - `comments` = an array of `{path, line, body}`, one per anchored candidate. Each `body` opens with the finding's conventional-comment label (see **Comment style**). `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. **Anchor-check every candidate before submitting** — a bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection:
+
+      ```bash
+      gh pr diff <n> --repo <owner>/<name> > "<DIFF>"
+      cat "<COMMENTS>" | python3 "${CLAUDE_PLUGIN_ROOT}/scripts/diff-anchor-check.py" --diff "<DIFF>"
+      ```
+
+      `<DIFF>` and `<COMMENTS>` are fixed absolute paths (not `$TMPDIR`); write the candidate `[{path, line, body}]` array to `<COMMENTS>` before this call. The helper prints `{"anchored": [...], "unanchored": [...]}` on stdout — each entry keeps its original fields. Use `anchored` as the `comments` array above and fold every `unanchored` entry's `body` into the review's top-level `body` instead (each keeps its conventional-comment label). If the POST still fails after that split — the helper and GitHub disagree — retry once with the offending comment(s) moved to `body`.
 
 13. **Report the result.** Print the review URL (`gh pr view <n> --repo <owner>/<name> --json url` plus the review, or the API response's `html_url` — `<owner>/<name>` is the same resolved repo from step 2, not necessarily `cwd`'s). Don't commit or push anything — you changed no files.
 
