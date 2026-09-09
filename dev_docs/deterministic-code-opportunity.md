@@ -104,6 +104,89 @@ the shipped code — is tracked independently as
 [PRE-619](https://linear.app/prethinkio/issue/PRE-619) and is **not** in this
 project's scope. This audit is the graduated permanent home for the workstream.
 
+## Round 2 — delivered
+
+The second prose-to-code round — sourced from
+[`2026-09-09-prose-to-code-index.md`](2026-09-09-prose-to-code-index.md) via
+[milestone 2](https://github.com/bestdan/workflow-skills/milestone/2) — shipped
+14 of its 15 tasks (the 15th, this section itself, is issue #538). Row numbers
+below refer to that index; the index's own Evidence/Note cells carry each
+row's PR link.
+
+### Shipped scripts (final interfaces)
+
+| Script                                                              | PR(s)      | Interface                                                                                                                                                                                                                     | Replaces (re-derived prose)                                                                                                                   |
+| ------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commands/handlers/assets/jira-resolve-transition.py`               | #545       | `jira-resolve-transition.py [--category C [--exclude RE] [--prefer RE]] \| --exact NAME` — transitions JSON on stdin → transition id, or `AMBIGUOUS`/`NONE` with candidate names                                              | Jira transition-id resolution restated at 5 call sites (`jira-claim.md`, `jira-complete.md`, `jira-promote.md`, `jira.md`, `jira-archive.md`) |
+| `scripts/diff-anchor-check.py`                                      | #546       | `diff-anchor-check.py --diff <file>` — candidate-comment JSON on stdin → `{anchored: [...], unanchored: [...]}`                                                                                                               | co-review's batched-review-POST anchor check                                                                                                  |
+| `scripts/tutorial-root-guard.sh`                                    | #544       | `tutorial-root-guard.sh <path>` — exit 0 if safe, exit 1 with the failing predicate on stderr                                                                                                                                 | research-spike-tutorial's hand-walked `$WORK` root guard ahead of an `rm -rf`                                                                 |
+| `commands/handlers/assets/linear-graph-analyze.py`                  | #541       | `linear-graph-analyze.py [--file <linear-relations.py JSON>]` (else stdin) → cycles, topological order, priority inversions                                                                                                   | `linear-reoptimize.md`'s hand-walked cycle detection, topo sort + tie-break, priority-inversion sweep                                         |
+| `commands/handlers/assets/gh-issue-graph.py --sort`                 | #542       | adds `--sort` (and `--edges <file>`) to the existing `gh-issue-graph.py --repo <o/n> [...]` → topological order over open, in-scope nodes                                                                                     | `gh-issue-reoptimize.md` Dimension 3's hand-walked topo sort                                                                                  |
+| `commands/handlers/assets/_body_refs.py`                            | #547       | `parse(body, self_id, id_pattern) -> [{target, phrase, direction, strength}]`; called from `gh-issue-graph.py` and `linear-relations.py`, which each gain a `body_references`/`proposed` field                                | dependency-phrase body parsing with a direction table, duplicated in `gh-issue-reoptimize.md` and `linear-reoptimize.md`                      |
+| `commands/handlers/assets/linear-pr-resolve.py`                     | #550, #554 | `linear-pr-resolve.py [--config <.task-config.yml>] [--repo <o/n>]` → per-issue `{prs, resolved_via, unresolved}`; `classify()` → `merged`/`open`/`closed_unmerged`/`no_pr`                                                   | `linear-sweep-complete.md`'s three-source PR-discovery choreography and merge-state precedence                                                |
+| `scripts/spawn-orchestrator.sh reserve-gate`                        | #551       | `reserve-gate --run-md <p> --percent <p> --reset-epoch <e> [--floor n] [--samples n]` or `--read-failed` → `RESERVE: reserve=n headroom=n verdict=proceed\|pause\|fallback samples=n`                                         | `run-budget.md`/`run-state.md`'s `usage_delta` reserve bookkeeping, hand-walked at four `/deliver-task` boundaries                            |
+| `commands/handlers/assets/gh-issue-claim.py acquire-ref`            | #549       | `acquire-ref --repo <o/n> --branch <name> --base-sha <sha>` (exit 0 won / 3 lost / 4 other), sharing `acquire_ref()` with the existing `acquire` subcommand                                                                   | `claim-lock.md` and `jira-claim.md`'s hand-walked create-only-ref POST/422 dispatch                                                           |
+| `scripts/preflight.sh --scout-run-md`                               | #557       | `preflight.sh --scout-run-md <RUN.md path>` → `SCOUT VERDICT: go` or one or more `BLOCKS LAUNCH:` lines                                                                                                                       | auto-pilot's task-backend-in-environment-fingerprint check, duplicated in `launch-preflight.md` and `resume.md`                               |
+| `commands/handlers/assets/linear-false-closures.py --from-mcp-json` | #552       | `--from-mcp-json <search.json> <list.json> --complete-since <iso> --prs-file <out\|->` → builds the `--prs-file` JSON by joining on PR number                                                                                 | nightly-linear-tidy.md's merged-PR file builder (page, join, field-map, null-coerce)                                                          |
+| `scripts/analysis-pipeline/check-reproducibility.sh`                | #553       | `check-reproducibility.sh <dir>` → `REPRO: verdict=pass\|fail\|n/a` (plus a diff on fail); exit 0 pass/n-a, 1 fail, 2 usage error                                                                                             | `agents/fact-reviewer.md`'s clean-check / re-run / diff / guaranteed-restore sequence                                                         |
+| `commands/handlers/assets/kanban-classify.py`                       | #548       | `kanban-classify.py --tracker {linear,gh-issue,jira}` — issue JSON on stdin → classified, ordered sections                                                                                                                    | the kanban section-classification table restated in `linear-list.md`, `gh-issue.md`, `jira.md`                                                |
+| `commands/handlers/assets/_linear_rank.py` (+ `linear-rank.py`)     | #543       | `_linear_rank.py`: `gate(issue, max_estimate)` / `rank_key(issue)`, shared by `linear-ready.py` (GraphQL fast path) and the new `linear-rank.py [--max-estimate N] [--viewer-id ID]` (MCP-floor, `list_issues` JSON on stdin) | the ready-candidate gate + rank restated across `linear-claim.md`, `linear-list.md`, `linear-promote.md`, `linear-reoptimize.md`              |
+
+### Load-bearing decisions & gotchas (easy to re-break)
+
+1. **`test_linear_gql_shape.py` filters on `hasattr(mod, "gql")`, not the
+   `linear-*.py` glob (#543/#547).** `linear-rank.py` and any other pure
+   JSON-in/JSON-out `linear-*.py` decision script has no `gql()` seam and no
+   network call, so the shared gql-shape test would otherwise import it and
+   fail looking for a function that was never meant to exist. Filter new
+   `linear-*.py` assets the same way before adding them to this suite.
+2. **`linear-relations.py` never fetches `createdAt` (#541).** The prose's
+   "urgency → smaller estimate → age" tie-break degrades on real fast-path
+   input to "missing sorts last" — `linear-graph-analyze.py`'s age tie-break
+   only fires when a caller supplies `created_at` itself (as the tests do).
+   Fetching it is a separate, not-yet-done change; don't assume the fast path
+   already exercises the age tie-break in production.
+3. **`gh-issue-graph.py --sort`'s ordering is one transitive tuple key, not a
+   per-pair comparator (#542).** An earlier per-pair "fall to age when either
+   side lacks an estimate" comparator was not transitive (three same-priority
+   nodes could rank A<B, B<C, and C<A), so the shipped version sorts on
+   `(priority, has_estimate, estimate, age, number)` — which is why
+   has-estimate nodes group ahead of lacks-estimate ones within a priority
+   tier rather than interleaving by age.
+4. **`reserve-gate` records nothing on a zero delta (#551).** `/deliver-task`
+   re-presents one cached usage reading across four lifecycle boundaries per
+   task; recording all four would spuriously reach the 5-sample threshold and
+   evict real intervals from the 20-entry cap. A genuine no-op interval costs
+   nothing since the reserve is a max. `--read-failed` is a distinct path:
+   it exits 3 with `verdict=fallback`, never `proceed` — a failed read is not
+   zero headroom, and the caller must fall back to its own conservative
+   proxy for that boundary rather than treat exit 3 like exit 0.
+5. **`linear-pr-resolve.py` has a fifth `no_pr` state, distinct from
+   `closed_unmerged` (#550).** `no_pr` means every probe succeeded and found
+   nothing; `closed_unmerged` means every resolved PR read cleanly and is
+   closed unmerged. `/reconcile-tasks` garbage-collects `no_pr` issues and
+   only demotes `closed_unmerged` ones — folding the two together would
+   misroute one or the other.
+6. **`kanban-classify.py` checks the terminal category before any label
+   override (#548).** A tracker's labels are not cleared on close, so an
+   issue can be `Done` and still carry a label that would otherwise route it
+   elsewhere; checking terminal status first is what keeps a closed issue
+   classified as closed.
+7. **`check-reproducibility.sh` normalizes memo table-row padding before
+   diffing (#553).** `dprint` repads a committed table's column widths to its
+   final substituted values on format; the freshly regenerated file is never
+   repadded to match, so a byte-for-byte diff would report false drift on
+   every run. The script collapses runs of padding before comparing.
+8. **`jira-resolve-transition.py --exact` returns `AMBIGUOUS` on a tie, not
+   the first match (#545).** Two transitions sharing the same `to.name` (or
+   `name`) is treated as an unresolved tie the caller must handle, the same
+   as the `--category` mode's disambiguation path — it never silently picks
+   one.
+9. **`preflight.sh --scout-run-md` fails closed when RUN.md's task table has
+   no `coder` column (#557).** The column is located by header name, not
+   position, and its absence prints both `BLOCKS LAUNCH:` and
+   `SCOUT VERDICT: no-go` rather than defaulting to an assumed backend.
+
 ## Update — 2026-07-15
 
 Five days of work on main (this branch is ~96 commits behind it) shipped the
