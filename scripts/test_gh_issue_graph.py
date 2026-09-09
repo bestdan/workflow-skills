@@ -19,6 +19,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -429,6 +430,73 @@ class GraphTests(unittest.TestCase):
 
         self.assertEqual([a for a in repo.calls if a[:2] == ["issue", "list"]], [])
         self.assertEqual(result["checked"], 2)
+
+    # --- --sort: Dimension 3's re-order step ------------------------------
+
+    def test_no_order_key_without_sort(self):
+        repo = FakeRepo(scope=[issue(1)])
+        self.assertNotIn("order", self._run(repo))
+
+    def test_sort_ranks_by_prio_first(self):
+        repo = FakeRepo(
+            scope=[issue(1, labels=["prio:3"]), issue(2, labels=["prio:0"])]
+        )
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_tie_breaks_by_est_when_both_sides_carry_it(self):
+        """The pinned case: swapping est and age in the tie-break flips this.
+
+        #1 is older (lower number -> earlier createdAt) but carries the
+        LARGER est. Ranking est before age puts #2 first; ranking age before
+        est would put #1 first instead.
+        """
+        repo = FakeRepo(scope=[issue(1, labels=["est:5"]), issue(2, labels=["est:1"])])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_omits_the_est_tiebreak_when_one_side_lacks_it(self):
+        """ "Omit the tie-break otherwise" — a missing est is not a value.
+
+        #2's est is not treated as "better" than #1 having none; the
+        comparison falls through to age, and #1 (older) sorts first.
+        """
+        repo = FakeRepo(scope=[issue(1), issue(2, labels=["est:1"])])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+
+    def test_sort_breaks_remaining_ties_by_older_createdat_first(self):
+        repo = FakeRepo(scope=[issue(2), issue(1)])  # scope order != age order
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+
+    def test_sort_excludes_closed_and_out_of_scope_nodes(self):
+        repo = FakeRepo(
+            scope=[issue(1), issue(2, milestone="A")],
+            extra=[issue(9, milestone="B")],
+            edges={2: [9]},
+        )
+        # #2 is closed -> excluded; #9 is backfilled out-of-scope -> excluded.
+        repo.scope[1]["state"] = "CLOSED"
+        repo.scope[1]["stateReason"] = "COMPLETED"
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1])
+
+    def test_an_extra_approved_edge_changes_the_order(self):
+        repo = FakeRepo(scope=[issue(1), issue(2)])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump([{"blocked": 1, "blocker": 2}], f)
+            edges_path = f.name
+        try:
+            reordered = self._run(repo, ["--sort", "--edges", edges_path])
+        finally:
+            Path(edges_path).unlink()
+
+        self.assertEqual(reordered["order"], [2, 1])
+
+    def test_a_node_stuck_in_a_cycle_is_left_out_of_order(self):
+        repo = FakeRepo(scope=[issue(1), issue(2)], edges={1: [2], 2: [1]})
+        result = self._run(repo, ["--sort"])
+
+        self.assertEqual(result["cycles"], [[1, 2]])
+        self.assertEqual(result["order"], [])
 
 
 if __name__ == "__main__":

@@ -28,6 +28,17 @@ Findings, all over the native graph:
   least). Sweeps every edge, not a sample.
 - `concurrent` — a blocker and its dependent both at `status:3_started`. They
   cannot legitimately both be mid-build.
+- `order` — present only with `--sort`: a topological ordering of the open,
+  in-scope nodes, ranked within topo constraints by `prio_rank` (lower is more
+  urgent, absent is last), then smaller `est:<n>` when **both** sides of a
+  comparison carry the label (the tie-break is skipped, not defaulted, when
+  either side lacks one), then older `createdAt` first. This is
+  `gh-issue-reoptimize.md` Dimension 3's re-order step, code-backed instead of
+  hand-walked. `--edges <file>` folds in a JSON list of `{"blocked", "blocker"}`
+  proposed edges (Dimension 1-2's approved findings) before sorting; an edge
+  naming a node outside the sortable set is ignored. A node inside a cycle
+  never dequeues and is left out of `order` — `cycles` above already reports it
+  for the human decision `find_cycles` exists to defer.
 
 Reads only. Every call is a GET: `gh issue list`, `gh issue view`, and
 `gh api .../dependencies/blocked_by`. Writes belong to `gh-issue-deps.py`
@@ -61,9 +72,11 @@ Usage:
   python3 gh-issue-graph.py --repo owner/name
   python3 gh-issue-graph.py --repo owner/name --milestone "Phase 3" --json
   python3 gh-issue-graph.py --repo owner/name --issue 12 --issue 11 --json
+  python3 gh-issue-graph.py --repo owner/name --sort --edges approved.json --json
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -315,7 +328,89 @@ def find_cycles(numbers, edges):
     return sorted(cycles)
 
 
-def analyse(repo, labels_file, milestone, scope_labels, limit, issue_numbers):
+def compare_nodes(a, b, vocabulary):
+    """Ranking comparator for `--sort`'s tie-break, in rank order.
+
+    `prio_rank` first (lower is more urgent). Then smaller `est:<n>` — but only
+    when BOTH sides carry the label; one side missing it skips straight to the
+    next tie-break rather than treating the gap as a value, which is what
+    `gh-issue-reoptimize.md` Dimension 3 means by "omit the tie-break
+    otherwise". Then older `createdAt` first (let aging issues bubble up, the
+    same convention `gh-issue-claim.md`'s Rank step uses). Node number last, so
+    the comparator is a total order and the sort is deterministic.
+    """
+    pa, pb = prio_rank(a["prio"], vocabulary), prio_rank(b["prio"], vocabulary)
+    if pa != pb:
+        return -1 if pa < pb else 1
+    if a["est"] is not None and b["est"] is not None:
+        ea, eb = int(a["est"]), int(b["est"])
+        if ea != eb:
+            return -1 if ea < eb else 1
+    ca, cb = a["created_at"] or "", b["created_at"] or ""
+    if ca != cb:
+        return -1 if ca < cb else 1
+    return -1 if a["number"] < b["number"] else (1 if a["number"] > b["number"] else 0)
+
+
+def topo_order(nodes, edges, extra_edges, vocabulary):
+    """Kahn's algorithm over the OPEN, IN-SCOPE nodes, tie-broken by `compare_nodes`.
+
+    `edges` is the full `blocked -> {blocker, ...}` map `analyse()` builds; only
+    the edges whose blocked AND blocker are both in the sortable set gate the
+    order — a closed or out-of-scope blocker cannot legitimately hold up a
+    schedule (it is already satisfied/stale, or outside what this run may
+    touch). `extra_edges` is `--edges`'s approved Dimension 1-2 findings, folded
+    in the same way and subject to the same filter.
+
+    A node inside a cycle never reaches indegree 0 and is left out of the
+    returned order — `find_cycles` over the full graph already reports it.
+    """
+    sortable = {
+        n for n, node in nodes.items() if node["in_scope"] and node["state"] == "open"
+    }
+
+    adjacency: dict[int, list[int]] = {n: [] for n in sortable}
+    indegree = {n: 0 for n in sortable}
+
+    def add_edge(blocked, blocker):
+        if blocked not in sortable or blocker not in sortable or blocked == blocker:
+            return
+        adjacency[blocker].append(blocked)
+        indegree[blocked] += 1
+
+    for blocked, blockers in edges.items():
+        for blocker in blockers:
+            add_edge(blocked, blocker)
+    for extra in extra_edges:
+        add_edge(extra["blocked"], extra["blocker"])
+
+    ranker = functools.cmp_to_key(
+        lambda x, y: compare_nodes(nodes[x], nodes[y], vocabulary)
+    )
+    ready = [n for n in sortable if indegree[n] == 0]
+    order = []
+    while ready:
+        ready.sort(key=ranker)
+        current = ready.pop(0)
+        order.append(current)
+        for dependent in adjacency[current]:
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+
+    return order
+
+
+def analyse(
+    repo,
+    labels_file,
+    milestone,
+    scope_labels,
+    limit,
+    issue_numbers,
+    sort=False,
+    extra_edges=(),
+):
     vocabulary, _colors = load_vocabulary(labels_file)
 
     if issue_numbers:
@@ -421,6 +516,9 @@ def analyse(repo, labels_file, milestone, scope_labels, limit, issue_numbers):
         "concurrent": concurrent,
         "footer_only": footer_only,
         "edge_only": edge_only,
+        **(
+            {"order": topo_order(nodes, edges, extra_edges, vocabulary)} if sort else {}
+        ),
     }
 
 
@@ -487,6 +585,9 @@ def report(result):
         result["edge_only"],
         lambda e: f"#{e['blocked']} blocked_by #{e['blocker']}",
     )
+    if "order" in result:
+        print(f"\nTopological order — {len(result['order'])} node(s), provisional:")
+        print("  " + " -> ".join(f"#{n}" for n in result["order"]))
 
 
 def main(argv=None):
@@ -516,7 +617,32 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument(
+        "--sort",
+        action="store_true",
+        help=(
+            "also compute a topological order (Dimension 3's re-order step) "
+            "over the open, in-scope nodes"
+        ),
+    )
+    parser.add_argument(
+        "--edges",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "JSON file of approved extra edges — a list of "
+            '{"blocked": <n>, "blocker": <n>} — folded in before --sort orders '
+            "the graph; ignored without --sort"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    extra_edges = []
+    if args.edges:
+        raw_edges = json.loads(args.edges.read_text())
+        extra_edges = [
+            {"blocked": e["blocked"], "blocker": e["blocker"]} for e in raw_edges
+        ]
 
     result = analyse(
         args.repo,
@@ -525,6 +651,8 @@ def main(argv=None):
         args.scope_labels,
         args.limit,
         args.issue_numbers,
+        sort=args.sort,
+        extra_edges=extra_edges,
     )
     if args.as_json:
         print(json.dumps(result, indent=2))
