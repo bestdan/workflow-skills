@@ -79,7 +79,7 @@ import urllib.request
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _linear_pr import GhError, pr_identity  # noqa: E402,F401
+from _linear_pr import GhError, pr_identity  # noqa: E402
 from _linear_pr import merged_prs as _shared_merged_prs  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
