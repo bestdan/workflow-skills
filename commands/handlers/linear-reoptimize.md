@@ -157,9 +157,10 @@ JSON object: `{cycles, order, inversions}` — parse it, don't re-derive it.
   non-terminal nodes, already ranked by urgency (`1`=Urgent…`4`=Low, `0`=None
   sorted **last** — never a formula like `priority ÷ estimate`, which is
   incoherent over that scale), then smaller `estimate` (quick wins), then age.
-  A cycle's members and anything downstream of one are absent from `order`
-  (they're in `cycles` instead) — **report** that gap rather than treating a
-  short `order` as an error. **Output the order as a recommendation** (a
+  A cycle's members are absent from `order` (they're in `cycles` instead);
+  anything merely downstream of a cycle is absent from **both** — **report**
+  that gap rather than treating a short `order` as an error. **Output the
+  order as a recommendation** (a
   printed ordered list): the Linear MCP doesn't expose board rank, so
   re-ordering is advisory.
 - **Priority-inversion sweep (systematic, every edge).** Read `inversions`:

@@ -117,7 +117,9 @@ def load_nodes(payload):
         key = node_key(issue, where)
         state = issue.get("state")
         state_type = (state or {}).get("type") if isinstance(state, dict) else None
-        blocked_by = issue.get("blockedBy") or []
+        blocked_by = issue.get("blockedBy")
+        if blocked_by is None:
+            blocked_by = []
         if not isinstance(blocked_by, list):
             raise MalformedInput(f"{where}.blockedBy: expected a list")
         priority = issue.get("priority")
@@ -125,12 +127,17 @@ def load_nodes(payload):
             priority = 0
         if not isinstance(priority, int) or isinstance(priority, bool):
             raise MalformedInput(f"{where}.priority: expected an int")
+        estimate = issue.get("estimate")
+        if estimate is not None and (
+            not isinstance(estimate, (int, float)) or isinstance(estimate, bool)
+        ):
+            raise MalformedInput(f"{where}.estimate: expected a number or null")
         nodes[key] = {
             "key": key,
             "state_type": state_type,
             "terminal": state_type in TERMINAL_TYPES,
             "priority": priority,
-            "estimate": issue.get("estimate"),
+            "estimate": estimate,
             "created_at": issue.get("createdAt"),
             "blocked_by": [b for b in blocked_by if isinstance(b, str)],
         }

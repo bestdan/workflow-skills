@@ -162,6 +162,24 @@ class MalformedInputTest(unittest.TestCase):
         with self.assertRaises(graph_analyze.MalformedInput):
             graph_analyze.analyze({"issues": [{"priority": 1}]})
 
+    def test_non_list_blocked_by_raises_even_when_falsy(self):
+        # `0`/`""` are falsy but not None/missing — a bare `or []` fallback
+        # would silently swallow this instead of rejecting it. Built by hand
+        # (not the `issue()` helper, which has the same `or []` shape) so the
+        # falsy `0` actually reaches the module under test.
+        with self.assertRaises(graph_analyze.MalformedInput):
+            graph_analyze.analyze(
+                {"issues": [{"identifier": "A", "priority": 1, "blockedBy": 0}]}
+            )
+
+    def test_non_numeric_estimate_raises(self):
+        with self.assertRaises(graph_analyze.MalformedInput):
+            graph_analyze.analyze({"issues": [issue("A", estimate="big")]})
+
+    def test_boolean_estimate_raises(self):
+        with self.assertRaises(graph_analyze.MalformedInput):
+            graph_analyze.analyze({"issues": [issue("A", estimate=True)]})
+
     def test_main_exits_nonzero_on_invalid_json(self):
         import io
         import sys
