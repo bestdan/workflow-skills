@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.41.0] - 2026-09-09
+
+### Features
+
+- add spawn-orchestrator.sh reserve-gate for the usage_delta bookkeeping (#551) (52f58a0)
+
 ## [2.40.1] - 2026-09-09
 
 ### Fixes
