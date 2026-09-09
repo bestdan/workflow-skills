@@ -124,10 +124,10 @@ Flag matrix:
 | -------------------- | --------------------------------------------------------------------------------------------------- |
 | `/do-tasks`          | execute the single highest-ranked dependency-ready task                                             |
 | `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`)                       |
-| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)                          |
-| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)                           |
-| `--remote` (default) | dispatch each task to its own cloud VM (file path)                                                  |
-| `--local`            | run in the current session; caps the batch at 1 (file path)                                         |
+| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path and linear)                    |
+| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path and linear)                     |
+| `--remote` (default) | dispatch each task to its own cloud VM (file path and linear)                                       |
+| `--local`            | run in the current session; caps the batch at 1 (file path and linear)                              |
 | `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable                          |
 | `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only                        |
 | `--non-interactive`  | declare no human present: never prompt, and the WIP gate declines rather than offering its override |
