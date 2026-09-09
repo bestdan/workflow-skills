@@ -54,15 +54,16 @@ directory, so the script accepts it silently and scaffolds
 That is the learner's own repo. It has already happened once, during this
 skill's own development.
 
-So before every command, check the root you are about to pass:
+So before every command, run the guard on the path you are about to pass:
 
-- it is non-empty;
-- it is the absolute path Step 1 printed;
-- it is **not** inside the learner's repo (compare against
-  `git rev-parse --show-toplevel`).
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/tutorial-root-guard.sh" "$WORK"
+```
 
-If any of those fails, stop and re-derive the path. Never fall back to a bare
-`--root ""` or to the current directory.
+It checks non-empty, absolute, exists, and not the learner's repo (or under
+it, via `git rev-parse --show-toplevel`) in one call. If it exits non-zero,
+stop and re-derive the path. Never fall back to a bare `--root ""` or to the
+current directory.
 
 Say the whole spine up front, once, before starting: _"You'll answer
 questions, and the answered count will go up — that feels like progress. Watch
@@ -416,14 +417,15 @@ the command exits quietly having deleted nothing — leaving the tutorial's one
 promise (nothing survives this walk) broken with no error to notice:
 
 ```bash
-rm -rf "/absolute/path/printed/by/step/1"
+"${CLAUDE_PLUGIN_ROOT}/scripts/tutorial-root-guard.sh" "/absolute/path/printed/by/step/1" \
+  && rm -rf "/absolute/path/printed/by/step/1"
 ```
 
-Before running it, check the path the same three ways Step 1 did: non-empty,
-the absolute path Step 1 printed, and not inside the learner's repo. A blank
-path there is not "nothing to clean up," it is one quoting mistake away from
-deleting whatever the shell happens to be sitting in. Then confirm the
-directory is actually gone rather than assuming it:
+The guard is the same one from Step 1, run again here for the same reason: a
+blank path is not "nothing to clean up," it is one quoting mistake away from
+deleting whatever the shell happens to be sitting in. If it exits non-zero,
+stop and re-derive the path — do not fall back to a bare `rm -rf` without it.
+Then confirm the directory is actually gone rather than assuming it:
 
 ```bash
 [ -e "/absolute/path/printed/by/step/1" ] && echo "STILL THERE" || echo "gone"
