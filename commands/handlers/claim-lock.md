@@ -56,33 +56,32 @@ real lock instead of a TOCTOU probe spanning the whole execution.
 assignee/status/label write. `<repo>` is the handler's configured repo
 (`gh-issue.repo`) or, when unset, the current one (`gh repo view --json nameWithOwner
 --jq .nameWithOwner`); `<base>` is the handler's configured base branch, else the repo
-default:
+default. The POST/422 dispatch is not hand-walked here — both handlers call the one
+implementation in `commands/handlers/assets/gh-issue-claim.py`, named for gh-issue but
+tracker-neutral at this entry point (it takes the branch name directly, not an issue
+number):
 
 ```bash
 git fetch origin
 base_sha=$(git rev-parse "origin/<base>")
-gh api --method POST "repos/<repo>/git/refs" \
-  -f "ref=refs/heads/<branch>" -f "sha=$base_sha"
+python3 commands/handlers/assets/gh-issue-claim.py acquire-ref \
+  --repo "<repo>" --branch "<branch>" --base-sha "$base_sha"
 ```
 
-Read the result — it is the election:
+Branch on the exit code — it is the election, and it is the only thing that decides it:
 
-- **HTTP 201** → you hold the claim. Check the branch out and proceed to the handler's
-  human-visible markers (assign yourself, transition/label), then to "Branch + execute"
-  **already on this branch** — do not create it a second time:
+| exit | meaning                                                                                                                   | do                                                                                                                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | acquired (HTTP 201); stdout is `<branch>`                                                                                 | you hold the claim — proceed to the handler's human-visible markers (assign yourself, transition/label)                                                                                                                                              |
+| `3`  | lost — the ref already exists (HTTP 422)                                                                                  | **you lost the race.** Do not build, do not touch the issue's assignee or status: they belong to the winner. Report `Skipped <KEY>: claim lost — <branch> already exists on origin` and advance to the next candidate (in single/direct mode, stop). |
+| `4`  | neither — 403/404 from a token without write scope, a protected-ref ruleset, a branch-pinned environment, a network error | **not** a lost race and **not** a held claim. Fall back to the election below; never report a claim you did not acquire atomically.                                                                                                                  |
 
-  ```bash
-  git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD
-  ```
+On exit `0`, proceed to "Branch + execute" **already on this branch** — do not create it
+a second time:
 
-- **HTTP 422 `Reference already exists`** → **you lost the race.** Do not build, do not
-  touch the issue's assignee or status: they belong to the winner. Report
-  `Skipped <KEY>: claim lost — <branch> already exists on origin` and advance to the
-  next candidate (in single/direct mode, stop).
-- **Any other failure** — 403/404 from a token without write scope, a protected-ref
-  ruleset, a branch-pinned environment, a network error — → this is **not** a lost race
-  and **not** a held claim. Fall back to the election below; never report a claim you
-  did not acquire atomically.
+```bash
+git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD
+```
 
 Because the loser detects the loss from the 422, feasibility judging may still run
 **before** the claim: two sessions can both judge the same issue, but only one can

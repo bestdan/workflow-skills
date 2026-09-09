@@ -200,10 +200,20 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
    ```bash
    git fetch origin
    base_sha=$(git rev-parse "origin/<base>")
-   gh api --method POST "repos/<repo>/git/refs" -f "ref=refs/heads/task/<KEY>" -f "sha=$base_sha"
+   python3 commands/handlers/assets/gh-issue-claim.py acquire-ref \
+     --repo "<repo>" --branch "task/<KEY>" --base-sha "$base_sha"
    ```
 
-   **HTTP 422 `Reference already exists`** → **you lost**: leave the issue's assignee and status untouched, return `race`, and fall back to the next candidate. **Any other failure** (403/404, protected-ref ruleset, branch-pinned environment) → degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report the degrade reason. Only **HTTP 201** proceeds to step 4 — check the branch out first (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not** substitute `git push origin task/<KEY>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
+   Branch on the exit code (`claim-lock.md` → "Acquire" has the full table): **exit `3`**
+   (HTTP 422, `Reference already exists`) → **you lost**: leave the issue's assignee and
+   status untouched, return `race`, and fall back to the next candidate. **Exit `4`**
+   (403/404, protected-ref ruleset, branch-pinned environment) → degrade to
+   `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report
+   the degrade reason. Only **exit `0`** proceeds to step 4 — check the branch out first
+   (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not**
+   substitute `git push origin task/<KEY>` for this call: both racers branch from the same
+   base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured —
+   see the warning in `claim-lock.md`).
 
 4. **Assign yourself.** Call `<atlassian-mcp>__editJiraIssue` with:
    - `cloudId`: `<jira.site>`
