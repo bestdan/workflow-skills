@@ -1,6 +1,11 @@
-# prose_to_code — parallel work plan
+# prose_to_code — parallel work plan (2026-09-09)
 
-Plan scaffolding; task 15 graduates and deletes it with the folder.
+A snapshot. The tasks live in
+[milestone 2](https://github.com/bestdan/workflow-skills/milestone/2) with
+native `blocked_by` edges; this note only explains the shape. Task numbers
+below map to issues: 1 #524 · 2 #525 · 3 #526 · 4 #527 · 5 #528 · 6 #534 ·
+7 #529 · 8 #530 · 9 #535 · 10 #536 · 11 #531 · 12 #532 · 13 #537 · 14 #533 ·
+15 #538. Issue #538 (the cleanup task) deletes this file.
 
 ## Waves
 
@@ -26,11 +31,11 @@ Wave 1 (no blockers, start today)        Wave 2 (one blocker)       Wave 3
 
 ## Schedule, no WIP limit
 
-| Round | Tasks                              | Points | Starts when                                  |
-| ----- | ---------------------------------- | ------ | -------------------------------------------- |
-| 1     | 1, 2, 3, 4, 5, 7, 8, 11, 12, 14    | 30     | now, all ten at once                         |
-| 2     | 6, 9, 10, 13                       | 10     | each as its own blocker merges, not as a set |
-| 3     | 15                                 | 1      | the last of the other 14 merges              |
+| Round | Tasks                           | Points | Starts when                                  |
+| ----- | ------------------------------- | ------ | -------------------------------------------- |
+| 1     | 1, 2, 3, 4, 5, 7, 8, 11, 12, 14 | 30     | now, all ten at once                         |
+| 2     | 6, 9, 10, 13                    | 10     | each as its own blocker merges, not as a set |
+| 3     | 15                              | 1      | the last of the other 14 merges              |
 
 Round 2 is not a barrier: 9 can start the moment 1 merges, while 7 and 8 are
 still open. Wall-clock is bounded by the slowest chain, 4/5 → 6 → 15 or
