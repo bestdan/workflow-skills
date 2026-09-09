@@ -154,22 +154,17 @@ The gate and rank rules `/do-tasks` (tracker path) apply when picking claimable 
 
 **State scope.** Only `unstarted`-type states (the `ready` kanban column) are eligible — `backlog` issues are unrefined and must go through `/promote-tasks` first, and `started` issues are by definition already claimed.
 
-**Gates.** Drop a candidate if any of these fail. Each has a fixed reason string so the caller can report consistently:
+**Gates and rank.** The six-gate table and the rank rule (priority
+urgent→low, **none(0) last**, then `updatedAt` ascending) live in one place
+now: `commands/handlers/assets/_linear_rank.py`'s header docstring. Both
+selection paths call into that module rather than restating the table — the
+GraphQL fast path via `linear-ready.py`'s import, the MCP floor via
+`commands/handlers/assets/linear-rank.py` (`linear-claim.md` → "Find
+candidates" floor step 5). Change the rules there first, never here.
 
-| Gate                                                                               | Reason string              |
-| ---------------------------------------------------------------------------------- | -------------------------- |
-| `estimate` is `null`/missing                                                       | `no estimate set`          |
-| `estimate >= <max>` (candidate's resolved per-project `max_estimate`, default `3`) | `estimate <N> >= <max>`    |
-| Has label `auto-claimed`                                                           | `already auto-claimed`     |
-| Has label `human-approval-requested`                                               | `human-approval-requested` |
-| Has label `blocked`                                                                | `blocked`                  |
-| `assignee` is set and is **not** the current Linear user                           | `assigned to <name>`       |
+**The assignee gate is viewer-relative — and each path resolves "the current Linear user" from its own credential.** The GraphQL fast path reads `assignee { isMe }`, which the Linear API evaluates server-side against the **`$LINEAR_API_KEY`'s** owner; the MCP floor compares `assigneeId` against the **MCP connection's** viewer (`<linear-mcp>__get_user`), passed to `linear-rank.py` as `--viewer-id`. Those are two independent identities, so the gate only means the same thing on both paths when the personal API key and the MCP connection belong to the **same Linear user** — see `linear-claim.md` → "Find candidates" for the operator-facing statement of that requirement. When they diverge, the fast path gates against the key's owner and the floor against the MCP's, and the two paths can legitimately disagree about which candidates are "someone else's". Nothing detects this automatically; it is a configuration requirement, not an invariant the code enforces.
 
-**The assignee gate is viewer-relative — and each path resolves "the current Linear user" from its own credential.** The GraphQL fast path reads `assignee { isMe }`, which the Linear API evaluates server-side against the **`$LINEAR_API_KEY`'s** owner; the MCP floor compares `assigneeId` against the **MCP connection's** viewer (`<linear-mcp>__get_user`). Those are two independent identities, so the gate only means the same thing on both paths when the personal API key and the MCP connection belong to the **same Linear user** — see `linear-claim.md` → "Find candidates" for the operator-facing statement of that requirement. When they diverge, the fast path gates against the key's owner and the floor against the MCP's, and the two paths can legitimately disagree about which candidates are "someone else's". Nothing detects this automatically; it is a configuration requirement, not an invariant the code enforces.
-
-**Rank.** Sort remaining issues by Linear `priority`: urgent(1) → high(2) → medium(3) → low(4), then **none(0) last** (Linear stores "no priority" as `0`, so a naive numeric ascending sort would wrongly put it first), then by `updatedAt` ascending (oldest first — let aging cards bubble up).
-
-This block is the single source of truth for `ready` selection. `linear-claim.md` (both the GraphQL fast-path and the MCP floor) and `commands/handlers/assets/linear-ready.py` all implement exactly these gates and this ordering — change them here and update both consumers in lockstep. **Every gate above is enforceable on both paths**, including the assignee gate: `<linear-mcp>__list_issues` returns `assignee`/`assigneeId` on each result, so the floor applies it client-side over data it has already fetched — no per-candidate `<linear-mcp>__get_issue`. The gates themselves are identical on both paths; where the two can still differ is _whose_ viewer the assignee gate is relative to (above) and how much of the backlog each path saw — the MCP floor caps its read at 50 per scope and does not paginate, where `linear-ready.py` paginates to exhaustion (`linear-claim.md` → floor step 4). Neither is a gate difference.
+This block is the single source of truth for `ready` selection's **scope** (state-type and viewer-relativity); the gates and rank themselves live in `_linear_rank.py` per above. **Every gate is enforceable on both paths**, including the assignee gate: `<linear-mcp>__list_issues` returns `assignee`/`assigneeId` on each result, so the floor applies it client-side over data it has already fetched — no per-candidate `<linear-mcp>__get_issue`. The gates themselves are identical on both paths; where the two can still differ is _whose_ viewer the assignee gate is relative to (above) and how much of the backlog each path saw — the MCP floor caps its read at 50 per scope and does not paginate, where `linear-ready.py` paginates to exhaustion (`linear-claim.md` → floor step 4). Neither is a gate difference.
 
 ## Fast-path / MCP-floor gate (and the security boundary)
 
