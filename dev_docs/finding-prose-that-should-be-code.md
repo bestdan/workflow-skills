@@ -2,8 +2,8 @@
 
 How to run a prose-to-code survey on this repo: what the smell looks like, how
 to rank what you find, and the mistakes that have already been paid for. Two
-rounds have run this way (2026-07 and 2026-09); this file is the method they
-left behind, not their results. Their point-in-time records are
+prose-to-code rounds have run (2026-07 and 2026-09); this file is the method
+they left behind, not their results. Their point-in-time records are
 [`dev_docs/deterministic-code-opportunity.md` at `eef937e`](https://github.com/bestdan/workflow-skills/blob/eef937e/dev_docs/deterministic-code-opportunity.md)
 and
 [`dev_docs/2026-09-09-prose-to-code-index.md` at `c1af35e`](https://github.com/bestdan/workflow-skills/blob/c1af35eb26af8d614cf2fa93ebd41b6e919c4af1/dev_docs/2026-09-09-prose-to-code-index.md).
@@ -26,8 +26,10 @@ only about finding the candidates.
 ## How to find it
 
 Read every assigned file in full against one rubric. Splitting the tree across
-parallel readers, one file group each, is what both rounds did; a reader that
-skims for keywords finds the fenced blocks and misses everything else.
+parallel readers, one file group each, is how the 2026-09 round did it. The
+2026-07 round instead picked its hotspots by grepping for computation-shaped
+language, and a reader who does that finds the fenced blocks and misses
+everything else.
 
 | Category                                        | What it looks like                                                                 | Shipped example                                                                                                                              |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
