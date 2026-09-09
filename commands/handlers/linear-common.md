@@ -160,7 +160,7 @@ now: `commands/handlers/assets/_linear_rank.py`'s header docstring. Both
 selection paths call into that module rather than restating the table — the
 GraphQL fast path via `linear-ready.py`'s import, the MCP floor via
 `commands/handlers/assets/linear-rank.py` (`linear-claim.md` → "Find
-candidates" floor steps 5–6). Change the rules there first, never here.
+candidates" floor step 5). Change the rules there first, never here.
 
 **The assignee gate is viewer-relative — and each path resolves "the current Linear user" from its own credential.** The GraphQL fast path reads `assignee { isMe }`, which the Linear API evaluates server-side against the **`$LINEAR_API_KEY`'s** owner; the MCP floor compares `assigneeId` against the **MCP connection's** viewer (`<linear-mcp>__get_user`), passed to `linear-rank.py` as `--viewer-id`. Those are two independent identities, so the gate only means the same thing on both paths when the personal API key and the MCP connection belong to the **same Linear user** — see `linear-claim.md` → "Find candidates" for the operator-facing statement of that requirement. When they diverge, the fast path gates against the key's owner and the floor against the MCP's, and the two paths can legitimately disagree about which candidates are "someone else's". Nothing detects this automatically; it is a configuration requirement, not an invariant the code enforces.
 
