@@ -96,32 +96,44 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
   issue blocks the dependent forever → propose `removeBlockedBy`. A `blockedBy`
   pointing at a **`Done`** issue is _satisfied_, not a bug → report it as
   satisfied and offer optional cleanup (low priority); do **not** auto-remove.
-- **Prose → native reconciliation (the core fix).** For **every** issue, parse
-  the description for both signals — exhaustively, not a spot-check:
-  - embedded mentions: `<issue id="…" href="…/PRE-NNN/…">` and bare `PRE-NNN`;
-  - dependency phrases (match case-insensitively): `unblocks`, `blocked on`,
-    `blocked by`, `relies on`, `depends on`, `requires`, `with X in place`,
-    `re-scoped per`, `part of … plan`.
+- **Prose → native reconciliation (the core fix).** The dependency-phrase
+  table (`unblocks`, `blocked on`, `blocked by`, `relies on`, `depends on`,
+  `requires`, `with X in place`, `re-scoped per`, `part of … plan`, plus a
+  bare `<issue id="…" href="…/PRE-NNN/…">` or `PRE-NNN` mention) lives once, in
+  `commands/handlers/assets/_body_refs.py` — shared with the gh-issue handler,
+  not restated here.
 
-  For each referenced issue — **excluding the issue's own id**, so a body that
-  restates its own identifier never yields a self-block — **not already covered
-  by a native relation**, propose the missing link, classified by phrasing
-  strength:
-  - strong (`blocked on/by`, `relies on`, `depends on`, `requires`, `unblocks`)
-    → **`blockedBy`** (on the dependent) or **`blocks`** (on the blocker);
-  - weak (`part of`, `re-scoped per`, a bare mention) → **`relatedTo`**.
+  - **Fast path.** `linear-relations.py` already ran that table over every
+    issue's description while building the graph (§Load). Read its top-level
+    `proposed` field: each entry is a `{from, target, phrase, direction,
+    strength}` reference **not already covered by a native relation** —
+    self-mentions and code-span mentions are already excluded. `direction:
+    "blocked_by"` → propose `blockedBy` on `from`; `direction: "blocks"` →
+    propose `blocks` on `from` (only `unblocks` produces this, already
+    reversed correctly — `_body_refs.py`'s tests pin that, so don't re-derive
+    it); `direction: "related"`, i.e. `strength: "weak"` → propose
+    `relatedTo`. This catches drift like PRE-210's body saying it "unblocks
+    PRE-189" while the native relation is only `relatedTo` — propose
+    converting it to a real `blocks` edge.
+  - **MCP floor.** There is no script entry point on this path (§Load's floor
+    has no `gh`/`linear-relations.py` fast-path call to piggyback on), so run
+    the same `_body_refs.py` table by hand, issue by issue, exhaustively — not
+    a spot-check. It is the identical rules the fast path reads pre-computed;
+    read the module's docstring for the phrase → direction/strength mapping
+    rather than re-deriving it, and apply its stated exclusions
+    (self-mentions, code-span mentions).
 
-  This catches drift like PRE-210's body saying it "unblocks PRE-189" while the
-  native relation is only `relatedTo` — propose converting it to a real `blocks`
-  edge. Build the diff for **all** issues; do not stop at the load-bearing ones.
+  Build the diff for **all** issues on either path; do not stop at the
+  load-bearing ones.
 
 ### Dimension 2 — Hidden cross-project dependencies
 
-- **Cross-project references.** From the same parse, flag any reference whose
-  target issue's `projectId` **differs** from the referrer's and that has **no
-  native link** → propose `blockedBy`/`relatedTo` per phrasing strength. These
-  are invisible inside any single project view and are the whole point of the
-  initiative-scoped run.
+- **Cross-project references.** From the same references (`proposed` on the
+  fast path; the hand-walk above on the floor), flag any whose target issue's
+  `projectId` **differs** from the referrer's and that has **no native link**
+  → propose `blockedBy`/`relatedTo`/`blocks` per Dimension 1's direction, which
+  is already resolved. These are invisible inside any single project view and
+  are the whole point of the initiative-scoped run.
 - **Semantic inference (judgment, lower-confidence).** Read descriptions for a
   shared file / function / subsystem that implies one issue must precede another
   even when neither cites the other (e.g. two issues both rewriting the same
