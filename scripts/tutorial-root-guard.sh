@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tutorial-root-guard.sh — the three path predicates
+# tutorial-root-guard.sh — the four path predicates
 # skills/research-spike-tutorial/SKILL.md hand-walks before trusting `$WORK`.
 #
 # Usage: scripts/tutorial-root-guard.sh <path>
