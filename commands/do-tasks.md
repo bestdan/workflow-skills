@@ -610,11 +610,11 @@ capability is actually visible — inside the remote session** — via two concr
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
-   **self-contained** — **the VM has no plugin**, and a committed
-   `.claude/settings.json` does not install one (probed 2026-09-05,
-   `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`; see §4's gate),
-   **and** a fresh clone has no local task config (`/task-config` gitignores
-   `dev_docs/tasks/` by default) — so
+   **self-contained** — **assume the VM has no plugin** unless its environment's setup
+   script installed one; a committed `.claude/settings.json` does **not** install one
+   (both probed 2026-09-05 and after, `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`
+   findings 1 and 9; see §4's gate), **and** a fresh clone has no local task config
+   (`/task-config` gitignores `dev_docs/tasks/` by default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
    already-resolved **non-secret** Linear config the single-issue flow needs (the
    resolved `team`, `base_branch`, the issue's project scope, and its applicable
@@ -735,10 +735,12 @@ a repo finds nothing.
 
 The `gh` half is still open. Such a session also needs a working `gh` credential,
 because every phase of this handler shells out to `gh`, and the probed session had none.
-**Whether one can be provisioned is untested** — a repo attached with credentials
-(`add_repo` with `access:"push"`) was never tried, and that is the experiment that would
-answer it. Setting `true` before then is not silently broken: step 5's self-check stops
-each session loudly on its own issue.
+**Whether one can be provisioned is untested**, though not for want of trying. Attaching
+a repo with credentials **works** — `add_repo` accepts `access:"push"`. What no run has
+managed is a repo-scoped `gh` call **after** that attach, because the environment that
+offers `add_repo` had no `gh` and the one with `gh` had no `add_repo`. That is the
+experiment that would answer it. Setting `true` before then is not silently broken:
+step 5's self-check stops each session loudly on its own issue.
 
 > **Every deterministic value below comes from a script whose exit code or JSON is
 > the contract.** Do not re-derive a candidate query, an in-flight count, or a

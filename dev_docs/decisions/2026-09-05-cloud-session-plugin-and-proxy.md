@@ -7,8 +7,11 @@ and is allowed to go stale. It is the companion to
 measured the same questions in a **routine**.
 
 **Amended 2026-09-07 and 2026-09-08.** Routine probes on 09-07 corrected three claims
-this file made; a second cloud-session probe on 09-08 corrected two more and added four
-findings. The 09-07 probes are recorded in `2026-09-07-cloud-routine-plugins-and-gh.md`,
+this file made. A second cloud-session probe on 09-08 corrected three more — the
+"declaration was ignored" reading, "the barrier is at the account", and the connector
+being unscoped — and added findings 6, 7 and 8. Finding 9 comes from a separate routine
+run, not from that session. The 09-07 probes are recorded in
+`2026-09-07-cloud-routine-plugins-and-gh.md`,
 which lands in this directory with **PR #498** — open at the time of writing, so run ids
 are cited directly and stay checkable whichever change merges first. The 09-08 probe is
 session `session_01ERAh8hmMbqq4Xu2hfqbEcA` and is recorded below.
@@ -236,17 +239,29 @@ access:"push" to attach the repository with credentials.`
    where it comes from. So the correct statement is narrow: the **plugin-declaration
    keys** did not take effect; the **hooks** key did.
 
-   That also dissolves an apparent contradiction rather than leaving it open. `gh`
-   presence had looked like a property of the environment that changed between runs — a
-   routine sourcing `bestdan/workflow-skills` had no `gh`, while sessions sourcing
-   `bestdan/dotfiles` had it. It is not the environment. It is whether the **source
-   repo** commits a hook that installs `gh`. `workflow-skills` commits no `.claude/`
-   files at all; `dotfiles` commits that hook.
-2. **`gh` exists in a cloud session and had no working credential in the session as
-   provisioned**, reads 403 alongside writes. So the 2026-08-24 routine finding and this
-   session's finding agree in effect — no usable `gh` — while disagreeing on the
-   mechanism (a routine had no `gh` binary at all; a cloud session has the binary and a
-   dead token). **Where the barrier sits is _not_ settled**, and the wording matters: an
+   **A committed hook is therefore one route to `gh`** — in this session it was the
+   route, since `gh` was absent from the base image. Whether it is the **only** route is
+   an absence claim this probe cannot support, and an earlier draft of this paragraph
+   made it: it said "It is not the environment. It is whether the source repo commits a
+   hook."
+
+   **Read that against the companion record, which settles the same question the other
+   way.** `2026-09-07-cloud-routine-plugins-and-gh.md` (PR #498) concludes that `gh` is a
+   property of an environment at a point in time, citing `gh` 2.45.0 in every 09-07 run
+   and rc 127 from the same environment id nine hours later. The source-repo reading fits
+   the same runs — the `gh`-present ones sourced `dotfiles`, which commits the hook; the
+   `gh`-absent one sourced `workflow-skills`, which tracks no `.claude/` files — but
+   fitting is not discriminating, and nobody has compared the two runs' **sources** as
+   the variable rather than their environment ids. **Treat both readings as live.** The
+   cheap discriminator: run the same probe twice in one environment, once sourcing a repo
+   with the hook and once without, and report `which gh` from each.
+2. **`gh` was present in this session — see finding 1 for where from — and had no
+   working credential in the session as provisioned**, reads 403 alongside writes. So the
+   2026-08-24 routine finding and this session's finding agree in effect: no usable `gh`.
+   They differ in how far they got — that routine had no `gh` binary to try, this session
+   had the binary and a dead token. **Do not read that as a session-versus-routine
+   property**; finding 1 says what actually varies, and says it is unsettled.
+   **Where the barrier sits is _not_ settled** either, and the wording matters: an
    earlier draft of this file said "the barrier is at the account, not the endpoint" as
    though that followed from reads-403-too. It does not follow. See below.
 3. **The GitHub MCP connector remains the credentialed channel**, in a cloud session as
@@ -259,8 +274,10 @@ access:"push" to attach the repository with credentials.`
    "bestdan/workflow-skills" is not configured for this session. Allowed repositories:
    bestdan/dotfiles.` So the connector is not a way around repository scoping. It is
    scoped the same way `gh` is; it differs by being credentialed **within** that scope.
-4. **Closing the plugin gap alone would not be enough.** `gh` stays broken either way.
-   Both must be solved before `remote_batch: true` dispatches anything that works.
+4. **Closing the plugin gap alone would not have been enough in the environments
+   probed** — `gh` was unusable in each of them. Whether it stays unusable after a
+   credentialed attach is open; see "Where the `gh` 403 comes from" below. Read this as
+   "both gaps were open in everything measured", **not** as "`gh` can never work".
 5. **Nothing about the marketplace clone is blocked.** Proxy repository scoping does not
    stop a public unattached repo from being cloned over plain HTTPS.
 6. **`git` is credentialed for the source repo where `gh` REST is not.** Measured
@@ -299,12 +316,14 @@ access:"push" to attach the repository with credentials.`
      "organization" is this account. Connecting the app was not tried.
   2. **Repo provisioning.** `bestdan/dotfiles` was the session's **cloned source**, which
      is not the same thing as a repo attached **with credentials**. A source clone buys
-     read access to the working tree; the GitHub API is a separate grant. Nothing here
-     was measured against a credentialed attach, so the 403 may simply be the
-     un-provisioned state, with nothing about accounts or policy needing to be true.
-     Neither this probe nor the routine probes that corroborate it tested that path
-     (routine probes, PR #498; runs `cse_011MSb2bYVcG7QfzDb6RP33J` for the not-a-source
-     case and `cse_01M9WzAbESA3hSwBZuYWczNJ` for the source-clone case).
+     read access to the working tree; the GitHub API is a separate grant. So the 403 may
+     simply be the un-provisioned state, with nothing about accounts or policy needing to
+     be true. **The attach itself has been performed** — `add_repo` accepted
+     `access:"push"` on the first call in routine `cse_014DT5cUvE7zGfVjix9fW7fC`. What
+     no run has done is make a **repo-scoped `gh` call after** such an attach: that
+     routine had no `gh` binary, and the session that had one had no `add_repo`. Every
+     403 recorded in this file and in PR #498 was measured against a **cloned source or
+     an unattached repo**, never against a credentialed attach.
   3. **Something else neither probe looked for.**
 
   So read finding 2 as "not available in the session as provisioned" — **not** as "the
