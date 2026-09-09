@@ -59,6 +59,9 @@ Usage:
   python3 linear-false-closures.py --project <uuid> --repo owner/name --apply --only PRE-1,PRE-2
   # cloud routines, where `gh` cannot reach the GitHub API -- see load_prs_file():
   python3 linear-false-closures.py --project <uuid> --prs-file merged_prs.json
+  # build that --prs-file from two saved MCP captures -- see build_prs_from_mcp_json():
+  python3 linear-false-closures.py --from-mcp-json search.json list.json \
+    --complete-since 2026-08-08T00:00:00Z --prs-file merged_prs.json
 
 Each false closure is reported with the merged PR that most likely tripped it
 (the one bare-mentioning the id, merged just before the completion instant), so
@@ -287,6 +290,133 @@ def load_prs_file(path):
     return since, [pr for _, pr in prs]
 
 
+def _mcp_rows(path, label):
+    """Load a saved MCP tool payload as a list of row objects.
+
+    Accepts a bare JSON list (list_pull_requests, as the GitHub REST array it
+    wraps), or an object carrying that list under one of a few common wrapper
+    keys (search_pull_requests wraps the GitHub search API's ``items``).
+    Anything else is a malformed capture and must die loudly here rather than
+    be silently misjoined below.
+    """
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+    except OSError as e:
+        die(f"--from-mcp-json: {label}: {e}")
+    except json.JSONDecodeError as e:
+        die(f"--from-mcp-json: {label}: invalid JSON: {e}")
+    rows = None
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        for key in ("items", "pull_requests", "results"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                rows = val
+                break
+    else:
+        die(
+            f"--from-mcp-json: {label}: expected a list or object, got {type(payload).__name__}"
+        )
+    if not isinstance(rows, list):
+        die(
+            f"--from-mcp-json: {label}: expected a list, or an object "
+            "with an 'items'/'pull_requests'/'results' list"
+        )
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            die(
+                f"--from-mcp-json: {label}[{i}]: expected an object, got {type(row).__name__}"
+            )
+    return rows
+
+
+def _require_complete_since(since):
+    """Validate --complete-since the same way load_prs_file validates its
+    complete_since field, so a bad value is caught at build time rather than
+    surfacing later on someone else's --prs-file read."""
+    if not since or not since.strip():
+        die("--complete-since: blank")
+    parsed = _ts(since)
+    if parsed is None:
+        die(f"--complete-since: unparseable timestamp {since!r}")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        die(
+            f"--complete-since: no timezone offset ({since!r}) -- "
+            f"add one, e.g. {since!r} -> {since + 'Z'!r}"
+        )
+    return since
+
+
+def build_prs_from_mcp_json(search_path, list_path, complete_since):
+    """Join a saved search_pull_requests capture (titles/bodies) with a saved
+    list_pull_requests capture (head branches) on PR number, and return the
+    ``{complete_since, pull_requests}`` object load_prs_file() expects.
+
+    The search capture is the authoritative merged-PR set (it is fetched with
+    an `is:merged` query) -- every one of its numbers must resolve against the
+    list capture, which supplies headRefName/url/mergedAt. A list.json number
+    absent from search.json (e.g. a closed-but-unmerged PR) is simply not a
+    merged PR and is dropped, not an error. The reverse -- a search.json
+    number with no matching list.json row -- is a failed join: it means the
+    caller's two fetches don't actually cover the same PRs, and building the
+    file anyway would silently drop ownership evidence, so it's fatal and
+    names every missing number.
+
+    title/body come from search.json (list.json's own `body` field exists
+    only to force the MCP result to spill to a file -- see
+    linear-false-closures.md). A null title/body (an empty PR description) is
+    coerced to "" here because load_prs_file() dies on a null.
+    """
+    since = _require_complete_since(complete_since)
+    search_rows = _mcp_rows(search_path, "search.json")
+    list_rows = _mcp_rows(list_path, "list.json")
+
+    by_number = {}
+    for row in list_rows:
+        n = row.get("number")
+        if isinstance(n, int) and not isinstance(n, bool):
+            by_number[n] = row
+
+    pull_requests, missing = [], []
+    for row in search_rows:
+        n = row.get("number")
+        if not isinstance(n, int) or isinstance(n, bool):
+            die(
+                f"--from-mcp-json: search.json: entry missing a valid 'number': {row!r}"
+            )
+        list_row = by_number.get(n)
+        if list_row is None:
+            missing.append(n)
+            continue
+        head = list_row.get("head")
+        head_ref = head.get("ref") if isinstance(head, dict) else None
+        url = list_row.get("html_url")
+        if not isinstance(head_ref, str) or not head_ref:
+            die(f"--from-mcp-json: list.json: PR #{n}: missing head.ref")
+        if not isinstance(url, str) or not url:
+            die(f"--from-mcp-json: list.json: PR #{n}: missing html_url")
+        pull_requests.append(
+            {
+                "number": n,
+                "headRefName": head_ref,
+                "url": url,
+                "title": row.get("title") or "",
+                "body": row.get("body") or "",
+                "mergedAt": list_row.get("merged_at"),
+            }
+        )
+
+    if missing:
+        die(
+            "--from-mcp-json: numbers in search.json with no matching "
+            f"list.json entry: {sorted(missing)}"
+        )
+    return {"complete_since": since, "pull_requests": pull_requests}
+
+
+
 def owning_pr(issue, prs, merged):
     """The merged PR that actually delivered this issue, or None.
 
@@ -392,7 +522,7 @@ def main():
     ap = argparse.ArgumentParser(
         description="Detect Linear issues closed with no work behind them."
     )
-    ap.add_argument("--project", required=True, help="Linear project UUID.")
+    ap.add_argument("--project", help="Linear project UUID.")
     ap.add_argument(
         "--repo",
         help="owner/name of the GitHub repo whose merged PRs establish "
@@ -402,7 +532,8 @@ def main():
         "--prs-file",
         help="Path to a JSON file with a pre-fetched merged-PR list, for "
         "hosts where `gh` cannot reach the GitHub API. Exactly one of "
-        "--repo / --prs-file is required.",
+        "--repo / --prs-file is required. With --from-mcp-json, this is "
+        "the output path instead (or '-' to print rather than write).",
     )
     ap.add_argument(
         "--since",
@@ -419,7 +550,43 @@ def main():
         action="store_true",
         help="Restore false closures to Todo. Without it, DRY RUN.",
     )
+    ap.add_argument(
+        "--from-mcp-json",
+        nargs=2,
+        metavar=("SEARCH_JSON", "LIST_JSON"),
+        help="Build the --prs-file JSON from two saved MCP payloads instead "
+        "of running detection: a search_pull_requests capture (titles/"
+        "bodies) and a list_pull_requests capture (head branches), joined "
+        "on PR number. Requires --complete-since and --prs-file.",
+    )
+    ap.add_argument(
+        "--complete-since",
+        help="With --from-mcp-json: the caller's assertion that the "
+        "list.json fetch covers every PR merged at or after this ISO-8601 "
+        "instant (with a timezone offset). Required with --from-mcp-json.",
+    )
     args = ap.parse_args()
+
+    if args.from_mcp_json:
+        if args.project or args.repo:
+            die("--from-mcp-json cannot be combined with --project/--repo")
+        if not args.complete_since:
+            die("--from-mcp-json requires --complete-since")
+        if not args.prs_file:
+            die("--from-mcp-json requires --prs-file (a path, or '-' to print)")
+        payload = build_prs_from_mcp_json(
+            args.from_mcp_json[0], args.from_mcp_json[1], args.complete_since
+        )
+        text = json.dumps(payload, indent=2) + "\n"
+        if args.prs_file == "-":
+            sys.stdout.write(text)
+        else:
+            with open(args.prs_file, "w") as f:
+                f.write(text)
+        return 0
+
+    if not args.project:
+        die("--project is required")
     if bool(args.repo) == bool(args.prs_file):
         die("exactly one of --repo or --prs-file is required")
 
