@@ -6,18 +6,32 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 **Shared reference:** see `linear-common.md` for connection details, full config schema (including the `max_estimate` and `base_branch` keys used here), preflight pattern, and the kanban mapping table this file reads against.
 
-> **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Completion is now driven by the reconciler verbs — `/complete-task` (the primitive), `/sweep-for-complete` (the merge-verified sweep), and `/reconcile-tasks` (the bounded reconciler built on both) — not by Linear's GitHub integration, which is **disabled** (it over-closed: a bare `<TEAM>-NNN` id anywhere in a PR's title or body was treated as a closing link and swept unrelated sibling issues to `Done`). If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
+> **Hard rule for every phase below: the tracker path never moves a Linear issue to a `completed`- or `canceled`-type workflow state.** Completion is now driven by the reconciler verbs — `/complete-task` (the primitive), `/sweep-for-complete` (the merge-verified sweep), and `/reconcile-tasks` (the bounded reconciler built on both) — not by Linear's GitHub integration, whether or not that integration is live in your workspace (see "Whether Linear's integration is live" below). If you are about to call `save_issue` with a `completed`-type `state` from this file, you have a bug — stop.
 
 ## PR body magic words
 
-> **Inert for completion while the integration is disabled.** The magic words below no longer drive any state change — nothing reads them to complete an issue; that job now belongs to the reconciler verbs, which key off the explicit `links` attachment (see "Move to review on PR open"), never off ids parsed from PR text. This section is kept as intent documentation and re-enables cleanly if the integration is ever turned back on. The bare-id discipline below stays **mandatory regardless**: it is the exact reason the integration was disabled, and a bare id would go live again the moment anyone re-enables it.
+> **Inert for completion.** The magic words below drive no state change here — nothing reads them to complete an issue; that job belongs to the reconciler verbs, which key off the explicit `links` attachment (see "Move to review on PR open"), never off ids parsed from PR text. This section is intent documentation: it describes what Linear would do if the integration were live, and the discipline to keep so that it stays safe if anyone ever makes it live.
 
-Linear's GitHub integration scans the **whole** PR title and body for issue ids, not just the `Closes` line. On merge it moves every id referenced with a **closing** magic word to the team's `completed` state.
+### Whether Linear's integration is live
+
+**This is a per-workspace question, and this plugin does not depend on the answer.** Completion comes from the reconciler verbs either way, so the flow below is correct whether your integration fires or not. To check yours: a live integration puts webhooks on the repository (`gh api repos/<owner>/<name>/hooks`) and writes its own linkbacks onto issues when a PR opens.
+
+In the workspace this plugin was developed against, the integration has never fired — see [`dev_docs/2026-09-05-linear-integration-inert.md`](../../dev_docs/2026-09-05-linear-integration-inert.md) for the evidence and its limits. That document also records the incident that shaped this design: the over-closing earlier revisions of this file attributed to Linear came from a **repo-local GitHub Actions workflow** that scraped ids out of PR text on merge, not from Linear.
+
+### What Linear does when the integration is live
+
+Sourced from Linear's documentation, not tested here — the integration is inert in the development workspace, so there is nothing to test it against. A PR links to an issue three ways, and only two of them close it on merge:
+
+- **Head branch name contains the issue id** — links, and **closes** on merge.
+- **Magic word + id in the PR title or description** — links; a closing magic word closes on merge, a non-closing one does not.
+- **Issue id alone in the PR title** — links, and does **not** close on merge.
+
+A bare id in the PR **body** is not documented as forming a link at all. The closing and non-closing word sets are:
 
 - **Closing** (auto-completes on merge): `close`, `closes`, `closed`, `closing`, `fix`, `fixes`, `fixed`, `fixing`, `resolve`, `resolves`, `resolved`, `resolving`, `complete`, `completes`, `completed`, `completing`, `implement`, `implements`, `implemented`, `implementing`.
 - **Non-closing / contributing** (links only, **no** status change on merge): `ref`, `refs`, `references`, `part of`, `related to`, `contributes to`, `toward`, `towards`.
 
-**Rule when composing the PR body:** close only the issues this PR actually finishes, and mark each one **explicitly** — `Closes <identifier>` on **its own line**, one per line. A PR may legitimately close more than one issue (`Closes <TEAM>-12` / `Closes <TEAM>-13` on separate lines); that is fine as long as each closing line is clear and each named issue was truly completed. The danger is never an explicit `Closes`; it is an id that gets **inferred** as a closing link. So: every Linear id that appears anywhere in the **title or body** must carry an explicit magic word — a closing one (`Closes …`) for an issue this PR completes, or a non-closing one (`related to …`, `part of …`) for a blocker / sibling / follow-up it merely references (these may also repeat, one clearly-marked reference per line). A bare `<TEAM>-NNN` token is the bug: in practice Linear treats it as a closing link and auto-completes that sibling on merge, even though the PR did none of its work. **Do not** rely on a bare Linear URL as the escape hatch either — the URL embeds the raw id (`…/issue/<TEAM>-NNN/…`), so it carries the same auto-close risk; only a non-closing magic word is verified to prevent it. This is exactly how an unrelated issue gets silently closed — guard against it every time an id appears that this PR did not finish.
+**Rule when composing the PR body:** close only the issues this PR actually finishes, and mark each one **explicitly** — `Closes <identifier>` on **its own line**, one per line. A PR may legitimately close more than one issue (`Closes <TEAM>-12` / `Closes <TEAM>-13` on separate lines); that is fine as long as each closing line is clear and each named issue was truly completed. The danger is never an explicit `Closes`; it is an id that gets **inferred** as a closing link. So: every Linear id that appears anywhere in the **title or body** must carry an explicit magic word — a closing one (`Closes …`) for an issue this PR completes, or a non-closing one (`related to …`, `part of …`) for a blocker / sibling / follow-up it merely references (these may also repeat, one clearly-marked reference per line). A bare `<TEAM>-NNN` token is the case to avoid. Linear's documentation says a bare id in the body forms no link and so closes nothing — but that is documentation, not something this plugin has observed, so keep the discipline as cheap insurance against an untested path rather than as a guard against a demonstrated behaviour. **Do not** rely on a bare Linear URL as the escape hatch either — the URL embeds the raw id (`…/issue/<TEAM>-NNN/…`), so it carries whatever risk the bare token carries; a non-closing magic word removes the ambiguity outright.
 
 ## Find candidates
 
@@ -187,7 +201,7 @@ If **feasible**: print the issue's identifier, title, and a one-sentence rationa
 
 Called from `/do-tasks` immediately after `gh pr create` succeeds.
 
-This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing, and the GitHub integration that would otherwise create this link is disabled), and it transitions the issue to a review state if the team has one.
+This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing, and the GitHub integration that might otherwise create this link may not be live in your workspace — see "Whether Linear's integration is live"), and it transitions the issue to a review state if the team has one.
 
 1. **Resolve the target state.** From the cached state map (find-candidates step 2), look for a `started`-type state whose name (case-insensitive) is `In Review`. If found, capture its id. If not, leave the state field unset in step 3 — the issue stays in its current `started` state (`In Progress`). Never move the issue to a `completed`-type state here, regardless of how done the work feels.
 
@@ -201,7 +215,7 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
 
 4. **No additional comment.** The PR-URL comment already posted by `/do-tasks` right after `gh pr create` is the user-facing signal that review has started; the `links` attachment is the structural one.
 
-> With Linear's GitHub integration **disabled**, the explicit `links` attachment above is not just the reliable path — it is the **only** one. It does not depend on branch-name matching or magic words in the PR body at all, and it is exactly what `/sweep-for-complete` reads later to verify this issue's own PR merged and complete it. If the integration is ever re-enabled, it may also create its own PR↔issue link on branch-name/magic-word detection; that's fine to leave de-duplicating by URL against the one set here, but do not rely on it.
+> With Linear's GitHub integration **inert**, the explicit `links` attachment above is not just the reliable path — it is the **only** one. It does not depend on branch-name matching or magic words in the PR body at all, and it is exactly what `/sweep-for-complete` reads later to verify this issue's own PR merged and complete it. If the integration is ever made live, it may also create its own PR↔issue link on branch-name/magic-word detection; that's fine to leave de-duplicating by URL against the one set here, but do not rely on it.
 
 ## Bail
 

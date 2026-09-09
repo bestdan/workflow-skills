@@ -9,7 +9,7 @@ argument-hint: "<identifier> [--dry-run]"
 `/do-tasks`' tracker path never moves an issue to a `completed`-type state —
 merge is meant to be the completion signal. But relying on that signal alone
 breaks once a tracker's native auto-close integration is off (for example,
-Linear's GitHub integration disabled or unreachable): the PR merges, the issue
+Linear's GitHub integration inert or unreachable): the PR merges, the issue
 never moves, and the tracker silently drifts out of sync with reality.
 `/complete-task` is the explicit, mechanical replacement for that missing
 auto-close: given one identifier, it transitions that single issue to its

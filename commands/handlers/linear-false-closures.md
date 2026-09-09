@@ -11,11 +11,12 @@ details and the config schema this flow's project/repo scoping assumes.
 
 ## The bug it detects
 
-This workspace's Linear/GitHub integration treats a **bare** issue id
-(`PRE-123`) appearing anywhere in a merged PR's title or body as a closing
-reference. A PR that merely name-drops a sibling issue therefore sweeps that
-sibling to Done too, with no branch, no PR, and no code behind it — it has
-done so repeatedly, which is why that integration got disabled.
+A repo-local merge workflow scraped **bare** issue ids (`PRE-123`) out of a
+merged PR's title and body and swept every match to Done. A PR that merely
+name-dropped a sibling issue therefore closed it too, with no branch, no PR, and
+no code behind it. Linear's own GitHub integration is not the source: it links by
+branch name and magic word, per its documentation. See
+`commands/handlers/linear-claim.md`, "Whether Linear's integration is live".
 
 `/reconcile-tasks` (`commands/handlers/linear-reconcile.md`) cannot repair
 this: its rule table is deliberately **promote/complete-only and never
@@ -118,7 +119,7 @@ The file is a JSON **object**, not a bare list:
   "pull_requests": [
     {
       "number": 472,
-      "headRefName": "dpegan/pre-645-...",
+      "headRefName": "alex/pre-645-...",
       "url": "https://github.com/bestdan/workflow-skills/pull/472",
       "title": "...",
       "body": "...",

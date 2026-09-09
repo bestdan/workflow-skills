@@ -31,9 +31,9 @@ non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-scan.py --team PreThink
-  python3 linear-scan.py --team PreThink --state-type started --state-type unstarted
-  python3 linear-scan.py --team PreThink --project <uuid> --project <uuid>
+  python3 linear-scan.py --team Platform
+  python3 linear-scan.py --team Platform --state-type started --state-type unstarted
+  python3 linear-scan.py --team Platform --project <uuid> --project <uuid>
 """
 
 import argparse
@@ -194,7 +194,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
