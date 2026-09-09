@@ -2,7 +2,8 @@
 """Hermetic tests for commands/handlers/assets/linear-false-closures.py's
 --prs-file path — the alternative to --repo for hosts where `gh` cannot reach
 the GitHub API (a Claude Code cloud routine). These tests stub gql, get_key,
-and subprocess.run so nothing touches the network or a real `gh` binary.
+and the shared `_linear_pr.run_gh` seam so nothing touches the network or a
+real `gh` binary.
 
 Covers only the new behaviour: --repo/--prs-file mutual exclusivity, the
 --prs-file classification parity with an equivalent --repo run, the coverage
@@ -31,6 +32,11 @@ _spec = importlib.util.spec_from_file_location("linear_false_closures", ASSET)
 assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 linear_false_closures = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(linear_false_closures)
+
+# The asset puts its own directory on sys.path at import time, so the shared
+# module it pulls `merged_prs`/`pr_identity` from is importable by name here.
+# That module owns the one `gh` subprocess seam both linear assets share.
+import _linear_pr  # type: ignore[import-not-found]  # noqa: E402
 
 TEAM_UUID = "12345678-1234-1234-1234-1234567890ab"
 
@@ -77,14 +83,14 @@ class RunCase(unittest.TestCase):
     def setUp(self):
         self._orig_gql = linear_false_closures.gql
         self._orig_get_key = linear_false_closures.get_key
-        self._orig_run = linear_false_closures.subprocess.run
+        self._orig_run = _linear_pr.run_gh
         self._orig_argv = sys.argv
         linear_false_closures.get_key = lambda: "k"
 
     def tearDown(self):
         linear_false_closures.gql = self._orig_gql
         linear_false_closures.get_key = self._orig_get_key
-        linear_false_closures.subprocess.run = self._orig_run
+        _linear_pr.run_gh = self._orig_run
         sys.argv = self._orig_argv
 
     def _stub_issues(self, issues):
@@ -105,7 +111,7 @@ class RunCase(unittest.TestCase):
         def fail(*a, **k):
             raise AssertionError("gh should not be invoked under --prs-file")
 
-        linear_false_closures.subprocess.run = fail
+        _linear_pr.run_gh = fail
 
     def _run_main(self, argv):
         sys.argv = ["linear-false-closures.py"] + argv
@@ -161,17 +167,10 @@ class ParityTests(RunCase):
 
         self._stub_issues(issues)
 
-        def fake_run(cmd, capture_output, text):
-            lines = "\n".join(json.dumps(pr) for pr in prs)
+        def fake_run_gh(args):
+            return 0, "\n".join(json.dumps(pr) for pr in prs), ""
 
-            class Result:
-                returncode = 0
-                stdout = lines
-                stderr = ""
-
-            return Result()
-
-        linear_false_closures.subprocess.run = fake_run
+        _linear_pr.run_gh = fake_run_gh
         repo_out, repo_code = self._run_main(
             ["--project", "p", "--repo", "bestdan/repo"]
         )

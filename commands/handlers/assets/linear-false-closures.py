@@ -69,13 +69,14 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from typing import NoReturn
 import urllib.request
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _linear_pr import GhError, pr_identity  # noqa: E402,F401
+from _linear_pr import merged_prs as _shared_merged_prs  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -202,25 +203,16 @@ def completed_issues(key, project, since):
 def merged_prs(repo):
     """All merged PRs, from `gh` -- the source of truth for what actually shipped.
 
-    Paginates the full closed-PR history (no --limit cap): a silently truncated
-    page would misclassify a real, delivered issue as a false closure, and
-    --apply would then un-complete real work.
+    Thin adapter over `_linear_pr.merged_prs()`, which `linear-pr-resolve.py`
+    imports too: one implementation of the paginated `gh api` read, one failure
+    policy per caller. Here a failed read is fatal -- a truncated merged-PR
+    list would misclassify a delivered issue as a false closure, and --apply
+    would then un-complete real work.
     """
-    out = subprocess.run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            "--jq",
-            ".[] | select(.merged_at != null) | {number: .number, headRefName: .head.ref, url: .html_url, title: .title, body: .body, mergedAt: .merged_at}",
-            f"repos/{repo}/pulls?state=closed&per_page=100",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if out.returncode != 0:
-        die(f"gh api pulls failed: {out.stderr.strip()}")
-    return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+    try:
+        return _shared_merged_prs(repo)
+    except GhError as exc:
+        die(str(exc))
 
 
 def load_prs_file(path):
@@ -293,22 +285,6 @@ def load_prs_file(path):
         except ShapeError as exc:
             die(str(exc))
     return since, [pr for _, pr in prs]
-
-
-PR_IDENTITY = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", re.I)
-
-
-def pr_identity(url):
-    """Canonical `owner/repo/pull/<n>` for a GitHub PR url, else None.
-
-    Linear stores whatever url was attached -- routinely with a trailing slash,
-    a `?src=linear` query, a fragment, or a `/files` tab -- so an exact-string
-    match against gh's canonical `html_url` misses real ownership links and
-    would misclassify delivered work as a false closure. Compare parsed
-    identities, not raw strings.
-    """
-    m = PR_IDENTITY.search(url or "")
-    return f"{m.group(1).lower()}/pull/{m.group(2)}" if m else None
 
 
 def owning_pr(issue, prs, merged):
