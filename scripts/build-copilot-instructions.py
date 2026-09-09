@@ -35,10 +35,14 @@ from typing import NamedTuple, NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# GitHub's own guidance: past ~1000 lines instructions start getting dropped,
-# and it recommends trimming anything past ~4000 characters. The line cap is a
-# hard failure because a silently-ignored instruction file is indistinguishable
-# from one that works.
+# The one hard limit. Past ~1000 lines GitHub starts dropping instructions, and
+# a silently-ignored instruction file is indistinguishable from one that works,
+# so this fails the build rather than warning.
+#
+# GitHub also suggests trimming past ~4000 characters. That one is NOT enforced,
+# deliberately: two of the three outputs already sit just above it, and a hard
+# check would fail the gate on the files this script ships. Treat it as a signal
+# to re-read a growing file, not as a threshold.
 MAX_LINES = 1000
 
 BEGIN = re.compile(r"<!--\s*copilot:begin\s+id=([A-Za-z0-9_-]+)\s*-->")
