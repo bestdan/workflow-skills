@@ -107,6 +107,8 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 
 ## Adding a skill
 
+<!-- copilot:begin id=adding-a-skill -->
+
 1. Create `skills/<name>/SKILL.md` with valid frontmatter (`description`
    required; `name`, if set, must equal `<name>`). Keep the body ≤500 lines —
    move detail into sibling reference files.
@@ -118,7 +120,11 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 4. Run `just check` (must pass) and, if you can, `just eval` to confirm the new
    skill auto-triggers.
 
+<!-- copilot:end -->
+
 ## What loads at runtime vs. contributor-only
+
+<!-- copilot:begin id=runtime-vs-contributor -->
 
 Skill files split into two tiers with different audiences, and confusing them
 silently drops behavior:
@@ -141,7 +147,11 @@ co-review pass, before a second pass caught it. The same split applies to
 it), and `agents/<name>.md` (loaded when the subagent spawns): their bodies are
 runtime prompts, not documentation.
 
+<!-- copilot:end -->
+
 ## Logic goes in a typed file
+
+<!-- copilot:begin id=logic-typed-file -->
 
 **Write code in a `.py` or `.sh` file and call it from the markdown. Do not
 write it as a fenced block inside a skill, command, handler, or agent body.**
@@ -151,6 +161,8 @@ The gate cannot see a fenced block. `scripts/lint-shell.sh` globs `*.sh`,
 syntax-checked, never shellchecked, and never run. Nothing else covers it
 either. A fenced block is the one place in this repo where code ships with no
 check at all.
+
+<!-- copilot:end -->
 
 That is not theoretical. `gh-issue-promote.md` step 3a carried a 36-line
 GraphQL pagination loop, and **seven defects were found in it across three
@@ -164,6 +176,8 @@ defect is not there, and nothing can check the bet. It is now
 `commands/handlers/assets/gh-issue-rollups.py` with
 `scripts/test_gh_issue_rollups.py` pinning each defect.
 
+<!-- copilot:begin id=logic-typed-where -->
+
 **Where it goes.** A helper a runtime prompt shells out to belongs in
 `commands/handlers/assets/<name>.py` — Python, matching every existing asset
 there, and it replaces `jq` with real JSON handling. Dev/CI tooling belongs in
@@ -171,6 +185,8 @@ there, and it replaces `jq` with real JSON handling. Dev/CI tooling belongs in
 `unittest`, no network, the subprocess seam stubbed) plus a thin
 `scripts/test-<name>.sh` that `exec`s it. `scripts/check.sh` discovers
 `scripts/test-*.sh` by glob, so the gate picks it up with no edit.
+
+<!-- copilot:end -->
 
 **How to call it.** Mirror `gh-issue-promote.md` step 3a:
 
@@ -185,6 +201,8 @@ temp path does not survive the invocation. Say in the prose what the helper
 prints, and keep the two in sync: prose disagreeing with the output channel is
 one of the seven defects above, and it recurred twice.
 
+<!-- copilot:begin id=logic-typed-inline -->
+
 **What is still fine inline.** A `gh` invocation, a one-liner with a `||`
 fallback, a guarded `if ...; then ...; fi`. The check fires on a fenced shell
 block with **two or more** control-flow statements plus a bare `fi`/`done`/`esac`
@@ -197,6 +215,8 @@ being flagged; English does not write a bare `done`.
 may keep, and validate.py fails if an entry has more headroom than its file
 needs. Shrink an entry when you extract a block. Never raise one to land a new
 block — extract instead.
+
+<!-- copilot:end -->
 
 ## Writing Python the checker can follow
 
@@ -288,3 +308,34 @@ procedure for landing a stack of PRs are all in
 auto-invokes each skill from its naive prompt. They cost API tokens and are
 nondeterministic, so they are **opt-in and never block a PR**. See
 [`evals/README.md`](evals/README.md).
+
+## Copilot review instructions are generated
+
+GitHub Copilot code review reads `.github/copilot-instructions.md` and the
+path-scoped `.github/instructions/*.instructions.md` files, and it **does not
+follow links**. Progressive disclosure — the house style everywhere else here —
+therefore hands Copilot a map and no territory, which is why its reviews used to
+miss the rules above.
+
+So those three files are a flat copy, and the copy is generated rather than
+maintained:
+
+```sh
+python3 scripts/build-copilot-instructions.py            # rewrite the files
+python3 scripts/build-copilot-instructions.py --check    # fail on drift
+```
+
+The source of truth stays in `AGENTS.md` and this file. Spans are delimited by a
+pair of `copilot:begin id=<id>` and `copilot:end` HTML comments, and routed to an
+output file by the `OUTPUTS` table in the script. (Write those two words as
+comments only where you mean them — the parser reads the whole file and cannot
+tell a documented marker from a real one.) Edit the rule where it lives, rerun
+the script, and commit both — `scripts/test-copilot-instructions.sh` fails the
+gate when a committed output no longer matches its source, so a rule change
+cannot quietly stop reaching reviewers.
+
+Two constraints the script enforces, both from GitHub's own guidance: an
+instruction file over ~1000 lines starts getting silently dropped, and a URL
+inside a marked span is an instruction that does nothing. Keep spans short and
+link-free; add a new marked span rather than growing an existing one past the
+point a reviewer would read it.
