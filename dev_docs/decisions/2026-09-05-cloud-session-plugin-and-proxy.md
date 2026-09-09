@@ -6,11 +6,12 @@ and is allowed to go stale. It is the companion to
 [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md), which
 measured the same questions in a **routine**.
 
-**Amended 2026-09-07 and 2026-09-08.** Routine probes on 09-07 corrected three claims
+**Amended 2026-09-07, 2026-09-08 and 2026-09-09.** Routine probes on 09-07 corrected three claims
 this file made. A second cloud-session probe on 09-08 corrected three more — the
 "declaration was ignored" reading, "the barrier is at the account", and the connector
 being unscoped — and added findings 6, 7 and 8. Finding 9 comes from a separate routine
-run, not from that session. The 09-07 probes are recorded in
+run, not from that session. A controlled two-arm run on 09-09 then settled where the
+`gh` binary comes from; finding 1 carries it. The 09-07 probes are recorded in
 `2026-09-07-cloud-routine-plugins-and-gh.md`,
 which lands in this directory with **PR #498** — open at the time of writing, so run ids
 are cited directly and stay checkable whichever change merges first. The 09-08 probe is
@@ -239,18 +240,43 @@ access:"push" to attach the repository with credentials.`
    where it comes from. So the correct statement is narrow: the **plugin-declaration
    keys** did not take effect; the **hooks** key did.
 
-   **A committed hook is therefore one route to `gh`** — in this session it was the
-   route, since `gh` was absent from the base image. Whether it is the **only** route is
-   an absence claim this probe cannot support, and an earlier draft of this paragraph
-   made it: it said "It is not the environment. It is whether the source repo commits a
-   hook."
+   **`gh` presence follows the SOURCE REPO, not the environment — settled 2026-09-09 by
+   a controlled two-arm run.** Two routines, same `environment_id`
+   (`env_01KURKZo3LcfRKBaEZWcbsrk`), same model, same Claude Code build (2.1.266), fired
+   ~40 seconds apart, differing **only** in the source repo:
 
-   **The source-repo reading has a mechanism; the competing one does not.** An earlier
-   draft of `2026-09-07-cloud-routine-plugins-and-gh.md` (PR #498) concluded that `gh` is
-   a property of an environment at a point in time, from `gh` 2.45.0 in every 09-07 run
-   and rc 127 from the same environment id nine hours later. That record has since
-   withdrawn the claim. What decides it is committed code, read directly in
-   `bestdan/dotfiles` at `.claude/hooks/session-start.sh`:
+   |                             | A — source `dotfiles` | B — source `workflow-skills` |
+   | --------------------------- | --------------------- | ---------------------------- |
+   | `CLAUDE_CODE_REMOTE`        | `true`                | `true`                       |
+   | `gh`                        | `/usr/bin/gh` 2.45.0  | absent, rc 127               |
+   | `just` (hook payload)       | `/usr/local/bin/just` | absent                       |
+   | `shellcheck` (hook payload) | `/usr/bin/shellcheck` | absent                       |
+   | `mise` (**not** payload)    | absent                | absent                       |
+   | `shfmt` (**not** payload)   | absent                | absent                       |
+
+   Runs `cse_01QPUZsJtPAyEeUandvm3P7V` (A) and `cse_01R9taMQAkgGQAgyfVmHoNXs` (B). The
+   controls carry the result: three hook-payload tools move with the source repo while
+   two non-payload tools stay absent in both, so this is the hook's whole manifest
+   arriving, not `gh` alone varying. A's environment log shows
+   `SessionStart:startup hook success` with an apt install of `gh`, `shellcheck`, `zsh`
+   and then `just.tar.gz: OK` — the payload item for item.
+
+   **Two earlier readings are now dead, and both were stated as settled at the time.**
+   This file once said "It is not the environment" on one session's evidence — true, but
+   unsupported then. `2026-09-07-cloud-routine-plugins-and-gh.md` (PR #498) once
+   concluded the opposite, that `gh` is a property of an environment at a point in time,
+   from `gh` 2.45.0 in every 09-07 run and rc 127 from the same environment id nine hours
+   later; that record withdrew the claim before this run, and this run closes it. Same
+   environment, same minute, same build, opposite answers — no clock or image drift can
+   account for it.
+
+   **A hook firing is not the discriminator; whose hook is.** Arm B also ran a
+   `SessionStart` hook — a guidance plugin injecting sentinel text and installing
+   nothing. A probe that only asks "did a hook run?" gets `yes` in both arms and
+   concludes wrongly.
+
+   The mechanism is committed code, read directly in `bestdan/dotfiles` at
+   `.claude/hooks/session-start.sh`:
 
    ```
    if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
@@ -260,19 +286,13 @@ access:"push" to attach the repository with credentials.`
    ```
 
    It declines to run outside the cloud, then apt-installs `gh` by name, and installs a
-   pinned `just` further down. Across six runs between two sessions, every `gh`-present
-   run sourced `dotfiles` and every `gh`-absent run did not — and in the absent runs
-   `just` and `shellcheck`, also hook payload, were missing too, while `mise` and `shfmt`,
-   which the hook does not install, were missing in both groups. Three of the hook's four
-   tools appear and disappear with the hook's repo.
+   pinned `just` further down. Eight runs across two sessions now agree: every
+   `gh`-present run sourced `dotfiles`, every `gh`-absent run did not.
 
-   **It is still not discriminated, and the difference matters.** Source and clock both
-   changed between the two run groups, so nothing was varied one at a time. The
-   discriminator is one run: same environment id, twice, once sourcing a repo that
-   commits the hook and once not, reporting `which gh` with its exit code from each.
-   **Whichever way it comes out, that probe must also report `CLAUDE_CODE_REMOTE`** — the
-   hook exits 0 when it is unset, so a `gh`-absent result with the variable unset means
-   the hook correctly declined, not that the source repo is irrelevant.
+   **The `CLAUDE_CODE_REMOTE` gate is why the two-arm run had to report it.** The hook
+   exits 0 when that variable is unset, so a `gh`-absent arm with it unset would mean the
+   hook correctly declined — not that the source repo is irrelevant. Both arms read
+   `true`, so neither result is void. **Any future probe of this must report it too.**
 2. **`gh` was present in this session — see finding 1 for where from — and had no
    working credential in the session as provisioned**, reads 403 alongside writes. So the
    2026-08-24 routine finding and this session's finding agree in effect: no usable `gh`.
