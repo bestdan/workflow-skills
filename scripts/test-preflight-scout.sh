@@ -143,6 +143,16 @@ else
   bad "CAO port closed: wrong output: $out3"
 fi
 
+# --- Case 4: --source and --scout-run-md are mutually exclusive -----------
+"$SCRIPT" --source plan --scout-run-md "$BASE/all-present.md" >/dev/null 2>"$BASE/mutex.stderr"
+rc4=$?
+assert_exit "mutually exclusive flags: exits 2" 2 "$rc4"
+if grep -q 'mutually exclusive' "$BASE/mutex.stderr"; then
+  ok "mutually exclusive flags: stderr names the conflict"
+else
+  bad "mutually exclusive flags: stderr did not name it: $(cat "$BASE/mutex.stderr")"
+fi
+
 echo
 echo "test-preflight-scout: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1

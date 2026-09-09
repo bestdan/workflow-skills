@@ -220,6 +220,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -n "$scout_run_md" ]; then
+  [ -z "$source_arg" ] || die "--source and --scout-run-md are mutually exclusive"
   run_scout "$scout_run_md"
   exit $?
 fi
