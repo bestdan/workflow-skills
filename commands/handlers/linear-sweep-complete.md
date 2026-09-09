@@ -278,15 +278,35 @@ If the `gh repo view` fallback itself fails (the sweep is running outside any
 repo, or `gh` cannot reach the remote), treat every issue that reaches steps
 2–3 as **`left: unresolved`** under the rule below — not as "no-PR skipped".
 
-### Steps 2–3 in a `claude-web` environment (no `gh`)
+### Steps 2–3 in a `claude-web` environment
 
-The probes above are `gh`, and a cloud routine has no `gh` CLI — the same
-environment split `skills/auto-pilot/references/launch-preflight.md` calls
-`local-full` vs `claude-web`, and the reason `push-plan.md` and
-`gh-issue-deps.py` already carry MCP-side notes. Without a substitute, a
-`claude-web` sweep resolves **only** step 1, so every issue whose PR was opened
-outside `/do-tasks` (no `links` attachment) is unresolvable — which is the bulk
-of hand-opened work.
+The probes above are `gh pr list`, and **that command cannot run in a cloud
+routine** — the same environment split
+`skills/auto-pilot/references/launch-preflight.md` calls `local-full` vs
+`claude-web`. Without a substitute, a `claude-web` sweep resolves **only**
+step 1, so every issue whose PR was opened outside `/do-tasks` (no `links`
+attachment) is unresolvable — which is the bulk of hand-opened work.
+
+> **It is not the credential, and REST is not a way round it.**
+>
+> - `gh pr list` and `gh pr view` are refused because they are GraphQL, which
+>   is not served. No provisioning fixes that.
+> - Repo-scoped `gh api` REST was refused in every measured run (the repo was a
+>   cloned source, never credential-attached; attaching works, but no run has
+>   yet had both an attach and a `gh`) — do not
+>   spend the run probing it.
+> - **`gh` may not be installed at all** — it comes from a source repo's own
+>   `SessionStart` hook, not from the image, so a session sourced from a repo
+>   without one has no `gh`. Where it does exist,
+>   `gh api user` answers and `gh auth status` reports the token invalid
+>   **while exiting 0**. So never gate on `gh` being present, and never gate on
+>   its exit code.
+>
+> So treat `mcp__github__*` as the only working GitHub channel and do not route
+> this sweep through `gh`. If a `gh` REST call does start answering, the repo
+> was provisioned since — re-measure, do not treat it as a malfunction.
+> Measurements, refusal texts and run ids:
+> `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent
@@ -298,6 +318,12 @@ Slack, Todoist and visualize under `mcp_connections`, and calls
 **Load the tools first.** In a routine these are deferred — call `ToolSearch`
 with `select:mcp__github__search_pull_requests,mcp__github__list_pull_requests,mcp__github__pull_request_read`
 before the first use, or the call fails as an unknown tool.
+
+**If the MCP tools are unavailable, the run resolves nothing here.** The
+`gh api` REST the `gh pr list` refusal names is itself refused for any
+repo-scoped path, so there is no second channel to fall back to — do not spend
+the run probing for one. Every issue that reaches steps 2–3 lands in
+`left: unresolved`.
 
 The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
@@ -382,7 +408,8 @@ Measured on a merged PR: `gh` reports `state "MERGED"` / `mergedAt`, while REST
 and MCP report `state "closed"` / `merged true` / `merged_at`. Mind the field
 spelling too — `merged_at`, not `mergedAt`.
 
-**In a `claude-web` environment (no `gh`), read the same fields with
+**In a `claude-web` environment, where the `gh pr view` read above is refused
+as a GraphQL query, read the same fields with
 `mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
 `claude-web` environment" above for the environment split. It takes `owner`,
 `repo`, and `pullNumber` (the attested call shape is
@@ -391,6 +418,13 @@ spelling too — `merged_at`, not `mergedAt`.
 together. That is the same guarantee the URL rule above buys on the `gh`
 path — the repo travels with the number — and it is why a bare `pullNumber`
 with an inferred owner/repo is the one form to avoid here.
+
+**`gh api` REST is not a fallback for this read.** A repo-scoped REST call was
+refused in every measured routine, in each of which the repo was a cloned
+source that nobody had attached with credentials; a credentialed attach is
+untested. So if `mcp__github__pull_request_read` is unavailable the merge state is
+unreadable and the issue lands in `left: unresolved`. See "Steps 2–3 in a
+`claude-web` environment" above.
 
 Read **`merged`** off the returned pull request, per the per-backend rule
 above. That field is always present — it is serialized without `omitempty`, so
