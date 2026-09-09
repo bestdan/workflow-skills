@@ -25,29 +25,32 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
    The goal is "everything still active in the team's kanban." Pull all non-archived issues in the `backlog`, `unstarted`, `started`, and recently-`completed` state types. To avoid over-fetching when `list_issues` doesn't accept a state-type filter directly, first resolve the team's workflow states by calling `<linear-mcp>__list_workflow_states` (with `teamId`), then pass the matching state ids into `list_issues` for each relevant type. Cache the state-id → type map for step 4's grouping.
 
-4. **Group into kanban sections.** Reverse the kanban mapping in `linear-common.md`. For each issue, classify by **state type** (not display name) and label presence:
+4. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table:
 
-   | Section            | Match rule                                                                                                                                            |
-   | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `new`              | state type `backlog`, no `human-approval-requested` label                                                                                             |
-   | `needs_refinement` | state type `backlog`, has `human-approval-requested` label                                                                                            |
-   | `ready`            | state type `unstarted` (optionally tagged `auto-eligible`)                                                                                            |
-   | `in_progress`      | state type `started`, no `blocked` label, no open linked PR                                                                                           |
-   | `blocked`          | state type `started`, has `blocked` label                                                                                                             |
-   | `needs_review`     | state type `started`, has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment from the tracker execute path) |
-   | `done`             | state type `completed` — limit to the 10 most recent by `completedAt`                                                                                 |
+   | Row field     | Source                                                                                                                                |
+   | ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+   | `id`          | Linear `identifier`                                                                                                                   |
+   | `category`    | Linear **state type** — `backlog` \| `unstarted` \| `started` \| `completed`                                                          |
+   | `labels`      | label names on the issue                                                                                                              |
+   | `has_open_pr` | `true` when the issue has an open linked GitHub PR (via Linear's GitHub integration or the explicit `links` attachment); else `false` |
+   | `priority`    | Linear `priority` (int, 0 = none)                                                                                                     |
+   | `sort_date`   | Linear `updatedAt`                                                                                                                    |
 
-   If an issue could match both `blocked` and `needs_review`, prefer `blocked` (the more actionable signal).
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker linear
+   ```
 
-   **If the `list_issues` payload does not include linked GitHub PR data** (attachments/integrations), treat `needs_review` as best-effort: leave such issues in `in_progress` and skip the `PR #<n> open` annotation. Do **not** call additional tools to enrich PR data — `list-tasks` is read-only and scoped to one snapshot call.
+   (If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/kanban-classify.py`.) The helper's header carries the fixed render order and the canonical precedence sentence (`blocked > needs_review > in_progress > ready > needs_refinement`) — link there rather than restating it. Under this view every state-type section is shown (there are no gates to apply, only classification and rank), and the helper's per-tracker rank already applies the same rule as `linear-common.md` → "Ready-candidate selection" (priority urgent→low, none(0) last, then `updatedAt` ascending).
 
-5. **Render** as stacked vertical sections in this fixed order, omitting empty sections:
+   **If the `list_issues` payload does not include linked GitHub PR data** (attachments/integrations), treat `needs_review` as best-effort: pass `has_open_pr: false` for those issues so they classify to `in_progress`, and skip the `PR #<n> open` annotation. Do **not** call additional tools to enrich PR data — `list-tasks` is read-only and scoped to one snapshot call.
 
-   `new` → `needs_refinement` → `ready` → `in_progress` → `blocked` → `needs_review` → `done`
+   **Before building rows for `completed` issues**, keep only the 10 most recent by `completedAt` — the helper classifies and ranks whatever rows it's given, so this selection cap runs before the call, not after.
 
-   When the scope is the **union** of all configured projects (`/list-tasks all` or the `All` pick), repeat this section layout once per configured project under a `# <project name>` header (omitting projects with no active issues), so each project's kanban is labeled and grouped separately. For a single-project or whole-team scope, render one un-grouped kanban as before.
+5. **Render** the helper's `sections` in the fixed render order stated in its header, omitting empty sections.
 
-   Use the same `## <section> (N)` header, single-line bullet, `---` separator layout as the file-based path in `commands/list-tasks.md` step 4. Sort within each section by the same rank rule as `linear-common.md` → "Ready-candidate selection" (priority urgent→low, **none(0) last** — do NOT sort numerically ascending — then `updatedAt` ascending); see `commands/handlers/assets/_linear_rank.py`'s header for the canonical statement. This view has no gates to apply (every state-type section is shown, not just `ready`), only the rank.
+   When the scope is the **union** of all configured projects (`/list-tasks all` or the `All` pick), classify each configured project's issues separately and repeat this section layout once per project under a `# <project name>` header (omitting projects with no active issues), so each project's kanban is labeled and grouped separately. For a single-project or whole-team scope, render one un-grouped kanban as before.
+
+   Use the same `## <section> (N)` header, single-line bullet, `---` separator layout as the file-based path in `commands/list-tasks.md` step 4. The helper already sorted each section — render its order as-is.
 
    Card line format:
 

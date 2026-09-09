@@ -120,21 +120,25 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 > - **Promote / claim (added after this audit was scoped):** `jira-promote.md` step 3 (`project` + `statusCategory = "To Do"` + per-key `status !=`), the WIP gate (`statusCategory = "In Progress"`), and `jira-claim.md` step 2 (`status = "<ready_status>" AND assignee IS EMPTY AND Flagged IS EMPTY AND (labels IS EMPTY OR labels NOT IN ("human-approval-requested", "blocked"))`) are all server-side. The step-2 label clause is the **primary** server-side filter for the `human-approval-requested` / `blocked` conditions — orthogonal to `assignee IS EMPTY`, which only excludes already-claimed work (an unassigned issue can still carry those labels). `jira-claim.md` step 3 repeats the same label drop post-fetch as a **defensive** backstop against JQL index lag. The `labels IS EMPTY` arm in the JQL clause is **required** — JQL `NOT IN` does not match issues whose field is empty, so omitting it would drop unlabeled issues (the common case in the ready lane).
 > - **Blocked signals beyond the label (live-config finding, PRE-129).** The kanban `blocked` row (step 3) matches only `statusCategory indeterminate` **plus** the `blocked` label, so it misses the three more reliable blocked encodings seen on real boards: the native `Flagged` / Impediment field (`Flagged IS NOT EMPTY`, server-side); a dedicated `Blocked` / `On Hold/Blocked` **status** (sometimes filed under the `new` / To-Do category, where it also leaks into the promoter — see `jira-promote.md`'s "Blocked-in-To-Do leak" finding); and an **unresolved "is blocked by" link** (the most semantically precise — and, unlike a status that someone forgot to clear, it self-resolves when the blocker closes). The `Flagged` and status signals are JQL-expressible; the link signal is **not** filterable in core JQL (`linkedIssues`/`issueFunction` are ScriptRunner add-ons — see `jira-promote.md`'s parent-rollup finding), so it requires reading each issue's `issuelinks[]` and testing inward `Blocks` links whose source is unresolved (`statusCategory != done`). Surfacing any of these in the `blocked` section would extend the step-3 mapping beyond the single label.
 
-3. **Group into kanban sections.** Classify each issue by its `statusCategory.key` (the coarse split, like gh-issue's open/closed `state`) plus label presence. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
+3. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
-   | Section            | Match rule                                                                                     |
-   | ------------------ | ---------------------------------------------------------------------------------------------- |
-   | `new`              | statusCategory `new`, none of the status labels below present                                  |
-   | `needs_refinement` | statusCategory `new`, has `human-approval-requested`                                           |
-   | `ready`            | statusCategory `new`, has `auto-eligible`                                                      |
-   | `in_progress`      | statusCategory `indeterminate`, no `blocked` or `needs-review` (the default for indeterminate) |
-   | `blocked`          | statusCategory `indeterminate`, has `blocked`                                                  |
-   | `needs_review`     | statusCategory `indeterminate`, has `needs-review`                                             |
-   | `done`             | statusCategory `done` — select the 10 most recent by `created`, then sort per step 4           |
+   | Row field   | Source                                                                                        |
+   | ----------- | --------------------------------------------------------------------------------------------- |
+   | `id`        | issue `key`                                                                                   |
+   | `category`  | `fields.status.statusCategory.key` — `new` \| `indeterminate` \| `done`                       |
+   | `labels`    | `fields.labels[]`                                                                             |
+   | `priority`  | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low` per step 4's table, or `null` |
+   | `sort_date` | `fields.created`                                                                              |
 
-`in_progress` is the default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`. If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker jira
+   ```
 
-4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
+   (If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/kanban-classify.py`.) The helper's header carries the fixed render order and the canonical precedence sentence (`blocked > needs_review > in_progress > ready > needs_refinement`) — link there rather than restating it, matching the Linear and gh-issue handlers. `in_progress` is the helper's default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`.
+
+   Select the `done` category's rows down to the 10 most recent by `created` before building rows — the helper classifies and ranks whatever it's given, so this selection cap runs before the call, not after.
+
+4. **Render** the helper's `sections` in the fixed render order stated in its header, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
    ```
    - [high] PLAT-142 Fix broken import — assignee dan
@@ -150,7 +154,7 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
    | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                                                                                                                                    |
    | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                                                                                                                                         |
 
-   Sort within each section by priority (`urgent > high > medium > low`, none last), then `created` (oldest first).
+   The helper already sorted each section (priority `urgent > high > medium > low`, none last, then `created` oldest first) — render its order as-is.
 
 5. **Summary line.** Same shape as the file-based path:
 

@@ -114,19 +114,23 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
    - Pass one `--label` flag per entry in `gh-issue.labels` (AND filter) so the board shows only the issues this loop files. Omit `--label` entirely when no labels are configured.
    - `--state all` is required so closed issues populate the `done` section (`gh issue list` defaults to open only).
 
-3. **Group into kanban sections.** Classify each issue by `state` plus its `status:` rung. The sections mirror the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
+3. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table:
 
-   | Section            | Match rule                                                                                                                                |
-   | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-   | `new`              | `open`, has `status:0_untriaged` — **or** no `status:` label at all (an issue filed outside the loop, or before the repo was provisioned) |
-   | `needs_refinement` | `open`, has `status:1_needs_refinement`                                                                                                   |
-   | `ready`            | `open`, has `status:2_ready` and no open dependency (see **Blocked** below)                                                               |
-   | `in_progress`      | `open`, has `status:3_started`                                                                                                            |
-   | `blocked`          | `open`, has the `blocked` label — **or** has `status:2_ready` with an open `blocked_by` dependency (see **Blocked** below)                |
-   | `needs_review`     | `open`, has `status:4_needs_review` — best-effort: `gh issue list` does not return linked PRs, so call no extra tool to detect them       |
-   | `done`             | `closed` — select the 10 most recent by `createdAt`, then sort per step 4                                                                 |
+   | Row field   | Source                                                                                                                                      |
+   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `id`        | `#<number>`                                                                                                                                 |
+   | `category`  | `closed` when `state == "closed"`; else the `status:<value>` label's `<value>` (e.g. `2_ready`); else `""` (no `status:` label, open issue) |
+   | `labels`    | label names on the issue — **including** a `blocked` entry folded in per the dependency check below                                         |
+   | `priority`  | the `prio:<0-3>` label's `<n>` (int), or `null` when absent                                                                                 |
+   | `sort_date` | `createdAt`                                                                                                                                 |
 
-   If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker gh-issue
+   ```
+
+   (If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/kanban-classify.py`.) The helper's header carries the fixed render order and the canonical precedence sentence (`blocked > needs_review > in_progress > ready > needs_refinement`) — link there rather than restating it, matching the Linear and jira handlers.
+
+   Select the `done` category's (`closed`) rows down to the 10 most recent by `createdAt` before building rows — the helper classifies and ranks whatever it's given, so this selection cap runs before the call, not after.
 
    **Blocked has two independent sources; report both in that one section.**
    - **The `blocked` label** is a manual override, and stays the only way to mark an issue blocked by something outside GitHub. It sits outside the four managed namespaces, so `gh-issue-state.py` carries it forward through every state write instead of dropping it — a human's override survives a promote or a claim.
@@ -141,9 +145,9 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
 
      Pass one `--label` per entry in `gh-issue.labels`, the same filters step 2 used. Without them the helper draws its own 50-issue window over the **whole** repo, so an in-scope issue can fall outside it and get no verdict at all — and a missing verdict is indistinguishable from a ready one, which the intersection below cannot detect.
 
-     If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. **Intersect its output with the issue numbers step 2 returned**, then move each of those it reports as blocked into the `blocked` section, annotated with the open blockers it names. The helper queries the whole repo, while step 2 may be narrowed by `gh-issue.labels` (which defaults to `[follow-up]`), so applying its verdicts unfiltered would put a card on the board that this board never listed.
+     If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. **Intersect its output with the issue numbers step 2 returned**, then for each of those it reports as blocked, add `blocked` to that issue's `labels` row field (annotated with the open blockers it names) before calling the helper. The helper queries the whole repo, while step 2 may be narrowed by `gh-issue.labels` (which defaults to `[follow-up]`), so applying its verdicts unfiltered would put a card on the board that this board never listed.
 
-4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
+4. **Render** the helper's `sections` in the fixed render order stated in its header, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
    ```
    - [p1] #142 Fix broken import (est 3) — assignee dan
@@ -160,7 +164,7 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
    | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                              |
    | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—` |
 
-   Sort within each section by priority (`prio:0` first through `prio:3`, none last), then `createdAt` (oldest first).
+   The helper already sorted each section (priority `prio:0` first through `prio:3`, none last, then `createdAt` oldest first) — render its order as-is.
 
 5. **Summary line.** Same shape as the file-based path:
 
