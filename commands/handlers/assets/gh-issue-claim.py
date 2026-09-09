@@ -14,7 +14,11 @@ sessions could each interpret slightly differently:
 - `acquire` performs the create-only ref push that IS the election, and its
   exit code is a contract: 0 (won), 3 (lost the race), and 4 (indeterminate —
   neither won nor lost) mean different things to the caller, and the caller
-  branches on the number, not on parsing prose.
+  branches on the number, not on parsing prose. `acquire-ref` is the same
+  election with the branch name passed in directly instead of derived from an
+  issue number, so `claim-lock.md` and the jira handler — which have their own
+  branch-naming rules — share this one implementation instead of hand-walking
+  the POST/422 dispatch a second time.
 - `wip` counts in-flight work with one server-side query and reports the
   remaining batch ceiling as `slack`, so a caller cannot under-count by
   missing a label spelling, over-cost by issuing two calls, or hand a batch
@@ -27,6 +31,7 @@ Usage:
   python3 gh-issue-claim.py issue-number --branch bestdan/task-142
   python3 gh-issue-claim.py wip --repo owner/name --json
   python3 gh-issue-claim.py acquire --repo owner/name --issue 142 --base-sha <sha>
+  python3 gh-issue-claim.py acquire-ref --repo owner/name --branch task/PLAT-142 --base-sha <sha>
   python3 gh-issue-claim.py release --repo owner/name --issue 142
 """
 
@@ -192,7 +197,7 @@ def cmd_wip(args):
     return 0
 
 
-def cmd_acquire(args):
+def acquire_ref(repo, branch, base_sha):
     """Create the claim-lock ref. Exit code IS the election result.
 
     A plain `git push` cannot substitute for this: both racers cut the
@@ -204,12 +209,13 @@ def cmd_acquire(args):
 
     Never mutates the issue itself — the caller writes assignee/labels only
     after this returns 0, so a lost or indeterminate race leaves the issue
-    untouched.
+    untouched. Shared by `acquire` (which derives `branch` from an issue
+    number) and `acquire-ref` (which takes it directly), so the POST/422
+    dispatch has exactly one implementation.
     """
-    branch = branch_name(args.issue, args.prefix)
-    body = json.dumps({"ref": f"refs/heads/{branch}", "sha": args.base_sha})
+    body = json.dumps({"ref": f"refs/heads/{branch}", "sha": base_sha})
     code, out, err = run_gh(
-        ["api", "--method", "POST", f"repos/{args.repo}/git/refs", "--input", "-"],
+        ["api", "--method", "POST", f"repos/{repo}/git/refs", "--input", "-"],
         stdin=body,
     )
     if code == 0:
@@ -227,6 +233,15 @@ def cmd_acquire(args):
 
     print(f"could not acquire {branch}: {err.strip() or out.strip()}", file=sys.stderr)
     return 4
+
+
+def cmd_acquire(args):
+    branch = branch_name(args.issue, args.prefix)
+    return acquire_ref(args.repo, branch, args.base_sha)
+
+
+def cmd_acquire_ref(args):
+    return acquire_ref(args.repo, args.branch, args.base_sha)
 
 
 def cmd_release(args):
@@ -275,6 +290,15 @@ def main(argv=None):
     p.add_argument("--base-sha", required=True, dest="base_sha")
     p.add_argument("--prefix", default="")
     p.set_defaults(func=cmd_acquire)
+
+    p = subparsers.add_parser(
+        "acquire-ref",
+        help="create-only ref push for a tracker-neutral branch name (the election)",
+    )
+    p.add_argument("--repo", required=True, help="owner/name")
+    p.add_argument("--branch", required=True)
+    p.add_argument("--base-sha", required=True, dest="base_sha")
+    p.set_defaults(func=cmd_acquire_ref)
 
     p = subparsers.add_parser(
         "release", help="delete a claim-lock ref this session created"

@@ -191,6 +191,70 @@ class AcquireConcurrencyTests(unittest.TestCase):
         self.assertIn("403", err.getvalue())
 
 
+class AcquireRefTests(unittest.TestCase):
+    """`acquire-ref` shares acquire_ref() with `acquire` but takes the branch
+    name directly, for callers (claim-lock.md, the jira handler) that derive
+    it under their own naming rule instead of gh-issue's issue-number rule."""
+
+    def setUp(self):
+        self._orig = gh_issue_claim.run_gh
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        gh_issue_claim.run_gh = self._orig
+
+    def _acquire_ref(self, remote, branch="task/PLAT-142"):
+        gh_issue_claim.run_gh = remote.run_gh
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gh_issue_claim.main(
+                [
+                    "acquire-ref",
+                    "--repo",
+                    "o/n",
+                    "--branch",
+                    branch,
+                    "--base-sha",
+                    "deadbeef",
+                ]
+            )
+        return code, out.getvalue(), err.getvalue()
+
+    def test_wins_with_a_tracker_neutral_branch_name(self):
+        remote = FakeRemote()
+
+        code, out, _ = self._acquire_ref(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "task/PLAT-142")
+
+    def test_422_is_a_lost_race_not_an_error(self):
+        remote = FakeRemote(refs={"refs/heads/task/PLAT-142"})
+
+        code, out, err = self._acquire_ref(remote)
+
+        self.assertEqual(code, 3)
+        self.assertEqual(out, "", "a lost race must never print an acquired branch")
+        self.assertIn("task/PLAT-142", err)
+        self.assertEqual(remote.mutating_issue_calls(), [])
+
+    def test_indeterminate_failure_is_exit_4_not_3(self):
+        class Forbidden:
+            def __init__(self):
+                self.calls = []
+
+            def run_gh(self, args, stdin=None):
+                self.calls.append((args, stdin))
+                return 1, "", "HTTP 403: Resource not accessible by integration"
+
+        code, out, err = self._acquire_ref(Forbidden())
+
+        self.assertEqual(code, 4)
+        self.assertEqual(out.strip(), "")
+        self.assertNotIn("acquired", err.lower())
+        self.assertIn("403", err)
+
+
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
         self._orig = gh_issue_claim.run_gh
