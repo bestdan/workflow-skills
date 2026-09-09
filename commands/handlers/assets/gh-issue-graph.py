@@ -87,6 +87,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _body_refs import parse as parse_body_refs  # noqa: E402
 from _labels import (  # noqa: E402
     DEFAULT_LABELS_FILE,
     load_vocabulary,
@@ -96,6 +97,14 @@ from _labels import (  # noqa: E402
 # a stale edge from a satisfied one, so a caller that drops it gets a graph that
 # cannot tell "blocks forever" from "already done".
 ISSUE_FIELDS = "number,title,body,state,stateReason,labels,milestone,createdAt"
+
+# `_body_refs.parse()`'s `id_pattern` for this handler: a bare `#<n>` mention,
+# never a repo-qualified `owner/repo#<n>` one — the negative lookbehind refuses
+# to match when `#` is immediately preceded by a word character, `.`, `/` or
+# `-`, which is exactly the shape a qualifier takes. A cross-repo number is not
+# a local issue, so it is excluded from body_references entirely rather than
+# resolved to the wrong local id.
+BODY_REF_ID_PATTERN = re.compile(r"(?<![\w./-])#(?P<num>\d+)\b")
 
 # `Blocked by: #12, #13` — the echo `/push-plan` §5 writes and `gh-issue.md`
 # step 2 renders. `Blocked by task: <slug>` is deliberately NOT matched: a slug
@@ -237,6 +246,12 @@ def build_node(issue, vocabulary, in_scope, repo):
         "in_scope": in_scope,
         "footer_blockers": footer_blockers(
             issue.get("body") or "", issue["number"], repo
+        ),
+        # Every dependency-phrase reference the body makes, direction- and
+        # strength-classified by the shared `_body_refs` table — the fixed
+        # phrase list `gh-issue-reoptimize.md` Dimensions 1-2 used to hand-walk.
+        "body_references": parse_body_refs(
+            issue.get("body") or "", str(issue["number"]), BODY_REF_ID_PATTERN
         ),
     }
 
@@ -513,6 +528,25 @@ def analyse(
         if edge["blocker"] not in nodes[edge["blocked"]]["footer_blockers"]:
             edge_only.append(edge)
 
+    # `body_references` with no matching native relation yet — Dimension 1-2's
+    # "missing edges, from prose" and "hidden cross-milestone dependencies"
+    # both read this instead of re-parsing bodies themselves. A `related`
+    # reference has no native counterpart in gh-issue at all, so it is always
+    # proposed; a `blocked_by`/`blocks` reference is proposed only when the
+    # edge it implies (in the direction it implies) isn't already in `native`.
+    proposed = []
+    for number in sorted(n for n, node in nodes.items() if node["in_scope"]):
+        for ref in nodes[number]["body_references"]:
+            target = int(ref["target"])
+            if ref["direction"] == "blocked_by":
+                covered = (number, target) in native
+            elif ref["direction"] == "blocks":
+                covered = (target, number) in native
+            else:
+                covered = False
+            if not covered:
+                proposed.append({"from": number, **ref})
+
     return {
         "repo": repo,
         "scope": {
@@ -532,6 +566,7 @@ def analyse(
         "concurrent": concurrent,
         "footer_only": footer_only,
         "edge_only": edge_only,
+        "proposed": proposed,
         **(
             {"order": topo_order(nodes, edges, extra_edges, vocabulary)} if sort else {}
         ),
@@ -600,6 +635,14 @@ def report(result):
         "Edge without a footer — echo missing from the body",
         result["edge_only"],
         lambda e: f"#{e['blocked']} blocked_by #{e['blocker']}",
+    )
+    section(
+        "Proposed from body prose — no matching native relation yet",
+        result["proposed"],
+        lambda e: (
+            f"#{e['from']} → #{e['target']} ({e['direction']}, {e['strength']}) "
+            f"— “{e['phrase']}”"
+        ),
     )
     if "order" in result:
         print(f"\nTopological order — {len(result['order'])} node(s), provisional:")

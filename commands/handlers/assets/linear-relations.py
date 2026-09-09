@@ -72,10 +72,25 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _body_refs import parse as parse_body_refs  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
+
+# `_body_refs.parse()`'s `id_pattern` for this handler: an embedded
+# `<issue id="PRE-NNN" href="…">` mention (the `tag_id` group) or a bare
+# `PRE-NNN` (the `bare_id` group), never a fragment of a longer word —
+# `(?<![\w-])`/`(?![\w-])` refuse a match inside e.g. `PRE-142a` or
+# `subPRE-142`. `re.I` so a hand-typed lowercase mention (`pre-142`) still
+# matches; `_body_refs.parse()`'s self-exclusion already compares
+# case-insensitively, but that's moot if the pattern never matches lowercase
+# in the first place.
+LINEAR_BODY_REF_PATTERN = re.compile(
+    r'<issue\b[^>]*\bid="(?P<tag_id>[A-Z]+-\d+)"[^>]*>'
+    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])",
+    re.I,
+)
 
 # linear.team may be a team NAME or a UUID id (see linear-common.md / linear-config.md).
 UUID_RE = re.compile(
@@ -311,8 +326,46 @@ def main():
                 "blocks": blocks,
                 "relatedTo": related_to,
                 "duplicateOf": duplicate_of,
+                # Every dependency-phrase reference the description makes,
+                # direction- and strength-classified by the shared
+                # `_body_refs` table — the fixed phrase list
+                # `linear-reoptimize.md` Dimensions 1-2 used to hand-walk.
+                "body_references": parse_body_refs(
+                    issue.get("description") or "",
+                    issue["identifier"],
+                    LINEAR_BODY_REF_PATTERN,
+                ),
             }
         )
+
+    # `body_references` with no matching native relation yet — Dimension 1-2's
+    # "prose -> native reconciliation" and "hidden cross-project dependencies"
+    # both read this instead of re-parsing descriptions themselves. Covered by
+    # `blockedBy`/`blocks`/`relatedTo` respectively, compared case-insensitively
+    # since a hand-typed mention's case need not match the real identifier's.
+    by_identifier = {issue["identifier"].casefold(): issue for issue in issues_out}
+    proposed = []
+    for issue in issues_out:
+        for ref in issue["body_references"]:
+            target_norm = ref["target"].casefold()
+            if ref["direction"] == "blocked_by":
+                native_list = issue["blockedBy"]
+            elif ref["direction"] == "blocks":
+                native_list = issue["blocks"]
+            else:
+                native_list = issue["relatedTo"]
+            covered = any(t.casefold() == target_norm for t in native_list)
+            if not covered:
+                target = by_identifier.get(target_norm)
+                proposed.append(
+                    {
+                        "from": issue["identifier"],
+                        "target": target["identifier"] if target else ref["target"],
+                        "phrase": ref["phrase"],
+                        "direction": ref["direction"],
+                        "strength": ref["strength"],
+                    }
+                )
 
     print(
         f"Resolved team={team_node['name']} scopes={len(project_ids)} "
@@ -327,6 +380,7 @@ def main():
             "states": team_node["states"]["nodes"],
         },
         "issues": issues_out,
+        "proposed": proposed,
     }
     print(json.dumps(result))
 

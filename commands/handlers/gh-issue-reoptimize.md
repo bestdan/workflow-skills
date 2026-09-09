@@ -133,30 +133,20 @@ can execute it verbatim.
 
 ### Dimension 1 — Repair blocking chains
 
-- **Missing edges, from prose.** Parse every issue's body for the signals
-  `linear-reoptimize.md` Dimension 1 parses: bare `#<n>` / `owner/repo#<n>`
-  mentions, and the dependency phrases (case-insensitive) `unblocks`, `blocked
-  on`, `blocked by`, `relies on`, `depends on`, `requires`, `with X in place`,
-  `re-scoped per`, `part of … plan`. Exclude the issue's own number so a body
-  restating its own id never yields a self-block. For each referenced issue with
-  **no native edge already** (check `edges` from step 4, not the footer),
-  classify by phrasing strength: strong → propose a **`blocked_by` edge**; weak
-  (`part of`, `re-scoped per`, a bare mention) → propose a `Related: #<n>` footer
-  line, which is a cross-reference and stays prose.
-
-  > **Get the direction right — one strong phrase points the other way.**
-  > `gh-issue-deps.py --edge` takes `<blocked>:<blocker>`, so the orientation is
-  > part of the finding, not a detail of applying it. Reading issue `#A` whose
-  > body names `#B`:
-  >
-  > | Phrase in #A's body                                                              | Edge             |
-  > | -------------------------------------------------------------------------------- | ---------------- |
-  > | `blocked on #B`, `blocked by #B`, `relies on #B`, `depends on #B`, `requires #B` | `--edge A:B`     |
-  > | **`unblocks #B`**                                                                | **`--edge B:A`** |
-  >
-  > `unblocks` is the reverse of every other strong phrase — "#A unblocks #B"
-  > means #B waits on #A. Both directions are valid edges and neither errors, so
-  > a mistake here writes a real dependency backwards and nothing catches it.
+- **Missing edges, from prose.** Step 4's `gh-issue-graph.py --json` call
+  already parsed every in-scope issue's body for the dependency-phrase table
+  in `commands/handlers/assets/_body_refs.py` — the shared module also used by
+  `linear-relations.py`, so the table lives in exactly one place. Read its
+  `proposed` field: each entry is a `{from, target, phrase, direction,
+  strength}` reference with **no matching native edge yet**. A `strength:
+  "strong"` entry with `direction: "blocked_by"` proposes `--edge
+  <from>:<target>`; `direction: "blocks"` proposes `--edge <target>:<from>`
+  (`unblocks` is the only phrase that produces `blocks`, and `_body_refs.py`'s
+  tests pin that it stays reversed — do not re-derive the direction here). A
+  `strength: "weak"` entry (`direction: "related"`) proposes a `Related:
+  #<target>` footer line instead, which is a cross-reference and stays prose.
+  Every reference in `proposed` already excludes the issue's own number and
+  anything inside a code span — nothing here needs re-checking that.
 - **Cycles.** `cycles` from step 4, computed over the real edges. **Report** the
   members; never auto-resolve — breaking a cycle means deciding which dependency
   is wrong, which is a human call, same as Linear. A cycle that appears only in
@@ -172,14 +162,15 @@ can execute it verbatim.
 
 ### Dimension 2 — Hidden cross-milestone dependencies
 
-From the same prose parse, flag any reference whose target node's `milestone`
-differs from the referrer's (or either has none) and that has **no native edge**
-→ propose the edge per Dimension 1's phrasing-strength rule. These are invisible
-inside a single milestone's board view, and step 4's backfill is what makes the
-target's state readable at all. Semantic inference (a shared file or subsystem
-implying an unstated order) is in scope too, exactly as `linear-reoptimize.md`
-Dimension 2 — propose the edge with the shared evidence quoted, marked
-lower-confidence.
+From the same `proposed` field, filter to entries whose `target` node's
+`milestone` differs from the `from` node's (or either has none) — step 4's
+backfill is what makes the target's state readable at all for this check.
+Everything else is Dimension 1's rule unchanged: strength decides edge vs.
+footer, and direction is already resolved. **Semantic inference** (a shared
+file or subsystem implying an unstated order, with neither issue citing the
+other so `_body_refs.py` finds nothing) is the one judgment step left in
+this dimension, exactly as `linear-reoptimize.md` Dimension 2 — propose the
+edge with the shared evidence quoted, marked lower-confidence.
 
 ### Dimension 3 — Re-order & re-prioritize
 
