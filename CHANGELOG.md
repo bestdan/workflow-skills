@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.43.0] - 2026-09-09
+
+### Features
+
+- add preflight.sh --scout-run-md for the per-task capability join (#557) (12135da)
+
 ## [2.42.0] - 2026-09-09
 
 ### Features
