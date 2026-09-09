@@ -51,9 +51,11 @@ def _load_parse_diff():
 def right_side_anchors(files):
     """{path: set(line numbers)} of every line anchorable on that file's right side.
 
-    A path maps in under both its `old` and `new` name so a comment against
-    either survives a rename; the line set itself only ever holds added/context
-    (right-side) line numbers, never deleted ones.
+    Keyed only by `new` — GitHub's Reviews API takes `path` in the file's
+    *current* (new) tree, so a renamed file's old path never anchors, even
+    though parse_diff's rows carry the same right-side line numbers under
+    either name. A deleted file's `new` already equals its (only) real path,
+    so no fallback to `old` is needed there.
     """
     anchors: dict = {}
     for f in files:
@@ -63,9 +65,9 @@ def right_side_anchors(files):
                 r = row["r"]
                 if r["t"] in ("add", "ctx"):
                     lines.add(r["n"])
-        for path in {f["old"], f["new"]}:
-            if path and path != "/dev/null":
-                anchors.setdefault(path, set()).update(lines)
+        path = f["new"]
+        if path and path != "/dev/null":
+            anchors.setdefault(path, set()).update(lines)
     return anchors
 
 
