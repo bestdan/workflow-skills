@@ -53,8 +53,8 @@ In a **cloud routine, as environments are provisioned today, no repo-scoped
 `gh` subcommand reaches GitHub** — GraphQL is not served, and repo-scoped REST
 needs the repo attached with credentials, which no measured environment had
 done (attaching works, but no run has yet had both an attach and a `gh`). `gh`
-may not even be installed — its presence
-varies by environment — and where it is, `gh api user` answers and
+may not even be installed — it comes from a source repo's own `SessionStart`
+hook rather than the image — and where it is, `gh api user` answers and
 `gh auth status` exits 0 while reporting the token invalid, so neither is a
 health check. Both
 therefore run over the `mcp__github__*` tools, which are the **only** working

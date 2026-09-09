@@ -287,28 +287,34 @@ one properly is the thing that would change it.
   the one that is blocking. What still rests on it is
   `gh-issue.remote_batch`, which stays `false` for caution rather than for a
   measured reason.
-- **~~Whether `gh` is reliably present.~~ Settled, and it is not.** `gh` is a
-  property of an environment at a point in time, not of routines. It answered
-  `gh --version` as 2.45.0 in every run inspected here on 2026-09-07, and was
-  **absent** from `env_01KURKZo3LcfRKBaEZWcbsrk` — the same environment id — at
-  2026-09-08T01:08Z, where `which gh` exited 1 and `gh --version` returned rc
-  **127** (`command not found` from Bash, not from `gh`). The same run found
-  none of this repo's gate tools present either. Nine hours, one environment
-  id, opposite answers.
+- **Whether `gh` is present is not a property of the environment — the
+  evidence points at the source repo, which installs it.** `gh` answered 2.45.0
+  in three runs on 2026-09-07 and was **absent** from three later runs in the
+  same `env_01KURKZo3LcfRKBaEZWcbsrk`, where `which gh` exited 1 and
+  `gh --version` returned rc **127** (`command not found` from Bash, not from
+  `gh`) — `cse_014DT5cUvE7zGfVjix9fW7fC`, `cse_01TdwvhMQCgH2xXd5SR51bex`,
+  `cse_01V9RMunnPTVfB6n9a1VwfKm`.
 
-  Reproduced twice more the same night — `cse_01TdwvhMQCgH2xXd5SR51bex`
-  (01:36) and `cse_01V9RMunnPTVfB6n9a1VwfKm` (01:47) — so three consecutive
-  runs, and the second of those had `sources` configured while the first did
-  not, which rules out sources as the explanation. `just`, `mise`, `shfmt` and
-  `shellcheck` were all absent too (rc 1 each), and the env log said
-  `Setup script cached from previous run`, so whatever the setup script
-  installs, it is not these.
+  **The mechanism is committed code.** `bestdan/dotfiles` tracks
+  `.claude/hooks/session-start.sh`, which runs only when
+  `CLAUDE_CODE_REMOTE=true` and apt-installs `shellcheck`, `zsh` and **`gh`**,
+  then installs `just`. Sort the six runs by source and it lines up exactly:
+  every `gh`-present run sourced `dotfiles`; every `gh`-absent run did not, and
+  in those, `just` and `shellcheck` — two more of that hook's payload — were
+  absent as well. `bestdan/workflow-skills` tracks no `.claude/` files at all,
+  so a session sourced only from it gets no hook.
 
-  So every `gh` finding in this document is scoped to the runs that produced
-  it, and **no handler may lean on `gh` being installed** — the runtime files
-  now say so. It also means an rc-127 in a future probe is Bash reporting a
-  missing binary, which is not the same failure as any refusal recorded here
-  and must not be read as one.
+  **Not isolated, and the confound is named.** Source and clock both changed
+  between the present and absent runs, so no run varies one thing at a time.
+  The source-repo reading has a mechanism with source code behind it; the
+  time-based reading has none, which is why this bullet no longer asserts one.
+  The discriminating run is cheap, and its design is below under "The probe
+  that would settle the open question".
+
+  Either way, **no handler may lean on `gh` being installed** — the runtime
+  files say so, and that holds under both readings. An rc-127 in a future probe
+  is Bash reporting a missing binary, which is not the same failure as any
+  refusal recorded here and must not be read as one.
 
 ## Reproducing
 
@@ -354,11 +360,22 @@ Three things about driving `RemoteTrigger` that cost a wasted run each:
 
 ### The probe that would settle the open question
 
-Designed jointly with the session that measured the 2026-09-05 `--cloud`
-environment, so that whoever runs it first runs the same thing. It provisions
-credentials on a real account, so it is the account owner's call, not an
-agent's.
+Designed jointly across the sessions that measured the 2026-09-05 `--cloud`
+environment and the 2026-09-08 `gh`-absent runs, so that whoever runs it first
+runs the same thing. It provisions credentials on a real account, so it is the
+account owner's call, not an agent's.
 
+It now answers two questions at once — whether an attached repo serves `gh`
+REST, and whether `gh`'s presence follows the source repo's `SessionStart`
+hook — because both need the same run and neither has been isolated.
+
+- **Two runs, same environment id, differing only in source** — one sourcing a
+  repo that commits a `SessionStart` hook installing `gh`, one that does not.
+  This is the variable nothing has yet varied on its own.
+- **`echo CLAUDE_CODE_REMOTE=[$CLAUDE_CODE_REMOTE]` in both.** The hook exits
+  early unless it is `true`, so a `gh`-absent run with it unset means the hook
+  correctly declined — not that the source repo is irrelevant. Without this,
+  the run can produce a confident wrong answer in favour of the hook reading.
 - **Both cases in one run** — a source-cloned repo and a not-a-source repo.
   Conflating the two is how finding 6 went wrong twice.
 - **Both provisioning states for the same repo** — before and after `add_repo`

@@ -295,8 +295,9 @@ attachment) is unresolvable — which is the bulk of hand-opened work.
 >   cloned source, never credential-attached; attaching works, but no run has
 >   yet had both an attach and a `gh`) — do not
 >   spend the run probing it.
-> - **`gh` may not be installed at all** — its presence varies by environment
->   and changed inside one day in the same environment id. Where it does exist,
+> - **`gh` may not be installed at all** — it comes from a source repo's own
+>   `SessionStart` hook, not from the image, so a session sourced from a repo
+>   without one has no `gh`. Where it does exist,
 >   `gh api user` answers and `gh auth status` reports the token invalid
 >   **while exiting 0**. So never gate on `gh` being present, and never gate on
 >   its exit code.
