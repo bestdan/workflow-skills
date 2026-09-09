@@ -80,11 +80,11 @@ stays here rather than in `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
 ([`launch-runtime.md`](launch-runtime.md) "Laptop
 sleep"). If it can't be guaranteed, **BLOCKS LAUNCH**.
 
-**Less-claude CAO gate (BLOCKS LAUNCH).** Only when `--profile less-claude` is
-present, require `cao`, `cao-run`, and `cao-server` on `PATH`, then prove the
-already-running daemon responds at `localhost:9889` with `nc -z localhost
-9889`. Any missing binary or failed port probe **BLOCKS LAUNCH**; name the
-missing prerequisite and do not start or restart `cao-server`.
+**Less-claude CAO gate (BLOCKS LAUNCH).** A `--profile less-claude` run routes
+every task through the CAO fleet, so this gate is folded into the scout's one
+call in Step 6 below rather than duplicated here — there is nothing to check
+yet at this point, since the task graph (and each task's `coder`) doesn't
+exist until Step 6 materializes it.
 
 ## Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
@@ -164,17 +164,27 @@ existing `RUN.md` bytes. Also seed empty `.auto-pilot/QUESTIONS.md` and
 `.auto-pilot/REPORT.md`. **Commit** all three to the run-state branch (the
 first write under the run-state branch's fixed write order).
 
-**Scout — per-task capability join (BLOCKS LAUNCH).** With the graph now
-materialized and each task's coder resolved (step 3) against the environment
-fingerprint (step 2), check the **demand** side the auth probes structurally
-can't see: for **each** task, take the `<backend>` it routes to and confirm
-it **exists in this environment** — the motivating case is a `codex` task in
-a `claude-web` run with no `codex` binary. A task routed to an absent backend
-**BLOCKS LAUNCH**, naming the task, the missing backend, and the fix (install
-it, or re-route the task). This is a **deterministic** check only: it blocks
-on a provable route-vs-environment gap, never a guess about what a task's
-prose might need — inferring demands from task _text_ is a separate,
-warn-only predictive scout, deliberately not here.
+**Scout — per-task capability join (BLOCKS LAUNCH).** Record each task's
+resolved `<backend>` (step 3) in its `coder` cell as the table is written
+above (`run-state.md` "`RUN.md`"). Then run:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md .auto-pilot/RUN.md
+```
+
+against the environment fingerprint (step 2) — the demand side the auth
+probes structurally can't see: for each task, does its declared backend
+**exist in this environment** — the motivating case is a `codex` task in a
+`claude-web` run with no `codex` binary — and, only when any task's backend
+is `cao`, is the less-claude CAO gate (`cao`/`cao-run`/`cao-server` on `PATH`,
+the daemon responding at `localhost:9889`, every `cao_coder_mapping` route in
+the fixed CAO fleet) satisfied. Its `SCOUT VERDICT: go` / `no-go` line and any
+`BLOCKS LAUNCH: <task> -> <backend> (missing)` lines are the source of truth;
+a `no-go` **BLOCKS LAUNCH** with the reason it names — install the backend, or
+re-route the task. This is a **deterministic** check only: it blocks on a
+provable route-vs-environment gap, never a guess about what a task's prose
+might need — inferring demands from task _text_ is a separate, warn-only
+predictive scout, deliberately not here.
 
 **v1 treats every route as _required_** — an absent backend blocks. A planned
 follow-up softens this to **required-vs-preferred** (a _preferred_ backend

@@ -72,12 +72,20 @@ usage_delta_baseline: # last successful session-status sample: {percent: 42, res
 usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent: 8, reset_epoch: 1783823504}]. Written ONLY by `spawn-orchestrator.sh reserve-gate`
 ---
 
-| task    | phase        | branch            | base              | base_sha | pr   | notes                  |
-| ------- | ------------ | ----------------- | ----------------- | -------- | ---- | ---------------------- |
-| PRE-459 | handed-off   | bestdan/pre-459-… | main              | —        | #140 | 2 co-review rounds     |
-| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | a1b2c3d  | —    | chained on PRE-459 tip |
+| task    | phase        | branch            | base              | base_sha | pr   | notes                  | coder |
+| ------- | ------------ | ----------------- | ----------------- | -------- | ---- | ---------------------- | ----- |
+| PRE-459 | handed-off   | bestdan/pre-459-… | main              | —        | #140 | 2 co-review rounds     | opus  |
+| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | a1b2c3d  | —    | chained on PRE-459 tip | codex |
 ```
 
+- `coder` is the `<backend>` launch step 3 resolved for this task (`select-coder`
+  per task); `opus`, `codex`, `agy`, `devin`, or `cao` (the generic marker for a
+  less-claude task dispatched through the CAO fleet — which named `cao-*` entry
+  actually runs it is a run-level detail in `cao_coder_mapping`, not a per-task
+  one). Empty (`—`) means not yet resolved. This is the column the scout
+  (`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md`,
+  [`launch-preflight.md`](launch-preflight.md) "Step 6") joins against the
+  environment fingerprint.
 - `base` encodes the dependency edge for a stacked task: `main` for an
   independent task, or the parent task's branch for a chained one.
 - `base_sha` is the parent branch's **frozen-tip SHA**, recorded when the parent

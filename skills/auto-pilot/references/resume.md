@@ -102,12 +102,21 @@ half, the scout's **capability join**, must re-run against the current
 environment — and **base freshness**. As at launch, a hard failure here
 **BLOCKS THE RESUME**, fail-closed the same way.
 
-**Less-claude capability join.** Read `run_profile` and its profile fields from
-the selected `RUN.md` before re-running the join. When it is `less-claude`,
-re-verify `cao`, `cao-run`, and `cao-server` on `PATH` and `nc -z localhost
-9889`; a missing binary or non-responding `cao-server` **BLOCKS THE RESUME**.
-Then re-check every recorded `cao_coder_mapping` route against the current CAO
-fleet. Do not restart the daemon or downgrade the profile during resume.
+**Capability join, including the less-claude CAO gate.** Re-run the same one
+call launch step 6 used:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md .auto-pilot/RUN.md
+```
+
+against the selected `RUN.md` on the resumable branch. Every task's `coder`
+cell and (for a `less-claude` run) `cao_coder_mapping` already exist from
+launch, so this one call re-verifies both halves at once: each task's
+backend on `PATH`, and — only when any task routes to `cao` —
+`cao`/`cao-run`/`cao-server` on `PATH`, the daemon responding at
+`localhost:9889`, and every `cao_coder_mapping` route still in the fixed CAO
+fleet. A `no-go` **BLOCKS THE RESUME**, naming the gap. Do not restart the
+daemon or downgrade the profile during resume.
 
 **Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
 but run-state branches are named `auto-pilot/<run_id>`

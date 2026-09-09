@@ -163,8 +163,9 @@ The full mechanics of each step are in
 2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
    plus per-credential probes (GitHub, Linear, coder CLIs, MCP), each through
    the run's sandbox wrapper; capture the environment fingerprint / class; a
-   probe that would prompt is itself the failure. Includes the less-claude CAO
-   gate and the machine-stays-awake check.
+   probe that would prompt is itself the failure. Includes the
+   machine-stays-awake check; the less-claude CAO gate runs as part of step 6's
+   scout below.
 3. **Resolve config into non-interactive choices** (BLOCKS LAUNCH) — reviewer
    set + `min_task_budget`, `select-coder` per task, the less-claude profile
    fields, and the custom-commands posture; anything left unresolved would
@@ -175,7 +176,9 @@ The full mechanics of each step are in
    `exercise_path` into `RUN.md` and install the un-jailed verify broker.
 6. **Materialize the task graph into run state** — write `RUN.md` /
    `QUESTIONS.md` / `REPORT.md`, then the deterministic capability-join
-   **scout** (BLOCKS LAUNCH on a route-vs-environment gap).
+   **scout** (`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md`,
+   including the less-claude CAO gate; BLOCKS LAUNCH on a route-vs-environment
+   gap).
 7. **Spawn the detached orchestrator** — launch script + sandbox wrapper, the
    auth smoke test through that wrapper, OS-level detach with PID/start-time
    recorded, and print where state lives.
