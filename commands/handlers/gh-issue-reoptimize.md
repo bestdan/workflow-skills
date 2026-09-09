@@ -183,14 +183,30 @@ lower-confidence.
 
 ### Dimension 3 — Re-order & re-prioritize
 
-- **Topological order.** Fold in the proposed Dimension 1–2 edges (label the
-  order **provisional** — it assumes those edges are approved), then
-  topologically sort the non-terminal nodes. Within topo constraints, rank by:
-  `prio:` first (`prio:0` most urgent through `prio:3`, no `prio:` label last),
-  then smaller `est:<n>` first when both sides of a comparison carry the label
-  (omit the tie-break otherwise), then age. Print as a recommendation —
-  gh-issue has no board-rank field to write back to, so this is advisory only,
-  same as Linear.
+- **Topological order.** Write the proposed Dimension 1–2 edges to a JSON file
+  as a list of `{"blocked": <n>, "blocker": <n>}` objects, then re-run the
+  helper with `--sort` and that file — do not hand-walk the sort, it is the
+  same algorithm `gh-issue-graph.py` already implements:
+
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-graph.py" \
+    --repo "<repo>" [--milestone "<milestone>"] --limit 500 \
+    --sort --edges "<proposed-edges.json>" --json
+  ```
+
+  Read its `order` field and print it as a recommendation, **labeled
+  provisional** — it assumes the Dimension 1–2 edges in the file are approved;
+  if approval diverges in §Apply, drop the unapproved edges from the file and
+  re-run to restate the order over the edges that survived. `order` is already
+  a topological sort of the open, in-scope nodes ranked within topo constraints
+  by `prio:` (`prio:0` most urgent through `prio:3`, no `prio:` label last),
+  then a node carrying `est:<n>` before one that doesn't (an unestimated node
+  never wins on `est` — that is the tie-break's "omit otherwise"), smaller
+  `est:<n>` between two nodes that both carry it, then older `createdAt`
+  first. gh-issue has no board-rank field to write back to,
+  so this stays advisory only, same as Linear. A node caught in a cycle never
+  appears in `order` — report it as skipped alongside the `cycles` finding
+  above rather than silently dropping it.
 - **Priority inversions.** `inversions` from step 4, swept over every edge
   rather than a sample: an open blocker less urgent than the open issue it
   blocks, including a blocker carrying **no** `prio:` label, which ranks last.

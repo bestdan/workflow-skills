@@ -19,6 +19,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -41,6 +42,7 @@ def issue(
     state_reason=None,
     labels=(),
     milestone=None,
+    created_at=None,
 ):
     return {
         "number": number,
@@ -50,7 +52,10 @@ def issue(
         "stateReason": state_reason,
         "labels": [{"name": name} for name in labels],
         "milestone": {"title": milestone} if milestone else None,
-        "createdAt": f"2026-01-{number:02d}T00:00:00Z",
+        # Defaults to the number's own date so most tests need not think about
+        # it; `created_at` overrides this to test age independently of number
+        # (the default keeps the two confounded).
+        "createdAt": created_at or f"2026-01-{number:02d}T00:00:00Z",
     }
 
 
@@ -429,6 +434,100 @@ class GraphTests(unittest.TestCase):
 
         self.assertEqual([a for a in repo.calls if a[:2] == ["issue", "list"]], [])
         self.assertEqual(result["checked"], 2)
+
+    # --- --sort: Dimension 3's re-order step ------------------------------
+
+    def test_no_order_key_without_sort(self):
+        repo = FakeRepo(scope=[issue(1)])
+        self.assertNotIn("order", self._run(repo))
+
+    def test_sort_ranks_by_prio_first(self):
+        repo = FakeRepo(
+            scope=[issue(1, labels=["prio:3"]), issue(2, labels=["prio:0"])]
+        )
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_tie_breaks_by_est_when_both_sides_carry_it(self):
+        """The pinned case: swapping est and age in the tie-break flips this.
+
+        #1 is older (lower number -> earlier createdAt) but carries the
+        LARGER est. Ranking est before age puts #2 first; ranking age before
+        est would put #1 first instead.
+        """
+        repo = FakeRepo(scope=[issue(1, labels=["est:5"]), issue(2, labels=["est:1"])])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_omits_the_est_tiebreak_when_one_side_lacks_it(self):
+        """ "Omit the tie-break otherwise" — a node with no est never wins ON est.
+
+        #1 is older but carries no `est:` at all; #2 has one. A node carrying
+        `est:` ranks before one that doesn't (per-pair "fall through to age"
+        instead is NOT transitive — see compare_nodes's docstring for the
+        3-node counterexample), so #2 sorts first despite being younger.
+        """
+        repo = FakeRepo(scope=[issue(1), issue(2, labels=["est:1"])])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_breaks_remaining_ties_by_older_createdat_first(self):
+        """Age, not issue number: #2's `createdAt` is EARLIER than #1's.
+
+        If the age comparator were dead code (e.g. a stale field name) this
+        would fall through to the number tie-break and still produce [1, 2]
+        by coincidence — using non-monotonic dates rules that out.
+        """
+        repo = FakeRepo(
+            scope=[
+                issue(1, created_at="2026-03-01T00:00:00Z"),
+                issue(2, created_at="2026-01-01T00:00:00Z"),
+            ]
+        )
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
+
+    def test_sort_excludes_closed_and_out_of_scope_nodes(self):
+        repo = FakeRepo(
+            scope=[issue(1), issue(2, milestone="A")],
+            extra=[issue(9, milestone="B")],
+            edges={2: [9]},
+        )
+        # #2 is closed -> excluded; #9 is backfilled out-of-scope -> excluded.
+        repo.scope[1]["state"] = "CLOSED"
+        repo.scope[1]["stateReason"] = "COMPLETED"
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1])
+
+    def test_sort_is_not_gated_by_a_closed_or_out_of_scope_blocker(self):
+        """A closed/backfilled blocker must not hold up its dependent.
+
+        #1 is open and in-scope; its only blocker, #9, is closed. #1 must
+        still reach indegree 0 and appear in `order` rather than being stuck
+        behind an edge that can never legitimately clear.
+        """
+        repo = FakeRepo(
+            scope=[issue(1)],
+            extra=[issue(9, state="CLOSED", state_reason="COMPLETED")],
+            edges={1: [9]},
+        )
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1])
+
+    def test_an_extra_approved_edge_changes_the_order(self):
+        repo = FakeRepo(scope=[issue(1), issue(2)])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump([{"blocked": 1, "blocker": 2}], f)
+            edges_path = f.name
+        try:
+            reordered = self._run(repo, ["--sort", "--edges", edges_path])
+        finally:
+            Path(edges_path).unlink()
+
+        self.assertEqual(reordered["order"], [2, 1])
+
+    def test_a_node_stuck_in_a_cycle_is_left_out_of_order(self):
+        repo = FakeRepo(scope=[issue(1), issue(2)], edges={1: [2], 2: [1]})
+        result = self._run(repo, ["--sort"])
+
+        self.assertEqual(result["cycles"], [[1, 2]])
+        self.assertEqual(result["order"], [])
 
 
 if __name__ == "__main__":
