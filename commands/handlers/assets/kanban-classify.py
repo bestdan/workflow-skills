@@ -23,8 +23,8 @@ close), so `classify()` checks the terminal category **before** any
 label-driven rule for those two trackers. (Linear's own state-type partition
 makes only the blocked-vs-needs_review collision reachable in practice;
 gh-issue and jira can also collide on the label-driven sections. See
-`dev_docs/2026-09-09-prose-to-code-index.md` row 16 for the diff that
-confirmed the three tables agree here.)
+`dev_docs/2026-09-09-prose-to-code-index.md` at c1af35e, row 16, for the diff
+that confirmed the three tables agree here.)
 
 **Input** (stdin): a JSON array of rows, each:
 
