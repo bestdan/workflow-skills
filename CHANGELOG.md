@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.40.1] - 2026-09-09
+
+### Fixes
+
+- drop a dead import and an inaccurate noqa (#554) (e4b25a2)
+
 ## [2.40.0] - 2026-09-09
 
 ### Features
