@@ -4,16 +4,17 @@ Guidance for anyone — human or agent — working **on** this repository. It is
 the map and the short list of rules that are load-bearing here; everything
 deeper is one link away.
 
-| You want to…                                                   | Go to                                                          |
-| -------------------------------------------------------------- | -------------------------------------------------------------- |
-| Install and use the plugin                                     | [`README.md`](README.md)                                       |
-| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           |
-| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)               |
-| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                   |
-| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md) |
-| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)   |
-| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)   |
-| Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                     |
+| You want to…                                                   | Go to                                                                                            |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Install and use the plugin                                     | [`README.md`](README.md)                                                                         |
+| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                             |
+| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
+| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
+| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
+| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
+| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
+| Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
+| Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                                                       |
 
 ## What this repo is
 

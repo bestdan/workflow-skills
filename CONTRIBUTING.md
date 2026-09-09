@@ -218,6 +218,11 @@ block — extract instead.
 
 <!-- copilot:end -->
 
+**How to find candidates.** The rubric for spotting prose that should be a
+helper, how to rank what you find, and the gotchas that have already bitten an
+extraction:
+[`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md).
+
 ## Writing Python the checker can follow
 
 The assets are unannotated by convention and that is not changing — the leverage
