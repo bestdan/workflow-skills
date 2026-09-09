@@ -46,13 +46,25 @@ For every input whose comment cites a URL or document:
 
 ### 3. Output reproducibility
 
-- First confirm the target files are clean: verify that `git status --porcelain -- <dir>/model.py <dir>/fill_templates.py <dir>/model_output.json <dir>/memo.filled.md` (the pipeline code and its generated outputs) is empty. If dirty, mark the reproducibility check `n/a` instead of running it (the re-run would clobber uncommitted edits and the diff would report false drift).
-- Re-run the pipeline (`uv run model.py`, `uv run fill_templates.py`, etc.). Note this is the only sanctioned modification of existing analysis files, and it must be restored before the agent returns; writing `fact_review.md` at the end is the expected deliverable and separate.
-- Use `git diff -- <dir>/model_output.json <dir>/memo.filled.md` to compare against the committed copies. If `git diff` shows drift in `model_output.json`, confirm it is real with `diff <(git show HEAD:<dir>/model_output.json | jq -S .) <(jq -S . <dir>/model_output.json)` (if `jq` is available), so key-order or whitespace differences don't count as drift.
-- Diff regenerated `memo.filled.md` against the committed copy in full — `fill_templates.py` leaves `{{narrative:*}}` placeholders untouched, so the filled memo is deterministic.
-- If a separately-generated narrative-filled artifact exists (e.g. `memo.final.md` produced by piping `memo.filled.md` through Claude CLI), treat it as nondeterministic: diff only the data-bearing portions.
-- Drift in the deterministic artifacts means the committed copies are stale relative to the code.
-- If you ran the pipeline, afterward run `git checkout -- <dir>/model_output.json <dir>/memo.filled.md` to restore the regenerated outputs (never touch `fact_review.md`).
+Run:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/analysis-pipeline/check-reproducibility.sh" <dir>
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/analysis-pipeline/check-reproducibility.sh` and use what that finds.
+
+It prints `REPRO: verdict=pass|fail|n/a`, plus a diff when `fail`. `pass` means
+the committed `model_output.json` and `memo.filled.md` reproduce from a fresh
+re-run of the pipeline's own README command; `fail` means they don't — record
+the printed diff as the finding; `n/a` means it didn't run the check at all
+(the directory had uncommitted changes, or no README `uv run` command to
+re-run) — report `n/a` rather than treating it as a pass. It always restores
+`model_output.json` and `memo.filled.md` to their committed state before
+returning, on every exit path. Treat any separately-generated narrative-filled
+artifact (e.g. `memo.final.md`) as nondeterministic — the script never touches
+it, and this check does not cover it.
 
 ### 4. Numbers in the narrative trace to the model
 
