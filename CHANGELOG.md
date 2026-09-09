@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.36.0] - 2026-09-09
+
+### Features
+
+- share one kanban-classify.py across linear/gh-issue/jira (#548) (e2adb16)
+
 ## [2.35.0] - 2026-09-09
 
 ### Features
