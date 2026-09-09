@@ -78,7 +78,15 @@ jira:
 
    Otherwise transition the issue to `ready_status`:
 
-   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`) and find the transition whose target status `to.name` matches `jira.ready_status` (case-insensitive).
+   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`), write the response to a file, and resolve the transition whose target status matches `jira.ready_status`:
+
+      ```bash
+      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+        --exact "<jira.ready_status>" \
+        < <transitions-response.json>
+      ```
+
+      If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/jira-resolve-transition.py`. On success it prints `<id>\t<to.name>`; on `NONE` (exit 2), no transition leads to `jira.ready_status` — fall to the first bullet below.
    2. Call `<atlassian-mcp>__transitionJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`, `transition: { id: <transition id> }`).
 
    Either call can fail, and neither failure is fatal: the issue is already created, and a capture flow must not fail after its artifact exists. **Do not stop and do not guess a different status** — leave the issue where it is and surface the reason in the `/add-task` step 8 report. Report the two causes apart, because they send the user to different places:

@@ -81,34 +81,29 @@ This phase takes, in addition to the identifier:
 
 4. **Resolve the target transition.** Call
    `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`, `issueIdOrKey:
-   <identifier>`). From the returned `transitions[]`, keep only entries whose
-   target status is in the `done` category (`to.statusCategory.key ==
-   "done"`). **Resolve by status category, never by display name** — a board
-   may rename its terminal status to anything.
+   <identifier>`), write the response to a file, and let the helper resolve
+   the completing transition — **by status category, never by display name**,
+   since a board may rename its terminal status to anything:
 
-   Then **drop every cancellation-style candidate** — any whose `to.name`
-   matches `won't do`, `wont do`, `cancel`, `reject`, or `obsolete`
-   (case-insensitive) — **before** branching on how many are left. Completing
-   means "this shipped", and cancelling is a different outcome even though Jira
-   files both under the same `done` category. Filtering first is what stops a
-   board whose _only_ terminal transition is `Canceled` from being quietly
-   completed with the wrong resolution.
-   - **No Done-category transition at all** → stop and report: "`<IDENTIFIER>`:
-     no Done-category transition available from `<current status name>` —
-     resolve manually in Jira."
-   - **Every candidate was cancellation-style** → stop and report them by name:
-     "`<IDENTIFIER>`: the only Done-category transition(s) available are
-     `<names>`, which cancel rather than complete — resolve manually in Jira."
-     Never fire one just to satisfy the request, the same way `jira-claim.md`
-     declines to guess among ambiguous in-progress transitions.
-   - **One left** → use it.
-   - **Several left** → some workflows expose more than one genuine terminal
-     transition. Prefer one whose `to.name` matches `done`/`complete`/`resolved`
-     (case-insensitive). If that leaves **exactly one**, use it. If it leaves
-     **several** (e.g. both `Complete` and `Resolved`) or **none** (e.g.
-     `Closed` and `Shipped` — real terminal statuses matching no known name),
-     **stop** and report the candidates by name so a human can pick. Never pick
-     arbitrarily just to have picked.
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+     --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
+     < <transitions-response.json>
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+   `**/handlers/assets/jira-resolve-transition.py`. Dropping cancellation-style
+   candidates **before** counting is what stops a board whose _only_ terminal
+   transition is `Canceled` from being quietly completed with the wrong
+   resolution. On success the helper prints `<id>\t<to.name>` — use that id in
+   step 6.
+
+   On `NONE`/`AMBIGUOUS` (exit 2), **do not guess** — never fire a transition
+   just to satisfy the request, the same way `jira-claim.md` declines to guess
+   among ambiguous in-progress transitions. Stop and report: "`<IDENTIFIER>`:
+   no Done-category transition resolves to a completion (available:
+   `<printed candidate names, or "none" if the helper printed none>`) —
+   resolve manually in Jira."
 
 5. **`--dry-run` and confirmation.**
    - **`dry_run: true`** → print the planned transition and **stop, no
