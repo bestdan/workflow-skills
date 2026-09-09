@@ -68,7 +68,7 @@ import sys
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _linear_pr import GhError, pr_identity, run_gh  # noqa: E402,F401
+from _linear_pr import pr_identity, run_gh  # noqa: E402
 
 MERGED = "MERGED"
 OPEN = "OPEN"
