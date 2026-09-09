@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.32.0] - 2026-09-09
+
+### Features
+
+- script the $WORK root guard (#544) (92e4903)
+
 ## [2.31.0] - 2026-09-09
 
 ### Features
