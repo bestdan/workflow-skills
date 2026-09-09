@@ -17,8 +17,11 @@
 #   - <dir> is not inside a git repo
 #   - <dir> has uncommitted changes: a re-run would clobber them and any diff
 #     would report false drift
-#   - <dir> has no README.md, or its README names no "uv run" command to
-#     re-run
+#   - <dir> has no README.md, or its README's "## How to Run" section names
+#     no "uv run" command to re-run
+#   - <dir> has no committed model_output.json or memo.filled.md at HEAD: a
+#     re-run would create an untracked file the diff step would silently skip
+#     and the restore trap could not clean up
 #
 # The only files ever touched are model_output.json and memo.filled.md
 # inside <dir> (fill_templates.py leaves both deterministic — see the
@@ -60,14 +63,18 @@ if [ ! -f "$readme" ]; then
   exit 0
 fi
 
-# Pull the deterministic re-run commands out of the README's own "How to
-# Run" fence: every "uv run ..." line inside a ```sh/```bash block. This
-# picks up model.py + fill_templates.py while skipping an optional
-# narrative-fill step piped through an LLM CLI, with no need to know that
-# step's name — it never matches "uv run ".
+# Pull the deterministic re-run commands out of the README's own "## How to
+# Run" section: every "uv run ..." line inside a ```sh/```bash fence there.
+# Scoped to that one section (not any fence in the file) so an unrelated
+# example elsewhere in the README — a test command, a setup step — is never
+# executed as a side effect of this check. This also picks up model.py +
+# fill_templates.py while skipping an optional narrative-fill step piped
+# through an LLM CLI, with no need to know that step's name — it never
+# matches "uv run ".
 commands="$(awk '
-  /^```(sh|bash)[[:space:]]*$/ { fence = 1; next }
-  /^```/ { fence = 0; next }
+  /^## / { in_section = ($0 == "## How to Run") }
+  in_section && /^```(sh|bash)[[:space:]]*$/ { fence = 1; next }
+  in_section && /^```/ { fence = 0; next }
   fence && /^[[:space:]]*uv run / { print }
 ' "$readme")"
 
@@ -76,12 +83,27 @@ if [ -z "$commands" ]; then
   exit 0
 fi
 
+# A clean directory can still lack a committed baseline for one or both
+# outputs. Require both in HEAD before running anything: otherwise the
+# re-run creates an untracked file, the diff step below silently skips it
+# (reporting pass instead of drift), and the cleanup trap's `git checkout --`
+# cannot remove an untracked path, so it wouldn't even restore the other one.
+if ! (cd "$dir" && git cat-file -e "HEAD:./$model_output") 2>/dev/null \
+  || ! (cd "$dir" && git cat-file -e "HEAD:./$memo_filled") 2>/dev/null; then
+  echo "REPRO: verdict=n/a (no committed $model_output or $memo_filled in $dir)"
+  exit 0
+fi
+
 tmp_before="$(mktemp "${TMPDIR:-/tmp}/check-repro.XXXXXX")"
 tmp_after="$(mktemp "${TMPDIR:-/tmp}/check-repro.XXXXXX")"
 run_output="$(mktemp "${TMPDIR:-/tmp}/check-repro.XXXXXX")"
 cleanup() {
   rm -f "$tmp_before" "$tmp_before.norm" "$tmp_after" "$tmp_after.norm" "$run_output"
-  (cd "$dir" && git checkout -- "$model_output" "$memo_filled") 2>/dev/null
+  # Separate calls: a single pathspec that can't restore (e.g. one file went
+  # missing) would otherwise fail the whole checkout atomically and restore
+  # neither file.
+  (cd "$dir" && git checkout -- "$model_output") 2>/dev/null
+  (cd "$dir" && git checkout -- "$memo_filled") 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -131,26 +153,37 @@ fi
 # a markdown formatter run over the committed copy (e.g. `dprint fmt`) can
 # repad a table's column widths to its final substituted values, which the
 # raw regenerated file never repads to match. Collapse runs of padding
-# whitespace and separator dashes on both sides first, the same way the JSON
-# diff above normalizes key order — real content differs char-for-char
-# either way, only padding is insensitive to this.
+# whitespace and separator dashes, but ONLY on table rows/separators (lines
+# starting with "|", after optional leading whitespace) — every other line
+# is compared byte-exact, so a Markdown hard line break (two trailing
+# spaces) or an indented code block (four leading spaces) still counts as
+# drift, the same way the JSON diff above normalizes key order without
+# touching values.
 if [ -f "$dir/$memo_filled" ] && (cd "$dir" && git show "HEAD:./$memo_filled") >"$tmp_before" 2>/dev/null; then
   python3 -c '
 import re, sys
 def norm(path):
-    text = open(path).read()
-    text = re.sub(r" {2,}", " ", text)
-    text = re.sub(r"-{3,}", "---", text)
-    return text
+    out = []
+    with open(path) as f:
+        for line in f:
+            if re.match(r"^\s*\|", line):
+                line = re.sub(r" {2,}", " ", line)
+                line = re.sub(r"-{3,}", "---", line)
+            out.append(line)
+    return "".join(out)
 sys.stdout.write(norm(sys.argv[1]))
 ' "$tmp_before" >"$tmp_before.norm" 2>/dev/null || cp "$tmp_before" "$tmp_before.norm"
   python3 -c '
 import re, sys
 def norm(path):
-    text = open(path).read()
-    text = re.sub(r" {2,}", " ", text)
-    text = re.sub(r"-{3,}", "---", text)
-    return text
+    out = []
+    with open(path) as f:
+        for line in f:
+            if re.match(r"^\s*\|", line):
+                line = re.sub(r" {2,}", " ", line)
+                line = re.sub(r"-{3,}", "---", line)
+            out.append(line)
+    return "".join(out)
 sys.stdout.write(norm(sys.argv[1]))
 ' "$dir/$memo_filled" >"$tmp_after.norm" 2>/dev/null || cp "$dir/$memo_filled" "$tmp_after.norm"
   d="$(diff -u "$tmp_before.norm" "$tmp_after.norm" 2>&1)"

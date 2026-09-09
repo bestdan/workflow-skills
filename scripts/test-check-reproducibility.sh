@@ -3,12 +3,18 @@
 # scripts/analysis-pipeline/check-reproducibility.sh.
 #
 # Copies skills/analysis-pipeline/example/ into a fresh `git init` fixture
-# under a temp dir and asserts the three cases the card calls out:
+# under a temp dir and asserts the card's three cases plus two memo-specific
+# regression guards for the table-padding normalization:
 #   - clean commit: verdict=pass
 #   - a COMMITTED perturbation of model_output.json: verdict=fail, with the
 #     diff, and a clean tree afterwards (the restore ran)
 #   - an UNCOMMITTED edit: verdict=n/a (the clean check trips first — a
 #     perturbation left uncommitted can never reach fail)
+#   - a COMMITTED table-padding-only memo.filled.md change (what `dprint fmt`
+#     does to a table row): verdict=pass
+#   - a COMMITTED real memo.filled.md content change on a non-table line:
+#     verdict=fail — proves the padding normalization stayed narrow enough
+#     to still catch real drift
 #
 # Run directly: bash scripts/test-check-reproducibility.sh
 set -uo pipefail
@@ -140,6 +146,63 @@ if [ -n "$dirty3" ]; then
   ok "uncommitted edit: left untouched by the n/a path"
 else
   bad "uncommitted edit: the uncommitted change was clobbered"
+fi
+
+# --- Case 4: a COMMITTED table-padding-only memo change -> pass ---------
+# Simulates what `dprint fmt` does to the checked-in memo: repad a table
+# row's column widths with no content change. The padding normalization
+# (scoped to lines starting with "|") must absorb this.
+repo4="$(new_fixture repo4)"
+python3 -c '
+p = "'"$repo4"'/example/memo.filled.md"
+with open(p) as f:
+    text = f.read()
+text = text.replace(
+    "| Nimbus Cloud    | $209.20      | $2,510.40   | $116.40                           |",
+    "|  Nimbus Cloud      |   $209.20        |   $2,510.40     |   $116.40                             |",
+)
+with open(p, "w") as f:
+    f.write(text)
+'
+(cd "$repo4" && git add -A && git -c user.name=Test -c user.email=test@example.com commit -q -m repad)
+out4="$("$SCRIPT" "$repo4/example" 2>&1)"
+rc4=$?
+assert_exit "committed table-padding-only memo change: exits 0" 0 "$rc4"
+case "$out4" in
+  *"REPRO: verdict=pass"*) ok "committed table-padding-only memo change: verdict=pass" ;;
+  *) bad "committed table-padding-only memo change: expected verdict=pass, got: $out4" ;;
+esac
+
+# --- Case 5: a COMMITTED real memo content change -> fail ---------------
+# A prose line (not a table row) changes meaning, not just padding. The
+# padding normalization is scoped to table rows only, so this line is
+# compared byte-exact and must still be caught.
+repo5="$(new_fixture repo5)"
+python3 -c '
+p = "'"$repo5"'/example/memo.filled.md"
+with open(p) as f:
+    text = f.read()
+text = text.replace("**Recommendation: CumuloStack**", "**Recommendation: WrongVendor**")
+with open(p, "w") as f:
+    f.write(text)
+'
+(cd "$repo5" && git add -A && git -c user.name=Test -c user.email=test@example.com commit -q -m mangle)
+out5="$("$SCRIPT" "$repo5/example" 2>&1)"
+rc5=$?
+assert_exit "committed real memo content change: exits 1" 1 "$rc5"
+case "$out5" in
+  *"REPRO: verdict=fail"*) ok "committed real memo content change: verdict=fail" ;;
+  *) bad "committed real memo content change: expected verdict=fail, got: $out5" ;;
+esac
+case "$out5" in
+  *"WrongVendor"*) ok "committed real memo content change: diff shown on fail" ;;
+  *) bad "committed real memo content change: no diff in output: $out5" ;;
+esac
+clean5="$(cd "$repo5" && git status --porcelain)"
+if [ -z "$clean5" ]; then
+  ok "committed real memo content change: tree restored to clean after fail"
+else
+  bad "committed real memo content change: tree left dirty after fail: $clean5"
 fi
 
 echo
