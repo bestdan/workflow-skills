@@ -181,111 +181,125 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
    so the same whole-team result set is what's available to bucket either
    way.
 
-On the **MCP floor**, "3. Resolve each issue's PR" step 1 (the per-issue
-`get_issue` attachment read) runs as written below, unchanged.
+On the **MCP floor**, the per-issue `get_issue` read that step 3's input needs
+(`attachments`, `branchName`, `project`) runs as written below — that read is
+MCP, so it stays with the agent either way.
 
 ## 3. Resolve each issue's PR
 
-For each in-flight issue from step 2, resolve its **own** PR in this priority
-order — stop at the first **source** that resolves, but keep **every** PR that
-source yields. A source can return more than one PR (several `links`
-attachments, several bracket-token title hits, several PRs off one branch) —
-an issue can legitimately accumulate a stale closed-unmerged PR _and_ a newer
-merged one, and picking the first hit could mask the merged one. Step 4
-checks **all** of a source's PRs and the issue qualifies if **any** of its own
-PRs verified as merged (report that one):
+**`linear-pr-resolve.py` owns this step and step 4.** The three-source walk,
+the coarse-search post-filter, the per-issue repo resolution, the fail-closed
+probe handling and step 4's merge-state precedence are one tested script — not
+an agent procedure — because each of them has a failure mode that reads as a
+clean result. Build its input, run it, read its rows:
 
-1. **The issue's `links` attachment** — the explicit attachment `/do-tasks`
-   writes in `linear-claim.md` "Move to review on PR open." Call
-   `<linear-mcp>__get_issue` with the identifier (this also refreshes state,
-   used again in step 4) and read its `attachments`. Pick the attachment
-   whose `url` is a GitHub PR URL (matches `github.com/.../pull/<n>`). This
-   is the **authoritative** source — it is a structural link written at PR-open
-   time, not an inferred one.
-2. **Fallback — title search.**
+```bash
+python3 commands/handlers/assets/linear-pr-resolve.py \
+  --config dev_docs/tasks/.task-config.yml \
+  --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+  < issues.json
+```
 
-   ```bash
-   gh pr list -R "<resolved-repo>" --state all --search "<IDENTIFIER> in:title" --json number,url,title,state
-   ```
+Outside this repo the path is
+`"$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/linear-pr-resolve.py"`.
 
-   GitHub search tokenizes on punctuation, so this is a **coarse** pre-filter
-   — the same caveat `linear-claim.md` "Pre-flight" step 3 documents. Before
-   accepting a match, post-filter on the returned PR's `title`.
+**Input** — a JSON array, one object per in-flight issue from step 2:
 
-   **Match the identifier as a whole token, in any surrounding punctuation.**
-   Accept the title when `<IDENTIFIER>` appears with a non-alphanumeric
-   character (or the string edge) on each side, and **not** followed by
-   another digit. So `[PRE-73]`, `(PRE-73)`, `PRE-73:` and a trailing
-   `… (PRE-73)` all match, while `PRE-731` does not, and neither does a title
-   that merely contains the tokens `PRE` and `73` separately — which is the
-   false positive the post-filter exists to stop. Discard any hit that fails
-   this.
+| key           | on the fast path                         | on the MCP floor                                 |
+| ------------- | ---------------------------------------- | ------------------------------------------------ |
+| `id`          | `linear-scan.py`                         | `list_issues`                                    |
+| `identifier`  | `linear-scan.py` (required)              | `list_issues` (required)                         |
+| `attachments` | `linear-scan.py`                         | the per-issue `<linear-mcp>__get_issue`          |
+| `branchName`  | `linear-scan.py`                         | the same `get_issue` — one call, not two         |
+| `project`     | `linear-scan.py` carries the issue's own | the same `get_issue` — read it off that response |
 
-   > **Do not require the `[<IDENTIFIER>]` bracket form.** Only the tracker
-   > execute path writes that shape; a hand-opened PR routinely puts the id in
-   > parentheses or at the end of the title. Requiring brackets makes the
-   > search find the PR and then throw it away, and the issue is filed as
-   > "no-PR skipped" — indistinguishable from having no PR at all. Observed in
-   > the nightly tidy run of 2026-09-02: `repo:bestdan/finplan PRE-73 in:title`
-   > returned open PR #1003, `Scaffold packages/rest-server FastAPI package
-   > (PRE-73)`, and the run reported PRE-73 as having "genuinely no PR found
-   > yet". Hand-opened PRs are exactly the population these fallbacks exist
-   > for, since anything `/do-tasks` opened already resolved at step 1.
-3. **Fallback — branch name.** Call `<linear-mcp>__get_issue` for the issue's
-   `branchName` if not already fetched, then:
+The `get_issue` call also refreshes the issue's state, which step 6 uses; make
+it once per issue and feed the same response into all three.
 
-   ```bash
-   gh pr list -R "<resolved-repo>" --state all --head "<branchName>" --json number,url,state
-   ```
+**What the script decides, and why each rule is there.** Read
+`linear-pr-resolve.py`'s docstrings for the full statement of each; this is the
+contract the report and steps 5–6 depend on.
 
-**`<resolved-repo>` — resolve per issue, from that issue's own project.**
-Step 1 needs no repo: a `links` attachment carries a full
-`github.com/<owner>/<name>/pull/<n>` URL, so it resolves in any repo. Steps 2
-and 3 search **one** repo — without `-R` that is whatever repo the sweep
-happens to run in. A Linear workspace spans repos, so a scheduled sweep would
-silently return no match for every issue whose PR lives elsewhere, and file it
-as "no-PR skipped".
+1. **Three sources, in order, stopping at the first that resolves** — the
+   issue's `links` attachment (authoritative: a structural link `/do-tasks` and
+   `/deliver-task` write at PR-open time), then `gh pr list --search
+   "<IDENTIFIER> in:title"`, then `gh pr list --head "<branchName>"`. A source
+   can yield several PRs and all of them are kept: an issue can accumulate a
+   stale closed-unmerged PR _and_ a newer merged one, and taking the first hit
+   could mask the merged one.
 
-Resolve per issue, in this order — the same order `linear-false-closures.md`
-step 2 uses, so the two flows agree on which repo owns a project's work:
+2. **The title search is post-filtered on a whole-token match** —
+   `identifier_in_title()`, the identifier bounded by a non-alphanumeric
+   character or the string edge on each side. GitHub search tokenizes on
+   punctuation, so the query alone also returns a title carrying `PRE` and `73`
+   separately.
 
-1. The `repo:` of **the issue's own project** — match `issue.project.id`
-   against the `linear.projects` entries (`linear-common.md` "Resolve
-   configured projects" carries `repo` on each). On the fast path `project`
-   comes straight from `linear-scan.py`; on the MCP floor it comes from the
-   per-issue `get_issue` that step 3.1 already makes for `attachments` — read
-   it off that response rather than adding a call.
-2. Else the current repo's `origin`:
+   > **Do not narrow it to the `[<IDENTIFIER>]` bracket form.** Only the tracker
+   > execute path writes brackets; a hand-opened PR routinely puts the id in
+   > parentheses or at the end of the title, and hand-opened PRs are exactly the
+   > population these fallbacks exist for — anything `/do-tasks` opened already
+   > resolved at source 1. Observed in the nightly tidy run of 2026-09-02:
+   > `repo:bestdan/finplan PRE-73 in:title` returned open PR #1003, `Scaffold
+   > packages/rest-server FastAPI package (PRE-73)`, and the run reported PRE-73
+   > as having "genuinely no PR found yet". That title is now a fixture in
+   > `scripts/test_linear_pr_resolve.py`.
 
-   ```bash
-   gh repo view --json nameWithOwner --jq .nameWithOwner
-   ```
+3. **The repo is resolved per issue, from that issue's own project** —
+   `--config`'s `linear.projects[].repo` matched on `project.id`, else
+   `--repo`. Source 1 needs none (a `links` attachment carries a full
+   `github.com/<owner>/<name>/pull/<n>` url); sources 2 and 3 search **one**
+   repo, and a Linear workspace spans repos, so without this every issue whose
+   PR lives elsewhere would come back empty and be filed as "no PR".
 
-**Resolve from the issue's `project`, never from its `scope`.** `--all`
-deliberately skips project resolution for the _query_ (step 1 above), so
-`scope` is the **team** name on every issue there and answers nothing — which
-is exactly why the scan carries the issue's own `project` alongside it (see
-`linear-common.md` "In-flight scan"). Read `linear.projects` for the
-**mapping** even when it was not used for **scoping**. An issue with no
-project, or in a project with no `repo:`, correctly falls to `origin`.
+   Resolve from the issue's `project`, **never** from its `scope`: `--all`
+   skips project resolution for the _query_, so `scope` is the team name on
+   every issue there and answers nothing. Read `linear.projects` for the
+   **mapping** even when it was not used for **scoping**. An issue with no
+   project, or in a project with no `repo:`, falls to `--repo`.
 
-A project whose work spans several repos still resolves to one repo — name the
-repo whose merged PRs cover most of it, and rely on step 1's attachment for the
-rest. `/do-tasks` and `/deliver-task` write that attachment on every PR they
-open, so issues they created never depend on these fallbacks.
+   If the `gh repo view` fallback itself fails (the sweep is running outside
+   any repo, or `gh` cannot reach the remote), omit `--repo`: every issue that
+   reaches sources 2–3 then lands in `unresolved`, not "no PR".
 
-If the `gh repo view` fallback itself fails (the sweep is running outside any
-repo, or `gh` cannot reach the remote), treat every issue that reaches steps
-2–3 as **`left: unresolved`** under the rule below — not as "no-PR skipped".
+   A project whose work spans several repos still resolves to one repo — name
+   the repo whose merged PRs cover most of it, and rely on source 1 for the
+   rest.
+
+4. **A failed probe is never "no PR".** `gh pr list` prints an empty result
+   when it **fails** (network, auth, rate limit) exactly as it does on a
+   genuine no-match, so the script treats a non-zero exit as a recorded error
+   and the issue as `unresolved`. That distinction is the whole point of the
+   bucket: `/reconcile-tasks` row 4 GC's the "no-PR skipped" bucket, so a
+   failure misfiled there could demote a live-PR issue.
+
+**Output** — a JSON array on stdout, one row per input issue, in input order:
+
+```json
+{
+  "id": "…",
+  "identifier": "PRE-73",
+  "repo": "bestdan/finplan",
+  "prs": [{ "number": 1003, "url": "…", "state": "OPEN", "mergedAt": null }],
+  "resolved_via": "title",
+  "state": "open",
+  "unresolved": false,
+  "probe_errors": []
+}
+```
+
+`resolved_via` is `attachment`, `title`, `branch`, or `null` when nothing
+resolved. `state` is step 4's verdict. `probe_errors` carries every failure
+text, for the report.
 
 ### Steps 2–3 in a `claude-web` environment
 
-The probes above are `gh pr list`, and **that command cannot run in a cloud
-routine** — the same environment split
+The two fallback probes are `gh pr list`, and **that command cannot run in a
+cloud routine** — the same environment split
 `skills/auto-pilot/references/launch-preflight.md` calls `local-full` vs
-`claude-web`. Without a substitute, a `claude-web` sweep resolves **only**
-step 1, so every issue whose PR was opened outside `/do-tasks` (no `links`
-attachment) is unresolvable — which is the bulk of hand-opened work.
+`claude-web`. **`linear-pr-resolve.py` therefore cannot run there either**: its
+probes are `gh`. In that environment the agent walks the same three sources by
+hand over `mcp__github__*`, applying the script's rules — the whole-token title
+post-filter above especially — as the specification they are.
 
 > **It is not the credential, and REST is not a way round it.**
 >
@@ -322,17 +336,17 @@ before the first use, or the call fails as an unknown tool.
 **If the MCP tools are unavailable, the run resolves nothing here.** The
 `gh api` REST the `gh pr list` refusal names is itself refused for any
 repo-scoped path, so there is no second channel to fall back to — do not spend
-the run probing for one. Every issue that reaches steps 2–3 lands in
+the run probing for one. Every issue that reaches sources 2–3 lands in
 `left: unresolved`.
 
 The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
 
-- **Step 2 (title search)** → `search_pull_requests`. Put the repo **in the
+- **Source 2 (title search)** → `search_pull_requests`. Put the repo **in the
   query** as a `repo:<owner>/<name>` qualifier — `"repo:bestdan/finplan
   PRE-808 in:title"` is the attested form — which is what carries `-R` here.
   (`owner`/`repo` parameters also exist; either works.)
-- **Step 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
+- **Source 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
   `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
   `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
   --head`, which takes the branch alone.
@@ -357,114 +371,91 @@ from upstream:
 Both accept `fields` to trim the response; omitting `body` drops the largest
 per-result payload, and this flow never reads PR body text.
 
-Apply the identical post-filters — step 2's title check still applies, because
-an MCP search tokenizes no more precisely than `gh` does.
-
-**If no PR search or read tool is exposed, that is `left: unresolved` for every
-issue reaching steps 2–3 — never "no-PR skipped".** A missing capability is not
-a confirmed absence of a PR, and `/reconcile-tasks` row 4 GC's the skipped
-bucket.
-
-If none of the three resolve a PR, **skip the issue** — but only when every
-discovery probe **succeeded** and simply returned no match. The `gh pr list`
-probes (steps 2–3) also emit an empty result when they **fail** (network/auth
-error, rate limit), so treat a **non-zero exit** from any attempted probe as
-**`left: unresolved`**, not "no-PR skipped": a discovery failure is not a
-confirmed absence, and `/reconcile-tasks` row 4 GC's the "no-PR skipped"
-bucket, so a failure misfiled there could demote a live-PR issue. Only when
-all attempted probes exited cleanly **and** returned no match is the issue a
-true "no-PR skipped" — count it toward that bucket and do not treat it as an
-error. (This mirrors step 4's fail-closed `left: unresolved` handling for a
-merge-state read that can't be completed.)
+Apply the identical post-filter — source 2's title check still applies, because
+an MCP search tokenizes no more precisely than `gh` does. Treat a tool error
+the same way the script treats a non-zero probe exit: `left: unresolved`, never
+"no-PR skipped". A missing capability is not a confirmed absence of a PR, and
+`/reconcile-tasks` row 4 GC's the skipped bucket.
 
 ## 4. Check merge state
 
-For **each** of the issue's resolved PRs (step 3 can yield several), call:
+On the `gh` path this is the **same script run** as step 3 — no second command.
+`linear-pr-resolve.py` reads each resolved PR's merge state with `gh pr view
+<url> --json number,url,state,mergedAt` and classifies the issue; read the
+verdict off each row's `state`.
 
-```bash
-gh pr view <url> --json number,url,state,mergedAt
-```
+**Pass the URL, never the number** — the reason the script does, and the reason
+the `claude-web` path below has to reconstruct it. A PR number is
+repository-local and step 3 can resolve a PR in another repo, so a number would
+read the merge state of whatever same-numbered PR exists in the current
+checkout, and a false `MERGED` completes an issue whose real PR never merged.
+The `-R` on step 3's probes does not carry into `gh pr view`; each `gh`
+invocation is independent.
 
-**Pass the URL, never the number.** A PR number is repository-local, and step 3
-can now resolve a PR in another repo — so a number would read the merge state
-of whatever same-numbered PR exists in the current checkout, and a false
-`MERGED` completes an issue whose real PR never merged. The `-R` on step 3's
-probes does not carry into this command; each `gh` invocation is independent.
-All three step-3 sources already yield a URL (a `links` attachment **is** one;
-both probes request `url` in `--json`), so there is never a reason to fall back
-to the number.
+This read runs for **every** resolved PR regardless of which source found it —
+including one resolved from a `links` attachment, which proves a PR is linked
+but never that it merged. (`number` and `url` come back on each row, so step
+6's completion comment has them from the merge-verification read itself.)
 
-(`number` and `url` are captured here so step 6's completion comment has
-them from the merge-verification read itself, whichever step-3 fallback
-resolved the PR.)
+**Row `state`, and the bucket each maps to:**
+
+| `state`           | meaning                                                    | outcome                                  |
+| ----------------- | ---------------------------------------------------------- | ---------------------------------------- |
+| `merged`          | **any** PR of this issue merged, whatever the others say   | step-5 candidate → step 6 completes it   |
+| `open`            | none merged, **any** PR open                               | leave untouched, `left: open`            |
+| `unresolved`      | a probe failed, or a resolved PR's state could not be read | leave untouched, `left: unresolved`      |
+| `closed_unmerged` | **every** resolved PR read cleanly and is closed unmerged  | leave untouched, `left: closed unmerged` |
+| `no_pr`           | every probe succeeded and found nothing                    | `skipped: no PR found` — not an error    |
+
+That order is a precedence, checked top to bottom — `classify()` in the script.
+Three properties of it are load-bearing:
+
+- `left: open` is `/reconcile-tasks` row 2's concern and `left: closed
+  unmerged` is row 3's, which **demotes** the issue back to Backlog. This file
+  only classifies and reports; do not add either behavior here.
+- An **unread** PR does not fall through to `closed_unmerged`. A missing read
+  is not a confirmed closed-unmerged read, and since row 3 demotes only
+  `closed_unmerged`, keeping the unread case in `unresolved` is what makes the
+  demote path fail-closed.
+- For the same reason, a recorded probe error promotes a `no_pr` or
+  `closed_unmerged` verdict to `unresolved` — the two verdicts a missed PR
+  would make destructive. `merged` and `open` already rest on positive
+  evidence, so an error alongside them changes nothing.
+
+**In a `claude-web` environment, where the `gh pr view` read is refused as a
+GraphQL query** (and the script cannot run at all), read the same fields with
+`mcp__github__pull_request_read` (`method: "get"`). It takes `owner`, `repo`,
+and `pullNumber` — the attested call shape is `{method: "get", owner:
+"bestdan", repo: "finplan", pullNumber: 1149}` — and **has no URL parameter**,
+so parse all three out of the PR URL and pass them together. That is the same
+guarantee the URL rule above buys on the `gh` path: the repo travels with the
+number. A bare `pullNumber` with an inferred owner/repo is the one form to
+avoid.
 
 **What qualifies is per-backend — the two vocabularies do not overlap.** On the
-`gh` path, `state == "MERGED"` (equivalently, a non-null `mergedAt`). On the
-MCP path, **`merged == true`** — and nothing else, because the MCP response is
-shaped by GitHub's REST API, where `state` is only ever `open` or `closed`.
-A merged PR reads `state: "closed"`, so applying the `gh` rule to an MCP
-response qualifies **nothing** and the sweep silently completes zero issues.
-Measured on a merged PR: `gh` reports `state "MERGED"` / `mergedAt`, while REST
-and MCP report `state "closed"` / `merged true` / `merged_at`. Mind the field
-spelling too — `merged_at`, not `mergedAt`.
+`gh` path (and so inside the script), `state == "MERGED"`, equivalently a
+non-null `mergedAt`. On the MCP path, **`merged == true`** — and nothing else,
+because the MCP response is shaped by GitHub's REST API, where `state` is only
+ever `open` or `closed`. A merged PR reads `state: "closed"`, so applying the
+`gh` rule to an MCP response qualifies **nothing** and the sweep silently
+completes zero issues. Measured on a merged PR: `gh` reports `state "MERGED"` /
+`mergedAt`, while REST and MCP report `state "closed"` / `merged true` /
+`merged_at`. Mind the field spelling too — `merged_at`, not `mergedAt`.
 
-**In a `claude-web` environment, where the `gh pr view` read above is refused
-as a GraphQL query, read the same fields with
-`mcp__github__pull_request_read`** (`method: "get"`) — see "Steps 2–3 in a
-`claude-web` environment" above for the environment split. It takes `owner`,
-`repo`, and `pullNumber` (the attested call shape is
-`{method: "get", owner: "bestdan", repo: "finplan", pullNumber: 1149}`);
-**it has no URL parameter**, so parse all three out of the PR URL and pass them
-together. That is the same guarantee the URL rule above buys on the `gh`
-path — the repo travels with the number — and it is why a bare `pullNumber`
-with an inferred owner/repo is the one form to avoid here.
+Read **`merged`** off the returned pull request. That field is always present —
+it is serialized without `omitempty`, so an unmerged PR carries `merged: false`
+rather than omitting it. **`merged_at` is not**: it is omitted entirely when the
+PR has not merged, so a missing `merged_at` is a _merge state read
+successfully_, not an unread. Only a failed or unanswered call is an unread.
 
 **`gh api` REST is not a fallback for this read.** A repo-scoped REST call was
 refused in every measured routine, in each of which the repo was a cloned
 source that nobody had attached with credentials; a credentialed attach is
-untested. So if `mcp__github__pull_request_read` is unavailable the merge state is
-unreadable and the issue lands in `left: unresolved`. See "Steps 2–3 in a
-`claude-web` environment" above.
+untested. So if `mcp__github__pull_request_read` is unavailable the merge state
+is unreadable and the issue lands in `left: unresolved`.
 
-Read **`merged`** off the returned pull request, per the per-backend rule
-above. That field is always present — it is serialized without `omitempty`, so
-an unmerged PR carries `merged: false` rather than omitting it. **`merged_at`
-is not**: it is omitted entirely when the PR has not merged, so a missing
-`merged_at` is a _merge state read successfully_, not an unread. Only a failed
-or unanswered call is an unread — treat that as unread rather than unmerged,
-per the fail-closed rule below.
-
-This read is required in **every** environment: it is the merge verification
-the whole sweep rests on, and it runs for every issue regardless of which
-step-3 source found the PR — including an issue resolved from its `links`
-attachment, which proves a PR is linked but never that it merged. If the merge
-state cannot be read at all, every affected PR is an unread PR under precedence
-rule 3 below, so the issue lands in `left: unresolved` and is not completed.
-
-**Multi-PR precedence.** An issue can carry more than one resolved PR (a
-stale one plus a newer one). Classify the whole issue by this precedence,
-checked in order:
-
-1. **Any** PR `MERGED` → the issue is a step-5 candidate, regardless of the
-   state of its other PRs.
-2. Else, **any** PR `OPEN` → leave the issue untouched, bucket `left: open`.
-   This is `/reconcile-tasks` row 2's concern — do not add that logic here.
-3. Else, **any** resolved PR whose state could **not** be read (the `gh pr
-   view` above errored, returned no `state`, or the PR was deleted after step
-   3 resolved its URL) → leave the issue untouched, bucket `left: unresolved`.
-   The issue does **not** fall through to `left: closed unmerged` on an
-   unread PR — a missing read is not a confirmed closed-unmerged read. This
-   keeps the classification **fail-closed**: `/reconcile-tasks` row 3 demotes
-   only issues in `left: closed unmerged`, so an unreadable PR can never
-   trigger a demote.
-4. Else (**every** resolved PR is `CLOSED` and unmerged, each read
-   successfully) → leave the issue untouched, bucket `left: closed unmerged`.
-   `/reconcile-tasks` row 3 reads this exact bucket to demote the issue back
-   to Backlog — do not add that logic here either; this file only classifies
-   and reports.
-
-Count `left: open`, `left: unresolved`, and `left: closed unmerged`
-separately in the report.
+Count `left: open`, `left: unresolved`, and `left: closed unmerged` separately
+in the report.
 
 ## 5. Dry-run (default)
 
