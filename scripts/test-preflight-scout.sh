@@ -153,6 +153,57 @@ else
   bad "mutually exclusive flags: stderr did not name it: $(cat "$BASE/mutex.stderr")"
 fi
 
+# --- Case 5: missing `coder` column fails closed ---------------------------
+cat >"$BASE/no-coder-column.md" <<'RUNMD'
+---
+run_id: test-run
+work_source: plan:foo
+base_branch: main
+run_profile: default
+cao_coder_mapping: {}
+status: active
+---
+
+| task | phase | branch | base | base_sha | pr | notes |
+| ---- | ----- | ------ | ---- | -------- | -- | ----- |
+| T-1  | pending | - | main | - | - | - |
+RUNMD
+
+out5="$(PATH="$FIXTURE_PATH" "$SCRIPT" --scout-run-md "$BASE/no-coder-column.md")"
+rc5=$?
+assert_exit "no coder column: exits 1" 1 "$rc5"
+if grep -q '^BLOCKS LAUNCH: RUN.md task table has no coder column$' <<<"$out5"; then
+  ok "no coder column: names the missing column"
+else
+  bad "no coder column: wrong output: $out5"
+fi
+
+# --- Case 6: unrecognized cao_coder_mapping key is rejected -----------------
+cat >"$BASE/cao-bad-mapping.md" <<'RUNMD'
+---
+run_id: test-run
+work_source: plan:foo
+base_branch: main
+run_profile: less-claude
+cao_coder_mapping: {devin: cao-devin}
+status: active
+---
+
+| task | phase | branch | base | base_sha | pr | notes | coder |
+| ---- | ----- | ------ | ---- | -------- | -- | ----- | ----- |
+| T-1  | pending | - | main | - | - | - | opus |
+| T-2  | pending | - | main | - | - | - | cao |
+RUNMD
+
+out6="$(PATH="$FIXTURE_PATH" PREFLIGHT_NC="$FIXBIN/fake-nc-open" "$SCRIPT" --scout-run-md "$BASE/cao-bad-mapping.md")"
+rc6=$?
+assert_exit "unrecognized cao_coder_mapping key: exits 1" 1 "$rc6"
+if grep -q '^BLOCKS LAUNCH: T-2 -> cao (missing)$' <<<"$out6"; then
+  ok "unrecognized cao_coder_mapping key: names the cao-routed task"
+else
+  bad "unrecognized cao_coder_mapping key: wrong output: $out6"
+fi
+
 echo
 echo "test-preflight-scout: $pass_count passed, $fail_count failed"
 [ "$fail" -eq 0 ] || exit 1

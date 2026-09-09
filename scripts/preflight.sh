@@ -93,6 +93,17 @@ run_scout() {
     done
   fi
 
+  # Fail closed on a missing `coder` column: coder_idx stays 0 whether the
+  # header carries no such column or there's no header at all, and 0 is
+  # never a legitimate index (position 0 is the empty cell before the first
+  # `|`) — so this can't be confused with a task's per-cell "not yet
+  # resolved" empty marker, which is handled separately below.
+  if [ "$coder_idx" -eq 0 ]; then
+    echo "BLOCKS LAUNCH: RUN.md task table has no coder column"
+    echo "SCOUT VERDICT: no-go — RUN.md task table has no coder column"
+    return 1
+  fi
+
   local -a distinct_backends=() backend_tasks=() cao_tasks=()
   local cao_needed=false
 
