@@ -87,8 +87,11 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
 
 ### Dimension 1 — Repair blocking chains
 
-- **Cycles.** Detect any cycle in the `blockedBy` graph. **Report** the members;
-  never auto-resolve — a cycle is a human decision (mirrors push-plan §4.3).
+- **Cycles.** Run `linear-graph-analyze.py` (see Dimension 3's "Run the
+  helper" — one call serves both dimensions) and read its `cycles` field:
+  each entry is a strongly-connected-component's members, in no particular
+  order. **Report** the members; never auto-resolve — a cycle is a human
+  decision (mirrors push-plan §4.3).
 - **Stale / never-satisfiable links.** A `blockedBy` pointing at a **`Canceled`**
   issue blocks the dependent forever → propose `removeBlockedBy`. A `blockedBy`
   pointing at a **`Done`** issue is _satisfied_, not a bug → report it as
@@ -130,26 +133,44 @@ prose phrase or `<issue>` mention, or the conflicting relation/priority) and the
 
 ### Dimension 3 — Re-order & re-prioritize
 
-- **Topological order.** Fold in the proposed Dimension 1–2 edges (the report
-  is printed before approval, so label the order **provisional** — it assumes
-  those edges are approved; if approval diverges in §5, restate the order over
-  the edges that survived), then topologically sort the non-terminal nodes → a
-  valid execution order. Within the
-  topo constraints, rank by **sequential sort keys** (not a single formula —
-  Linear's `priority` is `1`=Urgent…`4`=Low with `0`=None, so arithmetic like
-  `priority ÷ estimate` is incoherent): first by urgency (Urgent→Low, with
-  `0`=None sorted **last**), then smaller `estimate` first (quick wins), then age
-  — the same ranking notion `linear-promote.md` uses. **Output the order as a
-  recommendation** (a printed ordered list): the Linear MCP doesn't expose board
-  rank, so re-ordering is advisory.
-- **Priority-inversion sweep (systematic, every edge).** For **each** `blockedBy`
-  edge, compare the blocker's `priority` to the dependent's. A blocker that is
-  _less_ urgent (numerically larger non-zero `priority`, or `0`=None) than what it
-  blocks is an inversion — the dependent can't start until a less-urgent task
-  finishes → propose making the blocker **at least as urgent as the dependent**:
-  its numeric `priority` ≤ the dependent's, treating `0`=None as least urgent (so
-  a `0` blocker is raised to a real priority). Sweep the full edge set, not a
-  sample.
+**Run the helper.** Cycle detection, the topological order, and the priority-
+inversion sweep are all one deterministic pass over the same graph, so run it
+once and read all three fields — do not hand-walk any of them:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-graph-analyze.py" --file <graph.json>
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/linear-graph-analyze.py`. Its input is a `{issues: [...]}`
+JSON object — the fast path's `linear-relations.py` output already has this
+shape; on the MCP floor, build it from the "Build the graph" nodes, giving
+each issue `identifier` (or `id`), `priority`, `estimate`, `state: {type}`,
+and native `blockedBy` (by identifier), plus `createdAt` when the node
+carries it. **Fold in the proposed Dimension 1–2 edges** before calling it
+(the report is printed before approval, so label everything below
+**provisional** — it assumes those edges are approved; if approval diverges
+in §5, re-run the helper over the edges that survived). Its stdout is one
+JSON object: `{cycles, order, inversions}` — parse it, don't re-derive it.
+
+- **Topological order.** Read `order`: a valid execution order over the
+  non-terminal nodes, already ranked by urgency (`1`=Urgent…`4`=Low, `0`=None
+  sorted **last** — never a formula like `priority ÷ estimate`, which is
+  incoherent over that scale), then smaller `estimate` (quick wins), then age.
+  A cycle's members are absent from `order` (they're in `cycles` instead);
+  anything merely downstream of a cycle is absent from **both** — **report**
+  that gap rather than treating a short `order` as an error. **Output the
+  order as a recommendation** (a
+  printed ordered list): the Linear MCP doesn't expose board rank, so
+  re-ordering is advisory.
+- **Priority-inversion sweep (systematic, every edge).** Read `inversions`:
+  each entry (`blocker`, `dependent`, `blocker_priority`, `dependent_priority`)
+  is an edge where the blocker is less urgent than what it blocks — the
+  dependent can't start until a less-urgent task finishes. Propose making the
+  blocker **at least as urgent as the dependent** (its `priority` ≤ the
+  dependent's, treating `0`=None as least urgent, so a `0` blocker is raised
+  to a real priority). The helper already swept the full edge set restricted
+  to open issues on both ends; nothing further to scan here.
 - **Concurrency sanity (report-only).** Flag any chain where multiple issues on
   the _same_ `blockedBy` path are simultaneously `In Progress` — a blocker and its
   dependent can't both legitimately be in flight.

@@ -26,7 +26,6 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_DIR = ROOT / "commands" / "handlers" / "assets"
-LINEAR_ASSETS = sorted(ASSET_DIR.glob("linear-*.py"))
 
 
 def load(path):
@@ -35,6 +34,17 @@ def load(path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+# `linear-graph-analyze.py` matches the glob but never calls Linear's API — it
+# is a local, offline JSON->JSON transform (its input is another asset's
+# stdout), so it has no `gql()` seam to share. Filtering on the attribute
+# rather than hand-naming an exclusion list keeps "a sixth linear asset added
+# tomorrow is covered by the glob" true for the assets the claim is actually
+# about.
+LINEAR_ASSETS = sorted(
+    p for p in ASSET_DIR.glob("linear-*.py") if hasattr(load(p), "gql")
+)
 
 
 class FakeResponse(io.BytesIO):
