@@ -42,6 +42,7 @@ def issue(
     state_reason=None,
     labels=(),
     milestone=None,
+    created_at=None,
 ):
     return {
         "number": number,
@@ -51,7 +52,10 @@ def issue(
         "stateReason": state_reason,
         "labels": [{"name": name} for name in labels],
         "milestone": {"title": milestone} if milestone else None,
-        "createdAt": f"2026-01-{number:02d}T00:00:00Z",
+        # Defaults to the number's own date so most tests need not think about
+        # it; `created_at` overrides this to test age independently of number
+        # (the default keeps the two confounded).
+        "createdAt": created_at or f"2026-01-{number:02d}T00:00:00Z",
     }
 
 
@@ -454,17 +458,30 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
 
     def test_sort_omits_the_est_tiebreak_when_one_side_lacks_it(self):
-        """ "Omit the tie-break otherwise" — a missing est is not a value.
+        """ "Omit the tie-break otherwise" — a node with no est never wins ON est.
 
-        #2's est is not treated as "better" than #1 having none; the
-        comparison falls through to age, and #1 (older) sorts first.
+        #1 is older but carries no `est:` at all; #2 has one. A node carrying
+        `est:` ranks before one that doesn't (per-pair "fall through to age"
+        instead is NOT transitive — see compare_nodes's docstring for the
+        3-node counterexample), so #2 sorts first despite being younger.
         """
         repo = FakeRepo(scope=[issue(1), issue(2, labels=["est:1"])])
-        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
 
     def test_sort_breaks_remaining_ties_by_older_createdat_first(self):
-        repo = FakeRepo(scope=[issue(2), issue(1)])  # scope order != age order
-        self.assertEqual(self._run(repo, ["--sort"])["order"], [1, 2])
+        """Age, not issue number: #2's `createdAt` is EARLIER than #1's.
+
+        If the age comparator were dead code (e.g. a stale field name) this
+        would fall through to the number tie-break and still produce [1, 2]
+        by coincidence — using non-monotonic dates rules that out.
+        """
+        repo = FakeRepo(
+            scope=[
+                issue(1, created_at="2026-03-01T00:00:00Z"),
+                issue(2, created_at="2026-01-01T00:00:00Z"),
+            ]
+        )
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [2, 1])
 
     def test_sort_excludes_closed_and_out_of_scope_nodes(self):
         repo = FakeRepo(
@@ -475,6 +492,20 @@ class GraphTests(unittest.TestCase):
         # #2 is closed -> excluded; #9 is backfilled out-of-scope -> excluded.
         repo.scope[1]["state"] = "CLOSED"
         repo.scope[1]["stateReason"] = "COMPLETED"
+        self.assertEqual(self._run(repo, ["--sort"])["order"], [1])
+
+    def test_sort_is_not_gated_by_a_closed_or_out_of_scope_blocker(self):
+        """A closed/backfilled blocker must not hold up its dependent.
+
+        #1 is open and in-scope; its only blocker, #9, is closed. #1 must
+        still reach indegree 0 and appear in `order` rather than being stuck
+        behind an edge that can never legitimately clear.
+        """
+        repo = FakeRepo(
+            scope=[issue(1)],
+            extra=[issue(9, state="CLOSED", state_reason="COMPLETED")],
+            edges={1: [9]},
+        )
         self.assertEqual(self._run(repo, ["--sort"])["order"], [1])
 
     def test_an_extra_approved_edge_changes_the_order(self):

@@ -200,9 +200,10 @@ lower-confidence.
   re-run to restate the order over the edges that survived. `order` is already
   a topological sort of the open, in-scope nodes ranked within topo constraints
   by `prio:` (`prio:0` most urgent through `prio:3`, no `prio:` label last),
-  then smaller `est:<n>` when **both** sides of a comparison carry the label
-  (the tie-break is skipped, not defaulted, when either side lacks one), then
-  older `createdAt` first. gh-issue has no board-rank field to write back to,
+  then a node carrying `est:<n>` before one that doesn't (an unestimated node
+  never wins on `est` — that is the tie-break's "omit otherwise"), smaller
+  `est:<n>` between two nodes that both carry it, then older `createdAt`
+  first. gh-issue has no board-rank field to write back to,
   so this stays advisory only, same as Linear. A node caught in a cycle never
   appears in `order` — report it as skipped alongside the `cycles` finding
   above rather than silently dropping it.

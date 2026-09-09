@@ -30,15 +30,17 @@ Findings, all over the native graph:
   cannot legitimately both be mid-build.
 - `order` — present only with `--sort`: a topological ordering of the open,
   in-scope nodes, ranked within topo constraints by `prio_rank` (lower is more
-  urgent, absent is last), then smaller `est:<n>` when **both** sides of a
-  comparison carry the label (the tie-break is skipped, not defaulted, when
-  either side lacks one), then older `createdAt` first. This is
-  `gh-issue-reoptimize.md` Dimension 3's re-order step, code-backed instead of
-  hand-walked. `--edges <file>` folds in a JSON list of `{"blocked", "blocker"}`
-  proposed edges (Dimension 1-2's approved findings) before sorting; an edge
-  naming a node outside the sortable set is ignored. A node inside a cycle
-  never dequeues and is left out of `order` — `cycles` above already reports it
-  for the human decision `find_cycles` exists to defer.
+  urgent, absent is last), then a node carrying `est:<n>` before one that
+  doesn't (an unestimated node never wins on `est`, which is
+  `gh-issue-reoptimize.md` Dimension 3's "omit the tie-break otherwise"),
+  smaller `est:<n>` between two nodes that both carry it, then older
+  `createdAt` first. This is Dimension 3's re-order step, code-backed instead
+  of hand-walked. `--edges <file>` folds in a JSON list of
+  `{"blocked", "blocker"}` proposed edges (Dimension 1-2's approved findings)
+  before sorting; an edge naming a node outside the sortable set is ignored. A
+  node inside a cycle never dequeues and is left out of `order` — `cycles`
+  above already reports it for the human decision `find_cycles` exists to
+  defer.
 
 Reads only. Every call is a GET: `gh issue list`, `gh issue view`, and
 `gh api .../dependencies/blocked_by`. Writes belong to `gh-issue-deps.py`
@@ -331,18 +333,32 @@ def find_cycles(numbers, edges):
 def compare_nodes(a, b, vocabulary):
     """Ranking comparator for `--sort`'s tie-break, in rank order.
 
-    `prio_rank` first (lower is more urgent). Then smaller `est:<n>` — but only
-    when BOTH sides carry the label; one side missing it skips straight to the
-    next tie-break rather than treating the gap as a value, which is what
-    `gh-issue-reoptimize.md` Dimension 3 means by "omit the tie-break
-    otherwise". Then older `createdAt` first (let aging issues bubble up, the
-    same convention `gh-issue-claim.md`'s Rank step uses). Node number last, so
-    the comparator is a total order and the sort is deterministic.
+    `prio_rank` first (lower is more urgent). Then smaller `est:<n>` — but
+    only between two nodes that BOTH carry the label; a node with no `est:`
+    ranks after every node that has one, which is what `gh-issue-reoptimize.md`
+    Dimension 3 means by "omit the tie-break otherwise" (an unestimated issue
+    never wins ON est, so it falls out of that comparison rather than being
+    treated as a value). Then older `createdAt` first (let aging issues bubble
+    up, the same convention `gh-issue-claim.md`'s Rank step uses). Node number
+    last, so the comparator is a total order and the sort is deterministic.
+
+    The "only between two nodes that both carry it" rule is a fixed group
+    split (has-`est` before lacks-`est`), not a per-pair skip straight to age —
+    the earlier per-pair form was NOT transitive: three same-prio nodes A (no
+    est, oldest), B (est:1, newest), C (est:2, mid-age) gave A<B and B<C by age
+    (each pair has one side without est) but C<A by est (both sides have it) —
+    a cycle `functools.cmp_to_key` cannot sort consistently. Splitting into two
+    groups up front and only comparing est WITHIN the has-est group removes the
+    cycle: every comparison is decided by the same fixed precedence
+    (prio, group, est, age, number), which is what makes it transitive.
     """
     pa, pb = prio_rank(a["prio"], vocabulary), prio_rank(b["prio"], vocabulary)
     if pa != pb:
         return -1 if pa < pb else 1
-    if a["est"] is not None and b["est"] is not None:
+    a_has_est, b_has_est = a["est"] is not None, b["est"] is not None
+    if a_has_est != b_has_est:
+        return -1 if a_has_est else 1
+    if a_has_est:
         ea, eb = int(a["est"]), int(b["est"])
         if ea != eb:
             return -1 if ea < eb else 1
