@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.35.0] - 2026-09-09
+
+### Features
+
+- extract dependency-phrase body parsing into _body_refs.py (#547) (c44d2c9)
+
 ## [2.34.0] - 2026-09-09
 
 ### Features
