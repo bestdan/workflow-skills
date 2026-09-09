@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.31.0] - 2026-09-09
+
+### Features
+
+- split gate()/rank_key() out of linear-ready.py for the MCP floor (#543) (72b405f)
+
 ## [2.30.0] - 2026-09-09
 
 ### Features
