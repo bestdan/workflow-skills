@@ -90,27 +90,48 @@ GitHub reads there are only available through the `mcp__github__*` MCP tools,
 which the script cannot call — only the agent can.
 
 `--prs-file PATH` is the alternative: the agent fetches the merged-PR list
-itself, with `mcp__github__list_pull_requests` (state `closed`, filtered to
-entries with a non-null `merged_at`), and hands it to the script as a JSON
-file instead of a repo name. `--repo` and `--prs-file` are mutually
-exclusive — pass exactly one. `mcp__github__list_pull_requests` is deferred in
-a routine — call `ToolSearch` with `select:mcp__github__list_pull_requests`
+itself and hands it to the script as a JSON file instead of a repo name.
+`--repo` and `--prs-file` are mutually exclusive — pass exactly one.
+
+**Building that file by hand is what `--from-mcp-json` replaces.** The agent
+still owns the two MCP calls — `mcp__github__search_pull_requests` (titles and
+bodies, windowed by an `is:merged` search) and `mcp__github__list_pull_requests`
+(head branches, `state: closed`) — and saves each raw result to its own JSON
+file, but the join is one call:
+
+```bash
+python3 commands/handlers/assets/linear-false-closures.py \
+  --from-mcp-json search.json list.json \
+  --complete-since 2026-08-08T00:00:00Z \
+  --prs-file merged_prs.json   # or --prs-file - to print instead of write
+```
+
+It joins the two captures on PR number, renames `merged_at`→`mergedAt`,
+`head.ref`→`headRefName`, `html_url`→`url`, coerces a null title/body to
+`""` (`load_prs_file()` below dies on a null), and writes the `--prs-file`
+object shown below. A number present in `search.json` with no matching entry
+in `list.json` is a failed join, not a partial result — the script dies
+naming every missing number, because silently dropping one there would
+silently shrink the ownership evidence and could turn delivered work into a
+reported false closure. The reverse (a `list.json` number `search.json`
+doesn't have — a closed-but-unmerged PR, say) is simply not part of the
+merged-PR set and is dropped, not an error. Both tools are deferred in a
+routine — call `ToolSearch` with
+`select:mcp__github__search_pull_requests,mcp__github__list_pull_requests`
 before the first use, per `linear-sweep-complete.md`'s "claude-web
 environment" note.
 
-The MCP response is REST-shaped, not `gh`-shaped, so map fields when writing
-the file: `mergedAt` from `merged_at` (snake_case there), `headRefName` from
-`head.ref`, `url` from `html_url`. Call the tool with `state: closed`,
-`sort: updated`, `direction: desc`; keep fetching pages until a page contains
-an entry whose `updated_at` is earlier than your intended cutoff; set
-`complete_since` to that cutoff; keep filtering to entries with a non-null
-`merged_at`. A merge updates the PR, so `updated_at` is at or after
-`merged_at` for every merged PR, which makes "first entry older than the
-cutoff" a sound stopping point — stopping on `merged_at` instead is wrong,
-because an old merged PR that later took a comment surfaces near the top with
-an old `merged_at` and would end the scan early.
+**The fetch itself — paging both calls, and the pagination stop rule
+(`updated_at`, never `merged_at`: an old merged PR that later took a comment
+surfaces near the top with a stale `merged_at` and would end the scan
+early) — stays the caller's responsibility; this script only joins what it's
+handed.** `dotfiles/agents/routines/nightly-linear-tidy.md`'s "1. Restore
+false closures" step is the worked procedure this repo's cloud routine
+follows for both calls; that file's rewrite to call `--from-mcp-json`
+directly is tracked separately (`bestdan/dotfiles`, out of this repo's scope).
 
-The file is a JSON **object**, not a bare list:
+The file `--from-mcp-json` writes — and what any hand-built `--prs-file` must
+match — is a JSON **object**, not a bare list:
 
 ```json
 {
@@ -274,6 +295,12 @@ python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --rep
 
 # Cloud routine (no gh): pass a pre-fetched merged-PR list instead of --repo.
 python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --prs-file merged_prs.json
+
+# Build that merged-PR list from two saved MCP captures instead of by hand
+# (no --project here -- this mode only builds the file, it doesn't detect):
+python3 commands/handlers/assets/linear-false-closures.py \
+  --from-mcp-json search.json list.json --complete-since 2026-08-08T00:00:00Z \
+  --prs-file merged_prs.json
 ```
 
 `--project` is the Linear project UUID (see "Resolve configured projects" in

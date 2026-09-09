@@ -8,7 +8,9 @@ real `gh` binary.
 Covers only the new behaviour: --repo/--prs-file mutual exclusivity, the
 --prs-file classification parity with an equivalent --repo run, the coverage
 guard that refuses to classify an issue created before the window opened, the
-null-mergedAt filter, and the malformed-input error messages.
+null-mergedAt filter, the malformed-input error messages, and
+--from-mcp-json's join/rename/null-coercion of two saved MCP captures into a
+--prs-file payload.
 """
 
 import contextlib
@@ -284,6 +286,336 @@ class NullMergedAtTests(unittest.TestCase):
             Path(path).unlink()
         self.assertEqual(since, "2026-08-08T00:00:00Z")
         self.assertEqual([pr["number"] for pr in prs], [2])
+
+
+class FromMcpJsonTests(unittest.TestCase):
+    """Tests for build_prs_from_mcp_json() -- the --from-mcp-json join that
+    builds the --prs-file payload out of two saved MCP captures."""
+
+    def _write(self, payload):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(payload, f)
+            return f.name
+
+    def test_clean_join_renames_fields_and_keeps_complete_since(self):
+        search_path = self._write(
+            [
+                {"number": 1, "title": "Fix the thing", "body": "the body"},
+                {"number": 2, "title": "Other fix", "body": "other body"},
+            ]
+        )
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1-fix"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T12:00:00Z",
+                    "updated_at": "2026-08-10T12:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "head": {"ref": "dpegan/pre-2-fix"},
+                    "html_url": "https://github.com/o/r/pull/2",
+                    "merged_at": "2026-08-11T00:00:00Z",
+                    "updated_at": "2026-08-11T00:00:00Z",
+                },
+            ]
+        )
+        try:
+            payload = linear_false_closures.build_prs_from_mcp_json(
+                search_path, list_path, "2026-08-08T00:00:00Z"
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+
+        self.assertEqual(payload["complete_since"], "2026-08-08T00:00:00Z")
+        self.assertEqual(
+            payload["pull_requests"],
+            [
+                {
+                    "number": 1,
+                    "headRefName": "dpegan/pre-1-fix",
+                    "url": "https://github.com/o/r/pull/1",
+                    "title": "Fix the thing",
+                    "body": "the body",
+                    "mergedAt": "2026-08-10T12:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "headRefName": "dpegan/pre-2-fix",
+                    "url": "https://github.com/o/r/pull/2",
+                    "title": "Other fix",
+                    "body": "other body",
+                    "mergedAt": "2026-08-11T00:00:00Z",
+                },
+            ],
+        )
+
+    def test_missing_number_dies_naming_it(self):
+        search_path = self._write(
+            [
+                {"number": 1, "title": "a", "body": "a"},
+                {"number": 2, "title": "b", "body": "b"},
+            ]
+        )
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+            ]
+        )
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                linear_false_closures.build_prs_from_mcp_json(
+                    search_path, list_path, "2026-08-08T00:00:00Z"
+                )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertIn("[2]", str(ctx.exception))
+
+    def test_list_entry_with_no_matching_search_number_is_dropped_not_fatal(self):
+        # A closed-but-unmerged PR (or one search's `is:merged` query simply
+        # didn't return): list.json can carry numbers search.json doesn't,
+        # and those are just not part of the merged-PR set -- not a failed
+        # join.
+        search_path = self._write([{"number": 1, "title": "a", "body": "a"}])
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+                {
+                    "number": 2,
+                    "head": {"ref": "dpegan/pre-2"},
+                    "html_url": "https://github.com/o/r/pull/2",
+                    "merged_at": None,
+                },
+            ]
+        )
+        try:
+            payload = linear_false_closures.build_prs_from_mcp_json(
+                search_path, list_path, "2026-08-08T00:00:00Z"
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertEqual([pr["number"] for pr in payload["pull_requests"]], [1])
+
+    def test_null_title_and_body_are_coerced_to_empty_string(self):
+        search_path = self._write([{"number": 1, "title": None, "body": None}])
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+            ]
+        )
+        try:
+            payload = linear_false_closures.build_prs_from_mcp_json(
+                search_path, list_path, "2026-08-08T00:00:00Z"
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        pr = payload["pull_requests"][0]
+        self.assertEqual(pr["title"], "")
+        self.assertEqual(pr["body"], "")
+
+    def test_search_pull_requests_items_wrapper_and_bare_list_are_both_accepted(
+        self,
+    ):
+        search_path = self._write(
+            {"total_count": 1, "items": [{"number": 1, "title": "a", "body": "a"}]}
+        )
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+            ]
+        )
+        try:
+            payload = linear_false_closures.build_prs_from_mcp_json(
+                search_path, list_path, "2026-08-08T00:00:00Z"
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertEqual(payload["pull_requests"][0]["number"], 1)
+
+    def test_incomplete_search_results_dies(self):
+        # A timed-out GitHub search sets incomplete_results: true -- joining
+        # against it would let the file assert a complete window while
+        # silently missing merged-PR ownership evidence.
+        search_path = self._write(
+            {
+                "total_count": 1,
+                "incomplete_results": True,
+                "items": [{"number": 1, "title": "a", "body": "a"}],
+            }
+        )
+        list_path = self._write([])
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                linear_false_closures.build_prs_from_mcp_json(
+                    search_path, list_path, "2026-08-08T00:00:00Z"
+                )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertIn("incomplete_results", str(ctx.exception))
+
+    def test_bad_complete_since_dies(self):
+        search_path = self._write([])
+        list_path = self._write([])
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                linear_false_closures.build_prs_from_mcp_json(
+                    search_path, list_path, "not-a-timestamp"
+                )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+        self.assertIn("--complete-since", str(ctx.exception))
+
+    def test_cli_writes_prs_file_that_load_prs_file_accepts(self):
+        search_path = self._write([{"number": 1, "title": "Fix", "body": "body"}])
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1-fix"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+            ]
+        )
+        out_path = tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+        try:
+            code = self._run_cli(
+                [
+                    "--from-mcp-json",
+                    search_path,
+                    list_path,
+                    "--complete-since",
+                    "2026-08-08T00:00:00Z",
+                    "--prs-file",
+                    out_path,
+                ]
+            )
+            self.assertEqual(code, 0)
+            since, prs = linear_false_closures.load_prs_file(out_path)
+            self.assertEqual(since, "2026-08-08T00:00:00Z")
+            self.assertEqual(prs[0]["headRefName"], "dpegan/pre-1-fix")
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+            Path(out_path).unlink()
+
+    def test_cli_prints_instead_of_writing_when_prs_file_is_dash(self):
+        search_path = self._write([{"number": 1, "title": "Fix", "body": "body"}])
+        list_path = self._write(
+            [
+                {
+                    "number": 1,
+                    "head": {"ref": "dpegan/pre-1-fix"},
+                    "html_url": "https://github.com/o/r/pull/1",
+                    "merged_at": "2026-08-10T00:00:00Z",
+                },
+            ]
+        )
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self._run_cli(
+                    [
+                        "--from-mcp-json",
+                        search_path,
+                        list_path,
+                        "--complete-since",
+                        "2026-08-08T00:00:00Z",
+                        "--prs-file",
+                        "-",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            printed = json.loads(out.getvalue())
+            self.assertEqual(printed["pull_requests"][0]["number"], 1)
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+
+    def test_cli_write_is_atomic_prior_file_survives_a_failed_build(self):
+        # A failed join (the missing-number die()) must never touch a prior
+        # valid --prs-file at the destination -- the write only happens
+        # after the join succeeds, and even then goes through a temp file
+        # + rename rather than truncating the destination directly.
+        search_path = self._write([{"number": 1, "title": "a", "body": "a"}])
+        list_path = self._write([])  # no matching entry -> failed join
+        out_path = tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+        Path(out_path).write_text('{"complete_since": "x", "pull_requests": []}')
+        try:
+            with self.assertRaises(SystemExit):
+                self._run_cli(
+                    [
+                        "--from-mcp-json",
+                        search_path,
+                        list_path,
+                        "--complete-since",
+                        "2026-08-08T00:00:00Z",
+                        "--prs-file",
+                        out_path,
+                    ]
+                )
+            self.assertEqual(
+                Path(out_path).read_text(),
+                '{"complete_since": "x", "pull_requests": []}',
+            )
+        finally:
+            Path(search_path).unlink()
+            Path(list_path).unlink()
+            Path(out_path).unlink()
+
+    def test_from_mcp_json_rejects_project_or_repo(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self._run_cli(
+                [
+                    "--from-mcp-json",
+                    "a.json",
+                    "b.json",
+                    "--complete-since",
+                    "2026-08-08T00:00:00Z",
+                    "--prs-file",
+                    "-",
+                    "--project",
+                    "p",
+                ]
+            )
+        self.assertIn("--from-mcp-json cannot be combined", str(ctx.exception))
+
+    def _run_cli(self, argv):
+        orig_argv = sys.argv
+        sys.argv = ["linear-false-closures.py"] + argv
+        try:
+            return linear_false_closures.main()
+        finally:
+            sys.argv = orig_argv
 
 
 class MalformedInputTests(unittest.TestCase):
