@@ -10,9 +10,11 @@ Read-only. Never mutates anything. This is the sibling of linear-archive.py; it
 reuses that script's gql() helper verbatim, and both call the shared
 _secret_resolve.py for get_key().
 
-Gate + rank rules mirror commands/handlers/linear-common.md's "Ready-candidate
-selection" block exactly. Change them there first and update both consumers
-(linear-claim.md and this file) in lockstep.
+Gate + rank rules live in commands/handlers/assets/_linear_rank.py, this
+script's sibling module — its header docstring is the single source of truth
+for commands/handlers/linear-common.md's "Ready-candidate selection" block.
+Change them there first; both this script and linear-rank.py (the MCP-floor
+entry point) import from it.
 
 The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
 walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
@@ -45,6 +47,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _linear_rank import gate, rank_key  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -175,32 +178,6 @@ def parse_project_arg(raw, default_max):
         uuid, _, max_str = raw.rpartition(":")
         return uuid, int(max_str)
     return raw, default_max
-
-
-def gate(issue, max_estimate):
-    """Return a drop reason string, or None if the issue survives the gates."""
-    estimate = issue.get("estimate")
-    if estimate is None:
-        return "no estimate set"
-    if estimate >= max_estimate:
-        return f"estimate {estimate} >= {max_estimate}"
-    label_names = {n["name"] for n in issue["labels"]["nodes"]}
-    if "auto-claimed" in label_names:
-        return "already auto-claimed"
-    if "human-approval-requested" in label_names:
-        return "human-approval-requested"
-    if "blocked" in label_names:
-        return "blocked"
-    assignee = issue.get("assignee")
-    if assignee and not assignee.get("isMe"):
-        who = assignee.get("displayName") or assignee.get("id") or "unknown"
-        return f"assigned to {who}"
-    return None
-
-
-def rank_key(candidate):
-    priority = candidate["priority"] or 0
-    return (priority if priority != 0 else float("inf"), candidate["_updatedAt"])
 
 
 def main():

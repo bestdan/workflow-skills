@@ -47,7 +47,7 @@ Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — n
 
    When the scope is the **union** of all configured projects (`/list-tasks all` or the `All` pick), repeat this section layout once per configured project under a `# <project name>` header (omitting projects with no active issues), so each project's kanban is labeled and grouped separately. For a single-project or whole-team scope, render one un-grouped kanban as before.
 
-   Use the same `## <section> (N)` header, single-line bullet, `---` separator layout as the file-based path in `commands/list-tasks.md` step 4. Sort within each section by Linear priority — **urgent first, then high, medium, low, then none last**. Note that Linear stores `none` as `0`, so do NOT sort numerically ascending; map `0` to the lowest rank (after `4=low`). Then by `updatedAt` (oldest first).
+   Use the same `## <section> (N)` header, single-line bullet, `---` separator layout as the file-based path in `commands/list-tasks.md` step 4. Sort within each section by the same rank rule as `linear-common.md` → "Ready-candidate selection" (priority urgent→low, **none(0) last** — do NOT sort numerically ascending — then `updatedAt` ascending); see `commands/handlers/assets/_linear_rank.py`'s header for the canonical statement. This view has no gates to apply (every state-type section is shown, not just `ready`), only the rank.
 
    Card line format:
 

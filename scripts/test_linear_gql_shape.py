@@ -9,8 +9,12 @@ an agent got a traceback instead of a reason.
 
 This tests that seam across ALL FIVE at once, which matters because
 `linear-false-closures.py`, `linear-relations.py` and `linear-scan.py` have no
-test file of their own. The parametrization is the point: a sixth linear asset
-added tomorrow is covered by the glob without anyone remembering to add it.
+test file of their own. The parametrization is the point: a sixth
+GraphQL-calling linear asset added tomorrow is covered by the glob without
+anyone remembering to add it. The glob is narrowed to assets that define
+`gql()` at all — `linear-rank.py` matches `linear-*.py` but is a pure
+JSON-in/JSON-out decision script with no network call and no `gql()` seam
+(see its own docstring), so it has nothing for this test to cover.
 
 Hermetic — `urllib.request.urlopen` is stubbed, so nothing reaches the network
 and no API key is needed.
