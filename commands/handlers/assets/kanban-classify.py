@@ -16,10 +16,15 @@ prefer the more actionable signal in this order:
 
 `classify()` applies the rules in exactly that order per tracker, so a
 collision always resolves the same way regardless of which tracker produced
-the row. (Linear's own state-type partition makes only the blocked-vs-
-needs_review collision reachable in practice; gh-issue and jira can also
-collide on the label-driven sections. See `dev_docs/2026-09-09-prose-to-code-index.md`
-row 16 for the diff that confirmed the three tables agree here.)
+the row. `done` (and `new`) sit outside this precedence entirely: a closed
+gh-issue or a `statusCategory: done` jira issue is `done` even if it still
+carries a stale `blocked`/`needs-review` label (labels aren't cleared on
+close), so `classify()` checks the terminal category **before** any
+label-driven rule for those two trackers. (Linear's own state-type partition
+makes only the blocked-vs-needs_review collision reachable in practice;
+gh-issue and jira can also collide on the label-driven sections. See
+`dev_docs/2026-09-09-prose-to-code-index.md` row 16 for the diff that
+confirmed the three tables agree here.)
 
 **Input** (stdin): a JSON array of rows, each:
 
@@ -49,6 +54,11 @@ last):
 ascending (deliberately, to surface stale cards — see `_linear_rank.py`);
 gh-issue and jira sort `createdAt`/`created` ascending. Each tracker keeps its
 own field, per the index row 16 diff.
+
+Every other key on a row is passed through unchanged onto the matching output
+row (mirroring `linear-rank.py`'s own contract) — so the caller can carry
+`title`, `assignee`, `estimate` and any other card-rendering field straight
+through with no reshaping; this module only reads the keys named above.
 
 **Output** (stdout): one JSON object:
 
@@ -104,6 +114,8 @@ def classify(row, tracker):
         return None
 
     if tracker == "gh-issue":
+        if category == "closed":
+            return "done"
         if "blocked" in labels:
             return "blocked"
         if category == "4_needs_review":
@@ -116,16 +128,16 @@ def classify(row, tracker):
             return "needs_refinement"
         if category in ("0_untriaged", "", None):
             return "new"
-        if category == "closed":
-            return "done"
         return None
 
     if tracker == "jira":
-        if "blocked" in labels:
-            return "blocked"
-        if "needs-review" in labels:
-            return "needs_review"
+        if category == "done":
+            return "done"
         if category == "indeterminate":
+            if "blocked" in labels:
+                return "blocked"
+            if "needs-review" in labels:
+                return "needs_review"
             return "in_progress"
         if category == "new":
             if "auto-eligible" in labels:
@@ -133,8 +145,6 @@ def classify(row, tracker):
             if "human-approval-requested" in labels:
                 return "needs_refinement"
             return "new"
-        if category == "done":
-            return "done"
         return None
 
     raise ValueError(f"unknown tracker: {tracker}")

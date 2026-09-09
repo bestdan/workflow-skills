@@ -127,6 +127,15 @@ class GhIssueClassifyTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in result["sections"]["blocked"]], ["1"])
         self.assertEqual(result["sections"]["needs_review"], [])
 
+    def test_closed_wins_over_a_stale_blocked_label(self):
+        # A closed issue's labels aren't cleared on close, so a `blocked`
+        # label surviving from before the merge must not pull it back out
+        # of `done`.
+        rows = [row("1", "closed", labels=["blocked"])]
+        result = run("gh-issue", rows)
+        self.assertEqual([r["id"] for r in result["sections"]["done"]], ["1"])
+        self.assertEqual(result["sections"]["blocked"], [])
+
     def test_priority_none_sorts_last(self):
         rows = [
             row("NONE", "2_ready", priority=None),
@@ -169,6 +178,16 @@ class JiraClassifyTests(unittest.TestCase):
         rows = [row("A-1", "indeterminate", labels=["blocked", "needs-review"])]
         result = run("jira", rows)
         self.assertEqual([r["id"] for r in result["sections"]["blocked"]], ["A-1"])
+        self.assertEqual(result["sections"]["needs_review"], [])
+
+    def test_done_wins_over_stale_blocked_and_needs_review_labels(self):
+        # statusCategory done isn't recomputed on close, so labels set
+        # earlier in the issue's life must not pull it back into blocked
+        # or needs_review.
+        rows = [row("A-1", "done", labels=["blocked", "needs-review"])]
+        result = run("jira", rows)
+        self.assertEqual([r["id"] for r in result["sections"]["done"]], ["A-1"])
+        self.assertEqual(result["sections"]["blocked"], [])
         self.assertEqual(result["sections"]["needs_review"], [])
 
     def test_ready_over_needs_refinement(self):
