@@ -12,9 +12,9 @@ this file made. A second cloud-session probe on 09-08 corrected three more — t
 being unscoped — and added findings 6, 7 and 8. Finding 9 comes from a separate routine
 run, not from that session. A controlled two-arm run on 09-09 then settled where the
 `gh` binary comes from; finding 1 carries it. The 09-07 probes are recorded in
-`2026-09-07-cloud-routine-plugins-and-gh.md`,
-which lands in this directory with **PR #498** — open at the time of writing, so run ids
-are cited directly and stay checkable whichever change merges first. The 09-08 probe is
+[`2026-09-07-cloud-routine-plugins-and-gh.md`](2026-09-07-cloud-routine-plugins-and-gh.md),
+merged to `main` in PR #498. Run ids are cited directly throughout, so every claim stays
+checkable against the run rather than against either record. The 09-08 probe is
 session `session_01ERAh8hmMbqq4Xu2hfqbEcA` and is recorded below.
 
 **The 2026-09-05 measurements are unchanged and still carry their date.** What changed
@@ -263,12 +263,14 @@ access:"push" to attach the repository with credentials.`
 
    **Two earlier readings are now dead, and both were stated as settled at the time.**
    This file once said "It is not the environment" on one session's evidence — true, but
-   unsupported then. `2026-09-07-cloud-routine-plugins-and-gh.md` (PR #498) once
-   concluded the opposite, that `gh` is a property of an environment at a point in time,
-   from `gh` 2.45.0 in every 09-07 run and rc 127 from the same environment id nine hours
-   later; that record withdrew the claim before this run, and this run closes it. Same
-   environment, same minute, same build, opposite answers — no clock or image drift can
-   account for it.
+   unsupported then. The companion record once concluded the opposite — that `gh` is a
+   property of an environment at a point in time — from `gh` 2.45.0 in every 09-07 run
+   and rc 127 from the same environment id nine hours later. **It had already reversed
+   that before merging**, and as merged it reads "the evidence points at the source repo,
+   which installs it", with the hook named. This run is what turns "points at" into a
+   measurement: same environment, same minute, same build, opposite answers — no clock or
+   image drift accounts for it. The two records agree; only this one has the controlled
+   run.
 
    **A hook firing is not the discriminator; whose hook is.** Arm B also ran a
    `SessionStart` hook — a guidance plugin injecting sentinel text and installing
@@ -360,7 +362,7 @@ access:"push" to attach the repository with credentials.`
      `access:"push"` on the first call in routine `cse_014DT5cUvE7zGfVjix9fW7fC`. What
      no run has done is make a **repo-scoped `gh` call after** such an attach: that
      routine had no `gh` binary, and the session that had one had no `add_repo`. Every
-     403 recorded in this file and in PR #498 was measured against a **cloned source or
+     403 recorded in this file and in the companion record was measured against a **cloned source or
      an unattached repo**, never against a credentialed attach.
   3. **Something else neither probe looked for.**
 
@@ -379,7 +381,7 @@ access:"push" to attach the repository with credentials.`
   Whoever runs this next must satisfy both **in one run** — source a repo whose hook
   installs `gh`, in an environment where `add_repo` is available — and check `which gh`
   first rather than assuming. A probe design agreed jointly is in the "Reproducing"
-  section of the record landing in PR #498. Its load-bearing rule: **capture the exit
+  section of the companion record. Its load-bearing rule: **capture the exit
   code alongside the body for every call.** Every `gh` finding across three probes
   turned on rc, and `gh auth status` reports failure while exiting 0 — a stdout-only
   probe reproduces exactly the blind spot that made it look like a working health check.

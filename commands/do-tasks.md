@@ -924,7 +924,7 @@ step 5's self-check stops each session loudly on its own issue.
    > reporting failure**. Measured in a cloud session on 2026-09-05
    > (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`) and again in a
    > routine on 2026-09-07 (run `cse_016MBzxJfhs7w8pgwt1k2Hjd`; recorded in
-   > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`, PR #498) — both printed `Active account: true` and
+   > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`) — both printed `Active account: true` and
    > `The token in GH_TOKEN is invalid.` and returned **rc 0**. So an `if ! gh auth
    > status` guard never fires, and this whole self-check silently passes in exactly the
    > environment it exists to stop. `gh api user` is no better: it succeeds on the same
