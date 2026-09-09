@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.30.0] - 2026-09-09
+
+### Features
+
+- add --sort to gh-issue-graph.py for Dimension 3 (#542) (7df91ff)
+
 ## [2.29.0] - 2026-09-09
 
 ### Features
