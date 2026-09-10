@@ -22,9 +22,10 @@ carries a stale `blocked`/`needs-review` label (labels aren't cleared on
 close), so `classify()` checks the terminal category **before** any
 label-driven rule for those two trackers. (Linear's own state-type partition
 makes only the blocked-vs-needs_review collision reachable in practice;
-gh-issue and jira can also collide on the label-driven sections. See
-`dev_docs/2026-09-09-prose-to-code-index.md` at c1af35e, row 16, for the diff
-that confirmed the three tables agree here.)
+gh-issue and jira can also collide on the label-driven sections. The three
+handler tables were reconciled when this helper replaced them: the per-tracker
+field map below carries their known differences, and
+`scripts/test_kanban_classify.py` pins each tracker's map.)
 
 **Input** (stdin): a JSON array of rows, each:
 
@@ -53,7 +54,7 @@ last):
 `sort_date` is the tie-break: Linear's own rank rule sorts `updatedAt`
 ascending (deliberately, to surface stale cards — see `_linear_rank.py`);
 gh-issue and jira sort `createdAt`/`created` ascending. Each tracker keeps its
-own field, per the index row 16 diff.
+own field; that is a tracker fact, not drift.
 
 Every other key on a row is passed through unchanged onto the matching output
 row (mirroring `linear-rank.py`'s own contract) — so the caller can carry

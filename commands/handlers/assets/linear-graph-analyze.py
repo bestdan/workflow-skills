@@ -11,7 +11,12 @@ hand-walk `gh-issue-graph.py`'s docstring warns about.
 Input is the JSON `linear-relations.py` prints (`{meta, issues: [...]}`), on
 stdin or `--file`. Each issue is keyed by its `identifier` (falling back to
 `id` when `identifier` is absent), and `blockedBy` entries name blockers by
-the same key — exactly what `linear-relations.py`'s `_ref()` emits.
+the same key — exactly what `linear-relations.py`'s `_ref()` emits. One field
+the age tie-break wants, `createdAt`, is **not** in that script's GraphQL
+selection today, so on real fast-path input every issue lacks it and the
+tie-break degrades to "missing sorts last" (see `sort_key`); the tests supply
+it by hand. Add `createdAt` to `linear-relations.py`'s query to make the age
+rule live.
 
 Cycle detection reuses `gh-issue-graph.py`'s `find_cycles()` (Tarjan's SCC,
 iterative) verbatim rather than writing a second implementation — it is

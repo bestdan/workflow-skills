@@ -1,14 +1,11 @@
 # Finding prose that should be code
 
-How to run a prose-to-code survey on this repo: what the smell looks like, how
-to rank what you find, and the mistakes that have already been paid for. Two
-prose-to-code rounds have run (2026-07 and 2026-09); this file is the method
-they left behind, not their results. Their point-in-time records are
-[`dev_docs/deterministic-code-opportunity.md` at `eef937e`](https://github.com/bestdan/workflow-skills/blob/eef937e/dev_docs/deterministic-code-opportunity.md)
-and
-[`dev_docs/2026-09-09-prose-to-code-index.md` at `c1af35e`](https://github.com/bestdan/workflow-skills/blob/c1af35eb26af8d614cf2fa93ebd41b6e919c4af1/dev_docs/2026-09-09-prose-to-code-index.md).
-The candidates neither round shipped are filed as issues under the
-[round 3 milestone](https://github.com/bestdan/workflow-skills/milestone/3).
+How to spot prose in this repo that should be a helper script, how to rank
+what you find, and the mistakes that have already been paid for. The rule
+itself, and where an extracted helper goes, live in
+[CONTRIBUTING.md](../CONTRIBUTING.md#logic-goes-in-a-typed-file); this file is
+only about finding and ranking the candidates. Candidates already found and not
+yet extracted are filed as issues.
 
 ## The smell
 
@@ -19,17 +16,11 @@ re-derive identically on every invocation: each re-derivation costs context and
 is a fresh chance to apply the rule slightly differently from last time. A
 fenced block is worse again, because nothing in the gate can see it.
 
-The rule itself, and where an extracted helper goes, live in
-[CONTRIBUTING.md](../CONTRIBUTING.md#logic-goes-in-a-typed-file). This file is
-only about finding the candidates.
-
 ## How to find it
 
-Read every assigned file in full against one rubric. Splitting the tree across
-parallel readers, one file group each, is how the 2026-09 round did it. The
-2026-07 round instead picked its hotspots by grepping for computation-shaped
-language, and a reader who does that finds the fenced blocks and misses
-everything else.
+Read each file in full against the rubric below. A grep for
+computation-shaped language finds the fenced blocks and misses the other six
+categories.
 
 | Category                                        | What it looks like                                                                 | Shipped example                                                                                                                              |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,8 +58,8 @@ defect is the cheapest proof that the round is worth running.
 
 ## The one standing constraint
 
-**A script can own the decision over fetched JSON, never the fetch and never
-the tracker write.** MCP tools (`mcp__linear__*`, `mcp__atlassian__*`) are
+**A script can own the decision over fetched JSON, never an MCP fetch and
+never a tracker write.** MCP tools (`mcp__linear__*`, `mcp__atlassian__*`) are
 invocable only by the agent, so anything that must call one stays in prose.
 Shape findings accordingly: JSON in on stdin, a decision out on stdout, with
 the agent doing the reads before and the writes after.
