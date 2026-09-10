@@ -1432,6 +1432,95 @@ finally:
     if os.path.exists(ep_out):
         os.unlink(ep_out)
 
+# -- threads mode: round-summary thread (issue #429) --------------------------
+sm_fd, sm_out = _tempfile.mkstemp(suffix=".json")
+os.close(sm_fd)
+os.unlink(sm_out)
+proc, patch_path = start_server(["--out", sm_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: summary-thread run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        # round 1: a non-empty summary alongside one line comment -> the
+        # summary mints its OWN thread (t2), anchor-free, same round.
+        payload1 = {"meta": {}, "summary": "Looks good overall.", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+        ]}
+        status, info1 = post_json("submit", payload1)
+        check("server: summary-thread round 1 returns 200", status == 200, status)
+        check("server: summary-thread round 1 mints ids for the comment AND the summary",
+              info1.get("ids") == ["t1"], info1)  # only comments are minted into "ids"
+
+        status, threads1 = get_json("threads")
+        check("server: summary-thread round 1 mints 2 threads (comment + summary)",
+              len(threads1.get("threads", [])) == 2, threads1)
+        summary1 = next((t for t in threads1["threads"] if t.get("kind") == "summary"), None)
+        check("server: summary-thread round 1 minted a kind:summary thread", summary1 is not None, threads1)
+        if summary1:
+            check("server: summary thread carries the round's summary text",
+                  summary1.get("text") == "Looks good overall.", summary1)
+            check("server: summary thread carries no file anchor",
+                  summary1.get("file") is None and summary1.get("side") is None
+                  and summary1.get("line") is None and summary1.get("code") is None,
+                  summary1)
+            check("server: summary thread starts unresolved with no replies",
+                  summary1.get("resolved") is False and summary1.get("replies") == [], summary1)
+            check("server: summary thread carries round 1", summary1.get("round") == 1, summary1)
+
+        with open(sm_out) as f:
+            written1 = json.load(f)
+        check("server: --out summary key is unchanged (still the plain string)",
+              written1.get("summary") == "Looks good overall.", written1)
+        check("server: --out comments carries only the line comment, not the summary",
+              [c.get("id") for c in written1.get("comments", [])] == ["t1"], written1)
+
+        # round 2: an empty summary mints nothing -- no blank thread left behind.
+        status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: summary-thread round 2 (empty summary) returns 200", status == 200, status)
+        status, threads2 = get_json("threads")
+        check("server: an empty-summary round mints no new thread",
+              len(threads2.get("threads", [])) == 2, threads2)
+
+        # the summary thread takes /reply and /resolve exactly like any other.
+        status, r1 = post_json("reply", {"thread_id": summary1["id"], "author": "agent",
+                                          "text": "Thanks -- addressed the one comment."})
+        check("server: POST /reply to a summary thread returns 200", status == 200, status)
+        _, after_reply = get_json("threads")
+        sum_after = next(t for t in after_reply["threads"] if t["id"] == summary1["id"])
+        check("server: summary thread shows the new reply", len(sum_after["replies"]) == 1, sum_after)
+        check("server: summary thread reply carries author agent",
+              sum_after["replies"][0].get("author") == "agent", sum_after)
+
+        status, res1 = post_json("resolve", {"thread_id": summary1["id"], "resolved": True})
+        check("server: POST /resolve on a summary thread returns 200", status == 200, status)
+        _, after_resolve = get_json("threads")
+        sum_resolved = next(t for t in after_resolve["threads"] if t["id"] == summary1["id"])
+        check("server: summary thread can be resolved like any other", sum_resolved.get("resolved") is True,
+              sum_resolved)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(sm_out):
+        os.unlink(sm_out)
+
 # -- threads mode: submit response counts replies since the last round -------
 rc_fd, rc_out = _tempfile.mkstemp(suffix=".json")
 os.close(rc_fd)
@@ -3163,6 +3252,32 @@ check("server.PAGE's Reply control posts route 'reply' with author 'user'",
       _re.search(r"openThreadReply[\s\S]{0,800}?postThreadAction\('reply',\s*\{thread_id:\s*thread\.id,\s*author:\s*'user'",
                  server.PAGE) is not None,
       "openThreadReply() does not post {thread_id, author: 'user'} to 'reply'")
+
+# -- summary-thread rendering (source scans, DOM unreachable) ----------------
+# The server-side round-trip above proves /reply mutates a kind:summary
+# thread; it says nothing about the browser path that is supposed to SHOW
+# that reply -- fetchThreads() routing it out of placeThreads(), the
+# dedicated strip renderer, and buildThreadChip()'s anchor-free branch. A
+# regression that dropped a summary thread on the floor somewhere in that
+# path would leave every server-side check above green.
+check("server.PAGE's page carries the summary-threads container above <main id=\"root\">",
+      '<div class="summary-threads" id="summaryThreads" hidden></div>' in server.PAGE
+      and server.PAGE.index('id="summaryThreads"') < server.PAGE.index('id="root"'),
+      "the summaryThreads container is missing, or not above #root")
+check("server.PAGE's fetchThreads() buckets kind:summary threads separately from placeThreads()",
+      _re.search(r"if\(t\.kind === 'summary'\)\{[\s\S]{0,400}?summaries\.push\(t\);", server.PAGE) is not None,
+      "fetchThreads() does not route kind:summary threads to their own bucket before placeThreads()")
+check("server.PAGE's fetchThreads() hands the bucket to summaryThreads and re-renders it",
+      _re.search(r"summaryThreads\s*=\s*summaries;\s*\n\s*renderSummaryThreads\(\);", server.PAGE) is not None,
+      "fetchThreads() does not assign summaryThreads and call renderSummaryThreads()")
+check("server.PAGE defines a summary-threads renderer that appends into summaryThreadsEl",
+      _re.search(r"function renderSummaryThreads\(\)\{[\s\S]{0,500}?summaryThreadsEl\.appendChild\(buildThreadChip\(t,\s*\{reopen:\s*!!t\.resolved\}\)",
+                 server.PAGE) is not None,
+      "renderSummaryThreads() is missing, or does not append chips into summaryThreadsEl")
+check("server.PAGE's buildThreadChip() renders a summary thread's anchor as 'Round N summary'",
+      _re.search(r"if\(thread\.kind === 'summary'\)\{[\s\S]{0,300}?Round \$\{thread\.round\} summary",
+                 server.PAGE) is not None,
+      "buildThreadChip() does not special-case kind:summary with a 'Round N summary' anchor")
 
 # -- d. documentation: resolve is the user's click, never the agent's -------
 # Timing subtlety: references/threads.md is a later task and doesn't exist
