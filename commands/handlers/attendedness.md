@@ -1,9 +1,11 @@
 # Attendedness — is a human present to answer right now?
 
 Read by the four pre-claim WIP gates (`repo-pr-execute.md`, `gh-issue-claim.md`,
-`jira-claim.md`, and `commands/do-tasks.md` for `linear`) and by
-`linear-common.md` "Resolve claim scope". It defines **one** notion of "a human is
-watching this run", and the mechanism that keeps a wrong answer cheap.
+`jira-claim.md`, and `commands/do-tasks.md` for `linear`), by
+`linear-common.md` "Resolve claim scope", and by the **held-issue override** below,
+which the three tracker claim handlers apply on a direct `/do-tasks <identifier>`
+pick. It defines **one** notion of "a human is watching this run", and the mechanism
+that keeps a wrong answer cheap.
 
 A run is **attended** when a human is present to answer a question **right now** —
 operationally, when an `AskUserQuestion` prompt can be answered. Presence hours ago,
@@ -72,6 +74,37 @@ gating it is not a fix this file licenses.)
    stays granted for every later cap the same run meets, and a **Stop** already given is
    not re-litigated. Handlers must not restate this bound locally — a step cannot enforce
    a run-wide property on its own, and a local copy drifts.
+
+## The held-issue override — a direct pick of an issue withheld from automation
+
+The ranked path claims only issues a human has marked ready **and** released to
+automation; each tracker handler names its own pair of gates for that (a `status:`
+rung plus an `auto:` rung on gh-issue, the ready status plus a
+`human-approval-requested` label on jira, the label alone on linear). Those gates
+are correct for the unattended loop and wrong for a person who names the issue: a
+human running `/do-tasks <identifier>` in an attended session is exactly who the
+hold is for. So on a **direct pick only** — never on the ranked path, never in a
+batch, never for a session a dispatcher handed a pinned identifier — a failed
+ready/eligibility gate is offered as an override instead of a refusal. The other
+gates (an assignee that is not this caller, an in-flight marker, a block flag) stay
+hard: an override never takes an issue away from someone.
+
+1. If any **hard negative** below holds, decline exactly as the handler specifies
+   today. Do not prompt.
+2. Otherwise ask **once**, via `AskUserQuestion`: header `Held issue`, question
+   `<identifier> is <its current state/labels> — withheld from automation (<the gate
+   that failed>). Claim it anyway?`, options **Claim anyway** and **Stop**.
+   - **Claim anyway** → proceed with the claim, carrying the issue's hold marker
+     through unchanged (the handler says which field that is), and say the override
+     was used in the run report.
+   - **Stop**, no answer, an unavailable tool, or a failed call → decline with the
+     handler's normal message. **Never retry the prompt** and never infer an answer
+     from silence other than "stop".
+
+This is a separate decision from the WIP override above, so a direct pick that meets
+both asks both — two questions, each once. The reason it is a prompt and not a skip
+is the whole design of this file: "attended" is not observable, and a prompt that
+goes unanswered holds the gate where a skip would open it.
 
 ## Hard negatives — a cheap pre-check, not the guarantee
 

@@ -36,7 +36,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 - `/do-tasks --project <name|id|unassigned|any>` — **`linear` only** (the other tracker handlers have no project dimension: `gh-issue` refuses the flag, see section 4; `jira` has no scope prompt): pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
-- `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All five prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
+- `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All six prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the held-issue override on a direct pick declines the same way (same file), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
 dispatch (each task gets its own cloud VM). Foreground pairing is inherently
@@ -263,7 +263,9 @@ If the relative paths don't resolve, find them with **Glob**
 
 - `/do-tasks` / `/do-tasks <identifier>` (e.g. `PRE-12`) / `--no-claim` — **single**,
   foreground, current session. Bare `/do-tasks` selects the single highest-ranked
-  dependency-ready issue; `<identifier>` claims that one issue.
+  dependency-ready issue; `<identifier>` claims that one issue (a
+  `human-approval-requested` hold is offered as the override in
+  `commands/handlers/attendedness.md`, not refused).
 - `/do-tasks --all` / `-n N` (without `--claim-only`) — **true batch execution**:
   dispatch up to `min(N, wip_slack)` **remote** single-claim sessions (one per
   dependency-ready issue, each its own cloud VM), via the **Tracker-batch
@@ -660,7 +662,9 @@ report format. If the relative path doesn't resolve, find it with **Glob**
 **Execution modes.**
 
 - `/do-tasks`, `/do-tasks <#n>`, and `--no-claim` — **single and foreground**, in the
-  current session over the `gh` CLI. `/do-tasks <#n>` claims that one issue.
+  current session over the `gh` CLI. `/do-tasks <#n>` claims that one issue, and
+  when the issue is withheld from automation a present human is offered the
+  one-keystroke override in `commands/handlers/attendedness.md` rather than refused.
 - `--claim-only` — reserves without executing, so it batches regardless of mode,
   bounded by the pre-claim WIP gate (`gh-issue-claim.md` "Pre-claim WIP gate").
   Unchanged by this section.
@@ -1077,7 +1081,9 @@ foreground work, so `--all` / `-n N --claim-only` may reserve several issues at 
 bounded by the pre-claim WIP gate. The claim/execute split (`--claim-only` /
 `--no-claim`) and the pre-claim WIP gate are now wired for jira — both are documented
 in `jira-claim.md` ("Modes: atomic vs. claim/execute split" and "Pre-claim WIP gate").
-`/do-tasks <KEY>` (a specific issue key, e.g. `PLAT-142`) claims that one issue.
+`/do-tasks <KEY>` (a specific issue key, e.g. `PLAT-142`) claims that one issue; an
+issue outside `ready_status` or carrying `human-approval-requested` is offered as the
+override in `commands/handlers/attendedness.md`, not refused.
 
 ## 6. Report
 
