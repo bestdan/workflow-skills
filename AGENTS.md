@@ -15,6 +15,7 @@ deeper is one link away.
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
 | Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
 | Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                                                       |
+| Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
 
 ## What this repo is
 
