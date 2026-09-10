@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hermetic tests for commands/handlers/assets/kanban-classify.py — the shared
 kanban classification + ordering for the linear, gh-issue and jira `/list-tasks`
-list sections (row 16 of dev_docs/2026-09-09-prose-to-code-index.md).
+list sections.
 
 No network: the script itself never touches the network.
 """

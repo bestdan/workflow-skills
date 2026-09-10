@@ -40,8 +40,8 @@ invoked through `${CLAUDE_PLUGIN_ROOT}`, so `__file__` is the *installed
 plugin*. An `__file__`-anchored default would scan the plugin checkout instead
 of the consumer repo, and would fail **silently green**: the plugin has no
 `dev_docs/research/` tree, and "no research dir is clean" would report success.
-See `dev_docs/deterministic-code-opportunity.md` §"Load-bearing decisions &
-gotchas" item 1 — this is the exact defect PRE-611 fixed.
+See `dev_docs/finding-prose-that-should-be-code.md` §"Gotchas that generalise"
+rule 1 — this is the exact defect PRE-611 fixed.
 
 Exit codes:
 
