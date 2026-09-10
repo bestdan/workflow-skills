@@ -84,8 +84,9 @@ rung plus an `auto:` rung on gh-issue, the ready status plus a
 are correct for the unattended loop and wrong for a person who names the issue: a
 human running `/do-tasks <identifier>` in an attended session is exactly who the
 hold is for. So on a **direct pick only** — never on the ranked path, never in a
-batch, never for a session a dispatcher handed a pinned identifier — a failed
-ready/eligibility gate is offered as an override instead of a refusal. The other
+batch — a failed ready/eligibility gate is offered as an override instead of a
+refusal. (A dispatched worker never reaches the prompt: its prompt inlines
+`--non-interactive`, a hard negative below.) The other
 gates (an assignee that is not this caller, an in-flight marker, a block flag) stay
 hard: an override never takes an issue away from someone.
 
