@@ -242,6 +242,9 @@ the merge. Confidence decides neither — it only sets the default:
   usually `thought:`/`note:`. But a high-confidence typo fix is still
   non-blocking, and a medium-confidence data-loss bug is still blocking — the
   reconciler's confidence is how sure it is, not how much the finding matters.
+- **The decorations decide the whole-review verdict.** Step 9's Overview verdict
+  (`pass` / `pass with suggestions` / `blocking`) is a roll-up of them, not a
+  separate call — the roll-up rule is at step 9.
 
 Two rules that carry the weight here:
 
@@ -331,24 +334,42 @@ label is the only signal of how hard each finding is meant to land.
    - A finding that recommends pinning or SHA-pinning a GitHub Action to a version/tag is **never high confidence** unless the finding (or your own check — e.g. `gh api repos/<owner>/<repo>/releases/latest`) confirms that version is current — a reviewer endorsing a stale major version is exactly the failure mode this check exists to catch. Downgrade an unverified pin recommendation to medium and say why in the rationale.
    - **In `--post` mode**, tell the reconciler the findings will be posted as comments on **someone else's** PR, so each `recommended_fix` should read as a concrete suggestion addressed to the author, not as an edit you're about to make.
 
-9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`. Always note which reviewers contributed (Claude + which local agents ran, or which were skipped and why). Under `--non-interactive`, this note is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps. Then branch on disposition:
+9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`.
 
-   **Escalate architectural/design judgment calls to Fable before asking the user.** A medium-confidence item is frequently a technical question with a defensible "right" answer — signal handling, test design patterns, harness structure, and similar calls a reasonable engineer could resolve from the code and conventions alone — not a matter of what the user wants. For those, consult Fable (the Agent tool's `model: fable`) for a decisive recommendation **before** the item reaches the user, then turn the ask into a go/no-go on that recommendation rather than an open-ended "which do you want" question. Reserve a genuinely open question for items that are actual user-preference (priority, scope, whether the work is worth doing at all) — Fable has no standing to answer those on the user's behalf. Note in the summary which items were escalated and what Fable recommended. **A failed escalation is never fatal** — if Fable can't be reached or doesn't come back, note it and put the open question to the user as you would have without this rule, rather than stalling the review on it. This governs the **Default (your PR)** disposition below, where a medium item becomes a question you have to answer. It does not apply under `--non-interactive` (step 11 already skips every medium item there; there's no question to escalate), and it does not apply in `--post` mode, where medium findings aren't asked at all — they go onto the post-candidate list and you vet them at step 10.
-   - **Default (your PR):**
-     - Auto-fix list (high confidence) — state what you will change.
-     - Ask list (medium) — one yes/no question per item, per the escalation rule above.
-     - Skip list (low) — name them so the user can override if they disagree.
-   - **`--post` mode (someone else's PR):**
-     - Post-candidate list — **high + medium** findings, as a single numbered list. For each: `file:line`, the issue, the suggested fix, and its tier. These are what _may_ be posted, pending your vetting (step 10).
-     - Skip list (low) — name them so the user can pull one back in if they disagree.
+   **The presentation has three sections, always in this order: Overview, Findings & verification, Calls for you to make.** The order is the point — everything already resolved comes first and the review ends on the questions, so the one part addressed to the reader is never buried mid-output. Fill this template; don't reorder it, and don't drop a section that came out empty — say it is empty.
 
-   **Then derive the verification tests.** Alongside the finding lists, produce a short list of the real-machine checks this diff needs — the ones `just check` and CI cannot cover by construction: driving the actual CLI in the actual shell, calling the real tracker API, tearing down a real worktree on the real OS. These are not unit tests; a gap in the test suite is a **finding**, not a verification test. For each item name four things: the command or action, the environment it needs (this machine / a remote host / CI / a specific OS), what a pass looks like, and **who runs it** — you or the user. An item you cannot run yourself, because it needs the user's own shell, real credentials, or a particular machine, is the user's, and must say so.
+   ```markdown
+   ## Overview
+
+   **Verdict:** <pass | pass with suggestions | blocking> — <one line of why>
+   **Reviewers:** <which ran, which timed out, which were skipped and why>
+
+   ## Findings & verification
+
+   **Auto-fixing** (high confidence) — <what you will change at step 10, or "none">
+   **Skipped** (low confidence) — <each one named, with its reason, or "none">
+   **Verification tests** — <the real-machine checks, or "none needed — <why>">
+
+   ## Calls for you to make
+
+   <the first open item, as one yes/no question — or "none">
+   ```
+
+   **The verdict is a roll-up of the decorations, not a second judgment.** Any `(blocking)` finding in the presented set → `blocking`; findings present but none blocking → `pass with suggestions`; no findings → `pass`. The verdict and the decorations can never disagree — if they do, the decorations are right.
+
+   **Walk section 3 one item at a time. This is a rule, not a preference.** Put the first medium item to the user as a single yes/no question and wait for the answer before raising the next. Never emit a numbered list of open questions in one message: a batch of judgment calls gets answered in one reply, which loses the per-item yes/no that step 11 assumes it will get. Say how many remain ("1 of 3") so the user knows the shape without being shown the list.
+
+   **Escalate architectural/design judgment calls to Fable before asking the user.** A medium-confidence item is frequently a technical question with a defensible "right" answer — signal handling, test design patterns, harness structure, and similar calls a reasonable engineer could resolve from the code and conventions alone — not a matter of what the user wants. For those, consult Fable (the Agent tool's `model: fable`) for a decisive recommendation **before** the item reaches the user, then turn the ask into a go/no-go on that recommendation rather than an open-ended "which do you want" question. Reserve a genuinely open question for items that are actual user-preference (priority, scope, whether the work is worth doing at all) — Fable has no standing to answer those on the user's behalf. Note in section 2 which items were escalated and what Fable recommended. **A failed escalation is never fatal** — if Fable can't be reached or doesn't come back, note it and put the open question to the user as you would have without this rule, rather than stalling the review on it. This governs the **default disposition (your PR)**, where a medium item becomes a question you have to answer. It does not apply under `--non-interactive` (step 11 already skips every medium item there; there's no question to escalate), and it does not apply in `--post` mode, where medium findings aren't asked at all — they go onto the post-candidate list and you vet them at step 10.
+
+   **Deriving section 2's verification tests.** These are the real-machine checks this diff needs — the ones `just check` and CI cannot cover by construction: driving the actual CLI in the actual shell, calling the real tracker API, tearing down a real worktree on the real OS. They are not unit tests; a gap in the test suite is a **finding**, not a verification test. For each item name four things: the command or action, the environment it needs (this machine / a remote host / CI / a specific OS), what a pass looks like, and **who runs it** — you or the user. An item you cannot run yourself, because it needs the user's own shell, real credentials, or a particular machine, is the user's, and must say so.
 
    **Reaching a verdict is mandatory; an empty list is a valid verdict.** A docs-only diff needs no verification tests, and the right output is to say so rather than invent ceremony. Print the verdict either way — an omitted list is indistinguishable from a forgotten one.
 
    **Co-review lists; it never runs.** Offer the items you could run yourself; do not execute them in this step. The local-agent reviewers are read-only and sandboxed, and under `--post` the tree is never touched at all.
-   - **`--post` mode:** present the list to the user only, and never post it to the PR. You cannot know the author's environment, and a verification list is not a review finding.
-   - **`--non-interactive`:** there is no one to run the human items. Record **every** item as a deferred entry in the run summary so the `/deliver-task` caller can carry them into the PR body and the hand-off.
+
+   Two dispositions reshape the sections without reordering them:
+   - **`--post` mode (someone else's PR):** section 2 keeps only the skip list (low) and the verification list, and the **post-candidate list moves to section 3**, because vetting it (step 10) is the call the user makes — **high + medium** findings as a single numbered list, each with `file:line`, the issue, the suggested fix, and its tier. That list is the one place the one-at-a-time rule doesn't apply: step 10 vets it as a set. The verification list is presented to the user only and is **never posted to the PR** — you cannot know the author's environment, and a verification list is not a review finding.
+   - **`--non-interactive`:** there is no one to answer, so **section 3 becomes the deferred log** — every medium finding recorded as a deferred judgment call and every verification item recorded as a deferred entry, so the `/deliver-task` caller can carry them into the PR body and the hand-off. Section 1's reviewer line is then the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps.
 
 The remaining steps depend on disposition.
 
@@ -376,7 +397,7 @@ The remaining steps depend on disposition.
 
 **`--post` disposition (someone else's PR):**
 
-10. **Vet before posting.** Never touch the working tree — you don't own this code. Present the numbered post-candidate list and let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing. **Under `--non-interactive`** there is no one to vet: skip this gate and treat the reconciled high+medium set as the final post set (low findings stay excluded), then continue to step 11 — see **Non-interactive mode**.
+10. **Vet before posting.** Never touch the working tree — you don't own this code. The numbered post-candidate list is section 3 of the step-9 output; let the user deselect, edit the wording of, or pull a low finding into any candidate. Nothing is posted until the user explicitly approves the final set. If they approve none, stop and say so — post nothing. **Under `--non-interactive`** there is no one to vet: skip this gate and treat the reconciled high+medium set as the final post set (low findings stay excluded), then continue to step 11 — see **Non-interactive mode**.
 
 11. **Choose the verdict.** Ask the user which review event to submit: `COMMENT` (neutral), `REQUEST_CHANGES`, or `APPROVE`. Ask this every run; don't assume. Under `--non-interactive`, don't ask: default to **`COMMENT`** (never `REQUEST_CHANGES`/`APPROVE` unattended) and post the vetted high+medium set without a prompt (see **Non-interactive mode**).
 
