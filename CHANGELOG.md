@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.44.0] - 2026-09-10
+
+### Features
+
+- add min-task-budget.sh and cut the archive handler's prose walk (#579) (d1b022d)
+
 ## [2.43.0] - 2026-09-09
 
 ### Features
