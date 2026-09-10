@@ -3253,6 +3253,32 @@ check("server.PAGE's Reply control posts route 'reply' with author 'user'",
                  server.PAGE) is not None,
       "openThreadReply() does not post {thread_id, author: 'user'} to 'reply'")
 
+# -- summary-thread rendering (source scans, DOM unreachable) ----------------
+# The server-side round-trip above proves /reply mutates a kind:summary
+# thread; it says nothing about the browser path that is supposed to SHOW
+# that reply -- fetchThreads() routing it out of placeThreads(), the
+# dedicated strip renderer, and buildThreadChip()'s anchor-free branch. A
+# regression that dropped a summary thread on the floor somewhere in that
+# path would leave every server-side check above green.
+check("server.PAGE's page carries the summary-threads container above <main id=\"root\">",
+      '<div class="summary-threads" id="summaryThreads" hidden></div>' in server.PAGE
+      and server.PAGE.index('id="summaryThreads"') < server.PAGE.index('id="root"'),
+      "the summaryThreads container is missing, or not above #root")
+check("server.PAGE's fetchThreads() buckets kind:summary threads separately from placeThreads()",
+      _re.search(r"if\(t\.kind === 'summary'\)\{[\s\S]{0,400}?summaries\.push\(t\);", server.PAGE) is not None,
+      "fetchThreads() does not route kind:summary threads to their own bucket before placeThreads()")
+check("server.PAGE's fetchThreads() hands the bucket to summaryThreads and re-renders it",
+      _re.search(r"summaryThreads\s*=\s*summaries;\s*\n\s*renderSummaryThreads\(\);", server.PAGE) is not None,
+      "fetchThreads() does not assign summaryThreads and call renderSummaryThreads()")
+check("server.PAGE defines a summary-threads renderer that appends into summaryThreadsEl",
+      _re.search(r"function renderSummaryThreads\(\)\{[\s\S]{0,500}?summaryThreadsEl\.appendChild\(buildThreadChip\(t,\s*\{reopen:\s*!!t\.resolved\}\)",
+                 server.PAGE) is not None,
+      "renderSummaryThreads() is missing, or does not append chips into summaryThreadsEl")
+check("server.PAGE's buildThreadChip() renders a summary thread's anchor as 'Round N summary'",
+      _re.search(r"if\(thread\.kind === 'summary'\)\{[\s\S]{0,300}?Round \$\{thread\.round\} summary",
+                 server.PAGE) is not None,
+      "buildThreadChip() does not special-case kind:summary with a 'Round N summary' anchor")
+
 # -- d. documentation: resolve is the user's click, never the agent's -------
 # Timing subtlety: references/threads.md is a later task and doesn't exist
 # yet, and SKILL.md doesn't document the thread protocol yet either. So this
