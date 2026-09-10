@@ -238,6 +238,12 @@ thread you answered with `author: "agent"`, as in the loop above; the
 endpoint table, full payload schemas, and re-placement rules are in
 `references/threads.md`, loaded when running a threaded review.
 
+A non-empty `summary` also mints its own thread (`kind: "summary"`, no file
+anchor — rendered above the file cards) the moment this round's payload is
+read. If you answer the summary, reply to it the same way you reply to any
+other thread — its `id` rides in `threads` like every other entry — rather
+than answering only in chat.
+
 **The agent never resolves a thread.** Resolve is the user's click in the
 page. Propose resolution in reply prose ("resolving unless you object") and
 never call `/resolve` — see `references/threads.md`.

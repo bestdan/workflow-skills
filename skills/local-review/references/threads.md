@@ -16,14 +16,14 @@ cookie, the `Sec-Fetch-Site` check, and the Origin allowlist. The three new
 routes exist only in threads mode — in one-shot (`--once`) and human-only
 mode they 404.
 
-| Route           | Caller          | Threads-mode only | Purpose                                              |
-| --------------- | --------------- | ----------------- | ---------------------------------------------------- |
-| `GET /state`    | browser         | no                | today's staleness poll, plus a `threads_rev` integer |
-| `GET /threads`  | browser         | yes               | full thread state, for render and for a page reload  |
-| `POST /submit`  | browser         | no                | round write, id minting, round number                |
-| `POST /reply`   | agent & browser | yes               | append a reply to one thread                         |
-| `/resolve`      | browser only    | yes               | set or clear one thread's `resolved` bit             |
-| `POST /refresh` | browser         | no                | unchanged; threads survive it, drafts do not         |
+| Route           | Caller          | Threads-mode only | Purpose                                                               |
+| --------------- | --------------- | ----------------- | --------------------------------------------------------------------- |
+| `GET /state`    | browser         | no                | today's staleness poll, plus a `threads_rev` integer                  |
+| `GET /threads`  | browser         | yes               | full thread state, for render and for a page reload                   |
+| `POST /submit`  | browser         | no                | round write, id minting, round number (plus a summary thread — below) |
+| `POST /reply`   | agent & browser | yes               | append a reply to one thread                                          |
+| `/resolve`      | browser only    | yes               | set or clear one thread's `resolved` bit                              |
+| `POST /refresh` | browser         | no                | unchanged; threads survive it, drafts do not                          |
 
 `/resolve` is reachable from the browser only. The agent holds the same
 bearer token and technically could reach it, but the skill body forbids
@@ -94,6 +94,44 @@ The resolve request body sets or clears the bit by thread id:
 }
 ```
 
+### Round-summary threads
+
+A round's overall `summary` — the `summary` key in the `/submit` payload,
+optional and free text — mints a thread of its own when it is non-empty, on
+the same submit that carries it. It is the same shape as a per-line thread
+minus the anchor: `file`, `side`, `line`, `code`, and `endLine` are all
+`null`, and `kind` is `"summary"`.
+
+```json
+{
+  "id": "t8",
+  "round": 2,
+  "file": null,
+  "side": null,
+  "line": null,
+  "code": null,
+  "endLine": null,
+  "kind": "summary",
+  "github": false,
+  "text": "Looks good overall -- one question on the caching change.",
+  "resolved": false,
+  "replies": []
+}
+```
+
+It takes `POST /reply` exactly like any other thread — same `thread_id`,
+same election of `author`. Resolving one is unchanged too: still the user's
+click only, never the agent's, the same rule as every other thread. What it
+opts out of is anchor re-placement (the rule below): with no `{file, side,
+line, code}` to test a diff row against, it never runs through
+`placeThreads()` and never appears in a file's Outdated or per-file Resolved
+strip. The page renders it in its
+own strip above the file cards instead, in round order, resolved or not —
+"never dropped" applies to a summary thread the same as any other.
+
+A round with an empty or omitted `summary` mints nothing; an empty round
+never leaves a blank thread behind.
+
 `--out` round payload, written on every submit (atomic replace, as today):
 
 ```json
@@ -146,6 +184,11 @@ rule, in order:
 A thread is never dropped by re-placement: a comment the user wrote stays
 visible until the user resolves it, even when its anchor can no longer be
 found.
+
+A round-summary thread (`kind: "summary"`, see above) has no `{file, side,
+line, code}` to test, so it skips this rule entirely rather than falling
+through to Outdated — it always renders, in its own strip above the file
+cards.
 
 ## Resolved-thread semantics
 
