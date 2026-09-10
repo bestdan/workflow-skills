@@ -125,8 +125,8 @@ Carry leg 2's out-of-scope warning line through to the final report unchanged.
 If `verified` is empty, skip the leg and report "nothing verified in the window —
 nothing to archive."
 
-Otherwise follow **`commands/handlers/linear-archive.md`** → "Named issues
-instead of a sweep (`--issues <refs>`)", passing `verified` as the refs and
+Otherwise follow **`commands/handlers/linear-archive.md`** → "`--issues` —
+archive specific issues, no age threshold", passing `verified` as the refs and
 `--apply` only if this command got it:
 
 ```bash

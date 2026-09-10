@@ -135,8 +135,8 @@ usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent:
   `--until` kill would sever mid-delivery. Present only when `until` is set — a
   run with no `--until` has no deadline to guard. Launch step 3 computes it from
   the resolved co-review reviewer set (it is reviewer-latency-coupled, not a
-  constant) and writes it here; formula and defaults live in
-  [`run-budget.md`](run-budget.md) "Minimum task budget".
+  constant) and writes it here; the formula lives in
+  `scripts/min-task-budget.sh`; run-budget.md carries the reasoning.
 - `reserve` remains the task-3-owned **fixed floor** (15 by default, or the
   launch/resume `--reserve` override). The gate derives its effective reserve
   from it and `usage_deltas`; it never overwrites this configured floor.
