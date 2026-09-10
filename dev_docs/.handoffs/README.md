@@ -33,7 +33,8 @@ enough that a tracker issue would cost more than it returns, including a local
 `dev_docs/tasks/<name>_plan/` that is deliberately never pushed. A handoff is
 what carries that between sessions.
 
-`dev_docs/designs/2026-08-01-state-locality-design.md` still holds in general:
+The state-locality principle (the design lives in dotfiles at
+`dev_docs/designs/2026-08-01-state-locality-design.md`) still holds in general:
 state belongs where its owner keeps it, and a handoff is a poor tracker for
 anything that outlives a few sessions. Overriding that is allowed, and it works
 because it is deliberate. Say in the file that you are doing it and why, so the
@@ -109,12 +110,14 @@ conventions have to reach the next machine and the next session. Guidance that
 exists only where it was written is not guidance. Git applies `.gitignore` only
 to untracked files, so it stays tracked with no negation pattern.
 
-Editing it later has one wrinkle: `git add dev_docs/.handoffs/README.md` is
-**refused**, because the pathspec names an ignored directory, and the hint it
-prints tells you to force it. You usually should not. `git add -A` and
-`git commit -a` stage the change normally, since a tracked file's modifications
-are not subject to the ignore rules. Reach for `-f` only when adding a genuinely
-new file here, which should be close to never.
+Editing it later has one wrinkle. Measured 2026-09-09:
+`git add dev_docs/.handoffs/README.md` **stages the change**, but because the
+pathspec names an ignored directory git also prints the "ignored by one of your
+.gitignore files, use -f" hint and **exits 1**. The stage happened; the exit
+code says it did not. A `&&` chain or a script reads that as failure, so stage
+this file with `git add -A` or `git commit -a`, which touch the tracked entry
+without naming the ignored path and exit 0. Reach for `-f` only when adding a
+genuinely new file here, which should be close to never.
 
 Every other file here stays untracked, and that asymmetry is the point: the
 conventions are shared, the handoffs are not.
