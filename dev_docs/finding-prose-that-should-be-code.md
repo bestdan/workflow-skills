@@ -18,31 +18,36 @@ fenced block is worse again, because nothing in the gate can see it.
 
 ## How to find it
 
-Read each file in full against the rubric below. A grep for
-computation-shaped language finds the fenced blocks and misses the other six
-categories.
+Read the files in front of you in full against the rubric below — the files
+in a PR when reviewing one, a handler and its siblings when editing one, the
+whole tree only for a deliberate audit. A grep for computation-shaped language
+finds the fenced blocks and misses the other six categories.
 
-| Category                                        | What it looks like                                                                 | Shipped example                                                                                                                              |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hand-walked algorithms**                      | Prose instructing the agent to walk a graph, sort, or accumulate a count           | `linear-reoptimize.md`'s cycle detection, topological sort and priority-inversion sweep → `commands/handlers/assets/linear-graph-analyze.py` |
-| **Fenced blocks with logic**                    | A `bash` fence with loops, cursors, or `jq` pipelines                              | `gh-issue-promote.md` step 3a's 36-line GraphQL pagination loop → `commands/handlers/assets/gh-issue-rollups.py`                             |
-| **Decision tables**                             | A table of input conditions the agent applies by hand, especially with precedence  | the kanban section table in `linear-list.md`, `gh-issue.md` and `jira.md` → `commands/handlers/assets/kanban-classify.py`                    |
-| **API choreography**                            | "try source A, then B, then C, then post-filter" over a CLI or fetched JSON        | `linear-sweep-complete.md`'s three-source PR discovery → `commands/handlers/assets/linear-pr-resolve.py`                                     |
-| **Rules that could be hooks or lints**          | A "never do X" the reader is trusted to honour, guarding something destructive     | research-spike-tutorial's `$WORK` root check ahead of an `rm -rf` → `scripts/tutorial-root-guard.sh`                                         |
-| **Prose re-deriving a shipped script**          | A handler that walks the flow by hand and then says the script does the same thing | `linear-archive.md`'s GraphQL sweep, whose own §"Run it without an agent" prefers `linear-archive.py`                                        |
-| **The same procedure restated across handlers** | One rule with per-tracker deltas, copied N times                                   | Jira transition-id resolution at five call sites → `commands/handlers/assets/jira-resolve-transition.py`                                     |
+The middle column is the **mistake**: what the prose looked like before it was
+extracted. None of these survive in the tree, so they are quoted here. The
+right column is what replaced each one.
+
+| Category                                        | The mistake, as the prose read before extraction                                                                                                             | What replaced it                                                                |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| **Hand-walked algorithms**                      | _"Detect cycles, then topologically sort the non-terminal nodes with an urgency → smaller-estimate → age tie-break, then sweep every edge for an inversion"_ | `commands/handlers/assets/linear-graph-analyze.py`, one call, three JSON fields |
+| **Fenced blocks with logic**                    | A 36-line `bash` fence paginating GraphQL with a `jq` cursor loop, in `gh-issue-promote.md` — seven defects found in it, none by the gate                    | `commands/handlers/assets/gh-issue-rollups.py` with a test per defect           |
+| **Decision tables**                             | Three near-identical seven-row tables mapping state plus labels to a kanban section, one per tracker handler, each applied by hand with a precedence rule    | `commands/handlers/assets/kanban-classify.py` with a per-tracker field map      |
+| **API choreography**                            | _"Try the links attachment; if none, search PR titles for the identifier; if none, list PRs by branch; then classify by merge state"_                        | `commands/handlers/assets/linear-pr-resolve.py`, which runs the probes itself   |
+| **Rules that could be hooks or lints**          | _"Before the final `rm -rf`, confirm `$WORK` is non-empty, absolute, and not inside the learner's repo"_ — a check the reader was trusted to perform         | `scripts/tutorial-root-guard.sh`, exit 1 on any failed predicate                |
+| **Prose re-deriving a shipped script**          | A handler walking the archive sweep query by query, ending with "the script does the same thing"                                                             | A pointer to `linear-archive.py`; the walk is deleted                           |
+| **The same procedure restated across handlers** | The Jira transition-id lookup written out five times, in two diverging variants, one of which filtered cancel-style names after counting instead of before   | `commands/handlers/assets/jira-resolve-transition.py`, called from all five     |
 
 **Re-check every absence claim before you rank it.** "No script computes this"
 is what makes a finding a finding, and it is the claim a reader is most likely
 to get wrong — inference cannot tell "not there" from "not where I looked". Run
 `rg` against `scripts/` and `commands/handlers/assets/` for the concept, not
-only for the filename you expect, and record that you did. Several round-2
+only for the filename you expect, and record that you did. Several past
 findings landed as an extra flag or subcommand on an existing asset rather than
 a new script, which is the outcome this step exists to produce.
 
 ## How to rank
 
-Four weights, in this order:
+Five weights, in this order:
 
 1. **An explicit prior defect in the prose.** A dated incident, a quoted wrong
    result, or a warning the prose gives itself. This dominates everything else:
@@ -50,10 +55,14 @@ Four weights, in this order:
 2. **Confidence the logic is deterministic.** If two careful readers could
    legitimately disagree on an output, it is judgment and stays prose.
 3. **Call-site count.** Every copy is an independent chance to break the rule.
-4. **Size.** `S` under 50 lines, `M` under 200, `L` above. Small and duplicated
+4. **How hot the path is.** A hand-walk that runs on every invocation, or once
+   per issue over a whole board, costs context and wall-clock every time; the
+   same logic in a script runs in milliseconds and costs the agent one tool
+   call. A rarely-run procedure can wait.
+5. **Size.** `S` under 50 lines, `M` under 200, `L` above. Small and duplicated
    beats large and singular.
 
-Sequence the first slice by (1) and (4) together — a small finding with a dated
+Sequence the first slice by (1) and (5) together — a small finding with a dated
 defect is the cheapest proof that the round is worth running.
 
 ## The one standing constraint
@@ -93,8 +102,11 @@ surviving hand-walk is the next round's finding.
 
 ## Gotchas that generalise
 
-Each of these cost a review round or a production defect once. Every rule below
-is embodied in a file today; that file's header carries the specifics.
+Each of these cost a review round or a production defect once. Every entry is
+the **rule** in bold, then the **mistake** that produced it, then the file where
+the **correct form** lives today — that file's header carries the specifics.
+The mistakes are described rather than linked because none of them survive in
+the tree.
 
 1. **Default a path to the caller's cwd, never to `__file__` or a git-root
    lookup.** An asset ships to consumers and runs from the installed plugin, so
