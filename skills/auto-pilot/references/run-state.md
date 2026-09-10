@@ -66,7 +66,7 @@ exit_reason_detail: "context exhausted mid-task T-3" # optional one-line human n
 orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
 orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
 until: 2026-07-10T06:00:00 # the run's --until deadline
-min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; run-budget.md); only written for a time-boxed (--until) run
+min_task_budget: 24m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; min-task-budget.sh); only written for a time-boxed (--until) run
 reserve: 15 # minimum session-window headroom percent before claim, verify, or enabled co-review; --reserve overrides this fixed default
 usage_delta_baseline: # last successful session-status sample: {percent: 42, reset_epoch: 1783823504}; empty when cleared. Written ONLY by `spawn-orchestrator.sh reserve-gate`
 usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent: 8, reset_epoch: 1783823504}]. Written ONLY by `spawn-orchestrator.sh reserve-gate`
@@ -136,7 +136,8 @@ usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent:
   run with no `--until` has no deadline to guard. Launch step 3 computes it from
   the resolved co-review reviewer set (it is reviewer-latency-coupled, not a
   constant) and writes it here; the formula lives in
-  `scripts/min-task-budget.sh`; run-budget.md carries the reasoning.
+  [`scripts/min-task-budget.sh`](../../../scripts/min-task-budget.sh);
+  [`run-budget.md`](run-budget.md) carries the reasoning.
 - `reserve` remains the task-3-owned **fixed floor** (15 by default, or the
   launch/resume `--reserve` override). The gate derives its effective reserve
   from it and `usage_deltas`; it never overwrites this configured floor.

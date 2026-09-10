@@ -16,7 +16,7 @@
 #                          # CLI bound
 #   term(devin)   = 15   # same
 #   term(copilot) = 15   # same
-#   term(crush)   = 15   # local CLI, unmeasured; take the same 15-min bound
+#   term(crush)   = 15   # cloud (Charm Hyper), unmeasured; same 15-min bound
 #   term(gemini)  = ignored (retired; co-review silently skips it)
 #   no reviewers  = Claude-only set (main agent + reconciler are in-session,
 #                    already inside OVERHEAD) -> max term 0
@@ -42,7 +42,7 @@ OVERHEAD=18
 ROUNDS=3
 
 usage() {
-  sed -n '2,37p' "$0"
+  sed -n '2,/^set -uo pipefail/{ /^set /!p; }' "$0"
 }
 
 case "${1:-}" in

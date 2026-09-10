@@ -432,7 +432,7 @@ reviewer set's** latency, and is produced by running
 The formula and the per-reviewer terms live in that script's header comment
 and are not restated here. Two anchor results: the **fast set** (codex +
 Claude + reconciler) → `24m`; **any cloud reviewer** (`agy` / `devin` /
-`copilot`) → `63m`.
+`copilot` / `crush`) → `63m`.
 
 Because it is coupled to that set, `min_task_budget` is **computed at launch from
 the resolved reviewer set** (Launch step 3) and recorded in `RUN.md`'s front
