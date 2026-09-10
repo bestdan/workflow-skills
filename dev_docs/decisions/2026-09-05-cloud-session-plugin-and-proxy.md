@@ -300,8 +300,8 @@ access:"push" to attach the repository with credentials.`
    2026-08-24 routine finding and this session's finding agree in effect: no usable `gh`.
    They differ in how far they got — that routine had no `gh` binary to try, this session
    had the binary and a dead token. **Do not read that as a session-versus-routine
-   property**; finding 1 says what actually varies, and says it is unsettled.
-   **Where the barrier sits is _not_ settled** either, and the wording matters: an
+   property**; finding 1 says what actually varies, and settles it.
+   **Where the barrier sits is _not_ settled**, and the wording matters: an
    earlier draft of this file said "the barrier is at the account, not the endpoint" as
    though that followed from reads-403-too. It does not follow. See below.
 3. **The GitHub MCP connector remains the credentialed channel**, in a cloud session as
