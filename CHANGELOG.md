@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.45.1] - 2026-09-10
+
+### Fixes
+
+- the remote self-check passes on a dead credential (#507) (0fe235a)
+
 ## [2.45.0] - 2026-09-10
 
 ### Features
