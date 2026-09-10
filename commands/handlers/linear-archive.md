@@ -111,157 +111,44 @@ native window, or needs to drain a workspace that has already hit the cap.
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a
    pasted key and do not write one to the repo.
 
-### Find candidates
+### Run the script
 
-**Canonical: one GraphQL query (validated).** Filter on the **state type** (not
-display name — names are team-configurable) and the terminal timestamp directly,
-so no separate `list_workflow_states` call is needed. This is the same query the
-standalone script uses, and it ran cleanly against a real workspace:
+The retire step **is** `linear-archive.py` — do not re-derive its queries by
+hand. See "Run it without an agent — the shipped script" below for the full
+invocation and flag reference; this subsection is only the mapping from the
+resolved config onto those flags.
 
-```graphql
-query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!) {
-  issues(first: 100, after: $cursor, filter: {
-    team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
-    state: { type: { eq: $type } },         # repeat for "completed", "canceled", "duplicate"
-    # project: { id: { eq: $projectId } },  # per §3: loop once per configured project (omit for whole-team) — also declare $projectId: String in the signature above
-    completedAt: { lt: $cutoff }            # canceledAt for the canceled + duplicate passes
-  }) {
-    nodes { id identifier title completedAt }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-```
+- Resolved age threshold (Preflight above, plus `--older-than` on
+  `/archive-tasks` if given) → `--older-than <N>`.
+- Call `commands/handlers/linear-common.md` → "Resolve configured projects" for
+  the project list. Whole-team scope (the synthetic `id: null` entry) → omit
+  `--project`. One or more configured projects → pass `--project <id>` once per
+  entry with a non-null `id`.
+- Refs passed to `/archive-tasks --issues` → `--issues <refs>` (identifiers
+  and/or UUIDs, comma-separated and/or repeated).
+- `linear.team` → `--team`.
 
-3. **Scope** the same way the rest of the Linear handler scopes — always bind the
-   team. `linear.team` may be a **name or a UUID id**: filter on
-   `team: { id: { eq: $team } }` when the value is UUID-shaped, else
-   `team: { name: { eq: $team } }` — otherwise a UUID-configured team matches
-   nothing and the archive silently no-ops. (The shipped script auto-detects this;
-   the agent path can resolve the id via the common preflight instead.) For the
-   **project** scope, call the **"Resolve configured projects"** step in
-   `commands/handlers/linear-common.md` (do **not** read the scalar
-   `default_project`). It returns a list of `{ id, name, wip_limit, max_estimate }`:
-   - **Whole-team scope** — the list is the single synthetic entry with `id: null`
-     (projects absent/empty): omit the `project` filter and sweep the whole team,
-     unchanged from today.
-   - **One or more configured projects** — each entry has a non-null `id`: **loop
-     the query once per `project.id`**, adding `project: { id: { eq: $projectId } }`
-     to the filter **and** declaring `$projectId: String` in the query signature
-     (the base example above omits it, so enabling the filter without also adding
-     the variable fails GraphQL validation). **Union** the candidates across all
-     projects (dedupe by issue `id`). This sweeps **every** configured project, not
-     just one.
+Run once without `--apply` first (the script's default) and show the candidate
+list. If the caller asked for a dry run, stop there. Otherwise re-run with
+`--apply`.
 
-   (`--project X` narrowing — restricting the sweep to a single named project — is
-   deferred _for this agent-driven flow_; don't build it here. The standalone
-   script does take `--project`, repeatably — see "Run it without an agent".)
-4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
-   `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
-   exhausted — a single page silently undercounts a backlog at the cap. The
-   `issues` query **excludes archived issues by default**, so re-running the
-   sweep is idempotent: already-archived items simply don't come back. (No
-   `archivedAt` filter needed.) That default is wrong for `--issues`, where the
-   caller named the issues — see that section below.
-5. **Cutoff & the terminal passes.** `$cutoff` is `now − N days` as an ISO-8601
-   string (`DateTimeOrDuration`). Run the query once per terminal type **× per
-   configured project** (§3's loop) — **all three types, always**: `completed`
-   filtered on `completedAt`, and `canceled` and `duplicate` both filtered on
-   `canceledAt`. An issue missing the relevant timestamp is skipped (never archive
-   on an unknown date). Collect each match's UUID `id` and `identifier` into the
-   unioned candidate set (dedupe by `id`).
+Report what the script prints: candidate count, archived count, any failed ids
+with their error, and "nothing archived (dry-run)" for a dry run.
 
-   > **Sweep every terminal state, unconditionally.** A state left unswept can never
-   > be archived and consumes the workspace cap permanently. That is exactly what
-   > happened to `duplicate` while the canceled sweep was opt-in: `duplicate` is its
-   > own state type, not a flavour of `canceled`, so it matched neither filter and
-   > accumulated invisibly. There is no flag to narrow this — archiving completed
-   > work while deliberately retaining canceled work is not a thing anyone wants.
-
-### Named issues instead of a sweep (`--issues <refs>`)
-
-When `/archive-tasks` passed `--issues <refs>`, **skip steps 3–5 entirely** —
-there is no cutoff and no per-project loop, because the refs _are_ the candidate
-set. Replace the find with a direct lookup, then rejoin the flow at **Archive**
-below (the mutation, the report, and dry-run all behave identically):
-
-```graphql
-query($team: String!, $numbers: [Float!]) {
-  issues(first: 250, includeArchived: true, filter: {
-    team: { name: { eq: $team } },   # UUID-configured team? use id: { eq: $team }
-    number: { in: $numbers }         # the numeric halves of PRE-12, PRE-13, …
-  }) {
-    nodes { id identifier title completedAt canceledAt archivedAt state { type } team { id name } }
-  }
-}
-```
-
-Four rules make this safe, and none of them are optional:
-
-- **Terminal state is still required.** The age gate is gone; this one is not.
-  Check `state.type` **client-side** against `completed`/`canceled`/`duplicate`
-  and **report-and-skip** anything else. Never archive an issue that is still
-  open just because someone named it.
-- **Stay inside the configured team.** The `number` filter is team-scoped
-  server-side, so another team's `OTH-12` simply matches nothing. If a ref is a
-  raw issue **UUID** instead, filter on `id: { in: $ids }` — but an `id` is a
-  **global** key that cannot bind the team, so compare the returned
-  `team.id`/`team.name` yourself and drop mismatches.
-- **Ask for archived rows, and report them as done.** `includeArchived: true`
-  plus `archivedAt` in the selection, then split the matches three ways: live
-  (archive these), already archived (report "already archived", archive
-  nothing), and unmatched. Without it a re-run reports work that already
-  succeeded as "not found on this team" — the sweep's exclude-archived default
-  is what makes _it_ idempotent, and it does not transfer here. The team check
-  runs first, so an archived ref on another team is still not found.
-- **Report what didn't resolve.** Any ref with no matching node is listed as not
-  found. Silence would read as "archived", which is the one wrong impression to
-  leave about a destructive op.
-
-The shipped script implements exactly this as `--issues` (see below); prefer it
-over hand-rolling the queries.
-
-> **In-session alternative (no key for the query).** If you are already in an
-> agent session with the Linear MCP, you _can_ do the read half over the MCP:
-> resolve `completed`/`canceled`/`duplicate` state ids with `<linear-mcp>__list_workflow_states`,
-> then call `<linear-mcp>__list_issues` (`teamId`, optional `projectId`,
-> `includeArchived: false`, those state ids) and filter by age client-side. But
-> the mutation still needs the key in a non-agent shell, so for anything but a
-> tiny manual run, prefer the single-key GraphQL path above end-to-end.
-
-### Archive (mutation)
-
-6. **Always print the candidate list first** (identifier + terminal date). If
-   `dry-run`, stop here and report "nothing archived (dry-run)".
-7. Otherwise call the GraphQL `issueArchive` mutation **once per id** — there is
-   **no bulk archive mutation, so loop**. Use `trash: false` (archive, not trash):
-
-   ```bash
-   curl -sS https://api.linear.app/graphql \
-     -H "Authorization: $LINEAR_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"query":"mutation($id:String!){issueArchive(id:$id,trash:false){success}}","variables":{"id":"<ISSUE_ID>"}}'
-   ```
-
-   Check each response's `data.issueArchive.success`. On a `false` or an error
-   payload for an id, record it and continue the loop — one failure must not abort
-   the rest. (The personal API key authenticates as the user; `issueArchive` uses
-   the issue **UUID** `id`, not the `identifier` like `PRE-12`.)
-
-### Report
-
-8. Report: the candidate count, how many archived successfully, any ids that
-   failed (with the error), and a one-line "now under the 250 cap" note if you can
-   compute the remaining active count cheaply (otherwise omit — do not add tool
-   calls just for the count). In dry-run, report the candidates and that nothing
-   was changed.
+> Every terminal state is swept unconditionally — `duplicate` is its own state
+> type, not a flavour of `canceled`, and a state left out never gets archived.
+> If you are already in an agent session with the Linear MCP, you can do the
+> **read** half over the MCP instead (`list_workflow_states` +
+> `list_issues`), but the mutation still needs the key in a non-agent shell —
+> for anything but a tiny manual run, prefer the script end-to-end.
 
 ## Run it without an agent — the shipped script
 
 Because the backstop needs only the API key, it runs as a standalone job with no
 agent session — the cleanest way to dodge the `op`-in-agent-shell gotcha
-entirely, and the form to schedule on a cron / GitHub Action. The whole flow
-above (paginated query → candidate list → per-id `issueArchive` loop) is packaged
-as a runnable script:
+entirely, and the form to schedule on a cron / GitHub Action. The retire flow
+(paginated query → candidate list → per-id `issueArchive` loop, or the
+`--issues` lookup) is packaged as a runnable script:
 
 **`commands/handlers/assets/linear-archive.py`** (Glob `**/handlers/assets/linear-archive.py` if the relative path doesn't resolve).
 
@@ -292,8 +179,8 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
   --project <uuid> --apply
 
-# Scope to several configured projects — repeat --project once per id (§3's
-# "Resolve configured projects" list); the sweep loops per project and unions
+# Scope to several configured projects — repeat --project once per id
+# (linear-common.md → "Resolve configured projects" list); the sweep loops per project and unions
 # the results, deduped by issue id. Omitting --project entirely still sweeps
 # the whole team.
 python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
@@ -304,7 +191,7 @@ python3 commands/handlers/assets/linear-archive.py --team PreThink \
   --issues PRE-12,PRE-13 --apply
 ```
 
-The script's scope can now match the agent-driven flow's (§3), but only when
+The script's scope can now match the agent-driven flow's ("Run the script"), but only when
 the caller passes every configured project's `id` as its own `--project` —
 with 1+ projects configured under `linear.projects`, that is what a cron/Action
 entry must do to sweep the same scope the agent flow does. Omitting `--project`

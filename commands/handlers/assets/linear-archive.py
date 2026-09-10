@@ -44,7 +44,7 @@ Usage:
 default); one or more scope the sweep to exactly those projects, looping the
 query once per id and unioning the results (deduped by issue id) — this is how
 a caller resolves `linear.projects` from `.task-config.yml` (see
-linear-archive.md §3 "Resolve configured projects") into a scope this
+linear-common.md "Resolve configured projects") into a scope this
 script understands, without the script itself reading any config.
 """
 

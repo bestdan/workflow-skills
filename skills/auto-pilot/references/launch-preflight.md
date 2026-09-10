@@ -98,12 +98,13 @@ so nothing prompts at 3am:
   (codex + Claude + reconciler) over one that includes the slower cloud
   reviewers (`devin` / `agy`); cloud reviewers are **optional/skippable** in
   this set — a skipped reviewer is never fatal and is recorded (`REPORT.md`
-  review classes). Then **compute `min_task_budget` from this resolved
-  set** — the pre-dispatch floor is coupled to reviewer latency, not a
-  constant; formula in
-  [`run-budget.md`](run-budget.md) "Minimum task
-  budget" — and write it to `RUN.md` front matter (step 6) so the run loop's
-  pre-dispatch deadline guard reads a concrete number.
+  review classes). Then run
+  `"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh"` with the resolved
+  `local_reviewers` names (pass nothing for a Claude-only set) — the script
+  owns the formula; [`run-budget.md`](run-budget.md) "Minimum task budget"
+  carries the reasoning — and write its output to `RUN.md` front matter
+  (step 6) so the run loop's pre-dispatch deadline guard reads a concrete
+  number.
 - **Coder config** — run `select-coder` once to resolve each task's
   `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
   dispatches without prompting for a missing default.

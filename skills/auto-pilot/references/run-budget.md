@@ -426,21 +426,13 @@ recorded) **and at a paused resume's wake**. Nothing else checks it between
 dispatches. A future change that "fixes" or removes this guard on the assumption
 that the deadline is enforced somewhere else is removing the enforcement.
 
-`min_task_budget` is **not a constant**. A single delivery is coder dispatch +
-independent verify + PR + co-review (bounded **per reviewer**) + up to 2 iterate
-rounds, and the co-review term is dominated by the **resolved reviewer set's**
-latency:
-
-- **Fast set** (codex + Claude + reconciler): codex is ~1–2 min, stateless and
-  sandboxed; the floor is ~**20 min**.
-- **With cloud reviewers** (`devin` / `agy`): each hits the `--non-interactive`
-  **15-min bound**, so they dominate a short run and push the floor to ~**45 min+**.
-
-As an approximation, `min_task_budget ≈ delivery overhead (coder implement +
-verify + PR, ~18 min) + co-review latency`, where the co-review term is the
-**slowest per-reviewer bound in the resolved set** carried across the initial
-review plus up to 2 iterate rounds: a ~2-min codex term keeps the fast-set floor
-near **20 min**, while a 15-min cloud-reviewer bound pushes it past **45 min**.
+`min_task_budget` is **not a constant** — it is coupled to the **resolved
+reviewer set's** latency, and is produced by running
+`"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh" <resolved local_reviewers…>`.
+The formula and the per-reviewer terms live in that script's header comment
+and are not restated here. Two anchor results: the **fast set** (codex +
+Claude + reconciler) → `24m`; **any cloud reviewer** (`agy` / `devin` /
+`copilot` / `crush`) → `63m`.
 
 Because it is coupled to that set, `min_task_budget` is **computed at launch from
 the resolved reviewer set** (Launch step 3) and recorded in `RUN.md`'s front

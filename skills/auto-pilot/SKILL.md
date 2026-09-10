@@ -141,9 +141,10 @@ correct even when the repo's own `.task-config.yml` default is `linear`.
 
 **Size `--until` realistically.** A single `/deliver-task` floors well above a
 naive "a few minutes" guess once the resolved reviewer set includes a cloud
-reviewer (step 3 computes the exact number as `min_task_budget`; the formula
-is [`references/run-budget.md`](references/run-budget.md) "Minimum task
-budget"). An under-provisioned `--until` isn't fatal: the pre-dispatch guard
+reviewer (step 3 computes the exact number as `min_task_budget` by running
+`"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh"`;
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget"
+carries the reasoning). An under-provisioned `--until` isn't fatal: the pre-dispatch guard
 (Run phase) just declines to start the next task, so a too-tight window
 yields fewer tasks, not a hard-killed one. Provision at least one
 `min_task_budget` per task you expect to finish.
