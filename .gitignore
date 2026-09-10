@@ -16,6 +16,10 @@ __pycache__/
 # available is machine-specific, so this is not committed/shared.
 dev_docs/co-review/
 
+# Session-to-session handoff notes — local by design; only the README is
+# tracked (force-added). See dev_docs/.handoffs/README.md.
+dev_docs/.handoffs/
+
 # Plan scaffolding under dev_docs/tasks/ is ephemeral, in-flight project-tracker
 # working state (see skills/plan-with-docs) — it graduates to a permanent
 # dev_docs/<name>.md and is deleted when the plan is done, so it isn't committed.
