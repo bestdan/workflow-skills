@@ -729,7 +729,7 @@ yet speak (see `claim-lock.md`).
 So `true` needs **two** things the probed environment did not have, and the plugin is
 only the first. **The plugin half now has a known answer**: a cloud-environment setup
 script running `claude plugin marketplace add` plus `claude plugin install` before the
-session starts does install it (measured 2026-09-07; see that record). Note it is
+session starts does install it (measured 2026-09-07 — `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`). Note it is
 **environment** configuration — a repo cannot commit it, which is why looking for it in
 a repo finds nothing.
 
