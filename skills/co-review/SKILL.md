@@ -336,24 +336,7 @@ label is the only signal of how hard each finding is meant to land.
 
 9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`.
 
-   **The presentation has three sections, always in this order: Overview, Findings & verification, Calls for you to make.** The order is the point — everything already resolved comes first and the review ends on the questions, so the one part addressed to the reader is never buried mid-output. Fill this template; don't reorder it, and don't drop a section that came out empty — say it is empty.
-
-   ```markdown
-   ## Overview
-
-   **Verdict:** <pass | pass with suggestions | blocking> — <one line of why>
-   **Reviewers:** <which ran, which timed out, which were skipped and why>
-
-   ## Findings & verification
-
-   **Auto-fixing** (high confidence) — <what you will change at step 10, or "none">
-   **Skipped** (low confidence) — <each one named, with its reason, or "none">
-   **Verification tests** — <the real-machine checks, or "none needed — <why>">
-
-   ## Calls for you to make
-
-   <the first open item, as one yes/no question — or "none">
-   ```
+   **The presentation has three sections, always in this order: Overview, Findings & verification, Calls for you to make.** The order is the point — everything already resolved comes first and the review ends on the questions, so the one part addressed to the reader is never buried mid-output. **Read [`references/output-template.md`](references/output-template.md) and fill it** — it carries the skeleton and the per-disposition variants of section 3. Read it on every run; unlike the reviewer files, this one is not conditional. Don't reorder the sections, and don't drop one that came out empty — say it is empty.
 
    **The verdict is a roll-up of the decorations, not a second judgment.** Any `(blocking)` finding in the presented set → `blocking`; findings present but none blocking → `pass with suggestions`; no findings → `pass`. The verdict and the decorations can never disagree — if they do, the decorations are right.
 
@@ -369,7 +352,10 @@ label is the only signal of how hard each finding is meant to land.
 
    Two dispositions reshape the sections without reordering them:
    - **`--post` mode (someone else's PR):** section 2 keeps only the skip list (low) and the verification list, and the **post-candidate list moves to section 3**, because vetting it (step 10) is the call the user makes — **high + medium** findings as a single numbered list, each with `file:line`, the issue, the suggested fix, and its tier. That list is the one place the one-at-a-time rule doesn't apply: step 10 vets it as a set. The verification list is presented to the user only and is **never posted to the PR** — you cannot know the author's environment, and a verification list is not a review finding.
-   - **`--non-interactive`:** there is no one to answer, so **section 3 becomes the deferred log** — every medium finding recorded as a deferred judgment call and every verification item recorded as a deferred entry, so the `/deliver-task` caller can carry them into the PR body and the hand-off. Section 1's reviewer line is then the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps.
+   - **`--non-interactive`, default disposition:** there is no one to answer, so **section 3 becomes the deferred log** — every medium finding recorded as a deferred judgment call and every verification item recorded as a deferred entry, so the `/deliver-task` caller can carry them into the PR body and the hand-off.
+   - **`--post --non-interactive`:** the `--post` shape wins — **section 3 stays the post-candidate list**, because step 10 skips the vetting gate and step 11 posts that high+medium set. The verification list stays in section 2, user-facing only, and is still never posted.
+
+   Under `--non-interactive` in either disposition, section 1's reviewer line is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ran / timed-out / skipped-with-reason, so the caller can see the coverage gaps.
 
 The remaining steps depend on disposition.
 
