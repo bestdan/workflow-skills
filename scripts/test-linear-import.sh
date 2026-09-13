@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# test-linear-import.sh — hermetic tests for linear-import.py's --plan mode.
+# test-linear-import.sh — hermetic tests for linear-import.py.
 #
-# Wraps scripts/test_linear_import.py (stdlib unittest, no network: the GitHub
-# read is stubbed) so the crosswalk and every refusal path are exercised by the
-# same `run scripts/test-*.sh` gate as the other hermetic tests.
+# Wraps scripts/test_linear_import.py (stdlib unittest, no network: --plan's
+# GitHub read and --apply's two write seams are stubbed) so the crosswalk, the
+# resume behaviour and every refusal path are exercised by the same
+# `run scripts/test-*.sh` gate as the other hermetic tests.
 #
 # Run directly: bash scripts/test-linear-import.sh
 set -uo pipefail
