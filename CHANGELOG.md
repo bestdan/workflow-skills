@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.1] - 2026-09-13
+
+### Fixes
+
+- deliver the trailing-key title grammar to installs (#593) (b9569f8)
+
 ## [2.48.0] - 2026-09-13
 
 ### Features
