@@ -17,6 +17,8 @@
 #   - a reviewer with no rule at all is "not configured", not drift
 #   - a general-purpose `Bash(cd ...)` is never attributed to a reviewer
 #   - a missing plugin root exits 2, distinct from the exit 1 that means drift
+#   - the script is runnable AS DOCUMENTED, with CLAUDE_PLUGIN_ROOT unset, and
+#     both documented call sites still pass --plugin-root (issue #607)
 #
 # Run directly: bash scripts/test-coreview-rule-drift.sh
 set -uo pipefail
@@ -285,6 +287,50 @@ if [ "$?" -eq 2 ]; then
 else
   fail "bad plugin root did not exit 2"
 fi
+
+# --- 9. the documented invocation runs with CLAUDE_PLUGIN_ROOT unset -------
+# Every other case here hands the script a root explicitly, so none of them can
+# see the failure #607 reported: the docs spell the root into the *path* via
+# ${CLAUDE_PLUGIN_ROOT}, but that variable is never exported into the Bash
+# subprocess, so the script's own env lookup found nothing and it exited 2 from
+# inside the plugin root. The fix is that both documented sites also pass
+# --plugin-root. This case pins the shape of that invocation, not just the
+# script's behavior — an env-only form would regress silently again.
+
+env -u CLAUDE_PLUGIN_ROOT "$SCRIPT" \
+  --plugin-root "$PLUGIN" --settings "$BASE/clean.json" --json >/dev/null 2>&1
+if [ "$?" -eq 0 ]; then
+  pass "documented form (--plugin-root, CLAUDE_PLUGIN_ROOT unset) runs"
+else
+  fail "documented form failed with CLAUDE_PLUGIN_ROOT unset"
+fi
+
+# The bug itself: without the flag and without the env var, exit 2.
+env -u CLAUDE_PLUGIN_ROOT "$SCRIPT" --settings "$BASE/clean.json" --json >/dev/null 2>&1
+if [ "$?" -eq 2 ]; then
+  pass "no flag and no env var still exits 2 (the #607 failure)"
+else
+  fail "rootless invocation did not exit 2"
+fi
+
+# And the docs must keep passing it. The script cannot enforce its own call
+# sites, so assert them here — this is the half that actually stays fixed.
+#
+# Count, don't just match: two file-wide greps joined by && would pass a file
+# that grew a SECOND, unflagged code block while the flag stayed in the first.
+# Requiring every invocation to carry the flag within two following lines (the
+# documented form wraps the flag onto the next line) is what makes a
+# reintroduced bug fail, not merely a wholly removed flag.
+for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
+  calls=$(grep -c 'coreview-rule-drift\.py' "$doc")
+  flagged=$(grep -A2 'coreview-rule-drift\.py' "$doc" \
+    | grep -c -- '--plugin-root "${CLAUDE_PLUGIN_ROOT}"')
+  if [ "$calls" -gt 0 ] && [ "$calls" -eq "$flagged" ]; then
+    pass "$(basename "$doc"): all $calls invocation(s) pass --plugin-root"
+  else
+    fail "$(basename "$doc"): $flagged of $calls invocation(s) pass --plugin-root"
+  fi
+done
 
 echo
 if [ "$fails" -eq 0 ]; then

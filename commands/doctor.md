@@ -370,13 +370,23 @@ makes it a standing hazard rather than an occasional one.
 Run the deterministic checker (read-only; it never writes settings):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 ```
 
 `${CLAUDE_PLUGIN_ROOT}` is load-bearing, not incidental: it resolves to the
 **installed** plugin, which is what actually dispatches. A working checkout can be
 several releases ahead of it, so a check run against the checkout answers a
-question nobody asked. Pass `--plugin-root` only to test the script itself.
+question nobody asked.
+
+**Spell it twice — once in the path, once as `--plugin-root`.** The variable is
+interpolated into this markdown when the command is rendered, so the path is
+correct and the script does run; it is **not** exported into the Bash subprocess,
+so the script's own environment lookup finds nothing and it exits `2` — reporting
+no plugin root from inside the plugin root. The flag carries the same interpolated
+value the path already proves is right, so the installed-versus-checkout property
+above is preserved rather than traded away. Point `--plugin-root` at anything
+**other** than `${CLAUDE_PLUGIN_ROOT}` only to test the script itself.
 
 It compares each reviewer's shipped rule templates against `permissions.allow`
 in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /

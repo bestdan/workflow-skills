@@ -97,8 +97,18 @@ queued, so the reviewer vanishes from the run summary with nothing logged.
 Alongside the auth probes, run:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" --json
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}" --json
 ```
+
+**Pass `--plugin-root` explicitly; the script cannot read the variable itself.**
+`${CLAUDE_PLUGIN_ROOT}` is interpolated into this markdown when the skill is
+rendered, so the path in the command is right — but it is not exported into the
+Bash subprocess, so the script's own environment lookup finds nothing and it
+exits `2` from inside the very directory it reports it cannot find. Repeating the
+same interpolated value as the flag is what actually reaches it, and it keeps the
+install-versus-checkout property intact: the value is still the **installed**
+plugin either way.
 
 It is read-only and costs milliseconds. Exit `1` means at least one configured
 reviewer has a dead or missing rule; **do not skip that reviewer on
