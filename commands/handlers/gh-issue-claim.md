@@ -18,6 +18,15 @@ the name by hand; ask for it:
 branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"])
 ```
 
+**The bracket means "when the key is unset", not "at your discretion".** `--prefix`
+defaults to empty in the script, which cannot see the config — so resolving the key and
+passing it is the caller's job on **every** invocation that builds the name
+(`branch-name`, `acquire`, `release`). Drop it while the key is set and you do not get an
+error: you get a **different lock ref**, `task-<n>` instead of `<prefix>task-<n>`. A
+session that passes the prefix and one that omits it then each acquire a ref the other
+cannot see, and both conclude they won the claim. `/doctor` Check 1c flags the inverse —
+a repo whose branches carry a prefix its config does not name.
+
 Three constraints meet here. `claim-lock.md` needs one deterministic name both racers
 compute the same way — which is why it is derived from the issue number and not from the
 title. The number must be **in** the name, so a branch or PR traces back to its issue.

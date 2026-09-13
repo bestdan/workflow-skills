@@ -113,6 +113,33 @@ config can trip more than one:
   `/task-config` to fix it." An absent or empty `projects: []` is a legitimate
   whole-team scope, not an error → `PASS`.
 
+**Check 1c (gh-issue only) — `branch_prefix` matches what the repo actually pushes.**
+When the resolved handler is `gh-issue` and `gh-issue.branch_prefix` is **unset**,
+check whether the repo's own branches say it should be set. Its own status line,
+separate from Check 1.
+
+The key is not cosmetic: `<branch_prefix>task-<n>` is the claim **lock ref**
+(`commands/handlers/claim-lock.md`), so two callers that disagree about the prefix
+acquire different refs, neither sees the other, and both believe they hold the
+claim. Unset means empty, and empty is only correct for a repo that really does
+push bare `task-<n>` branches.
+
+Read what the repo pushes rather than guessing:
+
+```bash
+gh pr list --repo "<repo>" --state merged --limit 20 --json headRefName \
+  --jq '[.[].headRefName | select(contains("/")) | split("/")[0]] | unique'
+```
+
+- `branch_prefix` set, or the query returns no common prefix → `PASS`.
+- Unset while every returned head shares one prefix `<p>` → `WARN`: "`gh-issue.branch_prefix`
+  is unset, so the claim lock ref is `task-<n>` — but this repo's merged PRs all use
+  `<p>/`. Set `gh-issue.branch_prefix: <p>/` in `.task-config.yml`." Never auto-fixed:
+  which prefix a repo wants is a judgment, and writing the wrong one moves the lock
+  rather than fixing it.
+- The `gh` call fails (auth, network, a repo with no merged PRs) → `PASS` with the
+  check noted as not run. An unavailable signal is not evidence of a problem.
+
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler
 unresolved — fix Check 1 first") rather than defaulting to `repo-pr` prerequisites,
