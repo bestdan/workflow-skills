@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-05 after the cloud-session probe.** Read this first, then
+**Redrafted 2026-09-12 after #510's export script landed unrun.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -73,9 +73,8 @@ here; this branch's links to it resolve once that merges.
 
 ## Where things stand
 
-**Redrafted 2026-09-12.** The previous version said this repo was still on Linear. It
-has not been since 2026-09-07. If you read that sentence and planned around it, stop and
-re-read this section.
+**This repo has been on `gh-issue` since 2026-09-07.** Any older copy of this file that
+says otherwise is wrong; if you planned around that sentence, stop and re-read here.
 
 **Phase 3 is complete.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed and has no
 task file; it gates nothing anyone is waiting on.
@@ -87,17 +86,29 @@ plan said to sequence task 13 first; that did not happen, and the consequence is
 see "The switch happened without task 13" below. **Do not plan as though the flip is
 still ahead of you.**
 
-**Phase 4 task 9 is broken down and entirely unstarted.** It became seven issues under
-GitHub milestone 1 on 2026-09-08 — [#510](https://github.com/bestdan/workflow-skills/issues/510)
+**Phase 4 task 9 is broken down into seven issues under GitHub milestone 1** (filed
+2026-09-08) — [#510](https://github.com/bestdan/workflow-skills/issues/510)
 (export) → [#511](https://github.com/bestdan/workflow-skills/issues/511) (plan) →
 [#512](https://github.com/bestdan/workflow-skills/issues/512) (apply) →
 [#513](https://github.com/bestdan/workflow-skills/issues/513) (link) →
 [#514](https://github.com/bestdan/workflow-skills/issues/514) (verify) →
 [#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
-[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out). All seven sit
-at `status:0_untriaged`, unassigned, no branch. Verified 2026-09-12: there is no
-`commands/handlers/assets/linear-export.py` and `$HOME/src/linear-export/` does not
-exist. **#510 is the entry point and blocks the other six.**
+[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out).
+
+**#510's code is written; its export has not run, and that gap is the whole state of
+Phase 4.** `commands/handlers/assets/linear-export.py` plus both test pairs are on
+[PR #590](https://github.com/bestdan/workflow-skills/pull/590) (branch
+`bestdan/linear-export`, off `main`) — team-wide, `includeArchived: true`, paginating to
+exhaustion, and raising rather than truncating a nested connection. What does **not**
+exist is `$HOME/src/linear-export/` or any file in it. So **#510 stays open on its
+user-run criteria** (the live count, `PRE-746`'s attachment and relations, archived
+`PRE-730`'s presence, the off-machine copy), and the reason it could not be discharged
+is a host fact, not a code one — see "The export needs a host with a 1Password desktop
+session" below.
+
+**#511 (choose the projects) needs no export file and is startable now**; #512 onward
+cannot move until someone runs the export on a machine that can resolve the key. The
+five remaining issues still sit at `status:0_untriaged`, unassigned, no branch.
 
 **Task 9's scope was re-assessed 2026-09-12 and it is bigger and less well-defined than
 the task file assumed.** See "What task 9 is actually importing" below before starting
@@ -111,6 +122,29 @@ not re-run it, and do not re-derive it from documentation.
 criteria sitting on already-merged work. See "Acceptance criteria still owed".
 
 ## What will bite you
+
+### The export needs a host with a 1Password desktop session, and a green gate hides that
+
+**Measured 2026-09-12** while building #510, over SSH into the Mac mini. The Linear key
+resolves through `op read op://Private/…` from the gitignored
+`dev_docs/tasks/.task-config.local.yml`; that read returns **`authorization timeout`**,
+because 1Password's biometric prompt has no desktop to surface on. Read the error text,
+because the two are not the same problem: `promptError` means no session yet and
+`op signin` fixes it; **`authorization timeout` means the session lives on another
+machine and `op signin` will never help.** The alternatives are running on the machine
+with the desktop app, or `OP_SERVICE_ACCOUNT_TOKEN`, which is not set by default.
+
+**The trap is that nothing fails.** `scripts/check.sh:148` excludes
+`scripts/test-*-live.sh` from the gate outright, and each live harness exits **0** with a
+warning when no key resolves — by design, since a Linear personal key is a full-account
+bearer token that must never reach CI secrets. So a whole task can be written, tested,
+and merged green while the thing it exists to do has never happened once. **A green gate
+is not evidence for any criterion whose discharge is a live run.** Say "it skipped" when
+it skipped; the warning is the only signal, and it scrolls past.
+
+Practical note: an approval-based resolver is invalidated between resolves, so a harness
+that probes and then runs the script raises one dialog per resolve. Prefer
+`LINEAR_API_KEY=… bash scripts/test-linear-export-live.sh`.
 
 ### A cloud session gives a gh-issue batch neither the plugin nor a usable `gh`
 
@@ -397,8 +431,8 @@ named for the repo, and `Plugin data-ops enhancement` reads like plugin work but
 finplan's (PRE-325/327 are `scripts/finplan.py`). A selector written as "projects matching
 `workflow-skills`" silently drops 39 issues; one written as "anything plugin-shaped"
 silently imports finplan's. **#511 must carry an explicit, enumerated project list that a
-human approved — not a name pattern.** Decide it before #510 writes the export, since the
-export is team-wide anyway and the selection happens downstream.
+human approved — not a name pattern.** The export is team-wide regardless, so #511 never
+blocked on it and does not block on it now — the selection happens downstream, in #512.
 
 **One thing that is better than feared: the divergence is bounded, not growing.** The
 newest workflow-skills issue in Linear is PRE-823, created **2026-09-03** — four days
