@@ -1,6 +1,6 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-12 after #510's export script landed unrun.** Read this first, then
+**Redrafted 2026-09-13, after #510's export ran.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -95,24 +95,31 @@ still ahead of you.**
 [#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
 [#516](https://github.com/bestdan/workflow-skills/issues/516) (close out).
 
-**#510's code is written; its export has not run, and that gap is the whole state of
-Phase 4.** `commands/handlers/assets/linear-export.py` plus both test pairs are on
+**#510 is done bar one manual step, and the export exists.**
+`commands/handlers/assets/linear-export.py` plus both test pairs are on
 [PR #590](https://github.com/bestdan/workflow-skills/pull/590) (branch
 `bestdan/linear-export`, off `main`) — team-wide, `includeArchived: true`, paginating to
-exhaustion, and raising rather than truncating a nested connection. What does **not**
-exist is `$HOME/src/linear-export/` or any file in it. So **#510 stays open on its
-user-run criteria** (the live count, `PRE-746`'s attachment and relations, archived
-`PRE-730`'s presence, the off-machine copy), and the reason it could not be discharged
-is a host fact, not a code one — see "The export needs a host with a 1Password desktop
-session" below.
+exhaustion, and raising rather than truncating a nested connection. It ran on
+2026-09-13: **810 issues, 557 archived, 462 with comments, 110 with relations, across 40
+projects**, at `$HOME/src/linear-export/2026-09-13-prethink.json` (3.2 MB, outside every
+checkout).
 
-**#511 (choose the projects) needs no export file and is startable now**; #512 onward
-cannot move until someone runs the export on a machine that can resolve the key. The
-five remaining issues still sit at `status:0_untriaged`, unassigned, no branch.
+**Read the 810 against `PRE-835`, not against 781.** The export spans `PRE-5 … PRE-835`
+with 21 numbers missing to deleted issues, and that top identifier is what shows the
+pagination reached the end — it matches the highest key observed independently on
+2026-09-12. **An identifier is not an index**; nothing downstream may compute a count
+from a key, or treat a gap as a lost issue.
+
+The one thing still owed on #510 is human: **copy that file off this machine.** The
+directory has no remote, and once the Linear originals are cancelled it is the only
+record of those 810 keys.
+
+**#511 (choose the projects) and #512 (apply) are both unblocked.** The five remaining
+issues sit at `status:0_untriaged`, unassigned, no branch.
 
 **Task 9's scope was re-assessed 2026-09-12 and it is bigger and less well-defined than
-the task file assumed.** See "What task 9 is actually importing" below before starting
-#510.
+the task file assumed.** That re-assessment is now the live question, since it is #511's
+whole job. Read "What task 9 is actually importing" below before starting it.
 
 **The cloud-session probe is done and it came back red.** It was the last thing gating
 `gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
@@ -123,28 +130,41 @@ criteria sitting on already-merged work. See "Acceptance criteria still owed".
 
 ## What will bite you
 
-### The export needs a host with a 1Password desktop session, and a green gate hides that
+### `op` is dead over SSH, and there is a second Linear credential that is not
 
-**Measured 2026-09-12** while building #510, over SSH into the Mac mini. The Linear key
-resolves through `op read op://Private/…` from the gitignored
-`dev_docs/tasks/.task-config.local.yml`; that read returns **`authorization timeout`**,
-because 1Password's biometric prompt has no desktop to surface on. Read the error text,
-because the two are not the same problem: `promptError` means no session yet and
-`op signin` fixes it; **`authorization timeout` means the session lives on another
-machine and `op signin` will never help.** The alternatives are running on the machine
-with the desktop app, or `OP_SERVICE_ACCOUNT_TOKEN`, which is not set by default.
+**Measured 2026-09-13** while running #510's export from an SSH session on the Mac mini.
+Two facts, and the second is the one that saves you an hour.
 
-**The trap is that nothing fails.** `scripts/check.sh:148` excludes
-`scripts/test-*-live.sh` from the gate outright, and each live harness exits **0** with a
-warning when no key resolves — by design, since a Linear personal key is a full-account
-bearer token that must never reach CI secrets. So a whole task can be written, tested,
-and merged green while the thing it exists to do has never happened once. **A green gate
-is not evidence for any criterion whose discharge is a live run.** Say "it skipped" when
-it skipped; the warning is the only signal, and it scrolls past.
+**`op` cannot work here, and the error says which kind of cannot.** The key in
+`dev_docs/tasks/.task-config.local.yml` is an `op://Private/…` ref, and that read returns
+**`authorization timeout`** — 1Password's biometric prompt has no desktop to surface on.
+Do not read this as `promptError`, which means no session yet and is fixed by
+`op signin`; **`authorization timeout` means the session lives on another machine and
+`op signin` will never help.** `op account list` here reports no accounts configured at
+all, so the CLI is desktop-integrated only.
+
+**`~/.config/linear/client-credentials` is the way through.** It holds an OAuth app's
+client id and secret, and Linear's `client_credentials` grant against
+`https://api.linear.app/oauth/token` returns a working token at scope `read`. Contrary
+to the obvious worry, that app-actor token is **not** scope-limited in practice — it read
+all 810 issues including the 557 archived ones. Two things to know before using it: it is
+a **`Bearer`** token, not a personal `lin_api_…` key (`linear-export.py:auth_header()`
+handles both, and nothing else in `commands/handlers/assets/` does), and the token is a
+plaintext credential wherever you park it, so delete it after.
+
+**The trap that outlives both:** `scripts/check.sh:148` excludes `scripts/test-*-live.sh`
+from the gate outright, and each live harness exits **0** with a warning when no key
+resolves — by design, since a Linear personal key is a full-account bearer token that
+must never reach CI secrets. So a whole task can be written, tested, and merged green
+while the thing it exists to do has never happened once. **A green gate is not evidence
+for any criterion whose discharge is a live run.** Say "it skipped" when it skipped; the
+warning is the only signal, and it scrolls past.
 
 Practical note: an approval-based resolver is invalidated between resolves, so a harness
-that probes and then runs the script raises one dialog per resolve. Prefer
-`LINEAR_API_KEY=… bash scripts/test-linear-export-live.sh`.
+that probes and then runs the script raises one dialog per resolve. And a
+worktree-isolated session refuses `$(cat …)` in a command, so bridging a key from a file
+means the `api_key` rung of `.task-config.local.yml`, not a command substitution —
+remove it again afterwards.
 
 ### A cloud session gives a gh-issue batch neither the plugin nor a usable `gh`
 
