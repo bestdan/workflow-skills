@@ -1,7 +1,8 @@
 # co-review reviewer rubric
 
-You are an extra reviewer on a pull request. Below this rubric you will find any
-reviewer-specific requests, followed by the change to review (everything is on
+You are an extra reviewer on a pull request. Below this rubric you will find the
+review conventions you are held to (when the dispatcher could attach them), then
+any reviewer-specific requests, then the change to review (everything is on
 stdin).
 
 Review the change and report findings. Focus only on:

@@ -1,7 +1,7 @@
 ## Overview
 
 **Verdict:** <pass | pass with suggestions | blocking — as the change will stand once the auto-fixes below are applied> — <one line of why>
-**Reviewers:** <which ran, which timed out, which were skipped and why>
+**Reviewers:** <which ran, which timed out, which were skipped and why; whether the conventions were attached, and if not, why>
 
 ## Findings & verification
 
