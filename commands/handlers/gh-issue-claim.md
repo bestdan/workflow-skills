@@ -34,7 +34,7 @@ This path deliberately does not use `gh issue develop`: its
 generated branch name is not deterministic, so it cannot be probed before the claim,
 and the create it performs yields no rejection this flow can read as a lost race. The
 GitHub-native issue↔branch link is the cost; `Closes #<n>` in the PR body and the
-`[#<n>]` title prefix carry the association instead.
+`[#<n>]` token in the PR title carry the association instead.
 
 **Every label write is read-modify-write.** `gh-issue-state.py` takes the **complete
 managed set** and refuses a non-`--done` write that is missing exactly one `status:` and
@@ -200,7 +200,7 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
 
-2. **Open PR by issue number.** The execute path titles PRs `[#<n>] <title>`, so also catch a PR opened from an unlinked branch:
+2. **Open PR by issue number.** The execute path titles PRs `<type>(scope): <description> [#<n>]`, so also catch a PR opened from an unlinked branch:
 
    ```bash
    gh pr list --state open --search "[#<n>] in:title" --json number,url,title [--repo <repo>]
@@ -270,10 +270,12 @@ The claim locks on an **atomic primitive** — creating the `<branch>` ref, a se
 ## PR
 
 ```bash
-gh pr create --title "[#<n>] <title>" --body "Closes #<n>
+gh pr create --title "<type>(scope): <description> [#<n>]" --body "Closes #<n>
 
 <summary>" [--repo <repo>]
 ```
+
+The title grammar is the `agent-guidance` plugin's `portable.md` (`Git:` bullet), not this file.
 
 `Closes #<n>` on its own line is the completion signal — GitHub closes the issue on merge. Then post the PR URL back to the issue:
 

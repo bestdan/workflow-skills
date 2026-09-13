@@ -109,7 +109,7 @@ Runs on the **top-ranked candidate** immediately **before "Claim the issue"** â€
 
    If any PR is returned, **skip** â€” report `Skipped <IDENTIFIER>: open PR already exists (<url>)`.
 
-3. **Open PR by identifier.** The execute path puts `[<IDENTIFIER>]` in every PR title (see "PR" in `/do-tasks` section 3), so also catch a PR opened from a non-standard branch:
+3. **Open PR by identifier.** The execute path ends every PR title with `[<IDENTIFIER>]` (see "PR" in `/do-tasks` section 3), so also catch a PR opened from a non-standard branch:
 
    ```bash
    gh pr list --state open --search "<IDENTIFIER> in:title" --json number,url,title

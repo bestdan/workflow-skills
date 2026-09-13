@@ -248,7 +248,9 @@ to **draft** — the safe choice.
   (the same `ADMIN`/`MAINTAIN`/`WRITE` gate); otherwise leave it a draft and hand
   off in that state — never fail trying to ready a PR you lack permission to. On
   **linear/gh-issue/jira**, open the PR with the handler's own title/link
-  conventions (e.g. `[PRE-12]` + the linked issue), draft per the same gate.
+  conventions (e.g. `fix(scope): … [PRE-12]` + the linked issue), draft per the
+  same gate. The title grammar is the `agent-guidance` plugin's
+  `portable.md` (`Git:` bullet), not this file.
 - **PR body:** the evidence captured in step 3 (check output, screenshots,
   artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
   exactly how to judge it and what a "no" would invalidate.
