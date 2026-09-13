@@ -7,6 +7,27 @@ this first, then
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
 
+## The launcher prompt is these three lines
+
+Everything a fresh session needs is in this file, which is the point: the pointer
+that starts it stays small enough to paste and throw away. Do **not** write the
+briefing out as a second document — three `.dev_docs/task_N_handoff.md` files had
+accumulated by task 6, each an untracked copy of plan content telling a new session
+to begin already-merged work, none with any git history to recover from. If you find
+yourself wanting a longer pointer, the missing content belongs **here** instead.
+
+```
+Pick up https://github.com/bestdan/workflow-skills/issues/512
+
+Read dev_docs/gh-issue-migration/HANDOFF.md first — it is NOT on main, only on the
+unmerged draft PR #441. Get it with:
+  git show origin/bestdan/gh-issue-migration:dev_docs/gh-issue-migration/HANDOFF.md
+```
+
+Swap the issue number as the chain advances (#512 → #513 → #514 → #515 → #516) and
+the pointer keeps working, because which task is next is a fact this file carries
+rather than one the prompt has to.
+
 ## Redraft this file when you finish — read this before you start
 
 **Finishing a task includes rewriting this file for the agent who picks up the next
@@ -102,19 +123,39 @@ table nothing else in this repo states. Read it there, not from a copy.
 **#510 and #511 are complete**, both merged to `main`:
 `commands/handlers/assets/linear-export.py` as `d57d51c`
 ([PR #590](https://github.com/bestdan/workflow-skills/pull/590)), and
-`commands/handlers/assets/linear-import.py --plan` plus its test pair in
-[PR #597](https://github.com/bestdan/workflow-skills/pull/597).
+`commands/handlers/assets/linear-import.py` — `--plan` and `--show`, plus the test pair
+— as `32f8523` in v2.49.0
+([PR #597](https://github.com/bestdan/workflow-skills/pull/597)).
 
 **Two files on this machine are the input to everything downstream, and neither has a
 remote.** Both sit in `$HOME/src/linear-export/`:
 
-- `2026-09-13-prethink.json` — the export, 3.2 MB, sha256
+- `2026-09-13-prethink.json` — the export, 3.3 MB, sha256
   `60276d3c65fb8334a74b84ea65ba880816532137fcc5dba5a513ea3723ecc4b3`, **810 issues, 557
   archived**, 462 with comments, 110 with relations, across 40 projects. It is the only
   record of those keys once the Linear originals are cancelled.
-- `2026-09-13-import-plan.json` — the import plan #512 executes. Regenerable from the
-  export in seconds (the invocation is in `linear-import.py`'s header), so it is the
-  cheap half of the pair; the export is not.
+- `2026-09-13-import-plan.json` — the import plan #512 executes, 451 KB, sha256
+  `b080ff8585da0e10ee7ae2402858b215a55e4badbcd60323642a3a3536d4644e`.
+
+**Treat the two differently: the plan is regenerable, the export is not.** Rebuilding
+the plan from the export takes seconds and the invocation is in `linear-import.py`'s
+header, so a lost or stale plan costs nothing. A lost export is the provenance hole this
+whole phase exists to avoid.
+
+**Read an entry back rather than grepping the JSON.** `--show` prints one plan entry
+beside its Linear original, which is how the crosswalk is checked by a person — the
+plan is 125 entries and the question asked of it is never "does it parse":
+
+```
+python3 commands/handlers/assets/linear-import.py --show PRE-746 \
+    --plan-file "$HOME/src/linear-export/2026-09-13-import-plan.json" \
+    --export "$HOME/src/linear-export/2026-09-13-prethink.json"
+```
+
+Two things it deliberately shows: relation **direction** (`-> blocks X` is this issue
+blocking X, `<- blocks X` is X blocking it, and only the second becomes a `blocked_by`
+edge), and the footer sliced at the **last** `---`, because a Linear description may
+carry its own rule.
 
 **Read the 810 against `PRE-835`, not against 781.** The export spans `PRE-5 … PRE-835`
 with 21 numbers missing to deleted issues, and that top identifier is what shows the
@@ -159,6 +200,26 @@ counts are not meant to reconcile.
 reopens one by hand, regenerating the plan refuses (an open original means two live homes
 already exist), and `--apply` must not paper over it.
 
+**Three refusals guard the reopen decision, and `--apply` inherits rather than repeats
+them.** Re-implementing any of them is how they drift apart:
+
+- An original that is **OPEN** means two live homes already exist.
+- An original that **cannot be read** is unverified, which is not the same as absent — a
+  404 is not downgraded to `create`, because a permissions problem looks identical.
+- **Two Linear issues claiming one number** refuses. It was the only one of the three
+  that fails silently: both entries are legal alone, and the loss shows up as a Linear
+  key with no GitHub home after the import has run.
+
+A marker's **repository identity comes from its url, never its title.** `GitHub #288
+(migrated)` carries no repo, so the attachment path checks `attachment.url` against
+`--repo` exactly as the description-footer path does; an attachment naming another repo
+leaves the issue to be created fresh, and one disagreeing with its own url refuses.
+
+**Expect `PRE-416` to arrive needing a sweep, not a fix.** It lands
+`status:4_needs_review` with its PR #487 already merged, which is a faithful migration —
+Linear still has it In Review. `/sweep-for-complete` is the verb that notices the merged
+PR and closes it. Do not "correct" it during the import.
+
 **`papercut` is provisioned on this repo; `blocked` is not.** No live issue carries
 `blocked`, so nothing needs it today — but `--apply` must not assume a carried label
 exists. The four managed namespaces are all provisioned (task 17).
@@ -176,6 +237,17 @@ exists. The four managed namespaces are all provisioned (task 17).
    is the spelling `/reoptimize-tasks` reads as a dependency claim — see the footer rule
    below. These blockers have no edge and never can, because the issue they name is not
    being imported.
+
+**`duplicate` relations keep no direction, and that was decided rather than overlooked.**
+A reviewer argued they should: an outgoing duplicate means this issue duplicates the
+target, an inverse one means the target duplicates this canonical issue, and
+`linear-relations.py` populates its `duplicate_of` field from outgoing relations only for
+exactly that reason. It was declined on three grounds — the crosswalk puts
+`related`/`similar`/`duplicate` on one footer line, so a split amends the contract and
+belongs in the milestone description first; the footer is prose rather than a machine-read
+edge, unlike that consumed field; and the export contains **zero** duplicate relations, so
+it is handling for a path that cannot fire. **If a later export ever carries one, this is
+the decision to revisit**, starting with the milestone table.
 
 Also worth knowing rather than rediscovering: the export contains **zero**
 `<issue id=… href=…>` mentions, so the rewrite `linear-import.py` performs for them is
