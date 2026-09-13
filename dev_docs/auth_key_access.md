@@ -196,11 +196,18 @@ Removing it at `HEAD` is worth doing and is not the fix. The reference stays in
 history, in every clone taken since it landed, and in every fork — none of which
 a rewrite can reach.
 
-Rotation can. Revoke the key, **rename or move the item**, then update the
-reference in `.task-config.local.yml`. Every copy of the old pointer now names
-something that does not exist: the disclosure is not hidden, it is made false.
-The rename is the half that does the work — rotating alone leaves the disclosed
-location still correct and merely changes the secret behind it.
+Rotation can. **Revoke the key and issue a new one**, then update the reference
+in `.task-config.local.yml`. Every copy of the old pointer now names a dead
+credential: the disclosure is not hidden, it is made worthless.
+
+Revocation is the whole mitigation. Renaming a segment of the reference is
+**not** a substitute and is easy to overrate — resolution needs all three
+segments to match, so renaming any one of them breaks the disclosed reference
+equally, and none of it reaches someone who already read the value while it was
+live. Renaming the **item** buys a little residual hygiene, since it is the
+segment that identifies what the item holds; renaming the field buys almost
+none. Neither is worth doing in place of revoking, and after revoking neither is
+worth much at all.
 
 A rewrite, by contrast, renumbers every commit since the reference landed,
 breaks existing clones and forks, invalidates any commit hash cited in
