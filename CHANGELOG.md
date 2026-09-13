@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.2] - 2026-09-13
+
+### Fixes
+
+- name the context window behind crush's opaque oversize error [N/A] (#603) (4548842)
+
 ## [2.48.1] - 2026-09-13
 
 ### Fixes
