@@ -48,13 +48,13 @@ Order matters: the diff is read while the cwd is still the repo — `--cwd` reta
 
 crush exits non-zero on a real error, but check the output too: the rubric's terminal `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS` line is what proves a review actually happened. Missing it means **incomplete, not PASS** — treat it as a skipped reviewer (noted, never fatal). See the "Long reviews" note in [`../SKILL.md`](../SKILL.md) for the backgrounding pattern; a Hyper review is fast enough that it rarely applies.
 
-## A `NO INPUT` from crush means the pipe carried zero bytes — crush does read stdin
+## Diagnosing a `NO INPUT` from crush — it does read stdin, so measure the pipe
 
-`crush run` reads stdin in this version and every shape of the dispatch above delivers `<INPUT>` intact, so a `NO INPUT` is not the `agy` bug (see [`agy.md`](agy.md)) and is not fixed by retargeting the pointer at a file. Look at what the `cat "<INPUT>" |` pipe carried instead. This is verified, not inferred: it was tested against a spurious `NO INPUT` seen on 2026-09-12 (bestdan/agent-guidance#20) that did **not** reproduce.
+`crush run` reads stdin in this version and every shape of the dispatch above delivers `<INPUT>` intact, so a `NO INPUT` is not the `agy` bug (see [`agy.md`](agy.md)) and is not fixed by retargeting the pointer at a file. Look at what the `cat "<INPUT>" |` pipe carried instead — `prompt_len` separates an empty pipe from a missing one from a model-side refusal, and the closing paragraph below reads all three. This is verified, not inferred: it was tested against a spurious `NO INPUT` seen on 2026-09-12 (bestdan/agent-guidance#20) that did **not** reproduce.
 
 **The mechanism** is `MaybePrependStdin` in [`internal/cmd/root.go:918`](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/cmd/root.go#L918) at v0.92.0. When stdin is a **named pipe or a regular file** it `io.ReadAll`s it and sends `<stdin bytes> + "\n\n" + <prompt argument>` as the prompt; when stdin is a TTY, a socket, or a character device such as `/dev/null` it sends the prompt argument alone, silently. There is no size cap in that path.
 
-**The measurement** needs no model call and no credits: after any run, `crush --cwd "<NEUTRAL>" logs` carries one `prompt_len=<n>` line per dispatch (logs are per data dir, so pass the same `--cwd` the dispatch used), and `n` is exactly `<INPUT>` bytes + 2 + 258 (the pointer's length). Measured 2026-09-12 against crush v0.92.0, one unique input size per run so each line is attributable:
+**The measurement** needs no model call and no credits: after any run, `crush --cwd "<NEUTRAL>" logs` carries one `prompt_len=<n>` line per dispatch (logs are per data dir, so pass the same `--cwd` the dispatch used), and `n` is exactly `<INPUT>` bytes + 2 + 258 (the pointer's length). Measured 2026-09-12 against crush v0.92.0 (the 21,284-byte row 2026-09-13), one unique input size per run so each line is attributable:
 
 | Dispatch                                                                                        | `prompt_len` | Input delivered |
 | ----------------------------------------------------------------------------------------------- | ------------ | --------------- |
@@ -62,6 +62,7 @@ crush exits non-zero on a real error, but check the output too: the rubric's ter
 | Same without `--cwd`, without `-q`, without `-m` (each; canary echoed)                          | 721 each     | yes             |
 | `< "<INPUT>"` redirect instead of the pipe                                                      | 1265         | yes             |
 | 44,005-byte input (the real rubric plus an 8-commit diff)                                       | 44265        | yes             |
+| 21,284-byte input (the real rubric plus this file's own PR diff; returned a real review)        | 21544        | yes             |
 | Two dispatches in parallel, 1012 and 1013 bytes                                                 | 1272, 1273   | yes, unmixed    |
 | From a backgrounded Bash tool call (its shell stdin is `/dev/null`)                             | 1274         | yes             |
 | `--cwd` pointed at an empty directory with no `crush.json`                                      | 1270         | yes             |
@@ -69,7 +70,7 @@ crush exits non-zero on a real error, but check the output too: the rubric's ter
 | `< /dev/null`                                                                                   | 258          | not read        |
 | No pipe at all — stdin inherited from the Bash tool, which is a **socket**                      | 258          | not read        |
 
-So when the string `NO INPUT` comes back, the `prompt_len` line settles it: **258** means the pipe was missing (the dispatch was run without its `cat "<INPUT>" |` prefix, or with stdin inherited from the harness); **260** means the pipe was there and empty, so `<INPUT>` held zero bytes when `cat` ran — a per-agent-path race with another reviewer's `>` truncation, or an assembly that was split across the sandbox boundary (both in [`../SKILL.md`](../SKILL.md) under Built-in invocations); a **full-sized** value means the bytes reached the model and it emitted `NO INPUT` anyway, which is a model-side failure and the one case this table does not cover: it did not happen at 461 bytes in four runs, and it was not exercised at review size because the Hyper credits ran out before the 44KB run could complete (that row's bytes were confirmed by the log line, not by a review). If that last case turns up, the mitigation is the pointer, not the transport — the `If stdin is empty` clause is what licenses the string.
+So when the string `NO INPUT` comes back, the `prompt_len` line settles it: **258** means the pipe was missing (the dispatch was run without its `cat "<INPUT>" |` prefix, or with stdin inherited from the harness); **260** means the pipe was there and empty, so `<INPUT>` held zero bytes when `cat` ran — a per-agent-path race with another reviewer's `>` truncation, or an assembly that was split across the sandbox boundary (both in [`../SKILL.md`](../SKILL.md) under Built-in invocations); a **full-sized** value means the bytes reached the model and it emitted `NO INPUT` anyway, which is a model-side failure and the one case this table does not cover: it did not happen at 461 bytes in four runs, nor at 21,284 bytes, where a full review came back. What stays untested is the top of the range: the Hyper credits ran out before the 44KB run could complete, so that row's bytes were confirmed by the log line, not by a review. If that last case turns up, the mitigation is the pointer, not the transport — the `If stdin is empty` clause is what licenses the string.
 
 ## Permission allow-rule (exact-match, approve once)
 
