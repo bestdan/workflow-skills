@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.4] - 2026-09-13
+
+### Fixes
+
+- set branch_prefix so the claim lock is not caller-dependent [#599] (#605) (2cd2764)
+
 ## [2.48.3] - 2026-09-13
 
 ### Fixes
