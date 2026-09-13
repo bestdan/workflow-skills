@@ -126,6 +126,11 @@ FOOTER_RELATION_TYPES = ("related", "similar", "duplicate")
 # question 3, resolved 2026-09-07): the catch-all backlog, whose milestone would
 # name every issue in the repo, and the token-cost-fix project, which has no live
 # issues to group. Override with --no-milestone.
+# What the summary calls the bucket of entries with no milestone. On GitHub that
+# absence already means the catch-all, so it needs a name a reader recognises
+# rather than a null.
+NO_MILESTONE_LABEL = "(none)"
+
 NO_MILESTONE_PROJECTS = (
     "workflow-skills backlog",
     "Linear MCP token-cost fix — GraphQL fast-path for find-candidates",
@@ -184,17 +189,21 @@ def rewrite_issue_mentions(text):
     return ISSUE_MENTION_RE.sub(replace, text)
 
 
-def migrated_footer_re(repo):
-    """Match a migrated-from footer that names THIS repo, capturing the number.
+def migrated_markers(repo):
+    """The (footer, attachment-url) patterns identifying an original in THIS repo.
 
-    Scoped to the target repo on purpose: a footer citing another repository's
-    issue number is not an original to reopen here, and reopening by number
-    alone would land on an unrelated issue.
+    Both are scoped to the target repo, and the symmetry is the point. A footer
+    citing another repository's issue number is not an original to reopen here —
+    and neither is an attachment, but an attachment **title** carries no
+    repository identity at all, so a `GitHub #288 (migrated)` left by some other
+    repo's migration would otherwise reopen #288 here. The export records each
+    attachment's `url` beside its title, so the attachment path can run the same
+    check the footer path does.
     """
-    return re.compile(
-        r"Migrated from\s+\[?<?https://github\.com/"
-        + re.escape(repo)
-        + r"/issues/(\d+)>?\]?"
+    issue_url = r"https://github\.com/" + re.escape(repo) + r"/issues/(\d+)"
+    return (
+        re.compile(r"Migrated from\s+\[?<?" + issue_url + r">?\]?"),
+        re.compile(issue_url + r"/?$"),
     )
 
 
@@ -298,13 +307,23 @@ def select(issues, projects, keys):
     ]
 
 
-def resolve_review_state(issues, review_state):
+def resolve_review_state(issues, selected, review_state):
     """Assert the team really has the state the review row keys on.
 
     Every other crosswalk row reads a state TYPE, which Linear fixes. This one
     reads a NAME, which the team can rename — and a rename would quietly route
     every in-review issue to `status:3_started`, which reads as healthy. So the
     name is checked against the states the export actually contains.
+
+    The export carries no state catalogue (`linear-export.py` exports
+    `team { id key name }`), so existence is inferred from the states issues
+    occupy — across the WHOLE export, not the selection, since a team-wide state
+    is what the name has to exist in. The check only fires when at least one
+    SELECTED issue is `started`: with none, the review row cannot apply to any
+    entry, so a refusal there would be a false alarm about a row that is not
+    being used. That is the only case the gate changes — a review column that
+    empties while other started issues remain still fails to match the name, and
+    still refuses.
     """
     started = {
         name
@@ -312,7 +331,10 @@ def resolve_review_state(issues, review_state):
         if ((issue.get("state") or {}).get("type")) == "started"
         and (name := (issue.get("state") or {}).get("name"))
     }
-    if review_state not in started:
+    any_started = any(
+        ((issue.get("state") or {}).get("type")) == "started" for issue in selected
+    )
+    if any_started and review_state not in started:
         raise PlanError(
             f"no `started` state named {review_state!r} in the export "
             f"(found: {', '.join(sorted(started)) or 'none'}) — "
@@ -454,7 +476,7 @@ def body(issue, slug, date, related, dropped_blockers):
     if related:
         lines.append(
             f"Related: {', '.join(related)} (relations of type "
-            "related/similar are not native on GitHub)."
+            "related/similar/duplicate are not native on GitHub)."
         )
     if dropped_blockers:
         lines.append(
@@ -477,18 +499,30 @@ def comments(issue):
     ]
 
 
-def migrated_number(issue, footer_re):
+def migrated_number(issue, markers):
     """The GitHub issue this Linear issue was migrated out of, or None.
 
-    Both markers are read, and a disagreement refuses: two different numbers
-    means the markers no longer describe one original, and picking either would
-    reopen the wrong issue.
+    Every marker found is read, and a disagreement refuses: two different
+    numbers means the markers no longer describe one original, and picking
+    either would reopen the wrong issue. An attachment contributes both its
+    title's number and its url's, so a marker that disagrees with itself trips
+    that same refusal instead of being resolved arbitrarily.
     """
+    footer_re, url_re = markers
     numbers = []
     for attachment in issue.get("attachments") or []:
-        match = MIGRATED_ATTACHMENT_RE.match(attachment.get("title") or "")
-        if match:
-            numbers.append(int(match.group(1)))
+        title = MIGRATED_ATTACHMENT_RE.match(attachment.get("title") or "")
+        if not title:
+            continue
+        # The url is what says whether this marker is about the target repo at
+        # all. One naming a different repo — or absent, which is
+        # indistinguishable from that — leaves the issue to be created fresh,
+        # because its original does not live here.
+        url = url_re.search((attachment.get("url") or "").strip())
+        if not url:
+            continue
+        numbers.append(int(title.group(1)))
+        numbers.append(int(url.group(1)))
     match = footer_re.search(issue.get("description") or "")
     if match:
         numbers.append(int(match.group(1)))
@@ -523,21 +557,25 @@ def github_issue_state(repo, number):
     return state.upper() if isinstance(state, str) else None
 
 
-def resolve_actions(selected, repo, footer_re, reader=None):
+def resolve_actions(selected, repo, markers, reader=None):
     """Decide create-versus-reopen for every selected issue.
 
     Reopening keeps the number that branch names and PR bodies already cite,
     which is the whole reason these are not recreated. The candidate's original
-    is verified before the plan trusts it, and the two failure modes are
+    is verified before the plan trusts it, and the three failure modes are
     reported TOGETHER rather than one per run: an original that cannot be read
-    is unverifiable, and one that is still OPEN means two live homes already
-    exist, which is a state no import may deepen.
+    is unverifiable; one that is still OPEN means two live homes already exist,
+    which is a state no import may deepen; and two Linear issues claiming the
+    same number would have `--apply` reopen one issue twice and leave the other
+    with no home at all — the only one of the three that is silent rather than
+    merely wrong.
     """
     reader = reader or github_issue_state
     actions, problems = {}, []
+    claimed: dict = {}
     for issue in selected:
         key = issue.get("identifier")
-        number = migrated_number(issue, footer_re)
+        number = migrated_number(issue, markers)
         if number is None:
             actions[key] = {"action": "create", "number": None}
             continue
@@ -548,7 +586,13 @@ def resolve_actions(selected, repo, footer_re, reader=None):
             problems.append(
                 f"{key}: {repo}#{number} is OPEN — two live homes already exist"
             )
+        elif number in claimed:
+            problems.append(
+                f"{key}: {repo}#{number} is already claimed by {claimed[number]} — "
+                "two Linear issues cannot reopen one GitHub issue"
+            )
         else:
+            claimed[number] = key
             actions[key] = {"action": "reopen", "number": number}
     if problems:
         raise PlanError(
@@ -667,7 +711,14 @@ def summarize(document, selected, projects):
         "entries": len(entries),
         "by_action": tally(entry["action"] for entry in entries),
         "by_status": tally(entry["managed_labels"][0] for entry in entries),
-        "by_milestone": tally(entry["milestone"] for entry in entries),
+        # Named rather than left as None: json.dump would emit that key as the
+        # string "null", while the printed summary calls the same bucket
+        # "(none)" — one bucket with two names across the two renderings of one
+        # plan. The entries themselves keep `milestone: null`, which is the
+        # field --apply reads.
+        "by_milestone": tally(
+            entry["milestone"] or NO_MILESTONE_LABEL for entry in entries
+        ),
         "by_project": {name: live_by_project.get(name, 0) for name in projects},
         "empty_projects": sorted(
             name for name in projects if not live_by_project.get(name)
@@ -710,8 +761,8 @@ def build_plan(export, args, validator, vocabulary, groups, reader=None):
     """The whole plan document. Raises PlanError rather than writing anything."""
     issues = export["issues"]
     selected = select(issues, args.project, args.issue)
-    review_state = resolve_review_state(issues, args.review_state)
-    footer_re = migrated_footer_re(args.repo)
+    review_state = resolve_review_state(issues, selected, args.review_state)
+    markers = migrated_markers(args.repo)
 
     document = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -742,7 +793,7 @@ def build_plan(export, args, validator, vocabulary, groups, reader=None):
                 "viewer": args.viewer,
                 "slug": workspace_slug(issues),
                 "date": args.date,
-                "actions": resolve_actions(selected, args.repo, footer_re, reader),
+                "actions": resolve_actions(selected, args.repo, markers, reader),
             },
         ),
     }
@@ -756,7 +807,7 @@ def build_plan(export, args, validator, vocabulary, groups, reader=None):
 def write_plan(document, path, force):
     if os.path.exists(path) and not force:
         raise PlanError(f"refusing to overwrite {path} — pass --force to replace it.")
-    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     # Write-then-rename: a crash mid-write must not leave a half-written plan
     # where --apply would read it as the whole mapping.
     tmp = str(path) + ".tmp"
@@ -781,7 +832,7 @@ def print_summary(document, path):
         print(f"    {rung}: {count}")
     print("  milestones:")
     for milestone, count in summary["by_milestone"].items():
-        print(f"    {milestone or '(none)'}: {count}")
+        print(f"    {milestone}: {count}")
     print("  live issues per selected project:")
     for name, count in summary["by_project"].items():
         print(f"    {count:>4}  {name}")

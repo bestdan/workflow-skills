@@ -16,6 +16,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -35,6 +36,24 @@ MILESTONE_PROJECT = "reviewer-quality"
 EMPTY_PROJECT = "Linear MCP token-cost fix — GraphQL fast-path for find-candidates"
 OTHER_PROJECT = "finplan backlog"
 VIEWER = "dp.egan@gmail.com"
+
+
+def attachment(entry):
+    """One attachment, as the export records it — `{title, url}`.
+
+    A bare string is a marker whose url points at the target repo's issue of the
+    same number, which is what the eight real candidates look like. A
+    `(title, url)` pair spells the url out, for the cases where it names another
+    repo or a different number.
+    """
+    if isinstance(entry, tuple):
+        title, url = entry
+        return {"title": title, "url": url}
+    number = re.search(r"#(\d+)", entry)
+    url = (
+        f"https://github.com/{REPO}/issues/{number.group(1)}" if number else "https://x"
+    )
+    return {"title": entry, "url": url}
 
 
 def issue(
@@ -85,7 +104,7 @@ def issue(
         "relations": [{"type": "blocks", "identifier": k} for k in blocks]
         + [{"type": "related", "identifier": k} for k in related],
         "inverseRelations": [{"type": "blocks", "identifier": k} for k in blocked_by],
-        "attachments": [{"title": t, "url": "https://x"} for t in attachments],
+        "attachments": [attachment(entry) for entry in attachments],
         "comments": [
             {
                 "body": b,
@@ -450,6 +469,28 @@ class ReviewStateTests(PlanTests):
         )
         self.assertEqual(entries["PRE-6"]["managed_labels"][0], "status:4_needs_review")
 
+    def test_no_selected_started_issue_means_the_check_cannot_fire(self):
+        """With nothing `started` selected, the review row applies to no entry.
+
+        The export carries no state catalogue, so the name is checked against the
+        states issues occupy — and a review column nobody currently sits in would
+        otherwise refuse every run. Refusing over a row that cannot apply is a
+        false alarm, so the gate is what the selection actually needs.
+        """
+        issues = [
+            row
+            for row in fixture_issues()
+            if (row["state"]["type"] != "started" or row["identifier"] == "PRE-6")
+        ]
+        for row in issues:
+            # PRE-6 keeps the milestone project in the selection but stops being
+            # `started`, so no selected issue is.
+            if row["identifier"] == "PRE-6":
+                row["state"] = {"type": "backlog", "name": "Backlog"}
+        entries = self._entries(issues=issues)
+        self.assertEqual(entries["PRE-6"]["managed_labels"][0], "status:0_untriaged")
+        self.assertNotIn("PRE-5", entries)
+
 
 class ReopenTests(PlanTests):
     def test_a_migrated_issue_reopens_its_original(self):
@@ -489,6 +530,22 @@ class ReopenTests(PlanTests):
         self.assertIn("PRE-7", err)
         self.assertIn("PRE-12", err)
 
+    def test_two_issues_claiming_one_number_refuse(self):
+        """Otherwise --apply reopens one issue twice and loses the other.
+
+        Unlike the open and unreadable cases, this one fails silently: both
+        entries are legal on their own, and the loss only shows up as a Linear
+        key with no GitHub home once the import has run.
+        """
+        issues = fixture_issues()
+        issues.append(issue("PRE-19", attachments=("GitHub #288 (migrated)",)))
+        code, _, err = self._run(issues=issues)
+        self.assertEqual(code, 2)
+        self.assertIn("already claimed by", err)
+        self.assertIn("PRE-7", err)
+        self.assertIn("PRE-19", err)
+        self.assertFalse(Path(self.out).exists())
+
     def test_the_description_footer_is_the_second_detector(self):
         """The live export writes it markdown-wrapped, mid-body.
 
@@ -496,7 +553,7 @@ class ReopenTests(PlanTests):
         and a missed candidate is a duplicate GitHub issue rather than a loud
         failure — so this is the form the regex must accept.
         """
-        footer_re = linear_import.migrated_footer_re(REPO)
+        markers = linear_import.migrated_markers(REPO)
         row = issue(
             "PRE-13",
             description=(
@@ -506,25 +563,57 @@ class ReopenTests(PlanTests):
                 "> **Sizing flag (added during migration):** estimated **8**.\n"
             ),
         )
-        self.assertEqual(linear_import.migrated_number(row, footer_re), 288)
+        self.assertEqual(linear_import.migrated_number(row, markers), 288)
 
     def test_a_footer_naming_another_repo_is_not_an_original(self):
-        footer_re = linear_import.migrated_footer_re(REPO)
+        markers = linear_import.migrated_markers(REPO)
         row = issue(
             "PRE-14",
             description="Migrated from https://github.com/bestdan/dotfiles/issues/288",
         )
-        self.assertIsNone(linear_import.migrated_number(row, footer_re))
+        self.assertIsNone(linear_import.migrated_number(row, markers))
 
     def test_disagreeing_markers_refuse(self):
-        footer_re = linear_import.migrated_footer_re(REPO)
+        markers = linear_import.migrated_markers(REPO)
         row = issue(
             "PRE-15",
             attachments=("GitHub #288 (migrated)",),
             description=f"Migrated from https://github.com/{REPO}/issues/999",
         )
         with self.assertRaises(linear_import.PlanError) as ctx:
-            linear_import.migrated_number(row, footer_re)
+            linear_import.migrated_number(row, markers)
+        self.assertIn("disagree", str(ctx.exception))
+
+    def test_an_attachment_naming_another_repo_is_not_an_original(self):
+        """An attachment TITLE carries no repository identity.
+
+        `GitHub #288 (migrated)` left by another repo's migration would reopen
+        #288 here on the title alone, which is a write against an unrelated
+        issue. The url is the only thing that says which repo the marker is
+        about, so it decides.
+        """
+        markers = linear_import.migrated_markers(REPO)
+        row = issue(
+            "PRE-17",
+            attachments=(
+                (
+                    "GitHub #288 (migrated)",
+                    "https://github.com/bestdan/dotfiles/issues/288",
+                ),
+            ),
+        )
+        self.assertIsNone(linear_import.migrated_number(row, markers))
+
+    def test_an_attachment_disagreeing_with_its_own_url_refuses(self):
+        markers = linear_import.migrated_markers(REPO)
+        row = issue(
+            "PRE-18",
+            attachments=(
+                ("GitHub #288 (migrated)", f"https://github.com/{REPO}/issues/290"),
+            ),
+        )
+        with self.assertRaises(linear_import.PlanError) as ctx:
+            linear_import.migrated_number(row, markers)
         self.assertIn("disagree", str(ctx.exception))
 
 
@@ -678,6 +767,28 @@ class AssigneeTests(PlanTests):
             sorted(plan["summary"]["assignee_mismatches"]), ["PRE-5", "PRE-6"]
         )
 
+    def test_the_viewer_matches_either_the_linear_name_or_the_email(self):
+        """Linear carries both, and `--viewer` accepts either.
+
+        Everywhere else in the fixture an assignee has one identity under both
+        fields, so this branch — the reason build_entries reads a set rather than
+        a single field — would otherwise never run.
+        """
+        for viewer in ("Dan Egan", "dan@example.com"):
+            with self.subTest(viewer=viewer):
+                issues = fixture_issues()
+                for row in issues:
+                    if row["identifier"] == "PRE-5":
+                        row["assignee"] = {
+                            "name": "Dan Egan",
+                            "email": "dan@example.com",
+                        }
+                entries = self._entries(
+                    issues=issues, extra_args=("--viewer", viewer, "--force")
+                )
+                self.assertEqual(entries["PRE-5"]["assignee"], "@me")
+                self.assertIsNone(entries["PRE-5"]["assignee_mismatch"])
+
     def test_an_unstarted_issue_is_never_assigned(self):
         entries = self._entries(extra_args=("--viewer", VIEWER))
         self.assertIsNone(entries["PRE-3"]["assignee"])
@@ -691,6 +802,9 @@ class OutputTests(PlanTests):
         self.assertEqual(summary["by_action"], {"create": 8, "reopen": 1})
         self.assertEqual(summary["by_status"]["status:0_untriaged"], 4)
         self.assertEqual(summary["reopen_targets"], {"PRE-7": 288})
+        # Named, not None: json.dump would write that key as the string "null"
+        # while the printed summary called the same bucket "(none)".
+        self.assertEqual(summary["by_milestone"], {"(none)": 8, MILESTONE_PROJECT: 1})
         self.assertEqual(summary["sub_issues"], 1)
 
     def test_oversized_estimates_are_flagged_for_break_down_task(self):
