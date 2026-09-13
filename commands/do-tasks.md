@@ -491,7 +491,7 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    reconstruct it when the field is present), do the work, run the project's
    tests/lints (`just check` here).
 6. **PR** — `gh pr create` with a Conventional Commits title ending in the Linear
-   identifier in brackets (`<type>(<scope>): <description> [PRE-12]`) and
+   identifier in brackets (`<type>(scope): <description> [PRE-12]`) and
    `Closes <identifier>` on its own line in the body; post the PR URL as a Linear
    comment. **Close only issues this PR actually finishes, each
    as its own `Closes <identifier>` line** (more than one is fine when the PR
@@ -1097,8 +1097,9 @@ Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds th
 config read (`ready_status` is required here), the find-candidates JQL, the
 in-flight pre-flight, the feasibility judgment, the atomic `task/<KEY>` claim lock
 (defined in `commands/handlers/claim-lock.md`) plus the self-assign + transition board
-marker, `gh pr create` with the
-`[<KEY>]` title prefix, the move-to-review transition, bail mechanics, and the
+marker, `gh pr create` with a
+Conventional Commits title ending in `[<KEY>]`, the move-to-review transition,
+bail mechanics, and the
 report format. `/do-tasks` runs these phases in the **current session** over the
 Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
