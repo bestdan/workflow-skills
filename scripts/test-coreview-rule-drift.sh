@@ -315,12 +315,20 @@ fi
 
 # And the docs must keep passing it. The script cannot enforce its own call
 # sites, so assert them here — this is the half that actually stays fixed.
+#
+# Count, don't just match: two file-wide greps joined by && would pass a file
+# that grew a SECOND, unflagged code block while the flag stayed in the first.
+# Requiring every invocation to carry the flag within two following lines (the
+# documented form wraps the flag onto the next line) is what makes a
+# reintroduced bug fail, not merely a wholly removed flag.
 for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
-  if grep -q 'coreview-rule-drift\.py' "$doc" \
-    && grep -q -- '--plugin-root "${CLAUDE_PLUGIN_ROOT}"' "$doc"; then
-    pass "$(basename "$doc") passes --plugin-root"
+  calls=$(grep -c 'coreview-rule-drift\.py' "$doc")
+  flagged=$(grep -A2 'coreview-rule-drift\.py' "$doc" \
+    | grep -c -- '--plugin-root "${CLAUDE_PLUGIN_ROOT}"')
+  if [ "$calls" -gt 0 ] && [ "$calls" -eq "$flagged" ]; then
+    pass "$(basename "$doc"): all $calls invocation(s) pass --plugin-root"
   else
-    fail "$(basename "$doc") invokes coreview-rule-drift.py without --plugin-root"
+    fail "$(basename "$doc"): $flagged of $calls invocation(s) pass --plugin-root"
   fi
 done
 
