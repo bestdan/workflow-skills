@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.6] - 2026-09-13
+
+### Fixes
+
+- reconcile row 4 strips rungs from closed issues [#608] (#612) (ec673df)
+
 ## [2.48.5] - 2026-09-13
 
 ### Fixes
