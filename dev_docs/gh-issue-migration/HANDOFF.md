@@ -1,6 +1,8 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-13, after #510's export ran.** Read this first, then
+**Redrafted 2026-09-13, after #510 merged. #511 is next and is an implementation task,
+not the open decision earlier revisions described — see "Where things stand".** Read this
+first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -95,14 +97,17 @@ still ahead of you.**
 [#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
 [#516](https://github.com/bestdan/workflow-skills/issues/516) (close out).
 
-**#510 is done bar one manual step, and the export exists.**
-`commands/handlers/assets/linear-export.py` plus both test pairs are on
-[PR #590](https://github.com/bestdan/workflow-skills/pull/590) (branch
-`bestdan/linear-export`, off `main`) — team-wide, `includeArchived: true`, paginating to
-exhaustion, and raising rather than truncating a nested connection. It ran on
-2026-09-13: **810 issues, 557 archived, 462 with comments, 110 with relations, across 40
-projects**, at `$HOME/src/linear-export/2026-09-13-prethink.json` (3.2 MB, outside every
-checkout).
+**#510 is complete.** `commands/handlers/assets/linear-export.py` and both test pairs
+merged to `main` on 2026-09-13 as `d57d51c` ([PR #590](https://github.com/bestdan/workflow-skills/pull/590)).
+The export ran, and the file was copied off this machine over Taildrop. The issue itself
+may still read `status:0_untriaged` — closing it is the only thing left, and it is
+bookkeeping, not work.
+
+**The export is the input to everything downstream:**
+`$HOME/src/linear-export/2026-09-13-prethink.json`, 3.2 MB, sha256
+`60276d3c65fb8334a74b84ea65ba880816532137fcc5dba5a513ea3723ecc4b3` — **810 issues, 557
+archived**, 462 with comments, 110 with relations, across 40 projects. It is the only
+record of those keys once the Linear originals are cancelled; there is no remote.
 
 **Read the 810 against `PRE-835`, not against 781.** The export spans `PRE-5 … PRE-835`
 with 21 numbers missing to deleted issues, and that top identifier is what shows the
@@ -110,16 +115,76 @@ pagination reached the end — it matches the highest key observed independently
 2026-09-12. **An identifier is not an index**; nothing downstream may compute a count
 from a key, or treat a gap as a lost issue.
 
-The one thing still owed on #510 is human: **copy that file off this machine.** The
-directory has no remote, and once the Linear originals are cancelled it is the only
-record of those 810 keys.
+## #511 is next, and it is not the decision you were told it was
 
-**#511 (choose the projects) and #512 (apply) are both unblocked.** The five remaining
-issues sit at `status:0_untriaged`, unassigned, no branch.
+Earlier revisions of this file said the scoping question — which Linear projects count
+as workflow-skills — was open and belonged to #511. **It is already resolved in #511's
+own body**, as "plan open question 1, resolved": seven named projects plus `PRE-685` and
+`PRE-815`, with `autopilot-harness` deferred to
+[#508](https://github.com/bestdan/workflow-skills/issues/508). #511 is an
+**implementation** task. Do not reopen the selection; implement it.
 
-**Task 9's scope was re-assessed 2026-09-12 and it is bigger and less well-defined than
-the task file assumed.** That re-assessment is now the live question, since it is #511's
-whole job. Read "What task 9 is actually importing" below before starting it.
+**That selection was validated against the export on 2026-09-13 and it is sound** —
+every one of the seven project names matches the export exactly, and both named issues
+exist and are live. It selects **125 live issues** (state type `backlog`, `unstarted` or
+`started`):
+
+| Project                                           | Live | Total |
+| ------------------------------------------------- | ---: | ----: |
+| `workflow-skills backlog`                         |   82 |   111 |
+| `Auto-pilot mode — /deliver-task + /auto-pilot`   |   18 |    36 |
+| `workflow-skills: Handler parity follow-ups`      |   16 |    49 |
+| `reviewer-quality`                                |    5 |     5 |
+| `Deterministic-script extraction`                 |    1 |    11 |
+| `reconcile-tasks`                                 |    1 |    12 |
+| `Linear MCP token-cost fix — GraphQL fast-path …` |    0 |     4 |
+| `PRE-685`, `PRE-815` (no project)                 |    2 |     2 |
+
+**One selected project is empty.** The token-cost-fix project has 0 live issues — all 4
+are terminal. Selecting it is harmless and contributes nothing; do not read a zero in
+the plan summary as a selection bug.
+
+**The "96 or 135" figures below are superseded.** Both were estimates made before an
+export existed, and neither is the number. The gap is not the scoping question: it is
+that `Handler parity follow-ups` has 16 live rather than 14, and that
+`autopilot-harness`'s 15 are excluded by the #508 deferral rather than included "by
+content". **Anything computing a count now reads the export, not this file.**
+
+### Which coder should write it
+
+Profiled 2026-09-13 against `select-coder`'s matrix, with the availability cache
+re-probed the same day (the old block was 72 days stale).
+
+**Author it with `opus:claude-opus-5`.** The task reads as `standard-pr` by size — one
+asset plus one test pair — but it is **`verification-sensitive`** in character, and that
+label decides the routing: the deliverable is a crosswalk whose correctness nothing
+downstream re-checks, guarded by a validator whose refusal path is the safety property.
+A wrong plan becomes 125 wrong GitHub issues in #512. The matrix's carve-out bars
+`codex:gpt-5.6-sol` from exactly this label, and note that **codex's resolved default on
+this machine is now `gpt-5.6-luna`** — the mechanical-bulk tier — so an unpinned codex
+dispatch would author this with the weakest model in the pool.
+
+**Use codex as a reviewer, not as the author.** `/co-review` already dispatches it
+(`codex` and `crush` are the configured local reviewers), and that is the cross-vendor
+second opinion this work wants. On #510 it was the reviewer pool — Copilot and crush,
+independently — that caught the one real defect, and the defect was **a test that did
+not test what it claimed**. Expect the same class here and structure for it.
+
+**Do not fan this out across subagents.** It is one file whose parts share a data model;
+splitting it costs more in coordination than it saves. Two narrow delegations do pay,
+and neither is authorship:
+
+- An `Explore` agent to map the three contracts the plan must satisfy before you write
+  any of it — `labels.yml`'s vocabulary, `validate()` in `gh-issue-state.py`, and the
+  `EXACTLY_ONE`/`AT_MOST_ONE` constants in `_labels.py`. Cheaper than reading four files
+  into the authoring context.
+- The reopen-detection sweep is I/O, not reasoning: it is one `gh issue view` per
+  candidate carrying a migrated-from marker. Batch it, and remember the issue's own rule
+  — an original that is **open** is a refusal, because two live homes already exist.
+
+**Before dispatching any external coder, deal with `~/.linear-key`** (see below). A
+plaintext full-account token in `$HOME` is reachable by any backend with filesystem
+access, and gate 1 of the matrix is about exactly that exposure.
 
 **The cloud-session probe is done and it came back red.** It was the last thing gating
 `gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
@@ -151,6 +216,15 @@ all 810 issues including the 557 archived ones. Two things to know before using 
 a **`Bearer`** token, not a personal `lin_api_…` key (`linear-export.py:auth_header()`
 handles both, and nothing else in `commands/handlers/assets/` does), and the token is a
 plaintext credential wherever you park it, so delete it after.
+
+> **Two credentials are live on this machine right now, and nobody has decided their
+> fate.** `~/.linear-key` holds the OAuth token in plaintext (mode 600), and
+> `~/src/linear-token.py` is the throwaway that mints it. They were left in place in case
+> #511/#512 want the same token, which is a real convenience and a real exposure: the
+> token is full-account, and **any coder backend with filesystem access can read it**.
+> Decide before dispatching an external coder — either delete both and re-mint when
+> needed (the script takes seconds and the client credentials persist), or keep them and
+> route authorship locally. Do not leave the question open while fanning work out.
 
 **The trap that outlives both:** `scripts/check.sh:148` excludes `scripts/test-*-live.sh`
 from the gate outright, and each live harness exits **0** with a warning when no key
@@ -420,39 +494,23 @@ Do not let the gate silently score the handler down for a gap that is auto-pilot
 
 ## What task 9 is actually importing
 
-**Re-assessed 2026-09-12 against the live Linear workspace.** The task file's "84 backlog
-issues plus its share of the active set" is stale, and the bigger problem is that it names
-no predicate for _which_ issues are workflow-skills'.
+**Settled. The counting argument this section used to make is over** — an export exists,
+so the selected set is 125 and the authority is the file, not a table here. The numbers
+that were in this space (96 by name, 135 by content) were pre-export estimates and both
+were wrong; see "#511 is next" above for the validated breakdown.
 
-Live (non-terminal, unarchived) PreThink issues, counted by state across `backlog`,
-`unstarted` and `started`:
+**What survives is the reasoning, because #512 still needs it.**
 
-| Linear project                                  | Live | workflow-skills?          |
-| ----------------------------------------------- | ---: | ------------------------- |
-| `workflow-skills backlog`                       |   82 | yes, by name              |
-| `workflow-skills: Handler parity follow-ups`    |   14 | yes, by name              |
-| `Auto-pilot mode — /deliver-task + /auto-pilot` |   18 | yes, by content           |
-| `autopilot-harness`                             |   15 | yes, by content           |
-| `reviewer-quality`                              |    5 | yes, by content           |
-| `reconcile-tasks`                               |    1 | yes, by content           |
-| `Deterministic-script extraction`               |    1 | ambiguous                 |
-| `Plugin data-ops enhancement`                   |    7 | **no** — finplan's plugin |
-| `aiutopilot backlog`                            |    2 | **no** — separate repo    |
-
-**So the answer is 96 or 135 depending on a question nobody has answered.** 96 is the two
-projects whose names say workflow-skills. 135 adds the four that are unambiguously this
-repo's work — `/auto-pilot`, `/deliver-task`, `/reconcile-tasks` and the co-review
-reviewer-quality score are all skills in this plugin — under project names that do not say
-so. Both numbers exceed the task file's 84.
-
-**The trap, and it is #511's problem.** Linear has no repo field. Project name is the only
-proxy, and it is a lying one in both directions: four workflow-skills projects are not
-named for the repo, and `Plugin data-ops enhancement` reads like plugin work but is
-finplan's (PRE-325/327 are `scripts/finplan.py`). A selector written as "projects matching
-`workflow-skills`" silently drops 39 issues; one written as "anything plugin-shaped"
-silently imports finplan's. **#511 must carry an explicit, enumerated project list that a
-human approved — not a name pattern.** The export is team-wide regardless, so #511 never
-blocked on it and does not block on it now — the selection happens downstream, in #512.
+**The trap, and why the resolved list is shaped the way it is.** Linear has no repo
+field. Project name is the only proxy, and it is a lying one in both directions: four
+workflow-skills projects are not named for the repo, and `Plugin data-ops enhancement`
+reads like plugin work but is finplan's (PRE-325/327 are `scripts/finplan.py`). A
+selector written as "projects matching `workflow-skills`" silently drops issues; one
+written as "anything plugin-shaped" silently imports finplan's. **That is why #511's
+selection is an enumerated list of project names and explicit keys, and never a
+pattern** — the list is already approved and sits in #511's body. Anything downstream
+that is tempted to re-derive the set from a name match is reintroducing the bug the
+enumeration exists to prevent.
 
 **One thing that is better than feared: the divergence is bounded, not growing.** The
 newest workflow-skills issue in Linear is PRE-823, created **2026-09-03** — four days
