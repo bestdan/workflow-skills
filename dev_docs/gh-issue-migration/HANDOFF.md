@@ -73,9 +73,35 @@ here; this branch's links to it resolve once that merges.
 
 ## Where things stand
 
-**No task is available to start.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed
-and has no task file. Task 13 is postponed, which **holds all of Phase 4** — so the only
-unclaimed work in this plan is task 12, and it gates nothing anyone is waiting on.
+**Redrafted 2026-09-12.** The previous version said this repo was still on Linear. It
+has not been since 2026-09-07. If you read that sentence and planned around it, stop and
+re-read this section.
+
+**Phase 3 is complete.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed and has no
+task file; it gates nothing anyone is waiting on.
+
+**The switch already happened, ahead of this plan's own sequencing.**
+`dev_docs/tasks/.task-config.yml` has read `handler: gh-issue` since
+[PR #503](https://github.com/bestdan/workflow-skills/pull/503) merged 2026-09-07. The
+plan said to sequence task 13 first; that did not happen, and the consequence is live —
+see "The switch happened without task 13" below. **Do not plan as though the flip is
+still ahead of you.**
+
+**Phase 4 task 9 is broken down and entirely unstarted.** It became seven issues under
+GitHub milestone 1 on 2026-09-08 — [#510](https://github.com/bestdan/workflow-skills/issues/510)
+(export) → [#511](https://github.com/bestdan/workflow-skills/issues/511) (plan) →
+[#512](https://github.com/bestdan/workflow-skills/issues/512) (apply) →
+[#513](https://github.com/bestdan/workflow-skills/issues/513) (link) →
+[#514](https://github.com/bestdan/workflow-skills/issues/514) (verify) →
+[#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
+[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out). All seven sit
+at `status:0_untriaged`, unassigned, no branch. Verified 2026-09-12: there is no
+`commands/handlers/assets/linear-export.py` and `$HOME/src/linear-export/` does not
+exist. **#510 is the entry point and blocks the other six.**
+
+**Task 9's scope was re-assessed 2026-09-12 and it is bigger and less well-defined than
+the task file assumed.** See "What task 9 is actually importing" below before starting
+#510.
 
 **The cloud-session probe is done and it came back red.** It was the last thing gating
 `gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
@@ -264,9 +290,12 @@ about cloud sessions. Probe it.
 
 ## Open blockers, and who owns them
 
-- **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02**,
-  because `/auto-pilot` is under active development with a new harness. It stops outright
-  rather than degrading. **This holds Phase 4**, task 10's pilot included.
+- **`/auto-pilot` does not support `gh-issue`** (task 13) — **postponed 2026-09-02,
+  reaffirmed by the owner 2026-09-12**, because `/auto-pilot` is under active development
+  with a new harness. It stops outright rather than degrading. **The cost is no longer
+  hypothetical**: the config flipped on 09-07 without it, so this repo is out of unattended
+  auto-pilot today. It still gates a like-for-like **task 10**; it no longer gates task 9,
+  which is import work needing no auto-pilot at all.
 - **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
   same validate-then-replace rule. The probe promoted this from "for any channel without
   `gh`" to **the** prerequisite for a working dispatched session. **No task owns it.**
@@ -306,21 +335,90 @@ about cloud sessions. Probe it.
   task-6 backstop) and **PRE-823** (does a runner's token reach the dependency endpoints).
   PRE-823 blocks nothing in this plan.
 
-## This repo is still on Linear
+## The switch happened without task 13
 
-`dev_docs/tasks/.task-config.yml` says `handler: linear`. Nothing has switched, and the
-switch waits on the auto-pilot harness — switching before then ends unattended operation
-rather than degrading it. That is a postponement, not a dead end: every handler verb works
-in a foreground session today.
+`dev_docs/tasks/.task-config.yml` reads `handler: gh-issue`, `labels: []`, and has since
+[PR #503](https://github.com/bestdan/workflow-skills/pull/503) merged **2026-09-07**. It
+was not done to this plan's schedule: 28 papercut issues were transferring in from
+`bestdan/dotfiles` and would have been invisible to `/list-tasks`, `/promote-tasks` and
+`/do-tasks` while the config still read `linear`. Seven labels the transfer needed were
+created directly on the repo, outside `labels.yml`'s four managed namespaces.
+
+**`labels: []` is deliberate and must stay.** `gh-issue.labels` is an AND filter on
+`/list-tasks`, not a stamp on new issues; every issue in this repo is a task issue, so any
+marker would hide part of the board. The cost is asymmetric and known: `/reconcile-tasks`
+has `--all`, `/archive-tasks` has no equivalent and will refuse
+([#504](https://github.com/bestdan/workflow-skills/issues/504)).
+
+**What this costs, right now.** Task 13 is still postponed — confirmed by the owner
+2026-09-12, and verified unstarted: `skills/auto-pilot/SKILL.md:135` still stops outright
+on any handler but `linear`/`repo-pr`. So **this repo is currently outside unattended
+auto-pilot**, and has been since 09-07. That was a predicted consequence, not a surprise;
+it is recorded here because it is now a live operating condition rather than a future
+risk, and because it is invisible from the config file alone. Every handler verb still
+works in a foreground session.
+
+**What it costs task 10.** The pilot evaluation asks "keep, extend, or revert", against
+`finplan` as a Linear control. The pilot repo has lost unattended operation and the control
+has not, so that comparison is no longer like-for-like. Either restore parity (task 13)
+before running the gate, or run it attended and **state the asymmetry in the verdict**.
+Do not let the gate silently score the handler down for a gap that is auto-pilot's.
+
+## What task 9 is actually importing
+
+**Re-assessed 2026-09-12 against the live Linear workspace.** The task file's "84 backlog
+issues plus its share of the active set" is stale, and the bigger problem is that it names
+no predicate for _which_ issues are workflow-skills'.
+
+Live (non-terminal, unarchived) PreThink issues, counted by state across `backlog`,
+`unstarted` and `started`:
+
+| Linear project                                  | Live | workflow-skills?          |
+| ----------------------------------------------- | ---: | ------------------------- |
+| `workflow-skills backlog`                       |   82 | yes, by name              |
+| `workflow-skills: Handler parity follow-ups`    |   14 | yes, by name              |
+| `Auto-pilot mode — /deliver-task + /auto-pilot` |   18 | yes, by content           |
+| `autopilot-harness`                             |   15 | yes, by content           |
+| `reviewer-quality`                              |    5 | yes, by content           |
+| `reconcile-tasks`                               |    1 | yes, by content           |
+| `Deterministic-script extraction`               |    1 | ambiguous                 |
+| `Plugin data-ops enhancement`                   |    7 | **no** — finplan's plugin |
+| `aiutopilot backlog`                            |    2 | **no** — separate repo    |
+
+**So the answer is 96 or 135 depending on a question nobody has answered.** 96 is the two
+projects whose names say workflow-skills. 135 adds the four that are unambiguously this
+repo's work — `/auto-pilot`, `/deliver-task`, `/reconcile-tasks` and the co-review
+reviewer-quality score are all skills in this plugin — under project names that do not say
+so. Both numbers exceed the task file's 84.
+
+**The trap, and it is #511's problem.** Linear has no repo field. Project name is the only
+proxy, and it is a lying one in both directions: four workflow-skills projects are not
+named for the repo, and `Plugin data-ops enhancement` reads like plugin work but is
+finplan's (PRE-325/327 are `scripts/finplan.py`). A selector written as "projects matching
+`workflow-skills`" silently drops 39 issues; one written as "anything plugin-shaped"
+silently imports finplan's. **#511 must carry an explicit, enumerated project list that a
+human approved — not a name pattern.** Decide it before #510 writes the export, since the
+export is team-wide anyway and the selection happens downstream.
+
+**One thing that is better than feared: the divergence is bounded, not growing.** The
+newest workflow-skills issue in Linear is PRE-823, created **2026-09-03** — four days
+before the switch. Nothing has been filed there since, so the two boards are parked rather
+than drifting apart. For scale on the other side, the GitHub board currently holds 46 open
+issues: 31 `status:0_untriaged`, 5 `status:2_ready`, 2 `status:1_needs_refinement`,
+2 `status:4_needs_review`, 6 carrying no rung at all.
+
+**This does not change the import's shape, only its size and its selector.** The four
+scripts #510–#513 specify are still the right decomposition.
 
 ### Acceptance criteria still owed
 
-Each needs a repo on the `gh-issue` handler — but that is **not** the same as needing this
-repo to switch: **`bestdan/dotfiles` is already `handler: gh-issue`**. Anything testing
-only **handler dispatch** can run there today against a real board. What dotfiles cannot
-stand in for is a **migrated** backlog: it was never on Linear, so it carries none of the
-imported issues, old-vocabulary labels or `Blocked by:` footers the migration criteria are
-about.
+Each needs a repo on the `gh-issue` handler. **Two now qualify** — `bestdan/dotfiles` since
+before this plan, and `bestdan/workflow-skills` itself since 2026-09-07 — so anything
+testing only **handler dispatch** can run in either against a real board. What neither can
+stand in for is a **migrated** backlog: dotfiles was never on Linear, and this repo's
+Linear issues have not been imported yet, so no board anywhere carries the imported
+issues, old-vocabulary labels or `Blocked by:` footers the migration criteria are about.
+That half still waits on task 9.
 
 - **Task 16's dispatch half is now unrunnable, not merely blocked.** `/do-tasks --all`
   dispatching bounded sessions needs a repo that can legitimately set

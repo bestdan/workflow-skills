@@ -181,12 +181,25 @@ join, and `gh` covers it only partially.
 **Phase 4 — migrate**
 
 9. [phase_4_migrate/gh_migration_task_9.md](phase_4_migrate/gh_migration_task_9.md) — Export Linear, import the active `workflow-skills` issues.
+   **Broken down 2026-09-08 into GitHub issues [#510](https://github.com/bestdan/workflow-skills/issues/510)–[#516](https://github.com/bestdan/workflow-skills/issues/516)**
+   under milestone 1, a strict chain: export → plan → apply → link → verify → Linear-side
+   close-out → retire. All seven are unstarted as of 2026-09-12; **#510 blocks the rest**.
+   **Not blocked by task 13** — importing issues needs no auto-pilot. The task file's
+   "84 issues" was re-assessed 2026-09-12 to **96 or 135** depending on an unanswered
+   scoping question; see the task file and HANDOFF.md.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
-    **Blocked by task 13's postponement, unless the pilot runs attended.** Flipping
-    `.task-config.yml` to `gh-issue` drops this repo out of auto-pilot entirely (task 13),
-    so a pilot run today is a hand-driven one. That is a legitimate way to run it — the
-    handler works fine in a foreground session — but decide it deliberately rather than
-    discovering it at switch time.
+    **The thing this warned about has happened.** The warning below was written while the
+    flip was still ahead; [PR #503](https://github.com/bestdan/workflow-skills/pull/503)
+    made it on **2026-09-07** for an unrelated reason (a label transfer from `dotfiles`),
+    with task 13 still postponed. So this repo is out of unattended auto-pilot **now**, and
+    the gate's comparison against the `finplan` Linear control is no longer like-for-like.
+    Either sequence task 13 first, or run the pilot attended and **record the asymmetry in
+    the verdict** — the handler must not be scored down for a gap that belongs to
+    `/auto-pilot`. Original note, kept because its reasoning still governs the choice:
+    flipping `.task-config.yml` to `gh-issue` drops this repo out of auto-pilot entirely
+    (task 13), so a pilot run today is a hand-driven one. That is a legitimate way to run
+    it — the handler works fine in a foreground session — but decide it deliberately rather
+    than discovering it at switch time.
 
 **Phase 3 — handler (added by co-review of PR #415)**
 
@@ -268,27 +281,38 @@ join, and `gh` covers it only partially.
 
 **Phase 4 — migrate (added 2026-08-30)**
 
-13. **Teach auto-pilot the `gh-issue` handler. POSTPONED 2026-09-02** — `/auto-pilot`
-    is under active development with a new harness. Teaching it a fifth handler against a
-    moving target buys rework, so this waits until that harness lands; resume by
-    re-reading the three `SKILL.md` line references below, which will have moved.
-    **This holds Phase 4 with it** — see the note under task 10. `/auto-pilot` today
-    supports **linear and plan sources only**: `skills/auto-pilot/SKILL.md:92` stops outright on "any
-    handler other than `linear`/`repo-pr`". So the moment `workflow-skills` switches its
-    `.task-config.yml` to `gh-issue`, **the repo drops out of auto-pilot entirely** — it
-    does not degrade, it refuses to launch. Three pieces need doing:
-    - **Source detection** (`SKILL.md:90`) — recognise a gh-issue source (a milestone, or
-      a `status:`-label query) alongside `dev_docs/tasks/<name>_plan/` and a Linear
-      project.
-    - **Effective-handler mapping** (`SKILL.md:95`) — the current rule is plan ⇒
+13. **Teach auto-pilot the `gh-issue` handler. POSTPONED 2026-09-02, reaffirmed by the
+    owner 2026-09-12** — `/auto-pilot` is under active development with a new harness.
+    Teaching it a fifth handler against a moving target buys rework, so this waits until
+    that harness lands; resume by re-reading the three `SKILL.md` line references below,
+    which will have moved.
+
+    > **Amended 2026-09-12 — the conditional below is now past tense.** The repo switched
+    > to `gh-issue` on 2026-09-07 ([#503](https://github.com/bestdan/workflow-skills/pull/503))
+    > with this task still postponed, so `workflow-skills` **is** out of unattended
+    > auto-pilot today. Verified: `skills/auto-pilot/SKILL.md:135` still refuses any
+    > handler but `linear`/`repo-pr`. This is an accepted cost, not an unnoticed
+    > regression — but it is a live one, so anything that reads "auto-pilot will stop
+    > working if we switch" should be read as "auto-pilot is not running here".
+    > **It no longer holds Phase 4.** Task 9 is import work that needs no auto-pilot and
+    > is unblocked; only task 10's like-for-like comparison still depends on this.
+
+    `/auto-pilot` today supports **linear and plan sources only**:
+    `skills/auto-pilot/SKILL.md:135` stops outright on "any handler other than
+    `linear`/`repo-pr`". Three pieces need doing:
+    - **Source detection** (`SKILL.md:132-133`, re-checked 2026-09-12) — recognise a
+      gh-issue source (a milestone, or a `status:`-label query) alongside
+      `dev_docs/tasks/<name>_plan/` and a Linear project.
+    - **Effective-handler mapping** (`SKILL.md:136-140`) — the current rule is plan ⇒
       `repo-pr`, linear ⇒ `linear`; add gh-issue ⇒ `gh-issue`.
-    - **`/deliver-task` gh-issue path** (`SKILL.md:242`) — the handler is passed in
+    - **`/deliver-task` gh-issue path** (`SKILL.md:290-294`) — the handler is passed in
       rather than re-derived, so `/deliver-task` must accept and honour it.
 
     **This gates task 10.** The pilot evaluation asks "keep, extend, or revert", and that
     comparison is not fair if the pilot repo silently lost unattended operation while the
-    Linear control kept it. Sequence 13 before 10, and before flipping
-    `.task-config.yml`.
+    Linear control kept it. Sequence 13 before 10 — **the "and before flipping
+    `.task-config.yml`" half of this instruction is spent**; the flip happened on
+    2026-09-07 regardless. If task 10 runs before task 13, it runs attended and says so.
 
     **Amended 2026-09-02 — a runner is a third credentialed channel.** Task 6
     ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) measured that a
