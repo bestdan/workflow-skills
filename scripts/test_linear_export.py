@@ -120,6 +120,24 @@ class Recorder:
         return [v.get("cursor") for q, v in self.calls if "issues(" in q]
 
 
+class AuthHeaderTests(unittest.TestCase):
+    """A correctly-valued key in the wrong envelope fails as 'bad key'.
+
+    Both framings are live: the repo's own `.task-config.local.yml` points at a
+    personal key, and a client_credentials grant hands back an OAuth token
+    instead. Neither works in the other's envelope.
+    """
+
+    def test_personal_key_is_sent_bare(self):
+        self.assertEqual(linear_export.auth_header("lin_api_abc123"), "lin_api_abc123")
+
+    def test_oauth_token_gets_the_bearer_scheme(self):
+        self.assertEqual(linear_export.auth_header("abc123"), "Bearer abc123")
+
+    def test_an_already_framed_token_is_not_double_framed(self):
+        self.assertEqual(linear_export.auth_header("Bearer abc123"), "Bearer abc123")
+
+
 class ExportTests(unittest.TestCase):
     def setUp(self):
         self._orig_gql = linear_export.gql

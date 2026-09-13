@@ -155,15 +155,34 @@ def get_key():
         sys.exit(str(e))
 
 
+def auth_header(key):
+    """Frame the key the way Linear expects for the kind of key it is.
+
+    A personal API key (`lin_api_…`) goes in the Authorization header BARE —
+    every other linear asset here hardcodes that, and adding a scheme breaks
+    it. An OAuth access token does not: it is a Bearer token, and Linear
+    rejects it unframed. A client_credentials grant returns the latter, so this
+    export is the first asset here that can be handed either.
+
+    Getting it wrong surfaces as an authentication error, which reads like a
+    bad key rather than a correctly-valued key in the wrong envelope — so the
+    framing is decided from the key's own shape rather than from a flag the
+    caller has to know to pass.
+    """
+    if key.startswith("Bearer ") or key.startswith("lin_api_"):
+        return key
+    return "Bearer " + key
+
+
 def gql(key, query, variables=None):
     body = json.dumps({"query": query, "variables": variables or {}}).encode()
     req = urllib.request.Request(
         API,
         data=body,
         headers={
-            "Authorization": key,
+            "Authorization": auth_header(key),
             "Content-Type": "application/json",
-        },  # personal key, no "Bearer"
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
