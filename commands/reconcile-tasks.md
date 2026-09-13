@@ -12,7 +12,7 @@ top of it — it fixes issues sitting in the **wrong** state against a fixed,
 enumerated rule table, not open-ended "fix whatever looks off" judgment.
 
 **Each handler's table is its own**, because the two trackers drift in different
-places. The rows below are the **`linear`** table; the `gh-issue` table is three
+places. The rows below are the **`linear`** table; the `gh-issue` table is four
 rows auditing the label invariants and lives in
 `commands/handlers/gh-issue-reconcile.md`. What both tables share is the
 doctrine: a closed rule set, and no rule that retires live work on an ambiguous
@@ -46,8 +46,8 @@ the `gh-issue` reading named alongside.
 - **`--apply`** — actually apply the rules' corrections. Without it, the
   command only prints the candidate table and changes nothing (dry-run is the
   default posture, mirroring `/archive-tasks` and `/sweep-for-complete`). For
-  `gh-issue` this repairs its **row 1 only**; its other two rows are flag-only
-  and write nothing at any flag combination.
+  `gh-issue` this repairs its **rows 1 and 4 only**; its other two rows are
+  flag-only and write nothing at any flag combination.
 - **`--all`** — widen scope to the whole team instead of the default (the
   configured projects + project-less Unassigned issues). See the handler
   file's "Preflight + scope" for exactly what this changes. For `gh-issue`
@@ -90,10 +90,11 @@ Overlay the local override on the committed config — mappings merge recursivel
   state, so the PR-versus-column drift rows 1–2 repair cannot occur. What can
   drift is the **label** state model, which the web UI can edit by hand — so
   that handler audits the `labels.yml` invariants instead, on its own closed
-  three-row table (double `status:` rung → keep the highest; a missing
+  four-row table (double `status:` rung → keep the highest; a missing
   `status:`/`auto:` rung → flag; closed without ever reaching
-  `status:4_needs_review` → flag). Only the first row writes, and only under
-  `--apply`.
+  `status:4_needs_review` → flag; closed but still carrying a `status:`/`auto:`
+  rung → strip both, keep `prio:`/`est:`). Only rows 1 and 4 write, and only
+  under `--apply`.
 - `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
   Jira's completion path is its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue

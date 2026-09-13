@@ -17,23 +17,24 @@ the Linear reconciler runs.
 
 ## The rule table
 
-Three rows, closed the same way the Linear table is closed — this is not a
-starting point. Do not add a fourth row, and do not widen these three.
+Four rows, closed the same way the Linear table is closed — this is not a
+starting point. Do not add a fifth row, and do not widen these four.
 
 | # | Detected drift                                                          | Action                                   |
 | - | ----------------------------------------------------------------------- | ---------------------------------------- |
 | 1 | **open** issue carrying two or more vocabulary `status:` labels         | keep the **highest** rung, drop the rest |
 | 2 | **open** issue missing a `status:` or an `auto:` label                  | **flag only** — never assign             |
 | 3 | issue **closed** although it was never labelled `status:4_needs_review` | **flag only**                            |
+| 4 | issue **closed** still carrying a `status:` or an `auto:` rung          | strip both, keep `prio:`/`est:`          |
 
 A row checks that the labels it asks about are provisioned, because a label
 namespace is per-repo and an absent rung makes the question unanswerable rather
 than answered "no". Row 3 is **void** where its one review label is absent. Row 2
 skips only a `status:`/`auto:` group with no vocabulary member provisioned, and
 still runs for the other. Each reports the gap once instead of flagging every
-issue. Row 1 needs no guard: it ranks labels the issue already carries.
+issue. Rows 1 and 4 need no guard: they read labels the issue already carries.
 
-**Row 1 is the only row that writes**, and only under `--apply`. It keeps the
+**Rows 1 and 4 are the rows that write**, and only under `--apply`. Row 1 keeps the
 highest rung because the ladder is numbered (`0_untriaged` … `4_needs_review`)
 exactly so that "highest" is a fact rather than a judgment — and keeping it is
 the same forward-only doctrine the Linear rows follow: a wrong read leaves an
@@ -50,10 +51,30 @@ row 1 has no ladder position to rank it by either.
 **Row 3 is the backstop for merge-as-completion.** Closing IS completion under
 this schema, so a stray or mistaken `Closes #<n>` in an unrelated PR body
 retires an issue that never passed review, and nothing else in the loop notices.
-It reads the issue's `labeled` events, because a closed issue carries no rungs
-to inspect. It reports rather than reopens: an issue can be legitimately closed
-without review (abandoned, duplicate, filed by hand), and the finding carries
-GitHub's `state_reason` so those are dismissible on sight.
+It reads the issue's `labeled` events rather than its current labels, because a
+closed issue's rungs are stripped only where something strips them — the
+`/complete-task` path, or row 4 — never by the merge that closed it. So the
+labels a closed issue carries now are unreliable evidence of the review it did
+or did not pass, not absent (that unreliability is row 4's subject). It reports rather than
+reopens: an issue can be legitimately closed without review (abandoned,
+duplicate, filed by hand), and the finding carries GitHub's `state_reason` so
+those are dismissible on sight.
+
+**Row 4 repairs because its target state is written down, not judged.**
+`labels.yml` states that "done" is the absence of both rungs, so unlike rows 2
+and 3 there is nothing to defer to a human. The drift is routine rather than
+exotic: before this row, `/complete-task` (`gh-issue-complete.md` step 5, via
+`gh-issue-state.py --done`) was the only thing that stripped the rungs, and it
+is the **fallback**
+path — the primary one is a merged PR carrying `Closes #<n>`, and GitHub's
+auto-close knows nothing about this vocabulary, so it flips the state and leaves
+every label in place. A stale `auto:eligible` on a closed issue is the hazard
+`labels.yml` names: a live instruction to a scheduler, left on work that is over.
+The row fires on any **vocabulary** rung, so a hand-typed `status:blocked` is not
+on its own a finding; it never reopens the issue, and the repair is validated
+in-process by `gh-issue-state.py`'s `validate(done=True)` — the same rule the
+`--done` CLI flag enforces — so it refuses rather than write a set that would
+still be illegal.
 
 **Two things about that guard were decided, not inherited**, and a reader of the
 table would otherwise re-derive them. Row 2 is guarded by **group, not
@@ -68,7 +89,8 @@ docstring.
 > through `gh-issue-state.py`'s validate-then-one-PATCH path, which replaces the
 > whole label set in a single request — so row 1's drift cannot arise on the
 > happy path. It arises from the web UI, which is a supported way to work with
-> this board.
+> this board. **Row 4 is the exception**: its drift arises on the happy path,
+> because the happy path is GitHub's auto-close and no write of ours runs there.
 
 ## Steps
 
@@ -113,8 +135,8 @@ docstring.
    continue at the default label scope — a report the user did not quite ask for
    costs them nothing, and refusing it would throw away a free answer.
 
-4. **Run the audit.** Dry-run by default; `--apply` repairs row 1 and nothing
-   else:
+4. **Run the audit.** Dry-run by default; `--apply` repairs rows 1 and 4 and
+   nothing else:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-reconcile.py" \
@@ -126,15 +148,18 @@ docstring.
 
    The script reads the 50 most recently **created** issues per state — `gh
    issue list` orders by creation date, not by close date, so a long-lived issue
-   closed yesterday can sit outside the window and go unaudited by row 3. If the
+   closed yesterday can sit outside the window and go unaudited by rows 3 and 4.
+   If the
    operator asks for a wider window, add `--limit <N>` to the invocation above —
    it is a flag on this script, not on `/reconcile-tasks`, so it never arrives
    as a command argument. Mind the cost: row 3 spends one API call per
    **closed** issue in the window, so the limit is what bounds the run — unless
    `status:4_needs_review` is absent from the repo, in which case row 3 is void,
    skips those reads entirely, and the run costs three base `gh` invocations —
-   one `gh label list` and one `gh issue list` per state, before any row-1 repair
-   under `--apply` adds writes of its own. The script makes that `gh label list`
+   one `gh label list` and one `gh issue list` per state, before any row-1 or
+   row-4 repair under `--apply` adds writes of its own. Row 4 costs nothing to
+   detect either way: it reads the labels already on the closed `gh issue list`
+   payload. The script makes that `gh label list`
    before any per-issue work to decide the row's fate, and its report opens with
    the repo's provisioning gap and the `gh-label-sync.py` command that closes it.
 
@@ -150,8 +175,8 @@ docstring.
    not invent the missing rung to make its own write legal.
 
 5. **Report.** The script's own output is the report — a scope line, then one
-   section per row with its findings and, for row 1, whether each was repaired
-   or refused. A dry run ends with an explicit "nothing changed (dry-run)".
+   section per row with its findings and, for rows 1 and 4, whether each was
+   repaired or refused. A dry run ends with an explicit "nothing changed (dry-run)".
    Fold nothing else in; unlike the Linear flow this file delegates to no other
    command.
 
@@ -159,7 +184,8 @@ docstring.
 
 - **It never closes or reopens an issue.** Row 3 flags; the decision to reopen a
   wrongly-closed issue is the user's, and `gh-issue-state.py --reopen` is how it
-  is carried out.
+  is carried out. Row 4 writes to a **closed** issue, and that is still true of
+  it: its PATCH carries labels and no `state`, so the issue stays closed.
 - **It never assigns a rung to an issue that has none.** That is row 2, and it
   is a refusal, not a gap.
 - **It does not reconcile an issue against its PR.** That is
