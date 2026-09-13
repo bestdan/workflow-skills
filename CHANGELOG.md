@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.49.0] - 2026-09-13
+
+### Features
+
+- build the reviewable Linear-to-GitHub import plan (#597) (32f8523)
+
 ## [2.48.6] - 2026-09-13
 
 ### Fixes
