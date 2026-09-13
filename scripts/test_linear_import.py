@@ -257,6 +257,103 @@ class PlanTests(unittest.TestCase):
     def _entries(self, **kwargs):
         return {entry["key"]: entry for entry in self._plan(**kwargs)["entries"]}
 
+    def _show(self, *keys, extra_args=()):
+        """Build a plan, then read it back through --show."""
+        self._plan()
+        argv = [
+            "--export",
+            str(Path(self.tmp) / "export.json"),
+            "--plan-file",
+            self.out,
+        ]
+        for key in keys:
+            argv += ["--show", key]
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = linear_import.main(argv + list(extra_args))
+        return code, out.getvalue(), err.getvalue()
+
+
+class ShowTests(PlanTests):
+    """--show is what makes the plan checkable by a person.
+
+    The acceptance criterion on a 125-entry plan is a human deciding whether the
+    crosswalk did the right thing to a handful of known issues, which means seeing
+    the Linear row and the GitHub row together.
+    """
+
+    def test_both_sides_of_one_entry_are_printed(self):
+        code, out, err = self._show("PRE-3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Todo (unstarted)", out)
+        self.assertIn("status:2_ready", out)
+        self.assertIn("blocked_by: PRE-4", out)
+        self.assertIn("parent: PRE-4", out)
+
+    def test_relation_direction_is_shown_not_flattened(self):
+        """`-> blocks` and `<- blocks` are the fact being checked.
+
+        Only the incoming one becomes a `blocked_by` edge, so a merged list would
+        hide exactly what a reader is here to verify.
+        """
+        code, out, _ = self._show("PRE-3", "PRE-4")
+        self.assertEqual(code, 0)
+        self.assertIn("<- blocks PRE-4", out)
+        self.assertIn("-> blocks PRE-3", out)
+
+    def test_the_footer_starts_at_the_last_rule_not_the_first(self):
+        """A Linear description may carry its own `---`."""
+        issues = fixture_issues()
+        for row in issues:
+            if row["identifier"] == "PRE-1":
+                row["description"] = "Body.\n\n---\n\nA note after a rule."
+        self._plan(issues=issues)
+        argv = [
+            "--export",
+            str(Path(self.tmp) / "export.json"),
+            "--plan-file",
+            self.out,
+            "--show",
+            "PRE-1",
+        ]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(linear_import.main(argv), 0)
+        rendered = out.getvalue()
+        self.assertIn("Migrated from Linear PRE-1", rendered)
+        self.assertNotIn("A note after a rule.", rendered)
+
+    def test_a_key_absent_from_the_plan_refuses(self):
+        """Silence would read as "nothing to say", not "never selected"."""
+        code, _, err = self._show("PRE-99")
+        self.assertEqual(code, 2)
+        self.assertIn("not in the plan", err)
+        self.assertIn("PRE-99", err)
+
+    def test_show_without_a_plan_file_is_a_usage_error(self):
+        argv = ["--show", "PRE-1", "--export", self._export()]
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                linear_import.main(argv)
+
+    def test_the_two_modes_are_mutually_exclusive(self):
+        argv = ["--plan", "--show", "PRE-1", "--export", self._export()]
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                linear_import.main(argv)
+
+    def test_plan_still_needs_its_own_flags(self):
+        for missing in ("--repo", "--out"):
+            with self.subTest(missing=missing):
+                argv = ["--plan", "--export", self._export(), "--project", "x"]
+                if missing != "--repo":
+                    argv += ["--repo", REPO]
+                if missing != "--out":
+                    argv += ["--out", self.out]
+                with self.assertRaises(SystemExit):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        linear_import.main(argv)
+
 
 class SelectionTests(PlanTests):
     def test_only_live_issues_in_the_enumerated_projects_are_selected(self):

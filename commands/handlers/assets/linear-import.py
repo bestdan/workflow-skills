@@ -70,6 +70,14 @@ Usage:
       --project "reviewer-quality" \\
       --issue PRE-685 --issue PRE-815 \\
       --out <dir>/<date>-import-plan.json
+
+`--show` reads a plan back, printing each named entry beside its Linear original.
+That is how a person checks the plan: the file is 125 entries of JSON, and the
+question asked of it is not whether it parses but whether the crosswalk did the
+right thing to a known issue — which needs both rows in view at once.
+
+  python3 linear-import.py --show PRE-746 --show PRE-555 --show PRE-416 \\
+      --plan-file <dir>/<date>-import-plan.json --export <file>
 """
 
 import argparse
@@ -122,15 +130,15 @@ CARRIED_LABELS = {
 # edge — GitHub has `blocked_by` and sub-issues and nothing else.
 FOOTER_RELATION_TYPES = ("related", "similar", "duplicate")
 
-# Projects that are selected but get no milestone (milestone-1 plan open
-# question 3, resolved 2026-09-07): the catch-all backlog, whose milestone would
-# name every issue in the repo, and the token-cost-fix project, which has no live
-# issues to group. Override with --no-milestone.
 # What the summary calls the bucket of entries with no milestone. On GitHub that
 # absence already means the catch-all, so it needs a name a reader recognises
 # rather than a null.
 NO_MILESTONE_LABEL = "(none)"
 
+# Projects that are selected but get no milestone (milestone-1 plan open
+# question 3, resolved 2026-09-07): the catch-all backlog, whose milestone would
+# name every issue in the repo, and the token-cost-fix project, which has no live
+# issues to group. Override with --no-milestone.
 NO_MILESTONE_PROJECTS = (
     "workflow-skills backlog",
     "Linear MCP token-cost fix — GraphQL fast-path for find-candidates",
@@ -880,16 +888,115 @@ def print_summary(document, path):
         )
 
 
+def load_plan(path):
+    with open(path, encoding="utf-8") as fh:
+        document = json.load(fh)
+    if not isinstance(document, dict) or not isinstance(document.get("entries"), list):
+        raise PlanError(f"{path}: not an import plan (no `entries` list)")
+    return document
+
+
+def dash(value):
+    """`-` for an absent value, so a blank never reads as an oversight."""
+    if value is None or value == [] or value == "":
+        return "-"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
+def show_lines(plan, export, keys):
+    """Each named entry rendered beside its Linear original.
+
+    This is what makes the plan checkable by a person. The file is 125 entries of
+    JSON and the question asked of it is not "is it well-formed" but "did the
+    crosswalk do the right thing to THIS issue" — which means holding the Linear
+    row and the GitHub row side by side. Reading them out of two multi-megabyte
+    files by hand means carrying the crosswalk in your head while scrolling; the
+    comparison printed together IS the check.
+
+    Refuses on a key the plan does not carry, naming it: silence there would read
+    as "nothing to say about that issue", when it means the issue was never
+    selected.
+    """
+    entries = {entry["key"]: entry for entry in plan["entries"]}
+    originals = {issue.get("identifier"): issue for issue in export["issues"]}
+
+    absent = [key for key in keys if key not in entries]
+    if absent:
+        raise PlanError(
+            "not in the plan (so not selected for import): " + ", ".join(absent)
+        )
+
+    lines = []
+    for key in keys:
+        entry, origin = entries[key], originals.get(key, {})
+        state = origin.get("state") or {}
+        # Direction is shown, not flattened: `-> blocks X` means this issue
+        # blocks X, `<- blocks X` means X blocks this one, and only the second
+        # becomes a `blocked_by` edge. A merged list would hide the one thing a
+        # reader is checking.
+        relations = [
+            f"-> {r['type']} {r['identifier']}" for r in origin.get("relations") or []
+        ] + [
+            f"<- {r['type']} {r['identifier']}"
+            for r in origin.get("inverseRelations") or []
+        ]
+        lines += [
+            "=" * 78,
+            f"{key}  {origin.get('title', '')}",
+            "-" * 78,
+            f"  Linear  {state.get('name')} ({state.get('type')})"
+            f"   priority {dash(origin.get('priority'))}"
+            f"   estimate {dash(origin.get('estimate'))}",
+            f"          project: {dash(project_name(origin))}",
+            f"          labels: {dash(origin.get('labels'))}",
+            f"          parent: {dash(origin.get('parent'))}"
+            f"   assignee: {dash((origin.get('assignee') or {}).get('email'))}",
+            f"          relations: {dash(relations)}",
+            f"          attachments: "
+            f"{dash([a.get('title') for a in origin.get('attachments') or []])}",
+            "",
+            f"  GitHub  {entry['action']}"
+            + (f" -> #{entry['number']}" if entry["number"] else ""),
+            f"          labels: "
+            f"{dash(entry['managed_labels'] + entry['carried_labels'])}",
+            f"          milestone: {dash(entry['milestone'])}"
+            f"   assignee: {dash(entry['assignee'])}",
+            f"          blocked_by: {dash(entry['blocked_by'])}"
+            f"   parent: {dash(entry['parent'])}"
+            f"   related: {dash(entry['related'])}",
+            f"          comments: {len(entry['comments'])}",
+            "",
+            "  Footer",
+        ]
+        # The LAST rule, not the first: a Linear description may carry its own
+        # `---`, and starting there would print half the body as the footer.
+        footer = entry["body"].rstrip().splitlines()
+        start = len(footer) - footer[::-1].index("---") - 1 if "---" in footer else 0
+        lines += [f"          {line}" for line in footer[start:]]
+        lines.append("")
+    return lines
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument(
-        "--plan",
-        action="store_true",
-        required=True,
-        help="build the import plan (the only mode this asset has today)",
+    # The two modes: build a plan, or read one back. --show carries its own
+    # subjects, so passing it both selects the mode and says what to show.
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--plan", action="store_true", help="build the import plan")
+    mode.add_argument(
+        "--show",
+        action="append",
+        metavar="KEY",
+        help=(
+            "print this plan entry beside its Linear original instead of "
+            "building a plan; repeatable. Needs --plan-file"
+        ),
     )
     ap.add_argument("--export", required=True, help="the linear-export.py JSON file")
-    ap.add_argument("--repo", required=True, help="owner/name the import targets")
+    ap.add_argument("--plan-file", help="the plan JSON to read back (--show)")
+    ap.add_argument("--repo", help="owner/name the import targets (--plan)")
     ap.add_argument(
         "--project",
         action="append",
@@ -904,7 +1011,7 @@ def main(argv=None):
         metavar="KEY",
         help="an extra Linear issue to select regardless of project; repeatable",
     )
-    ap.add_argument("--out", required=True, help="where to write the plan JSON")
+    ap.add_argument("--out", help="where to write the plan JSON (--plan)")
     ap.add_argument(
         "--review-state",
         default=DEFAULT_REVIEW_STATE,
@@ -938,6 +1045,22 @@ def main(argv=None):
     )
     args = ap.parse_args(argv)
 
+    if args.show:
+        if not args.plan_file:
+            ap.error("--show needs --plan-file")
+        try:
+            plan = load_plan(args.plan_file)
+            export = load_export(args.export)
+            for line in show_lines(plan, export, args.show):
+                print(line)
+        except PlanError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        return 0
+
+    for flag in ("repo", "out"):
+        if not getattr(args, flag):
+            ap.error(f"--plan needs --{flag}")
     if not args.project and not args.issue:
         ap.error("select something: --project and/or --issue")
     if args.no_milestone is None:
