@@ -141,10 +141,13 @@ gh_label_sync = _load("gh-label-sync.py", "gh_label_sync")
 
 REVIEW_STATUS_VALUE = "4_needs_review"
 
-# The two groups that are live state rather than facts about the work. A closed
-# issue carries neither — labels.yml's "done is implicit" invariant — while
-# `prio:`/`est:` stay useful afterwards and are kept.
-RUNG_GROUPS = ("status", "auto")
+# Row 4's two primitives live in gh-issue-state.py, because the merged-PR branch
+# of gh-issue-pr-sync.py strips the same rungs at the moment of completion and
+# the two must not disagree about what "done" is. The groups themselves are
+# `_labels.EXACTLY_ONE` — the vocabulary's own statement of which rungs an open
+# issue carries exactly one of, and therefore which a closed one carries none of.
+carried_rungs = gh_issue_state.carried_rungs
+done_set = gh_issue_state.done_label_set
 
 
 def run_gh(args):
@@ -249,41 +252,6 @@ def repair_set(current, keep, groups, vocabulary):
         and label in vocabulary
     ]
     gh_issue_state.validate(managed, vocabulary)
-    preserved = gh_issue_state.preserve_unmanaged(current, set(groups))
-    return managed + [label for label in preserved if label not in managed]
-
-
-def carried_rungs(labels, vocabulary):
-    """The issue's in-vocabulary `status:`/`auto:` labels.
-
-    Vocabulary membership, not the bare prefix, is what counts as carrying a
-    rung — the same reading rules 1 and 2 use. A hand-typed `status:blocked` on
-    a closed issue is not a rung, so it does not on its own make rule 4 fire and
-    rewrite an issue that has no invariant drift. Where the rule DOES fire, the
-    full-set write purges such a name anyway, and `dropped_unrecognized` names it.
-    """
-    return [
-        label
-        for label in labels
-        if label in vocabulary and gh_issue_state.group_of(label) in RUNG_GROUPS
-    ]
-
-
-def done_set(current, groups, vocabulary):
-    """The complete label set for a closed issue: no rungs, `prio:`/`est:` kept.
-
-    Everything outside the four managed namespaces rides through untouched,
-    because the write replaces the whole set and would otherwise delete
-    `follow-up` and anything a human added.
-    """
-    managed = [
-        label
-        for label in current
-        if gh_issue_state.in_managed_namespace(label, set(groups))
-        and label in vocabulary
-        and gh_issue_state.group_of(label) not in RUNG_GROUPS
-    ]
-    gh_issue_state.validate(managed, vocabulary, done=True)
     preserved = gh_issue_state.preserve_unmanaged(current, set(groups))
     return managed + [label for label in preserved if label not in managed]
 

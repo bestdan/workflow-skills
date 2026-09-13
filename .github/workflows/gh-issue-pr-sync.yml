@@ -36,9 +36,22 @@ name: gh-issue PR status sync
 # `workflow-skills` is public, so Actions minutes are free; this is not
 # optimized for them.
 #
-# Note what does NOT happen here: a MERGED PR is left alone. `Closes #<n>` in
-# the PR body makes GitHub close the issue, and closure is completion under
-# this schema. Never add a merged branch that writes a rung.
+# A MERGED PR is the third case, and the rule about it is narrower than it used
+# to read here. `Closes #<n>` makes GitHub close the issue, and closure is
+# completion under this schema — but GitHub leaves the labels alone, and "done"
+# is the ABSENCE of the `status:`/`auto:` rungs (labels.yml). So the auto-close
+# on its own leaves the issue violating the invariant, wearing a stale
+# `auto:eligible` that is a live instruction to a scheduler.
+#
+# The standing rule — never add a merged branch that WRITES a rung — holds, and
+# always will: writing one would park a finished issue in a live column. The
+# merged branch below does the opposite. It strips both rungs, keeps
+# `prio:`/`est:`, and never touches issue state. Removing them is what
+# completion means here; that is why this is not the thing the rule forbids.
+#
+# It is a backstop, not the only guard: `gh-issue-reconcile.py`'s row 4 sweeps
+# up what this cannot see — an issue closed by hand, a repo where this workflow
+# does not run. Both compute the rung-free set through the same helper.
 
 on:
   pull_request:
@@ -117,11 +130,12 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
           EVENT: ${{ github.event.action }}
           MERGED: ${{ github.event.pull_request.merged }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           merged_flag=""
           if [ "$MERGED" = "true" ]; then
             merged_flag="--merged"
           fi
           python3 commands/handlers/assets/gh-issue-pr-sync.py \
-            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" \
+            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" --pr "$PR" \
             $merged_flag --apply

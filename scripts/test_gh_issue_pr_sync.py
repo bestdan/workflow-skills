@@ -2,8 +2,9 @@
 """Hermetic tests for commands/handlers/assets/gh-issue-pr-sync.py.
 
 Stubs the run_gh() seam of the gh-issue-state module that pr-sync loads, so
-nothing shells out to `gh` or touches the network. Covers the two transitions
-(ready-for-review forward, closed-unmerged back), every no-op gate, and the
+nothing shells out to `gh` or touches the network. Covers the two rung
+transitions (ready-for-review forward, closed-unmerged back), the merged branch
+that strips both rungs from every issue the PR closed, every no-op gate, and the
 fact that a write is one PATCH carrying the complete set — never
 `--add-label`, which is not atomic.
 
@@ -81,6 +82,55 @@ def run(remote, argv):
 
 READY = ["status:3_started", "auto:eligible", "prio:1", "est:3"]
 IN_REVIEW = ["status:4_needs_review", "auto:eligible", "prio:1", "est:3"]
+
+
+class FakeMergedRemote:
+    """Several issues plus a PR's closing references — the merged branch's world.
+
+    `issues` maps number -> (label list, state). `closing` is what
+    `closingIssuesReferences` returns, as (number, owner, repo name) triples, so
+    a test can put a reference in ANOTHER repository and check it is dropped.
+    """
+
+    def __init__(self, issues=None, closing=()):
+        self.issues = {n: (list(ls), st) for n, (ls, st) in (issues or {}).items()}
+        self.closing = list(closing)
+        self.calls = []
+
+    def run_gh(self, args, stdin=None):
+        self.calls.append((args, stdin))
+        if args[:2] == ["pr", "view"]:
+            refs = [
+                {
+                    "number": number,
+                    "repository": {"name": name, "owner": {"login": owner}},
+                }
+                for number, owner, name in self.closing
+            ]
+            return 0, json.dumps({"closingIssuesReferences": refs}), ""
+        if args[:2] == ["issue", "view"]:
+            labels, state = self.issues[int(args[2])]
+            payload = {
+                "labels": [{"name": name} for name in labels],
+                "state": state,
+            }
+            return 0, json.dumps(payload), ""
+        if args[:3] == ["api", "--method", "PATCH"]:
+            number = int(next(a for a in args if "/issues/" in a).rsplit("/", 1)[1])
+            labels, state = self.issues[number]
+            self.issues[number] = (json.loads(stdin)["labels"], state)
+            return 0, "{}", ""
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def labels(self, number):
+        return self.issues[number][0]
+
+    def patches(self):
+        return [
+            json.loads(stdin)
+            for args, stdin in self.calls
+            if args[:3] == ["api", "--method", "PATCH"]
+        ]
 
 
 class ForwardTransitionTests(unittest.TestCase):
@@ -254,27 +304,173 @@ class ReverseTransitionTests(unittest.TestCase):
         self.assertIn("status:3_started", remote.labels)
         self.assertNotIn("status:4_needs_review", remote.labels)
 
-    def test_merged_pr_writes_nothing_and_makes_no_request_at_all(self):
-        # `Closes #<n>` closes the issue, and closure IS completion here. A
-        # write would put a live rung back on a done issue.
-        remote = FakeRemote(IN_REVIEW)
-        code, result = run(
-            remote,
-            [
-                "--repo",
-                "o/n",
-                "--branch",
-                "bestdan/task-142",
-                "--event",
-                "closed",
-                "--merged",
-                "--apply",
-            ],
+
+class MergedPRTests(unittest.TestCase):
+    """A merged PR STRIPS the rungs from the issues it closed.
+
+    This replaces an earlier test asserting the merged case made no request at
+    all. That premise was the defect (#608): GitHub's auto-close flips the state
+    and leaves every label, so "no request" left the issue violating labels.yml
+    with a stale `auto:eligible` on finished work. The rule that survives is
+    narrower — a merged PR must never WRITE a rung — and stripping is its
+    opposite, not an exception to it.
+    """
+
+    def _run(self, remote, pr="612", apply=True):
+        argv = [
+            "--repo",
+            "o/n",
+            "--branch",
+            "bestdan/task-142",
+            "--event",
+            "closed",
+            "--merged",
+            "--pr",
+            pr,
+        ]
+        if apply:
+            argv.append("--apply")
+        return run(remote, argv)
+
+    def test_strips_both_rungs_and_keeps_prio_and_est(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED")}, closing=[(142, "o", "n")]
         )
+        code, result = self._run(remote)
+
         self.assertEqual(code, 0)
-        self.assertIn("merged", result["skipped"])
-        self.assertEqual(remote.calls, [])
-        self.assertEqual(remote.labels, IN_REVIEW)
+        self.assertEqual(sorted(remote.labels(142)), ["est:3", "prio:1"])
+        outcome = result["merged"][0]
+        self.assertEqual(outcome["rungs"], ["status:4_needs_review", "auto:eligible"])
+        self.assertTrue(outcome["applied"])
+
+    def test_the_write_never_reopens_the_issue(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED")}, closing=[(142, "o", "n")]
+        )
+        self._run(remote)
+
+        self.assertTrue(remote.patches())
+        for payload in remote.patches():
+            self.assertNotIn("state", payload)
+
+    def test_unmanaged_labels_ride_through(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW + ["follow-up"], "CLOSED")},
+            closing=[(142, "o", "n")],
+        )
+        self._run(remote)
+
+        self.assertIn("follow-up", remote.labels(142))
+
+    def test_every_issue_the_pr_closed_is_stripped(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED"), 143: (READY, "CLOSED")},
+            closing=[(142, "o", "n"), (143, "o", "n")],
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(len(result["merged"]), 2)
+        self.assertEqual(remote.labels(142), ["prio:1", "est:3"])
+        self.assertEqual(remote.labels(143), ["prio:1", "est:3"])
+
+    def test_an_issue_in_another_repo_is_dropped_not_written(self):
+        """GITHUB_TOKEN is repo-scoped; writing there fails, and writing to a
+        same-numbered local issue instead would be worse."""
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED")}, closing=[(142, "other", "repo")]
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(result["merged"], [])
+        self.assertEqual(remote.patches(), [])
+
+    def test_an_issue_the_merge_left_open_is_a_no_op(self):
+        """A human reopened it, or the reference resolved without a close.
+        Stripping a live issue's rungs would retire work still moving."""
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "OPEN")}, closing=[(142, "o", "n")]
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("open", result["merged"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+        self.assertEqual(remote.labels(142), IN_REVIEW)
+
+    def test_an_already_clean_issue_is_a_no_op(self):
+        """Row 4's sweep, or a rerun, got here first."""
+        remote = FakeMergedRemote(
+            issues={142: (["prio:1"], "CLOSED")}, closing=[(142, "o", "n")]
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("no rung", result["merged"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_refuses_when_the_rung_free_set_would_still_be_illegal(self):
+        remote = FakeMergedRemote(
+            issues={142: (["auto:eligible", "prio:1", "prio:2"], "CLOSED")},
+            closing=[(142, "o", "n")],
+        )
+        code, result = self._run(remote)
+
+        # Reported, never fatal — the PR's other issues are still worth
+        # stripping and row 4 will re-report this one.
+        self.assertEqual(code, 0)
+        self.assertIn("prio", result["merged"][0]["refused"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_a_pr_that_closed_nothing_makes_no_issue_request(self):
+        remote = FakeMergedRemote(closing=[])
+        code, result = self._run(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(result["merged"], [])
+        self.assertEqual(remote.patches(), [])
+
+    def test_without_apply_it_reads_but_never_writes(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED")}, closing=[(142, "o", "n")]
+        )
+        code, result = self._run(remote, apply=False)
+
+        self.assertFalse(result["merged"][0]["applied"])
+        self.assertEqual(remote.patches(), [])
+        self.assertEqual(remote.labels(142), IN_REVIEW)
+
+    def test_merged_without_pr_is_an_error_not_a_silent_no_op(self):
+        remote = FakeMergedRemote()
+        original = pr_sync.gh_issue_state.run_gh
+        pr_sync.gh_issue_state.run_gh = remote.run_gh
+        try:
+            with self.assertRaises(SystemExit):
+                pr_sync.main(
+                    [
+                        "--repo",
+                        "o/n",
+                        "--branch",
+                        "bestdan/task-142",
+                        "--event",
+                        "closed",
+                        "--merged",
+                        "--apply",
+                    ]
+                )
+        finally:
+            pr_sync.gh_issue_state.run_gh = original
+
+    def test_the_branch_name_does_not_decide_which_issue_is_stripped(self):
+        """The branch says 142; the PR actually closed 500. GitHub's reference
+        is the one that names what closed."""
+        remote = FakeMergedRemote(
+            issues={500: (IN_REVIEW, "CLOSED"), 142: (READY, "OPEN")},
+            closing=[(500, "o", "n")],
+        )
+        self._run(remote)
+
+        self.assertEqual(sorted(remote.labels(500)), ["est:3", "prio:1"])
+        self.assertEqual(remote.labels(142), READY)
 
 
 class NoOpGateTests(unittest.TestCase):
@@ -433,6 +629,12 @@ class WorkflowTriggerTests(unittest.TestCase):
 
     def test_runs_the_sync_asset(self):
         self.assertIn("commands/handlers/assets/gh-issue-pr-sync.py", self.text)
+
+    def test_passes_the_pr_number_the_merged_branch_needs(self):
+        """Without `--pr` the merged branch exits with an argparse error, and an
+        unattended run would paint red on every merge rather than strip."""
+        self.assertIn("PR: ${{ github.event.pull_request.number }}", self.text)
+        self.assertIn('--pr "$PR"', self.text)
 
 
 if __name__ == "__main__":

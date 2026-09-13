@@ -62,14 +62,20 @@ those are dismissible on sight.
 
 **Row 4 repairs because its target state is written down, not judged.**
 `labels.yml` states that "done" is the absence of both rungs, so unlike rows 2
-and 3 there is nothing to defer to a human. The drift is routine rather than
-exotic: before this row, `/complete-task` (`gh-issue-complete.md` step 5, via
-`gh-issue-state.py --done`) was the only thing that stripped the rungs, and it
-is the **fallback**
-path — the primary one is a merged PR carrying `Closes #<n>`, and GitHub's
-auto-close knows nothing about this vocabulary, so it flips the state and leaves
-every label in place. A stale `auto:eligible` on a closed issue is the hazard
-`labels.yml` names: a live instruction to a scheduler, left on work that is over.
+and 3 there is nothing to defer to a human. A stale `auto:eligible` on a closed
+issue is the hazard `labels.yml` names: a live instruction to a scheduler, left
+on work that is over.
+
+**This row is the sweep, not the primary guard.** Two other things strip the
+rungs: `/complete-task` (`gh-issue-complete.md` step 5, via `gh-issue-state.py
+--done`), and the merged-PR branch of `gh-issue-pr-sync.py`, which acts on the
+`Closes #<n>` auto-close GitHub performs without knowing this vocabulary. All
+three compute the rung-free set with the same `gh-issue-state.py`
+`done_label_set()`, so they cannot disagree about what "done" is. The row still
+earns its place: it catches an issue closed **by hand** in the web UI, a repo
+where that workflow does not run (it acts on `github.repository`, so a
+`gh-issue.repo` pointing elsewhere must not run it), and anything that drifted
+before the workflow existed.
 The row fires on any **vocabulary** rung, so a hand-typed `status:blocked` is not
 on its own a finding; it never reopens the issue, and the repair is validated
 in-process by `gh-issue-state.py`'s `validate(done=True)` — the same rule the

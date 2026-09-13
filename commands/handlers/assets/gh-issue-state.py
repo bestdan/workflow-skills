@@ -207,6 +207,50 @@ def dropped_unrecognized(current, managed_groups, vocabulary):
     ]
 
 
+def done_label_set(current, groups, vocabulary):
+    """The complete label set for a CLOSED issue: no rungs, `prio:`/`est:` kept.
+
+    "Done" is the absence of the EXACTLY_ONE groups — labels.yml states it, and
+    `validate(done=True)` enforces it. `prio:`/`est:` are facts about the work
+    and stay useful afterwards; everything outside the four managed namespaces
+    rides through, because the write replaces the whole set.
+
+    Two callers need this and must not disagree about it: the merged-PR branch
+    of gh-issue-pr-sync.py, which strips the rungs at the moment of completion,
+    and gh-issue-reconcile.py's row 4, which sweeps up whatever that missed.
+
+    Raises InvalidLabelSet when the rung-free set would STILL be illegal — two
+    `prio:` labels, say. Stripping the rungs is not worth leaving a second
+    invariant broken, so the caller reports the refusal instead of writing.
+    """
+    managed = [
+        label
+        for label in current
+        if in_managed_namespace(label, set(groups))
+        and label in vocabulary
+        and group_of(label) not in EXACTLY_ONE
+    ]
+    validate(managed, vocabulary, done=True)
+    preserved = preserve_unmanaged(current, set(groups))
+    return managed + [label for label in preserved if label not in managed]
+
+
+def carried_rungs(labels, vocabulary):
+    """The issue's in-vocabulary `status:`/`auto:` labels.
+
+    Vocabulary membership, not the bare prefix, is what counts as carrying a
+    rung — the same reading validate() enforces. A hand-typed `status:blocked`
+    is not a rung, so it does not on its own make a caller rewrite an issue with
+    no invariant drift; where a caller DOES fire, the full-set write purges such
+    a name anyway and dropped_unrecognized() names it.
+    """
+    return [
+        label
+        for label in labels
+        if label in vocabulary and group_of(label) in EXACTLY_ONE
+    ]
+
+
 def patch_issue(repo, issue, labels, state=None):
     """One PATCH carrying the complete set. Never --add-label/--remove-label."""
     payload = {"labels": labels}
