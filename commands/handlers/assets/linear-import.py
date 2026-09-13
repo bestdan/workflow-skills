@@ -1349,13 +1349,21 @@ def issue_number_from_url(url, key):
     return int(match.group(1))
 
 
-def create_issue(repo, entry, milestone_number):
+def create_issue(repo, entry):
     """`gh issue create`, carrying everything EXCEPT the labels.
 
     The labels are a second call on purpose: `gh issue create --label` would
     reach the board with a name nothing validated, and the managed set has
     invariants (exactly one `status:`, exactly one `auto:`) that no per-flag
     write can enforce.
+
+    `--milestone` takes the TITLE, not the number. push-plan.md §5.3 says to pass
+    the number; measured against gh 2.98.0 that fails — `--milestone 8` exits 1
+    with `could not add to milestone '8': '8' not found`, because the flag is
+    documented as "by name" and gh looks the title up. The number is still
+    resolved, for the ambiguous-title refusal and the mapping record; it is just
+    not what gh accepts here. Passing a title is safe because these are argv
+    entries, never a shell word.
     """
     path = body_file(entry["body"], ".md")
     try:
@@ -1369,10 +1377,8 @@ def create_issue(repo, entry, milestone_number):
             "--body-file",
             path,
         ]
-        if milestone_number is not None:
-            # The NUMBER, not the title: push-plan.md §5.2's rule, so neither a
-            # rename nor a shell-unsafe character in a title breaks the grouping.
-            args += ["--milestone", str(milestone_number)]
+        if entry["milestone"]:
+            args += ["--milestone", entry["milestone"]]
         if entry.get("assignee"):
             args += ["--assignee", entry["assignee"]]
         lines = gh(args, f"{entry['key']}: creating the issue").strip().splitlines()
@@ -1419,7 +1425,7 @@ def verify_reopen_target(repo, number, key):
         )
 
 
-def reopen_issue(repo, entry, milestone_number):
+def reopen_issue(repo, entry):
     """Retitle and rebody the original. It stays CLOSED until the label write.
 
     Reopening is gh-issue-state.py's `--reopen`, never a separate
@@ -1441,8 +1447,8 @@ def reopen_issue(repo, entry, milestone_number):
             "--body-file",
             path,
         ]
-        if milestone_number is not None:
-            args += ["--milestone", str(milestone_number)]
+        if entry["milestone"]:
+            args += ["--milestone", entry["milestone"]]
         if entry.get("assignee"):
             args += ["--add-assignee", entry["assignee"]]
         gh(args, f"{entry['key']}: editing {repo}#{number}")
@@ -1557,7 +1563,6 @@ def apply_entry(entry, context):
     path = context["mapping_path"]
     key = entry["key"]
     reopen = entry["action"] == "reopen"
-    milestone_number = context["milestones"].get(entry["milestone"])
     reached = phase_reached(mapping, key)
 
     number = (mapping["entries"].get(key) or {}).get("number")
@@ -1572,10 +1577,10 @@ def apply_entry(entry, context):
 
     if not done_after(reached, "created"):
         if number is None:
-            number = create_issue(repo, entry, milestone_number)
+            number = create_issue(repo, entry)
             resolution = "created"
         elif reopen:
-            number = reopen_issue(repo, entry, milestone_number)
+            number = reopen_issue(repo, entry)
             resolution = "reopened"
         else:
             # A recovered create: the issue already exists carrying the body
@@ -1670,7 +1675,6 @@ def apply_plan(plan, mapping_path, limit=None, sleep=2.0, only=None):
         "repo": repo,
         "mapping": mapping,
         "mapping_path": mapping_path,
-        "milestones": milestones,
         "recovered": recovered,
     }
 

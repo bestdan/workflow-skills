@@ -1438,20 +1438,29 @@ class ApplyTests(unittest.TestCase):
         creates = [args for args in recorder.gh_calls("api") if "--slurp" not in args]
         self.assertEqual(creates, [])
         self.assertEqual(self._mapping()["milestones"][title], 7)
-        for args in recorder.gh_calls("issue", "create"):
-            if "--milestone" in args:
-                self.assertEqual(args[args.index("--milestone") + 1], "7")
 
-    def test_a_missing_milestone_is_created_once_and_passed_as_a_number(self):
+    def test_a_missing_milestone_is_created_once_and_recorded_by_number(self):
         recorder, out, _ = self._apply(self._reopen_recorder())
         creates = [args for args in recorder.gh_calls("api") if "--slurp" not in args]
         self.assertEqual(len(creates), len(self.plan["milestones"]))
         self.assertIn("milestones created:", out)
-        numbers = set(self._mapping()["milestones"].values())
-        self.assertTrue(numbers)
-        for args in recorder.gh_calls("issue", "create"):
-            if "--milestone" in args:
-                self.assertIn(int(args[args.index("--milestone") + 1]), numbers)
+        self.assertEqual(
+            sorted(self._mapping()["milestones"]), sorted(self.plan["milestones"])
+        )
+
+    def test_the_milestone_reaches_gh_as_a_title_not_a_number(self):
+        """gh 2.98.0's `--milestone` is documented "by name" and looks the title
+        up: `--milestone 8` exits 1 with `could not add to milestone '8'`. This
+        cost the first live run its first create, and push-plan.md §5.3 still
+        says to pass the number — so the shape is asserted, not assumed."""
+        title = self.plan["milestones"][0]
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        passed = [
+            args[args.index("--milestone") + 1]
+            for args in recorder.gh_calls("issue", "create")
+            if "--milestone" in args
+        ]
+        self.assertEqual(passed, [title])
 
     def test_two_milestones_sharing_a_title_refuse_before_any_write(self):
         title = self.plan["milestones"][0]
