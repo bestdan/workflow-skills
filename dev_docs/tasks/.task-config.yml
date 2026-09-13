@@ -7,3 +7,11 @@ gh-issue:
   # /reconcile-tasks needs --all here; /archive-tasks has no such override yet.
   labels: []
   assignees: []
+  # Required here, not cosmetic. The claim branch IS the claim lock ref
+  # (`commands/handlers/claim-lock.md`), and it is built as
+  # `<branch_prefix>task-<n>`. Unset, it defaults to empty and the lock becomes
+  # `task-<n>` — while this repo's branches are all `bestdan/`-prefixed, so a
+  # caller following that convention locks `bestdan/task-<n>` instead. Two
+  # sessions that disagree about the prefix each acquire a ref the other cannot
+  # see, and both think they won.
+  branch_prefix: bestdan/

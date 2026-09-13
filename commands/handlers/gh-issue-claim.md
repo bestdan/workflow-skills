@@ -18,6 +18,15 @@ the name by hand; ask for it:
 branch=$(python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"])
 ```
 
+**The bracket means "when the key is unset", not "at your discretion".** `--prefix`
+defaults to empty in the script, which cannot see the config — so resolving the key and
+passing it is the caller's job on **every** invocation that builds the name
+(`branch-name`, `acquire`, `release`). Drop it while the key is set and you do not get an
+error: you get a **different lock ref**, `task-<n>` instead of `<prefix>task-<n>`. A
+session that passes the prefix and one that omits it then each acquire a ref the other
+cannot see, and both conclude they won the claim. `/doctor` Check 1c flags the inverse —
+a repo whose branches carry a prefix its config does not name.
+
 Three constraints meet here. `claim-lock.md` needs one deterministic name both racers
 compute the same way — which is why it is derived from the issue number and not from the
 title. The number must be **in** the name, so a branch or PR traces back to its issue.
@@ -305,6 +314,9 @@ The backstop also assumes **the tracker is the same repo as the code**. It acts 
 ```bash
 git stash push -u
 git switch -
+# Pass --prefix whenever gh-issue.branch_prefix is set — see "Branch name" above.
+# Omitting it targets task-<n>, which does not exist: the delete fails loudly and
+# the real lock stays held, leaving the issue claimed by a session that has gone.
 python3 commands/handlers/assets/gh-issue-claim.py release --repo <repo> --issue <n> [--prefix "<branch_prefix>"]
 python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
   --labels "status:1_needs_refinement,auto:human-review-needed[,<its prio: label>][,<its est: label>]" --apply
