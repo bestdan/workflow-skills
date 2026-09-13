@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.47.0] - 2026-09-13
+
+### Features
+
+- export every PreThink issue to a date-named JSON file (#590) (d57d51c)
+
 ## [2.46.0] - 2026-09-13
 
 ### Features
