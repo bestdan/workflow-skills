@@ -39,8 +39,8 @@ Two mechanics to know if you do change the model:
 
 ## Invocation (assemble + dispatch in one shell call)
 
-- **GitHub mode, with requests** → `cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.6-terra" "<POINTER>"`
-- **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.6-terra" "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
+- **GitHub mode, with requests** → `cat "<this skill dir>/review_prompt.md" <CONVENTIONS> "<REQUESTS>" > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.6-terra" "<POINTER>"`
+- **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `cat "<this skill dir>/review_prompt.md" <CONVENTIONS> > "<INPUT>"; gh pr diff <n> --repo <owner>/<name> >> "<INPUT>"; cat "<INPUT>" | codex exec --sandbox read-only --model "gpt-5.6-terra" "<POINTER>"` (use whatever read-only/sandbox flag your codex version supports).
 - **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md.
 
 `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default, since a `--post` review commonly targets a PR that isn't checked out here.

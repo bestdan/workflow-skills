@@ -59,7 +59,7 @@ It persists every session to a per-conversation SQLite store and keeps cross-ses
 **GitHub mode, with requests** — note the `&&` between every step: dispatch happens only if the diff actually landed.
 
 ```sh
-cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <n> --repo <owner>/<name> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" -p "<AGY-POINTER>" --model "Gemini 3.6 Flash (High)"
+cat "<this skill dir>/review_prompt.md" <CONVENTIONS> "<REQUESTS>" > "<INPUT>" && gh pr diff <n> --repo <owner>/<name> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" -p "<AGY-POINTER>" --model "Gemini 3.6 Flash (High)"
 ```
 
 `--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.6 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review; both are pre-approved via their own exact-match allow-rule below, so switching between the two does not re-prompt (see the note under the allow-rules for why the tail is **not** wildcarded). `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox. `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default.
