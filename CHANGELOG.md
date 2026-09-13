@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.3] - 2026-09-13
+
+### Fixes
+
+- devin's auth probe gates login, not model entitlement [N/A] (#592) (c41288b)
+
 ## [2.48.2] - 2026-09-13
 
 ### Fixes
