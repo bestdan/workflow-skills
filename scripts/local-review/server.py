@@ -698,10 +698,14 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .outdated-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:6px 0 2px}
 .moved-badge{color:var(--dim);font-size:11px}
 /* Round-summary threads: no file anchor, so they render above the file
-   cards instead of inline in a diff grid -- see .cmt-row's border-radius
-   here, which the grid layout normally handles via its own row borders. */
-.summary-threads{margin:0 0 14px}
-.summary-threads .cmt-row{border-radius:8px;margin-bottom:8px}
+   cards instead of inline in a diff grid. The strip is a sibling of <main>,
+   so it restates main's box (max-width/centering/padding) or it would run
+   full-bleed past the file cards. Free-standing chips also supply what the
+   grid used to: the border-radius, and the right edge .cmt-row never
+   declares (per-side, not the `border:` shorthand -- this selector outranks
+   .cmt-thread and would flatten its 3px left accent). */
+.summary-threads{max-width:1180px;margin:0 auto;padding:18px 18px 0}
+.summary-threads .cmt-row{border-right:1px solid var(--border);border-radius:8px;margin-bottom:8px}
 .summary-threads .cmt-row:last-child{margin-bottom:0}
 .summary-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:0 0 6px}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
@@ -1641,7 +1645,7 @@ function openThreadReply(chip, thread){
 function buildThreadChip(thread, opts){
   opts = opts || {};
   const chip = document.createElement('div');
-  chip.className = 'cmt-row cmt-thread' + (thread.kind === 'summary' ? ' cmt-summary' : '');
+  chip.className = 'cmt-row cmt-thread';
   chip.dataset.tid = thread.id;
   const anchor = document.createElement('div');
   anchor.className = 'cmt-anchor';

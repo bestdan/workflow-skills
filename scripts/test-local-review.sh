@@ -1460,7 +1460,7 @@ try:
         ]}
         status, info1 = post_json("submit", payload1)
         check("server: summary-thread round 1 returns 200", status == 200, status)
-        check("server: summary-thread round 1 mints ids for the comment AND the summary",
+        check("server: summary-thread round 1 mints ids for the comment only",
               info1.get("ids") == ["t1"], info1)  # only comments are minted into "ids"
 
         status, threads1 = get_json("threads")
