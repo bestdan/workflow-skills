@@ -24,8 +24,9 @@ Four rules, matching the invariants labels.yml states:
    review, and nothing else in the loop would notice. Void where that label is
    not present on the repo — see the provisioning note below.
 4. A CLOSED issue still carrying a `status:` or an `auto:` rung — STRIP both,
-   keep `prio:`/`est:`. "Done" is the absence of those two rungs, and only
-   /complete-task's `--done` write ever produces it; the primary completion
+   keep `prio:`/`est:`. "Done" is the absence of those two rungs, and until
+   this rule the only write that produced it was /complete-task's `--done`;
+   the primary completion
    path is a merged PR carrying `Closes #<n>`, and GitHub knows nothing about
    this vocabulary — it flips the state and leaves every label untouched. So
    the invariant is violated by the NORMAL path, not an exotic one. Unlike

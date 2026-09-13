@@ -51,10 +51,11 @@ row 1 has no ladder position to rank it by either.
 **Row 3 is the backstop for merge-as-completion.** Closing IS completion under
 this schema, so a stray or mistaken `Closes #<n>` in an unrelated PR body
 retires an issue that never passed review, and nothing else in the loop notices.
-It reads the issue's `labeled` events rather than its current labels, because the
-rungs are stripped only on the `/complete-task` path — so the labels a closed
-issue carries now are unreliable evidence of the review it did or did not pass,
-not absent (that unreliability is row 4's subject). It reports rather than
+It reads the issue's `labeled` events rather than its current labels, because a
+closed issue's rungs are stripped only where something strips them — the
+`/complete-task` path, or row 4 — never by the merge that closed it. So the
+labels a closed issue carries now are unreliable evidence of the review it did
+or did not pass, not absent (that unreliability is row 4's subject). It reports rather than
 reopens: an issue can be legitimately closed without review (abandoned,
 duplicate, filed by hand), and the finding carries GitHub's `state_reason` so
 those are dismissible on sight.
@@ -62,8 +63,9 @@ those are dismissible on sight.
 **Row 4 repairs because its target state is written down, not judged.**
 `labels.yml` states that "done" is the absence of both rungs, so unlike rows 2
 and 3 there is nothing to defer to a human. The drift is routine rather than
-exotic: only `/complete-task` (`gh-issue-complete.md` step 5, via
-`gh-issue-state.py --done`) ever strips the rungs, and that is the **fallback**
+exotic: before this row, `/complete-task` (`gh-issue-complete.md` step 5, via
+`gh-issue-state.py --done`) was the only thing that stripped the rungs, and it
+is the **fallback**
 path — the primary one is a merged PR carrying `Closes #<n>`, and GitHub's
 auto-close knows nothing about this vocabulary, so it flips the state and leaves
 every label in place. A stale `auto:eligible` on a closed issue is the hazard
