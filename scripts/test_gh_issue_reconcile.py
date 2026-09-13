@@ -7,8 +7,8 @@ to `gh` or touches the network. Stubbing only the reconciler's own seam would
 leave the write path live, and the "no-op without --apply" tests would pass
 while proving nothing.
 
-Covers each of the three rules, that rules 2 and 3 never write at any flag
-combination, that rule 1 writes only under --apply, and the two ways a rule
+Covers each of the four rules, that rules 2 and 3 never write at any flag
+combination, that rules 1 and 4 write only under --apply, and the two ways a rule
 could be silently wrong instead of loudly: an event past the first page, and a
 status ladder whose numbering was renamed away.
 """
@@ -356,6 +356,157 @@ class RuleThreeTests(ReconcileTestCase):
         self.assertEqual(finding["state_reason"], "completed")
 
 
+class RuleFourTests(ReconcileTestCase):
+    """A closed issue must carry neither rung — labels.yml's "done is implicit".
+
+    This is the invariant the NORMAL completion path breaks: GitHub's auto-close
+    on a merged `Closes #<n>` flips the state and leaves every label alone.
+    """
+
+    def test_strips_both_rungs_and_keeps_prio_and_est(self):
+        repo = FakeRepo(
+            closed_issues={
+                1: ["status:4_needs_review", "auto:eligible", "prio:1", "est:3"]
+            },
+            events={1: [REVIEW]},
+        )
+        result = self._compute(repo, apply=True)
+
+        finding = result["closed_with_rungs"][0]
+        self.assertEqual(finding["rungs"], ["status:4_needs_review", "auto:eligible"])
+        self.assertTrue(finding["applied"])
+        self.assertEqual(sorted(repo.patched_labels(1)), ["est:3", "prio:1"])
+        # The reported set IS the written set — a `--json` consumer reads
+        # `labels` and would otherwise be trusting an unverified claim.
+        self.assertEqual(finding["labels"], repo.patched_labels(1))
+
+    def test_unmanaged_labels_ride_through(self):
+        repo = FakeRepo(
+            closed_issues={1: ["status:2_ready", "auto:eligible", "follow-up"]},
+            events={1: [REVIEW]},
+        )
+        self._compute(repo, apply=True)
+
+        self.assertEqual(repo.patched_labels(1), ["follow-up"])
+
+    def test_a_single_rung_is_enough_to_fire(self):
+        """The measured shape: 17 closed issues carrying only `auto:eligible`."""
+        repo = FakeRepo(closed_issues={1: ["auto:eligible"]}, events={1: [REVIEW]})
+        result = self._compute(repo)
+
+        self.assertEqual(result["closed_with_rungs"][0]["rungs"], ["auto:eligible"])
+
+    def test_a_correctly_closed_issue_is_not_touched(self):
+        repo = FakeRepo(
+            closed_issues={1: ["prio:1", "follow-up"]}, events={1: [REVIEW]}
+        )
+        result = self._compute(repo, apply=True)
+
+        self.assertEqual(result["closed_with_rungs"], [])
+        self.assertEqual(repo.writes(), [])
+
+    def test_an_out_of_vocabulary_name_does_not_on_its_own_fire_the_rule(self):
+        """`status:blocked` is not a rung, so there is no invariant drift to repair."""
+        repo = FakeRepo(closed_issues={1: ["status:blocked"]}, events={1: [REVIEW]})
+        result = self._compute(repo, apply=True)
+
+        self.assertEqual(result["closed_with_rungs"], [])
+        self.assertEqual(repo.writes(), [])
+
+    def test_the_strip_names_every_managed_label_it_also_deletes(self):
+        repo = FakeRepo(
+            closed_issues={1: ["auto:eligible", "prio:urgent"]},
+            events={1: [REVIEW]},
+        )
+        finding = self._compute(repo, apply=True)["closed_with_rungs"][0]
+
+        self.assertEqual(finding["dropped"], ["prio:urgent"])
+        self.assertNotIn("prio:urgent", repo.patched_labels(1))
+
+    def test_refuses_when_the_rung_free_set_would_still_be_illegal(self):
+        """Two `prio:` labels — stripping the rung would not make the set legal."""
+        repo = FakeRepo(
+            closed_issues={1: ["auto:eligible", "prio:1", "prio:2"]},
+            events={1: [REVIEW]},
+        )
+        finding = self._compute(repo, apply=True)["closed_with_rungs"][0]
+
+        self.assertIn("prio", finding["refused"])
+        self.assertFalse(finding["applied"])
+        self.assertEqual(repo.writes(), [])
+
+    def test_the_repair_never_reopens_the_issue(self):
+        repo = FakeRepo(closed_issues={1: ["auto:eligible"]}, events={1: [REVIEW]})
+        self._compute(repo, apply=True)
+
+        # Assert the write happened first: a loop over no writes passes this
+        # test vacuously, which is the one way it could stop meaning anything.
+        self.assertTrue(repo.writes())
+        for args, stdin in repo.calls:
+            if "--method" in args:
+                self.assertNotIn("state", json.loads(stdin))
+
+    def test_it_runs_even_when_rule_three_is_void(self):
+        """Rule 4 reads carried labels, so no provisioning premise gates it."""
+        repo = FakeRepo(
+            closed_issues={1: ["auto:eligible"]},
+            events={1: []},
+            repo_labels=[n for n in FULL_VOCABULARY if n != REVIEW],
+        )
+        result = self._compute(repo)
+
+        self.assertFalse(result["review_label_provisioned"])
+        self.assertEqual(repo.event_reads(), [])
+        self.assertEqual([f["number"] for f in result["closed_with_rungs"]], [1])
+
+    def test_every_finding_carries_the_same_keys_whether_stripped_or_refused(self):
+        repo = FakeRepo(
+            closed_issues={
+                1: ["auto:eligible"],
+                2: ["auto:eligible", "est:1", "est:2"],
+            },
+            events={1: [REVIEW], 2: [REVIEW]},
+        )
+        findings = self._compute(repo, apply=True)["closed_with_rungs"]
+
+        stripped, refused = findings[0], findings[1]
+        self.assertIsNone(stripped["refused"])
+        self.assertIsNotNone(refused["refused"])
+        self.assertEqual(sorted(stripped), sorted(refused))
+
+    def test_the_report_names_the_row_and_its_findings(self):
+        repo = FakeRepo(closed_issues={1: ["auto:eligible"]}, events={1: [REVIEW]})
+        result = self._compute(repo)
+
+        printed = io.StringIO()
+        with redirect_stdout(printed):
+            gh_issue_reconcile.report(result)
+        output = printed.getvalue()
+
+        self.assertIn("Rule 4", output)
+        self.assertIn("would strip auto:eligible", output)
+
+    def test_the_report_distinguishes_a_strip_from_a_refusal(self):
+        """The two --apply outcomes read differently, or a refusal looks done."""
+        repo = FakeRepo(
+            closed_issues={
+                1: ["auto:eligible"],
+                2: ["auto:eligible", "est:1", "est:2"],
+            },
+            events={1: [REVIEW], 2: [REVIEW]},
+        )
+        result = self._compute(repo, apply=True)
+
+        printed = io.StringIO()
+        with redirect_stdout(printed):
+            gh_issue_reconcile.report(result)
+        output = printed.getvalue()
+
+        self.assertIn("#1 issue 1 — stripped auto:eligible", output)
+        self.assertIn("#2 issue 2 — NOT stripped — ", output)
+        self.assertNotIn("would strip", output)
+
+
 class ProvisioningTests(ReconcileTestCase):
     """A row must check that the labels it looks for exist on the repo.
 
@@ -510,20 +661,22 @@ class RemediationCommandTests(ReconcileTestCase):
 
 
 class DryRunTests(ReconcileTestCase):
-    def test_all_three_rules_are_no_ops_without_apply(self):
+    def test_all_four_rules_are_no_ops_without_apply(self):
         repo = FakeRepo(
             open_issues={
                 1: ["status:2_ready", "status:4_needs_review", "auto:eligible"],
                 2: ["follow-up"],
             },
-            closed_issues={3: []},
-            events={3: ["status:3_started"]},
+            closed_issues={3: [], 4: ["auto:eligible"]},
+            events={3: ["status:3_started"], 4: [REVIEW]},
         )
         result = self._compute(repo)
 
         self.assertEqual(len(result["double_status"]), 1)
         self.assertEqual(len(result["missing_rung"]), 1)
         self.assertEqual(len(result["closed_unreviewed"]), 1)
+        self.assertEqual(len(result["closed_with_rungs"]), 1)
+        self.assertFalse(result["closed_with_rungs"][0]["applied"])
         self.assertEqual(repo.writes(), [])
         self.assertFalse(result["double_status"][0]["applied"])
         self.assertFalse(result["applied"])
