@@ -16,6 +16,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,11 @@ _spec = importlib.util.spec_from_file_location("linear_export", ASSET)
 assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 linear_export = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(linear_export)
+
+# Every nested connection ISSUES_QUERY selects, read out of the query text.
+# Anchored on `$nested` rather than on `first:` — the top-level
+# `issues(first: $first, …)` is not a nested connection and must not match.
+NESTED_RE = re.compile(r"(\w+)\s*\(\s*first\s*:\s*\$nested\b")
 
 
 def conn(nodes, has_next=False):
@@ -149,10 +156,20 @@ class ExportTests(unittest.TestCase):
         linear_export.gql = self._orig_gql
         linear_export.get_key = self._orig_key
 
+    def _tmpdir(self):
+        """A scratch export directory that is removed when the test ends.
+
+        Every destination here holds a full export document, so an unswept
+        mkdtemp leaves one per test per run.
+        """
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        return tmp
+
     def _run(self, pages, extra_args=(), out_dir=None):
         recorder = Recorder(pages)
         linear_export.gql = recorder.gql
-        tmp = out_dir or tempfile.mkdtemp()
+        tmp = out_dir or self._tmpdir()
         out, err = io.StringIO(), io.StringIO()
         argv = ["--team", "PreThink", "--out", tmp, "--json"] + list(extra_args)
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -216,7 +233,7 @@ class ExportTests(unittest.TestCase):
 
     def test_nested_overflow_aborts_the_run_and_writes_nothing(self):
         pages = [page([issue("PRE-1", overflow="relations")])]
-        tmp = tempfile.mkdtemp()
+        tmp = self._tmpdir()
         with self.assertRaises(SystemExit):
             self._run(pages, out_dir=tmp)
         self.assertEqual(list(Path(tmp).iterdir()), [])
@@ -235,7 +252,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(row["attachments"][0]["title"], "GitHub #288 (migrated)")
 
     def test_existing_file_is_not_overwritten_without_force(self):
-        tmp = tempfile.mkdtemp()
+        tmp = self._tmpdir()
         _, info, _, _ = self._run([page([issue("PRE-1")])], out_dir=tmp)
         with self.assertRaises(SystemExit):
             self._run([page([issue("PRE-2")])], out_dir=tmp)
@@ -244,7 +261,7 @@ class ExportTests(unittest.TestCase):
         self.assertEqual([i["identifier"] for i in doc["issues"]], ["PRE-1"])
 
     def test_force_replaces_todays_export(self):
-        tmp = tempfile.mkdtemp()
+        tmp = self._tmpdir()
         self._run([page([issue("PRE-1")])], out_dir=tmp)
         _, info, _, _ = self._run(
             [page([issue("PRE-2")])], extra_args=("--force",), out_dir=tmp
@@ -262,10 +279,32 @@ class ExportTests(unittest.TestCase):
         )
         self.assertEqual(doc["issue_count"], len(doc["issues"]))
 
+    def test_guard_list_matches_the_query(self):
+        """The guard list and the query must not drift apart.
+
+        `check_nested()` walks `NESTED_FIELDS`, so a connection selected in
+        `ISSUES_QUERY` but missing from that tuple overflows unchecked — and an
+        entry in the tuple that the query no longer selects is a dead guard.
+        Both are invisible at runtime, which is why the invariant is asserted
+        textually against the query rather than trusted to review.
+        """
+        selected = NESTED_RE.findall(linear_export.ISSUES_QUERY)
+        self.assertEqual(len(selected), len(set(selected)), "duplicate selection")
+        self.assertEqual(
+            set(selected),
+            set(linear_export.NESTED_FIELDS),
+            "ISSUES_QUERY and NESTED_FIELDS have drifted",
+        )
+        # An alias renames the response key, so check_nested() would look under
+        # the alias while NESTED_FIELDS names the field. Forbid them outright
+        # rather than teaching the regex to resolve them.
+        self.assertNotRegex(linear_export.ISSUES_QUERY, r"\w+\s*:\s*\w+\s*\(")
+
     def test_every_selected_connection_is_overflow_checked(self):
-        # NESTED_FIELDS is what check_nested() walks; a connection added to the
-        # query but not to that list would overflow unnoticed.
-        for field in linear_export.NESTED_FIELDS:
+        # Iterates the QUERY, not NESTED_FIELDS: drawing the cases from the
+        # tuple this guard polices would close the test over itself, leaving a
+        # newly added connection green while its overflow went unchecked.
+        for field in NESTED_RE.findall(linear_export.ISSUES_QUERY):
             with self.subTest(field=field):
                 with self.assertRaises(linear_export.ExportError):
                     linear_export.shape(issue("PRE-1", overflow=field))

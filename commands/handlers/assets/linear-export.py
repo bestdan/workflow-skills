@@ -11,7 +11,8 @@ thing that can answer "what was PRE-663?". So the export is deliberately
 TEAM-WIDE and unfiltered: selecting a subset is a downstream concern, and a
 subset is not a provenance record.
 
-Read-only. Never mutates anything.
+Read-only against Linear — it never mutates the workspace. The one thing it
+writes is the local JSON file named below.
 
 TRUNCATION IS THE FAILURE MODE THIS GUARDS AGAINST. A partial export looks
 exactly like a complete one — it is a well-formed JSON file with issues in it —
