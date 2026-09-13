@@ -124,21 +124,34 @@ acquire different refs, neither sees the other, and both believe they hold the
 claim. Unset means empty, and empty is only correct for a repo that really does
 push bare `task-<n>` branches.
 
-Read what the repo pushes rather than guessing:
+Read what the repo pushes rather than guessing. `<repo>` is `gh-issue.repo` if set,
+else `gh repo view --json nameWithOwner --jq .nameWithOwner`:
 
 ```bash
-gh pr list --repo "<repo>" --state merged --limit 20 --json headRefName \
-  --jq '[.[].headRefName | select(contains("/")) | split("/")[0]] | unique'
+gh pr list --repo "<repo>" --state merged --limit 20 --json headRefName,isCrossRepository \
+  --jq '[.[] | select(.isCrossRepository | not) | .headRefName
+        | capture("^(?<p>[^/]+/)") // {p:""} | .p] | unique'
 ```
 
-- `branch_prefix` set, or the query returns no common prefix → `PASS`.
-- Unset while every returned head shares one prefix `<p>` → `WARN`: "`gh-issue.branch_prefix`
-  is unset, so the claim lock ref is `task-<n>` — but this repo's merged PRs all use
-  `<p>/`. Set `gh-issue.branch_prefix: <p>/` in `.task-config.yml`." Never auto-fixed:
-  which prefix a repo wants is a judgment, and writing the wrong one moves the lock
-  rather than fixing it.
-- The `gh` call fails (auth, network, a repo with no merged PRs) → `PASS` with the
-  check noted as not run. An unavailable signal is not evidence of a problem.
+Each head maps to its prefix **including the trailing slash**, and a bare head maps
+to `""`. Two filters carry the weight. Keeping bare heads in the sample is the point:
+dropping them first is what would let one prefixed branch in a mixed repo pass for
+unanimity. Dropping **fork** heads is the opposite move — a cross-repository PR's
+branch name belongs to the contributor's fork, not to this repo, so it is evidence
+about someone else's naming and would pin a prefix this repo never pushes.
+
+- `branch_prefix` already set → `PASS`; the query is not needed.
+- Exactly one element and it is non-empty (`["bestdan/"]`) → `WARN`:
+  "`gh-issue.branch_prefix` is unset, so the claim lock ref is `task-<n>` — but this
+  repo's merged PRs all use `<p>`. Set `gh-issue.branch_prefix: <p>` in
+  `.task-config.yml`." Never auto-fixed: which prefix a repo wants is a judgment, and
+  writing the wrong one moves the lock rather than fixing it.
+- Anything else → `PASS`: more than one element means no single convention, and a
+  lone `""` means the repo really does push bare `task-<n>` branches.
+- The `gh` call fails (auth, network, a repo with no merged PRs) → `WARN`:
+  "`branch_prefix` check skipped — `gh pr list` unavailable." Same treatment Check 4
+  gives an unavailable `validate.py`: a check that could not run is reported, not
+  folded into `PASS`, because the vocabulary has no third state to hide it in.
 
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler

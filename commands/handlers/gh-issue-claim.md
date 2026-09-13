@@ -314,6 +314,9 @@ The backstop also assumes **the tracker is the same repo as the code**. It acts 
 ```bash
 git stash push -u
 git switch -
+# Pass --prefix whenever gh-issue.branch_prefix is set — see "Branch name" above.
+# Omitting it targets task-<n>, which does not exist: the delete fails loudly and
+# the real lock stays held, leaving the issue claimed by a session that has gone.
 python3 commands/handlers/assets/gh-issue-claim.py release --repo <repo> --issue <n> [--prefix "<branch_prefix>"]
 python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
   --labels "status:1_needs_refinement,auto:human-review-needed[,<its prio: label>][,<its est: label>]" --apply
