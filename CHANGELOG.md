@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.48.5] - 2026-09-13
+
+### Fixes
+
+- pass --plugin-root so the allow-rule pre-flight runs [#607] (#609) (9ce1b9b)
+
 ## [2.48.4] - 2026-09-13
 
 ### Fixes
