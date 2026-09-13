@@ -490,9 +490,10 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 5. **Branch + execute** — branch with Linear's **verbatim** `branchName` (never
    reconstruct it when the field is present), do the work, run the project's
    tests/lints (`just check` here).
-6. **PR** — `gh pr create` with the Linear identifier in brackets in the title
-   (`[PRE-12] …`) and `Closes <identifier>` on its own line in the body; post the
-   PR URL as a Linear comment. **Close only issues this PR actually finishes, each
+6. **PR** — `gh pr create` with a Conventional Commits title ending in the Linear
+   identifier in brackets (`<type>(<scope>): <description> [PRE-12]`) and
+   `Closes <identifier>` on its own line in the body; post the PR URL as a Linear
+   comment. **Close only issues this PR actually finishes, each
    as its own `Closes <identifier>` line** (more than one is fine when the PR
    genuinely completes several — one clearly-marked `Closes` per line). Any _other_
    Linear id that lands in the title or body — a blocker, a sibling phase task, a
@@ -608,7 +609,8 @@ capability is actually visible — inside the remote session** — via two concr
    cloud VM running the handler's single-issue claim+execute flow against **that one
    issue's identifier** — never instruct a session to claim more than one. For
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
-   branch with the verbatim `branchName` → execute → `gh pr create` with `[<id>]` +
+   branch with the verbatim `branchName` → execute → `gh pr create` with a title
+   ending in `[<id>]` +
    `Closes <id>` → `Move to review on PR open`). The remote prompt must be
    **self-contained** — **assume the VM has no plugin** unless its environment's setup
    script installed one; a committed `.claude/settings.json` does **not** install one

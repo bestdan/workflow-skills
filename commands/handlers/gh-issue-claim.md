@@ -200,7 +200,7 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
 
-2. **Open PR by issue number.** The execute path titles PRs `[#<n>] <title>`, so also catch a PR opened from an unlinked branch:
+2. **Open PR by issue number.** The execute path titles PRs `<type>(<scope>): <description> [#<n>]`, so also catch a PR opened from an unlinked branch:
 
    ```bash
    gh pr list --state open --search "[#<n>] in:title" --json number,url,title [--repo <repo>]
@@ -270,10 +270,12 @@ The claim locks on an **atomic primitive** — creating the `<branch>` ref, a se
 ## PR
 
 ```bash
-gh pr create --title "[#<n>] <title>" --body "Closes #<n>
+gh pr create --title "<type>(<scope>): <description> [#<n>]" --body "Closes #<n>
 
 <summary>" [--repo <repo>]
 ```
+
+The title grammar — Conventional Commits with the key in brackets at the end — is the `agent-guidance` plugin's `portable.md`, not this file. Conventional-first is load-bearing on a squash merge, where the merge commit inherits the PR title: a key-first title yields a history conventional-commit tooling cannot parse.
 
 `Closes #<n>` on its own line is the completion signal — GitHub closes the issue on merge. Then post the PR URL back to the issue:
 

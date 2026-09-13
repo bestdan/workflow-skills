@@ -146,7 +146,7 @@ If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the
 
 Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<KEY>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight, keyed on the handler's deterministic `task/<KEY>` branch (Jira publishes no branch of its own): catch a sibling session that is already building this issue before spending the full issue-description read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
-1. **Open PR by key.** The execute path titles PRs `[<KEY>] <summary>`, so an open PR carrying the key is an in-flight build:
+1. **Open PR by key.** The execute path titles PRs `<type>(<scope>): <description> [<KEY>]`, so an open PR carrying the key is an in-flight build:
 
    ```bash
    gh pr list --state open --search "[<KEY>] in:title" --json number,url,title
@@ -267,12 +267,14 @@ Return the issue key and url so `/do-tasks` can execute (the work branch is alre
 ## PR
 
 ```bash
-gh pr create --title "[<KEY>] <summary>" --body "<KEY>: <jira issue URL>
+gh pr create --title "<type>(<scope>): <description> [<KEY>]" --body "<KEY>: <jira issue URL>
 
 <summary of the change>"
 ```
 
-The `[<KEY>]` title prefix and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). Then post the PR URL back to the issue:
+The title grammar — Conventional Commits with the key in brackets at the end — is the `agent-guidance` plugin's `portable.md`, not this file. Conventional-first is load-bearing on a squash merge, where the merge commit inherits the PR title: a key-first title yields a history conventional-commit tooling cannot parse.
+
+The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). Jira matches the key anywhere in the title, so moving it to the end keeps the association intact. Then post the PR URL back to the issue:
 
 ```
 <atlassian-mcp>__addCommentToJiraIssue
