@@ -48,18 +48,20 @@ Order matters: the diff is read while the cwd is still the repo — `--cwd` reta
 
 crush exits non-zero on a real error, but check the output too: the rubric's terminal `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS` line is what proves a review actually happened. Missing it means **incomplete, not PASS** — treat it as a skipped reviewer (noted, never fatal). See the "Long reviews" note in [`../SKILL.md`](../SKILL.md) for the backgrounding pattern; a Hyper review is fast enough that it rarely applies.
 
-**An oversized `<INPUT>` fails closed, and its error names the wrong thing.** The pinned model's 262K window is the smallest in the reviewer pool, so crush is the first reviewer a large PR pushes over — and when it goes over, Hyper rejects the whole request rather than truncating it:
+**An oversized `<INPUT>` fails closed, and its error names the wrong thing.** The pinned model's window is 262K, so a large PR can push crush over it — and when it goes over, Hyper rejects the whole request rather than truncating it:
 
 ```
 ERROR  Agent processing failed: failed to start agent processing stream:
        bad request: Invalid input. Please review your request before trying again.
 ```
 
-Nothing in that names the context window, and the same `bad request` shape is what a bad model id or a malformed config produces — so **diagnose it by `<INPUT>`'s size before assuming the pin or the config is broken.** Measured 2026-09-13 against `kimi-k2.7-code`: an **800KB** `<INPUT>` reviewed normally, and a **1.33MB** one failed as above. The bracket is what was tested, not a discovered limit; treat anything approaching ~1MB as the danger zone and read the failure as "the diff is too big for this reviewer", noted as a skip like any other.
+Nothing in that names the context window — so **diagnose it by `<INPUT>`'s size before assuming the pin or the config is broken.** Measured 2026-09-13 against `kimi-k2.7-code`: an **800KB** `<INPUT>` reviewed normally, and a **1.33MB** one failed as above. Those are **bytes** measured against a **token** window, which is why neither number resembles 262K: at roughly 3-4 bytes per token, 800KB is about 200K tokens and fits, while 1.33MB is about 330K and does not. The bracket is what was tested, not a discovered limit; treat anything approaching ~1MB as the danger zone and read the failure as "the diff is too big for this reviewer", noted as a skip like any other.
 
-Do **not** add a size pre-check to the invocation to pre-empt this. The command must stay byte-for-byte identical to its exact-match allow rule, the failure is already loud (non-zero exit, no `REVIEW_COMPLETE`), and the existing skip path handles it correctly — the only thing missing was knowing _why_, which is what this note supplies. The one thing never to do is read the truncation-free failure as a passing review: crush returns the whole review or none of it. Verified by planting a canary instruction at the very end of the 800KB input and confirming the model emitted it, so nothing in the middle was dropped.
+**The transport is not what truncates — measure it rather than inferring.** The 800KB run logged `prompt_len=800830`, which is exactly its `<INPUT>` bytes + 260 (see the `prompt_len` table below), so the whole file reached the model — `MaybePrependStdin` has no size cap. The 1.33MB run logged **no** `prompt_len` line at all and returned the error above, so it was rejected before the stream started and produced no partial review. Both are statements about the two requests measured, not a general guarantee about crush — and the rule that matters needs no such guarantee: **never read an oversize failure as a passing review**, which the missing `REVIEW_COMPLETE` line already settles.
 
-Whether the **other** reviewers fail this way is untested — `codex`, `agy`, `devin`, and `copilot` were not probed for oversize behavior, so do not assume they also fail closed.
+Do **not** add a size pre-check to the invocation to pre-empt this. The failure is already loud (non-zero exit, no `REVIEW_COMPLETE`), the existing skip path handles it correctly, and the bracket above is a tested range rather than a known limit — so any threshold you picked would be invented. The only thing missing was knowing _why_, which is what this note supplies.
+
+Whether the **other** reviewers fail this way is untested — `codex`, `agy`, `devin`, and `copilot` were not probed for oversize behavior, so do not assume they also fail closed. crush is not the pool's floor either: `devin` is pinned to `swe-1.6`, a **200K** window.
 
 ## Diagnosing a `NO INPUT` from crush — it does read stdin, so measure the pipe
 
