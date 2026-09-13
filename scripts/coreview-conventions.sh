@@ -41,7 +41,7 @@ set -uo pipefail
 case "${1:-}" in
   "") ;;
   -h | --help)
-    sed -n '2,36p' "$0"
+    sed -n '2,38p' "$0"
     exit 0
     ;;
   *)

@@ -34,8 +34,14 @@ For each finding, give:
   and `<decorations>` is `(blocking)`, `(non-blocking)`, or `(if-minor)`. The
   label states how hard the finding is meant to land — do not soften a defect
   or inflate a preference. (`nitpick` is a valid label but the skip rule above
-  still stands: don't report nitpicks at all.)
+  still stands: don't report nitpicks at all. `praise` is a label in the
+  attached conventions but not here: it has no suggested fix, so it is not a
+  finding — the dispatcher writes praise into its own summary.)
 - a suggested fix
+
+Where the attached conventions and this rubric differ, this rubric wins. The
+conventions describe reviewing in general; this rubric describes the one job
+you have here, and the two lists above are its own.
 
 Output a plain list of findings, followed by the terminal verdict line below,
 and nothing else. You are read-only: do not modify files, write anything, or

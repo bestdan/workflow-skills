@@ -101,7 +101,7 @@ agy_line() {
 }
 devin_line() {
   local in="$INPUT_DIR/co-review-input.devin"
-  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\"; git diff HEAD >> \"$in\"; [ -s \"$in\" ] && mkdir -p \"$NEUTRAL\" && cd \"$NEUTRAL\" && devin -p --prompt-file \"$in\" --permission-mode auto --respect-workspace-trust false --model \"swe-1.6\""
+  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\" && git diff HEAD >> \"$in\" && [ -s \"$in\" ] && mkdir -p \"$NEUTRAL\" && cd \"$NEUTRAL\" && devin -p --prompt-file \"$in\" --permission-mode auto --respect-workspace-trust false --model \"swe-1.6\""
 }
 codex_line() {
   local in="$INPUT_DIR/co-review-input.codex"
