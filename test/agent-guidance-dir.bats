@@ -49,6 +49,13 @@ resolve() { run env HOME="$H" "$@" bash "$RESOLVER"; }
   refute_output --partial "$H/$MARKET"
 }
 
+@test "an exported-but-empty override falls through: empty means unset" {
+  mkroot "$H/$MARKET"
+  resolve AGENT_GUIDANCE_DIR=""
+  assert_success
+  assert_output "$H/$MARKET"
+}
+
 @test "a directory without portable.md is not a plugin root" {
   mkdir -p "$TEST_TMPDIR/bare/.claude-plugin"
   printf '{}\n' >"$TEST_TMPDIR/bare/.claude-plugin/plugin.json"
@@ -176,4 +183,11 @@ resolve() { run env HOME="$H" "$@" bash "$RESOLVER"; }
 @test "an unknown argument is a usage error, exit 2" {
   run env HOME="$H" bash "$RESOLVER" --bogus
   assert_failure 2
+}
+
+@test "--help exits 0 and prints the header, not the code below it" {
+  run env HOME="$H" bash "$RESOLVER" --help
+  assert_success
+  assert_output --partial 'Usage:'
+  refute_output --partial 'set -uo pipefail'
 }

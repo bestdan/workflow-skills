@@ -21,7 +21,7 @@
 #   1. $AGENT_GUIDANCE_DIR, when set. Set-but-wrong is an error, never a
 #      reason to keep looking.
 #   2. installPath from ~/.claude/plugins/installed_plugins.json.
-#   3. The newest directory under ~/.claude/plugins/cache/agent-guidance/.
+#   3. The newest directory under ~/.claude/plugins/cache/agent-guidance/agent-guidance/.
 #   4. The marketplace clone, ~/.claude/plugins/marketplaces/agent-guidance.
 #
 # Exit status:
