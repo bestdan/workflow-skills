@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.46.0] - 2026-09-13
+
+### Features
+
+- resolve the installed agent-guidance plugin (#588) (e679c8a)
+
 ## [2.45.2] - 2026-09-11
 
 ### Fixes
