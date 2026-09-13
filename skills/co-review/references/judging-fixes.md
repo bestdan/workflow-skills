@@ -8,7 +8,10 @@ Detail behind SKILL.md step 8's reconciler contract.
 `recommended_fix` are two claims, and they fail independently: a reviewer can
 correctly notice something and then propose a change that breaks the code. Run
 the fix against the diff before rating it. When the fix would introduce a new
-defect, mark the finding **low** whatever the finding's own merit, and say in
+defect, do not inherit it. If you can state a sound replacement, put that in
+`recommended_fix` and rate the finding **medium** at most — a fix you authored
+yourself has been checked by no one, and **high** applies it unasked. If you
+cannot, mark the finding **low** even when the observation is sound, and say in
 the rationale that the fix — not the observation — is what sank it.
 
 A finding whose premise is checkable is not reconciled until it has been
@@ -17,8 +20,9 @@ describing code is evidence about the reviewer, not about the code.
 
 ## Three worked examples, all from one run
 
-Each was rated `issue (blocking)` by at least one reviewer. All three are wrong,
-and the first two would have shipped a bug if applied.
+Each was rated `issue (blocking)` by at least one reviewer. All three are wrong.
+The first would have shipped a bug if applied; the second describes a bug the
+control flow rules out; the third is a no-op.
 
 **A fix that breaks the build.** Two reviewers independently read
 `AUTOLINK.sub("", text)` as dropping an autolink's visible label, claiming
@@ -34,7 +38,9 @@ halves in seconds.
 `with self.assertRaises(SystemExit)` as passing on success as well as failure.
 The tests call `main()` directly rather than running the script, and `main()`
 returns an int on every success path — it never raises. The concern is sound in
-general and inapplicable here, which only reading the control flow shows.
+general and inapplicable here, which only reading the control flow shows. Here
+the rating dropped because the premise failed, not the fix — the second rule
+above, not the first.
 
 **A fix that is a no-op.** A reviewer read an `applyTo` glob of
 `skills/**,commands/**,agents/**` as missing handler files and proposed adding
