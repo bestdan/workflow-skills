@@ -31,23 +31,24 @@ API key `linear-archive.md` already holds.
 
 Only `workflow-skills` migrates in this plan. `finplan` stays on Linear as the control.
 
-> **Re-assessed 2026-09-12 — "84 backlog issues plus its share of the active set" is
-> stale, and it was never a usable specification.** Live (non-terminal, unarchived) counts
-> across `backlog`/`unstarted`/`started`: `workflow-skills backlog` **82**,
-> `workflow-skills: Handler parity follow-ups` **14** — 96 in the two projects named for
-> the repo. Four more projects are unambiguously this repo's work under names that do not
-> say so: `Auto-pilot mode — /deliver-task + /auto-pilot` **18**, `autopilot-harness`
-> **15**, `reviewer-quality` **5**, `reconcile-tasks` **1** — bringing it to **135**.
-> `Deterministic-script extraction` (1) is ambiguous. Two read as in-scope and are not:
-> `Plugin data-ops enhancement` (7) is **finplan's** plugin (PRE-325/327 are
-> `scripts/finplan.py`), and `aiutopilot backlog` (2) is a separate repo.
+> **Settled 2026-09-13 — the counting arguments earlier revisions made here are over.**
+> "84 backlog issues plus its share of the active set" was never a usable specification,
+> and neither were the 96-by-name and 135-by-content estimates that replaced it: both
+> predate an export. The selected set is **125 live issues** (state type `backlog`,
+> `unstarted` or `started`), enumerated by
+> [#511](https://github.com/bestdan/workflow-skills/issues/511) and realised in
+> `$HOME/src/linear-export/2026-09-13-import-plan.json`. **Anything computing a count now
+> reads that file, not this one.** `autopilot-harness`'s 15 are excluded by the
+> [#508](https://github.com/bestdan/workflow-skills/issues/508) deferral.
 >
-> **Linear has no repo field, so project name is the only proxy and it lies in both
-> directions.** A selector matching the name `workflow-skills` drops 39 issues; one
-> matching "plugin-shaped" imports finplan's. **The live set must be an explicit,
-> human-approved list of project ids — never a name pattern.** That decision belongs to
-> [#511](https://github.com/bestdan/workflow-skills/issues/511); this task's export
-> (#510) is team-wide regardless, so it is not blocked on the answer.
+> **The reasoning under those numbers still holds: Linear has no repo field, so project
+> name is the only proxy and it lies in both directions.** A selector matching the name
+> `workflow-skills` drops issues; one matching "plugin-shaped" imports finplan's
+> (`Plugin data-ops enhancement` is finplan's plugin — PRE-325/327 are
+> `scripts/finplan.py`). **That is why the selection is an enumerated list of project
+> names and explicit keys, never a pattern**, and why nothing downstream may re-derive it;
+> the argument now lives with the code, in `commands/handlers/assets/linear-import.py`'s
+> header.
 >
 > Not urgent: the newest workflow-skills issue in Linear is PRE-823, created 2026-09-03.
 > Nothing has been filed there since the 09-07 switch, so the two boards are parked rather

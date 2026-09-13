@@ -1,8 +1,8 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-13, after #510 merged. #511 is next and is an implementation task,
-not the open decision earlier revisions described — see "Where things stand".** Read this
-first, then
+**Redrafted 2026-09-13, after #511 merged. #512 (`linear-import.py --apply`) is next, and
+the import plan it executes already exists on this machine — see "#512 is next".** Read
+this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -96,18 +96,25 @@ still ahead of you.**
 [#514](https://github.com/bestdan/workflow-skills/issues/514) (verify) →
 [#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
 [#516](https://github.com/bestdan/workflow-skills/issues/516) (close out).
+**The milestone's own description is the crosswalk contract** — the Linear-to-GitHub
+table nothing else in this repo states. Read it there, not from a copy.
 
-**#510 is complete.** `commands/handlers/assets/linear-export.py` and both test pairs
-merged to `main` on 2026-09-13 as `d57d51c` ([PR #590](https://github.com/bestdan/workflow-skills/pull/590)).
-The export ran, and the file was copied off this machine over Taildrop. The issue itself
-may still read `status:0_untriaged` — closing it is the only thing left, and it is
-bookkeeping, not work.
+**#510 and #511 are complete**, both merged to `main`:
+`commands/handlers/assets/linear-export.py` as `d57d51c`
+([PR #590](https://github.com/bestdan/workflow-skills/pull/590)), and
+`commands/handlers/assets/linear-import.py --plan` plus its test pair in
+[PR #597](https://github.com/bestdan/workflow-skills/pull/597).
 
-**The export is the input to everything downstream:**
-`$HOME/src/linear-export/2026-09-13-prethink.json`, 3.2 MB, sha256
-`60276d3c65fb8334a74b84ea65ba880816532137fcc5dba5a513ea3723ecc4b3` — **810 issues, 557
-archived**, 462 with comments, 110 with relations, across 40 projects. It is the only
-record of those keys once the Linear originals are cancelled; there is no remote.
+**Two files on this machine are the input to everything downstream, and neither has a
+remote.** Both sit in `$HOME/src/linear-export/`:
+
+- `2026-09-13-prethink.json` — the export, 3.2 MB, sha256
+  `60276d3c65fb8334a74b84ea65ba880816532137fcc5dba5a513ea3723ecc4b3`, **810 issues, 557
+  archived**, 462 with comments, 110 with relations, across 40 projects. It is the only
+  record of those keys once the Linear originals are cancelled.
+- `2026-09-13-import-plan.json` — the import plan #512 executes. Regenerable from the
+  export in seconds (the invocation is in `linear-import.py`'s header), so it is the
+  cheap half of the pair; the export is not.
 
 **Read the 810 against `PRE-835`, not against 781.** The export spans `PRE-5 … PRE-835`
 with 21 numbers missing to deleted issues, and that top identifier is what shows the
@@ -115,90 +122,75 @@ pagination reached the end — it matches the highest key observed independently
 2026-09-12. **An identifier is not an index**; nothing downstream may compute a count
 from a key, or treat a gap as a lost issue.
 
-## #511 is next, and it is not the decision you were told it was
+## #512 is next, and the plan file settles most of its arguments
 
-Earlier revisions of this file said the scoping question — which Linear projects count
-as workflow-skills — was open and belonged to #511. **It is already resolved in #511's
-own body**, as "plan open question 1, resolved": seven named projects plus `PRE-685` and
-`PRE-815`, with `autopilot-harness` deferred to
-[#508](https://github.com/bestdan/workflow-skills/issues/508). #511 is an
-**implementation** task. Do not reopen the selection; implement it.
+`--apply` creates or reopens the issues, writes labels and milestones, and posts the
+consolidated comment. It reads `2026-09-13-import-plan.json` and **must not re-derive
+the selection or the crosswalk from the export** — the enumeration and the mapping are
+the plan's, argued in `linear-import.py`'s header, and re-deriving them is how the
+"project name is a lying proxy" bug gets reintroduced.
 
-**That selection was validated against the export on 2026-09-13 and it is sound** —
-every one of the seven project names matches the export exactly, and both named issues
-exist and are live. It selects **125 live issues** (state type `backlog`, `unstarted` or
-`started`):
+**What the plan holds, measured 2026-09-13 by the real run.** These are the numbers
+`--apply` must reproduce, and a mismatch is a defect rather than drift:
 
-| Project                                           | Live | Total |
-| ------------------------------------------------- | ---: | ----: |
-| `workflow-skills backlog`                         |   82 |   111 |
-| `Auto-pilot mode — /deliver-task + /auto-pilot`   |   18 |    36 |
-| `workflow-skills: Handler parity follow-ups`      |   16 |    49 |
-| `reviewer-quality`                                |    5 |     5 |
-| `Deterministic-script extraction`                 |    1 |    11 |
-| `reconcile-tasks`                                 |    1 |    12 |
-| `Linear MCP token-cost fix — GraphQL fast-path …` |    0 |     4 |
-| `PRE-685`, `PRE-815` (no project)                 |    2 |     2 |
+| Fact                      | Value                                                       |
+| ------------------------- | ----------------------------------------------------------- |
+| entries                   | **125** (117 `create`, 8 `reopen`)                          |
+| status rungs              | 32 untriaged, 54 needs_refinement, 38 ready, 1 needs_review |
+| milestones to create      | 5, holding 18 / 16 / 5 / 1 / 1; **84 entries get none**     |
+| native `blocked_by` edges | 27                                                          |
+| sub-issue links           | 15                                                          |
+| entries carrying comments | 62                                                          |
+| assignees to write        | 1 (`PRE-416`, the only `started` issue, `@me`)              |
 
-**One selected project is empty.** The token-cost-fix project has 0 live issues — all 4
-are terminal. Selecting it is harmless and contributes nothing; do not read a zero in
-the plan summary as a selection bug.
+**Nothing falls off the selection edge.** Zero blockers and zero parents point outside the
+selected set, so no edge or sub-issue link is dropped, and no Linear label lands without a
+crosswalk row. Those three categories are printed even when empty, deliberately — a
+category that only appears when non-empty cannot be read as reassurance.
 
-**The "96 or 135" figures below are superseded.** Both were estimates made before an
-export existed, and neither is the number. The gap is not the scoping question: it is
-that `Handler parity follow-ups` has 16 live rather than 14, and that
-`autopilot-harness`'s 15 are excluded by the #508 deferral rather than included "by
-content". **Anything computing a count now reads the export, not this file.**
+**`status:3_started` appears zero times, and that is correct.** Exactly one live issue is
+`started` and it sits in `In Review`, so it maps to `status:4_needs_review`. Related trap:
+55 live issues carry `human-approval-requested` but only **54** get
+`status:1_needs_refinement`, because the crosswalk reads that label only on `backlog`. The
+counts are not meant to reconcile.
 
-### Which coder should write it
+**The eight reopen targets were verified CLOSED on 2026-09-13**: #284, #288, #289, #295,
+#296, #297, #299, #302. That is a live-state check, not a fact about the file — if anyone
+reopens one by hand, regenerating the plan refuses (an open original means two live homes
+already exist), and `--apply` must not paper over it.
 
-Profiled 2026-09-13 against `select-coder`'s matrix, with the availability cache
-re-probed the same day (the old block was 72 days stale).
+**`papercut` is provisioned on this repo; `blocked` is not.** No live issue carries
+`blocked`, so nothing needs it today — but `--apply` must not assume a carried label
+exists. The four managed namespaces are all provisioned (task 17).
 
-**Author it with `opus:claude-opus-5`.** The task reads as `standard-pr` by size — one
-asset plus one test pair — but it is **`verification-sensitive`** in character, and that
-label decides the routing: the deliverable is a crosswalk whose correctness nothing
-downstream re-checks, guarded by a validator whose refusal path is the safety property.
-A wrong plan becomes 125 wrong GitHub issues in #512. The matrix's carve-out bars
-`codex:gpt-5.6-sol` from exactly this label, and note that **codex's resolved default on
-this machine is now `gpt-5.6-luna`** — the mechanical-bulk tier — so an unpinned codex
-dispatch would author this with the weakest model in the pool.
+**Two deviations from #511's task file, both to avoid a silent failure:**
 
-**Use codex as a reviewer, not as the author.** `/co-review` already dispatches it
-(`codex` and `crush` are the configured local reviewers), and that is the cross-vendor
-second opinion this work wants. On #510 it was the reviewer pool — Copilot and crush,
-independently — that caught the one real defect, and the defect was **a test that did
-not test what it claimed**. Expect the same class here and structure for it.
+1. **The migrated-from footer is matched anywhere in the description, and through
+   Linear's markdown link wrapping** (`Migrated from [https://…/issues/288](<…>)`,
+   followed by a sizing-flag block). The issue spelled it as a description that _ends
+   with_ a bare URL; that form matches **none** of the eight real candidates. A missed
+   candidate is a duplicate GitHub issue, not a loud failure. The attachment marker
+   caught all eight independently, so the footer detector is the belt to that braces.
+2. **A blocker outside the selection is footnoted `Blockers not migrated:`, never
+   `Blocked by:`.** The issue said to note it "in the footer instead", and `Blocked by:`
+   is the spelling `/reoptimize-tasks` reads as a dependency claim — see the footer rule
+   below. These blockers have no edge and never can, because the issue they name is not
+   being imported.
 
-**Do not fan this out across subagents.** It is one file whose parts share a data model;
-splitting it costs more in coordination than it saves. Two narrow delegations do pay,
-and neither is authorship:
-
-- An `Explore` agent to map the three contracts the plan must satisfy before you write
-  any of it — `labels.yml`'s vocabulary, `validate()` in `gh-issue-state.py`, and the
-  `EXACTLY_ONE`/`AT_MOST_ONE` constants in `_labels.py`. Cheaper than reading four files
-  into the authoring context.
-- The reopen-detection sweep is I/O, not reasoning: it is one `gh issue view` per
-  candidate carrying a migrated-from marker. Batch it, and remember the issue's own rule
-  — an original that is **open** is a refusal, because two live homes already exist.
-
-**Before dispatching any external coder, deal with `~/.linear-key`** (see below). A
-plaintext full-account token in `$HOME` is reachable by any backend with filesystem
-access, and gate 1 of the matrix is about exactly that exposure.
-
-**The cloud-session probe is done and it came back red.** It was the last thing gating
-`gh-issue.remote_batch`, and the answer is that the flag stays off. Details below; do
-not re-run it, and do not re-derive it from documentation.
-
-**Three user-run checks are unblocked and cheap.** None is a task; all are acceptance
-criteria sitting on already-merged work. See "Acceptance criteria still owed".
+Also worth knowing rather than rediscovering: the export contains **zero**
+`<issue id=… href=…>` mentions, so the rewrite `linear-import.py` performs for them is
+insurance, not load-bearing. And `PRE-746` is the only oversized entry (`est:8`); it
+already carries its own `/break-down-task` note in the body, added during the 2026-08-08
+migration out of GitHub.
 
 ## What will bite you
 
 ### `op` is dead over SSH, and there is a second Linear credential that is not
 
 **Measured 2026-09-13** while running #510's export from an SSH session on the Mac mini.
-Two facts, and the second is the one that saves you an hour.
+This matters for [#515](https://github.com/bestdan/workflow-skills/issues/515), the
+Linear-side write — **#512, #513 and #514 need no Linear credential at all**, since they
+read the plan file and write only GitHub.
 
 **`op` cannot work here, and the error says which kind of cannot.** The key in
 `dev_docs/tasks/.task-config.local.yml` is an `op://Private/…` ref, and that read returns
@@ -217,14 +209,13 @@ a **`Bearer`** token, not a personal `lin_api_…` key (`linear-export.py:auth_h
 handles both, and nothing else in `commands/handlers/assets/` does), and the token is a
 plaintext credential wherever you park it, so delete it after.
 
-> **Two credentials are live on this machine right now, and nobody has decided their
-> fate.** `~/.linear-key` holds the OAuth token in plaintext (mode 600), and
-> `~/src/linear-token.py` is the throwaway that mints it. They were left in place in case
-> #511/#512 want the same token, which is a real convenience and a real exposure: the
-> token is full-account, and **any coder backend with filesystem access can read it**.
-> Decide before dispatching an external coder — either delete both and re-mint when
-> needed (the script takes seconds and the client credentials persist), or keep them and
-> route authorship locally. Do not leave the question open while fanning work out.
+> **Two credentials are still live on this machine, and their fate is still undecided.**
+> `~/.linear-key` holds the OAuth token in plaintext (mode 600), and
+> `~/src/linear-token.py` is the throwaway that mints it. They were kept in case #511/#512
+> wanted the same token; **#511 did not, and #512 will not** — the remaining Linear read is
+> #515's. The exposure is unchanged: the token is full-account, and any coder backend with
+> filesystem access can read it. Deleting both is now the cheap option, since re-minting
+> takes seconds and the client credentials persist. **Needs the operator.**
 
 **The trap that outlives both:** `scripts/check.sh:148` excludes `scripts/test-*-live.sh`
 from the gate outright, and each live harness exits **0** with a warning when no key
@@ -277,8 +268,8 @@ Consequences for the plan:
   16's acceptance criterion said flip it to `yes`. Do not — the premise that would have
   justified flipping is now measured false rather than merely unprobed, which is a
   stronger reason for the same default. **This deviation is now settled, not pending.**
-- **The handler's MCP branch is no longer optional-looking.** It is the only route to
-  a working dispatched session, since `gh` does not work there. It still owes the same
+- **The handler owes an MCP branch for its label writes.** It is the only route to a
+  working dispatched session, since `gh` does not work there. It still owes the same
   `labels.yml` validate-then-replace rule.
 - **`claim-lock.md` no longer claims a dispatched session "usually can" acquire the
   ref.** PR #490 amended that sentence; the instruction (take the election) is unchanged.
@@ -318,7 +309,9 @@ Consequences for the plan:
 
 **The vocabulary migration is finished.** Every gh-issue verb speaks `labels.yml`; there
 is no bridge left. An old spelling (`auto-eligible`, `priority:*`) is a defect, not a
-migration in progress.
+migration in progress. The one exception is the import: `auto-eligible` and
+`human-approval-requested` are **Linear** labels the crosswalk reads and consumes, and
+they exist on this repo only because the 2026-09-07 papercut transfer created them.
 
 **"Carrying a rung" means carrying one `labels.yml` defines** — never merely a label
 whose name starts with `status:` or `auto:`. The prefix reading is the trap: a hand-typed
@@ -368,7 +361,7 @@ read "unattended" as "cloud routine"** — a runner is unattended too. The token
 repo-scoped, so a repo whose `gh-issue.repo` points elsewhere must not run the task-6
 backstop.
 
-**Writes.**
+**Writes.** All four bear directly on #512 and #513.
 
 - A label write **replaces** the whole set and **auto-creates** unknown names. Hence
   validate-then-replace, always, before any network call. True on the REST path and on
@@ -422,7 +415,7 @@ about cloud sessions. Probe it.
   reaffirmed by the owner 2026-09-12**, because `/auto-pilot` is under active development
   with a new harness. It stops outright rather than degrading. **The cost is no longer
   hypothetical**: the config flipped on 09-07 without it, so this repo is out of unattended
-  auto-pilot today. It still gates a like-for-like **task 10**; it no longer gates task 9,
+  auto-pilot today. It still gates a like-for-like **task 10**; it does not gate task 9,
   which is import work needing no auto-pilot at all.
 - **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
   same validate-then-replace rule. The probe promoted this from "for any channel without
@@ -437,7 +430,8 @@ about cloud sessions. Probe it.
 - **`sandbox-network-guard` blocks non-GET `gh api`.** Confirmed as a workaround, not a
   fix: an asset's `--apply` PATCHes fine **unsandboxed**, because the hook matches the
   `gh api` text and a python helper hides it. Friction, not a wall; every local write
-  costs a sandbox escape. **Outside this repo; needs the operator.**
+  costs a sandbox escape. **#512 is a few hundred such writes — budget for the escape
+  rather than discovering it mid-batch.** Outside this repo; needs the operator.
 - **`state_reason` on the close path is unowned.** `gh-issue-state.py --done` writes
   `state: closed` and nothing else, so a completed issue and an abandoned one are
   indistinguishable afterwards. It costs more than it did: task 8's stale-versus-satisfied
@@ -492,47 +486,24 @@ has not, so that comparison is no longer like-for-like. Either restore parity (t
 before running the gate, or run it attended and **state the asymmetry in the verdict**.
 Do not let the gate silently score the handler down for a gap that is auto-pilot's.
 
-## What task 9 is actually importing
+## The two boards are parked, not drifting
 
-**Settled. The counting argument this section used to make is over** — an export exists,
-so the selected set is 125 and the authority is the file, not a table here. The numbers
-that were in this space (96 by name, 135 by content) were pre-export estimates and both
-were wrong; see "#511 is next" above for the validated breakdown.
-
-**What survives is the reasoning, because #512 still needs it.**
-
-**The trap, and why the resolved list is shaped the way it is.** Linear has no repo
-field. Project name is the only proxy, and it is a lying one in both directions: four
-workflow-skills projects are not named for the repo, and `Plugin data-ops enhancement`
-reads like plugin work but is finplan's (PRE-325/327 are `scripts/finplan.py`). A
-selector written as "projects matching `workflow-skills`" silently drops issues; one
-written as "anything plugin-shaped" silently imports finplan's. **That is why #511's
-selection is an enumerated list of project names and explicit keys, and never a
-pattern** — the list is already approved and sits in #511's body. Anything downstream
-that is tempted to re-derive the set from a name match is reintroducing the bug the
-enumeration exists to prevent.
-
-**One thing that is better than feared: the divergence is bounded, not growing.** The
-newest workflow-skills issue in Linear is PRE-823, created **2026-09-03** — four days
-before the switch. Nothing has been filed there since, so the two boards are parked rather
-than drifting apart. For scale on the other side, the GitHub board currently holds 46 open
-issues: 31 `status:0_untriaged`, 5 `status:2_ready`, 2 `status:1_needs_refinement`,
-2 `status:4_needs_review`, 6 carrying no rung at all.
-
-**This does not change the import's shape, only its size and its selector.** The four
-scripts #510–#513 specify are still the right decomposition.
+The newest workflow-skills issue in Linear is PRE-823, created **2026-09-03** — four days
+before the switch. Nothing has been filed there since, so the import is not racing a
+moving source. For scale on the other side, the GitHub board held 46 open issues at the
+2026-09-08 count; #512 adds 117 to it.
 
 ### Acceptance criteria still owed
 
-Each needs a repo on the `gh-issue` handler. **Two now qualify** — `bestdan/dotfiles` since
+Each needs a repo on the `gh-issue` handler. **Two qualify** — `bestdan/dotfiles` since
 before this plan, and `bestdan/workflow-skills` itself since 2026-09-07 — so anything
 testing only **handler dispatch** can run in either against a real board. What neither can
 stand in for is a **migrated** backlog: dotfiles was never on Linear, and this repo's
 Linear issues have not been imported yet, so no board anywhere carries the imported
 issues, old-vocabulary labels or `Blocked by:` footers the migration criteria are about.
-That half still waits on task 9.
+That half waits on #512.
 
-- **Task 16's dispatch half is now unrunnable, not merely blocked.** `/do-tasks --all`
+- **Task 16's dispatch half is unrunnable, not merely blocked.** `/do-tasks --all`
   dispatching bounded sessions needs a repo that can legitimately set
   `remote_batch: true`, and the probe says none can today. Retire the criterion or
   rewrite it against whatever closes the plugin gap. The **degrade** path is testable now
@@ -549,8 +520,7 @@ That half still waits on task 9.
   `status:2_ready` (which **is** provisioned there) and two concurrent sessions; the
   racing is the point, so a serial run proves nothing.
 - **Task 8's migrated-backlog half** — `/reoptimize-tasks` against the migrated
-  `workflow-skills` backlog, spot-checking three edges in the UI. Needs task 9, so it
-  waits on Phase 4.
+  `workflow-skills` backlog, spot-checking three edges in the UI. Needs #512 and #513.
 - **Task 15** — its user-run check.
 
 None of these is a defect. Task 7's was run and **found** task 17's defect, which is that
