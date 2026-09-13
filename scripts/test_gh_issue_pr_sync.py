@@ -443,22 +443,30 @@ class MergedPRTests(unittest.TestCase):
         remote = FakeMergedRemote()
         original = pr_sync.gh_issue_state.run_gh
         pr_sync.gh_issue_state.run_gh = remote.run_gh
+        stderr = io.StringIO()
         try:
-            with self.assertRaises(SystemExit):
-                pr_sync.main(
-                    [
-                        "--repo",
-                        "o/n",
-                        "--branch",
-                        "bestdan/task-142",
-                        "--event",
-                        "closed",
-                        "--merged",
-                        "--apply",
-                    ]
-                )
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    pr_sync.main(
+                        [
+                            "--repo",
+                            "o/n",
+                            "--branch",
+                            "bestdan/task-142",
+                            "--event",
+                            "closed",
+                            "--merged",
+                            "--apply",
+                        ]
+                    )
         finally:
             pr_sync.gh_issue_state.run_gh = original
+
+        # Pin WHICH SystemExit. `closing_issues()` raises a bare one too, so
+        # asserting the type alone would let a failed `gh pr view` satisfy a
+        # test named for the missing argument.
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--merged requires --pr", stderr.getvalue())
 
     def test_the_branch_name_does_not_decide_which_issue_is_stripped(self):
         """The branch says 142; the PR actually closed 500. GitHub's reference
@@ -626,6 +634,15 @@ class WorkflowTriggerTests(unittest.TestCase):
 
     def test_declares_the_issues_write_permission_the_patch_needs(self):
         self.assertRegex(self.text, r"(?m)^\s+issues:\s*write\s*$")
+
+    def test_declares_the_pull_requests_read_the_merged_branch_needs(self):
+        """`gh pr view --json closingIssuesReferences` has no scope without it.
+
+        Naming any permission sets every unlisted scope to `none`, so this is a
+        denial rather than a default — and invisible on a public repo, where a
+        restricted token still reads public data.
+        """
+        self.assertRegex(self.text, r"(?m)^\s+pull-requests:\s*read\s*$")
 
     def test_runs_the_sync_asset(self):
         self.assertIn("commands/handlers/assets/gh-issue-pr-sync.py", self.text)
