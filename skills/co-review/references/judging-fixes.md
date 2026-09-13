@@ -1,23 +1,11 @@
 # Judging a proposed fix
 
-Detail behind SKILL.md step 8's reconciler contract.
-
-## The rules
-
-**1. Judge the proposed fix, not only the finding.** A finding and its
-`recommended_fix` are two claims, and they fail independently: a reviewer can
-correctly notice something and then propose a change that breaks the code. Run
-the fix against the diff before rating it. When the fix would introduce a new
-defect, do not inherit it. If you can state a sound replacement, put that in
-`recommended_fix` and rate the finding **medium** at most — a fix you authored
-yourself has been checked by no one, and **high** applies it unasked. If you
-cannot, mark the finding **low** even when the observation is sound, and say in
-the rationale that the fix — not the observation — is what sank it.
-
-**2. Check a checkable premise.** A finding whose premise is checkable is not
-reconciled until it has been checked. Read the regex, trace the control flow,
-evaluate the glob. A reviewer describing code is evidence about the reviewer,
-not about the code.
+Worked examples behind SKILL.md step 8's reconciler contract. That step — and
+its deliberate mirror in `agents/co-review-reconciler.md` — already states the
+two rules these examples exercise, and they must not move here: **judge the
+proposed fix, not only the finding**, and **check a checkable premise before
+reconciling**. This file restates neither; it shows what each looks like when a
+reviewer gets it wrong.
 
 ## Three worked examples, all from one run
 
@@ -40,7 +28,8 @@ halves in seconds.
 The tests call `main()` directly rather than running the script, and `main()`
 returns an int on every success path — it never raises. The concern is sound in
 general and inapplicable here, which only reading the control flow shows. Here
-the rating dropped because the premise failed, not the fix — rule 2, not rule 1.
+the rating dropped because the premise failed, not the fix — the
+checkable-premise rule, not the fix-judging one.
 
 **A fix that is a no-op.** A reviewer read an `applyTo` glob of
 `skills/**,commands/**,agents/**` as missing handler files and proposed adding
