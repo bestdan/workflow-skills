@@ -274,7 +274,7 @@ gh pr create --title "<type>(scope): <description> [<KEY>]" --body "<KEY>: <jira
 
 The title grammar is the `agent-guidance` plugin's `portable.md` (`Git:` bullet), not this file.
 
-The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). The key still appears as a literal `[<KEY>]` token in the title. Jira's DVCS integration matches keys by pattern rather than position, so the end position is expected to associate the same way. That last point is unverified: if a merge stops closing its issue, check position first. Then post the PR URL back to the issue:
+The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). Atlassian documents the requirement as _including_ the key in the PR title, and names capitalization as the only constraint on its form, with no positional one ([Reference work items in your development spaces](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), read 2026-09-13); the page's own examples happen to lead with the key. The end position is therefore documented-compatible rather than separately exercised: if a merge stops closing its issue, check position first. Then post the PR URL back to the issue:
 
 ```
 <atlassian-mcp>__addCommentToJiraIssue
