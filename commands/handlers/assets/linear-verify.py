@@ -11,7 +11,7 @@ against the plan and the export, and its value is entirely in disagreeing.
 
 Read-only: every `gh` call is a GET, so it runs sandboxed.
 
-Six checks, each reporting the offending keys rather than a count:
+Seven checks, each reporting the offending keys rather than a count:
 
 1. `mapping`      every plan key has a mapping record at `phase: done` whose
                   issue is open.
@@ -33,9 +33,10 @@ shapes come from the EXPORT, not from the plan's own `blocked_by` and `parent`
 fields. A verifier that recomputed the plan's arithmetic could only confirm the
 plan's arithmetic.
 
-Three things the import did deliberately are reported as NOTES rather than
-failures, because each one is a true difference from the plan that is not a
-defect (see `dev_docs/gh-issue-migration/HANDOFF.md`):
+Four things are reported as NOTES rather than failures, because each one is a
+true difference from the plan that is not a defect (see
+`dev_docs/gh-issue-migration/HANDOFF.md`). The first three are the import's own
+deliberate choices; the fourth is a limit on what the export can speak to:
 
 - A mapped issue **closed since the import** and carrying no rung: work that has
   since been completed. Its `status:`/`auto:` rungs are then expected to be gone,
@@ -50,6 +51,11 @@ defect (see `dev_docs/gh-issue-migration/HANDOFF.md`):
   holds the pre-link text. The comparison therefore runs the plan body through
   `linear-import.rewrite_body()` first, which is idempotent — one fact, one home,
   rather than a second copy of the rewrite rules here.
+- A `blocked_by` edge or sub-issue link whose FAR end was never imported. The
+  export describes only the issues the import carried, so it cannot call such a
+  relationship right or wrong; reporting it as "not in the export" would be a
+  false statement, and dropping it would hide what the board is asserting. Both
+  ends mapped is still comparable, and still fails. See `partition_outside`.
 """
 
 import argparse
@@ -239,9 +245,10 @@ def export_edges(index, numbers):
     """
     pairs = set()
     for key, number in numbers.items():
-        issue = index.get(key)
-        if issue is None:
-            continue
+        # Indexed, not `.get()`: `require_export_covers_plan` has already
+        # refused an export missing any plan key, so a skip here would be
+        # unreachable — and a silent one is what made a wrong export read green.
+        issue = index[key]
         for relation in issue.get("inverseRelations") or []:
             if relation.get("type") != "blocks":
                 continue
@@ -260,15 +267,18 @@ def export_edges(index, numbers):
 def export_sub_issues(index, numbers):
     """Expected (parent, child) NUMBER pairs, from the export's parent/children.
 
-    Both fields, for the reason above. They are not redundant here: the export's
-    `children` list is populated for only some parents, while `parent` is set on
-    every child, so the union is strictly larger than either field alone.
+    Both fields, for the reason above — but they are not equal partners, and the
+    asymmetry is measured rather than assumed. Across the real export `parent`
+    yields 77 pairs and `children` yields 16, every one of them already in the
+    first set. So `parent` carries the hierarchy ON ITS OWN, which is what
+    `test_the_parent_field_alone_is_enough` pins, and reading `children` too is a
+    cross-check that costs nothing: it cannot lose a pair, and it would catch a
+    parent whose own row went missing. Do not invert this and read `children`
+    alone — that silently drops most of the hierarchy.
     """
     pairs = set()
     for key, number in numbers.items():
-        issue = index.get(key)
-        if issue is None:
-            continue
+        issue = index[key]  # guaranteed present; see export_edges
         parent = numbers.get(issue.get("parent"))
         if parent is not None:
             pairs.add((parent, number))
@@ -388,11 +398,16 @@ def check_fields(plan, live, numbers, rewrite_body, assignee_login):
         want_assignee = entry.get("assignee")
         if want_assignee == "@me":
             want_assignee = assignee_login()
+        # Equality, not membership. The plan names at most one assignee, so an
+        # issue carrying that assignee AND a stranger is a difference from the
+        # plan — and this check is documented as field equality.
+        want_assignees = {want_assignee} if want_assignee else set()
         logins = {who["login"] for who in issue.get("assignees") or []}
-        if want_assignee and want_assignee not in logins:
-            wrong["assignee"] = {"want": want_assignee, "got": sorted(logins)}
-        elif not want_assignee and logins:
-            wrong["assignee"] = {"want": None, "got": sorted(logins)}
+        if logins != want_assignees:
+            wrong["assignee"] = {
+                "want": sorted(want_assignees),
+                "got": sorted(logins),
+            }
         if wrong:
             failures.append({"key": key, "number": record["number"], "wrong": wrong})
     return check(
@@ -495,13 +510,43 @@ def check_vocabulary(live, groups):
     )
 
 
+def partition_outside(pairs, numbers, far_end):
+    """Split board pairs by whether their FAR end was imported.
+
+    `expected` is built from the export, which can only describe issues the
+    import carried — so a pair reaching an issue outside the mapping is one the
+    export has no vocabulary for, and calling it "not in the export" would be a
+    false statement about it rather than a finding.
+
+    It is not invisible either. The board is asserting a relationship, and a
+    verifier that hides half of what the board says has stopped being able to
+    disagree. So the far end decides the tier and neither option is silence:
+    a pair whose far end IS mapped stays comparable and can fail, and a pair
+    whose far end is not becomes a note.
+
+    This is unreachable on the board as imported — every entry is mapped — and
+    becomes reachable the moment anything adds a relationship to a native issue.
+    `/reoptimize-tasks` does exactly that, and #516 re-runs this verifier
+    immediately afterwards.
+    """
+    inside, outside = set(), []
+    imported = set(numbers.values())
+    for pair in pairs:
+        if pair[far_end] in imported:
+            inside.add(pair)
+        else:
+            outside.append(pair)
+    return inside, outside
+
+
 def check_edges(index, live, numbers):
     expected = export_edges(index, numbers)
-    actual = {
+    board = {
         (record["number"], blocker)
         for record in live.values()
         for blocker in record["blockers"]
     }
+    actual, outside = partition_outside(board, numbers, far_end=1)
     failures = [
         {"blocked": blocked, "blocker": blocker, "problem": "missing on the board"}
         for blocked, blocker in sorted(expected - actual)
@@ -509,20 +554,31 @@ def check_edges(index, live, numbers):
         {"blocked": blocked, "blocker": blocker, "problem": "not in the export"}
         for blocked, blocker in sorted(actual - expected)
     ]
+    notes = [
+        {
+            "blocked": blocked,
+            "blocker": blocker,
+            "note": "blocker is outside the import",
+        }
+        for blocked, blocker in sorted(outside)
+    ]
     return check(
         "edges",
-        f"{len(expected)} expected blocked_by pairs, {len(actual)} on the board",
+        f"{len(expected)} expected blocked_by pairs, {len(actual)} on the board"
+        + (f", {len(notes)} reaching outside the import" if notes else ""),
         failures,
+        notes,
     )
 
 
 def check_sub_issues(index, live, numbers):
     expected = export_sub_issues(index, numbers)
-    actual = {
+    board = {
         (record["number"], child)
         for record in live.values()
         for child in record["children"]
     }
+    actual, outside = partition_outside(board, numbers, far_end=1)
     failures = [
         {"parent": parent, "child": child, "problem": "missing on the board"}
         for parent, child in sorted(expected - actual)
@@ -530,10 +586,16 @@ def check_sub_issues(index, live, numbers):
         {"parent": parent, "child": child, "problem": "not in the export"}
         for parent, child in sorted(actual - expected)
     ]
+    notes = [
+        {"parent": parent, "child": child, "note": "child is outside the import"}
+        for parent, child in sorted(outside)
+    ]
     return check(
         "sub_issues",
-        f"{len(expected)} expected parent/child pairs, {len(actual)} on the board",
+        f"{len(expected)} expected parent/child pairs, {len(actual)} on the board"
+        + (f", {len(notes)} reaching outside the import" if notes else ""),
         failures,
+        notes,
     )
 
 
@@ -548,7 +610,7 @@ def check_comments(index, live, marker_template):
     expected = 0
     for key in sorted(live):
         record = live[key]
-        issue = index.get(key) or {}
+        issue = index[key]  # guaranteed present; see export_edges
         want = 1 if (issue.get("comments") or []) else 0
         expected += want
         marker = marker_template.format(key=key)
@@ -578,8 +640,64 @@ def check_comments(index, live, marker_template):
 # ---------------------------------------------------------------------------
 
 
+def require_export_covers_plan(index, plan):
+    """Refuse an export that does not describe every key the plan names.
+
+    This is the verifier's own premise, not a defensive check. Every expectation
+    about edges, sub-issue links and transcripts is DERIVED from the export — so
+    a key the export does not carry silently contributes nothing expected, while
+    `fields` and `labels` go on comparing against the plan. The run then comes
+    back green, which is precisely the false success this script exists to
+    prevent. A wrong or truncated export has to be unable to look like a pass.
+
+    Hence a refusal (exit 2) rather than a check failure: a verifier handed the
+    wrong export cannot form an opinion about the board at all.
+    """
+    missing = sorted(
+        entry["key"] for entry in plan["entries"] if entry["key"] not in index
+    )
+    if missing:
+        raise VerifyError(
+            f"the export does not carry {len(missing)} of the plan's "
+            f"{len(plan['entries'])} keys, so every edge, sub-issue and comment "
+            f"expectation for them would be silently empty: {', '.join(missing)}"
+        )
+
+
+def require_one_board(plan, mapping, repo):
+    """Refuse unless `--repo`, the plan and the mapping all name the same board.
+
+    `linear-import.py` records the repo in both documents and its `load_mapping`
+    refuses a mismatch on the write path, because a mapping belongs to one
+    board. The same rule matters at least as much here: these are issue NUMBERS,
+    which every repo has, so a mapping pointed at the wrong board verifies real
+    issues that happen to share the numbers and can report a clean pass. A
+    verifier's false certificate is worse than a bad write, because nothing
+    downstream checks it.
+
+    `--repo` stays required rather than being read out of the files. Taking the
+    board from the record alone would mean trusting the writer with no
+    independent word, which is the one thing this script exists not to do — the
+    flag is the operator naming the board, and this is what makes that a
+    verification rather than an echo.
+    """
+    for what, recorded in (
+        ("import plan", plan.get("repo")),
+        ("mapping file", mapping.get("repo")),
+    ):
+        if recorded != repo:
+            raise VerifyError(
+                f"the {what} records repo {recorded!r}, but --repo says {repo!r}; "
+                "these documents belong to one board and issue numbers are not "
+                "unique across repos, so verifying them elsewhere would compare "
+                "unrelated issues"
+            )
+
+
 def verify(export, plan, mapping, repo, importer, groups, vocabulary):
     index = export_index(export)
+    require_one_board(plan, mapping, repo)
+    require_export_covers_plan(index, plan)
     numbers, join_findings = mapped_numbers(plan, mapping)
     live = collect(repo, numbers)
     retired = retired_keys(live, vocabulary)

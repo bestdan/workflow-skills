@@ -122,11 +122,12 @@ def plan_entry(key, **overrides):
 
 def base_plan():
     return {
+        "repo": REPO,
         "entries": [
             plan_entry("PRE-1", body=plan_body("PRE-1", ["PRE-2"])),
             plan_entry("PRE-2", blocked_by=["PRE-1"]),
             plan_entry("PRE-3", parent="PRE-1", comments=[{"body": "hi"}]),
-        ]
+        ],
     }
 
 
@@ -284,6 +285,29 @@ class TestEdges(VerifyCase):
             [{"blocked": 101, "blocker": 103, "problem": "not in the export"}],
         )
 
+    def test_an_edge_to_an_unimported_issue_is_a_note(self):
+        # #514 is a native issue the migration never touched, so the export has
+        # no vocabulary for this edge. "not in the export" would be a false
+        # statement about it, and silence would hide what the board asserts.
+        self.board["blocked_by"][101] = {514}
+        checks = self.run_checks()
+        self.assert_all_pass({"edges": checks["edges"]})
+        self.assertEqual(
+            checks["edges"]["notes"],
+            [{"blocked": 101, "blocker": 514, "note": "blocker is outside the import"}],
+        )
+
+    def test_an_edge_between_two_imported_issues_still_fails(self):
+        # The other half of the partition: both ends mapped, so the export DOES
+        # speak to it, and its silence is a finding rather than a limit.
+        self.board["blocked_by"][101] = {103}
+        checks = self.run_checks()
+        self.assertEqual(
+            checks["edges"]["failures"],
+            [{"blocked": 101, "blocker": 103, "problem": "not in the export"}],
+        )
+        self.assertEqual(checks["edges"]["notes"], [])
+
     def test_the_export_is_read_from_both_relation_directions(self):
         # PRE-2's inverseRelations is the half --plan reads. Removing it leaves
         # PRE-1's forward `blocks`, which must still produce the same edge — a
@@ -307,6 +331,15 @@ class TestSubIssues(VerifyCase):
         self.assertEqual(
             checks["sub_issues"]["failures"],
             [{"parent": 101, "child": 102, "problem": "not in the export"}],
+        )
+
+    def test_a_child_outside_the_import_is_a_note(self):
+        self.board["sub_issues"][101] = {103, 514}
+        checks = self.run_checks()
+        self.assert_all_pass({"sub_issues": checks["sub_issues"]})
+        self.assertEqual(
+            checks["sub_issues"]["notes"],
+            [{"parent": 101, "child": 514, "note": "child is outside the import"}],
         )
 
     def test_the_parent_field_alone_is_enough(self):
@@ -376,7 +409,10 @@ class TestLabels(VerifyCase):
             {"name": "est:3"},
         ]
         checks = self.run_checks()
-        self.assertEqual(checks["vocabulary"]["failures"][0]["wrong"], {"status": []})
+        self.assertEqual(
+            checks["vocabulary"]["failures"],
+            [{"key": "PRE-2", "number": 102, "state": "OPEN", "wrong": {"status": []}}],
+        )
 
     def test_a_managed_label_the_plan_does_not_carry_fails(self):
         self.board["issues"][102]["labels"].append({"name": "prio:0"})
@@ -432,13 +468,132 @@ class TestClosedIssues(VerifyCase):
     def test_a_closed_issue_still_carrying_a_rung_fails(self):
         self.board["issues"][102]["state"] = "CLOSED"
         checks = self.run_checks()
-        self.assertFalse(checks["mapping"]["ok"])
         self.assertEqual(
-            checks["mapping"]["failures"][0]["problem"],
-            "closed while still carrying a status:/auto: rung",
+            checks["mapping"]["failures"],
+            [
+                {
+                    "key": "PRE-2",
+                    "number": 102,
+                    "problem": "closed while still carrying a status:/auto: rung",
+                    "labels": [
+                        "auto:eligible",
+                        "est:3",
+                        "prio:2",
+                        "status:2_ready",
+                    ],
+                }
+            ],
         )
-        # And the cardinality check says the same thing from its own end.
-        self.assertFalse(checks["vocabulary"]["ok"])
+        # And the cardinality check says the same thing from its own end: a
+        # closed issue must carry zero rungs, so both of these are one too many.
+        self.assertEqual(
+            checks["vocabulary"]["failures"],
+            [
+                {
+                    "key": "PRE-2",
+                    "number": 102,
+                    "state": "CLOSED",
+                    "wrong": {
+                        "status": ["status:2_ready"],
+                        "auto": ["auto:eligible"],
+                    },
+                }
+            ],
+        )
+
+
+class TestBoardOwnership(VerifyCase):
+    def test_a_plan_for_another_board_is_refused(self):
+        self.plan["repo"] = "someone/else"
+        with self.assertRaises(linear_verify.VerifyError) as caught:
+            self.run_checks()
+        self.assertIn("import plan", str(caught.exception))
+        self.assertIn("someone/else", str(caught.exception))
+
+    def test_a_mapping_for_another_board_is_refused(self):
+        self.mapping["repo"] = "someone/else"
+        with self.assertRaises(linear_verify.VerifyError) as caught:
+            self.run_checks()
+        self.assertIn("mapping file", str(caught.exception))
+
+    def test_a_document_that_records_no_board_is_refused(self):
+        # A file that cannot say which board it belongs to cannot vouch for one.
+        del self.mapping["repo"]
+        with self.assertRaises(linear_verify.VerifyError):
+            self.run_checks()
+
+    def test_the_board_is_checked_before_any_live_read(self):
+        # The refusal must land before collect() spends ~375 GETs on the wrong
+        # board — and before it reads anything at all.
+        self.plan["repo"] = "someone/else"
+
+        def refuse(args):
+            raise AssertionError(f"read the board despite a repo mismatch: {args}")
+
+        linear_verify.run_gh = refuse
+        groups, colors = linear_verify.load_vocabulary()
+        with self.assertRaises(linear_verify.VerifyError):
+            linear_verify.verify(
+                self.export,
+                self.plan,
+                self.mapping,
+                REPO,
+                linear_verify.load_import_module(),
+                groups,
+                linear_verify.expected_labels(groups, colors),
+            )
+
+
+class TestExportCoverage(VerifyCase):
+    def test_an_export_missing_a_plan_key_is_refused(self):
+        # The wrong export is the quiet failure: without this refusal the edge,
+        # sub-issue and comment expectations for PRE-3 go silently empty while
+        # fields and labels still compare, and the run comes back green.
+        self.export["issues"] = [
+            issue for issue in self.export["issues"] if issue["identifier"] != "PRE-3"
+        ]
+        with self.assertRaises(linear_verify.VerifyError) as caught:
+            self.run_checks()
+        self.assertIn("PRE-3", str(caught.exception))
+
+    def test_the_refusal_names_every_missing_key(self):
+        self.export["issues"] = []
+        with self.assertRaises(linear_verify.VerifyError) as caught:
+            self.run_checks()
+        message = str(caught.exception)
+        for key in ("PRE-1", "PRE-2", "PRE-3"):
+            self.assertIn(key, message)
+
+    def test_a_wrong_export_exits_two_rather_than_reporting_a_pass(self):
+        import tempfile
+
+        self.export["issues"] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {}
+            for name, payload in (
+                ("export", self.export),
+                ("plan", self.plan),
+                ("mapping", self.mapping),
+            ):
+                paths[name] = f"{tmp}/{name}.json"
+                with open(paths[name], "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle)
+            linear_verify.run_gh = stub(self.board)
+            with redirect_stdout(io.StringIO()) as out:
+                code = linear_verify.main(
+                    [
+                        "--export",
+                        paths["export"],
+                        "--plan-file",
+                        paths["plan"],
+                        "--mapping",
+                        paths["mapping"],
+                        "--repo",
+                        REPO,
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertNotIn("checks passed", out.getvalue())
 
 
 class TestMapping(VerifyCase):
@@ -493,40 +648,69 @@ class TestFields(VerifyCase):
         checks = self.run_checks()
         self.assertEqual(
             checks["fields"]["failures"][0]["wrong"]["assignee"],
-            {"want": None, "got": ["someone"]},
+            {"want": [], "got": ["someone"]},
+        )
+
+    def test_the_planned_assignee_plus_a_stranger_fails(self):
+        # Membership would pass this: the planned assignee IS on the issue. The
+        # check is documented as equality, so the extra assignee is a difference.
+        self.plan["entries"][1]["assignee"] = "bestdan"
+        self.board["issues"][102]["assignees"] = [
+            {"login": "bestdan"},
+            {"login": "someone"},
+        ]
+        checks = self.run_checks()
+        self.assertEqual(
+            checks["fields"]["failures"][0]["wrong"]["assignee"],
+            {"want": ["bestdan"], "got": ["bestdan", "someone"]},
         )
 
     def test_an_edited_body_fails(self):
         self.board["issues"][102]["body"] = "Context.\n"
         checks = self.run_checks()
-        self.assertIn("body", checks["fields"]["failures"][0]["wrong"])
+        self.assertEqual(
+            checks["fields"]["failures"],
+            [
+                {
+                    "key": "PRE-2",
+                    "number": 102,
+                    "wrong": {
+                        "body": "differs from the plan body as --link would rewrite it"
+                    },
+                }
+            ],
+        )
 
 
 class TestExitCodes(VerifyCase):
+    def argv_in(self, tmp, *extra):
+        """Write the three inputs into `tmp` and return main()'s argv."""
+        paths = {}
+        for name, payload in (
+            ("export", self.export),
+            ("plan", self.plan),
+            ("mapping", self.mapping),
+        ):
+            paths[name] = f"{tmp}/{name}.json"
+            with open(paths[name], "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+        return [
+            "--export",
+            paths["export"],
+            "--plan-file",
+            paths["plan"],
+            "--mapping",
+            paths["mapping"],
+            "--repo",
+            REPO,
+            *extra,
+        ]
+
     def test_a_clean_board_exits_zero_and_a_broken_one_exits_one(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = {}
-            for name, payload in (
-                ("export", self.export),
-                ("plan", self.plan),
-                ("mapping", self.mapping),
-            ):
-                path = f"{tmp}/{name}.json"
-                with open(path, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle)
-                paths[name] = path
-            argv = [
-                "--export",
-                paths["export"],
-                "--plan-file",
-                paths["plan"],
-                "--mapping",
-                paths["mapping"],
-                "--repo",
-                REPO,
-            ]
+            argv = self.argv_in(tmp)
             linear_verify.run_gh = stub(self.board)
             with redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(linear_verify.main(argv), 0)
@@ -537,6 +721,39 @@ class TestExitCodes(VerifyCase):
             with redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(linear_verify.main(argv), 1)
             self.assertIn("FAIL  edges", out.getvalue())
+
+    def test_json_mode_serialises_every_failure_shape(self):
+        # --json is a second rendering path, and the shapes it has to carry are
+        # not strings: edge pairs are ints, `wrong` is a nested dict, assignees
+        # are sorted lists. One unserialisable value anywhere raises at the
+        # dump, so this breaks one of each and parses the whole document back.
+        import tempfile
+
+        self.board["blocked_by"][102] = set()  # edges: a missing int pair
+        self.board["blocked_by"][103] = {101}  # edges: an extra int pair
+        self.board["sub_issues"][101] = set()  # sub_issues: a missing int pair
+        self.board["issues"][102]["title"] = "Renamed"  # fields: nested `wrong`
+        self.board["issues"][103]["comments"] = []  # comments: want/got ints
+        self.mapping["entries"]["PRE-1"]["phase"] = "labelled"  # mapping: a join
+
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = self.argv_in(tmp, "--json")
+            linear_verify.run_gh = stub(self.board)
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(linear_verify.main(argv), 1)
+
+        document = json.loads(out.getvalue())
+        self.assertEqual(document["repo"], REPO)
+        self.assertEqual(len(document["checks"]), 7)
+        self.assertEqual(
+            sorted(c["name"] for c in document["checks"] if not c["ok"]),
+            ["comments", "edges", "fields", "mapping", "sub_issues"],
+        )
+        edges = next(c for c in document["checks"] if c["name"] == "edges")
+        self.assertEqual(
+            sorted((f["blocked"], f["blocker"]) for f in edges["failures"]),
+            [(102, 101), (103, 101)],
+        )
 
     def test_an_unreadable_input_exits_two(self):
         argv = [
