@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.52.0] - 2026-09-14
+
+### Features
+
+- land the Linear import plan with linear-import.py --apply [#512] (#616) (9defa2e)
+
 ## [2.51.0] - 2026-09-14
 
 ### Features
