@@ -2,7 +2,7 @@
 title: Export Linear and import the active workflow-skills issues
 priority: high
 size: 5
-status: new
+status: active
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
@@ -56,6 +56,22 @@ Only `workflow-skills` migrates in this plan. `finplan` stays on Linear as the c
 
 **Labels must be provisioned before any issue lands** (task 2), or the state is
 silently lost on arrival.
+
+> **The import ran on 2026-09-13 — step 2 is half done and step 1 is finished.** All
+> **125** selected issues are on the GitHub board: 117 created (#617–#733) and 8 reopened
+> (#284, #288, #289, #295, #296, #297, #299, #302), each with its labels, milestone,
+> provenance footer and comment transcript, and one assignee. Verified by reading the
+> board rather than the run's own log.
+>
+> **What step 2 still owes is the graph**: no `blocked_by` edge and no sub-issue link has
+> been written — 27 and 15 of them respectively, and that is
+> [#513](https://github.com/bestdan/workflow-skills/issues/513). Step 4's mapping is
+> written, at `$HOME/src/linear-export/2026-09-13-mapping.json`, and it is the only copy.
+>
+> **The plan file is no longer regenerable**, which the earlier note above does not say.
+> Regenerating re-runs the create-versus-reopen decision, and the eight reopen targets are
+> now OPEN — which that decision refuses, correctly, as two live homes. Treat the export,
+> the plan and the mapping all as provenance now.
 
 ## Task
 

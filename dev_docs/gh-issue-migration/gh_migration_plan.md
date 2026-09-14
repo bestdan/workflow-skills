@@ -183,10 +183,14 @@ join, and `gh` covers it only partially.
 9. [phase_4_migrate/gh_migration_task_9.md](phase_4_migrate/gh_migration_task_9.md) — Export Linear, import the active `workflow-skills` issues.
    **Broken down 2026-09-08 into GitHub issues [#510](https://github.com/bestdan/workflow-skills/issues/510)–[#516](https://github.com/bestdan/workflow-skills/issues/516)**
    under milestone 1, a strict chain: export → plan → apply → link → verify → Linear-side
-   close-out → retire. All seven are unstarted as of 2026-09-12; **#510 blocks the rest**.
-   **Not blocked by task 13** — importing issues needs no auto-pilot. The task file's
-   "84 issues" was re-assessed 2026-09-12 to **96 or 135** depending on an unanswered
-   scoping question; see the task file and HANDOFF.md.
+   close-out → retire. **Not blocked by task 13** — importing issues needs no auto-pilot.
+   **#510, #511 and #512 are done and the import has landed**: all **125** selected issues
+   are on the GitHub board as of 2026-09-13, 117 created and 8 reopened. The set is 125,
+   not the "84" the task file opened with nor the "96 or 135" that replaced it — both
+   predate an export, and the count now lives in
+   `$HOME/src/linear-export/2026-09-13-import-plan.json`. **#513 is next**: the dependency
+   edges and sub-issue links were deliberately left out of the import and are the only
+   thing still missing from the board.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
     **The thing this warned about has happened.** The warning below was written while the
     flip was still ahead; [PR #503](https://github.com/bestdan/workflow-skills/pull/503)
