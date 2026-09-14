@@ -697,6 +697,23 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .outdated-strip .cmt-row:first-child{border-top:none}
 .outdated-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:6px 0 2px}
 .moved-badge{color:var(--dim);font-size:11px}
+/* Round-summary threads: no file anchor, so they render above the file
+   cards instead of inline in a diff grid. The strip is a sibling of <main>,
+   so it restates main's box (max-width/centering/padding) or it would run
+   full-bleed past the file cards. Free-standing chips also supply what the
+   grid used to: the border-radius, and the right edge .cmt-row never
+   declares (per-side, not the `border:` shorthand -- this selector outranks
+   .cmt-thread and would flatten its 3px left accent). */
+.summary-threads{max-width:1180px;margin:0 auto;padding:18px 18px 0}
+.summary-threads .cmt-row{border-right:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+.summary-threads .cmt-row:last-child{margin-bottom:0}
+/* A resolved summary thread has no file card to collapse into, so the
+   per-file strip's "N resolved" toggle is not available to it as a signal.
+   Dim it in place instead, and say so in the anchor -- otherwise resolved
+   and unresolved chips are identical apart from the button's wording. */
+.summary-threads .cmt-row.summary-resolved{opacity:.55;border-left-color:var(--dim)}
+.summary-threads .cmt-row.summary-resolved .cmt-anchor::after{content:' · resolved';color:var(--dim)}
+.summary-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:0 0 6px}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
   border-radius:20px;padding:0 7px;margin-left:6px;font-size:10.5px;vertical-align:1px}
 .cmt-saved.gh .saved{border-left-color:#6e7681}
@@ -741,6 +758,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
     <button class="btn" id="finishHdr" hidden>Finish</button>
   </div>
 </header>
+<div class="summary-threads" id="summaryThreads" hidden></div>
 <main id="root"></main>
 <div class="toast" id="toast"></div>
 <div class="modal-bg" id="finishBg">
@@ -781,6 +799,11 @@ let resolvedByFile = {};
 // file's unresolved threads whose anchor failed placeThreads() rules 1 and 2
 // -- rendered in the file's Outdated strip instead of at a diff row.
 let outdatedByFile = {};
+// Round-summary threads (kind: "summary"): no file anchor, so they never go
+// through placeThreads() and never appear in threadsByKey/resolvedByFile --
+// they render in their own strip above the file cards instead. In round
+// order, oldest first, same order the server minted them.
+let summaryThreads = [];
 // path -> view mode the user picked. Survives /refresh (unlike comments, which
 // refresh discards): a view preference cannot go stale the way an anchor can.
 // Refresh ends in location.reload(), so this has to outlive the page, not just
@@ -802,6 +825,7 @@ const GH_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentCo
 // the page as textContent, so nothing needs escaping and no innerHTML template
 // interpolates untrusted content. Issue #385.
 const root = document.getElementById('root');
+const summaryThreadsEl = document.getElementById('summaryThreads');
 
 // View modes. `split` is the two-sided diff; `single` drops the dead side and
 // is offered only when one side carries all the content (parse_diff decides
@@ -1631,6 +1655,13 @@ function buildThreadChip(thread, opts){
   chip.dataset.tid = thread.id;
   const anchor = document.createElement('div');
   anchor.className = 'cmt-anchor';
+  if(thread.kind === 'summary'){
+    // No file/side/line to anchor on -- the round number is the identity
+    // that stands in for one.
+    anchor.appendChild(document.createTextNode(`Round ${thread.round} summary`));
+    chip.appendChild(anchor);
+    return finishThreadChip(chip, thread, opts);
+  }
   const pathSpan = document.createElement('span');
   pathSpan.className = 'apath';
   pathSpan.textContent = thread.file || '';
@@ -1646,6 +1677,12 @@ function buildThreadChip(thread, opts){
     anchor.appendChild(moved);
   }
   chip.appendChild(anchor);
+  return finishThreadChip(chip, thread, opts);
+}
+// Shared tail: saved text, replies, and the Reply/Resolve (or Reopen) actions
+// -- identical for a per-line thread and a summary thread, which differ only
+// in how buildThreadChip built the anchor above.
+function finishThreadChip(chip, thread, opts){
   const saved = document.createElement('div');
   saved.className = 'saved';
   const txt = document.createElement('span');
@@ -1742,8 +1779,14 @@ async function fetchThreads(){
     const byFile = {};
     const outdated = {};
     const unresolved = [];
+    const summaries = [];
     (j.threads || []).forEach(t => {
-      if(t.resolved){
+      if(t.kind === 'summary'){
+        // No file/side/line, so placeThreads() below has nothing to anchor
+        // on -- these never go through re-placement, resolved or not, they
+        // just render in round order in their own strip.
+        summaries.push(t);
+      }else if(t.resolved){
         // Kept, not dropped: the per-file resolved-strip needs these to
         // render on demand and count them for the "N resolved" toggle.
         // Keyed by path AND side: path alone double-lists in a rename chain
@@ -1782,8 +1825,33 @@ async function fetchThreads(){
     threadsByKey = byKey;
     resolvedByFile = byFile;
     outdatedByFile = outdated;
+    summaryThreads = summaries;
+    renderSummaryThreads();
     updateRoundNote(j.round);
   }catch(e){ /* transient; the poll will retry */ }
+}
+// Above the file cards, independent of `root`: render() rebuilds root from
+// DIFF on every call and would otherwise wipe these on each poll tick.
+// Resolved summary threads stay visible here too -- unlike a per-line
+// thread they have no file card to collapse into a strip, and "never
+// dropped" (the design doc's own rule for a resolved thread) applies just
+// as much to one with no anchor. Staying visible is not the same as giving
+// no signal, though: the per-file strip's collapse IS a per-line thread's
+// resolved affordance, so a summary chip carries .summary-resolved and is
+// dimmed in place instead.
+function renderSummaryThreads(){
+  summaryThreadsEl.innerHTML = '';
+  if(!summaryThreads.length){ summaryThreadsEl.hidden = true; return; }
+  summaryThreadsEl.hidden = false;
+  const label = document.createElement('div');
+  label.className = 'summary-label';
+  label.textContent = 'Round summaries';
+  summaryThreadsEl.appendChild(label);
+  summaryThreads.forEach(t => {
+    const chip = buildThreadChip(t, {reopen: !!t.resolved});
+    if(t.resolved) chip.classList.add('summary-resolved');
+    summaryThreadsEl.appendChild(chip);
+  });
 }
 
 // A thread's `file` is the side-dependent path it was submitted on (old for
@@ -2781,6 +2849,31 @@ class Handler(BaseHTTPRequestHandler):
                         "kind": c.get("kind"),
                         "github": bool(c.get("github")),
                         "text": c.get("text"),
+                        "resolved": False,
+                        "replies": [],
+                        "diff_sig": Handler.diff_sig,
+                    })
+                # A round's overall `summary` gets a thread of its own, same
+                # shape as a per-line comment minus the anchor (file/side/line/
+                # code all None, kind: "summary") — the reply-capable home
+                # issue #429 asks for. Minted only when the round actually
+                # carries one: an empty round would otherwise leave an
+                # unanswerable blank thread behind every time.
+                summary_text = payload.get("summary")
+                if summary_text:
+                    counter += 1
+                    tid = f"t{counter}"
+                    new_entries.append({
+                        "id": tid,
+                        "round": round_no,
+                        "file": None,
+                        "side": None,
+                        "line": None,
+                        "code": None,
+                        "endLine": None,
+                        "kind": "summary",
+                        "github": False,
+                        "text": summary_text,
                         "resolved": False,
                         "replies": [],
                         "diff_sig": Handler.diff_sig,
