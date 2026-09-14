@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.55.0] - 2026-09-14
+
+### Features
+
+- verify the landed import with linear-verify.py [#514] (#735) (c962ffb)
+
 ## [2.54.0] - 2026-09-14
 
 ### Features
