@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.53.0] - 2026-09-14
+
+### Features
+
+- record how to weigh a reviewer's proposed fix (#558) (3e0e38c)
+
 ## [2.52.0] - 2026-09-14
 
 ### Features
