@@ -426,7 +426,7 @@ Three properties of it are load-bearing:
 GraphQL query** (and the script cannot run at all), read the same fields with
 `mcp__github__pull_request_read` (`method: "get"`). It takes `owner`, `repo`,
 and `pullNumber` — the attested call shape is `{method: "get", owner:
-"bestdan", repo: "finplan", pullNumber: 1149}` — and **has no URL parameter**,
+"acme", repo: "widgets", pullNumber: 1149}` — and **has no URL parameter**,
 so parse all three out of the PR URL and pass them together. That is the same
 guarantee the URL rule above buys on the `gh` path: the repo travels with the
 number. A bare `pullNumber` with an inferred owner/repo is the one form to

@@ -505,16 +505,16 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    URL, which embeds one — is the case to avoid. Linear documents a bare id in the
    body as forming no link at all, but that has never been exercised here, so the
    magic word is insurance against an untested path rather than a guard against
-   observed auto-close. See `linear-claim.md` "PR body magic words". With Linear's
-   GitHub integration inert, the magic word drives no completion — that belongs to
-   the reconciler verbs (`/sweep-for-complete` / `/reconcile-tasks`), not to
-   anything parsed from the PR body — but it stays because it documents which
-   issue this PR finishes and works cleanly if the integration is ever made live.
+   observed auto-close. See `linear-claim.md` "PR body magic words". The magic
+   word drives no completion in this flow — that belongs to the reconciler verbs
+   (`/sweep-for-complete` / `/reconcile-tasks`), not to anything parsed from the
+   PR body — but it stays because it documents which issue this PR references and
+   works cleanly wherever the integration is live.
 7. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
    PR via `links` and move to `In Review` if the team has one. **Never move the
    issue to a `completed`/`canceled` state** — completion belongs to the
    reconciler verbs (`/complete-task`, `/sweep-for-complete`, `/reconcile-tasks`),
-   not to Linear's GitHub integration, which is inert. This hard rule from
+   not to Linear's GitHub integration, whether or not it is live in your workspace. This hard rule from
    `linear-claim.md` carries over unchanged.
 8. **Bail (mid-execution → halt)** — if the work breaks _while building_ (after
    step 5 began), `linear-claim.md` "Bail": `git stash push -u` the WIP, remove
