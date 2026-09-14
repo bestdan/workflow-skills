@@ -707,6 +707,12 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .summary-threads{max-width:1180px;margin:0 auto;padding:18px 18px 0}
 .summary-threads .cmt-row{border-right:1px solid var(--border);border-radius:8px;margin-bottom:8px}
 .summary-threads .cmt-row:last-child{margin-bottom:0}
+/* A resolved summary thread has no file card to collapse into, so the
+   per-file strip's "N resolved" toggle is not available to it as a signal.
+   Dim it in place instead, and say so in the anchor -- otherwise resolved
+   and unresolved chips are identical apart from the button's wording. */
+.summary-threads .cmt-row.summary-resolved{opacity:.55;border-left-color:var(--dim)}
+.summary-threads .cmt-row.summary-resolved .cmt-anchor::after{content:' · resolved';color:var(--dim)}
 .summary-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:0 0 6px}
 .cmt-anchor .ghdest{display:inline-flex;align-items:center;gap:4px;color:#8b949e;border:1px solid var(--border);
   border-radius:20px;padding:0 7px;margin-left:6px;font-size:10.5px;vertical-align:1px}
@@ -1829,7 +1835,10 @@ async function fetchThreads(){
 // Resolved summary threads stay visible here too -- unlike a per-line
 // thread they have no file card to collapse into a strip, and "never
 // dropped" (the design doc's own rule for a resolved thread) applies just
-// as much to one with no anchor.
+// as much to one with no anchor. Staying visible is not the same as giving
+// no signal, though: the per-file strip's collapse IS a per-line thread's
+// resolved affordance, so a summary chip carries .summary-resolved and is
+// dimmed in place instead.
 function renderSummaryThreads(){
   summaryThreadsEl.innerHTML = '';
   if(!summaryThreads.length){ summaryThreadsEl.hidden = true; return; }
@@ -1838,7 +1847,11 @@ function renderSummaryThreads(){
   label.className = 'summary-label';
   label.textContent = 'Round summaries';
   summaryThreadsEl.appendChild(label);
-  summaryThreads.forEach(t => summaryThreadsEl.appendChild(buildThreadChip(t, {reopen: !!t.resolved})));
+  summaryThreads.forEach(t => {
+    const chip = buildThreadChip(t, {reopen: !!t.resolved});
+    if(t.resolved) chip.classList.add('summary-resolved');
+    summaryThreadsEl.appendChild(chip);
+  });
 }
 
 // A thread's `file` is the side-dependent path it was submitted on (old for

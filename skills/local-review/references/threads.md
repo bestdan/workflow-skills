@@ -129,6 +129,11 @@ strip. The page renders it in its
 own strip above the file cards instead, in round order, resolved or not —
 "never dropped" applies to a summary thread the same as any other.
 
+Resolving one therefore has to look like something on its own. A per-line
+thread signals resolution by collapsing into its file card's Resolved strip;
+a summary thread has no file card, so it is dimmed in place and its anchor
+reads `Round N summary · resolved`.
+
 A round with an empty or omitted `summary` mints nothing; an empty round
 never leaves a blank thread behind.
 
