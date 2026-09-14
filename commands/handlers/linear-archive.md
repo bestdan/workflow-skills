@@ -183,7 +183,7 @@ python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 
 # (linear-common.md → "Resolve configured projects" list); the sweep loops per project and unions
 # the results, deduped by issue id. Omitting --project entirely still sweeps
 # the whole team.
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 30 \
   --project <uuid-1> --project <uuid-2> --apply
 
 # Archive named issues regardless of age (identifiers and/or UUIDs):

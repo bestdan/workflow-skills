@@ -239,10 +239,10 @@ contract the report and steps 5–6 depend on.
    > parentheses or at the end of the title, and hand-opened PRs are exactly the
    > population these fallbacks exist for — anything `/do-tasks` opened already
    > resolved at source 1. Observed in the nightly tidy run of 2026-09-02:
-   > `repo:bestdan/finplan PRE-73 in:title` returned open PR #1003, `Scaffold
-   > packages/rest-server FastAPI package (PRE-73)`, and the run reported PRE-73
-   > as having "genuinely no PR found yet". That title is now a fixture in
-   > `scripts/test_linear_pr_resolve.py`.
+   > a `repo:<owner>/<name> PRE-73 in:title` search returned an open PR whose
+   > title _ended_ `… (PRE-73)` rather than starting `[PRE-73]`, and the run
+   > reported PRE-73 as having "genuinely no PR found yet". That title is now a
+   > fixture in `scripts/test_linear_pr_resolve.py`.
 
 3. **The repo is resolved per issue, from that issue's own project** —
    `--config`'s `linear.projects[].repo` matched on `project.id`, else
@@ -278,7 +278,7 @@ contract the report and steps 5–6 depend on.
 {
   "id": "…",
   "identifier": "PRE-73",
-  "repo": "bestdan/finplan",
+  "repo": "acme/widgets",
   "prs": [{ "number": 1003, "url": "…", "state": "OPEN", "mergedAt": null }],
   "resolved_via": "title",
   "state": "open",
