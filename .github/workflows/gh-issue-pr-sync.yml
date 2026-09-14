@@ -36,9 +36,22 @@ name: gh-issue PR status sync
 # `workflow-skills` is public, so Actions minutes are free; this is not
 # optimized for them.
 #
-# Note what does NOT happen here: a MERGED PR is left alone. `Closes #<n>` in
-# the PR body makes GitHub close the issue, and closure is completion under
-# this schema. Never add a merged branch that writes a rung.
+# A MERGED PR is the third case, and the rule about it is narrower than it used
+# to read here. `Closes #<n>` makes GitHub close the issue, and closure is
+# completion under this schema — but GitHub leaves the labels alone, and "done"
+# is the ABSENCE of the `status:`/`auto:` rungs (labels.yml). So the auto-close
+# on its own leaves the issue violating the invariant, wearing a stale
+# `auto:eligible` that is a live instruction to a scheduler.
+#
+# The standing rule — never add a merged branch that WRITES a rung — holds, and
+# always will: writing one would park a finished issue in a live column. The
+# merged branch below does the opposite. It strips both rungs, keeps
+# `prio:`/`est:`, and never touches issue state. Removing them is what
+# completion means here; that is why this is not the thing the rule forbids.
+#
+# It is a backstop, not the only guard: `gh-issue-reconcile.py`'s row 4 sweeps
+# up what this cannot see — an issue closed by hand, a repo where this workflow
+# does not run. Both compute the rung-free set through the same helper.
 
 on:
   pull_request:
@@ -46,9 +59,17 @@ on:
 
 # `issues: write` is the point of this file. The default token is
 # `contents: read`, which cannot PATCH an issue's labels.
+#
+# `pull-requests: read` is what the merged branch's `gh pr view --json
+# closingIssuesReferences` needs. Naming ANY permission here sets every scope
+# not listed to `none`, so omitting it does not fall back to a default — it
+# denies the read. This repo is public, where a restricted token can still read
+# public data, so the gap would not show up here; a private consumer repo would
+# fail on every merge, before stripping a single label.
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 # One PR emits two of these events in quick succession — mark a PR ready, close
 # it fifteen seconds later — and without this the two runs interleave. The close
@@ -62,6 +83,23 @@ permissions:
 # stays FALSE deliberately: the queued run re-reads the issue after the first
 # one's PATCH, so each event still sees true current state, and no run is ever
 # killed between its read and its write.
+#
+# The group is per-PR, not per-issue, and the merged branch made that gap
+# visible: it writes to whatever issues the PR closed, not just the one its
+# branch is named for. So two PRs pointing at one issue X can interleave — B's
+# ready run reads X open, A merges and strips X, B's PATCH puts a rung back on a
+# closed issue. The window is the sub-second gap between B's two `gh` calls, and
+# row 4's sweep repairs the result.
+#
+# Do NOT "fix" that by widening the group to a repo-wide constant. GitHub keeps
+# one running and one PENDING run per group and cancels the pending one when a
+# newer run queues ("any existing pending job or workflow in the same
+# concurrency group will be canceled"), so a repo-wide group DROPS events once
+# three arrive in one run's lifetime — routine when several PRs are open. A
+# dropped `closed`-unmerged event parks an OPEN issue in `needs_review` with no
+# PR, which is what this serialization exists to prevent and what rows 2 and 3
+# only flag. That trades a sub-second race the sweep heals for a wider one it
+# cannot.
 concurrency:
   group: gh-issue-pr-sync-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -117,11 +155,12 @@ jobs:
           BRANCH: ${{ github.event.pull_request.head.ref }}
           EVENT: ${{ github.event.action }}
           MERGED: ${{ github.event.pull_request.merged }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           merged_flag=""
           if [ "$MERGED" = "true" ]; then
             merged_flag="--merged"
           fi
           python3 commands/handlers/assets/gh-issue-pr-sync.py \
-            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" \
+            --repo "$REPO" --branch "$BRANCH" --event "$EVENT" --pr "$PR" \
             $merged_flag --apply

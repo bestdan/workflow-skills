@@ -51,25 +51,34 @@ row 1 has no ladder position to rank it by either.
 **Row 3 is the backstop for merge-as-completion.** Closing IS completion under
 this schema, so a stray or mistaken `Closes #<n>` in an unrelated PR body
 retires an issue that never passed review, and nothing else in the loop notices.
-It reads the issue's `labeled` events rather than its current labels, because a
-closed issue's rungs are stripped only where something strips them — the
-`/complete-task` path, or row 4 — never by the merge that closed it. So the
-labels a closed issue carries now are unreliable evidence of the review it did
-or did not pass, not absent (that unreliability is row 4's subject). It reports rather than
+It reads the issue's `labeled` events rather than its current labels, because
+those labels are unreliable evidence either way: three things strip a closed
+issue's rungs (`/complete-task`, row 4, and the merged-PR branch of
+`gh-issue-pr-sync.py`), and which of them ran says nothing about whether the
+issue passed review. So the labels a closed issue carries now are unreliable,
+not absent (that unreliability is row 4's subject). It reports rather than
 reopens: an issue can be legitimately closed without review (abandoned,
 duplicate, filed by hand), and the finding carries GitHub's `state_reason` so
 those are dismissible on sight.
 
 **Row 4 repairs because its target state is written down, not judged.**
 `labels.yml` states that "done" is the absence of both rungs, so unlike rows 2
-and 3 there is nothing to defer to a human. The drift is routine rather than
-exotic: before this row, `/complete-task` (`gh-issue-complete.md` step 5, via
-`gh-issue-state.py --done`) was the only thing that stripped the rungs, and it
-is the **fallback**
-path — the primary one is a merged PR carrying `Closes #<n>`, and GitHub's
-auto-close knows nothing about this vocabulary, so it flips the state and leaves
-every label in place. A stale `auto:eligible` on a closed issue is the hazard
-`labels.yml` names: a live instruction to a scheduler, left on work that is over.
+and 3 there is nothing to defer to a human. A stale `auto:eligible` on a closed
+issue is the hazard `labels.yml` names: a live instruction to a scheduler, left
+on work that is over.
+
+**This row is the sweep, not the primary guard.** Two other things strip the
+rungs: `/complete-task` (`gh-issue-complete.md` step 5, via `gh-issue-state.py
+--done`), and the merged-PR branch of `gh-issue-pr-sync.py`, which acts on the
+`Closes #<n>` auto-close GitHub performs without knowing this vocabulary. Those
+two share `gh-issue-state.py`'s `done_label_set()`, so they cannot disagree
+about what "done" is; `/complete-task` hand-assembles its `prio:`/`est:` set and
+passes it to `gh-issue-state.py --done`, which enforces the same rule through
+`validate(done=True)`. The row still
+earns its place: it catches an issue closed **by hand** in the web UI, a repo
+where that workflow does not run (it acts on `github.repository`, so a
+`gh-issue.repo` pointing elsewhere must not run it), and anything that drifted
+before the workflow existed.
 The row fires on any **vocabulary** rung, so a hand-typed `status:blocked` is not
 on its own a finding; it never reopens the issue, and the repair is validated
 in-process by `gh-issue-state.py`'s `validate(done=True)` — the same rule the
@@ -90,7 +99,10 @@ docstring.
 > whole label set in a single request — so row 1's drift cannot arise on the
 > happy path. It arises from the web UI, which is a supported way to work with
 > this board. **Row 4 is the exception**: its drift arises on the happy path,
-> because the happy path is GitHub's auto-close and no write of ours runs there.
+> because the happy path is GitHub's auto-close, which knows nothing of this
+> vocabulary. A write of ours does now run there — the merged-PR branch of
+> `gh-issue-pr-sync.py` — so row 4 sees this drift only where that branch cannot
+> reach: a hand-closed issue, a fork PR, a repo that does not run the workflow.
 
 ## Steps
 

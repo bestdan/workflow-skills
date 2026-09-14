@@ -20,10 +20,31 @@ declines to invoke this script at all for a draft; see the `if:` in
 .github/workflows/gh-issue-pr-sync.yml. Passing `--event opened` for a draft PR
 would move it, and correctly so: the caller asserted it is not one.
 
-A merged PR is deliberately NOT a transition here: `Closes #<n>` in the PR body
-makes GitHub close the issue itself, and closure IS completion under this
-schema (a closed issue carries no `status:`/`auto:` rung — see labels.yml). So
-the merged case is a no-op, not a write.
+A merged PR is a third case, and it is NOT a rung transition. `Closes #<n>` in
+the PR body makes GitHub close the issue itself, and closure IS completion under
+this schema — but GitHub knows nothing about this vocabulary, so it flips the
+state and leaves every label in place. "Done" is the ABSENCE of the `status:`
+and `auto:` rungs (labels.yml), so the auto-close alone leaves the issue
+violating the invariant, carrying a stale `auto:eligible` that is a live
+instruction to a scheduler. The merged branch therefore STRIPS both rungs
+rather than writing one, keeping `prio:`/`est:`, and never touches issue state.
+
+That distinction is the whole of it: a merged PR must never write a rung, and
+this does not — writing one would park a finished issue in a live column. It
+removes them, which is what completion means here.
+
+The merged branch asks GitHub which issues the PR closed
+(`closingIssuesReferences`) rather than deriving one from the branch name. The
+two usually agree, and where they differ the reference is the right answer: it
+names what actually closed, including a PR that closes several issues or one
+whose branch is not `<prefix>task-<n>` at all. It also self-verifies — an issue
+the merge did not close comes back open, and an open issue is skipped.
+
+This closes the drift at its source; `gh-issue-reconcile.py`'s row 4 is the
+sweep that catches what this cannot — an issue closed by hand in the web UI, a
+repo where this workflow does not run, and anything that drifted before this
+existed. Both compute the rung-free set with `gh-issue-state.py`'s
+`done_label_set()`, so they cannot disagree about what "done" is.
 
 This is the BACKSTOP channel. The agent that opens the PR is meant to set the
 rung in the same step; this exists to catch PRs opened outside that loop, and
@@ -58,12 +79,13 @@ Usage:
       --event ready_for_review --apply
 
   python3 gh-issue-pr-sync.py --repo owner/name --branch claude/task-142 \
-      --event closed --merged --apply
+      --event closed --merged --pr 612 --apply
 
 Without --apply it decides and prints what it would write, performing the read
-but no write. A no-op — any branch that is not a task branch, a merged PR, a
-closed issue, an unexpected current rung — exits 0 and says why: this runs on
-every PR in the repo, so "did nothing" is the common case, not a failure.
+but no write. A no-op — any branch that is not a task branch, a closed issue, an
+unexpected current rung, a merged PR that closed nothing — exits 0 and says why:
+this runs on every PR in the repo, so "did nothing" is the common case, not a
+failure.
 """
 
 import argparse
@@ -115,19 +137,107 @@ def status_rung(labels):
     return rungs[0] if len(rungs) == 1 else None
 
 
-def decide(event, merged, branch):
+def decide(event, branch):
     """(issue number, (expected rung, target rung)) — or (None, reason) to skip.
 
     Everything decidable from the PR event alone happens here, before any
     network call, so the overwhelmingly common case — a PR on a branch that is
     not a task branch — costs zero requests.
+
+    This is the RUNG-TRANSITION path only. A merged PR never reaches here: it is
+    not a transition, and main() routes it to strip_merged() first. That is why
+    this takes no `merged` argument — one used to be passed and ignored, which
+    would now read as if the merged case were still decided here.
     """
-    if event == "closed" and merged:
-        return None, "PR merged — `Closes #<n>` closes the issue, which IS completion"
     issue = gh_issue_claim.parse_issue_number(branch)
     if issue is None:
         return None, f"not a task branch: {branch}"
     return issue, TRANSITIONS[event]
+
+
+def closing_issues(repo, pr):
+    """Issue numbers this PR closes, restricted to `repo`.
+
+    GitHub resolves the closing keywords itself, so nothing here re-implements
+    `Closes #<n>` matching — which would have to track every accepted keyword
+    and the cross-repo `owner/name#n` form to stay correct.
+
+    The repo filter is not defensive tidying: a PR may close an issue in ANOTHER
+    repository, and `GITHUB_TOKEN` is scoped to this one. Writing there would
+    fail; reading a same-numbered local issue instead would be worse. So those
+    are dropped, and the caller reports the count.
+    """
+    code, out, err = gh_issue_state.run_gh(
+        ["pr", "view", str(pr), "--repo", repo, "--json", "closingIssuesReferences"]
+    )
+    if code != 0:
+        raise SystemExit(
+            f"reading closing issues for {repo}#{pr} failed: "
+            f"{err.strip() or out.strip()}"
+        )
+    payload = json.loads(out or "{}")
+    owner, name = repo.split("/", 1)
+    numbers = []
+    for ref in payload.get("closingIssuesReferences") or []:
+        ref_repo = ref.get("repository") or {}
+        ref_owner = (ref_repo.get("owner") or {}).get("login")
+        if ref_owner == owner and ref_repo.get("name") == name:
+            numbers.append(ref["number"])
+    return numbers
+
+
+def strip_merged(repo, pr, labels_file, apply):
+    """Strip the rungs from every issue this merged PR closed.
+
+    Returns a list of per-issue outcome dicts. Each issue is decided on its own
+    CURRENT state, the same safety posture the rung transitions take: an issue
+    that is not closed, or carries no rung, is left alone. So a PR whose closing
+    reference was already reconciled, or whose issue a human reopened, is a
+    no-op rather than a correction.
+    """
+    groups, colors = gh_issue_state.load_vocabulary(labels_file)
+    vocabulary = gh_issue_state.expected_labels(groups, colors)
+
+    outcomes = []
+    for issue in closing_issues(repo, pr):
+        current, state = gh_issue_state.current_issue(repo, issue)
+        if state != "closed":
+            # The merge did not close it — a human reopened it, or the reference
+            # resolved without a close. Stripping the rungs off a live issue
+            # would retire work that is still moving.
+            outcomes.append({"issue": issue, "skipped": f"{repo}#{issue} is open"})
+            continue
+
+        rungs = gh_issue_state.carried_rungs(current, vocabulary)
+        if not rungs:
+            outcomes.append(
+                {"issue": issue, "skipped": f"{repo}#{issue} carries no rung"}
+            )
+            continue
+
+        try:
+            labels = gh_issue_state.done_label_set(current, groups, vocabulary)
+        except gh_issue_state.InvalidLabelSet as exc:
+            # Two `prio:` labels, say. Report and leave it for row 4's sweep and
+            # a human, rather than writing a set that is still illegal.
+            outcomes.append({"issue": issue, "refused": str(exc), "rungs": rungs})
+            continue
+
+        dropped = gh_issue_state.dropped_unrecognized(current, set(groups), vocabulary)
+        if apply:
+            # No `state` in the payload — the issue stays closed. This strips
+            # labels; reopening or closing is never this script's to do.
+            gh_issue_state.patch_issue(repo, issue, labels)
+        outcomes.append(
+            {
+                "issue": issue,
+                "rungs": rungs,
+                "labels": labels,
+                "dropped": dropped,
+                "applied": apply,
+            }
+        )
+    return outcomes
 
 
 def main(argv=None):
@@ -146,6 +256,14 @@ def main(argv=None):
         "--merged",
         action="store_true",
         help="the PR was merged (only meaningful with --event closed)",
+    )
+    parser.add_argument(
+        "--pr",
+        type=int,
+        help=(
+            "the PR number. Required with --merged, which asks GitHub which "
+            "issues the PR closed rather than deriving one from the branch"
+        ),
     )
     parser.add_argument("--apply", action="store_true", help="send the PATCH")
     parser.add_argument(
@@ -174,7 +292,40 @@ def main(argv=None):
                 print(f"Dropped (not in labels.yml): {', '.join(fields['dropped'])}")
         return 0
 
-    issue, outcome = decide(args.event, args.merged, args.branch)
+    if args.event == "closed" and args.merged:
+        if args.pr is None:
+            parser.error("--merged requires --pr")
+        outcomes = strip_merged(args.repo, args.pr, args.labels_file, args.apply)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"repo": args.repo, "pr": args.pr, "merged": outcomes}, indent=2
+                )
+            )
+        elif not outcomes:
+            print(f"no-op: {args.repo}#{args.pr} closed no issue in this repo")
+        else:
+            for outcome in outcomes:
+                number = outcome["issue"]
+                if outcome.get("skipped"):
+                    print(f"no-op: {outcome['skipped']}")
+                elif outcome.get("refused"):
+                    print(
+                        f"refusing to write {args.repo}#{number}: {outcome['refused']}",
+                        file=sys.stderr,
+                    )
+                else:
+                    verb = "Stripped" if args.apply else "Would strip"
+                    rungs = ", ".join(outcome["rungs"])
+                    print(f"{verb} {args.repo}#{number}: {rungs}")
+                    if outcome["dropped"]:
+                        names = ", ".join(outcome["dropped"])
+                        print(f"Dropped (not in labels.yml): {names}")
+        # A refusal is reported, never fatal: the rest of the PR's issues are
+        # still worth stripping, and row 4's sweep will re-report this one.
+        return 0
+
+    issue, outcome = decide(args.event, args.branch)
     if issue is None:
         return report(outcome)
     expected, target = outcome
