@@ -10,7 +10,7 @@ reviewer gets it wrong.
 ## Three worked examples, all from one run
 
 Each was rated `issue (blocking)` by at least one reviewer. All three are wrong.
-The first would have shipped a bug if applied; the second describes a bug the
+The first would have broken the build if applied; the second describes a bug the
 control flow rules out; the third is a no-op.
 
 **A fix that breaks the build.** Two reviewers independently read
