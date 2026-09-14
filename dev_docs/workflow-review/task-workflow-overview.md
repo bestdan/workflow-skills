@@ -175,7 +175,8 @@ custom states required**:
 - `in_progress` / `blocked` / `needs_review` → **In Progress** (or **In Review**),
 - `done` → **Done**, set _only_ by the reconciler verbs — `/sweep-for-complete`
   or `/reconcile-tasks` detects that the issue's own linked PR merged, then
-  drives `/complete-task`. Linear's GitHub integration does not set it; see
+  drives `/complete-task`. That is the required path; where Linear's GitHub
+  integration is live it may also set it on merge, which is expected — see
   `commands/handlers/linear-claim.md`, "Whether Linear's integration is live".
 
 `/do-tasks` on Linear runs **in the current session (foreground)**: it pulls one
