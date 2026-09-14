@@ -212,10 +212,30 @@ read nine clean minutes as licence to drop the throttle. `--limit N` and `--only
 exist for an attended first pass; `--only` was added because the plan's order puts three
 creates first and the entry worth eyeballing was a reopen twelve rows down.
 
-**Expect `PRE-416` to need a sweep, not a fix.** It landed `status:4_needs_review` with
-its PR #487 already merged, which is a faithful migration — Linear still has it In
-Review. `/sweep-for-complete` is the verb that notices the merged PR and closes it. Do not
-"correct" it.
+**`PRE-416` landed at `status:4_needs_review` (#723) with its PR #487 already merged, and
+that is faithful** — Linear still has it In Review. It is not a defect of the import and
+must not be "corrected" during one.
+
+**But `/sweep-for-complete` will NOT close it, and earlier revisions of this file said it
+would.** That command is **unsupported on `gh-issue`** and refuses by design: GitHub
+normally closes an issue natively from `Closes #<n>` in the PR body, so the sweep has
+nothing to add. Here the native path could not fire either — #723 did not exist when #487
+merged on 2026-09-08, and #487's body cites the Linear key, not a GitHub number. **Every
+issue the import carried is in this position**, so nothing auto-closes any of them; #723 is
+simply the only one whose work is already done.
+
+Close it with the state helper, not a bare `gh issue close`:
+
+```
+python3 commands/handlers/assets/gh-issue-state.py --repo bestdan/workflow-skills \
+    --issue 723 --labels "prio:3,est:2" --done --apply
+```
+
+`--done` closes the issue and asserts no `status:`/`auto:` rung, which is the point: a bare
+`gh issue close` leaves live rungs on a closed issue, and that is one of the two label
+invariants with **no reconciler rule** (below). `prio:`/`est:` are not rungs and are carried
+through deliberately. v2.51.0 ([#613](https://github.com/bestdan/workflow-skills/issues/613))
+strips rungs at merge time, so this is pre-feature residue rather than a recurring class.
 
 **A reopened issue carries TWO provenance footers, and that is faithful.** #288 and the
 other seven were migrated OUT of GitHub in August, so each body already ended with
