@@ -160,6 +160,17 @@ That case is **stronger** than v1's Stages 4–5. It is **weaker** than Stages 1
 
 > **If the new controller starts accumulating special cases for "progress," reconciliation, and adapter ambiguity faster than the old supervisor sheds them, we are moving the complexity rather than removing the authority problem.** Stop and reassess.
 
+### Measuring it (the complexity ledger)
+
+Aspirational stop rules do not fire — this repo's history is fifteen PRs of proof. So the rule gets instruments:
+
+- **Annotation.** Every special case added to new-controller surface (Stage 2's lease/verdict code, Stage 3's `watch`/`worker`) carries a structured marker: `# SPECIAL-CASE(progress|reconciliation|adapter): <reason> (task-N or #PR)`. A special case is a branch whose condition names a **specific external ambiguity** — one `gh` error string, one launchd state, one exemption to the progress predicate — rather than a general rule. If the code says _"except when,"_ it gets a marker.
+- **Ledger.** [`auto-pilot-complexity-ledger.jsonl`](auto-pilot-complexity-ledger.jsonl) — append-only, one event per special case added or removed, on **either** side: `{"type": "event", "date": …, "pr": …, "side": "new" | "old", "delta": ±n, "category": …, "note": …}`. Any PR touching `spawn-orchestrator.sh` or new-controller paths either appends its events (`scripts/complexity_trend.py add …`) or states "no special-case delta" in the PR body. When Stages 0–3 get a `/plan-with-docs` plan, each task file carries this as a checklist item — the data accumulates across task runs, not in anyone's memory.
+- **Reconciliation.** `scripts/complexity_trend.py check` validates the ledger and asserts the new side's net total **equals the live `SPECIAL-CASE` marker count** in the controller paths — the ledger cannot silently drift from the code. It prints per-side and per-category totals plus the trailing events.
+- **The tripwire.** `new_adds_net ≥ 5` **and** `new_adds_net > old_sheds_net` → **TRIP** (exit 1). Before Stage 3: do not start it. During Stage 3: stop and reassess per this section. The ≥5 floor keeps noise from tripping the rule; the comparison is cumulative from the first Stage 2 PR. Run the check at every stage boundary and in any PR that appends to the ledger.
+
+The old supervisor is **not** retro-annotated (4,503 lines); its shedding is measured through the ledger alone, recorded at removal time. Stage 0 will legitimately **add** guards to the old side — those are `side: "old", delta: +n` events; they are recorded but do not feed the tripwire, which compares only new-side accumulation against old-side shedding.
+
 ## 10. What v1 got wrong
 
 Recorded so we do not re-derive it:
