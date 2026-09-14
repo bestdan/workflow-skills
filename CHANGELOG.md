@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.54.0] - 2026-09-14
+
+### Features
+
+- write the import graph with linear-import.py --link [#513] (#734) (2d9fe39)
+
 ## [2.53.2] - 2026-09-14
 
 ### Fixes
