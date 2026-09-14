@@ -4,9 +4,9 @@ A snapshot. The measurements below are tied to specific commits and to the
 reviewer pool as it stood on 2026-08-21; nothing here is maintained.
 
 The durable conclusion lives in
-[`skills/co-review/reviewers/codex.md`](../skills/co-review/reviewers/codex.md).
+[`skills/co-review/reviewers/codex.md`](../../skills/co-review/reviewers/codex.md).
 The fix it produced is the contradiction bullet and the generalized UNVERIFIED
-clause in [`skills/co-review/review_prompt.md`](../skills/co-review/review_prompt.md).
+clause in [`skills/co-review/review_prompt.md`](../../skills/co-review/review_prompt.md).
 
 ## The question
 
@@ -24,7 +24,7 @@ The hypothesis contrasted codex against reviewers that can read past the diff,
 and named `agy` as one. That is not what `--add-dir` does: it points at
 `<INPUT-DIR>`, the dedicated directory holding the input file, to defeat a
 headless `read_file` permission gate so agy can read _its own input_.
-[`reviewers/agy.md`](../skills/co-review/reviewers/agy.md) forbids the repo root
+[`reviewers/agy.md`](../../skills/co-review/reviewers/agy.md) forbids the repo root
 by name, and agy's pointer says "Do NOT explore any other file."
 
 **So the pool had two diff-only reviewers, not one.** Repo context came only

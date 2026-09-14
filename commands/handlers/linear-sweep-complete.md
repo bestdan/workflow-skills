@@ -11,12 +11,12 @@ and "Steps".
 config schema (`linear.projects`, the Unassigned bucket), and the preflight
 pattern.
 
-> **Hard note — this sweep is immune to the bare-id over-close bug that got
-> Linear's GitHub integration disabled.** That integration scans PR title/body
-> text for issue ids and auto-completes anything it finds referenced with a
-> closing magic word — including a **bare** `<TEAM>-NNN` token that was never
-> meant to close, which is exactly how an unrelated sibling issue got
-> silently closed. This sweep never parses issue ids out of PR text at all.
+> **Hard note — this sweep cannot reproduce the over-close bug that prompted
+> it.** That bug was a repo-local GitHub Actions workflow which scraped
+> `<TEAM>-NNN` ids out of PR title and body text on merge and moved **every**
+> match to `Done`, closing issues a PR had merely cited — not Linear's own
+> integration (see `commands/handlers/linear-claim.md`, "Whether Linear's
+> integration is live"). This sweep never parses issue ids out of PR text at all.
 > It works in the opposite direction: it starts from the issues it already
 > holds in a started-type state, resolves **that issue's own** structurally-
 > linked PR (an explicit Linear `links` attachment, or a title/branch match
@@ -239,10 +239,10 @@ contract the report and steps 5–6 depend on.
    > parentheses or at the end of the title, and hand-opened PRs are exactly the
    > population these fallbacks exist for — anything `/do-tasks` opened already
    > resolved at source 1. Observed in the nightly tidy run of 2026-09-02:
-   > `repo:bestdan/finplan PRE-73 in:title` returned open PR #1003, `Scaffold
-   > packages/rest-server FastAPI package (PRE-73)`, and the run reported PRE-73
-   > as having "genuinely no PR found yet". That title is now a fixture in
-   > `scripts/test_linear_pr_resolve.py`.
+   > a `repo:<owner>/<name> PRE-73 in:title` search returned an open PR whose
+   > title _ended_ `… (PRE-73)` rather than starting `[PRE-73]`, and the run
+   > reported PRE-73 as having "genuinely no PR found yet". That title is now a
+   > fixture in `scripts/test_linear_pr_resolve.py`.
 
 3. **The repo is resolved per issue, from that issue's own project** —
    `--config`'s `linear.projects[].repo` matched on `project.id`, else
@@ -278,7 +278,7 @@ contract the report and steps 5–6 depend on.
 {
   "id": "…",
   "identifier": "PRE-73",
-  "repo": "bestdan/finplan",
+  "repo": "acme/widgets",
   "prs": [{ "number": 1003, "url": "…", "state": "OPEN", "mergedAt": null }],
   "resolved_via": "title",
   "state": "open",
@@ -343,12 +343,12 @@ The tools, each attested from a routine run (2026-09-02), not merely inferred
 from upstream:
 
 - **Source 2 (title search)** → `search_pull_requests`. Put the repo **in the
-  query** as a `repo:<owner>/<name>` qualifier — `"repo:bestdan/finplan
+  query** as a `repo:<owner>/<name>` qualifier — `"repo:<owner>/<name>
   PRE-808 in:title"` is the attested form — which is what carries `-R` here.
   (`owner`/`repo` parameters also exist; either works.)
 - **Source 3 (branch)** → `list_pull_requests`, with `owner`, `repo`,
   `state: "all"`, and `head`. **`head` is not a bare branch name.** It takes
-  `<owner>:<branch>` — `"bestdan:dpegan/pre-507-…"` — unlike `gh pr list
+  `<owner>:<branch>` — `"acme:alex/pre-507-…"` — unlike `gh pr list
   --head`, which takes the branch alone.
 
   > **Get this wrong and the sweep completes the wrong issues.** A `head` with
@@ -426,7 +426,7 @@ Three properties of it are load-bearing:
 GraphQL query** (and the script cannot run at all), read the same fields with
 `mcp__github__pull_request_read` (`method: "get"`). It takes `owner`, `repo`,
 and `pullNumber` — the attested call shape is `{method: "get", owner:
-"bestdan", repo: "finplan", pullNumber: 1149}` — and **has no URL parameter**,
+"acme", repo: "widgets", pullNumber: 1149}` — and **has no URL parameter**,
 so parse all three out of the PR URL and pass them together. That is the same
 guarantee the URL rule above buys on the `gh` path: the repo travels with the
 number. A bare `pullNumber` with an inferred owner/repo is the one form to

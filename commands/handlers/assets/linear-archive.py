@@ -33,12 +33,12 @@ script only because the caller bridges them onto the environment — see
 linear-common.md's "Key resolution" step. This script reads no config.
 
 Usage:
-  python3 linear-archive.py --team PreThink --older-than 10
-  python3 linear-archive.py --team PreThink --older-than 10 --apply
-  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --apply
-  python3 linear-archive.py --team PreThink --older-than 30 \
+  python3 linear-archive.py --team Platform --older-than 10
+  python3 linear-archive.py --team Platform --older-than 10 --apply
+  python3 linear-archive.py --team Platform --older-than 30 --project <uuid> --apply
+  python3 linear-archive.py --team Platform --older-than 30 \
     --project <uuid-1> --project <uuid-2> --apply
-  python3 linear-archive.py --team PreThink --issues PRE-12,PRE-13 --apply
+  python3 linear-archive.py --team Platform --issues PRE-12,PRE-13 --apply
 
 --project is repeatable. No --project sweeps the whole team (unchanged
 default); one or more scope the sweep to exactly those projects, looping the
@@ -387,7 +387,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--older-than",
