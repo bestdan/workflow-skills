@@ -40,8 +40,31 @@ Write `dev_docs/gh_issue_task_loop.md` carrying:
 
 Then delete `dev_docs/tasks/gh_migration_plan/`.
 
+> **That path is now only the untracked original, and deleting it does NOT dispose
+> of the plan docs.** Verified 2026-09-13: it still exists in the main checkout, 8
+> entries, 0 tracked, gitignored, carrying its own stale `HANDOFF.md`. The live
+> plan moved to `dev_docs/gh-issue-migration/` — 18 files, tracked, on draft
+> **PR #441** — specifically so it would have git history. So this step is still
+> correct as written (delete the stale copy, and it is worth doing early: an
+> untracked plan copy has misled a session here twice), but it leaves the real
+> question open.
+>
+> **The open question: what happens to the tracked copy.** PR #441 is "never
+> merged" by design, so those files never reach `main` on their own. Deleting them
+> would discard the history the move bought. **Decide deliberately between merging
+> #441 and closing it, leaving the record on an abandoned branch** — both are
+> defensible; drift is not. This task is where that decision belongs, since it owns
+> "graduate the durable material".
+
 **Only retire the Linear handler and its four Linear-only commands once no repo
 is still on Linear.** If `finplan` remains, they stay.
+
+> **`linear-import.py` is the case this rule does not quite cover.** It is ~2,500
+> lines of one-shot migration tooling that every installed plugin user carries, and
+> it is kept not because a repo is on Linear but because **task 10 might extend the
+> migration to `finplan`** — which is why #516 step 3 documents its usage. If task
+> 10 decides not to extend, that justification is gone and retiring it is in scope
+> here. Same for whatever `linear-verify.py` / `linear-successor.py` #514/#515 add.
 
 ## Acceptance Criteria
 

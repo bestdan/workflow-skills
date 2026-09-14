@@ -91,6 +91,54 @@ worktree off `main`; edit these plan docs on this branch.
 `dev_docs/decisions/2026-08-24-routine-claim-channel.md`, because runtime prose under
 `commands/` links to them.
 
+### The old copy is still on disk, untracked — do not read it and do not act on it
+
+`dev_docs/tasks/gh_migration_plan/` **still exists** in the main checkout: 8 entries,
+0 tracked, gitignored, including its own stale `HANDOFF.md` and `gh_migration_plan.md`.
+Audited 2026-09-13. It is the pre-move original, superseded by the 18 tracked files here,
+and it is exactly the hazard this plan has already been bitten by twice — an untracked
+copy of plan content that a fresh session reads and acts on, with no git history to tell
+it how old the content is. **The file you are reading is the live one; that one is not.**
+
+Task 11 already names it for deletion and the instruction is still correct, so this is not
+a new task. It is recorded here because it will mislead someone before task 11 runs.
+Deleting it is unrecoverable (untracked, no history), so it wants an explicit go from the
+owner rather than a tidy-up in passing.
+
+### What goes and what stays at close-out
+
+Four sets, and only two are decided. Settle the other two before #516 rather than during
+it — #516's step 4 and task 11 both read as mechanical and neither covers the open half.
+
+| Files                                                            | Fate                                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev_docs/tasks/gh_migration_plan/` (untracked scaffolding)      | **Delete** — task 11 says so, the path is still accurate, needs the owner's go                                                              |
+| `$HOME/src/linear-export/` (export, plan, mapping)               | **Keep forever.** #516 step 3 records their paths in `linear-common.md`, so the plan assumes they persist. **No remote** — unowned exposure |
+| `dev_docs/gh-issue-migration/` (these 18 tracked files, PR #441) | **UNDECIDED** — see below                                                                                                                   |
+| `linear-import.py` and the assets #515/#516 add                  | **Keep**, per task 11 — but the reason is task 10's, see below                                                                              |
+
+**The tracked plan docs are the real open question, and task 11's wording hides it.** Task
+11 says to delete `dev_docs/tasks/gh_migration_plan/`, which is the scaffolding above, and
+says nothing about these files. They moved here _to have git history_, so deleting them
+would discard what the move bought — and because PR #441 is "never merged" by design, they
+never reach `main` either. So "delete the plan folder" collapses into a choice nobody has
+made: **merge #441, or close it and leave the record on an abandoned branch.** Pick one
+deliberately; both are defensible and the default (drift) is neither.
+
+**The assets stay for a reason that task 10 can remove.** Task 11 keeps the Linear handler
+while any repo is on Linear, and `finplan` is; #516 step 3 goes further and documents
+`linear-import.py`'s usage for a possible finplan migration. But `linear-import.py` is
+~2,500 lines of one-shot migration tooling that every installed user now carries, and if
+task 10 decides **not** to extend to finplan, that justification is gone. Revisit it there,
+not at #516.
+
+**#516's own acceptance criterion names a folder that never existed.** It asks that
+`dev_docs/tasks/linear_import_plan/` "no longer exists locally" — verified absent
+2026-09-13, and absent because nothing ever created it. The criterion therefore passes
+without anything happening, which reads as work done. The folder it should name is the
+scaffolding above. Fix the criterion or ignore it knowingly; do not let it stand as
+evidence.
+
 ## Where things stand
 
 **This repo has been on `gh-issue` since 2026-09-07.** Any older copy of this file that
