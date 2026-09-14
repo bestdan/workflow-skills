@@ -101,6 +101,48 @@ and PATCHes the complete set once.
 Every write here needs the sandbox escape: `sandbox-network-guard` blocks
 non-GET `gh api`, and 125 issues is a few hundred such writes.
 
+`--link` writes what `--apply` deliberately left out: the native dependency edges,
+the sub-issue links, and the `#number` cross-references. It needs BOTH files,
+because neither alone can write an edge — the relationships are Linear keys in
+the plan, the numbers are in the mapping, and the join is by key.
+
+  python3 linear-import.py --link \\
+      --plan-file <dir>/<date>-import-plan.json \\
+      --mapping <dir>/<date>-mapping.json [--apply]
+
+It previews unless `--apply`, and it keeps no progress file, deliberately: all
+three passes are check-then-write — existing edges are read, existing sub-issue
+links are read, an unchanged body is not edited — so the whole mode is
+re-runnable and a crash costs a re-read rather than a duplicate write. It refuses
+outright if any plan key is missing from the mapping or short of phase `done`,
+because an edge written to a number a rerun might replace is a silently wrong
+graph.
+
+Edges go through `gh-issue-deps.py`, which already knows the two facts that make
+them subtle (the POST body carries a database id; `blocked_by` is paginated), in
+ONE invocation so its id and edge caches survive the batch.
+
+THE SUB-ISSUE ENDPOINT, measured 2026-09-13 on this repo — the one call this task
+inherited as unmeasured. `POST repos/{owner}/{repo}/issues/{n}/sub_issues` with
+`{"sub_issue_id": <database id>}` WORKS here, so the `Parent: #n` footer fallback
+is not needed. Two traps in what it returns: the response is the PARENT issue, so
+it cannot confirm which child was attached; and a repeat POST is **422, not
+idempotent**, with a message that conflates two conditions — "Issue may not
+contain duplicate sub-issues and Sub issue may only have one parent". A 422 is
+therefore never read as "already linked": the parent's own list is re-read, and a
+child that is absent from it is parented somewhere else, which is a refusal.
+
+THE BODY REWRITE IS NARROWER THAN IT LOOKS, for measured reasons. The provenance
+footer is MASKED before any substitution, because `PRE-746 (https://linear.app/…)`
+is both the shape a cross-reference rewrite matches and the shape of the footer —
+125 of 125 bodies, every one the footer — and deleting it would remove the only
+thing naming the issue's Linear key. Only URL-bearing references are rewritten (a
+markdown link whose text is a mapped key and whose href is that key's own issue:
+152 real occurrences, against zero for the bare `KEY (url)` form): a BARE key in
+prose may be quoted history, where the Linear key is still the true statement.
+Unmapped keys are always left alone. The one place bare keys are rewritten is the
+`Related:` footer line, whose shape is this repo's rather than an author's.
+
 `--show` reads a plan back, printing each named entry beside its Linear original.
 That is how a person checks the plan: the file is 125 entries of JSON, and the
 question asked of it is not whether it parses but whether the crosswalk did the
@@ -1727,16 +1769,463 @@ def print_apply_summary(result):
         print("  every planned key is in the mapping at phase done")
 
 
+# ---------------------------------------------------------------------------
+# --link: the graph and the cross-references the import deliberately left out
+# ---------------------------------------------------------------------------
+
+# The join: relationships live in the PLAN (`blocked_by`, `parent`, both Linear
+# keys), numbers live in the MAPPING. Neither file alone can write an edge, and
+# re-deriving either from the export would reintroduce the selection bug --plan's
+# header argues about.
+
+# THE PATTERN #513's TASK FILE SPECIFIES IS NOT IMPLEMENTED, DELIBERATELY. It
+# says to rewrite `PRE-N (https://linear.app/...)`. In the real plan that shape
+# occurs 125 times and every single one is the provenance footer `--apply` wrote
+# — `Migrated from Linear PRE-746 (https://linear.app/…/issue/PRE-746)`. The
+# cross-reference it was meant to describe occurs zero times. So implementing it
+# would delete the only thing on each issue naming its Linear key: what
+# `--apply`'s lost-create recovery searches for, and what #514 verifies against.
+#
+# This is the same failure #511 hit and recorded — a pattern written from what a
+# Linear body was assumed to look like, matching none of the real ones. The
+# footer's safety is therefore a property of which rules exist, not of a guard:
+# the rule below requires a markdown link, and the `Related:` rule is anchored to
+# its own line. `test_the_provenance_footer_is_never_rewritten` is what fails if
+# anyone adds the task file's pattern later.
+
+# The cross-reference form the export actually contains: a markdown link whose
+# TEXT is a Linear key and whose HREF is that same key's issue URL. 152
+# occurrences in the real plan, against zero for the bare `KEY (url)` form the
+# task file names. Requiring the href to name the same key is what leaves
+# `[reconcile-tasks project](https://linear.app/…/project/…)` alone — a link
+# whose text is not a key, and the one such case in the export.
+LINEAR_MD_LINK = re.compile(
+    r"\[(?P<key>[A-Z][A-Z0-9]*-\d+)\]\(<?(?P<href>https://linear\.app/[^)>]*)>?\)"
+)
+
+# Our own `Related:` footer line, written by `body()`. Rewriting bare keys is safe
+# here and only here, because this line's shape is ours rather than a Linear
+# author's prose.
+RELATED_LINE = re.compile(r"^(Related: )(?P<keys>[^(\n]+?)( \(relations of type)", re.M)
+BARE_KEY = re.compile(r"[A-Z][A-Z0-9]*-\d+")
+
+# The sub-issue endpoint, measured 2026-09-13 on this repo — the one call #513
+# inherited as unmeasured. Three results, and the third shapes the code:
+#
+#   1. It WORKS here. `POST repos/{owner}/{repo}/issues/{n}/sub_issues` with
+#      `{"sub_issue_id": <database id>}` returns 200. So the `Parent: #n` footer
+#      fallback the task file allows for is not needed, and task 5's sub-issue
+#      check can read the native field.
+#   2. It returns the PARENT issue, not the child or the link. So the response
+#      cannot confirm WHICH child was attached; only a re-read can.
+#   3. A repeat POST is 422, not idempotent — and the message conflates two
+#      different conditions: "Issue may not contain duplicate sub-issues and Sub
+#      issue may only have one parent". So a 422 must NOT be read as "already
+#      linked": a child already parented somewhere ELSE fails identically, and
+#      treating that as success would record a link that does not exist. The
+#      parent's own sub-issue list is the only thing that tells the two apart.
+SUB_ISSUE_DUPLICATE_422 = "may not contain duplicate sub-issues"
+
+
+class LinkError(Exception):
+    """A refusal that stops the linking pass.
+
+    Separate from ApplyError because the recovery differs: `--link` writes no
+    progress file and needs none — every one of its three passes is
+    check-then-write and therefore re-runnable — so a LinkError means "fix the
+    cause and run the whole thing again", with no resume point to honour.
+    """
+
+
+def run_deps_helper(args):
+    """Run gh-issue-deps.py and return (returncode, stdout, stderr).
+
+    The edge writer already exists and already knows the two facts that make
+    edge writing subtle — the POST body carries a database id, and `blocked_by`
+    is paginated — so this calls it rather than reimplementing either. One
+    invocation for the whole batch, as the task specifies: it keeps its own
+    per-blocker id cache and its own existing-edge cache, both of which a
+    per-edge invocation would throw away 27 times.
+    """
+    proc = subprocess.run(
+        [sys.executable, str(ASSET_DIR / "gh-issue-deps.py"), *args],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def link_numbers(plan, mapping):
+    """key -> GitHub number, asserting the import actually finished.
+
+    Linking against a half-landed import is the failure worth refusing: an entry
+    still short of `done` may yet be created, and an edge written to a number
+    that does not exist yet — or to one a rerun replaces — is a silently wrong
+    graph. So every plan key must be present AND at `done`.
+    """
+    entries = mapping.get("entries") or {}
+    numbers, incomplete, absent = {}, [], []
+    for entry in plan["entries"]:
+        key = entry["key"]
+        record = entries.get(key)
+        if record is None:
+            absent.append(key)
+        elif record.get("phase") != "done":
+            incomplete.append(f"{key} (phase {record.get('phase')})")
+        else:
+            numbers[key] = record["number"]
+    if absent or incomplete:
+        raise LinkError(
+            "refusing to link; the import is not complete:\n"
+            + ("  not in the mapping: " + ", ".join(absent) + "\n" if absent else "")
+            + ("  not at phase done: " + ", ".join(incomplete) if incomplete else "")
+        )
+    return numbers
+
+
+def edge_pairs(plan, numbers):
+    """(blocked, blocker) numbers for every plan edge, plus what was unmappable.
+
+    Direction is the plan's and is not re-derived: `blocked_by` already means
+    "these block me", resolved in `--plan` from `inverseRelations`. Inverting it
+    here would write 27 real dependencies backwards, which reads as a healthy
+    graph.
+    """
+    pairs, skipped = [], []
+    for entry in plan["entries"]:
+        blocked = numbers.get(entry["key"])
+        for blocker in entry["blocked_by"]:
+            if blocked is None or blocker not in numbers:
+                skipped.append({"blocked": entry["key"], "blocker": blocker})
+            else:
+                pairs.append((blocked, numbers[blocker]))
+    return pairs, skipped
+
+
+def parent_pairs(plan, numbers):
+    """parent number -> [child numbers], plus what was unmappable."""
+    pairs: dict = {}
+    skipped = []
+    for entry in plan["entries"]:
+        parent = entry.get("parent")
+        if not parent:
+            continue
+        child = numbers.get(entry["key"])
+        if child is None or parent not in numbers:
+            skipped.append({"child": entry["key"], "parent": parent})
+            continue
+        pairs.setdefault(numbers[parent], []).append(child)
+    return pairs, skipped
+
+
+def write_edges(repo, pairs, apply_writes):
+    """The whole edge batch through gh-issue-deps.py, in one invocation."""
+    if not pairs:
+        return {"created": [], "existing": [], "skipped": [], "refused": []}
+    args = ["--repo", repo, "--json"]
+    for blocked, blocker in pairs:
+        args += ["--edge", f"{blocked}:{blocker}"]
+    if apply_writes:
+        args.append("--apply")
+    code, out, err = run_deps_helper(args)
+    if code != 0:
+        raise LinkError(f"gh-issue-deps.py exited {code}: {(err or out).strip()}")
+    try:
+        return json.loads(out or "{}")
+    except json.JSONDecodeError as exc:
+        raise LinkError(f"cannot read gh-issue-deps.py's JSON output ({exc})")
+
+
+def issue_database_id(repo, number, cache):
+    """The REST `id`, which is what the sub-issue POST body carries.
+
+    A database id is not an issue number and looks nothing like one, the same
+    trap gh-issue-deps.py documents for the dependency POST. Cached because the
+    two parents in this plan hold fifteen children between them.
+    """
+    if number not in cache:
+        payload = gh_json(
+            ["api", f"repos/{repo}/issues/{number}", "--jq", "{id: .id}"],
+            f"reading the database id of {repo}#{number}",
+            default={},
+        )
+        database_id = payload.get("id")
+        if not isinstance(database_id, int):
+            raise LinkError(f"{repo}#{number}: no database id in the response")
+        cache[number] = database_id
+    return cache[number]
+
+
+def existing_sub_issues(repo, parent):
+    """The child NUMBERS already attached to this parent.
+
+    Read with `--paginate --slurp` for gh-issue-deps.py's reason: a bare read
+    stops at 30, and an existing link past that page reads as absent — which
+    here means a 422 on the write rather than a skip.
+    """
+    pages = gh_json(
+        ["api", "--paginate", "--slurp", f"repos/{repo}/issues/{parent}/sub_issues"],
+        f"reading the sub-issues of {repo}#{parent}",
+        default=[],
+    )
+    return {issue["number"] for page in pages for issue in page}
+
+
+def write_sub_issues(repo, pairs, apply_writes):
+    """Attach each child to its parent, checking before every write.
+
+    The check is not an optimisation — it is the only way to interpret a failure.
+    A repeat POST and a child parented elsewhere both return the same 422, so on
+    a 422 the parent's list is re-read: the child being there means somebody won
+    the race and the link exists, and the child being absent means it is parented
+    somewhere else, which is a refusal rather than a success.
+    """
+    created, existing, refused = [], [], []
+    ids: dict = {}
+    for parent in sorted(pairs):
+        # Read even on a dry run, the way gh-issue-deps.py does: a preview that
+        # skips the read reports every link as new, so it would have claimed 15
+        # here when one already existed. A dry run whose counts differ from the
+        # real run is worse than no dry run.
+        already = existing_sub_issues(repo, parent)
+        for child in pairs[parent]:
+            if child in already:
+                existing.append({"parent": parent, "child": child})
+                continue
+            if not apply_writes:
+                created.append({"parent": parent, "child": child})
+                continue
+            child_id = issue_database_id(repo, child, ids)
+            code, out, err = run_gh(
+                [
+                    "api",
+                    "--method",
+                    "POST",
+                    f"repos/{repo}/issues/{parent}/sub_issues",
+                    "-F",
+                    f"sub_issue_id={child_id}",
+                ]
+            )
+            if code == 0:
+                created.append({"parent": parent, "child": child})
+                continue
+            blob = f"{out}\n{err}"
+            if SUB_ISSUE_DUPLICATE_422 not in blob:
+                raise LinkError(
+                    f"attaching #{child} to #{parent} failed: {blob.strip()}"
+                )
+            # The ambiguous 422. Re-read rather than assume.
+            if child in existing_sub_issues(repo, parent):
+                existing.append({"parent": parent, "child": child})
+            else:
+                refused.append(
+                    {
+                        "parent": parent,
+                        "child": child,
+                        "reason": "already has a different parent",
+                    }
+                )
+    return {"created": created, "existing": existing, "refused": refused}
+
+
+def rewrite_body(text, numbers):
+    """Turn migrated Linear cross-references in one body into `#number`.
+
+    Two rules, and each exists because of something measured in the real export
+    rather than imagined:
+
+    - **Only a URL-bearing reference is rewritten.** A markdown link to a Linear
+      issue is unambiguously a cross-reference; a BARE key in prose may be quoted
+      history — a commit title, a branch name, a sentence about what Linear held —
+      and there the Linear key is still the true statement. 591 bare keys appear
+      in these bodies against 152 links; rewriting the former would edit prose to
+      say something its author did not.
+    - **An unmapped key is left alone.** 62 bare keys and some links name issues
+      outside the import (terminal, or another project's), and `#number` for them
+      would point at an unrelated issue or nothing.
+
+    The one exception to "bare keys stay" is our own `Related:` line, whose shape
+    is this repo's rather than an author's.
+    """
+
+    def link(match):
+        key = match.group("key")
+        number = numbers.get(key)
+        # The href must name this same key's issue, or the link is about
+        # something else (a project, a different issue) and is left alone.
+        if number is None or f"/issue/{key}" not in match.group("href"):
+            return match.group(0)
+        return f"#{number}"
+
+    rewritten = LINEAR_MD_LINK.sub(link, text)
+
+    def related(match):
+        keys = [k.strip() for k in match.group("keys").split(",") if k.strip()]
+        rendered = [
+            f"#{numbers[k]}" if BARE_KEY.fullmatch(k) and k in numbers else k
+            for k in keys
+        ]
+        return match.group(1) + ", ".join(rendered) + match.group(3)
+
+    return RELATED_LINE.sub(related, rewritten)
+
+
+def rewrite_bodies(repo, plan, numbers, apply_writes, sleep=0.0):
+    """Rewrite every body that changes, and only those.
+
+    The LIVE body is read rather than the plan's, so a human edit since the
+    import survives: rewriting from the plan would silently revert it. It also
+    makes the pass idempotent — a second run finds no migrated link left to
+    rewrite and edits nothing.
+    """
+    edited, unchanged = [], []
+    first = True
+    for entry in plan["entries"]:
+        key = entry["key"]
+        number = numbers[key]
+        payload = gh_json(
+            ["issue", "view", str(number), "--repo", repo, "--json", "body"],
+            f"{key}: reading the body of {repo}#{number}",
+            default={},
+        )
+        current = payload.get("body") or ""
+        updated = rewrite_body(current, numbers)
+        if updated == current:
+            unchanged.append(key)
+            continue
+        edited.append({"key": key, "number": number})
+        if not apply_writes:
+            continue
+        if not first:
+            nap(sleep)
+        first = False
+        path = body_file(updated, ".md")
+        try:
+            gh(
+                ["issue", "edit", str(number), "--repo", repo, "--body-file", path],
+                f"{key}: rewriting the body of {repo}#{number}",
+            )
+        finally:
+            os.unlink(path)
+    return {"edited": edited, "unchanged": unchanged}
+
+
+def link_plan(plan, mapping_path, apply_writes=False, sleep=0.0):
+    """The three linking passes, in the order their failures are cheapest to fix.
+
+    Edges first: they are the acceptance criterion, and gh-issue-deps.py refuses
+    a malformed batch before writing any of it. Sub-issues next, because the
+    endpoint was unmeasured until this task and a refusal there is worth seeing
+    before 125 body edits run. Bodies last: cosmetic next to the graph, and the
+    only pass whose write count scales with the whole import.
+
+    No progress file, deliberately. Every pass is check-then-write — existing
+    edges are read, existing sub-issue links are read, an unchanged body is not
+    edited — so the whole mode is re-runnable and a crash costs a re-read rather
+    than a duplicate write.
+    """
+    repo = plan["repo"]
+    mapping = load_mapping(mapping_path, plan)
+    numbers = link_numbers(plan, mapping)
+
+    edges, edge_skipped = edge_pairs(plan, numbers)
+    parents, parent_skipped = parent_pairs(plan, numbers)
+
+    edge_result = write_edges(repo, edges, apply_writes)
+    sub_result = write_sub_issues(repo, parents, apply_writes)
+    body_result = rewrite_bodies(repo, plan, numbers, apply_writes, sleep)
+
+    return {
+        "repo": repo,
+        "applied": apply_writes,
+        "mapped": len(numbers),
+        "edges": {
+            "planned": len(edges),
+            "created": len(edge_result.get("created") or []),
+            "existing": len(edge_result.get("existing") or []),
+            "refused": edge_result.get("refused") or [],
+            "skipped": (edge_result.get("skipped") or []) + edge_skipped,
+        },
+        "sub_issues": {
+            "planned": sum(len(v) for v in parents.values()),
+            "parents": len(parents),
+            "created": len(sub_result["created"]),
+            "existing": len(sub_result["existing"]),
+            "refused": sub_result["refused"],
+            "skipped": parent_skipped,
+        },
+        "bodies": {
+            "edited": len(body_result["edited"]),
+            "unchanged": len(body_result["unchanged"]),
+            "keys": [row["key"] for row in body_result["edited"]],
+        },
+    }
+
+
+def print_link_summary(result):
+    verb = "Linked" if result["applied"] else "Would link"
+    print(f"{verb} {result['repo']} from {result['mapped']} mapped issue(s)")
+    edges = result["edges"]
+    print(
+        f"  edges:       planned={edges['planned']} created={edges['created']} "
+        f"already={edges['existing']}"
+    )
+    subs = result["sub_issues"]
+    print(
+        f"  sub-issues:  planned={subs['planned']} across {subs['parents']} parent(s) "
+        f"created={subs['created']} already={subs['existing']}"
+    )
+    bodies = result["bodies"]
+    print(
+        f"  bodies:      rewritten={bodies['edited']} unchanged={bodies['unchanged']}"
+    )
+    # Printed even when empty: a category that appears only when non-empty
+    # cannot be read as reassurance, the same rule --plan's summary follows.
+    for label, rows in (
+        ("edges refused by GitHub", edges["refused"]),
+        ("edges skipped (blocker unmapped)", edges["skipped"]),
+        ("sub-issue links refused", subs["refused"]),
+        ("sub-issue links skipped (parent unmapped)", subs["skipped"]),
+    ):
+        print(f"  {label}: {len(rows)}")
+        for row in rows:
+            print(f"      {row}")
+    if not result["applied"]:
+        print("  nothing changed (pass --apply to write)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    # The three modes: build a plan, read one back, or land it. --show carries
-    # its own subjects, so passing it both selects the mode and says what to show.
-    mode = ap.add_mutually_exclusive_group(required=True)
+    # Four modes: build a plan, read one back, land it, or link what landed.
+    # --show carries its own subjects, so passing it both selects the mode and
+    # says what to show.
+    #
+    # --apply does two jobs, and that is deliberate rather than tidy. It shipped
+    # as the verb that lands the plan, so it cannot stop meaning that; and
+    # everywhere else in this repo (gh-issue-state.py, gh-issue-deps.py,
+    # gh-label-sync.py) --apply is the WRITE switch over a dry-run default, which
+    # is the posture --link wants for ~190 writes. So `--link --apply` writes,
+    # bare `--link` previews, and bare `--apply` still selects the apply mode.
+    # The ambiguous combinations are rejected below rather than resolved by
+    # precedence, which is why this is no longer one mutually exclusive group.
+    mode = ap.add_argument_group("modes")
     mode.add_argument("--plan", action="store_true", help="build the import plan")
     mode.add_argument(
         "--apply",
         action="store_true",
-        help="land the plan on GitHub. Needs --plan-file and --mapping",
+        help=(
+            "alone: land the plan on GitHub (needs --plan-file and --mapping). "
+            "With --link: write the links instead of previewing them"
+        ),
+    )
+    mode.add_argument(
+        "--link",
+        action="store_true",
+        help=(
+            "write the dependency edges, sub-issue links and `#number` "
+            "cross-references for an import that has already landed. Previews "
+            "unless --apply. Needs --plan-file and --mapping"
+        ),
     )
     mode.add_argument(
         "--show",
@@ -1830,6 +2319,46 @@ def main(argv=None):
         "--force", action="store_true", help="overwrite an existing plan file"
     )
     args = ap.parse_args(argv)
+
+    # The mode group is no longer mutually exclusive (so `--link --apply` can
+    # mean "link, writing"), so the illegal combinations are named here. Every
+    # pairing except `--link --apply` is a caller who meant one thing and typed
+    # two, and picking one by precedence would run work they did not ask for.
+    selected = [
+        name
+        for name, chosen in (
+            ("--plan", args.plan),
+            ("--link", args.link),
+            ("--show", bool(args.show)),
+            ("--apply", args.apply and not args.link),
+        )
+        if chosen
+    ]
+    if len(selected) > 1:
+        ap.error(f"pick one mode: {', '.join(selected)} were all given")
+    if not selected:
+        ap.error("pick a mode: --plan, --apply, --link or --show")
+
+    if args.link:
+        for flag in ("plan_file", "mapping"):
+            if not getattr(args, flag):
+                ap.error(f"--link needs --{flag.replace('_', '-')}")
+        try:
+            plan = load_plan(args.plan_file)
+            if args.repo and args.repo != plan.get("repo"):
+                raise LinkError(
+                    f"{args.plan_file} targets {plan.get('repo')!r}, not "
+                    f"{args.repo!r} — refusing to link a plan on another board"
+                )
+            result = link_plan(plan, args.mapping, args.apply, args.sleep)
+        except (PlanError, ApplyError, LinkError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print_link_summary(result)
+        return 0
 
     if args.apply:
         for flag in ("plan_file", "mapping"):
