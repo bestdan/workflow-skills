@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.53.1] - 2026-09-14
+
+### Fixes
+
+- correct /do-tasks flag matrix — batch flags aren't file-path-only (#521) (aaf0415)
+
 ## [2.53.0] - 2026-09-14
 
 ### Features
