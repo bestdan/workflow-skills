@@ -113,10 +113,21 @@ the plan, the numbers are in the mapping, and the join is by key.
 It previews unless `--apply`, and it keeps no progress file, deliberately: all
 three passes are check-then-write — existing edges are read, existing sub-issue
 links are read, an unchanged body is not edited — so the whole mode is
-re-runnable and a crash costs a re-read rather than a duplicate write. It refuses
-outright if any plan key is missing from the mapping or short of phase `done`,
-because an edge written to a number a rerun might replace is a silently wrong
-graph.
+re-runnable and a crash costs a re-read rather than a duplicate write.
+
+A plan key the mapping has no record for is SKIPPED AND LISTED, never fatal: it
+has not been imported yet, so there is no number to link, and a rerun after the
+next `--apply` picks it up. A key the mapping does record is linkable whatever its
+phase — `--apply` writes the number once, at phase `created`, and never rewrites
+it, so the number is stable from that moment and the later phases only add labels
+and comments, which no link depends on. An earlier revision refused on both
+counts, on the grounds that "a rerun might replace the number"; that describes a
+state `apply_entry` cannot produce, and the refusal made the skip-and-list path
+this task requires unreachable.
+
+The one refusal left about mapping state is a mapping FILE that does not exist —
+a typo'd `--mapping` would otherwise read as an import that has landed nothing,
+and link nothing, and exit 0.
 
 Edges go through `gh-issue-deps.py`, which already knows the two facts that make
 them subtle (the POST body carries a database id; `blocked_by` is paginated), in
@@ -132,12 +143,15 @@ contain duplicate sub-issues and Sub issue may only have one parent". A 422 is
 therefore never read as "already linked": the parent's own list is re-read, and a
 child that is absent from it is parented somewhere else, which is a refusal.
 
-THE BODY REWRITE IS NARROWER THAN IT LOOKS, for measured reasons. The provenance
-footer is MASKED before any substitution, because `PRE-746 (https://linear.app/…)`
-is both the shape a cross-reference rewrite matches and the shape of the footer —
-125 of 125 bodies, every one the footer — and deleting it would remove the only
-thing naming the issue's Linear key. Only URL-bearing references are rewritten (a
-markdown link whose text is a mapped key and whose href is that key's own issue:
+THE BODY REWRITE IS NARROWER THAN IT LOOKS, for measured reasons. Nothing masks
+or special-cases the provenance footer; it survives because no rule can match it.
+That matters, because `PRE-746 (https://linear.app/…)` is both the footer's shape
+and the shape a naive cross-reference rewrite matches — 125 of 125 bodies, every
+one the footer — and rewriting it would remove the only thing naming the issue's
+Linear key. `test_the_provenance_footer_is_never_rewritten` is the guard, and it
+fails if a rule is ever added that reaches the footer. Only URL-bearing references
+are rewritten (a markdown link whose text is a mapped key and whose href is that
+key's own issue, boundary-checked so PRE-4 cannot match a PRE-40 link:
 152 real occurrences, against zero for the bare `KEY (url)` form): a BARE key in
 prose may be quoted history, where the Linear key is still the true statement.
 Unmapped keys are always left alone. The one place bare keys are rewritten is the
@@ -1856,31 +1870,33 @@ def run_deps_helper(args):
 
 
 def link_numbers(plan, mapping):
-    """key -> GitHub number, asserting the import actually finished.
+    """(key -> GitHub number, the plan keys with no number), refusing nothing.
 
-    Linking against a half-landed import is the failure worth refusing: an entry
-    still short of `done` may yet be created, and an edge written to a number
-    that does not exist yet — or to one a rerun replaces — is a silently wrong
-    graph. So every plan key must be present AND at `done`.
+    A recorded number is linkable whatever the record's phase. `apply_entry`
+    writes `number` in exactly one place — the `created` record — and `record()`
+    is an `update`, so no later phase rewrites or clears it; `recover_landed`
+    only fills keys with no record at all. The phases after `created` add labels
+    and comments, and no link depends on either.
+
+    So the only unlinkable key is one with no number, which means `--apply` has
+    not reached it. That is skipped and listed rather than fatal: the whole point
+    of `--apply --limit`/`--only` is to land part of the import first, and
+    `--link` is re-runnable, so the remainder is picked up by the next run.
+
+    An earlier revision refused on both counts. It made the skip-and-list path
+    this task requires unreachable, and its stated reason — that a rerun might
+    replace the number — described a state the apply path cannot produce.
     """
     entries = mapping.get("entries") or {}
-    numbers, incomplete, absent = {}, [], []
+    numbers, unmapped = {}, []
     for entry in plan["entries"]:
         key = entry["key"]
-        record = entries.get(key)
-        if record is None:
-            absent.append(key)
-        elif record.get("phase") != "done":
-            incomplete.append(f"{key} (phase {record.get('phase')})")
+        number = (entries.get(key) or {}).get("number")
+        if number is None:
+            unmapped.append(key)
         else:
-            numbers[key] = record["number"]
-    if absent or incomplete:
-        raise LinkError(
-            "refusing to link; the import is not complete:\n"
-            + ("  not in the mapping: " + ", ".join(absent) + "\n" if absent else "")
-            + ("  not at phase done: " + ", ".join(incomplete) if incomplete else "")
-        )
-    return numbers
+            numbers[key] = number
+    return numbers, unmapped
 
 
 def edge_pairs(plan, numbers):
@@ -2053,7 +2069,15 @@ def rewrite_body(text, numbers):
         number = numbers.get(key)
         # The href must name this same key's issue, or the link is about
         # something else (a project, a different issue) and is left alone.
-        if number is None or f"/issue/{key}" not in match.group("href"):
+        #
+        # The boundary is load-bearing, not defensive: a substring test passes
+        # `/issue/PRE-4` against a href for `/issue/PRE-40/...`, so a link
+        # labelled PRE-4 pointing at PRE-40 would be rewritten to PRE-4's
+        # number — the wrong issue, silently. Prefix-colliding keys are ordinary
+        # on a board numbered past 700.
+        if number is None or not re.search(
+            r"/issue/" + re.escape(key) + r"(?:[/?#]|$)", match.group("href")
+        ):
             return match.group(0)
         return f"#{number}"
 
@@ -2082,6 +2106,11 @@ def rewrite_bodies(repo, plan, numbers, apply_writes, sleep=0.0):
     first = True
     for entry in plan["entries"]:
         key = entry["key"]
+        # An unmapped key has no issue to read, let alone rewrite. This is the one
+        # place the skip is load-bearing beyond the summary: indexing `numbers`
+        # here would KeyError once a partial mapping is allowed through.
+        if key not in numbers:
+            continue
         number = numbers[key]
         payload = gh_json(
             ["issue", "view", str(number), "--repo", repo, "--json", "body"],
@@ -2125,8 +2154,16 @@ def link_plan(plan, mapping_path, apply_writes=False, sleep=0.0):
     than a duplicate write.
     """
     repo = plan["repo"]
+    # The one refusal about mapping state. `load_mapping` synthesises an empty
+    # mapping for a path that does not exist, which is right for `--apply` (it
+    # creates the file) and wrong here: `--link` only reads it, so a typo'd path
+    # would read as an import that landed nothing, link nothing, and exit 0.
+    if not os.path.exists(mapping_path):
+        raise LinkError(
+            f"{mapping_path}: no mapping file — --link reads the one --apply wrote"
+        )
     mapping = load_mapping(mapping_path, plan)
-    numbers = link_numbers(plan, mapping)
+    numbers, unmapped = link_numbers(plan, mapping)
 
     edges, edge_skipped = edge_pairs(plan, numbers)
     parents, parent_skipped = parent_pairs(plan, numbers)
@@ -2139,15 +2176,22 @@ def link_plan(plan, mapping_path, apply_writes=False, sleep=0.0):
         "repo": repo,
         "applied": apply_writes,
         "mapped": len(numbers),
+        "plan_entries": len(plan["entries"]),
+        "unmapped": unmapped,
         "edges": {
-            "planned": len(edges),
+            # What the PLAN holds, so a partial mapping cannot shrink the
+            # denominator: `planned` is every edge in the plan, and the ones with
+            # an unmapped endpoint show up under `skipped` rather than vanishing.
+            "planned": len(edges) + len(edge_skipped),
+            "linkable": len(edges),
             "created": len(edge_result.get("created") or []),
             "existing": len(edge_result.get("existing") or []),
             "refused": edge_result.get("refused") or [],
             "skipped": (edge_result.get("skipped") or []) + edge_skipped,
         },
         "sub_issues": {
-            "planned": sum(len(v) for v in parents.values()),
+            "planned": sum(1 for e in plan["entries"] if e.get("parent")),
+            "linkable": sum(len(v) for v in parents.values()),
             "parents": len(parents),
             "created": len(sub_result["created"]),
             "existing": len(sub_result["existing"]),
@@ -2164,16 +2208,28 @@ def link_plan(plan, mapping_path, apply_writes=False, sleep=0.0):
 
 def print_link_summary(result):
     verb = "Linked" if result["applied"] else "Would link"
-    print(f"{verb} {result['repo']} from {result['mapped']} mapped issue(s)")
+    print(
+        f"{verb} {result['repo']} from {result['mapped']} of "
+        f"{result['plan_entries']} plan entr(y|ies) in the mapping"
+    )
+    # A partial mapping goes at the TOP, not only in the per-edge skip rows: the
+    # run still exits 0, so "some of this import has not landed yet" has to be
+    # the first thing read rather than something inferred from a count.
+    if result["unmapped"]:
+        print(
+            f"  NOT YET IMPORTED ({len(result['unmapped'])}) — nothing linked for "
+            f"these; rerun after --apply: {', '.join(result['unmapped'])}"
+        )
     edges = result["edges"]
     print(
-        f"  edges:       planned={edges['planned']} created={edges['created']} "
-        f"already={edges['existing']}"
+        f"  edges:       planned={edges['planned']} linkable={edges['linkable']} "
+        f"created={edges['created']} already={edges['existing']}"
     )
     subs = result["sub_issues"]
     print(
-        f"  sub-issues:  planned={subs['planned']} across {subs['parents']} parent(s) "
-        f"created={subs['created']} already={subs['existing']}"
+        f"  sub-issues:  planned={subs['planned']} linkable={subs['linkable']} "
+        f"across {subs['parents']} parent(s) created={subs['created']} "
+        f"already={subs['existing']}"
     )
     bodies = result["bodies"]
     print(

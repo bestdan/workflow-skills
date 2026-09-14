@@ -1116,9 +1116,13 @@ class PlanFixture(unittest.TestCase):
         self._write_plan()
         self._watch_mapping()
 
+    # The export the plan is built from. None means the shared crosswalk fixture;
+    # LinkTests overrides it with one that carries batchable relationships.
+    ISSUES = None
+
     def _write_plan(self):
         export = Path(self.tmp) / "export.json"
-        export.write_text(json.dumps(export_document()), encoding="utf-8")
+        export.write_text(json.dumps(export_document(self.ISSUES)), encoding="utf-8")
         reader = Reader()
         original = linear_import.github_issue_state
         linear_import.github_issue_state = reader
@@ -1581,6 +1585,33 @@ class ApplyTests(PlanFixture):
         self.assertIn("worked this run=0", out)
 
 
+def link_fixture_issues():
+    """The crosswalk fixture plus enough RELATIONSHIPS to exercise batching.
+
+    The shared fixture carries one issue per crosswalk row and exactly one edge,
+    one parent and one child. That is right for the plan tests and useless for
+    `--link`: measured by mutation, processing only the first parent
+    (`sorted(pairs)[:1]`), only the first child (`pairs[parent][:1]`), or only the
+    first blocker (`entry["blocked_by"][:1]`) each left the whole suite green, so
+    a `--link` that wrote one edge out of 27 would have shipped. Correctness came
+    from the real run, not from here.
+
+    So this fixture adds a second parent holding two children, and a third
+    blocker on one entry, and the link tests below assert the COMPLETE sets
+    rather than a count of one.
+    """
+    issues = fixture_issues()
+    by_key = {issue["identifier"]: issue for issue in issues}
+    # PRE-2 becomes a second parent, with two children.
+    by_key["PRE-1"]["parent"] = "PRE-2"
+    by_key["PRE-5"]["parent"] = "PRE-2"
+    # PRE-7 gains three blockers, so one entry carries more than one edge.
+    by_key["PRE-7"]["inverseRelations"] = [
+        {"type": "blocks", "identifier": key} for key in ("PRE-4", "PRE-5", "PRE-2")
+    ]
+    return issues
+
+
 class LinkRecorder(Recorder):
     """The apply Recorder plus a stubbed gh-issue-deps.py, on the same call log.
 
@@ -1679,9 +1710,11 @@ class LinkTests(PlanFixture):
     silently writes nothing.
     """
 
+    ISSUES = link_fixture_issues()
+
     def setUp(self):
         super().setUp()
-        # A completed import, so --link's own precondition is satisfied.
+        # A fully-recorded import, which is the ordinary case.
         self.entries = {e["key"]: e for e in self.plan["entries"]}
         self._seed_done()
 
@@ -1738,9 +1771,18 @@ class LinkTests(PlanFixture):
             for i, a in enumerate(deps[0])
             if a == "--edge"
         }
-        # PRE-3 is blocked_by PRE-4 in the plan; both numbers come from the mapping.
-        self.assertIn((self.numbers["PRE-3"], self.numbers["PRE-4"]), edges)
-        self.assertEqual(len(edges), 1, "the fixture plan has exactly one edge")
+        # The COMPLETE set, not a membership check: `entry["blocked_by"][:1]`
+        # passed every assertion when this only looked for one edge.
+        n = self.numbers
+        self.assertEqual(
+            edges,
+            {
+                (n["PRE-3"], n["PRE-4"]),
+                (n["PRE-7"], n["PRE-4"]),
+                (n["PRE-7"], n["PRE-5"]),
+                (n["PRE-7"], n["PRE-2"]),
+            },
+        )
 
     def test_the_sub_issue_link_uses_the_parent_from_the_plan(self):
         recorder, _, _ = self._link(extra_args=("--apply",))
@@ -1751,34 +1793,87 @@ class LinkTests(PlanFixture):
             and any("/sub_issues" in a for a in args)
             and "--method" in args
         ]
-        self.assertEqual(len(posts), 1)
-        # PRE-3's parent is PRE-4, so PRE-4 is the parent endpoint.
-        self.assertIn(
-            f"repos/{REPO}/issues/{self.numbers['PRE-4']}/sub_issues", posts[0]
-        )
-        self.assertIn(
-            f"sub_issue_id={recorder.database_id(self.numbers['PRE-3'])}", posts[0]
+        # Every parent AND every child, because processing only the first of
+        # either passed a `len(posts) == 1` assertion.
+        n = self.numbers
+        posted: dict = {}
+        for args in posts:
+            parent = int([a for a in args if "/sub_issues" in a][0].split("/")[-2])
+            child_id = int(
+                [a for a in args if a.startswith("sub_issue_id=")][0].split("=")[1]
+            )
+            posted.setdefault(parent, set()).add(recorder.child_for(child_id))
+        self.assertEqual(
+            posted,
+            {
+                n["PRE-4"]: {n["PRE-3"]},
+                n["PRE-2"]: {n["PRE-1"], n["PRE-5"]},
+            },
         )
 
-    def test_an_incomplete_import_refuses_before_any_write(self):
+    def test_an_entry_short_of_done_is_linked_at_its_recorded_number(self):
+        """A number is written once, at phase `created`, and never rewritten — so
+        a record's phase says nothing about whether its number can be linked."""
         self._seed_done(
-            **{"PRE-3": {"key": "PRE-3", "number": 901, "phase": "labelled"}}
+            **{
+                "PRE-4": {
+                    "key": "PRE-4",
+                    "number": self.numbers["PRE-4"],
+                    "phase": "labelled",
+                }
+            }
         )
-        recorder, _, err = self._link(extra_args=("--apply",), expect=2)
-        self.assertIn("the import is not complete", err)
-        self.assertIn("PRE-3 (phase labelled)", err)
-        self.assertEqual([k for k, _ in recorder.calls if k == "deps"], [])
+        recorder, out, _ = self._link(extra_args=("--apply",))
+        deps = [args for kind, args in recorder.calls if kind == "deps"][0]
+        edges = {
+            tuple(int(x) for x in deps[i + 1].split(":"))
+            for i, a in enumerate(deps)
+            if a == "--edge"
+        }
+        self.assertIn(
+            (self.numbers["PRE-3"], self.numbers["PRE-4"]),
+            edges,
+            "a `labelled` entry is still linkable",
+        )
+        self.assertNotIn("NOT YET IMPORTED", out)
 
-    def test_a_key_missing_from_the_mapping_refuses(self):
+    def test_a_key_with_no_mapping_record_is_skipped_and_listed(self):
+        """The path #513 requires. An earlier revision refused the whole run here,
+        which made this unreachable."""
         entries = {
-            e["key"]: {"key": e["key"], "number": 900 + i, "phase": "done"}
-            for i, e in enumerate(self.plan["entries"])
-            if e["key"] != "PRE-8"
+            e["key"]: {
+                "key": e["key"],
+                "number": self.numbers[e["key"]],
+                "phase": "done",
+            }
+            for e in self.plan["entries"]
+            if e["key"] != "PRE-4"
         }
         with open(self.mapping, "w", encoding="utf-8") as fh:
             json.dump({"repo": REPO, "milestones": {}, "entries": entries}, fh)
-        _, _, err = self._link(extra_args=("--apply",), expect=2)
-        self.assertIn("not in the mapping: PRE-8", err)
+        recorder, out, _ = self._link(extra_args=("--apply",))
+        self.assertIn("NOT YET IMPORTED (1)", out)
+        self.assertIn("PRE-4", out)
+        # PRE-4 was one endpoint of two edges and one parent; both are reported
+        # skipped, and the remaining edges still go to the helper.
+        self.assertIn("edges skipped (blocker unmapped): 2", out)
+        self.assertIn("sub-issue links skipped (parent unmapped): 1", out)
+        deps = [args for kind, args in recorder.calls if kind == "deps"][0]
+        edges = {
+            tuple(int(x) for x in deps[i + 1].split(":"))
+            for i, a in enumerate(deps)
+            if a == "--edge"
+        }
+        n = self.numbers
+        self.assertEqual(edges, {(n["PRE-7"], n["PRE-5"]), (n["PRE-7"], n["PRE-2"])})
+
+    def test_a_missing_mapping_file_refuses(self):
+        """The only refusal left about mapping state. Without it, a typo'd path
+        reads as an import that landed nothing and exits 0 having linked nothing."""
+        os.unlink(self.mapping)
+        recorder, _, err = self._link(extra_args=("--apply",), expect=2)
+        self.assertIn("no mapping file", err)
+        self.assertEqual([k for k, _ in recorder.calls if k == "deps"], [])
 
     # -- dry run -----------------------------------------------------------
     def test_without_apply_nothing_is_written(self):
@@ -1805,7 +1900,7 @@ class LinkTests(PlanFixture):
             return [line for line in text.splitlines() if "sub-issues:" in line]
 
         self.assertEqual(counts(preview), counts(real))
-        self.assertIn("created=0 already=1", preview)
+        self.assertIn("created=2 already=1", preview)
 
     # -- sub-issue idempotence --------------------------------------------
     def test_an_existing_sub_issue_link_is_not_reposted(self):
@@ -1820,8 +1915,17 @@ class LinkTests(PlanFixture):
             and "--method" in args
             and any("/sub_issues" in a for a in args)
         ]
-        self.assertEqual(posts, [])
-        self.assertIn("created=0 already=1", out)
+        self.assertEqual(
+            [
+                args
+                for args in posts
+                if str(self.numbers["PRE-3"] + 1_000_000) in " ".join(args)
+            ],
+            [],
+            "the one already-linked child is not reposted",
+        )
+        self.assertEqual(len(posts), 2, "its two siblings still are")
+        self.assertIn("created=2 already=1", out)
 
     def test_a_duplicate_422_is_reread_and_counted_as_already_linked(self):
         """The parent's list, not the error text, decides what a 422 meant."""
@@ -1833,7 +1937,7 @@ class LinkTests(PlanFixture):
 
         recorder.post_fail = race
         recorder, out, _ = self._link(recorder, extra_args=("--apply",))
-        self.assertIn("created=0 already=1", out)
+        self.assertIn("created=0 already=3", out)
         self.assertIn("sub-issue links refused: 0", out)
 
     def test_a_422_for_a_child_parented_elsewhere_is_refused_not_swallowed(self):
@@ -1845,7 +1949,7 @@ class LinkTests(PlanFixture):
             "may only have one parent",
         )
         recorder, out, _ = self._link(recorder, extra_args=("--apply",))
-        self.assertIn("sub-issue links refused: 1", out)
+        self.assertIn("sub-issue links refused: 3", out)
         self.assertIn("already has a different parent", out)
 
     def test_a_non_422_sub_issue_failure_stops_the_run(self):
@@ -1919,6 +2023,23 @@ class LinkTests(PlanFixture):
         body = "See [PRE-4](https://linear.app/prethinkio/project/reconcile/abc).\n"
         out = linear_import.rewrite_body(body, {"PRE-4": 7})
         self.assertEqual(out, body)
+
+    def test_a_key_is_not_confused_with_a_longer_key_sharing_its_prefix(self):
+        """`/issue/PRE-4` is a substring of `/issue/PRE-40/...`, so a substring
+        test rewrote a PRE-40 link to PRE-4's number — the wrong issue, silently.
+        Prefix-colliding keys are ordinary on a board numbered past 700."""
+        body = "See [PRE-4](https://linear.app/prethinkio/issue/PRE-40/slug).\n"
+        self.assertEqual(
+            linear_import.rewrite_body(body, {"PRE-4": 7, "PRE-40": 99}), body
+        )
+        # The boundary must not cost the legitimate shapes.
+        for href, expected in (
+            ("https://linear.app/prethinkio/issue/PRE-4/slug", "#7"),
+            ("https://linear.app/prethinkio/issue/PRE-4", "#7"),
+            ("https://linear.app/prethinkio/issue/PRE-4?tab=x", "#7"),
+        ):
+            out = linear_import.rewrite_body(f"See [PRE-4]({href}).\n", {"PRE-4": 7})
+            self.assertEqual(out, f"See {expected}.\n", href)
 
     def test_the_related_footer_line_rewrites_only_mapped_keys(self):
         body = (
