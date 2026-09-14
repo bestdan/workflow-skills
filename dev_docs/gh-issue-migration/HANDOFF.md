@@ -115,7 +115,7 @@ table nothing else in this repo states. Read it there, not from a copy.
 
 **#510 through #513 are complete.** The assets are
 `commands/handlers/assets/linear-export.py` and `linear-import.py` (`--plan`, `--show`,
-`--apply`, `--link`). #513's half is on **PR #734**, unmerged at this writing.
+`--apply`, `--link`), all on `main` as of v2.54.0.
 
 **THE MIGRATION HAS RUN AND THE GITHUB BOARD IS THE LIVE BOARD.** 125 Linear issues
 landed on 2026-09-13: **117 created as #617–#733** and **8 reopened** (#284, #288, #289,
@@ -188,7 +188,15 @@ have caught: a field that landed differently from what was sent, a label a human
 changed, an edge present on the board that the plan does not contain (the reverse direction
 of what #513 checked), and a body whose rewrite mangled something.
 
-**Three things #514 will see and must not report as drift**, each verified deliberate:
+**Four things #514 will see and must not report as drift**, each verified deliberate. The
+first is the one that will bite a field-by-field body comparison hardest:
+
+- **33 of 125 live bodies no longer equal the plan's `body` field, by design.** `--link`
+  rewrote migrated cross-references to `#number` after `--apply` wrote the body, so the
+  plan holds the pre-link text and the board holds the post-link text. A verifier that
+  diffs the two reports 33 false mismatches. Compare the plan body **as `--link` would
+  rewrite it** — `rewrite_body(plan_body, numbers)` is importable and idempotent — or
+  exclude the body from the equality check and verify the footer separately.
 
 - **A reopened issue carries two provenance footers.** The eight were migrated OUT of
   GitHub in August, so each body already ended with
@@ -202,6 +210,29 @@ of what #513 checked), and a body whose rewrite mangled something.
   that footer and `/reoptimize-tasks` reads it as an echo of an edge — but the rule is
   "write the edge, then echo it", and the edge now exists, so an echo is legal for the
   first time. Decide it; do not assume the absence is a bug.
+
+**`--link` skips what is not imported yet rather than refusing, so a bare `--link` is
+also a cheap read-only audit.** It reports `N of M plan entries in the mapping`, lists any
+key with no mapping record under `NOT YET IMPORTED`, and prints the skipped edges and
+sub-issue links by name — all without `--apply`, and with the existing-link reads done
+either way so the preview's counts equal the real run's. The only refusal left about
+mapping state is a mapping **file** that does not exist. An earlier revision refused on
+any absent or not-yet-`done` key; that was wrong twice over, and both halves are worth
+knowing before writing #514's verifier:
+
+- It made the skip-and-list path this task requires unreachable dead code.
+- Its stated reason — "an edge written to a number a rerun might replace" — described a
+  state the apply path cannot produce. `number` is written in exactly one `record()` call,
+  at phase `created`, and `record()` is an `update` that never clears it. **A recorded
+  number is stable whatever the record's phase**, which is the fact #514 should rely on
+  rather than re-deriving.
+
+**A partial mapping is the cheapest way to exercise the skip paths against real tooling,
+and it needs no writes.** Copy the mapping, drop a key that is both a blocker and a
+parent, and run `--link` with no `--apply`: predicting the counts from the plan and
+comparing is what proved the real `gh-issue-deps.py` accepts a shortened `--edge` batch.
+Measured 2026-09-13 dropping `PRE-554` (blocks five) and `PRE-545` (parent of seven):
+22 of 27 edges and 8 of 15 links linkable, 5 and 7 skipped by name, exit 0.
 
 **`--link` is re-runnable, so #514 can use it as a repair.** All three of its passes are
 check-then-write, so running it again writes only what is genuinely missing. It has no
