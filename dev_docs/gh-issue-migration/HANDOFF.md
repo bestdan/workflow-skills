@@ -1,8 +1,9 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-13, after #512 landed the import. [#513](https://github.com/bestdan/workflow-skills/issues/513)
-(native `blocked_by` edges and sub-issue links) is next, and the mapping file it needs
-already exists on this machine — see "#513 is next".** Read this first, then
+**Redrafted 2026-09-13, after #513 wrote the graph. The board is now complete —
+125 issues, 27 edges, 15 sub-issue links — and
+[#514](https://github.com/bestdan/workflow-skills/issues/514) (verify it, independently)
+is next; see "#514 is next".** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -17,14 +18,14 @@ to begin already-merged work, none with any git history to recover from. If you 
 yourself wanting a longer pointer, the missing content belongs **here** instead.
 
 ```
-Pick up https://github.com/bestdan/workflow-skills/issues/513
+Pick up https://github.com/bestdan/workflow-skills/issues/514
 
 Read dev_docs/gh-issue-migration/HANDOFF.md first — it is NOT on main, only on the
 unmerged draft PR #441. Get it with:
   git show origin/bestdan/gh-issue-migration:dev_docs/gh-issue-migration/HANDOFF.md
 ```
 
-Swap the issue number as the chain advances (#513 → #514 → #515 → #516) and
+Swap the issue number as the chain advances (#514 → #515 → #516) and
 the pointer keeps working, because which task is next is a fact this file carries
 rather than one the prompt has to.
 
@@ -112,23 +113,23 @@ happened without task 13" below. **Do not plan as though the flip is still ahead
 **The milestone's own description is the crosswalk contract** — the Linear-to-GitHub
 table nothing else in this repo states. Read it there, not from a copy.
 
-**#510, #511 and #512 are complete.** The assets are
+**#510 through #513 are complete.** The assets are
 `commands/handlers/assets/linear-export.py` and `linear-import.py` (`--plan`, `--show`,
-`--apply`), on `main`.
+`--apply`, `--link`). #513's half is on **PR #734**, unmerged at this writing.
 
-**THE IMPORT HAS RUN. The GitHub board is now the live board.** 125 Linear issues landed
-on 2026-09-13: **117 created as #617–#733** and **8 reopened** (#284, #288, #289, #295,
-#296, #297, #299, #302), each with its labels, milestone, provenance footer and comment
-transcript, plus the one assignee. The board went from 46 open issues to **177**, which
-now section 33 / 83 / 56 / 0 / 2 across the five `status:` rungs.
+**THE MIGRATION HAS RUN AND THE GITHUB BOARD IS THE LIVE BOARD.** 125 Linear issues
+landed on 2026-09-13: **117 created as #617–#733** and **8 reopened** (#284, #288, #289,
+#295, #296, #297, #299, #302), each with its labels, milestone, provenance footer and
+comment transcript, plus the one assignee. Then `--link` wrote the graph: **27
+`blocked_by` edges, 15 sub-issue links** across two parents (#701 holds 7, #702 holds 8),
+and `#number` cross-references in 33 bodies. The board went from 46 open issues to 177
+(176 after #723 was completed), sectioning 33 / 83 / 56 / 0 / 2 across the five rungs.
 
-**Verified by reading the board, not the run's own log** — 125 distinct numbers, every one
-open, every planned label present, every milestone as planned, 62 of 62 transcripts
-posted. The mapping records what the run believes; agreement between two copies of one
-claim is not evidence, so check the board when you need to know.
-
-**What does NOT exist yet is the graph: no `blocked_by` edge and no sub-issue link has
-been written.** That is all of #513, and it is the only thing still missing.
+**Every claim above was verified by reading the board, not the runs' own logs** — 125
+distinct numbers all open, every planned label, milestone and assignee present, 62 of 62
+transcripts posted, all 27 edges and all 15 links live. The mapping records what a run
+believes; agreement between two copies of one claim is not evidence, so check the board
+when you need to know. **That is also exactly why #514 exists** — see "#514 is next".
 
 **Three files on this machine are the input to everything downstream, and none has a
 remote.** All three sit in `$HOME/src/linear-export/`:
@@ -158,59 +159,58 @@ with 21 numbers missing to deleted issues, and that top identifier is what shows
 pagination reached the end. **An identifier is not an index**; nothing downstream may
 compute a count from a key, or treat a gap as a lost issue.
 
-## #513 is next, and the mapping file settles its arguments
+## #514 is next, and it is the first task whose job is to DISBELIEVE the others
 
-#513 writes the graph the import deliberately left out: native `blocked_by` edges and
-sub-issue links. Both read the **plan** for the shape and the **mapping** for the
-numbers — a Linear key means nothing to the GitHub API.
+#514 writes `linear-verify.py`: a field-by-field and edge-set check of the board against
+the plan. Everything before it verified its own work, which is the weakness it exists to
+cover — #512 and #513 each checked what they had just written, using the same join, the
+same files and the same assumptions. #514's value is in reading the board **independently**
+and disagreeing.
 
-**What the plan holds for it, measured 2026-09-13 and reproduced by the real run:**
+**The state it is checking, all of it landed and spot-verified:**
 
 | Fact                      | Value                                                       |
 | ------------------------- | ----------------------------------------------------------- |
-| entries                   | **125** (117 `create`, 8 `reopen`)                          |
+| entries                   | **125** (117 created as #617–#733, 8 reopened)              |
 | status rungs              | 32 untriaged, 54 needs_refinement, 38 ready, 1 needs_review |
 | milestones                | 5, holding 18 / 16 / 5 / 1 / 1; **84 entries get none**     |
-| native `blocked_by` edges | **27** — #513's work                                        |
-| sub-issue links           | **15** — #513's work                                        |
-| entries carrying comments | 62                                                          |
-| assignees written         | 1 (`PRE-416`, the only `started` issue, `@me`)              |
+| native `blocked_by` edges | **27**, all present                                         |
+| sub-issue links           | **15**, across 2 parents (#701 holds 7, #702 holds 8)       |
+| entries carrying comments | 62, all posted                                              |
+| assignees written         | 1 (`PRE-416` → #723, since completed)                       |
+| bodies with `#n` rewrites | 33 of 125                                                   |
 
-**Nothing falls off the selection edge.** Zero blockers and zero parents point outside the
-selected set, so no edge or sub-issue link is dropped. Those categories are printed even
-when empty, deliberately — a category that only appears when non-empty cannot be read as
-reassurance.
+**Do not let #514 re-derive the join — that is the one shortcut that voids it.** The
+numbers come from the mapping and the shapes from the plan, which is exactly what #512 and
+#513 did; a verifier that repeats their arithmetic can only confirm their arithmetic. Read
+the live issue and compare. The things worth checking are the ones no earlier pass could
+have caught: a field that landed differently from what was sent, a label a human has since
+changed, an edge present on the board that the plan does not contain (the reverse direction
+of what #513 checked), and a body whose rewrite mangled something.
 
-**Relation direction is the thing to get right, and the plan already resolved it.**
-`blocked_by` in the plan means "these block me". `--show` prints the direction explicitly
-(`-> blocks X` is this issue blocking X, `<- blocks X` is X blocking it, and only the
-second is a `blocked_by` edge), which is how a person checks one before trusting all 27:
+**Three things #514 will see and must not report as drift**, each verified deliberate:
 
-```
-python3 commands/handlers/assets/linear-import.py --show PRE-746 \
-    --plan-file "$HOME/src/linear-export/2026-09-13-import-plan.json" \
-    --export "$HOME/src/linear-export/2026-09-13-prethink.json"
-```
+- **A reopened issue carries two provenance footers.** The eight were migrated OUT of
+  GitHub in August, so each body already ended with
+  `Migrated from [https://github.com/…/issues/288]`, and `--apply` appended the inbound
+  `Migrated from Linear PRE-746 (…)`. It is a round trip and reads as one.
+- **A reopened issue keeps unmanaged labels its GitHub original already had.** `papercut`
+  on #288 is not in the plan's `carried_labels`; `gh-issue-state.py` carries forward
+  everything outside the four managed namespaces, by design.
+- **Bodies carry no `Blocked by:` footer.** The edges are native and #513 deliberately did
+  not echo them. Whether they should be echoed is a live question — `/push-plan` writes
+  that footer and `/reoptimize-tasks` reads it as an echo of an edge — but the rule is
+  "write the edge, then echo it", and the edge now exists, so an echo is legal for the
+  first time. Decide it; do not assume the absence is a bug.
 
-**Four measured write facts bear directly on #513** — all four in "Do not re-derive
-these" below, and the dependency ones are the easiest to get wrong: the POST body carries
-**`issue_id`, a database id**, not the issue number; GitHub refuses a directly reciprocal
-edge with **422** and refuses nothing else, so a batch must survive a per-edge refusal
-rather than abort with earlier edges written; and `blocked_by` is **paginated**, so an
-existing edge past page 1 reads as absent and gets created twice.
+**`--link` is re-runnable, so #514 can use it as a repair.** All three of its passes are
+check-then-write, so running it again writes only what is genuinely missing. It has no
+progress file and needs none.
 
-**Copy `--apply`'s resume shape rather than inventing one.** 27 + 15 writes is small
-enough to look safe and large enough to die halfway. `--apply` records each phase to the
-mapping file before the next begins, and a rerun resumes at the phase rather than the
-issue; edge writes want the same treatment, keyed per edge. Its own guards are worth
-reading before writing new ones (`linear-import.py`, the `--apply` section).
-
-**What the real run cost, so #513 can budget.** 125 entries at `--sleep 2` took about nine
-minutes and hit **zero** rate limits, across roughly 400 writes. So the secondary limit
-was never the binding constraint at that pace — but it was also never tested, so do not
-read nine clean minutes as licence to drop the throttle. `--limit N` and `--only KEY` both
-exist for an attended first pass; `--only` was added because the plan's order puts three
-creates first and the entry worth eyeballing was a reopen twelve rows down.
+**What the runs cost, so #514 can budget.** `--apply`'s 125 entries at `--sleep 2` took
+about nine minutes and hit **zero** rate limits across roughly 400 writes; `--link`'s 74
+writes took about three. The secondary limit was never the binding constraint at that pace
+— but it was also never reached, so do not read that as licence to drop the throttle.
 
 **`PRE-416` landed at `status:4_needs_review` (#723) with its PR #487 already merged, and
 that is faithful** — Linear still has it In Review. It is not a defect of the import and
@@ -410,12 +410,15 @@ ones.
 
 **The `Blocked by:` footer is an echo of a native edge, never a dependency in itself.**
 Nothing may read a footer to decide blocked-ness, and nothing may write a footer for a
-dependency with no edge: write the edge, then echo it. **This is live for #513 right
-now** — the imported bodies carry `Blockers not migrated:` for blockers outside the
-selection (deliberately not spelled `Blocked by:`, because that spelling is what
-`/reoptimize-tasks` reads as a dependency claim) and carry no `Blocked by:` line at all,
-because no edge exists yet. #513 writes the edges; whether it also echoes them is its
-call, in that order.
+dependency with no edge: write the edge, then echo it. **The rule's precondition is now
+satisfied and the decision is open.** The 27 edges exist, so an echo is legal for the first
+time; #513 wrote the edges and did **not** echo them, because the task did not ask. The
+imported bodies therefore carry no `Blocked by:` line at all, and carry
+`Blockers not migrated:` for blockers outside the selection — deliberately not spelled
+`Blocked by:`, because that spelling is what `/reoptimize-tasks` reads as a dependency
+claim, and those blockers have no edge and never can. **Do not read the absence as a bug**;
+`/push-plan` does write the footer, so the two verbs are inconsistent today, and closing
+that is a real decision for #514 or #516 rather than an oversight to patch.
 
 **A scope this handler cannot honour, plus a write, is a refusal.** No initiative
 dimension and no project dimension. `/reconcile-tasks` stops on `--project` **with
@@ -469,6 +472,21 @@ backstop.
   write must survive a per-edge refusal rather than aborting with earlier edges written.
 - `blocked_by` is **paginated** — read it with `--paginate --slurp`. A bare read stops at
   30, and an invisible edge is a cycle that reads as absent.
+- **The sub-issue endpoint works on this repo**, measured 2026-09-13 by #513 — the call
+  this plan had carried as unmeasured since task 2, and the reason the `Parent: #n` footer
+  fallback was never needed. `POST repos/{owner}/{repo}/issues/{n}/sub_issues` takes
+  `{"sub_issue_id": <database id>}`, the same database-id trap the dependency POST has.
+  Two things about what comes back. **The response is the PARENT issue**, not the child and
+  not the link, so it cannot confirm which child attached — only a re-read can. And **a
+  repeat POST is 422, not idempotent**, with a message that conflates two different
+  conditions: `Issue may not contain duplicate sub-issues and Sub issue may only have one
+  parent`. So a 422 must never be read as "already linked" — a child parented somewhere
+  else fails identically, and treating that as success records a link that does not exist.
+  The parent's own `sub_issues` list is the only thing that separates them.
+- **`gh issue create -m` / `gh issue edit -m` take the milestone by TITLE**, measured
+  2026-09-13 against gh 2.98.0 after the number cost `--apply` its first create:
+  `--milestone 8` exits 1 with `could not add to milestone '8': '8' not found`.
+  `commands/push-plan.md` §5.3 said to pass the resolved number and is amended.
 
 **Reads**, measured 2026-09-03 by task 7
 ([PR #464](https://github.com/bestdan/workflow-skills/pull/464)).
@@ -599,15 +617,16 @@ open** — anyone reading Linear for status will read it wrong.
 ### Acceptance criteria still owed
 
 Two repos are on the `gh-issue` handler — `bestdan/dotfiles` and `bestdan/workflow-skills`
-— so anything testing **handler dispatch** can run in either. **The migrated-backlog half
-is now runnable too**, which it was not before 2026-09-13: this repo's board carries the
-imported issues, the consumed Linear labels and the footers those criteria are about. What
-it does **not** yet carry is the dependency graph, so any criterion that spot-checks edges
-waits on #513.
+— so anything testing **handler dispatch** can run in either. **Everything that needed a
+migrated backlog is now runnable**, which nothing was before 2026-09-13: this repo's board
+carries the imported issues, the consumed Linear labels, the footers AND, since #513, the
+dependency graph. No criterion here is waiting on migration work any more.
 
-- **Task 8's migrated-backlog half** — `/reoptimize-tasks` against the migrated
-  `workflow-skills` backlog, spot-checking three edges in the UI. **Needs #513**, not
-  #512: the issues exist, the edges do not.
+- **Task 8's migrated-backlog half — runnable NOW, and nothing blocks it.**
+  `/reoptimize-tasks` against the migrated `workflow-skills` backlog, spot-checking three
+  edges in the UI. The 27 edges and 15 sub-issue links are live; #701 and #702 are the two
+  richest subjects, and the PRE-554/PRE-555 chain (#692 → #691 → #686) is the clearest
+  dependency to eyeball.
 - **Task 16's dispatch half is unrunnable, not merely blocked.** `/do-tasks --all`
   dispatching bounded sessions needs a repo that can legitimately set
   `remote_batch: true`, and the probe says none can today. Retire the criterion or
