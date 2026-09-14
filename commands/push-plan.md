@@ -421,10 +421,18 @@ Walk the tasks in topological order. For each:
    the Linear `--ready-only` caveat in §3.
 4. **Create the issue** by following `gh-issue.md` steps 2–5 (build body + footer,
    ensure labels, `gh issue create`, return the URL), adding the container from
-   §5.2: `--milestone "<milestone number>"` (milestone path — pass the resolved
-   **number**, not the title, so a title with shell-unsafe characters or a later
-   rename can't break it) or `--label "plan:<name>"` (fallback path), alongside
-   any configured `gh-issue.labels`.
+   §5.2: `--milestone "<milestone title>"` (milestone path) or
+   `--label "plan:<name>"` (fallback path), alongside any configured
+   `gh-issue.labels`.
+
+   **Pass the TITLE here, not the resolved number.** `gh issue create` and
+   `gh issue edit` document `--milestone` as "by name" and look the title up, so
+   `--milestone 8` exits 1 with `could not add to milestone '8': '8' not found` —
+   measured against gh 2.98.0 on 2026-09-13, after the number cost the Linear
+   import its first create. The number §5.2 resolved is still what §5.2 needs it
+   for (reuse-before-create, and the id written back); it is only what `gh`
+   rejects at this step. Quote the title, and prefer an argv array over a shell
+   string when the caller has one.
 5. **Record the id back** into the task file's frontmatter: `tracker_id`
    (`owner/repo#<number>`, or `#<number>` when `gh-issue.repo` is unset) and
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map

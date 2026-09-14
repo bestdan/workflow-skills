@@ -7,7 +7,7 @@ create-versus-reopen for each one, and writes a diffable JSON plan. It performs
 no GitHub write, which is the point: ~125 issues with labels, milestones,
 parents and edges is a batch, and a batch nobody can read before it lands is a
 batch nobody can check afterwards either. The plan file is what makes the
-mapping reviewable per issue; `--apply` (a later task) executes it.
+mapping reviewable per issue; `--apply` executes it.
 
 Read-only, but NOT offline. Reopen detection reads GitHub — one `gh issue view`
 per candidate — so a cold run needs `gh auth` and network. Everything else is
@@ -71,6 +71,36 @@ Usage:
       --issue PRE-685 --issue PRE-815 \\
       --out <dir>/<date>-import-plan.json
 
+`--apply` lands that plan. It EXECUTES the plan and never re-derives it: the
+selection and the crosswalk are arguments settled in `--plan`, and re-deriving
+them here is how the "project name is a lying proxy" bug returns. It needs no
+export at all.
+
+  python3 linear-import.py --apply \\
+      --plan-file <dir>/<date>-import-plan.json \\
+      --mapping <dir>/<date>-mapping.json [--limit 3] [--only PRE-746] [--sleep 2]
+
+Two things make it a batch rather than a loop of prose steps.
+
+RESUMABILITY. GitHub's content-creation secondary limit is well under 125 issues
+plus labels plus comments in one burst, and any run can die mid-way. So each
+issue passes through four phases (create/reopen, labels, comments, done) and
+each phase's record is on disk BEFORE the next one starts — a rerun resumes at
+the exact phase that died, not at the issue. The one failure that outruns the
+mapping is a lost response: the write landed, the record did not. Two markers
+cover it — a body-footer search at run start recovers a lost create, and the
+comment's own first-line marker makes the transcript post idempotent.
+
+THE LABEL WRITE IS A SECOND CALL. `gh issue create --label` reaches the board
+with a name nothing validated, and a raw REST write CREATES an unknown label
+rather than rejecting it (`gh-issue-state.py:18-25`). So the create carries only
+title, body, milestone and assignee, and every label goes through
+`gh-issue-state.py`, which validates against labels.yml before any network call
+and PATCHes the complete set once.
+
+Every write here needs the sandbox escape: `sandbox-network-guard` blocks
+non-GET `gh api`, and 125 issues is a few hundred such writes.
+
 `--show` reads a plan back, printing each named entry beside its Linear original.
 That is how a person checks the plan: the file is 125 entries of JSON, and the
 question asked of it is not whether it parses but whether the crosswalk did the
@@ -87,6 +117,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -979,12 +1011,733 @@ def show_lines(plan, export, keys):
     return lines
 
 
+# ---------------------------------------------------------------------------
+# --apply: land the plan on GitHub
+# ---------------------------------------------------------------------------
+
+# The phases one entry passes through, in order. The mapping records the last
+# phase that COMPLETED, so a rerun resumes at the first one that did not. Each
+# phase is a separate network write and none is idempotent by itself, which is
+# why the resume point is per-phase rather than per-issue: a run that died after
+# the create must not create again, and one that died after the comment must not
+# post it twice.
+APPLY_PHASES = ("created", "labelled", "commented", "done")
+
+# The consolidated comment's first line. It is what makes the post idempotent
+# against a LOST RESPONSE — the one failure the mapping cannot cover, because
+# the write landed and the record did not. A rerun reads the issue's comments
+# and recognises its own work.
+COMMENT_MARKER = "<!-- linear-import: comments {key} -->"
+
+# The footer marker `--plan` writes into every body, read back the other way.
+# Recovering a lost create means finding the issue by the only thing on it that
+# names the Linear key.
+BODY_MARKER_RE = re.compile(r"Migrated from Linear ([A-Z][A-Z0-9]*-\d+)\b")
+BODY_MARKER_SEARCH = 'in:body "Migrated from Linear"'
+
+# How GitHub says the content-creation secondary limit has been hit. It is an
+# HTTP 403 with a message, not a 429, so the message is the ONLY thing that
+# separates it from a permissions failure — and a permissions failure must not
+# be retried, because the retry cannot succeed and the batch should stop where
+# a human can see it.
+RATE_LIMIT_MARKERS = (
+    "secondary rate limit",
+    "abuse detection",
+    "rate limit exceeded",
+    "api rate limit",
+)
+RETRY_AFTER_RE = re.compile(r"retry[-_ ]?after[\"'\s:]+(\d+)", re.IGNORECASE)
+DEFAULT_RETRY_WAIT = 60
+
+# Asked for as one bound on the recovery search. It is far above the 125-entry
+# plan on purpose: a truncated search would report a landed issue as absent and
+# create it a second time, so overflow has to be visible rather than plausible.
+RECOVERY_SEARCH_LIMIT = 500
+
+
+class ApplyError(Exception):
+    """A refusal that stops the batch where a human can see it.
+
+    Distinct from PlanError because the two failures are recovered differently:
+    a plan refusal means nothing was written and the plan can be regenerated,
+    while an apply refusal means some issues have landed and the mapping file is
+    the record of which. Every ApplyError that stops the loop therefore names
+    the key the rerun resumes at.
+    """
+
+
+def nap(seconds):
+    """The throttle, as a seam. Tests replace this rather than wait."""
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def run_state_helper(args):
+    """Run gh-issue-state.py and return (returncode, stdout, stderr).
+
+    The second seam the tests stub, beside run_gh. The label write is not a `gh`
+    call because it must not be one: `gh issue edit --add-label` is neither
+    atomic nor validating, and a raw REST write CREATES an unknown label. That
+    helper is the only supported writer, and calling it as a subprocess rather
+    than importing it keeps its argv contract — which gh-issue-claim.md and the
+    promote and complete flows also depend on — the thing under test.
+    """
+    proc = subprocess.run(
+        [sys.executable, str(ASSET_DIR / "gh-issue-state.py"), *args],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def gh(args, what):
+    """One `gh` call, retried once on a secondary rate limit, else a refusal.
+
+    The retry is deliberately single and deliberately narrow. Single, because a
+    loop against a limit that is still tightening turns one stall into an
+    unbounded one, and the mapping already makes a rerun cheap. Narrow, because
+    every other 403 — a missing scope, a label the board does not have, an issue
+    somebody deleted — cannot be fixed by waiting, and retrying it only doubles
+    the delay before a human reads the error.
+    """
+    code, out, err = run_gh(args)
+    if code == 0:
+        return out
+    blob = f"{out}\n{err}"
+    if any(marker in blob.lower() for marker in RATE_LIMIT_MARKERS):
+        match = RETRY_AFTER_RE.search(blob)
+        wait = int(match.group(1)) if match else DEFAULT_RETRY_WAIT
+        print(f"  rate limited; waiting {wait}s before one retry", flush=True)
+        nap(wait)
+        code, out, err = run_gh(args)
+        if code == 0:
+            return out
+        blob = f"{out}\n{err}"
+    raise ApplyError(f"{what} failed (gh exited {code}): {blob.strip()}")
+
+
+def gh_json(args, what, default=None):
+    """`gh` returning parsed JSON. Unreadable output is a refusal, never a None:
+    a write path must not continue on a response it could not read."""
+    out = gh(args, what)
+    try:
+        return json.loads(out or json.dumps(default))
+    except json.JSONDecodeError as exc:
+        raise ApplyError(f"{what}: cannot read gh's JSON output ({exc})")
+
+
+def load_label_sync():
+    """`existing_labels` from gh-label-sync.py, wired to THIS module's seam.
+
+    One fact, one home: the 500-label cap and its refuse-rather-than-truncate
+    rule are that file's, and a second copy here would drift. Rebinding its
+    run_gh to ours is what keeps the pre-flight hermetic in the tests — and what
+    keeps the seam one seam rather than two.
+    """
+    path = ASSET_DIR / "gh-label-sync.py"
+    spec = importlib.util.spec_from_file_location("gh_label_sync", path)
+    if spec is None or spec.loader is None:
+        raise ApplyError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    setattr(module, "run_gh", run_gh)
+    return module
+
+
+def check_carried_labels(repo, entries):
+    """Refuse up front on a carried label the board does not have.
+
+    `gh issue edit --add-label` rejects a name the repo lacks, which is the right
+    behaviour at the wrong TIME: discovered at entry 87 it leaves a half-landed
+    import. `blocked` is exactly this case — it is in the crosswalk and is not
+    provisioned here — so the whole carried set is checked against one label read
+    before anything is written. The managed set needs no such check: the helper
+    validates it against labels.yml, and task 17 provisioned all four namespaces.
+    """
+    wanted = sorted({label for entry in entries for label in entry["carried_labels"]})
+    if not wanted:
+        return
+    try:
+        present = load_label_sync().existing_labels(repo)
+    except SystemExit as exc:
+        raise ApplyError(f"reading {repo}'s labels failed: {exc}")
+    missing = [label for label in wanted if label not in present]
+    if missing:
+        raise ApplyError(
+            f"refusing to start; {repo} has no label: {', '.join(missing)}. "
+            "Provision them (gh-label-sync.py for the managed namespaces, "
+            "`gh label create` for a carried one) and rerun — nothing has been "
+            "written."
+        )
+
+
+def resolve_milestones(repo, titles):
+    """title -> number, reusing before creating, refusing on an ambiguous title.
+
+    Reuse-before-create is push-plan.md §5.2's rule and it is what makes a rerun
+    safe: creating a milestone that already exists 422s. Two milestones sharing a
+    title is a refusal rather than a pick, because the plan groups by title and
+    either choice would scatter one group across both.
+    """
+    pages = gh_json(
+        [
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repo}/milestones?state=all&per_page=100",
+        ],
+        "listing milestones",
+        default=[],
+    )
+    seen: dict = {}
+    for page in pages:
+        for milestone in page:
+            seen.setdefault(milestone["title"], []).append(milestone["number"])
+    ambiguous = {t: n for t, n in seen.items() if t in titles and len(n) > 1}
+    if ambiguous:
+        raise ApplyError(
+            "refusing to start; two milestones share a title: "
+            + "; ".join(
+                f"{t} (#{', #'.join(str(x) for x in sorted(n))})"
+                for t, n in sorted(ambiguous.items())
+            )
+        )
+
+    resolved, created = {}, []
+    for title in titles:
+        if title in seen:
+            resolved[title] = seen[title][0]
+            continue
+        payload = gh_json(
+            ["api", f"repos/{repo}/milestones", "-f", f"title={title}"],
+            f"creating milestone {title!r}",
+            default={},
+        )
+        number = payload.get("number")
+        if not isinstance(number, int):
+            raise ApplyError(f"creating milestone {title!r}: no number in the response")
+        resolved[title] = number
+        created.append(title)
+    return resolved, created
+
+
+def recover_landed(repo, keys):
+    """Linear key -> the GitHub issue already carrying its footer.
+
+    The backstop for the one failure the mapping cannot cover: `gh issue create`
+    landed and the process died before the record was written. The body footer is
+    the only thing on the issue naming the Linear key, so this is a body search.
+
+    ONE search for the whole run, not one per issue, and the second reason is the
+    load-bearing one. Cost: 117 searches would sit against GitHub's 30/min search
+    limit. Correctness: issue search is eventually consistent, so a just-created
+    issue may not be indexed yet, which makes a per-issue search unreliable
+    exactly where it would matter. A lost create is by definition from an earlier
+    run, minutes or more ago, so a pre-pass sees it; and a same-run double create
+    cannot happen, because the mapping is written before the next phase starts.
+
+    A key found on two issues refuses: it has already been imported twice, and no
+    rerun can decide which of them is the home.
+    """
+    payload = gh_json(
+        [
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "all",
+            "--limit",
+            str(RECOVERY_SEARCH_LIMIT),
+            "--search",
+            BODY_MARKER_SEARCH,
+            "--json",
+            "number,body",
+        ],
+        "searching for already-migrated issues",
+        default=[],
+    )
+    found: dict = {}
+    for issue in payload:
+        for key in set(BODY_MARKER_RE.findall(issue.get("body") or "")):
+            if key in keys:
+                found.setdefault(key, set()).add(issue["number"])
+    duplicated = {k: v for k, v in found.items() if len(v) > 1}
+    if duplicated:
+        raise ApplyError(
+            "refusing to continue; a Linear key already has two GitHub homes: "
+            + "; ".join(
+                f"{k} -> #{', #'.join(str(n) for n in sorted(v))}"
+                for k, v in sorted(duplicated.items())
+            )
+        )
+    return {key: numbers.pop() for key, numbers in found.items()}
+
+
+def load_mapping(path, plan):
+    """The mapping file, or a fresh one. The repo is asserted, not assumed.
+
+    A mapping belongs to one board: reusing one against a different `--repo`
+    would read another board's issue numbers as this one's and edit strangers.
+    """
+    repo = plan["repo"]
+    if not os.path.exists(path):
+        return {
+            "repo": repo,
+            "plan_generated_at": plan.get("generated_at"),
+            "milestones": {},
+            "entries": {},
+        }
+    with open(path, encoding="utf-8") as fh:
+        mapping = json.load(fh)
+    if not isinstance(mapping, dict) or not isinstance(mapping.get("entries"), dict):
+        raise ApplyError(f"{path}: not an import mapping (no `entries` object)")
+    if mapping.get("repo") != repo:
+        raise ApplyError(
+            f"{path}: records repo {mapping.get('repo')!r}, not {repo!r} — "
+            "a mapping belongs to one board"
+        )
+    return mapping
+
+
+def save_mapping(mapping, path):
+    """Write-then-rename, every time.
+
+    A truncating redirect would leave the only record of what has landed as
+    invalid JSON at exactly the moment it is the one thing standing between a
+    rerun and a duplicate import.
+    """
+    mapping["updated_at"] = (
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    tmp = str(path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(mapping, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def record(mapping, path, key, **fields):
+    """One phase's record, on disk before the next phase starts."""
+    entry = mapping["entries"].setdefault(key, {"key": key})
+    entry.update(fields)
+    save_mapping(mapping, path)
+    return entry
+
+
+def body_file(text, suffix):
+    """A body on disk, because it belongs on argv nowhere.
+
+    A migrated description is arbitrary text — backticks, `$(…)`, newlines,
+    kilobytes of it — and `--body` would put all of that through a quoting
+    question that has no reason to exist. `--body-file` is also what makes the
+    write byte-exact.
+    """
+    handle = tempfile.NamedTemporaryFile(
+        "w", suffix=suffix, delete=False, encoding="utf-8"
+    )
+    with handle:
+        handle.write(text)
+    return handle.name
+
+
+def issue_number_from_url(url, key):
+    match = re.search(r"/issues/(\d+)\s*$", (url or "").strip())
+    if not match:
+        raise ApplyError(f"{key}: cannot read an issue number out of {url!r}")
+    return int(match.group(1))
+
+
+def create_issue(repo, entry):
+    """`gh issue create`, carrying everything EXCEPT the labels.
+
+    The labels are a second call on purpose: `gh issue create --label` would
+    reach the board with a name nothing validated, and the managed set has
+    invariants (exactly one `status:`, exactly one `auto:`) that no per-flag
+    write can enforce.
+
+    `--milestone` takes the TITLE, not the number. push-plan.md §5.3 says to pass
+    the number; measured against gh 2.98.0 that fails — `--milestone 8` exits 1
+    with `could not add to milestone '8': '8' not found`, because the flag is
+    documented as "by name" and gh looks the title up. The number is still
+    resolved, for the ambiguous-title refusal and the mapping record; it is just
+    not what gh accepts here. Passing a title is safe because these are argv
+    entries, never a shell word.
+    """
+    path = body_file(entry["body"], ".md")
+    try:
+        args = [
+            "issue",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            entry["title"],
+            "--body-file",
+            path,
+        ]
+        if entry["milestone"]:
+            args += ["--milestone", entry["milestone"]]
+        if entry.get("assignee"):
+            args += ["--assignee", entry["assignee"]]
+        lines = gh(args, f"{entry['key']}: creating the issue").strip().splitlines()
+        return issue_number_from_url(lines[-1] if lines else "", entry["key"])
+    finally:
+        os.unlink(path)
+
+
+def verify_reopen_target(repo, number, key):
+    """The guard `--plan` ran, run again against live state.
+
+    Not a repetition of the plan's decision — a recheck of the premise it rests
+    on. The plan verified this issue was closed when the plan was written; a
+    human may have reopened it since, and reopening it again is the second live
+    home the plan refused to create. The key check is the other half: an issue
+    that no longer names this Linear key is not this issue's original.
+    """
+    payload = gh_json(
+        [
+            "issue",
+            "view",
+            str(number),
+            "--repo",
+            repo,
+            "--json",
+            "number,state,body,comments",
+        ],
+        f"{key}: reading {repo}#{number}",
+        default={},
+    )
+    state = (payload.get("state") or "").upper()
+    if state != "CLOSED":
+        raise ApplyError(
+            f"{key}: refusing to reopen {repo}#{number} — it is "
+            f"{state or 'unreadable'}, not closed. Two live homes would exist."
+        )
+    haystack = [payload.get("body") or ""] + [
+        comment.get("body") or "" for comment in payload.get("comments") or []
+    ]
+    if not any(key in text for text in haystack):
+        raise ApplyError(
+            f"{key}: refusing to reopen {repo}#{number} — neither its body nor "
+            f"its comments name {key}, so it is not this issue's original."
+        )
+
+
+def reopen_issue(repo, entry):
+    """Retitle and rebody the original. It stays CLOSED until the label write.
+
+    Reopening is gh-issue-state.py's `--reopen`, never a separate
+    `gh issue reopen`: the label set and open/closed are two encodings of one
+    fact and travel in one PATCH, so the issue is never open without its rungs.
+    """
+    number = entry["number"]
+    verify_reopen_target(repo, number, entry["key"])
+    path = body_file(entry["body"], ".md")
+    try:
+        args = [
+            "issue",
+            "edit",
+            str(number),
+            "--repo",
+            repo,
+            "--title",
+            entry["title"],
+            "--body-file",
+            path,
+        ]
+        if entry["milestone"]:
+            args += ["--milestone", entry["milestone"]]
+        if entry.get("assignee"):
+            args += ["--add-assignee", entry["assignee"]]
+        gh(args, f"{entry['key']}: editing {repo}#{number}")
+    finally:
+        os.unlink(path)
+    return number
+
+
+def write_labels(repo, number, entry, reopen):
+    """Carried labels first, then the managed set through the only writer.
+
+    The order is load-bearing. gh-issue-state.py PATCHes the COMPLETE label set,
+    carrying forward whatever its own read finds outside the four managed
+    namespaces — so carried labels added before it are read and preserved.
+    Reversed, that read would not yet see them and the PATCH would delete them.
+    """
+    key = entry["key"]
+    if entry["carried_labels"]:
+        gh(
+            [
+                "issue",
+                "edit",
+                str(number),
+                "--repo",
+                repo,
+                "--add-label",
+                ",".join(entry["carried_labels"]),
+            ],
+            f"{key}: adding carried labels to {repo}#{number}",
+        )
+    args = [
+        "--repo",
+        repo,
+        "--issue",
+        str(number),
+        "--labels",
+        ",".join(entry["managed_labels"]),
+        "--apply",
+    ]
+    if reopen:
+        args.append("--reopen")
+    code, out, err = run_state_helper(args)
+    if code != 0:
+        raise ApplyError(
+            f"{key}: writing labels on {repo}#{number} failed: {(err or out).strip()}"
+        )
+
+
+def comment_body(entry, reopen):
+    """The one consolidated comment.
+
+    One comment rather than one per Linear comment, resolved as the plan's open
+    question 5: N comments is N writes against the secondary limit, they arrive
+    attributed to the importer either way, and the thread then reads as a
+    transcript rather than as a conversation that happened here.
+    """
+    key = entry["key"]
+    lines = [COMMENT_MARKER.format(key=key)]
+    if reopen:
+        lines += [f"Returned from Linear {key}.", ""]
+    lines.append(f"Comments migrated from Linear {key}:")
+    for comment in entry["comments"]:
+        author = comment.get("author") or "unknown"
+        at = (comment.get("at") or "")[:10] or "unknown date"
+        lines += ["", f"**{author}, {at}:**", "", (comment.get("body") or "").rstrip()]
+    return "\n".join(lines) + "\n"
+
+
+def post_comments(repo, number, entry, reopen):
+    """The consolidated comment, unless the marker says it is already there.
+
+    The marker read is what a lost response costs: one `gh issue view` per
+    commented issue, in exchange for never double-posting a transcript.
+    """
+    key = entry["key"]
+    payload = gh_json(
+        ["issue", "view", str(number), "--repo", repo, "--json", "comments"],
+        f"{key}: reading comments on {repo}#{number}",
+        default={},
+    )
+    marker = COMMENT_MARKER.format(key=key)
+    if any(marker in (c.get("body") or "") for c in payload.get("comments") or []):
+        return False
+    path = body_file(comment_body(entry, reopen), ".md")
+    try:
+        gh(
+            ["issue", "comment", str(number), "--repo", repo, "--body-file", path],
+            f"{key}: commenting on {repo}#{number}",
+        )
+    finally:
+        os.unlink(path)
+    return True
+
+
+def phase_reached(mapping, key):
+    """The last phase recorded for this key, or None."""
+    return (mapping["entries"].get(key) or {}).get("phase")
+
+
+def done_after(phase, target):
+    """True when `phase` is at or past `target`. An unrecorded phase is before
+    every one of them, which is what makes a fresh key start at the beginning."""
+    if phase not in APPLY_PHASES:
+        return False
+    return APPLY_PHASES.index(phase) >= APPLY_PHASES.index(target)
+
+
+def apply_entry(entry, context):
+    """One entry through every phase it has not already passed."""
+    repo = context["repo"]
+    mapping = context["mapping"]
+    path = context["mapping_path"]
+    key = entry["key"]
+    reopen = entry["action"] == "reopen"
+    reached = phase_reached(mapping, key)
+
+    number = (mapping["entries"].get(key) or {}).get("number")
+    if number is None:
+        number = context["recovered"].get(key)
+        if number is not None:
+            # Recovered, not created: the write landed on an earlier run and the
+            # record did not. Adopting the number is the pre-pass's whole point.
+            print(f"  {key}: adopting already-landed {repo}#{number}")
+    if number is None and reopen:
+        number = entry["number"]
+
+    if not done_after(reached, "created"):
+        if number is None:
+            number = create_issue(repo, entry)
+            resolution = "created"
+        elif reopen:
+            number = reopen_issue(repo, entry)
+            resolution = "reopened"
+        else:
+            # A recovered create: the issue already exists carrying the body
+            # this plan wrote, so this phase has nothing left to write.
+            resolution = "adopted"
+        record(
+            mapping,
+            path,
+            key,
+            number=number,
+            action=entry["action"],
+            resolution=resolution,
+            url=f"https://github.com/{repo}/issues/{number}",
+            milestone=entry["milestone"],
+            phase="created",
+        )
+
+    if not done_after(reached, "labelled"):
+        write_labels(repo, number, entry, reopen)
+        record(mapping, path, key, phase="labelled")
+
+    if not done_after(reached, "commented"):
+        posted = bool(entry["comments"]) and post_comments(repo, number, entry, reopen)
+        record(mapping, path, key, phase="commented", commented=bool(posted))
+
+    if not done_after(reached, "done"):
+        record(
+            mapping,
+            path,
+            key,
+            phase="done",
+            landed_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+    return number
+
+
+def select_to_apply(entries, only):
+    """The entries `--only` names, in plan order, or all of them.
+
+    A named key the plan does not carry is a refusal, for the reason `--plan`'s
+    own `--issue` check gives: a typo in an enumeration must not read as
+    "nothing matched". The order stays the plan's, so a partial run and the full
+    run land issues in the same sequence.
+    """
+    if not only:
+        return list(entries)
+    known = {entry["key"] for entry in entries}
+    absent = sorted(set(only) - known)
+    if absent:
+        raise ApplyError(
+            "--only names a key the plan does not carry: " + ", ".join(absent)
+        )
+    wanted = set(only)
+    return [entry for entry in entries if entry["key"] in wanted]
+
+
+def apply_plan(plan, mapping_path, limit=None, sleep=2.0, only=None):
+    """Land the plan, phase by phase, recording as it goes.
+
+    The plan is EXECUTED, never re-derived. The selection and the crosswalk are
+    arguments settled in `--plan`; reading the export again here is how the
+    "project name is a lying proxy" bug comes back.
+    """
+    repo = plan["repo"]
+    entries = plan["entries"]
+    planned = [entry["key"] for entry in entries]
+    # Resolved first so an `--only` typo refuses before anything is created.
+    todo = select_to_apply(entries, only)
+    mapping = load_mapping(mapping_path, plan)
+    mapping["plan_generated_at"] = plan.get("generated_at")
+
+    # Both refusals run before the first write, so a board that cannot take the
+    # import fails with nothing landed rather than with eighty issues landed.
+    # They are checked over the WHOLE plan even on an `--only` run: a label the
+    # board lacks is worth knowing before the batch, not at entry 87.
+    check_carried_labels(repo, entries)
+    milestones, created = resolve_milestones(repo, plan["milestones"])
+    mapping["milestones"] = milestones
+    save_mapping(mapping, mapping_path)
+    if created:
+        print(f"milestones created: {', '.join(created)}")
+    print(f"milestones resolved: {len(milestones)}")
+
+    recovered = recover_landed(repo, set(planned))
+    if recovered:
+        print(
+            "already landed (adopting): "
+            + ", ".join(f"{k}->#{v}" for k, v in sorted(recovered.items()))
+        )
+
+    context = {
+        "repo": repo,
+        "mapping": mapping,
+        "mapping_path": mapping_path,
+        "recovered": recovered,
+    }
+
+    attempted, skipped, first = 0, 0, True
+    for entry in todo:
+        key = entry["key"]
+        if phase_reached(mapping, key) == "done":
+            skipped += 1
+            continue
+        if limit is not None and attempted >= limit:
+            break
+        if not first:
+            nap(sleep)
+        first = False
+        attempted += 1
+        try:
+            number = apply_entry(entry, context)
+        except ApplyError as exc:
+            raise ApplyError(
+                f"{exc}\n\nStopped at {key}. {attempted - 1} issue(s) completed "
+                f"this run; rerun the same command to resume from {key}."
+            )
+        print(f"  {key} -> {repo}#{number} ({entry['action']})")
+
+    return {
+        "repo": repo,
+        "mapping": str(mapping_path),
+        "planned": len(planned),
+        "attempted": attempted,
+        "already_done": skipped,
+        "milestones": len(milestones),
+        "milestones_created": created,
+        "incomplete": [k for k in planned if phase_reached(mapping, k) != "done"],
+    }
+
+
+def print_apply_summary(result):
+    print(f"Applied {result['attempted']} entry(ies) to {result['repo']}")
+    print(f"  mapping: {result['mapping']}")
+    print(
+        f"  planned={result['planned']}  worked this run={result['attempted']}  "
+        f"already done={result['already_done']}  milestones={result['milestones']}"
+    )
+    if result["incomplete"]:
+        print(
+            f"  NOT yet done in the mapping ({len(result['incomplete'])}): "
+            + ", ".join(result["incomplete"])
+        )
+    else:
+        print("  every planned key is in the mapping at phase done")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    # The two modes: build a plan, or read one back. --show carries its own
-    # subjects, so passing it both selects the mode and says what to show.
+    # The three modes: build a plan, read one back, or land it. --show carries
+    # its own subjects, so passing it both selects the mode and says what to show.
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--plan", action="store_true", help="build the import plan")
+    mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="land the plan on GitHub. Needs --plan-file and --mapping",
+    )
     mode.add_argument(
         "--show",
         action="append",
@@ -994,8 +1747,41 @@ def main(argv=None):
             "building a plan; repeatable. Needs --plan-file"
         ),
     )
-    ap.add_argument("--export", required=True, help="the linear-export.py JSON file")
-    ap.add_argument("--plan-file", help="the plan JSON to read back (--show)")
+    # Not required: `--apply` reads the plan and nothing else. The export is the
+    # provenance record and the plan is derived from it, so needing it here would
+    # make every apply depend on a 3.3 MB file the plan already answers for.
+    ap.add_argument("--export", help="the linear-export.py JSON file (--plan/--show)")
+    ap.add_argument("--plan-file", help="the plan JSON to read (--show/--apply)")
+    ap.add_argument(
+        "--mapping",
+        help=(
+            "where --apply records what landed, per phase. A rerun reads it and "
+            "resumes; it is the only record of which issues exist"
+        ),
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="--apply: work at most N not-yet-done entries, for a first attended run",
+    )
+    ap.add_argument(
+        "--only",
+        action="append",
+        metavar="KEY",
+        help=(
+            "--apply: restrict the run to these plan keys; repeatable. For the "
+            "attended first run, where the entries worth eyeballing (a reopen, a "
+            "milestoned create) are not the ones --limit would reach first"
+        ),
+    )
+    ap.add_argument(
+        "--sleep",
+        type=float,
+        default=2.0,
+        metavar="SECONDS",
+        help="--apply: pause between issues, against the secondary rate limit (default 2)",
+    )
     ap.add_argument("--repo", help="owner/name the import targets (--plan)")
     ap.add_argument(
         "--project",
@@ -1045,9 +1831,34 @@ def main(argv=None):
     )
     args = ap.parse_args(argv)
 
+    if args.apply:
+        for flag in ("plan_file", "mapping"):
+            if not getattr(args, flag):
+                ap.error(f"--apply needs --{flag.replace('_', '-')}")
+        if args.limit is not None and args.limit < 1:
+            ap.error("--limit must be at least 1")
+        try:
+            plan = load_plan(args.plan_file)
+            if args.repo and args.repo != plan.get("repo"):
+                raise ApplyError(
+                    f"{args.plan_file} targets {plan.get('repo')!r}, not "
+                    f"{args.repo!r} — refusing to land a plan on another board"
+                )
+            result = apply_plan(plan, args.mapping, args.limit, args.sleep, args.only)
+        except (PlanError, ApplyError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print_apply_summary(result)
+        return 0
+
     if args.show:
         if not args.plan_file:
             ap.error("--show needs --plan-file")
+        if not args.export:
+            ap.error("--show needs --export")
         try:
             plan = load_plan(args.plan_file)
             export = load_export(args.export)
@@ -1058,7 +1869,7 @@ def main(argv=None):
             return 2
         return 0
 
-    for flag in ("repo", "out"):
+    for flag in ("repo", "out", "export"):
         if not getattr(args, flag):
             ap.error(f"--plan needs --{flag}")
     if not args.project and not args.issue:

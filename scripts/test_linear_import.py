@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""Hermetic tests for commands/handlers/assets/linear-import.py's --plan mode.
+"""Hermetic tests for commands/handlers/assets/linear-import.py.
 
-Stubs the GitHub read so nothing reaches the network, and drives `main()` over a
-fixture export that carries one issue per crosswalk row. The crosswalk is the
-deliverable and nothing downstream re-derives it: a wrong rung here becomes a
-wrong GitHub issue in the apply task, and a wrong label set is indistinguishable
-from a right one once it has landed. So the labels are asserted ROW BY ROW
-against the table in the milestone-1 plan rather than in aggregate, and every
-refusal path — an unreadable or still-open reopen target, a Linear label inside
-a managed namespace, a renamed review state, a mistyped project name — is
-asserted to write no file at all.
+Nothing reaches the network: `--plan`'s GitHub read is stubbed, and `--apply`'s
+two write seams — `run_gh` and `run_state_helper` — are replaced by one Recorder
+over a single ordered call log.
+
+`--plan` is driven over a fixture export carrying one issue per crosswalk row.
+The crosswalk is the deliverable and nothing downstream re-derives it: a wrong
+rung here becomes a wrong GitHub issue, and a wrong label set is
+indistinguishable from a right one once it has landed. So the labels are asserted
+ROW BY ROW against the table in the milestone-1 plan rather than in aggregate,
+and every refusal path — an unreadable or still-open reopen target, a Linear
+label inside a managed namespace, a renamed review state, a mistyped project
+name — is asserted to write no file at all.
+
+`--apply` is driven over a plan this file BUILDS with `--plan`, not over a
+hand-written one: the two modes agree about every field name, and a hand-rolled
+fixture would keep passing after a rename while the apply half silently wrote
+nothing. What is asserted is what a rerun must not repeat — a done key makes no
+call, each phase is recorded before the next begins, a lost create is adopted
+rather than created twice, a posted transcript is not posted again — plus the
+orderings the writes depend on and the refusals that must fire before anything
+lands.
 """
 
 import contextlib
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -942,6 +955,627 @@ class OutputTests(PlanTests):
         with self.assertRaises(SystemExit):
             with contextlib.redirect_stderr(io.StringIO()):
                 linear_import.main(argv)
+
+
+class Recorder:
+    """A stubbed `gh` and gh-issue-state.py over ONE ordered call log.
+
+    One log rather than two because the ordering between the two seams is itself
+    a contract: the carried labels must be added before gh-issue-state.py reads
+    the issue, or its full-set PATCH deletes them. Two separate recorders could
+    assert that both calls happened and not that they happened in that order.
+
+    Every `--body-file` is read at call time and kept, since the real code
+    unlinks the file straight afterwards — and the body is most of what a write
+    is.
+    """
+
+    def __init__(self, labels=(), milestones=(), search=(), issues=None, first=900):
+        self.calls = []
+        self.bodies = []
+        self.labels = list(labels) or [
+            "papercut",
+            "papercut-fix-now",
+            "bug",
+            "enhancement",
+        ]
+        self.milestones = [dict(entry) for entry in milestones]
+        self.search = [dict(entry) for entry in search]
+        self.issues = {int(k): dict(v) for k, v in (issues or {}).items()}
+        self.next_issue = first
+        self.next_milestone = 50
+        self.fail_on = None
+        self.state_result = (0, "", "")
+
+    # -- the seams ---------------------------------------------------------
+    def gh(self, args):
+        args = list(args)
+        self.calls.append(("gh", args))
+        self._keep_body(args)
+        if self.fail_on:
+            forced = self.fail_on(args)
+            if forced:
+                return forced
+        return (0, self._respond(args), "")
+
+    def state(self, args):
+        args = list(args)
+        self.calls.append(("state", args))
+        if self.state_result[0] == 0:
+            number = int(args[args.index("--issue") + 1])
+            issue = self.issues.setdefault(
+                number, {"number": number, "state": "OPEN", "body": "", "comments": []}
+            )
+            if "--reopen" in args:
+                issue["state"] = "OPEN"
+        return self.state_result
+
+    def install(self, case):
+        case.addCleanup(setattr, linear_import, "run_gh", linear_import.run_gh)
+        case.addCleanup(
+            setattr, linear_import, "run_state_helper", linear_import.run_state_helper
+        )
+        linear_import.run_gh = self.gh
+        linear_import.run_state_helper = self.state
+        return self
+
+    # -- canned responses --------------------------------------------------
+    def _keep_body(self, args):
+        if "--body-file" not in args:
+            return
+        path = args[args.index("--body-file") + 1]
+        with open(path, encoding="utf-8") as fh:
+            self.bodies.append((" ".join(args[:2]), fh.read()))
+
+    def _respond(self, args):
+        if args[:1] == ["api"]:
+            if "--slurp" in args:
+                return json.dumps([self.milestones])
+            return self._create_milestone(args)
+        if args[:2] == ["label", "list"]:
+            return json.dumps([{"name": name} for name in self.labels])
+        if args[:2] == ["issue", "list"]:
+            return json.dumps(self.search)
+        if args[:2] == ["issue", "create"]:
+            number, self.next_issue = self.next_issue, self.next_issue + 1
+            self.issues[number] = {
+                "number": number,
+                "state": "OPEN",
+                "body": self.bodies[-1][1],
+                "comments": [],
+            }
+            return f"https://{HOST}/{REPO}/issues/{number}\n"
+        if args[:2] == ["issue", "view"]:
+            return self._view(args)
+        return ""
+
+    def _create_milestone(self, args):
+        title = next(a.split("=", 1)[1] for a in args if a.startswith("title="))
+        number, self.next_milestone = self.next_milestone, self.next_milestone + 1
+        self.milestones.append({"title": title, "number": number})
+        return json.dumps({"number": number, "title": title})
+
+    def _view(self, args):
+        number = int(args[2])
+        issue = self.issues.get(
+            number, {"number": number, "state": "OPEN", "body": "", "comments": []}
+        )
+        fields = args[args.index("--json") + 1].split(",")
+        return json.dumps({field: issue.get(field) for field in fields})
+
+    # -- what the assertions read -----------------------------------------
+    def gh_calls(self, *prefix):
+        return [
+            args
+            for kind, args in self.calls
+            if kind == "gh" and args[: len(prefix)] == list(prefix)
+        ]
+
+    def state_calls(self):
+        return [args for kind, args in self.calls if kind == "state"]
+
+    def order(self, predicate):
+        """Indices in the single log of every call matching `predicate`."""
+        return [i for i, (kind, args) in enumerate(self.calls) if predicate(kind, args)]
+
+
+HOST = "github.com"
+
+
+def closed_original(number, key, comments=()):
+    """A closed GitHub issue that still names its Linear key — a reopen target
+    as the eight real ones look: the key is in the body, not only in a marker."""
+    return {
+        number: {
+            "number": number,
+            "state": "CLOSED",
+            "body": f"Original body. Moved to Linear {key}.",
+            "comments": [{"body": body} for body in comments],
+        }
+    }
+
+
+class ApplyTests(unittest.TestCase):
+    """--apply, driven over a REAL plan built by --plan.
+
+    The plan is generated rather than hand-written because the two halves have to
+    agree about every field name: a hand-rolled fixture would keep passing after
+    `--plan` renamed `carried_labels`, and the apply half would then silently
+    write nothing. Building it through main() makes the contract between the
+    modes the thing under test.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.plan_path = str(Path(self.tmp) / "plan.json")
+        self.mapping = str(Path(self.tmp) / "mapping.json")
+        self.addCleanup(setattr, linear_import, "nap", linear_import.nap)
+        self.napped: list = []
+        linear_import.nap = self.napped.append
+        self._write_plan()
+        self._watch_mapping()
+
+    def _write_plan(self):
+        export = Path(self.tmp) / "export.json"
+        export.write_text(json.dumps(export_document()), encoding="utf-8")
+        reader = Reader()
+        original = linear_import.github_issue_state
+        linear_import.github_issue_state = reader
+        try:
+            argv = [
+                "--plan",
+                "--export",
+                str(export),
+                "--repo",
+                REPO,
+                "--project",
+                SELECTED_PROJECT,
+                "--project",
+                MILESTONE_PROJECT,
+                "--project",
+                EMPTY_PROJECT,
+                "--issue",
+                "PRE-10",
+                "--date",
+                "2026-09-13",
+                "--viewer",
+                VIEWER,
+                "--out",
+                self.plan_path,
+            ]
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = linear_import.main(argv)
+        finally:
+            linear_import.github_issue_state = original
+        assert code == 0, "the fixture plan must build"
+        with open(self.plan_path, encoding="utf-8") as fh:
+            self.plan = json.load(fh)
+
+    def _watch_mapping(self):
+        """Assert the mapping parses after EVERY append, not only at the end.
+
+        The file is the one thing standing between a crash and a duplicate
+        import, so "valid JSON once the run finished" is the wrong tense.
+        """
+        original = linear_import.save_mapping
+        self.addCleanup(setattr, linear_import, "save_mapping", original)
+        self.saves: list = []
+
+        def watched(mapping, path):
+            original(mapping, path)
+            with open(path, encoding="utf-8") as fh:
+                self.saves.append(json.load(fh))
+
+        linear_import.save_mapping = watched
+
+    # -- drivers -----------------------------------------------------------
+    def _apply(self, recorder=None, extra_args=(), expect=0):
+        recorder = (recorder or Recorder()).install(self)
+        argv = [
+            "--apply",
+            "--plan-file",
+            self.plan_path,
+            "--mapping",
+            self.mapping,
+            *extra_args,
+        ]
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = linear_import.main(argv)
+        self.assertEqual(code, expect, err.getvalue() or out.getvalue())
+        return recorder, out.getvalue(), err.getvalue()
+
+    def _reopen_recorder(self, **kwargs):
+        """The default board: #288 closed and still naming PRE-7, the plan's only
+        reopen target."""
+        issues = kwargs.pop("issues", None) or closed_original(288, "PRE-7")
+        return Recorder(issues=issues, **kwargs)
+
+    def _seed(self, **entries):
+        mapping = {"repo": REPO, "milestones": {}, "entries": dict(entries)}
+        with open(self.mapping, "w", encoding="utf-8") as fh:
+            json.dump(mapping, fh)
+
+    def _mapping(self):
+        with open(self.mapping, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    # -- the plan this all rests on ---------------------------------------
+    def test_the_fixture_plan_has_the_shapes_the_tests_need(self):
+        entries = {entry["key"]: entry for entry in self.plan["entries"]}
+        self.assertEqual(entries["PRE-7"]["action"], "reopen")
+        self.assertEqual(entries["PRE-7"]["number"], 288)
+        self.assertTrue(entries["PRE-7"]["comments"])
+        self.assertEqual(entries["PRE-6"]["carried_labels"], ["papercut", "bug"])
+        self.assertEqual(entries["PRE-5"]["assignee"], "@me")
+
+    # -- resume ------------------------------------------------------------
+    def test_a_key_at_phase_done_makes_no_call_of_its_own(self):
+        keys = [entry["key"] for entry in self.plan["entries"]]
+        self._seed(
+            **{
+                key: {"key": key, "number": 700 + i, "phase": "done"}
+                for i, key in enumerate(keys)
+            }
+        )
+        recorder, out, _ = self._apply()
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+        self.assertEqual(recorder.gh_calls("issue", "edit"), [])
+        self.assertEqual(recorder.state_calls(), [])
+        self.assertEqual(recorder.gh_calls("issue", "comment"), [])
+        self.assertIn(f"already done={len(keys)}", out)
+        self.assertIn("every planned key is in the mapping at phase done", out)
+
+    def test_a_key_at_phase_created_skips_the_create_and_finishes_the_rest(self):
+        # PRE-1 is the plan's first entry, so --limit 1 lands on exactly it.
+        self._seed(**{"PRE-1": {"key": "PRE-1", "number": 601, "phase": "created"}})
+        recorder, _, _ = self._apply(
+            self._reopen_recorder(), extra_args=("--limit", "1")
+        )
+        self.assertEqual(
+            recorder.gh_calls("issue", "create"), [], "the create phase was recorded"
+        )
+        self.assertEqual(
+            [args[args.index("--issue") + 1] for args in recorder.state_calls()],
+            ["601"],
+        )
+        self.assertEqual(self._mapping()["entries"]["PRE-1"]["phase"], "done")
+
+    def test_a_key_at_phase_labelled_only_has_its_comments_left(self):
+        self._seed(**{"PRE-7": {"key": "PRE-7", "number": 288, "phase": "labelled"}})
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        self.assertEqual(
+            [args for args in recorder.state_calls() if "288" in args],
+            [],
+            "the label phase was already recorded for this key",
+        )
+        self.assertEqual(
+            [args[2] for args in recorder.gh_calls("issue", "comment")], ["288"]
+        )
+
+    def test_the_mapping_records_each_phase_before_the_next_one_starts(self):
+        self._apply(self._reopen_recorder(), extra_args=("--limit", "1"))
+        phases = [
+            snapshot["entries"]["PRE-1"]["phase"]
+            for snapshot in self.saves
+            if "PRE-1" in snapshot["entries"]
+        ]
+        self.assertEqual(phases, ["created", "labelled", "commented", "done"])
+
+    def test_limit_bounds_the_run_and_the_summary_names_what_is_left(self):
+        _, out, _ = self._apply(self._reopen_recorder(), extra_args=("--limit", "2"))
+        done = [
+            key
+            for key, entry in self._mapping()["entries"].items()
+            if entry["phase"] == "done"
+        ]
+        self.assertEqual(len(done), 2)
+        self.assertIn("NOT yet done in the mapping", out)
+
+    def test_only_restricts_the_run_to_the_named_keys(self):
+        recorder, _, _ = self._apply(
+            self._reopen_recorder(), extra_args=("--only", "PRE-7", "--only", "PRE-10")
+        )
+        done = sorted(
+            key
+            for key, entry in self._mapping()["entries"].items()
+            if entry["phase"] == "done"
+        )
+        self.assertEqual(done, ["PRE-10", "PRE-7"])
+        self.assertEqual(len(recorder.gh_calls("issue", "create")), 1)
+
+    def test_only_with_a_key_the_plan_lacks_refuses_before_any_write(self):
+        recorder, _, err = self._apply(
+            self._reopen_recorder(), extra_args=("--only", "PRE-404"), expect=2
+        )
+        self.assertIn("--only names a key the plan does not carry: PRE-404", err)
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+        self.assertEqual(
+            [a for a in recorder.gh_calls("api") if "--slurp" not in a], []
+        )
+
+    # -- labels ------------------------------------------------------------
+    def test_carried_labels_are_written_before_the_state_write(self):
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        add = recorder.order(lambda kind, args: kind == "gh" and "--add-label" in args)
+        state = recorder.order(lambda kind, args: kind == "state")
+        self.assertTrue(add, "PRE-6 carries papercut and bug")
+        self.assertLess(min(add), max(state))
+        # The pair for PRE-6 specifically: its --add-label immediately precedes
+        # its own state write, because the helper's read has to see them.
+        for index in add:
+            following = [i for i in state if i > index]
+            self.assertTrue(following)
+            self.assertEqual(
+                recorder.calls[index][1][2],
+                recorder.calls[following[0]][1][
+                    recorder.calls[following[0]][1].index("--issue") + 1
+                ],
+            )
+
+    def test_the_managed_set_goes_through_the_helper_and_never_through_gh(self):
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        for args in recorder.gh_calls("issue", "create") + recorder.gh_calls(
+            "issue", "edit"
+        ):
+            self.assertNotIn("--label", args)
+        for args in recorder.gh_calls("issue", "edit"):
+            for flag in args:
+                self.assertFalse(flag.startswith("status:"))
+        self.assertTrue(recorder.state_calls())
+        for args in recorder.state_calls():
+            self.assertIn("--apply", args)
+
+    def test_a_carried_label_the_board_lacks_refuses_before_any_write(self):
+        recorder = Recorder(labels=["papercut"], issues=closed_original(288, "PRE-7"))
+        recorder, _, err = self._apply(recorder, expect=2)
+        self.assertIn("has no label: bug", err)
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+        self.assertFalse(os.path.exists(self.mapping))
+
+    # -- reopen ------------------------------------------------------------
+    def test_the_reopen_path_checks_state_and_key_then_reopens_via_the_helper(self):
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        views = [
+            args for args in recorder.gh_calls("issue", "view") if args[2] == "288"
+        ]
+        self.assertTrue(views, "the reopen target is read before it is edited")
+        self.assertIn("number,state,body,comments", views[0])
+        edit = [args for args in recorder.gh_calls("issue", "edit") if args[2] == "288"]
+        self.assertTrue(edit)
+        self.assertLess(
+            recorder.calls.index(("gh", views[0])),
+            recorder.calls.index(("gh", edit[0])),
+        )
+        reopen = [args for args in recorder.state_calls() if "288" in args]
+        self.assertTrue(reopen)
+        self.assertIn("--reopen", reopen[0])
+
+    def test_a_reopen_target_that_is_already_open_is_refused(self):
+        issues = closed_original(288, "PRE-7")
+        issues[288]["state"] = "OPEN"
+        recorder, _, err = self._apply(self._reopen_recorder(issues=issues), expect=2)
+        self.assertIn("refusing to reopen", err)
+        self.assertIn("Two live homes", err)
+        self.assertEqual(
+            [args for args in recorder.gh_calls("issue", "edit") if args[2] == "288"],
+            [],
+        )
+
+    def test_a_reopen_target_that_no_longer_names_the_key_is_refused(self):
+        issues = closed_original(288, "PRE-7")
+        issues[288]["body"] = "Some unrelated issue."
+        _, _, err = self._apply(self._reopen_recorder(issues=issues), expect=2)
+        self.assertIn("name PRE-7", err)
+
+    def test_the_refusal_names_the_key_the_rerun_resumes_at(self):
+        issues = closed_original(288, "PRE-7")
+        issues[288]["state"] = "OPEN"
+        _, _, err = self._apply(self._reopen_recorder(issues=issues), expect=2)
+        self.assertIn("Stopped at PRE-7", err)
+        self.assertIn("resume from PRE-7", err)
+
+    # -- recovery ----------------------------------------------------------
+    def test_a_create_whose_response_was_lost_is_adopted_not_created_again(self):
+        key = "PRE-1"
+        body = next(e for e in self.plan["entries"] if e["key"] == key)["body"]
+        recorder = self._reopen_recorder(search=[{"number": 777, "body": body}])
+        recorder, out, _ = self._apply(recorder, extra_args=("--limit", "1"))
+        self.assertIn(f"adopting already-landed {REPO}#777", out)
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+        entry = self._mapping()["entries"][key]
+        self.assertEqual((entry["number"], entry["resolution"]), (777, "adopted"))
+
+    def test_one_linear_key_on_two_issues_refuses_rather_than_picking(self):
+        body = self.plan["entries"][0]["body"]
+        recorder = self._reopen_recorder(
+            search=[{"number": 777, "body": body}, {"number": 778, "body": body}]
+        )
+        _, _, err = self._apply(recorder, expect=2)
+        self.assertIn("two GitHub homes", err)
+        self.assertIn("#777, #778", err)
+
+    def test_a_stranger_carrying_another_keys_footer_is_not_adopted(self):
+        recorder = self._reopen_recorder(
+            search=[{"number": 777, "body": "Migrated from Linear ZZZ-1 (…)."}]
+        )
+        recorder, out, _ = self._apply(recorder, extra_args=("--limit", "1"))
+        self.assertNotIn("adopting", out)
+        self.assertEqual(len(recorder.gh_calls("issue", "create")), 1)
+
+    # -- comments ----------------------------------------------------------
+    def test_the_consolidated_comment_is_one_call_carrying_the_marker(self):
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        posts = recorder.gh_calls("issue", "comment")
+        self.assertEqual(len(posts), 1, "only PRE-7 has comments in the fixture")
+        body = next(text for kind, text in recorder.bodies if kind == "issue comment")
+        self.assertTrue(body.startswith("<!-- linear-import: comments PRE-7 -->"))
+        self.assertIn("Returned from Linear PRE-7.", body)
+        self.assertIn("**Dan Egan, 2026-03-01:**", body)
+        self.assertIn("first comment", body)
+
+    def test_a_comment_whose_marker_is_already_present_is_not_posted_again(self):
+        issues = closed_original(
+            288, "PRE-7", comments=("<!-- linear-import: comments PRE-7 -->\nold",)
+        )
+        recorder, _, _ = self._apply(self._reopen_recorder(issues=issues))
+        self.assertEqual(recorder.gh_calls("issue", "comment"), [])
+        self.assertIs(self._mapping()["entries"]["PRE-7"]["commented"], False)
+
+    def test_an_issue_with_no_comments_reads_nothing_and_posts_nothing(self):
+        recorder, _, _ = self._apply(
+            self._reopen_recorder(), extra_args=("--limit", "1")
+        )
+        self.assertEqual(recorder.gh_calls("issue", "comment"), [])
+        self.assertEqual(recorder.gh_calls("issue", "view"), [])
+
+    # -- milestones --------------------------------------------------------
+    def test_a_milestone_with_the_planned_title_is_reused_not_recreated(self):
+        title = self.plan["milestones"][0]
+        recorder = self._reopen_recorder(milestones=[{"title": title, "number": 7}])
+        recorder, _, _ = self._apply(recorder)
+        creates = [args for args in recorder.gh_calls("api") if "--slurp" not in args]
+        self.assertEqual(creates, [])
+        self.assertEqual(self._mapping()["milestones"][title], 7)
+
+    def test_a_missing_milestone_is_created_once_and_recorded_by_number(self):
+        recorder, out, _ = self._apply(self._reopen_recorder())
+        creates = [args for args in recorder.gh_calls("api") if "--slurp" not in args]
+        self.assertEqual(len(creates), len(self.plan["milestones"]))
+        self.assertIn("milestones created:", out)
+        self.assertEqual(
+            sorted(self._mapping()["milestones"]), sorted(self.plan["milestones"])
+        )
+
+    def test_the_milestone_reaches_gh_as_a_title_not_a_number(self):
+        """gh 2.98.0's `--milestone` is documented "by name" and looks the title
+        up: `--milestone 8` exits 1 with `could not add to milestone '8'`. This
+        cost the first live run its first create, and push-plan.md §5.3 still
+        says to pass the number — so the shape is asserted, not assumed."""
+        title = self.plan["milestones"][0]
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        passed = [
+            args[args.index("--milestone") + 1]
+            for args in recorder.gh_calls("issue", "create")
+            if "--milestone" in args
+        ]
+        self.assertEqual(passed, [title])
+
+    def test_two_milestones_sharing_a_title_refuse_before_any_write(self):
+        title = self.plan["milestones"][0]
+        recorder = self._reopen_recorder(
+            milestones=[{"title": title, "number": 7}, {"title": title, "number": 8}]
+        )
+        recorder, _, err = self._apply(recorder, expect=2)
+        self.assertIn("two milestones share a title", err)
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+
+    # -- throttle and rate limits -----------------------------------------
+    def test_the_throttle_sleeps_between_issues_and_not_before_the_first(self):
+        self._apply(
+            self._reopen_recorder(), extra_args=("--limit", "3", "--sleep", "5")
+        )
+        self.assertEqual(self.napped, [5.0, 5.0])
+
+    def test_a_secondary_rate_limit_waits_its_retry_after_then_succeeds(self):
+        recorder = self._reopen_recorder()
+        seen: list = []
+
+        def once(args):
+            if args[:2] == ["issue", "create"] and not seen:
+                seen.append(args)
+                return (
+                    1,
+                    "",
+                    "HTTP 403: You have exceeded a secondary rate limit. retry-after: 7",
+                )
+            return None
+
+        recorder.fail_on = once
+        recorder, _, _ = self._apply(
+            recorder, extra_args=("--limit", "1", "--sleep", "0")
+        )
+        self.assertIn(7, self.napped)
+        self.assertEqual(len(recorder.gh_calls("issue", "create")), 2)
+        self.assertEqual(self._mapping()["entries"]["PRE-1"]["phase"], "done")
+
+    def test_a_permissions_403_is_not_retried(self):
+        recorder = self._reopen_recorder()
+        recorder.fail_on = lambda args: (
+            (1, "", "HTTP 403: Resource not accessible by integration")
+            if args[:2] == ["issue", "create"]
+            else None
+        )
+        recorder, _, err = self._apply(recorder, extra_args=("--limit", "1"), expect=2)
+        self.assertEqual(len(recorder.gh_calls("issue", "create")), 1)
+        self.assertIn("not accessible", err)
+        self.assertEqual(self.napped, [])
+
+    def test_a_failed_label_write_stops_at_that_key_with_the_create_recorded(self):
+        recorder = self._reopen_recorder()
+        recorder.state_result = (2, "", "refusing to write: est:7 is not in labels.yml")
+        _, _, err = self._apply(recorder, extra_args=("--limit", "1"), expect=2)
+        self.assertIn("est:7", err)
+        self.assertEqual(self._mapping()["entries"]["PRE-1"]["phase"], "created")
+
+    # -- the mapping's own guards -----------------------------------------
+    def test_a_mapping_from_another_board_refuses(self):
+        with open(self.mapping, "w", encoding="utf-8") as fh:
+            json.dump({"repo": "someone/else", "entries": {}}, fh)
+        recorder, _, err = self._apply(self._reopen_recorder(), expect=2)
+        self.assertIn("a mapping belongs to one board", err)
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+
+    def test_a_plan_for_another_board_refuses(self):
+        _, _, err = self._apply(
+            self._reopen_recorder(), extra_args=("--repo", "someone/else"), expect=2
+        )
+        self.assertIn("refusing to land a plan on another board", err)
+
+    def test_apply_needs_a_plan_file_and_a_mapping(self):
+        for argv in (
+            ["--apply", "--mapping", self.mapping],
+            ["--apply", "--plan-file", self.plan_path],
+        ):
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    linear_import.main(argv)
+
+    def test_apply_needs_no_export(self):
+        """The export is 3.3 MB of provenance the plan already answers for."""
+        self._apply(self._reopen_recorder(), extra_args=("--limit", "1"))
+        self.assertEqual(self._mapping()["entries"]["PRE-1"]["phase"], "done")
+
+    def test_a_full_run_lands_every_planned_key(self):
+        _, out, _ = self._apply(self._reopen_recorder())
+        planned = {entry["key"] for entry in self.plan["entries"]}
+        landed = {
+            key
+            for key, entry in self._mapping()["entries"].items()
+            if entry["phase"] == "done"
+        }
+        self.assertEqual(landed, planned)
+        self.assertIn("every planned key is in the mapping at phase done", out)
+
+    def test_the_assignee_is_written_on_the_create_that_plans_one(self):
+        recorder, _, _ = self._apply(self._reopen_recorder())
+        with_assignee = [
+            args
+            for args in recorder.gh_calls("issue", "create")
+            if "--assignee" in args
+        ]
+        self.assertEqual(len(with_assignee), 1)
+        self.assertEqual(
+            with_assignee[0][with_assignee[0].index("--assignee") + 1], "@me"
+        )
+
+    def test_a_rerun_after_a_complete_run_writes_nothing(self):
+        self._apply(self._reopen_recorder())
+        recorder, out, _ = self._apply(self._reopen_recorder())
+        self.assertEqual(recorder.gh_calls("issue", "create"), [])
+        self.assertEqual(recorder.state_calls(), [])
+        self.assertIn("worked this run=0", out)
 
 
 if __name__ == "__main__":
