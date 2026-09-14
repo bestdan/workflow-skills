@@ -1,8 +1,8 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-13, after #514 verified the board. The GitHub board has now
-been checked against the export by something that did not write it — 125 entries,
-27 edges, 15 sub-issue links, 62 transcripts, all confirmed — and
+**Redrafted 2026-09-14, after #514 landed in v2.55.0. The GitHub board has now been
+checked against the export by something that did not write it — 125 entries, 27 edges,
+15 sub-issue links, 62 transcripts, all confirmed — and
 [#515](https://github.com/bestdan/workflow-skills/issues/515) (the Linear side)
 is next; see "#515 is next".** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
@@ -162,10 +162,10 @@ happened without task 13" below. **Do not plan as though the flip is still ahead
 **The milestone's own description is the crosswalk contract** — the Linear-to-GitHub
 table nothing else in this repo states. Read it there, not from a copy.
 
-**#510 through #514 are complete.** The assets are
-`commands/handlers/assets/linear-export.py`, `linear-import.py` (`--plan`, `--show`,
-`--apply`, `--link`) and `linear-verify.py`. #510–#513 are on `main` as of v2.54.0;
-#514 is [PR #735](https://github.com/bestdan/workflow-skills/pull/735).
+**#510 through #514 are complete and all of them are on `main`** — #510–#513 as of
+v2.54.0, #514 as of **v2.55.0** ([PR #735](https://github.com/bestdan/workflow-skills/pull/735),
+merged `c962ffb`). The assets are `commands/handlers/assets/linear-export.py`,
+`linear-import.py` (`--plan`, `--show`, `--apply`, `--link`) and `linear-verify.py`.
 
 **THE MIGRATION HAS RUN, THE GITHUB BOARD IS THE LIVE BOARD, AND IT HAS BEEN CHECKED
 BY SOMETHING THAT DID NOT WRITE IT.** 125 Linear issues landed on 2026-09-13:
@@ -195,6 +195,26 @@ minutes for ~375 reads, exits 0 clean / 1 on a finding / 2 when it cannot read a
 and has a `--json` mode. **#516 step 1 requires a second run after `/reoptimize-tasks`**,
 because reoptimize can change edges and an unverified repair is the thing the verifier
 exists to catch.
+
+**Three of its behaviours will meet you before its findings do**, and the first two are
+refusals that fire before any network read, so they cost a second rather than three
+minutes:
+
+- **It refuses a `--repo` that disagrees with the repo the plan and the mapping both
+  record.** Issue numbers are not unique across repos, so a mapping pointed at the wrong
+  board verifies real issues that happen to share the numbers and can report a clean
+  pass. `--repo` is still required and is not read out of the files: taking the board
+  from the writer's own record would make the run an echo rather than a verification.
+- **It refuses an export that does not carry every plan key**, naming them. Every
+  expectation about edges, sub-issue links and transcripts is derived from the export, so
+  a key it does not describe contributes nothing expected while fields and labels go on
+  comparing — the run then comes back green off the wrong file.
+- **A `blocked_by` edge or sub-issue link whose FAR end was never imported is a NOTE, not
+  a failure.** This is the one that matters for #516: `/reoptimize-tasks` can legitimately
+  add an edge between an imported issue and a native one, and the export has no vocabulary
+  for such a pair, so calling it "not in the export" would be a false statement. Both ends
+  mapped is still compared and still fails. **So a note there is not a divergence to
+  record** — #516's instruction to record divergences applies to the failures.
 
 **Three files on this machine are the input to everything downstream, and none has a
 remote.** All three sit in `$HOME/src/linear-export/`:
@@ -253,7 +273,7 @@ the only one whose work was already done. A bare `gh issue close` is the wrong t
 the rest of them when their time comes: it leaves live rungs on a closed issue, one of
 the two label invariants with **no reconciler rule**. Use `gh-issue-state.py --done`.
 
-### Two deviations from #514's task file, both deliberate
+### Three deviations from #514's task file, all deliberate
 
 1. **"its GitHub issue is open" is not checked as written.** #723 is legitimately closed,
    so a strict open check would have made the "exits 0 against the real repo" criterion
@@ -266,6 +286,14 @@ the two label invariants with **no reconciler rule**. Use `gh-issue-state.py --d
    issues keep a `papercut` label that is absent from the plan's `carried_labels` by
    design. A missing carried label fails; an extra one is a note on a `reopen` entry and a
    failure on a `create`. The managed set is still compared as a strict equality.
+3. **The edge and sub-issue comparisons are not against "every pair on the board".** The
+   task file says the board's `blocked_by` pairs across mapped issues equal the export's
+   relations whose both ends are mapped. Read literally that makes a relationship reaching
+   a never-imported issue a failure, which is a false statement about it — the export
+   describes only what the import carried. The far end decides the tier instead, and
+   neither branch is silence: both ends mapped stays comparable and can fail, one end
+   outside becomes a note. Unreachable on the board as imported; reachable the moment
+   #516 runs `/reoptimize-tasks`, which is what makes it worth having.
 
 **The `Blocked by:` footer decision is still open, and #514 did not take it.** The rule is
 "write the edge, then echo it", and the 27 edges now exist, so an echo is legal for the
@@ -352,6 +380,15 @@ must never reach CI secrets. So a whole task can be written, tested, and merged 
 while the thing it exists to do has never happened once. **A green gate is not evidence
 for any criterion whose discharge is a live run.** Say "it skipped" when it skipped; the
 warning is the only signal, and it scrolls past.
+
+**The same blind spot has a cheaper form, and #514 shipped with it briefly: a second
+output path that nothing ever executes.** `linear-verify.py`'s `--json` mode passed a
+green gate and a clean live run while never having been invoked once, in tests or by
+hand — the rendered path was the only one exercised, and `--json` carries different
+shapes (integer pairs, nested dicts) that a serialisation error would have caught only at
+use. It works, now that it has been run and pinned by a test. **#515 has the same shape**:
+its `--json` summary and its `--cancel` gate are each a path the default invocation never
+touches. Run every flag once before calling a task done.
 
 Practical note: an approval-based resolver is invalidated between resolves, so a harness
 that probes and then runs the script raises one dialog per resolve. And a
