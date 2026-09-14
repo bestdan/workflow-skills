@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.53.2] - 2026-09-14
+
+### Fixes
+
+- correct what disabled Linear's integration and what over-closed (#509) (3bec0a2)
+
 ## [2.53.1] - 2026-09-14
 
 ### Fixes
