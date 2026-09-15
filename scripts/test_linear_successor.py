@@ -29,10 +29,16 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "commands" / "handlers" / "assets" / "linear-successor.py"
 
-_spec = importlib.util.spec_from_file_location("linear_successor", ASSET)
-assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
-successor = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(successor)
+
+def load_asset(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, f"cannot load {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+successor = load_asset("linear_successor", ASSET)
 
 REPO = "bestdan/workflow-skills"
 TEAM = {"id": "team-uuid", "name": "PreThink"}
@@ -479,6 +485,30 @@ class Rendering(unittest.TestCase):
         self.assertEqual(
             json.loads(self.render(doc, True)), json.loads(json.dumps(doc))
         )
+
+
+class AuthFraming(unittest.TestCase):
+    """The same `$LINEAR_API_KEY` slot now holds either kind of credential, and
+    the writes here are the first Linear mutations that can be made with an
+    OAuth token. A correctly-valued token in the wrong envelope fails as an
+    authentication error, which reads like a bad key."""
+
+    def test_a_personal_api_key_goes_bare(self):
+        self.assertEqual(successor.auth_header("lin_api_abc"), "lin_api_abc")
+
+    def test_a_client_credentials_token_is_framed_as_bearer(self):
+        self.assertEqual(successor.auth_header("oauth_tok"), "Bearer oauth_tok")
+
+    def test_an_already_framed_token_is_left_alone(self):
+        self.assertEqual(successor.auth_header("Bearer tok"), "Bearer tok")
+
+    def test_the_rule_has_one_home(self):
+        """Imported from `_linear_auth`, not restated — `linear-export.py` reads
+        the same function, so the two cannot disagree about a live key."""
+        export = load_asset("linear_export", ASSET.parent / "linear-export.py")
+        shared = str(ASSET.parent / "_linear_auth.py")
+        self.assertEqual(successor.auth_header.__code__.co_filename, shared)
+        self.assertEqual(export.auth_header.__code__.co_filename, shared)
 
 
 class ExitCode(Harness):

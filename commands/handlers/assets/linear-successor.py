@@ -56,6 +56,13 @@ walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
 -> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
 A failed resolve never falls through to the next rung. See
 dev_docs/auth_key_access.md for the full contract. This script reads no config.
+
+Either kind of credential works: `_linear_auth.py` frames a personal API key
+bare and an OAuth `client_credentials` token as `Bearer`, decided from the
+key's own shape. The writes here are what make that matter — a token minted
+with the default `app` actor posts the comment as the OAuth app rather than
+as a person, which is legible provenance for a migration but is not the same
+author a personal key would record.
 """
 
 import argparse
@@ -66,6 +73,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _linear_auth import auth_header  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -176,9 +184,9 @@ def gql(key, query, variables=None):
         API,
         data=body,
         headers={
-            "Authorization": key,
+            "Authorization": auth_header(key),
             "Content-Type": "application/json",
-        },  # personal key, no "Bearer"
+        },
     )
     try:
         with urllib.request.urlopen(req) as r:
