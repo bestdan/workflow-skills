@@ -43,12 +43,12 @@ The state id is resolved by TYPE, never by display name — names are
 user-configurable (see `commands/handlers/linear-common.md` → "Kanban mapping").
 
 SCHEMA NOTE — `issue(id:)` is asked for a human identifier (`PRE-824`) rather
-than a UUID, which is documented Linear behaviour but is NOT verified against
-the live API from this repo: it runs keyless, as `linear-export.py`'s own schema
-note records. The failure mode if that assumption is wrong is loud and harmless:
-every issue comes back null, the dry run reports each key as "no such issue in
-Linear" and exits 1, and no write has been attempted. Because the default is a
-dry run, the first live invocation is the check.
+than a UUID. Measured 2026-09-15 against the live workspace: all 125 mapped keys
+resolved, so the identifier form holds and the mapping needs no UUID column.
+That run also exercised both nested connections and, separately, the state
+resolution the dry run never reaches (`canceled_state` returned PreThink's
+`Canceled`/`canceled`). The three MUTATIONS remain unexercised — nothing has
+been written to Linear from this repo.
 
 The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
 walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
