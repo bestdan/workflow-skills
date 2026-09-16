@@ -67,6 +67,7 @@ def issue(
     comment_overflow=False,
     attachment_overflow=False,
     states=None,
+    archived_at=None,
 ):
     """A live Linear issue as the fixture workspace holds it."""
     url = gh_url(number)
@@ -82,6 +83,7 @@ def issue(
         "id": f"uuid-{key}",
         "identifier": key,
         "url": f"https://linear.app/acme/issue/{key}",
+        "archivedAt": archived_at,
         "state": {"id": node["id"], "name": node["name"], "type": node["type"]},
         "team": TEAM,
         "comments": {
@@ -115,10 +117,14 @@ def mapping(*entries, repo=REPO, **extra):
 class Workspace:
     """The stub gql(). Serves the fixture issues and records every mutation."""
 
-    def __init__(self, issues, states=None, fail=(), missing=()):
+    def __init__(self, issues, states=None, fail=(), missing=(), explode=()):
         self.issues = {i["identifier"]: i for i in issues}
         self.states = STATES if states is None else states
         self.fail = set(fail)  # mutation field names that return success: false
+        # (field, issue-uuid) pairs where gql() should sys.exit, as it does on a
+        # real GraphQL error. The live run met this as an archived issue
+        # refusing commentCreate 19 issues in.
+        self.explode = set(explode)
         self.missing = set(missing)  # keys Linear does not have
         self.calls = []
         self.mutations = []
@@ -146,6 +152,9 @@ class Workspace:
             successor.STATE_MUTATION: "issueUpdate",
         }[query]
         self.mutations.append((field, variables))
+        target = variables.get("issue") or variables.get("id")
+        if (field, target) in self.explode:
+            raise SystemExit("GraphQL error: Entity not found: Issue")
         return {field: {"success": field not in self.fail}}
 
     @property
@@ -485,6 +494,61 @@ class Rendering(unittest.TestCase):
         self.assertEqual(
             json.loads(self.render(doc, True)), json.loads(json.dumps(doc))
         )
+
+
+class ArchivedIssues(Harness):
+    """Linear serves an archived issue to `issue(id:)` and then refuses every
+    mutation against it with "Entity not found: Issue", which names neither the
+    issue nor the reason. Two of the real 125 were archived."""
+
+    def test_an_archived_issue_is_skipped_with_a_reason(self):
+        ws = Workspace([issue("PRE-1", 101, archived_at="2026-08-01T08:39:10.813Z")])
+        summary = self.run_script(mapping(("PRE-1", 101)), ws)
+        self.assertEqual(ws.written, [], "wrote to an archived issue")
+        self.assertEqual(summary["unreadable"][0][0], "PRE-1")
+        self.assertIn("archived 2026-08-01", summary["unreadable"][0][1])
+
+    def test_an_archived_issue_does_not_stop_the_live_ones(self):
+        ws = Workspace(
+            [
+                issue("PRE-1", 101, archived_at="2026-08-01T08:39:10.813Z"),
+                issue("PRE-2", 102),
+            ]
+        )
+        summary = self.run_script(mapping(("PRE-1", 101), ("PRE-2", 102)), ws)
+        self.assertEqual([r["key"] for r in summary["issues"]], ["PRE-2"])
+        self.assertEqual(summary["counts"], {"comment": 1, "attachment": 1, "state": 1})
+
+
+class OneBadIssueDoesNotEndTheRun(Harness):
+    """`gql()` answers a GraphQL error with sys.exit, as every sibling's does.
+    Caught per write, or one bad row in 125 takes the rest with it — which is
+    exactly what happened on the first live apply."""
+
+    def test_a_graphql_error_is_recorded_not_fatal(self):
+        ws = Workspace([issue("PRE-1", 101)], explode={("commentCreate", "uuid-PRE-1")})
+        summary = self.run_script(mapping(("PRE-1", 101)), ws)
+        row = summary["issues"][0]
+        self.assertEqual(row["failed"], ["comment"])
+        self.assertEqual(row["done"], ["attachment", "state"])
+        self.assertIn("Entity not found", row["errors"][0])
+
+    def test_the_remaining_issues_are_still_processed(self):
+        ws = Workspace(
+            [issue(f"PRE-{n}", 100 + n) for n in (1, 2, 3)],
+            explode={("commentCreate", "uuid-PRE-1")},
+        )
+        summary = self.run_script(
+            mapping(("PRE-1", 101), ("PRE-2", 102), ("PRE-3", 103)), ws
+        )
+        self.assertEqual(len(summary["issues"]), 3)
+        self.assertEqual(summary["counts"]["comment"], 2)
+        self.assertEqual(summary["failures"], 1)
+
+    def test_a_success_false_result_carries_a_reason_too(self):
+        ws = Workspace([issue("PRE-1", 101)], fail={"issueUpdate"})
+        summary = self.run_script(mapping(("PRE-1", 101)), ws)
+        self.assertIn("success=false", summary["issues"][0]["errors"][0])
 
 
 class AuthFraming(unittest.TestCase):

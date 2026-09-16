@@ -101,6 +101,7 @@ query($key: String!, $nested: Int!) {
     id
     identifier
     url
+    archivedAt
     state { id name type }
     team { id name }
     comments(first: $nested) {
@@ -334,6 +335,22 @@ def plan_issue(issue, entry, repo, cancel):
     url = entry["url"]
     pending = []
 
+    # Linear serves an archived issue to `issue(id:)` but refuses every mutation
+    # against it — `commentCreate` answers "Entity not found: Issue", which
+    # names neither the issue nor the reason. Measured 2026-09-15 on PRE-503.
+    # Caught here so the run says "archived" instead, and so the writes are
+    # never attempted: an archived issue is already off the board, so pointing
+    # it at a successor buys nothing. That two of the 125 are archived is a
+    # finding about the import SELECTION (an archived issue keeps its state
+    # type, so a live-state filter lets it through), which is why they are
+    # reported rather than quietly dropped.
+    if issue.get("archivedAt"):
+        raise SuccessorError(
+            "archived %s — Linear refuses every write to an archived issue; "
+            "unarchive it first if it should carry a successor pointer"
+            % issue["archivedAt"][:10]
+        )
+
     comments = nodes_of(issue, "comments", key)
     if not any(url in (c.get("body") or "") for c in comments):
         pending.append("comment")
@@ -372,46 +389,67 @@ def mutate(api_key, query, variables, field):
     return bool(isinstance(result, dict) and result.get("success"))
 
 
+def run_write(api_key, write, plan, state_for_team):
+    """Issue one mutation. Split from apply_issue so the error handling there is
+    one block rather than one per branch."""
+    if write == "comment":
+        return mutate(
+            api_key,
+            COMMENT_MUTATION,
+            {"issue": plan["id"], "body": plan["body"]},
+            "commentCreate",
+        )
+    if write == "attachment":
+        return mutate(
+            api_key,
+            ATTACHMENT_MUTATION,
+            {
+                "issue": plan["id"],
+                "title": attachment_title(plan["number"]),
+                "url": plan["url"],
+            },
+            "attachmentCreate",
+        )
+    state = state_for_team(plan["team"])
+    return mutate(
+        api_key,
+        STATE_MUTATION,
+        {"id": plan["id"], "state": state["id"]},
+        "issueUpdate",
+    )
+
+
 def apply_issue(api_key, plan, state_for_team):
     """Make this issue's pending writes, in order, and report each outcome.
 
-    A failed write does not abort the remaining two: they are independent
-    statements, and the guards mean the next run retries exactly what is still
-    missing.
+    A failed write does not abort the remaining two, and one issue's failure
+    does not abort the run. `gql()` answers a GraphQL error with `sys.exit`, as
+    every sibling's does, so that exit is caught HERE and turned into a per-write
+    outcome — the same thing linear-archive.py does around `issueArchive`.
+
+    Without that, one bad issue in 125 ends the whole pass: measured 2026-09-15,
+    when an archived PRE-503 refused a comment 19 issues in and took the
+    remaining 105 with it. The guards make a rerun cheap, but a run that stops
+    at the first bad row cannot report what else was wrong.
     """
     done: list = []
     failed: list = []
+    errors: list = []
     for write in WRITES:
         if write not in plan["pending"]:
             continue
-        if write == "comment":
-            ok = mutate(
-                api_key,
-                COMMENT_MUTATION,
-                {"issue": plan["id"], "body": plan["body"]},
-                "commentCreate",
-            )
-        elif write == "attachment":
-            ok = mutate(
-                api_key,
-                ATTACHMENT_MUTATION,
-                {
-                    "issue": plan["id"],
-                    "title": attachment_title(plan["number"]),
-                    "url": plan["url"],
-                },
-                "attachmentCreate",
-            )
+        try:
+            ok = run_write(api_key, write, plan, state_for_team)
+        except SystemExit as exc:
+            failed.append(write)
+            errors.append("%s: %s" % (write, exc))
+            continue
+        if ok:
+            done.append(write)
         else:
-            state = state_for_team(plan["team"])
-            ok = mutate(
-                api_key,
-                STATE_MUTATION,
-                {"id": plan["id"], "state": state["id"]},
-                "issueUpdate",
-            )
-        (done if ok else failed).append(write)
-    return done, failed
+            failed.append(write)
+            errors.append("%s: Linear reported success=false" % write)
+    return done, failed, errors
 
 
 # ---------------------------------------------------------------------------
@@ -434,8 +472,10 @@ def render(summary, as_json):
     for row in summary["issues"]:
         if row.get("failed"):
             print(f"  FAILED {row['key']}: {', '.join(row['failed'])}")
+            for detail in row.get("errors") or []:
+                print(f"    {detail.splitlines()[0][:160]}")
     if summary["unreadable"]:
-        print("\nCould not read:")
+        print("\nSkipped — could not read or cannot be written:")
         for key, why in summary["unreadable"]:
             print(f"  {key}: {why}")
     if summary["pending_import"]:
@@ -486,12 +526,14 @@ def run(api_key, mapping, cancel, apply_writes):
         }
         if apply_writes and plan["pending"]:
             try:
-                done, failed = apply_issue(api_key, plan, state_for_team)
+                done, failed, errors = apply_issue(api_key, plan, state_for_team)
             except SuccessorError as exc:
                 unreadable.append((plan["key"], str(exc)))
                 continue
             row["done"] = done
             row["failed"] = failed
+            if errors:
+                row["errors"] = errors
             for write in done:
                 counts[write] += 1
             failures += len(failed)
