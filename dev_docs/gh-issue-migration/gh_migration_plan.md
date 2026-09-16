@@ -202,44 +202,31 @@ join, and `gh` covers it only partially.
    permanent divergence**, because the plan file is provenance and must not be edited to
    make a check pass. See HANDOFF.md → "What #516 ran" for the expected-failure contract.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
-    **The two-week clock opened 2026-09-15**, when task 9 closed — so the gate is due on
-    or after **2026-09-29**.
+    **DONE 2026-09-15 — the verdict is KEEP**, and the gate was closed on day 0 of its
+    own two-week clock rather than run to term. `workflow-skills` stays on `gh-issue`,
+    `finplan` stays on Linear, nothing is scheduled to migrate next.
 
-    > **Amended 2026-09-15 — the 123 migrated originals are ARCHIVED, and "revert" is no
-    > longer a cheap option.** The earlier text here said they were deliberately left
-    > `Canceled` so a revert could un-cancel them. That was overturned the same day, for a
-    > reason that turned out to be measurable: **cancelling freed no capacity.** Linear's
-    > free plan counts every non-archived issue of every state, so 123 cancelled issues
-    > still consumed 123 of the 250, and the workspace sat at ~253 — over the cap, with
-    > Linear refusing to create new issues. Archiving took it to ~130. See
-    > [PR #739](https://github.com/bestdan/workflow-skills/pull/739), which corrects the
-    > three files that had the cap rule wrong.
-    >
-    > **What this costs the gate:** an archived Linear issue refuses `issueUpdate`, so the
-    > documented revert — a scripted un-cancel over the mapping file — no longer runs.
-    > Undoing it needs `issueUnarchive` first, which **this repo has no tooling for**
-    > (`linear-false-closures.md`, gap tracked in #460).
-    >
-    > **That was a smaller loss than it sounds, and the reasoning should be inspected
-    > rather than trusted.** The un-cancel was never the expensive part of a revert. Every
-    > GitHub issue completed or created since 2026-09-13 has no Linear counterpart, so a
-    > real revert means a reverse migration of that delta — the same class of work as
-    > #510–#516 — and it grows daily. The un-cancel was perhaps 2% of it. The decision was
-    > therefore: pay a real, immediate cap cost, or hold an escape hatch that was already
-    > impractical. **Treat task 10 as a choice between keep and extend.** If the verdict is
-    > revert, budget it as a fresh migration, not as an undo.
-    > **The thing this warned about has happened.** The warning below was written while the
-    > flip was still ahead; [PR #503](https://github.com/bestdan/workflow-skills/pull/503)
-    > made it on **2026-09-07** for an unrelated reason (a label transfer from `dotfiles`),
-    > with task 13 still postponed. So this repo is out of unattended auto-pilot **now**, and
-    > the gate's comparison against the `finplan` Linear control is no longer like-for-like.
-    > Either sequence task 13 first, or run the pilot attended and **record the asymmetry in
-    > the verdict** — the handler must not be scored down for a gap that belongs to
-    > `/auto-pilot`. Original note, kept because its reasoning still governs the choice:
-    > flipping `.task-config.yml` to `gh-issue` drops this repo out of auto-pilot entirely
-    > (task 13), so a pilot run today is a hand-driven one. That is a legitimate way to run
-    > it — the handler works fine in a foreground session — but decide it deliberately rather
-    > than discovering it at switch time.
+    **Closing it early was the decision, not a shortcut past it.** Two weeks of waiting
+    would have bought a comparison against a control that does not hold still — both
+    boards keep resolving and creating issues, so the 09-29 verdict would have scored a
+    stale snapshot — while the one dimension the time would have measured was already
+    known to be unfair (this repo lost unattended auto-pilot on 09-07 and the control did
+    not). Against that, waiting had a real price: it held the revert path open, which held
+    the 123 migrated originals unarchived, which kept the workspace at ~253 against a
+    250 cap **with Linear refusing to create new issues.** The migration exists to relieve
+    that cap and the relief was being withheld to preserve an escape hatch already
+    measured as impractical. Archiving ran the same day and took the workspace to ~130.
+
+    **The one consequence that opens rather than closes:** "keep, not extend" removes the
+    justification for the migration assets. `linear-import.py` (~2,500 lines),
+    `linear-verify.py` and `linear-successor.py` were kept against the possibility that
+    this gate said extend, and every installed plugin user carries them. Retiring them is
+    live in [task 11](phase_5_cleanup/gh_migration_task_11.md). The Linear **handler** and
+    its four Linear-only commands are a separate question and they stay — `finplan` is
+    still on Linear, which is the rule task 11 states.
+
+    Full reasoning, and the five diagnostic questions retired unanswered, are in the task
+    file's Decision section.
 
 **Phase 3 — handler (added by co-review of PR #415)**
 
@@ -334,8 +321,9 @@ join, and `gh` covers it only partially.
     > handler but `linear`/`repo-pr`. This is an accepted cost, not an unnoticed
     > regression — but it is a live one, so anything that reads "auto-pilot will stop
     > working if we switch" should be read as "auto-pilot is not running here".
-    > **It no longer holds Phase 4.** Task 9 is import work that needs no auto-pilot and
-    > is unblocked; only task 10's like-for-like comparison still depends on this.
+    > **It holds no task at all now.** Task 9 was import work that needed no auto-pilot,
+    > and task 10 — the one thing that did depend on this, for its like-for-like
+    > comparison — closed 2026-09-15 without it.
 
     `/auto-pilot` today supports **linear and plan sources only**:
     `skills/auto-pilot/SKILL.md:135` stops outright on "any handler other than
@@ -348,11 +336,15 @@ join, and `gh` covers it only partially.
     - **`/deliver-task` gh-issue path** (`SKILL.md:290-294`) — the handler is passed in
       rather than re-derived, so `/deliver-task` must accept and honour it.
 
-    **This gates task 10.** The pilot evaluation asks "keep, extend, or revert", and that
-    comparison is not fair if the pilot repo silently lost unattended operation while the
-    Linear control kept it. Sequence 13 before 10 — **the "and before flipping
-    `.task-config.yml`" half of this instruction is spent**; the flip happened on
-    2026-09-07 regardless. If task 10 runs before task 13, it runs attended and says so.
+    **This no longer gates anything — and that makes it worse, not better.** It used to
+    gate task 10, on the argument that a keep/extend/revert verdict is unfair if the pilot
+    repo silently lost unattended operation while the Linear control kept it. Task 10
+    closed 2026-09-15 without waiting for it, having weighed that unfairness explicitly.
+    So the sequencing argument is spent, and what remains is the bare cost: **this repo
+    has been outside unattended auto-pilot since 2026-09-07 and nothing is now scheduled
+    to end that.** It is an accepted cost with no gate behind it, which is exactly the
+    shape of thing that drifts. Still postponed by the owner (2026-09-12) pending the new
+    `/auto-pilot` harness.
 
     **Amended 2026-09-02 — a runner is a third credentialed channel.** Task 6
     ([PR #447](https://github.com/bestdan/workflow-skills/pull/447)) measured that a
@@ -447,10 +439,12 @@ argument for fixing the claim at its source rather than per-PR.
 [#436](https://github.com/bestdan/workflow-skills/pull/436) (Linear active-issue quota
 precheck) touches `linear-common.md` and `linear-promote.md` only. Its `auto-eligible`
 mentions are **Linear's** vocabulary, which this migration deliberately leaves alone —
-`finplan` stays on Linear as the control. No action. One observation for the pilot
-evaluation (task 10): it is building a workaround for the 250-issue cap that is one of
-the three reasons this migration was chosen, which is evidence about Linear's cost, not
-about #436.
+`finplan` stays on Linear as the control. No action. The observation this carried for
+task 10 — that #436 is building a workaround for the 250-issue cap that is one of the
+three reasons this migration was chosen — **was borne out in the most direct way
+available**: that same cap is what closed the gate early, by refusing new issues at ~253
+until the migrated originals were archived. Evidence about Linear's cost, not about #436,
+and `finplan` keeps living with it.
 
 ## Open questions
 

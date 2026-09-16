@@ -59,12 +59,28 @@ Then delete `dev_docs/tasks/gh_migration_plan/`.
 **Only retire the Linear handler and its four Linear-only commands once no repo
 is still on Linear.** If `finplan` remains, they stay.
 
-> **`linear-import.py` is the case this rule does not quite cover.** It is ~2,500
-> lines of one-shot migration tooling that every installed plugin user carries, and
-> it is kept not because a repo is on Linear but because **task 10 might extend the
-> migration to `finplan`** — which is why #516 step 3 documents its usage. If task
-> 10 decides not to extend, that justification is gone and retiring it is in scope
-> here. Same for whatever `linear-verify.py` / `linear-successor.py` #514/#515 add.
+> **`linear-import.py` is the case this rule does not cover, and task 10 has now
+> decided it.** It is ~2,500 lines of one-shot migration tooling that every installed
+> plugin user carries, and it was kept not because a repo is on Linear but because
+> **task 10 might extend the migration to `finplan`** — which is why #516 step 3
+> documents its usage. **Task 10 closed 2026-09-15 as keep, not extend**, so that
+> justification is spent and retiring it is squarely in scope here. Same for
+> `linear-verify.py` and `linear-successor.py`.
+>
+> **Retiring them is not the same decision as retiring the handler, and the two must
+> not be run together.** The handler and its four Linear-only commands stay while
+> `finplan` is on Linear — that is the rule above and it is unchanged. These five
+> assets (`linear-export.py`, `linear-import.py`, `linear-verify.py`,
+> `linear-successor.py`, `_linear_auth.py`) are migration tooling, not loop tooling;
+> nothing in the day-to-day Linear path calls them. **Check that claim before
+> deleting** rather than inheriting it from this sentence.
+>
+> **Two things argue for keeping them anyway, and they deserve an answer rather than
+> a default.** They are the only executable record of how the migration was performed,
+> against three provenance files that are no longer regenerable; and "keep" is a
+> reversible verdict, so a later decision to extend would have to rebuild them. The
+> counter is that they are dead weight in every user's install today and git history
+> holds them either way. **The owner decides; do not let it drift.**
 
 ## Acceptance Criteria
 

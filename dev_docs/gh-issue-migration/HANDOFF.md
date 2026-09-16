@@ -1,23 +1,32 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-15. Task 9 is DONE — both boards are settled and the close-out has
-run.** The GitHub board was checked by something that did not write it (125 entries, 27
-edges, 15 sub-issue links, 62 transcripts). The Linear originals point at their successors, and all
-123 are archived — the cap relief this whole exercise was for. #516 then found the graph already sound, wrote the 27
-missing `Blocked by:` echoes, and left the verifier with a **standing expected failure** —
-read "What #516 ran" before treating its output as a regression.
+**Redrafted 2026-09-15. Phase 4 is CLOSED: task 9 delivered the migration and task 10
+decided the pilot — the verdict is KEEP.** `workflow-skills` stays on `gh-issue`,
+`finplan` stays on Linear, and nothing is scheduled to migrate next.
 
-**Next is task 10, the pilot gate: keep, extend, or revert — due on or after 2026-09-29**
-(its two-week clock opened 2026-09-15). Read it as **keep-or-extend**: the 123 Linear
-originals are archived, so the documented revert no longer runs.
+**Next is task 11, the last task in the plan, and it is now fully unblocked.** Its sixth
+section — which Linear commands retire — was the one part waiting on task 10, and task 10
+has answered it. Task 11 also owns the decision this branch has been drifting on for
+weeks: **merge PR #441, close it, or graduate a curated subset.**
 
-**If you are here to close out PR #441, read "Closing out PR #441" below first.** The
-branch is current with `main` as of 2026-09-16 and the gate passes, so nothing is blocked
-by its condition — but task 11 is blocked by task 10, five-sixths of it is not, and the
-merge-or-close decision is still open and is that task's to make. Read this first, then
-[`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
+Read this first, then [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
+
+**Three things task 10's verdict opened rather than closed** — all of them task 11's, none
+of them decided:
+
+1. **The migration assets lost their justification.** `linear-import.py` (~2,500 lines),
+   `linear-verify.py`, `linear-successor.py`, `linear-export.py` and `_linear_auth.py`
+   were kept against the possibility that the gate said _extend_. It said _keep_. Every
+   installed plugin user carries them. **Retire or keep deliberately — see task 11.**
+2. **Task 13 now has nothing standing behind it.** It used to gate task 10's fairness;
+   task 10 closed without it. This repo has been outside unattended auto-pilot since
+   2026-09-07 and **nothing is now scheduled to end that.**
+3. **The `Blocked by:` footer's "revisit at task 10" never happened.** Task 10 settled the
+   assets question it was paired with and did not touch the footer. The footer's own
+   argument is a capability one about the routine channel, unaffected by keep-versus-
+   extend, so it stands — but it stands unreviewed. See "The footer" below.
 
 ## The launcher prompt is these three lines
 
@@ -29,15 +38,12 @@ to begin already-merged work, none with any git history to recover from. If you 
 yourself wanting a longer pointer, the missing content belongs **here** instead.
 
 ```
-Task 9 is done. Next is task 10 (pilot gate), due on or after 2026-09-29.
+Tasks 9 and 10 are done. Task 11 is next and is the last one.
 
 Read dev_docs/gh-issue-migration/HANDOFF.md first — it is NOT on main, only on the
 unmerged draft PR #441. Get it with:
   git show origin/bestdan/gh-issue-migration:dev_docs/gh-issue-migration/HANDOFF.md
 ```
-
-The chain #510–#516 is finished, so the pointer now names a task rather than an issue —
-which task is next is a fact this file carries rather than one the prompt has to.
 
 ## Redraft this file when you finish — read this before you start
 
@@ -117,30 +123,14 @@ owner rather than a tidy-up in passing.
 
 ### What goes and what stays at close-out
 
-Four sets, and only two are decided. Settle the other two before #516 rather than during
-it — #516's step 4 and task 11 both read as mechanical and neither covers the open half.
+Four sets. **Task 10 decided two of them; task 11 owns the remaining two.**
 
-| Files                                                            | Fate                                                                                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev_docs/tasks/gh_migration_plan/` (untracked scaffolding)      | **Delete** — task 11 says so, the path is still accurate, needs the owner's go                                                              |
-| `$HOME/src/linear-export/` (export, plan, mapping)               | **Keep forever.** #516 step 3 records their paths in `linear-common.md`, so the plan assumes they persist. **No remote** — unowned exposure |
-| `dev_docs/gh-issue-migration/` (these 18 tracked files, PR #441) | **UNDECIDED** — see below                                                                                                                   |
-| `linear-import.py`, `linear-verify.py` and what #515 adds        | **Keep**, per task 11 — but the reason is task 10's, see below                                                                              |
-
-**The tracked plan docs are the real open question, and task 11's wording hides it.** Task
-11 says to delete `dev_docs/tasks/gh_migration_plan/`, which is the scaffolding above, and
-says nothing about these files. They moved here _to have git history_, so deleting them
-would discard what the move bought — and because PR #441 is "never merged" by design, they
-never reach `main` either. So "delete the plan folder" collapses into a choice nobody has
-made: **merge #441, or close it and leave the record on an abandoned branch.** Pick one
-deliberately; both are defensible and the default (drift) is neither.
-
-**The assets stay for a reason that task 10 can remove.** Task 11 keeps the Linear handler
-while any repo is on Linear, and `finplan` is; #516 step 3 goes further and documents the
-migration scripts' usage for a possible finplan migration. But `linear-import.py` is
-~2,500 lines of one-shot migration tooling that every installed user now carries, and
-`linear-verify.py` is ~500 more; if task 10 decides **not** to extend to finplan, that
-justification is gone. Revisit it there, not at #516.
+| Files                                                            | Fate                                                                                                                   |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `dev_docs/tasks/gh_migration_plan/` (untracked scaffolding)      | **Delete** — task 11 says so, the path is still accurate, needs the owner's go                                         |
+| `$HOME/src/linear-export/` (export, plan, mapping)               | **Keep forever.** #516 step 3 records their paths in `linear-common.md`. **No remote** — unowned exposure              |
+| `dev_docs/gh-issue-migration/` (these 18 tracked files, PR #441) | **UNDECIDED** — merge, close, or graduate a subset. See "Closing out PR #441"                                          |
+| `linear-import.py`, `linear-verify.py`, `linear-successor.py`    | **UNDECIDED, and newly so** — task 10 said keep-not-extend, which removed the reason they were being held. See task 11 |
 
 **#516's own acceptance criterion names a folder that never existed.** It asks that
 `dev_docs/tasks/linear_import_plan/` "no longer exists locally" — verified absent
@@ -151,47 +141,31 @@ evidence.
 
 ## Where things stand
 
-**This repo has been on `gh-issue` since 2026-09-07.** Any older copy of this file that
-says otherwise is wrong; if you planned around that sentence, stop and re-read here.
+**This repo has been on `gh-issue` since 2026-09-07**, and as of 2026-09-15 that is a
+decision rather than a pilot. Any older copy of this file that frames it as provisional,
+or that says a revert is being held open, is wrong.
 
-**Phase 3 is complete.** Tasks 4–8 and 14–17 are done. Task 12 is unclaimed and has no
-task file; it gates nothing anyone is waiting on.
+**Phases 1–4 are complete.** Tasks 4–10 and 14–17 are done. **Task 11 is the only one
+left.** Task 12 is unclaimed, has no task file, and gates nothing anyone is waiting on.
 
-**The switch already happened, ahead of this plan's own sequencing** — see "The switch
-happened without task 13" below. **Do not plan as though the flip is still ahead of you.**
+**The migration ran on 2026-09-13 and both boards are settled.** 125 Linear issues landed
+on GitHub — **117 created as #617–#733** and **8 reopened** (#284, #288, #289, #295, #296,
+#297, #299, #302) — each with its labels, milestone, provenance footer and comment
+transcript. `--link` wrote **27 `blocked_by` edges** and **15 sub-issue links** across two
+parents (#701 holds 7, #702 holds 8) and rewrote `#number` cross-references into 33 bodies.
+The board went from 46 open issues to 177 (176 after #723 was completed). On the Linear
+side, all **123** writable originals now point at their GitHub successors and are
+**archived** — the cap relief this whole exercise was for.
 
-**Phase 4 task 9 is seven issues under GitHub milestone 1** (filed 2026-09-08):
-[#510](https://github.com/bestdan/workflow-skills/issues/510) (export) →
-[#511](https://github.com/bestdan/workflow-skills/issues/511) (plan) →
-[#512](https://github.com/bestdan/workflow-skills/issues/512) (apply) →
-[#513](https://github.com/bestdan/workflow-skills/issues/513) (link) →
-[#514](https://github.com/bestdan/workflow-skills/issues/514) (verify) →
-[#515](https://github.com/bestdan/workflow-skills/issues/515) (Linear side) →
-[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out).
-**The milestone's own description is the crosswalk contract** — the Linear-to-GitHub
-table nothing else in this repo states. Read it there, not from a copy.
+**The milestone 1 description is the crosswalk contract** — the Linear-to-GitHub table
+nothing else in this repo states. Read it there, not from a copy. The assets are
+`commands/handlers/assets/linear-export.py`, `linear-import.py` (`--plan`, `--show`,
+`--apply`, `--link`), `linear-verify.py`, `linear-successor.py`, and the shared
+`_linear_auth.py`. All of #510–#516 are closed and on `main`.
 
-**#510 through #515 are complete and all of them are on `main`** — #510–#513 as of
-v2.54.0, #514 as of **v2.55.0** ([PR #735](https://github.com/bestdan/workflow-skills/pull/735),
-merged `c962ffb`), #515 via [PR #736](https://github.com/bestdan/workflow-skills/pull/736),
-merged 2026-09-15. The assets are `commands/handlers/assets/linear-export.py`,
-`linear-import.py` (`--plan`, `--show`, `--apply`, `--link`), `linear-verify.py`,
-`linear-successor.py`, and the shared `_linear_auth.py`. **#516 is the only one left.**
+### `linear-verify.py` is the independent check, and it has a standing expected failure
 
-**THE MIGRATION HAS RUN, THE GITHUB BOARD IS THE LIVE BOARD, AND IT HAS BEEN CHECKED
-BY SOMETHING THAT DID NOT WRITE IT.** 125 Linear issues landed on 2026-09-13:
-**117 created as #617–#733** and **8 reopened** (#284, #288, #289, #295, #296, #297,
-#299, #302), each with its labels, milestone, provenance footer and comment transcript,
-plus the one assignee. `--link` then wrote **27 `blocked_by` edges** and **15 sub-issue
-links** across two parents (#701 holds 7, #702 holds 8), and rewrote `#number`
-cross-references into 33 bodies. The board went from 46 open issues to 177 (176 after
-#723 was completed), sectioning 33 / 83 / 56 / 0 / 2 across the five rungs.
-
-**`linear-verify.py` is the independent check, and it passes.** All seven of its checks
-reported clean against `bestdan/workflow-skills` on 2026-09-13 — mapping completeness and
-phase, field equality, the plan's label contract, the `labels.yml` cardinality rule, the
-edge set, the sub-issue set, and one transcript per commented issue. Run it whenever you
-need to know rather than believe:
+Run it whenever you need to know rather than believe:
 
 ```
 python3 commands/handlers/assets/linear-verify.py \
@@ -201,285 +175,203 @@ python3 commands/handlers/assets/linear-verify.py \
     --repo bestdan/workflow-skills
 ```
 
-It is read-only (every `gh` call is a GET, so it runs sandboxed), takes about three
-minutes for ~375 reads, exits 0 clean / 1 on a finding / 2 when it cannot read an input,
-and has a `--json` mode. **#516 step 1 requires a second run after `/reoptimize-tasks`**,
-because reoptimize can change edges and an unverified repair is the thing the verifier
-exists to catch.
+Read-only (every `gh` call is a GET, so it runs sandboxed), about three minutes for ~375
+reads, exits 0 clean / 1 on a finding / 2 when it cannot read an input, with a `--json`
+mode.
+
+> **The pass condition is `1 check(s) failed: fields`, 20 issues, `body` only.** That is
+> **not** a regression. The plan file holds each body as `--apply` wrote it; the board now
+> holds that body plus the `Blocked by:` line #516 applied. The plan is provenance and
+> must not be edited to make a check pass, so the divergence is permanent. The 20 are
+> #679, #686–#691, #693–#698, #707–#710, #719, #720, #729. **A run reporting more than
+> those 20, or a wrong field other than `body`, is a real finding.** The failing set and
+> the edited set were compared programmatically and are identical.
 
 **Three of its behaviours will meet you before its findings do**, and the first two are
-refusals that fire before any network read, so they cost a second rather than three
-minutes:
+refusals that fire before any network read:
 
 - **It refuses a `--repo` that disagrees with the repo the plan and the mapping both
   record.** Issue numbers are not unique across repos, so a mapping pointed at the wrong
-  board verifies real issues that happen to share the numbers and can report a clean
-  pass. `--repo` is still required and is not read out of the files: taking the board
+  board verifies real issues that happen to share the numbers and can report a clean pass.
+  `--repo` is required and is deliberately not read out of the files — taking the board
   from the writer's own record would make the run an echo rather than a verification.
 - **It refuses an export that does not carry every plan key**, naming them. Every
   expectation about edges, sub-issue links and transcripts is derived from the export, so
   a key it does not describe contributes nothing expected while fields and labels go on
   comparing — the run then comes back green off the wrong file.
 - **A `blocked_by` edge or sub-issue link whose FAR end was never imported is a NOTE, not
-  a failure.** This is the one that matters for #516: `/reoptimize-tasks` can legitimately
-  add an edge between an imported issue and a native one, and the export has no vocabulary
-  for such a pair, so calling it "not in the export" would be a false statement. Both ends
-  mapped is still compared and still fails. **So a note there is not a divergence to
-  record** — #516's instruction to record divergences applies to the failures.
+  a failure.** `/reoptimize-tasks` can legitimately add an edge between an imported issue
+  and a native one, and the export has no vocabulary for such a pair. Both ends mapped is
+  still compared and still fails.
 
-**Three files on this machine are the input to everything downstream, and none has a
-remote.** All three sit in `$HOME/src/linear-export/`:
+Three further deviations from #514's task file, all deliberate, all still governing what
+the verifier reports:
+
+1. **"its GitHub issue is open" is not checked as written.** #723 is legitimately closed,
+   so a strict open check would make the "exits 0 against the real repo" criterion
+   unsatisfiable. Closed **without** a rung is a NOTE (work completed since the import);
+   closed **with** a rung is a FAILURE (the invariant break). Collapsing the two would
+   hide the defect behind the benign case.
+2. **Carried labels are compared as a subset, not an equality.** `gh-issue-state.py`
+   carries forward every label outside the four managed namespaces, so all eight reopened
+   issues keep a `papercut` label absent from the plan's `carried_labels` by design. A
+   missing carried label fails; an extra one is a note on a `reopen` and a failure on a
+   `create`. The managed set is still a strict equality.
+3. **The edge and sub-issue comparisons are not against "every pair on the board."** The
+   far end decides the tier: both ends mapped stays comparable and can fail, one end
+   outside becomes a note.
+
+### The three provenance files, and why they are now irreplaceable
+
+**All three sit in `$HOME/src/linear-export/` and none has a remote.**
 
 - `2026-09-13-prethink.json` — the export, 3.3 MB, sha256
   `60276d3c65fb8334a74b84ea65ba880816532137fcc5dba5a513ea3723ecc4b3`, **810 issues, 557
-  archived**, 462 with comments, 110 with relations, across 40 projects. It is the only
-  record of those keys once the Linear originals are cancelled.
+  archived**, 462 with comments, 110 with relations, across 40 projects.
 - `2026-09-13-import-plan.json` — the plan, 451 KB, sha256
-  `b080ff8585da0e10ee7ae2402858b215a55e4badbcd60323642a3a3536d4644e`. It holds the
+  `b080ff8585da0e10ee7ae2402858b215a55e4badbcd60323642a3a3536d4644e`. Holds the
   `blocked_by` and `parent` fields `--link` reads.
-- `2026-09-13-mapping.json` — what `--apply` wrote. **This is the Linear-key-to-GitHub-number
+- `2026-09-13-mapping.json` — what `--apply` wrote. **The Linear-key-to-GitHub-number
   crosswalk**, one record per key with its `number`, `url`, `action`, `resolution`,
-  `milestone` and `phase`. #515 needs it, and nothing else on this machine holds it.
+  `milestone` and `phase`. Nothing else on this machine holds it.
 
-**The plan is NO LONGER regenerable.** Regenerating it re-runs the create-versus-reopen
-decision, and the eight reopen targets are now **OPEN** — which that decision refuses,
-correctly, as "two live homes already exist". So a regenerated plan would abort rather
-than reproduce this one. **Treat all three files as provenance now.** If a plan must be
-rebuilt for some later purpose, that is a new argument to make explicitly, not a
-`--force` away.
+**The plan is NO LONGER regenerable**, and the originals are now archived as well as
+cancelled, so the export is the only record of those keys. Regenerating the plan re-runs
+the create-versus-reopen decision, and the eight reopen targets are now **OPEN** — which
+that decision correctly refuses as "two live homes already exist". A regenerated plan
+aborts rather than reproducing this one. **Treat all three as provenance.** Rebuilding one
+is a fresh argument to make explicitly, not a `--force` away.
 
 **Read the 810 against `PRE-835`, not against 781.** The export spans `PRE-5 … PRE-835`
 with 21 numbers missing to deleted issues, and that top identifier is what shows the
-pagination reached the end. **An identifier is not an index**; nothing downstream may
+pagination reached the end. **An identifier is not an index** — nothing downstream may
 compute a count from a key, or treat a gap as a lost issue.
 
-## What #514 settled, and where it deviated
+### Export-shape facts that outlive the migration
 
-**The export's two relation directions agree exactly.** Measured 2026-09-13 over the
-whole export: 77 `blocks` pairs derived from `relations`, 77 from `inverseRelations`,
-symmetric difference **zero**. `--plan` reads `inverseRelations` alone and is right to —
-reading both there would double every edge — but that also means a verifier reading the
-same half could only ever agree with it, so `linear-verify.py` reads both and unions
-them. The union is the same set while the export stays well-formed and a superset if it
-ever stops being, which is the direction a verifier should err in.
+- **The two relation directions agree exactly.** 77 `blocks` pairs from `relations`, 77
+  from `inverseRelations`, symmetric difference **zero**. `--plan` reads
+  `inverseRelations` alone and is right to; `linear-verify.py` reads both and unions them,
+  because a verifier reading the same half could only ever agree with the writer.
+- **`children` is NOT interchangeable with `parent`.** `parent` yields 77 parent/child
+  pairs; `children` yields 16, every one of them also in the first set. `children` is a
+  strict subset and anything reading it alone silently loses most of the hierarchy.
+- **The export contains zero `duplicate` relations and zero `<issue id=… href=…>`
+  mentions.** The rewrite `linear-import.py` performs for the latter is insurance, not
+  load-bearing. `duplicate` relations deliberately keep no direction — if a later export
+  ever carries one, that is the decision to revisit, starting with the milestone table.
 
-**The export's `children` field is NOT interchangeable with `parent`.** `parent` yields
-77 parent/child pairs across the export; `children` yields 16, and every one of those 16
-is also in the first set. So `children` is a strict subset — populated for only some
-parents — and anything reading it alone silently loses most of the hierarchy. Read
-`parent`, or union the two.
+### Nothing auto-closes an imported issue
 
-**`#723` is closed and correctly so.** `PRE-416` landed at `status:4_needs_review` with
-its PR #487 already merged, which was faithful — Linear still had it In Review. It has
-since been closed with `gh-issue-state.py --done`, and now reads `CLOSED`/`COMPLETED`
-carrying `prio:3` and `est:2` and no rung, which is exactly the invariant `--done`
-asserts. Nothing here needs doing.
+`/sweep-for-complete` is **unsupported on `gh-issue`** and refuses by design, because
+GitHub normally closes an issue natively from `Closes #<n>` in the PR body. Here the
+native path cannot fire either: an imported issue did not exist when its PR merged, and
+those PR bodies cite the Linear key rather than a GitHub number. **Every issue the import
+carried is in this position** — #723 was simply the only one whose work was already done,
+and it now reads `CLOSED`/`COMPLETED` with `prio:3`, `est:2` and no rung, which is the
+invariant `--done` asserts.
 
-**Nothing auto-closes an imported issue.** `/sweep-for-complete` is **unsupported on
-`gh-issue`** and refuses by design, because GitHub normally closes an issue natively from
-`Closes #<n>` in the PR body. Here the native path cannot fire either: an imported issue
-did not exist when its PR merged, and those PR bodies cite the Linear key rather than a
-GitHub number. **Every issue the import carried is in this position** — #723 was simply
-the only one whose work was already done. A bare `gh issue close` is the wrong tool for
-the rest of them when their time comes: it leaves live rungs on a closed issue, one of
-the two label invariants with **no reconciler rule**. Use `gh-issue-state.py --done`.
+**A bare `gh issue close` is the wrong tool** for the rest when their time comes: it
+leaves live rungs on a closed issue, one of the two label invariants with **no reconciler
+rule**. Use `gh-issue-state.py --done`.
 
-### Three deviations from #514's task file, all deliberate
+### The footer
 
-1. **"its GitHub issue is open" is not checked as written.** #723 is legitimately closed,
-   so a strict open check would have made the "exits 0 against the real repo" criterion
-   unsatisfiable. The verifier splits the closed cases instead: closed **without** a rung
-   is a NOTE (work completed since the import), closed **with** a rung is a FAILURE (the
-   invariant break). Only the second is a defect, and collapsing the two would have hidden
-   it behind the benign case.
-2. **Carried labels are compared as a subset, not as an equality.** `gh-issue-state.py`
-   carries forward every label outside the four managed namespaces, so all eight reopened
-   issues keep a `papercut` label that is absent from the plan's `carried_labels` by
-   design. A missing carried label fails; an extra one is a note on a `reopen` entry and a
-   failure on a `create`. The managed set is still compared as a strict equality.
-3. **The edge and sub-issue comparisons are not against "every pair on the board".** The
-   task file says the board's `blocked_by` pairs across mapped issues equal the export's
-   relations whose both ends are mapped. Read literally that makes a relationship reaching
-   a never-imported issue a failure, which is a false statement about it — the export
-   describes only what the import carried. The far end decides the tier instead, and
-   neither branch is silence: both ends mapped stays comparable and can fail, one end
-   outside becomes a note. Unreachable on the board as imported; reachable the moment
-   #516 runs `/reoptimize-tasks`, which is what makes it worth having.
+**The `Blocked by:` echo is written — 27 edges over 20 issues**, the footer being an
+aggregate line (#686 carries five blockers on one line, #679 three). `/reoptimize-tasks`
+reported all 27 imported edges as `edge_only` and the footers were applied.
 
-**The `Blocked by:` footer decision is SETTLED — the echo is written.** #516 ran
-`/reoptimize-tasks`, which reported all 27 imported edges as `edge_only` (a real edge with
-no body echo), and the footers were applied: **27 edges over 20 issues**, since the footer
-is an aggregate line (#686 carries five blockers on one line, #679 three).
+**The deciding argument was the routine channel, not consistency.**
+[`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md)
+records a measured probe showing the **GitHub MCP connector exposes no dependency-edge
+tool**, so a cloud routine — no `gh` — cannot read `blocked_by` in any form, while it _can_
+read issue bodies. The 27 imported issues were the only dependencies on the board written
+without an echo, so they were exactly the set an unattended routine would misread as
+unblocked.
 
-**The deciding argument was not consistency, it was the routine channel.** The "one fact,
-one home" objection is the obvious one and it is wrong here: `dev_docs/decisions/
-2026-08-24-routine-claim-channel.md` records a measured probe showing the **GitHub MCP
-connector exposes no dependency-edge tool**, so a cloud routine — no `gh` — cannot read
-`blocked_by` in any form, while it _can_ read issue bodies. `push-plan.md` §5.5 already
-names that as the footer's strongest reason. The 27 imported issues were the only
-dependencies on the board written without an echo, so they were exactly the set an
-unattended routine would have misread as unblocked once task 13 restores auto-pilot here.
-
-> **The honest counter, recorded because it may outlive the decision:** nothing consumes
-> the footer unattended _today_ — the only reader is `gh-issue-graph.py`, for
-> reconciliation. This is a capability argument, not a usage one. If the routine channel
-> never grows a dependency-aware step, the footer is maintained for a reader who never
-> arrives. Revisit at task 10 alongside the "do the Linear assets stay" question.
-> Note that imported bodies do carry `Blockers not migrated:` for blockers outside the
+> **The honest counter, still unreviewed:** nothing consumes the footer unattended
+> _today_. The only reader is `gh-issue-graph.py`, for reconciliation. This is a capability
+> argument, not a usage one — and with task 13 now unscheduled, the routine channel that
+> would consume it has no arrival date. **This was supposed to be revisited at task 10 and
+> was not.** Task 10 settled the Linear-assets half of that pairing and left this half
+> untouched. It is task 11's or nobody's.
+>
+> Note that imported bodies carry `Blockers not migrated:` for blockers outside the
 > selection — deliberately not spelled `Blocked by:`, because those blockers have no edge
 > and never can.
 
-**A reopened issue carries TWO provenance footers, and that is faithful.** The eight were
-migrated OUT of GitHub in August, so each body already ended with
-`Migrated from [https://github.com/…/issues/288]`, and `--apply` appended the inbound
-`Migrated from Linear PRE-746 (…)`. It is a round trip and it reads as one. Do not "tidy"
-it — and note that the body-marker search `--apply` uses to recover a lost create matches
-only the **inbound** spelling, so the two do not collide.
+### Two import-selection facts worth not rediscovering
 
-**`--link` is re-runnable and doubles as a cheap read-only audit.** All three of its passes
-are check-then-write, so a bare `--link` with no `--apply` reports what is missing without
-writing anything, and a real rerun writes only what is genuinely absent. It has no progress
-file and needs none. **A recorded number is stable whatever the record's phase** — `number`
-is written in exactly one `record()` call, at phase `created`, by an `update` that never
-clears it — which is why both `--link` and `linear-verify.py` join on the number and treat
-the phase as its own separate question.
+- **A reopened issue carries TWO provenance footers, and that is faithful.** The eight were
+  migrated OUT of GitHub in August, so each body already ended with
+  `Migrated from [https://github.com/…/issues/288]`, and `--apply` appended the inbound
+  `Migrated from Linear PRE-746 (…)`. It is a round trip and reads as one. Do not "tidy" it
+  — and note the body-marker search `--apply` uses to recover a lost create matches only the
+  **inbound** spelling, so the two do not collide.
+- **Two archived issues reached the import set: PRE-503 and PRE-504**, archived since
+  2026-08-01, now #714 and #713. Linear serves an archived issue to `issue(id:)` and then
+  refuses **every** mutation against it — `commentCreate` answers `Entity not found: Issue`,
+  naming neither the issue nor the reason. **That is a finding about the selector, not the
+  script**: #511's `backlog`/`unstarted`/`started` filter reads state type, which an
+  archived issue keeps. Filed as **#737**. If that selector is re-run or reused it will do
+  the same thing again.
 
-**What the runs cost, so #515 can budget.** `--apply`'s 125 entries at `--sleep 2` took
-about nine minutes and hit **zero** rate limits across roughly 400 writes; `--link`'s 74
-writes took about three minutes. The secondary limit was never the binding constraint at
-that pace — but it was also never reached, so do not read that as licence to drop the
-throttle. #515's writes go to Linear's API rather than GitHub's, so none of this transfers
-except the habit.
+### What the runs cost
 
-## What #516 ran, and the one divergence it leaves behind
+`--apply`'s 125 entries at `--sleep 2` took about nine minutes and hit **zero** rate limits
+across roughly 400 writes; `--link`'s 74 writes took about three minutes; `linear-successor.py`
+wrote three mutations each against 123 issues with 0 failures. The secondary limit was
+never the binding constraint at that pace — but it was never reached either, so do not
+read that as licence to drop the throttle.
 
-**`/reoptimize-tasks`, whole-repo scope, 2026-09-15.** Scope is whole-repo on purpose:
-the migrated issues span milestones 4–8 plus unmilestoned ones, and gh-issue has no
-grouping above a milestone, so a milestone-scoped run would have missed every
-cross-milestone edge. 247 nodes, 50 real edges, not truncated.
+**`--link` is re-runnable and doubles as a cheap read-only audit.** All three passes are
+check-then-write, so a bare `--link` with no `--apply` reports what is missing without
+writing, and a real rerun writes only what is genuinely absent. **A recorded number is
+stable whatever the record's phase** — `number` is written in exactly one `record()` call,
+at phase `created`, by an `update` that never clears it — which is why both `--link` and
+`linear-verify.py` join on the number and treat the phase as a separate question.
 
-**The graph was already sound.** 0 cycles, 0 stale edges, 0 priority inversions, 0
-concurrent-started pairs, 0 `footer_only`. The 23 `satisfied_edges` are this plan's own
-chain (#510→#511→…) with the blocker closed `completed` — satisfied, not a defect, and
-GitHub already stops counting them. The only finding was the 27 missing echoes, now
-applied.
+### Two defects that only surfaced by running it
 
-**Dimension 2 produced nothing, and the reason is worth knowing before you trust that
-field.** All 279 prose candidates came back `weak`/`related` — zero blocking strength —
-and **151 of them point at numbers that are not issues in this graph** (`#1`, `#2`,
-`#3580`). `_body_refs.py` reads any `#<digits>` as an issue reference, but on GitHub
-issues and PRs share one number space, so a prose `#138` is as likely to be a PR. That is
-a ~54% false-positive rate on this repo, harmless only because nothing acts on a weak
-candidate. **Unfiled.**
-
-**Three edges spot-checked against the export**, as this task asks: #679←#674, #679←#684,
-#679←#685 → PRE-582 blocked by PRE-593 / PRE-566 / PRE-564, all three present as real
-`blocks` relations. 3/3.
-
-### The divergence: `linear-verify.py` now fails `fields` on 20 issues, and that is correct
-
-**Recorded rather than silenced, per this task's own instruction.** The post-reoptimize
-verify run reports exactly one failing check — `fields`, `body`-only, on exactly the 20
-issues that took a footer. Every other check passes, including `edges` (27/27) and
-`sub_issues` (15/15). The failing set and the edited set were compared programmatically
-and are identical, so nothing else moved.
-
-The cause is structural and permanent: the plan file holds each body as `--apply` wrote
-it, the board now holds that body plus a `Blocked by:` line, and **the plan is provenance
-and must not be edited to make a check pass.** So this failure is now the expected result:
-
-> **A future `linear-verify.py` run should report `1 check(s) failed: fields`, 20 issues,
-> `body` only. That is the pass condition, not a regression.** A run that reports _more_
-> than those 20, or a wrong field other than `body`, is a real finding. The 20 are
-> #679, #686–#691, #693–#698, #707–#710, #719, #720, #729.
-
-## What #515 settled — the Linear side is done
-
-`linear-successor.py` shipped and **has been run against the live workspace**
-(2026-09-15). Per mapping entry it posts a comment naming the GitHub successor, creates a
-`GitHub #<n> (migrated)` link attachment, and — behind `--cancel` — sets the team's
-`canceled`-type state. Idempotent **per write, not per issue**.
-
-**123 of the 125 originals took all three, and all 123 are now ARCHIVED** (2026-09-15,
-`Archived 123, failed 0`) — so they no longer count against Linear's 250-issue cap, and
-they no longer accept any mutation. A re-run of `linear-successor.py` reports 0
-outstanding.
-PRE-555 was checked by hand: comment → `bestdan/workflow-skills#691`, attachment to the
-same, state `Canceled`/`canceled`.
-
-> **Archived 2026-09-15, and that closed the revert path.** Cancelling them freed no
-> capacity: Linear's free plan counts every **non-archived** issue of every state, so 123
-> cancelled issues still consumed 123 of the 250 and the workspace sat at ~253 — over the
-> cap, with Linear refusing to create new issues. Archiving took it to ~130. The three
-> files that had this rule wrong are corrected in
-> [PR #739](https://github.com/bestdan/workflow-skills/pull/739); `linear-archive.py` had
-> it right all along and `linear-common.md` did not.
->
-> The cost is that an archived issue refuses `issueUpdate`, so the documented revert (a
-> scripted un-cancel over the mapping) no longer runs, and there is no `issueUnarchive`
-> tooling here (#460). **Inspect that trade rather than inheriting it:** the un-cancel was
-> never the expensive part — every GitHub issue completed or created since 2026-09-13 has
-> no Linear counterpart, so a revert is a reverse migration of that delta whether or not
-> the originals are archived. See task 10 in the plan.
-
-**The 2 that did not: PRE-503 and PRE-504, archived since 2026-08-01.** Linear serves an
-archived issue to `issue(id:)` and then refuses **every** mutation against it —
-`commentCreate` answers `Entity not found: Issue`, which names neither the issue nor the
-reason. They are on the board as **#714 and #713**.
-
-> **That is a finding about the import SELECTION, not about the script, and nothing has
-> been filed for it.** An archived issue keeps its state type, so #511's
-> `backlog`/`unstarted`/`started` filter let two archived issues into the import set. If
-> that selector is ever re-run or reused, it will do the same thing again.
-
-**Two defects surfaced only by running it**, both now fixed and pinned by tests:
-
-- **One bad issue ended the whole pass.** `gql()` answers a GraphQL error with
-  `sys.exit`, as every sibling's does, and nothing caught it — so the first apply died 19
-  issues in and took the remaining 105 with it, while the docstring two lines up claimed a
-  failed write does not abort the others. Now caught per write, the way
-  `linear-archive.py` already did around `issueArchive`. **Check the siblings before
-  trusting this pattern elsewhere**: the catch is per call site, not in `gql()`.
+- **One bad issue ended the whole pass.** `gql()` answers a GraphQL error with `sys.exit`,
+  as every sibling's does, and nothing caught it — so the first apply died 19 issues in and
+  took the remaining 105 with it, while the docstring two lines up claimed a failed write
+  does not abort the others. Now caught per write. **Check the siblings before trusting
+  this pattern elsewhere**: the catch is per call site, not in `gql()`.
 - **The `Bearer` framing was missing.** `linear-successor.py` copied the bare
   `"Authorization": key` header from the six older assets, which is right only for a
-  personal `lin_api_…` key. The rule now lives in `_linear_auth.py`, imported by both
+  personal `lin_api_…` key. The rule now lives in `_linear_auth.py`, imported by
   `linear-export.py` and `linear-successor.py`; **the other five still hardcode the bare
   form** and will fail against an OAuth token.
 
-**The per-write idempotence earned its keep unplanned.** The aborted first run resumed
-with no special handling — the guards simply found the 106 outstanding. Design for the
-crash you expect and you get the crash you did not.
+**The per-write idempotence earned its keep unplanned.** The aborted first run resumed with
+no special handling — the guards simply found the 106 outstanding. Design for the crash you
+expect and you get the crash you did not.
 
-**#516 needs no Linear credential.** Its `linear-verify.py` re-run reads the GitHub board
-against the local export/plan/mapping files; every `gh` call is a GET.
+### `_body_refs` cannot tell an issue from a PR
 
-## Closing out PR #441 — the decision, and what is actually blocked
+`/reoptimize-tasks`' dimension 2 produced nothing, and the reason matters before you trust
+that field. All 279 prose candidates came back `weak`/`related` — zero blocking strength —
+and **151 of them point at numbers that are not issues in this graph** (`#1`, `#2`,
+`#3580`). `_body_refs.py` reads any `#<digits>` as an issue reference, but GitHub issues and
+PRs share one number space, so a prose `#138` is as likely to be a PR. A ~54% false-positive
+rate on this repo, harmless only because nothing acts on a weak candidate. Filed as **#738**.
+
+## Closing out PR #441 — the decision task 11 owns
 
 **State as of 2026-09-16.** The branch is **current with `main`** (merged, 0 behind, gate
-passes), clean-merging, and carries **18 tracked plan files**. PR #441 is still a draft.
-Nothing about closing it out is blocked by the branch's condition any more.
+passes), clean-merging, and carries **18 tracked plan files**. PR #441 is still a draft
+titled "DO NOT MERGE — docs(gh-issue): migration plan, tracking only".
 
-**But task 11 is blocked by task 10, and that is real.** `gh_migration_task_11.md` declares
-`is_blocked_by: gh_migration_task_10`, the pilot gate, which is **due on or after
-2026-09-29**. Not all of task 11 depends on it — the split is worth knowing:
+**Nothing blocks this any more.** Task 11 declared `is_blocked_by: gh_migration_task_10`,
+and task 10 is done — so the whole of task 11 is available, including the sixth section
+that was waiting on the verdict. The blocker record stays in the frontmatter as history;
+it is satisfied, not live.
 
-| Task 11 asks for                                                                 | Blocked by task 10?                      |
-| -------------------------------------------------------------------------------- | ---------------------------------------- |
-| The label schema and three invariants                                            | no                                       |
-| Validate-then-PATCH and the two spike failures                                   | no                                       |
-| Why the claim lock is ref creation (and the `Everything up-to-date` exit-0 trap) | no                                       |
-| Merge-as-completion, review gate as convention not enforcement                   | no                                       |
-| Label provisioning as a migration prerequisite                                   | no                                       |
-| **Which Linear commands retire and which remain**                                | **yes** — it turns on keep/extend/revert |
+### The open decision
 
-So five-sixths of `dev_docs/gh_issue_task_loop.md` can be written now. Only the retirement
-list has to wait, and `finplan` being on Linear is what makes it wait: the answer is "they
-all stay" unless task 10 says extend.
-
-### The open decision this task owns
-
-Task 11 names it and deliberately does not settle it: **merge #441, or close it and leave
-the record on the branch.** "Both are defensible; drift is not." What each costs:
+**Merge #441, or close it and leave the record on the branch.** Both are defensible; drift
+is not, and drift is what has been happening.
 
 - **Merge it.** The 18 files reach `main` permanently. Costs: the repo's own `AGENTS.md`
   calls plan folders ephemeral in-flight state and says durable wisdom graduates to a
@@ -487,26 +379,26 @@ the record on the branch.** "Both are defensible; drift is not." What each costs
   progressive-disclosure rule the repo is built on.
 - **Close it.** No scaffolding on `main`. Costs: the history survives only as long as
   nobody deletes `origin/bestdan/gh-issue-migration`, and an abandoned branch is exactly
-  the kind of thing a later sweep removes. Note closing the PR does **not** delete the
-  branch — only a separate delete does.
+  what a later sweep removes. Closing the PR does **not** delete the branch — only a
+  separate delete does.
+- **Graduate a curated subset — consider this first.** Merge
+  `dev_docs/gh_issue_task_loop.md` (task 11's own distillation) **and**
+  `2026-08-24-requirements-and-evidence.md` — 43K of measured record that is durable by any
+  reading and is the one file here nothing else can reconstruct — then close the PR without
+  merging the per-task scaffolding. That buys permanence for what is durable and keeps the
+  in-flight material off `main`, which is what the repo's rules actually ask for.
 
-**A third option the task file does not list, and the one to consider first: graduate a
-curated subset.** Merge `dev_docs/gh_issue_task_loop.md` (task 11's distillation) **and**
-`2026-08-24-requirements-and-evidence.md` — 43K of measured record that is durable by any
-reading and is the one file here nothing else can reconstruct — then close the PR without
-merging the per-task scaffolding. That buys permanence for what is durable and keeps the
-in-flight material off `main`, which is what the repo's rules actually ask for.
-
-### What changed under this plan since it was written
+### What changed under this plan since the sections below were written
 
 Anything you read below predates these unless it says otherwise:
 
-- Task 9 is **done**; #510–#516 are all closed and on `main`.
-- The **123 Linear originals are archived**, not merely cancelled — so the cheap revert is
-  gone and task 10 is realistically keep-or-extend. See task 10 in the plan.
+- **Task 10 is done — the verdict is KEEP**, decided 2026-09-15 on day 0 of its own clock
+  rather than run to term. Task 9 is done; #510–#516 are all closed and on `main`.
+- The **123 Linear originals are archived**, not merely cancelled. The revert path is gone
+  and that was the point, not a side effect.
 - The free-plan cap was **misdocumented for months** (it counts every non-archived issue,
-  not `unstarted`+`started`); corrected in #739, and `linear-common.md` now owns the
-  figure as a dated observation because Linear exposes no field to re-derive it.
+  not `unstarted`+`started`); corrected in #739, and `linear-common.md` now owns the figure
+  as a dated observation because Linear exposes no field to re-derive it.
 - Three findings from this work are open and unfiled against any task here: **#737**
   (archived issues reached the import), **#738** (`_body_refs` can't tell an issue from a
   PR), **#740** (`active_issue_quota`'s domain hardcodes the cap).
@@ -828,8 +720,11 @@ about cloud sessions. Probe it.
   reaffirmed by the owner 2026-09-12**, because `/auto-pilot` is under active development
   with a new harness. It stops outright rather than degrading. **The cost is no longer
   hypothetical**: the config flipped on 09-07 without it, so this repo is out of unattended
-  auto-pilot today. It still gates a like-for-like **task 10**; it does not gate the rest
-  of task 9, which needs no auto-pilot at all.
+  auto-pilot today. **And it no longer gates anything.** It used to gate a like-for-like
+  task 10; task 10 closed 2026-09-15 having weighed that unfairness and decided anyway. So
+  what remains is the bare cost with no schedule behind it — the shape of thing that
+  drifts. If the footer above is ever to have its unattended reader, this is the task that
+  brings it.
 - **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
   same validate-then-replace rule. The probe promoted this from "for any channel without
   `gh`" to **the** prerequisite for a working dispatched session. **No task owns it.**
@@ -896,43 +791,37 @@ on any handler but `linear`/`repo-pr`. So **this repo is currently outside unatt
 auto-pilot**, and has been since 09-07. Every handler verb still works in a foreground
 session.
 
-**What it costs task 10.** The pilot evaluation asks "keep, extend, or revert", against
-`finplan` as a Linear control. The pilot repo has lost unattended operation and the control
-has not, so that comparison is no longer like-for-like. Either restore parity (task 13)
-before running the gate, or run it attended and **state the asymmetry in the verdict**.
-Do not let the gate silently score the handler down for a gap that is auto-pilot's.
+**What it cost task 10 — recorded because the reasoning is the verdict's.** The gate asked
+"keep, extend, or revert" against `finplan` as a Linear control, and the pilot repo had
+lost unattended operation while the control had not. That asymmetry was not resolved; it
+was **weighed and accepted**, and it is part of why waiting two more weeks was judged
+worthless — the extra time would have measured the one dimension already known to be
+unfair. The verdict is not a score of the handler against Linear. It is a judgement that
+the migration's cap relief was worth more than the comparison.
 
-## The two boards are no longer symmetric
+## The two boards, and what is left owed
 
-The newest workflow-skills issue in Linear is PRE-823, created **2026-09-03**, so the
-import was not racing a moving source. **As of 2026-09-13 the GitHub board is the live
-one and Linear holds 125 issues that have been copied out of it but not yet closed.** That
-is a deliberate intermediate state, not drift: closing the Linear side is
-[#515](https://github.com/bestdan/workflow-skills/issues/515), and it is the only step
-left that needs a Linear credential. Until it runs, **both boards show the same work as
-open** — anyone reading Linear for status will read it wrong.
+**The GitHub board is the live one and the Linear side is closed out.** As of 2026-09-15
+the 123 writable originals are archived, each pointing at its GitHub successor by comment
+and link attachment. A re-run of `linear-successor.py` reports 0 outstanding. The
+intermediate state where both boards showed the same work as open is over — anyone reading
+Linear for `workflow-skills` status now reads an archive, which is correct.
+
+`finplan` remains on Linear and is no longer a control for anything; task 10 closed the
+comparison it was serving.
 
 ### Acceptance criteria still owed
 
 Two repos are on the `gh-issue` handler — `bestdan/dotfiles` and `bestdan/workflow-skills`
-— so anything testing **handler dispatch** can run in either. **Everything that needed a
-migrated backlog is now runnable**, which nothing was before 2026-09-13: this repo's board
-carries the imported issues, the consumed Linear labels, the footers, the dependency graph,
-and now an independent check that all four are right. No criterion here is waiting on
-migration work any more.
+— so anything testing **handler dispatch** can run in either. **Nothing here is waiting on
+migration work any more.**
 
-- **Task 8's migrated-backlog half — DONE 2026-09-15, discharged by #516 step 1.** The two
-  were the same run, as this entry predicted. `/reoptimize-tasks` at whole-repo scope,
-  three edges spot-checked against the export (3/3), `linear-verify.py` re-run. The
-  PRE-554/PRE-555 chain (#692 → #691 → #686) now carries its `Blocked by:` echo along with
-  the other 26. See "What #516 ran" above, including the expected-failure contract the
-  verifier now has.
 - **Task 16's dispatch half is unrunnable, not merely blocked.** `/do-tasks --all`
-  dispatching bounded sessions needs a repo that can legitimately set
-  `remote_batch: true`, and the probe says none can today. Retire the criterion or
-  rewrite it against whatever closes the plugin gap. The **degrade** path is testable now
-  on `bestdan/dotfiles`: `--all` with the default config must claim exactly one issue in
-  the foreground and say `remote batch disabled — claiming one issue`.
+  dispatching bounded sessions needs a repo that can legitimately set `remote_batch: true`,
+  and the probe says none can today. Retire the criterion or rewrite it against whatever
+  closes the plugin gap. The **degrade** path is testable now on `bestdan/dotfiles`: `--all`
+  with the default config must claim exactly one issue in the foreground and say
+  `remote batch disabled — claiming one issue`.
 - **Task 8's dispatch half — runnable NOW, and the cheapest thing here.**
   `/reoptimize-tasks` against `bestdan/dotfiles`. Confirm the **installed** plugin under
   `~/.claude/plugins/cache/workflow-skills/workflow-skills/<version>/` is v2.21.0 or later
@@ -941,9 +830,9 @@ migration work any more.
   edges); read it as a dispatch check, not a coverage one.
 - **Task 4 — dispatch, runnable on `bestdan/dotfiles` today.** Two `/do-tasks` sessions
   against the same ready issue, confirming exactly one proceeds. Needs an issue at
-  `status:2_ready` (which **is** provisioned there) and two concurrent sessions; the
-  racing is the point, so a serial run proves nothing.
+  `status:2_ready` (which **is** provisioned there) and two concurrent sessions; the racing
+  is the point, so a serial run proves nothing.
 - **Task 15** — its user-run check.
 
-None of these is a defect. Task 7's was run and **found** task 17's defect, which is that
-check earning its keep.
+Task 8's migrated-backlog half was discharged 2026-09-15 by #516, and task 7's check was
+run and **found** task 17's defect, which is that check earning its keep.

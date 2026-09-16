@@ -2,7 +2,7 @@
 title: Export Linear and import the active workflow-skills issues
 priority: high
 size: 5
-status: active
+status: done
 created: 2026-08-24
 source_branch: bestdan/gh-issue-migration-plan
 parent: gh_migration
